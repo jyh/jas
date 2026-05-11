@@ -351,34 +351,47 @@ class MainWindow(QMainWindow):
 
         self._refresh_pane_positions()
 
-        # Keyboard shortcuts
+        # Keyboard shortcuts. Single-letter tool / view shortcuts have
+        # to defer to the active tool when it captures keyboard (text
+        # editing, etc.) — otherwise typing 'V' switches to Selection
+        # tool instead of inserting the character. Mirrors the OCaml
+        # focus guard in main.ml.
+        def _guarded(fn):
+            def _wrapper():
+                canvas = self.tab_widget.currentWidget()
+                if (isinstance(canvas, CanvasWidget)
+                        and canvas._active_tool.captures_keyboard()):
+                    return
+                fn()
+            return _wrapper
+
         QShortcut(QKeySequence("V"), self,
-                  lambda: self.toolbar.select_tool(Tool.SELECTION))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.SELECTION)))
         QShortcut(QKeySequence("A"), self,
-                  lambda: self.toolbar.select_tool(Tool.PARTIAL_SELECTION))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.PARTIAL_SELECTION)))
         QShortcut(QKeySequence("P"), self,
-                  lambda: self.toolbar.select_tool(Tool.PEN))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.PEN)))
         QShortcut(QKeySequence("="), self,
-                  lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT)))
         QShortcut(QKeySequence("+"), self,
-                  lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT)))
         QShortcut(QKeySequence("-"), self,
-                  lambda: self.toolbar.select_tool(Tool.DELETE_ANCHOR_POINT))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.DELETE_ANCHOR_POINT)))
         QShortcut(QKeySequence("T"), self,
-                  lambda: self.toolbar.select_tool(Tool.TYPE))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.TYPE)))
         QShortcut(QKeySequence("\\"), self,
-                  lambda: self.toolbar.select_tool(Tool.LINE))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.LINE)))
         QShortcut(QKeySequence("M"), self,
-                  lambda: self.toolbar.select_tool(Tool.RECT))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.RECT)))
         QShortcut(QKeySequence("Shift+E"), self,
-                  lambda: self.toolbar.select_tool(Tool.PATH_ERASER))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.PATH_ERASER)))
         QShortcut(QKeySequence("Q"), self,
-                  lambda: self.toolbar.select_tool(Tool.LASSO))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.LASSO)))
         # Navigation tools (HAND_TOOL.md / ZOOM_TOOL.md).
         QShortcut(QKeySequence("H"), self,
-                  lambda: self.toolbar.select_tool(Tool.HAND))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.HAND)))
         QShortcut(QKeySequence("Z"), self,
-                  lambda: self.toolbar.select_tool(Tool.ZOOM))
+                  _guarded(lambda: self.toolbar.select_tool(Tool.ZOOM)))
         # View shortcuts (per ZOOM_TOOL.md §Keyboard shortcuts).
         QShortcut(QKeySequence("Ctrl+0"), self,
                   self._fit_active_artboard)
@@ -389,13 +402,18 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+="), self, self._zoom_in)
         QShortcut(QKeySequence("Ctrl++"), self, self._zoom_in)
         QShortcut(QKeySequence("Ctrl+-"), self, self._zoom_out)
-        QShortcut(QKeySequence(Qt.Key_Delete), self, self._delete_selection)
-        QShortcut(QKeySequence(Qt.Key_Backspace), self, self._delete_selection)
+        QShortcut(QKeySequence(Qt.Key_Delete), self,
+                  _guarded(self._delete_selection))
+        QShortcut(QKeySequence(Qt.Key_Backspace), self,
+                  _guarded(self._delete_selection))
         QShortcut(QKeySequence.StandardKey.Undo, self, self._undo)
         QShortcut(QKeySequence.StandardKey.Redo, self, self._redo)
-        QShortcut(QKeySequence("D"), self, self._reset_fill_stroke_defaults)
-        QShortcut(QKeySequence("X"), self, self._toggle_fill_on_top)
-        QShortcut(QKeySequence("Shift+X"), self, self._swap_fill_stroke)
+        QShortcut(QKeySequence("D"), self,
+                  _guarded(self._reset_fill_stroke_defaults))
+        QShortcut(QKeySequence("X"), self,
+                  _guarded(self._toggle_fill_on_top))
+        QShortcut(QKeySequence("Shift+X"), self,
+                  _guarded(self._swap_fill_stroke))
 
         # Wire fill/stroke widget signals
         fs = self.toolbar.fill_stroke_widget
@@ -405,6 +423,26 @@ class MainWindow(QMainWindow):
         fs.stroke_double_clicked.connect(lambda: self._open_color_picker(for_fill=False))
         fs.fill_none_clicked.connect(self._set_fill_none)
         fs.stroke_none_clicked.connect(self._set_stroke_none)
+
+        # Restore the previous session's tabs (mirrors jas_dioxus /
+        # JasSwift / jas_ocaml). Each restored canvas re-enters via
+        # add_canvas so it's wired into the tab widget the same way
+        # as freshly opened tabs. Push the [Untitled-N] counter past
+        # restored slots so File→New picks an unused number.
+        from workspace.session import (
+            load_session, advance_next_untitled_past)
+        restored = load_session()
+        if restored is not None:
+            active_idx, tabs = restored
+            advance_next_untitled_past([fn for fn, _ in tabs])
+            for filename, doc in tabs:
+                m = Model(document=doc, filename=filename)
+                # Model initializes saved_doc = document so is_modified
+                # starts false — restored content is considered
+                # saved-state (matches the other apps).
+                self.add_canvas(m)
+            if active_idx is not None and 0 <= active_idx < self.tab_widget.count():
+                self.tab_widget.setCurrentIndex(active_idx)
 
     def _refresh_pane_positions(self):
         """Position all pane frames from PaneLayout coordinates."""
@@ -730,6 +768,44 @@ class MainWindow(QMainWindow):
         self.tab_widget.setCurrentIndex(idx)
         model.on_document_changed(tab_label)
         model.on_filename_changed(tab_label)
+
+        # Re-sync the Paragraph panel from the active selection on
+        # every document change so selecting / deselecting text
+        # updates [text_selected] / [area_text_selected] (which gate
+        # bind.disabled on the alignment + indent rows). Without this
+        # the panel state is frozen at the last set_paragraph_panel_field
+        # call and the buttons stick disabled once a stale sync wrote
+        # text_selected=false. Mirrors jas_ocaml main.ml.
+        # Re-entrancy guard: paragraph_panel_state.subscribe wires
+        # apply_paragraph_panel_to_selection to fire on every panel
+        # write. Without the guard, apply → model.document= → this
+        # listener → sync → set_panel → subscriber → apply → ...
+        # recurses until the stack overflows.
+        _resync_busy = {"flag": False}
+
+        def _resync_paragraph_panel(_doc=None):
+            if _resync_busy["flag"]:
+                print("[para_resync] skipped (busy)", flush=True)
+                return
+            from panels import panel_menu
+            store = panel_menu._paragraph_store
+            if store is None:
+                print("[para_resync] no store", flush=True)
+                return
+            from panels.paragraph_panel_state import (
+                sync_paragraph_panel_from_selection,
+            )
+            sel_count = len(model.document.selection) if model and model.document else 0
+            print(f"[para_resync] firing sel_count={sel_count}", flush=True)
+            _resync_busy["flag"] = True
+            try:
+                sync_paragraph_panel_from_selection(store, model)
+            finally:
+                _resync_busy["flag"] = False
+            ts = store.get_panel("paragraph_panel_content", "text_selected")
+            print(f"[para_resync] post-sync text_selected={ts}", flush=True)
+        model.on_document_changed(_resync_paragraph_panel)
+
         tab_label()
         self._update_canvas_logo()
 
@@ -787,6 +863,18 @@ class MainWindow(QMainWindow):
         self.tab_widget.removeTab(index)
         self._update_canvas_logo()
 
+    def _persist_session(self):
+        """Snapshot every open tab to the session directory so the
+        next launch re-opens them. Mirrors the other ports."""
+        from workspace.session import save_session
+        tabs = []
+        for i in range(self.tab_widget.count()):
+            canvas = self.tab_widget.widget(i)
+            if isinstance(canvas, CanvasWidget):
+                tabs.append((canvas._model.filename, canvas._model.document))
+        active = self.tab_widget.currentIndex()
+        save_session(tabs, active if active >= 0 else None)
+
     def closeEvent(self, event):
         """Intercept window close to prompt for unsaved changes.
 
@@ -796,12 +884,22 @@ class MainWindow(QMainWindow):
         Save-As dialog is cancelled (model still modified), the close is
         aborted.
         """
+        # SIGINT / SIGTERM short-circuit: persist the binary session
+        # and bail out without prompting. The session blob captures
+        # every tab's full document, so a relaunch restores work in
+        # progress without the user having to pick Save vs Discard
+        # under signal pressure.
+        if getattr(self, "_suppress_unsaved_prompt", False):
+            self._persist_session()
+            event.accept()
+            return
         modified = []
         for i in range(self.tab_widget.count()):
             canvas = self.tab_widget.widget(i)
             if isinstance(canvas, CanvasWidget) and canvas._model.is_modified:
                 modified.append(canvas._model)
         if not modified:
+            self._persist_session()
             event.accept()
             return
         names = ", ".join(f'"{m.filename}"' for m in modified)
@@ -821,6 +919,7 @@ class MainWindow(QMainWindow):
                 if m.is_modified:
                     event.ignore()
                     return
+            self._persist_session()
             event.accept()
         elif box.standardButton(clicked) == QMessageBox.Save:
             from menu.menu import _save
@@ -830,8 +929,10 @@ class MainWindow(QMainWindow):
                 if active.is_modified:
                     event.ignore()
                     return
+            self._persist_session()
             event.accept()
         elif box.standardButton(clicked) == QMessageBox.Discard:
+            self._persist_session()
             event.accept()
         else:
             event.ignore()
@@ -1238,6 +1339,9 @@ class MainWindow(QMainWindow):
 
 def main():
     import logging
+    import signal
+    from PySide6.QtCore import QTimer
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -1246,6 +1350,29 @@ def main():
     window = MainWindow()
     window.resize(1200, 900)
     window.show()
+
+    # Quit gracefully on Ctrl+C / SIGTERM. Closing via signal skips
+    # the unsaved-changes prompt — the session persist already
+    # snapshots every tab's binary document, so a relaunch picks up
+    # exactly where the user left off. The prompt is reserved for
+    # explicit window closes where the user is choosing to discard /
+    # save / cancel. The second signal falls through to the default
+    # handler so a runaway app can still be killed.
+    def _shutdown(signum, _frame):
+        signal.signal(signum, signal.SIG_DFL)
+        window._suppress_unsaved_prompt = True
+        window.close()
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # Qt's C++ event loop swallows Python signals. A periodic no-op
+    # timer hands control back to the interpreter often enough that
+    # the SIGINT handler runs in real time instead of waiting for
+    # the next mouse / key event.
+    _signal_pump = QTimer()
+    _signal_pump.start(200)
+    _signal_pump.timeout.connect(lambda: None)
+
     sys.exit(app.exec())
 
 

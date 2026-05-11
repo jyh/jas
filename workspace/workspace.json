@@ -11865,78 +11865,12 @@
                 "children": [
                   {
                     "id": "ch_kerning",
-                    "type": "combo_box",
+                    "type": "number_input",
                     "summary": "Kerning",
-                    "description": "Kerning between characters. Named modes (Auto, Optical, Metrics) pass through to the element's kerning attribute verbatim. Free numeric entry is treated as 1/1000 em and serialises to \"{N}em\". Named-mode text is preserved in the panel and on the element.\n",
+                    "description": "Kerning between characters.",
                     "style": {
                       "width": "100%"
                     },
-                    "options": [
-                      {
-                        "value": "Auto",
-                        "label": "Auto"
-                      },
-                      {
-                        "value": "Optical",
-                        "label": "Optical"
-                      },
-                      {
-                        "value": "Metrics",
-                        "label": "Metrics"
-                      },
-                      {
-                        "value": "-100",
-                        "label": "-100"
-                      },
-                      {
-                        "value": "-75",
-                        "label": "-75"
-                      },
-                      {
-                        "value": "-50",
-                        "label": "-50"
-                      },
-                      {
-                        "value": "-25",
-                        "label": "-25"
-                      },
-                      {
-                        "value": "-10",
-                        "label": "-10"
-                      },
-                      {
-                        "value": "-5",
-                        "label": "-5"
-                      },
-                      {
-                        "value": "0",
-                        "label": "0"
-                      },
-                      {
-                        "value": "5",
-                        "label": "5"
-                      },
-                      {
-                        "value": "10",
-                        "label": "10"
-                      },
-                      {
-                        "value": "25",
-                        "label": "25"
-                      },
-                      {
-                        "value": "50",
-                        "label": "50"
-                      },
-                      {
-                        "value": "75",
-                        "label": "75"
-                      },
-                      {
-                        "value": "100",
-                        "label": "100"
-                      }
-                    ],
                     "bind": {
                       "value": "panel.kerning"
                     }
@@ -12154,7 +12088,7 @@
                     "summary": "All Caps",
                     "description": "Render the selection in uppercase.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12177,7 +12111,7 @@
                     "summary": "Small Caps",
                     "description": "Render lowercase letters as x-height-sized capitals.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12200,7 +12134,7 @@
                     "summary": "Superscript",
                     "description": "Position the selection above the baseline.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12223,7 +12157,7 @@
                     "summary": "Subscript",
                     "description": "Position the selection below the baseline.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12246,7 +12180,7 @@
                     "summary": "Underline",
                     "description": "Underline the selected text.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12269,7 +12203,7 @@
                     "summary": "Strikethrough",
                     "description": "Strike through the selected text.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12521,7 +12455,7 @@
                     "summary": "Snap: Baseline",
                     "description": "Snap to the invisible baseline letters sit on.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12544,7 +12478,7 @@
                     "summary": "Snap: x-Height",
                     "description": "Snap to the top of lowercase letters (x, a, e, ...).",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12567,7 +12501,7 @@
                     "summary": "Snap: Glyph Bounds",
                     "description": "Snap to the left/right/top/bottom edges of a specific letter.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12590,7 +12524,7 @@
                     "summary": "Snap: Proximity Guides",
                     "description": "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12613,7 +12547,7 @@
                     "summary": "Snap: Angular Guides",
                     "description": "Snap to the slant lines of letters like V or A.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -12636,7 +12570,7 @@
                     "summary": "Snap: Anchor Point",
                     "description": "Snap to the actual mathematical anchor points on glyph outlines.",
                     "style": {
-                      "width": 28,
+                      "width": 24,
                       "height": 24
                     },
                     "bind": {
@@ -16440,6 +16374,11 @@
         {
           "label": "Reset Panel",
           "action": "reset_paragraph_panel"
+        },
+        "separator",
+        {
+          "label": "Close Paragraph",
+          "action": "close_panel"
         }
       ],
       "content": {
@@ -16456,9 +16395,10 @@
             "children": [
               {
                 "type": "container",
-                "col": 1,
+                "col": 12,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "alignment": "space-between"
                 },
                 "children": [
                   {
@@ -16475,16 +16415,7 @@
                       "value": "panel.align_left",
                       "disabled": "not panel.text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_align_center",
                     "type": "checkbox",
@@ -16499,16 +16430,7 @@
                       "value": "panel.align_center",
                       "disabled": "not panel.text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_align_right",
                     "type": "checkbox",
@@ -16523,16 +16445,7 @@
                       "value": "panel.align_right",
                       "disabled": "not panel.text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_justify_left",
                     "type": "checkbox",
@@ -16547,16 +16460,7 @@
                       "value": "panel.justify_left",
                       "disabled": "not panel.area_text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_justify_center",
                     "type": "checkbox",
@@ -16571,16 +16475,7 @@
                       "value": "panel.justify_center",
                       "disabled": "not panel.area_text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_justify_right",
                     "type": "checkbox",
@@ -16595,16 +16490,7 @@
                       "value": "panel.justify_right",
                       "disabled": "not panel.area_text_selected"
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 1,
-                "style": {
-                  "alignment": "center"
-                },
-                "children": [
+                  },
                   {
                     "id": "pg_justify_all",
                     "type": "checkbox",
@@ -16629,9 +16515,9 @@
             "children": [
               {
                 "type": "container",
-                "col": 2,
+                "col": 6,
                 "style": {
-                  "alignment": "center"
+                  "alignment": "start"
                 },
                 "children": [
                   {
@@ -16690,9 +16576,9 @@
               },
               {
                 "type": "container",
-                "col": 2,
+                "col": 6,
                 "style": {
-                  "alignment": "center"
+                  "alignment": "start"
                 },
                 "children": [
                   {
@@ -16751,9 +16637,10 @@
             "children": [
               {
                 "type": "container",
-                "col": 1,
+                "col": 6,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "gap": 4
                 },
                 "children": [
                   {
@@ -16763,13 +16650,7 @@
                       "width": 20,
                       "height": 20
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 5,
-                "children": [
+                  },
                   {
                     "id": "pg_left_indent",
                     "type": "number_input",
@@ -16789,9 +16670,10 @@
               },
               {
                 "type": "container",
-                "col": 1,
+                "col": 6,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "gap": 4
                 },
                 "children": [
                   {
@@ -16801,13 +16683,7 @@
                       "width": 20,
                       "height": 20
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 5,
-                "children": [
+                  },
                   {
                     "id": "pg_right_indent",
                     "type": "number_input",
@@ -16832,9 +16708,10 @@
             "children": [
               {
                 "type": "container",
-                "col": 1,
+                "col": 6,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "gap": 4
                 },
                 "children": [
                   {
@@ -16844,13 +16721,7 @@
                       "width": 20,
                       "height": 20
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 5,
-                "children": [
+                  },
                   {
                     "id": "pg_first_line_indent",
                     "type": "number_input",
@@ -16875,9 +16746,10 @@
             "children": [
               {
                 "type": "container",
-                "col": 1,
+                "col": 6,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "gap": 4
                 },
                 "children": [
                   {
@@ -16887,13 +16759,7 @@
                       "width": 20,
                       "height": 20
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 5,
-                "children": [
+                  },
                   {
                     "id": "pg_space_before",
                     "type": "number_input",
@@ -16913,9 +16779,10 @@
               },
               {
                 "type": "container",
-                "col": 1,
+                "col": 6,
+                "layout": "row",
                 "style": {
-                  "alignment": "center"
+                  "gap": 4
                 },
                 "children": [
                   {
@@ -16925,13 +16792,7 @@
                       "width": 20,
                       "height": 20
                     }
-                  }
-                ]
-              },
-              {
-                "type": "container",
-                "col": 5,
-                "children": [
+                  },
                   {
                     "id": "pg_space_after",
                     "type": "number_input",
@@ -16956,10 +16817,7 @@
             "children": [
               {
                 "type": "container",
-                "col": 3,
-                "style": {
-                  "alignment": "center"
-                },
+                "col": 12,
                 "children": [
                   {
                     "id": "pg_hyphenate",

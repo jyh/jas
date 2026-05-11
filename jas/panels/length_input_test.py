@@ -186,6 +186,32 @@ class LengthInputTest(absltest.TestCase):
         self.assertEqual(
             store.get_panel("stroke_panel_content", "weight"), 5.0)
 
+    def test_commit_empty_character_leading_re_derives_auto(self):
+        # Character panel ``leading`` is Auto when the element's
+        # line_height is empty; clearing the field re-derives the
+        # Auto-tracked value (font_size × 1.2) instead of writing
+        # None — that way the apply pipeline still produces an empty
+        # element line_height attribute, and the Character panel's
+        # leading display jumps back to the auto value rather than
+        # going blank. Mirrors the Rust ``render_length_input``
+        # special case for the Character ``leading`` field.
+        store, ctx = self._make_store_with_panel(
+            "character_panel_content",
+            {"font_size": 24.0, "leading": 40.0})
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "nullable": True,
+            "bind": {"value": "panel.leading"},
+        }
+        widget = render_element(el, store, ctx)
+        widget.setText("")
+        widget.editingFinished.emit()
+        # Re-derived = font_size * 1.2 = 24 * 1.2 = 28.8.
+        self.assertAlmostEqual(
+            store.get_panel("character_panel_content", "leading"),
+            24.0 * 1.2, places=6)
+
     # ── Helpers ──────────────────────────────────────────────────
 
     def _make_store_with_panel(self, panel_id, defaults):

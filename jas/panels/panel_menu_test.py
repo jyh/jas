@@ -846,3 +846,107 @@ def test_character_toggle_snap_visibility_does_not_apply_to_selection():
         assert model.document is before
     finally:
         set_character_store(None)
+
+
+# ── Paragraph panel hamburger menu ──────────────────────────
+
+
+def _seed_paragraph_store():
+    """StateStore with a fully-initialised paragraph_panel_content
+    scope so set_paragraph_panel_field has every key it reads.
+    Mirrors the YAML defaults in workspace/panels/paragraph.yaml."""
+    from workspace_interpreter.state_store import StateStore
+    store = StateStore()
+    store.init_panel("paragraph_panel_content", {
+        "text_selected": True, "area_text_selected": True,
+        "align_left": True, "align_center": False,
+        "align_right": False, "justify_left": False,
+        "justify_center": False, "justify_right": False,
+        "justify_all": False,
+        "left_indent": 0, "right_indent": 0,
+        "first_line_indent": 0,
+        "space_before": 0, "space_after": 0,
+        "hyphenate": False, "hanging_punctuation": False,
+        "bullets": "", "numbered_list": "",
+    })
+    return store
+
+
+def _model_with_area_text_wrapper():
+    from dataclasses import replace
+    from document.model import Model
+    from document.document import ElementSelection
+    from geometry.element import Text, Layer
+    from geometry.tspan import Tspan
+    wrapper = Tspan(id=0, content="", jas_role="paragraph")
+    body = Tspan(id=1, content="hello")
+    text = Text(x=0, y=0, content="hello", tspans=(wrapper, body),
+                font_family="sans-serif", font_size=12,
+                width=200, height=100)
+    model = Model()
+    layer = Layer(name="L", children=(text,))
+    model.document = replace(
+        model.document,
+        layers=(layer,),
+        selection=frozenset({ElementSelection.all((0, 0))}),
+    )
+    return model
+
+
+def test_paragraph_menu_has_hamburger_items():
+    items = panel_menu(PanelKind.PARAGRAPH)
+    labels = [i.label for i in items
+              if i.kind != PanelMenuItemKind.SEPARATOR]
+    assert "Hanging Punctuation" in labels
+    assert "Justification…" in labels
+    assert "Hyphenation…" in labels
+    assert "Reset Panel" in labels
+    assert "Close Paragraph" in labels
+
+
+def test_paragraph_toggle_hanging_punctuation_flips_panel_state():
+    from panels.panel_menu import set_paragraph_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)  # any addr works for dispatch
+    store = _seed_paragraph_store()
+    set_paragraph_store(store)
+    try:
+        model = _model_with_area_text_wrapper()
+        panel_dispatch(PanelKind.PARAGRAPH, "toggle_hanging_punctuation",
+                       addr, layout, model=model)
+        assert panel_is_checked(
+            PanelKind.PARAGRAPH, "toggle_hanging_punctuation", layout)
+        # And applies the panel state to the wrapper.
+        elem = model.document.get_element((0, 0))
+        assert elem.tspans[0].jas_hanging_punctuation is True
+    finally:
+        set_paragraph_store(None)
+
+
+def test_paragraph_reset_panel_clears_wrapper_attrs():
+    from panels.panel_menu import set_paragraph_store
+    layout = WorkspaceLayout.default_layout()
+    addr = _character_test_addr(layout)
+    store = _seed_paragraph_store()
+    store.set_panel("paragraph_panel_content", "left_indent", 24.0)
+    store.set_panel("paragraph_panel_content", "hyphenate", True)
+    set_paragraph_store(store)
+    try:
+        model = _model_with_area_text_wrapper()
+        # Push the panel state to the wrapper first.
+        from panels.paragraph_panel_state import (
+            apply_paragraph_panel_to_selection,
+        )
+        apply_paragraph_panel_to_selection(store, model)
+        # Now reset.
+        panel_dispatch(PanelKind.PARAGRAPH, "reset_paragraph_panel",
+                       addr, layout, model=model)
+        elem = model.document.get_element((0, 0))
+        w = elem.tspans[0]
+        assert w.jas_left_indent is None
+        assert w.jas_hyphenate is None
+        # Panel-state values reset to defaults.
+        assert store.get_panel("paragraph_panel_content", "left_indent") == 0
+        assert store.get_panel("paragraph_panel_content", "hyphenate") is False
+    finally:
+        set_paragraph_store(None)

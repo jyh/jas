@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QTransform,
     QMouseEvent, QPaintEvent,
@@ -8,6 +8,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QLineEdit, QTextEdit, QWidget
 
 import math
+import re
 
 from document.controller import Controller
 from document.document import Document, ElementSelection
@@ -1245,7 +1246,10 @@ def _draw_element_body(painter: QPainter, elem: Element,
             # First pass mirrors the Rust / Swift / OCaml canvas —
             # per-tspan baseline-shift / rotate / transform / dx and
             # wrapping are follow-ups.
-            if len(t.tspans) != 1 or not t.tspans[0].has_no_overrides():
+            # Paragraph-aware fast-path predicate: empty wrappers are
+            # metadata-only and don't disqualify; only body tspans with
+            # character-level overrides force the segmented path.
+            if not t.render_is_flat():
                 _draw_segmented_text(painter, t)
                 return
             x = t.x; y = t.y; content = t.content
@@ -1339,10 +1343,66 @@ def _draw_element_body(painter: QPainter, elem: Element,
                 line_x_shift = lay.glyphs[line.glyph_start].x \
                     if line.glyph_start < len(lay.glyphs) else 0.0
                 line_x = x + line_x_shift
-                if rot_deg == 0.0:
+                # When the layout stretched glue widths (justify), the
+                # single drawText path would render each line with
+                # Qt's *natural* inter-word advance and the result
+                # would look left-flush. Detect that by comparing the
+                # line's last visible glyph's right against the
+                # natural width of the line text — any non-trivial
+                # gap means a glue was stretched and we must position
+                # words individually using the layout's per-glyph x.
+                line_glyphs = lay.glyphs[line.glyph_start:line.glyph_end]
+                visible_glyphs = [g for g in line_glyphs
+                                  if not g.is_trailing_space]
+                if visible_glyphs:
+                    last_visible_right = max(g.right for g in visible_glyphs)
+                    first_visible_x = min(g.x for g in visible_glyphs)
+                    layout_w = max(0.0, last_visible_right - first_visible_x)
+                else:
+                    layout_w = 0.0
+                # Sum word + glue advances to match KP's per-word
+                # measure (no inter-word kerning). measure(s) on the
+                # whole line includes kerning across word boundaries
+                # and runs ~5-10px wider than KP composed against,
+                # which made the fast-path heuristic mis-trigger and
+                # the painter drew the entire line with kerning,
+                # overflowing the right margin on tightly-justified
+                # body lines. Threshold 0.01 (essentially any
+                # difference) catches even very tight stretches —
+                # 0.5 was wide enough that lines stretched by 0.3px
+                # still slipped through to the kerned fast path.
+                natural_w = sum(measure(tok) for tok in re.split(r'(\s+)', s) if tok)
+                glues_stretched = abs(layout_w - natural_w) > 0.01
+                if rot_deg == 0.0 and not glues_stretched:
                     # Fast path: QFont.setLetterSpacing handles inter-
                     # glyph advance for a single drawText call.
                     painter.drawText(QPointF(line_x, baseline), s)
+                elif rot_deg == 0.0:
+                    # Justified line: render word-by-word so each word
+                    # lands at the x the composer computed (with
+                    # stretched glue between words). Mirrors the Rust
+                    # canvas/render.rs justified-line branch.
+                    chars_v = list(s)
+                    word_buf: list[str] = []
+                    word_x = 0.0
+                    in_word = False
+                    for i, g in enumerate(line_glyphs):
+                        ch = chars_v[i] if i < len(chars_v) else None
+                        is_ws = ch is None or ch.isspace()
+                        if not is_ws and not g.is_trailing_space:
+                            if not in_word:
+                                word_x = x + g.x
+                                in_word = True
+                                word_buf = []
+                            if ch is not None:
+                                word_buf.append(ch)
+                        elif in_word:
+                            painter.drawText(QPointF(word_x, baseline),
+                                             "".join(word_buf))
+                            in_word = False
+                    if in_word:
+                        painter.drawText(QPointF(word_x, baseline),
+                                         "".join(word_buf))
                 else:
                     # Per-glyph rotation: draw each char with its own
                     # translate/rotate/restore. letter_spacing is
@@ -1356,34 +1416,77 @@ def _draw_element_body(painter: QPainter, elem: Element,
                         painter.drawText(QPointF(0, 0), ch)
                         painter.restore()
                         cx += measure(ch) + ls_px
-            # Phase 6: list markers. Walk segments after the body
-            # text pass, drawing each list paragraph's marker glyph
-            # at x = element.x + segment.left_indent on the first-
-            # line baseline. Counter values are computed once across
-            # all segments so the run rule (consecutive same-style
-            # num-* paragraphs count up; bullets / no-style /
-            # different num style all reset) holds across the
-            # element.
+                if getattr(line, "trailing_hyphen", False) and rot_deg == 0.0:
+                    # Hyphenation broke a word at end of line. The
+                    # composer reserved space for the hyphen but the
+                    # source content has no hyphen char, so the
+                    # renderer must draw the glyph itself. The
+                    # synthetic hyphen sits at the line's rightmost
+                    # glyph x — derive it from the last visible glyph
+                    # (which the composer emitted with width = hyphen_w).
+                    last_visible = None
+                    for g in reversed(line_glyphs):
+                        if not g.is_trailing_space:
+                            last_visible = g
+                            break
+                    hyph_x = (x + last_visible.x) if last_visible is not None else line_x
+                    painter.drawText(QPointF(hyph_x, baseline), "-")
+            # Phase 6: list markers. A list-style segment may span
+            # multiple paragraphs (the user typed "a\nb\nc" then
+            # clicked bullets — the model has one wrapper covering
+            # all three lines). The bullet must appear on every
+            # paragraph, so walk the layout's lines and treat any
+            # line whose predecessor ended at a hard break ('\n') as
+            # a sub-paragraph start. Counter values follow the
+            # §Counter run rule across the flattened sub-paragraph
+            # sequence (consecutive same-style num-* increment,
+            # anything else resets).
             if psegs:
                 from algorithms.text_layout import (
-                    compute_counters as _compute_counters,
                     marker_text as _marker_text,
                 )
-                counters = _compute_counters(psegs)
-                for si, seg in enumerate(psegs):
-                    style = seg.list_style or ""
+                def _owning_seg_for_line(line_start: int) -> int | None:
+                    for si, seg in enumerate(psegs):
+                        if seg.char_start <= line_start < seg.char_end:
+                            return si
+                    return None
+                # Build the sub-paragraph list.
+                sub_paras: list[tuple[int, str | None, float]] = []
+                prev_hard_break = True
+                for li, line in enumerate(lay.lines):
+                    if prev_hard_break:
+                        si = _owning_seg_for_line(line.start)
+                        if si is not None:
+                            sub_paras.append(
+                                (li, psegs[si].list_style, psegs[si].left_indent))
+                        else:
+                            sub_paras.append((li, None, 0.0))
+                    prev_hard_break = line.hard_break
+                # Per-style counter run.
+                counters: list[int] = []
+                prev_num: str | None = None
+                current = 0
+                for _, style, _ in sub_paras:
+                    if style is not None and style.startswith("num-"):
+                        if prev_num == style:
+                            current += 1
+                        else:
+                            current = 1
+                        counters.append(current)
+                        prev_num = style
+                    else:
+                        counters.append(0)
+                        prev_num = None
+                        current = 0
+                for (line_idx, style, left_indent), counter in zip(sub_paras, counters):
                     if not style:
                         continue
-                    marker = _marker_text(style, counters[si])
+                    marker = _marker_text(style, counter)
                     if not marker:
                         continue
-                    first_line = next(
-                        (l for l in lay.lines if l.start >= seg.char_start),
-                        None)
-                    if first_line is None:
-                        continue
-                    baseline = y + first_line.baseline_y + y_shift
-                    marker_x = x + seg.left_indent
+                    line = lay.lines[line_idx]
+                    baseline = y + line.baseline_y + y_shift
+                    marker_x = x + left_indent
                     painter.drawText(QPointF(marker_x, baseline), marker)
             if needs_scale:
                 painter.restore()
@@ -1996,6 +2099,23 @@ class CanvasWidget(QWidget):
             alt=bool(m & Qt.KeyboardModifier.AltModifier),
             meta=bool(m & Qt.KeyboardModifier.MetaModifier),
         )
+
+    def event(self, event):
+        # Intercept Qt's ShortcutOverride pass: when the active tool
+        # captures keyboard (text editing in progress), claim the key
+        # so the global QShortcut tool-switchers (V/T/H/etc.) don't
+        # fire and the keystroke flows to keyPressEvent → on_key_event
+        # for insertion. Without this, typing 'V' switches to the
+        # Selection tool mid-edit. Mirrors OCaml main.ml's focus guard.
+        if (event.type() == QEvent.Type.ShortcutOverride
+                and self._active_tool.captures_keyboard()):
+            mods = event.modifiers()
+            ignore = (Qt.KeyboardModifier.ControlModifier
+                      | Qt.KeyboardModifier.MetaModifier)
+            if not (mods & ignore):
+                event.accept()
+                return True
+        return super().event(event)
 
     def keyPressEvent(self, event):
         # Spacebar pass-through to Hand. Save the current tool and

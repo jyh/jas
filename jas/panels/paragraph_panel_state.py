@@ -162,6 +162,122 @@ _ALIGN_KEYS = ("align_left", "align_center", "align_right",
                "justify_right", "justify_all")
 
 
+def ensure_paragraph_wrapper(tspans: list) -> list[int]:
+    """Normalize the paragraph-wrapper layout for a text element's
+    tspans, returning the wrapper indices (always >= 1 after this
+    call). Wrapper tspans must be **empty**-content markers — the
+    paragraph's body lives in subsequent body tspans until the next
+    wrapper or end-of-tspans. Two corruption modes are repaired
+    here:
+
+    1. No wrapper at all -> prepend a fresh empty wrapper at index 0.
+    2. A wrapper carries non-empty content (legacy "promote first
+       tspan" path) -> demote it to a body tspan (clear ``jas_role``,
+       keep its content) and prepend a fresh empty wrapper that
+       inherits the legacy wrapper's paragraph attributes.
+
+    ``build_segments_from_text`` doesn't count wrapper-tspan content
+    toward the segment's char range, so leaving body chars on a
+    wrapper makes the layout's effective slice shorter than the
+    rendered string — the user sees the paragraph collapse to a
+    single line the moment any Paragraph-panel control is clicked.
+
+    Used by every paragraph-panel apply path:
+    ``apply_paragraph_panel_to_selection``,
+    ``apply_justification_dialog_to_selection``, and
+    ``apply_hyphenation_dialog_to_selection``.
+
+    Mutates ``tspans`` in place. Mirrors
+    ``jas_dioxus/src/workspace/app_state.rs::ensure_paragraph_wrapper``
+    and ``JasSwift/.../ensureParagraphWrapper``.
+    """
+    from dataclasses import replace
+    from geometry.tspan import Tspan
+    # Repair: if any wrapper has non-empty content, demote it to a
+    # body tspan and prepend a fresh empty wrapper that inherits
+    # the paragraph attributes.
+    bad = [i for i, t in enumerate(tspans)
+           if t.jas_role == "paragraph" and t.content != ""]
+    for i in reversed(bad):
+        src = tspans[i]
+        # Build a new wrapper inheriting paragraph-attr fields off
+        # the corrupted tspan; the corrupted tspan keeps its content
+        # + character overrides but loses its wrapper role and
+        # paragraph attrs.
+        new_wrapper = Tspan(
+            jas_role="paragraph",
+            text_align=src.text_align,
+            text_align_last=src.text_align_last,
+            text_indent=src.text_indent,
+            jas_left_indent=src.jas_left_indent,
+            jas_right_indent=src.jas_right_indent,
+            jas_space_before=src.jas_space_before,
+            jas_space_after=src.jas_space_after,
+            jas_hyphenate=src.jas_hyphenate,
+            jas_hanging_punctuation=src.jas_hanging_punctuation,
+            jas_list_style=src.jas_list_style,
+            jas_word_spacing_min=src.jas_word_spacing_min,
+            jas_word_spacing_desired=src.jas_word_spacing_desired,
+            jas_word_spacing_max=src.jas_word_spacing_max,
+            jas_letter_spacing_min=src.jas_letter_spacing_min,
+            jas_letter_spacing_desired=src.jas_letter_spacing_desired,
+            jas_letter_spacing_max=src.jas_letter_spacing_max,
+            jas_glyph_scaling_min=src.jas_glyph_scaling_min,
+            jas_glyph_scaling_desired=src.jas_glyph_scaling_desired,
+            jas_glyph_scaling_max=src.jas_glyph_scaling_max,
+            jas_auto_leading=src.jas_auto_leading,
+            jas_single_word_justify=src.jas_single_word_justify,
+            jas_hyphenate_min_word=src.jas_hyphenate_min_word,
+            jas_hyphenate_min_before=src.jas_hyphenate_min_before,
+            jas_hyphenate_min_after=src.jas_hyphenate_min_after,
+            jas_hyphenate_limit=src.jas_hyphenate_limit,
+            jas_hyphenate_zone=src.jas_hyphenate_zone,
+            jas_hyphenate_bias=src.jas_hyphenate_bias,
+            jas_hyphenate_capitalized=src.jas_hyphenate_capitalized,
+        )
+        # Demote the corrupted tspan: keep id + content + per-character
+        # overrides (font/style/etc.), drop paragraph role + attrs.
+        tspans[i] = replace(src,
+            jas_role=None,
+            text_align=None,
+            text_align_last=None,
+            text_indent=None,
+            jas_left_indent=None,
+            jas_right_indent=None,
+            jas_space_before=None,
+            jas_space_after=None,
+            jas_hyphenate=None,
+            jas_hanging_punctuation=None,
+            jas_list_style=None,
+            jas_word_spacing_min=None,
+            jas_word_spacing_desired=None,
+            jas_word_spacing_max=None,
+            jas_letter_spacing_min=None,
+            jas_letter_spacing_desired=None,
+            jas_letter_spacing_max=None,
+            jas_glyph_scaling_min=None,
+            jas_glyph_scaling_desired=None,
+            jas_glyph_scaling_max=None,
+            jas_auto_leading=None,
+            jas_single_word_justify=None,
+            jas_hyphenate_min_word=None,
+            jas_hyphenate_min_before=None,
+            jas_hyphenate_min_after=None,
+            jas_hyphenate_limit=None,
+            jas_hyphenate_zone=None,
+            jas_hyphenate_bias=None,
+            jas_hyphenate_capitalized=None,
+        )
+        tspans.insert(i, new_wrapper)
+    # Now collect indices of (post-repair) wrappers.
+    existing = [i for i, t in enumerate(tspans) if t.jas_role == "paragraph"]
+    if existing:
+        return existing
+    # No wrapper anywhere: prepend an empty one.
+    tspans.insert(0, Tspan(jas_role="paragraph"))
+    return [0]
+
+
 def _paragraph_align_attrs(panel: dict):
     """Map the seven alignment radio bools to a (text_align,
     text_align_last) pair per PARAGRAPH.md §Alignment sub-mapping.
@@ -189,8 +305,10 @@ def apply_paragraph_panel_to_selection(store, model) -> None:
     (set to None) rather than written. The seven alignment radio
     bools collapse to a (text_align, text_align_last) pair per the
     §Alignment sub-mapping; bullets and numbered_list both write the
-    single jas_list_style attribute. Promotes the first tspan to a
-    paragraph wrapper if none exists. No-op when the model is None
+    single jas_list_style attribute. Calls ``ensure_paragraph_wrapper``
+    which inserts a fresh empty wrapper if none exists (rather than
+    promoting the first tspan, which would shrink the segment's char
+    range and collapse the paragraph). No-op when the model is None
     or the selection contains no text. Phase 4."""
     if model is None:
         return
@@ -239,13 +357,7 @@ def apply_paragraph_panel_to_selection(store, model) -> None:
         if not isinstance(elem, (Text, TextPath)):
             continue
         tspans = list(elem.tspans)
-        wrapper_idx = [i for i, t in enumerate(tspans)
-                       if t.jas_role == "paragraph"]
-        if not wrapper_idx and tspans:
-            tspans[0] = replace(tspans[0], jas_role="paragraph")
-            wrapper_idx = [0]
-        if not wrapper_idx:
-            continue
+        wrapper_idx = ensure_paragraph_wrapper(tspans)
         for i in wrapper_idx:
             tspans[i] = replace(tspans[i],
                 text_align=text_align,
@@ -389,13 +501,7 @@ def apply_justification_dialog_to_selection(model, v: JustificationDialogValues)
         if not isinstance(elem, (Text, TextPath)):
             continue
         tspans = list(elem.tspans)
-        wrapper_idx = [i for i, t in enumerate(tspans)
-                       if t.jas_role == "paragraph"]
-        if not wrapper_idx and tspans:
-            tspans[0] = replace(tspans[0], jas_role="paragraph")
-            wrapper_idx = [0]
-        if not wrapper_idx:
-            continue
+        wrapper_idx = ensure_paragraph_wrapper(tspans)
         for i in wrapper_idx:
             tspans[i] = replace(tspans[i],
                 jas_word_spacing_min=ws_min,
@@ -481,13 +587,7 @@ def apply_hyphenation_dialog_to_selection(model, store, v: HyphenationDialogValu
                 if not isinstance(elem, (Text, TextPath)):
                     continue
                 tspans = list(elem.tspans)
-                wrapper_idx = [i for i, t in enumerate(tspans)
-                               if t.jas_role == "paragraph"]
-                if not wrapper_idx and tspans:
-                    tspans[0] = replace(tspans[0], jas_role="paragraph")
-                    wrapper_idx = [0]
-                if not wrapper_idx:
-                    continue
+                wrapper_idx = ensure_paragraph_wrapper(tspans)
                 for i in wrapper_idx:
                     tspans[i] = replace(tspans[i],
                         jas_hyphenate=hyph,
