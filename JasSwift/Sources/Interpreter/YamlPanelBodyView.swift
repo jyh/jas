@@ -96,6 +96,8 @@ struct YamlElementView: View {
                 renderLengthInput()
             case "select":
                 renderSelect()
+            case "icon_select":
+                renderIconSelect()
             case "toggle", "checkbox":
                 renderToggle()
             case "combo_box":
@@ -1112,7 +1114,33 @@ struct YamlElementView: View {
                 let trimmed = newVal.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty {
                     if nullable {
-                        commitWidgetWrite(target: t, value: nil as Any?)
+                        // Character panel ``leading`` is Auto when the
+                        // element's line_height is empty; clearing the
+                        // field re-derives the Auto-tracked value
+                        // (font_size × 1.2) explicitly so the apply
+                        // pipeline writes line_height back as the empty
+                        // element attribute and the next render reads
+                        // a concrete number into the input. Mirrors the
+                        // Rust `render_length_input` Character branch.
+                        // No other Character field is nullable yet.
+                        // Read font_size from the live selection
+                        // overrides rather than the stored panel state
+                        // so a freshly-opened panel (stored defaults
+                        // don't yet match the selection) still derives
+                        // Auto from the element's actual font size.
+                        if t.scope == .panel,
+                           panelId == "character_panel_content",
+                           t.key == "leading",
+                           let model = model {
+                            let live = characterPanelLiveOverrides(model: model)
+                            let fs = (live?["font_size"] as? Double)
+                                ?? ((model.stateStore.getPanel(
+                                    "character_panel_content", "font_size")
+                                    as? NSNumber)?.doubleValue ?? 12.0)
+                            commitWidgetWrite(target: t, value: fs * 1.2)
+                        } else {
+                            commitWidgetWrite(target: t, value: nil as Any?)
+                        }
                     }
                     // Non-nullable empty: drop the edit; the remount on
                     // any subsequent write will redisplay the prior value.
@@ -1798,6 +1826,90 @@ struct YamlElementView: View {
         }
     }
 
+    // MARK: - Icon Select
+
+    /// `icon_select`: an icon-button-sized dropdown that shows either
+    /// the per-option `glyph` (Unicode marker) of the selected option
+    /// or, when the YAML supplies a workspace `icon:`, that SVG glyph
+    /// as the button face. The native Menu surface handles popup
+    /// rendering and keyboard nav. Used by Paragraph panel's Bullets
+    /// and Numbered List rows. Mirrors `render_icon_select` in
+    /// `jas_dioxus/src/interpreter/renderer.rs`.
+    @ViewBuilder
+    private func renderIconSelect() -> some View {
+        let options = element["options"] as? [[String: Any]] ?? []
+        let bind = element["bind"] as? [String: Any]
+        let valueExpr = bind?["value"] as? String
+        let currentValue: String = {
+            if let e = valueExpr {
+                if case .string(let s) = evaluate(e, context: context) { return s }
+            }
+            return ""
+        }()
+        let writeTarget = writeBackTarget(valueExpr)
+        let isDisabled: Bool = {
+            if let disExpr = bind?["disabled"] as? String {
+                return evaluate(disExpr, context: context).toBool()
+            }
+            return false
+        }()
+        let summary = element["summary"] as? String ?? ""
+        let iconName = element["icon"] as? String ?? ""
+        let style = element["style"] as? [String: Any] ?? [:]
+        let w: CGFloat = {
+            if let n = style["width"] as? CGFloat { return n }
+            if let n = style["width"] as? Double { return CGFloat(n) }
+            if let n = style["width"] as? Int { return CGFloat(n) }
+            return 48
+        }()
+        let h: CGFloat = {
+            if let n = style["height"] as? CGFloat { return n }
+            if let n = style["height"] as? Double { return CGFloat(n) }
+            if let n = style["height"] as? Int { return CGFloat(n) }
+            return 26
+        }()
+
+        // Resolve the visible glyph (when no SVG icon is supplied).
+        let visibleGlyph: String = {
+            for opt in options {
+                let v = opt["value"].map { "\($0)" } ?? ""
+                if v == currentValue {
+                    if let g = opt["glyph"] as? String, !g.isEmpty { return g }
+                    if let l = opt["label"] as? String,
+                       let first = l.split(separator: " ").first { return String(first) }
+                }
+            }
+            return "—"
+        }()
+
+        // SwiftUI's `Menu { } label: { … }` on macOS wraps the label
+        // in a Picker-style chrome that strips custom views like
+        // SwiftUI Canvas (used by WorkspaceIcon) — the visible icon
+        // collapses to a tiny indicator. Use a stateful inner View
+        // that owns a `@State` popover-open binding and renders the
+        // icon explicitly inside a `Button`.
+        IconSelectButton(
+            iconName: iconName,
+            visibleGlyph: visibleGlyph,
+            options: options.map { opt in
+                IconSelectOption(
+                    value: opt["value"].map { "\($0)" } ?? "",
+                    glyph: opt["glyph"] as? String ?? "",
+                    label: opt["label"] as? String
+                        ?? (opt["value"].map { "\($0)" } ?? "")
+                )
+            },
+            width: w,
+            height: h,
+            theme: theme,
+            summary: summary,
+            isDisabled: isDisabled,
+            onPick: { v in
+                if let t = writeTarget { commitWidgetWrite(target: t, value: v) }
+            }
+        )
+    }
+
     // MARK: - Toggle / Checkbox
 
     @ViewBuilder
@@ -1889,10 +2001,25 @@ struct YamlElementView: View {
                     .disabled(isDisabled)
             }
         } else {
-            Toggle(label, isOn: Binding<Bool>(
+            // Custom checkbox + text label. SwiftUI's stock
+            // Toggle(label,…).toggleStyle(.checkbox) renders the label
+            // with the system's default color (dark on dark themes),
+            // and `Toggle(label:)` lets the label wrap when the
+            // container is narrow — both wrong for the dock-panel
+            // theme. Build it explicitly so the label uses theme.text
+            // and stays on a single line.
+            let labelColor: SwiftUI.Color = theme.map {
+                SwiftUI.Color(nsColor: $0.text)
+            } ?? .primary
+            Toggle(isOn: Binding<Bool>(
                 get: { isChecked },
                 set: onToggle
-            ))
+            )) {
+                SwiftUI.Text(label)
+                    .foregroundColor(labelColor)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
                 .toggleStyle(.checkbox)
                 .disabled(isDisabled)
         }
@@ -3142,6 +3269,87 @@ struct DisclosureSection<Content: View>: View {
             if !collapsed {
                 content()
             }
+        }
+    }
+}
+
+// MARK: - Icon-select popover button
+
+/// One option entry shown in the IconSelectButton popover.
+struct IconSelectOption: Identifiable {
+    let id = UUID()
+    let value: String
+    let glyph: String
+    let label: String
+}
+
+/// Custom popover-driven dropdown used by `icon_select` widgets in
+/// the Paragraph panel (Bullets / Numbered List). SwiftUI's `Menu`
+/// label rendering on macOS strips Canvas-based custom views like
+/// WorkspaceIcon — the icon collapses to a tiny indicator. This
+/// view explicitly draws the icon as the Button face and shows the
+/// option list in a popover the user dismisses by selecting an entry
+/// or clicking outside.
+struct IconSelectButton: View {
+    let iconName: String
+    let visibleGlyph: String
+    let options: [IconSelectOption]
+    let width: CGFloat
+    let height: CGFloat
+    let theme: Theme?
+    let summary: String
+    let isDisabled: Bool
+    let onPick: (String) -> Void
+    @State private var isOpen: Bool = false
+
+    var body: some View {
+        Button(action: { isOpen.toggle() }) {
+            HStack(spacing: 3) {
+                if let theme = theme,
+                   !iconName.isEmpty,
+                   WorkspaceIconCache.shared.lookup(iconName) != nil
+                {
+                    WorkspaceIcon(name: iconName, size: min(width - 12, height - 4),
+                                  tint: theme.text)
+                } else {
+                    SwiftUI.Text(visibleGlyph)
+                        .font(.system(size: max(14, height - 8)))
+                        .foregroundColor(theme.map { SwiftUI.Color(nsColor: $0.text) }
+                                         ?? .primary)
+                }
+                SwiftUI.Text("\u{25BE}")
+                    .font(.system(size: 9))
+                    .opacity(0.65)
+                    .foregroundColor(theme.map { SwiftUI.Color(nsColor: $0.text) }
+                                     ?? .primary)
+            }
+            .frame(width: width, height: height)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(summary)
+        .disabled(isDisabled)
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(options) { opt in
+                    Button(action: {
+                        onPick(opt.value)
+                        isOpen = false
+                    }) {
+                        HStack {
+                            SwiftUI.Text(opt.glyph.isEmpty ? "—" : opt.glyph)
+                                .frame(width: 24, alignment: .center)
+                            SwiftUI.Text(opt.label)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 }

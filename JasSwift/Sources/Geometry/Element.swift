@@ -2734,6 +2734,30 @@ public struct Text: Equatable {
 
     public var isAreaText: Bool { width > 0 && height > 0 }
 
+    /// Returns `true` when every tspan can be rendered by the
+    /// flat / paragraph-aware fast path:
+    ///
+    /// - Empty paragraph wrappers (`jasRole == "paragraph"`) are
+    ///   metadata only — `buildSegmentsFromText` reads them; their
+    ///   character-level fields are ignored at render time, so an
+    ///   empty wrapper never forces the segmented path.
+    /// - Body tspans (no `jasRole`) must carry no character-level
+    ///   overrides; otherwise the per-tspan font / decoration /
+    ///   transform must go through the per-tspan attributed path.
+    ///
+    /// Without this, the moment the Paragraph panel inserts an empty
+    /// wrapper before existing flat content, the renderer would flip
+    /// to the segmented (single-line) path and the paragraph would
+    /// collapse visually.
+    public var renderIsFlat: Bool {
+        tspans.allSatisfy { t in
+            if t.jasRole == "paragraph" {
+                return t.content.isEmpty
+            }
+            return t.hasNoOverrides
+        }
+    }
+
     /// Return a copy of this Text with the given fields replaced. Used by
     /// `TextEditSession.applyToDocument` so the field list lives in one
     /// place.

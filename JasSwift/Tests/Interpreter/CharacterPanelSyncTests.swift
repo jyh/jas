@@ -74,6 +74,128 @@ import Testing
     #expect((o["leading"] as? Double) == 24.0)
 }
 
+@Test func characterElementHasAutoLeadingTrueWhenLineHeightEmpty() {
+    // Empty element line_height = Auto = 120% of font_size.
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 20, lineHeight: ""))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    #expect(characterElementHasAutoLeading(model: model) == true)
+}
+
+@Test func characterElementHasAutoLeadingFalseWhenLineHeightSet() {
+    // Explicit line_height override = no Auto.
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 20, lineHeight: "30pt"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    #expect(characterElementHasAutoLeading(model: model) == false)
+}
+
+@Test func characterElementHasAutoLeadingFalseWhenNoSelection() {
+    let model = Model()
+    #expect(characterElementHasAutoLeading(model: model) == false)
+}
+
+@Test func characterElementHasAutoLeadingFalseForNonText() {
+    // Rect / other non-text element → false.
+    let model = Model()
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    model.document = Document(layers: [Layer(children: [rect])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    #expect(characterElementHasAutoLeading(model: model) == false)
+}
+
+@Test func characterElementHasAutoLeadingTrueForTextPath() {
+    let model = Model()
+    let tp = Element.textPath(TextPath(d: [], content: "x", fontSize: 20,
+                                        lineHeight: ""))
+    model.document = Document(layers: [Layer(children: [tp])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    #expect(characterElementHasAutoLeading(model: model) == true)
+}
+
+@Test func applyCharacterPanelLeadingNilPreservesAutoLineHeight() {
+    // End-to-end nullable-clear: when the user clears the leading
+    // input the renderer drops panel.leading from the store. The
+    // apply pipeline must re-derive line_height = "" (empty Auto)
+    // rather than write a stale numeric override. Mirrors the Rust
+    // `render_length_input` Character branch where clearing leading
+    // sets panel.leading = font_size * 1.2 and re-applies.
+    let model = Model()
+    // Element starts with an explicit leading (non-Auto). After the
+    // clear, line_height should round-trip back to empty.
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 20, lineHeight: "30pt"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    // Seed the production-id panel with a font_size and *no* leading
+    // entry (the clear path's effective state once setPanel(...,
+    // "leading", nil) removes the key).
+    model.stateStore.initPanel("character_panel_content", defaults: [
+        "font_family": "sans-serif",
+        "font_size": 20.0,
+        "style_name": "Regular",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "anti_aliasing": "Sharp",
+        "tracking": 0.0,
+        "kerning": "Auto",
+        "vertical_scale": 100.0, "horizontal_scale": 100.0,
+        "baseline_shift": 0.0, "character_rotation": 0.0,
+    ])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        #expect(Bool(false), "expected Text"); return
+    }
+    #expect(t.lineHeight == "",
+            "leading missing from panel state must round-trip to empty Auto line_height")
+}
+
+@Test func applyCharacterPanelLeadingAtAutoValueWritesEmpty() {
+    // Equivalent of the explicit Rust behavior: when the panel
+    // carries leading = font_size * 1.2 the apply still writes
+    // line_height = "" (Auto preserved).
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                  fontSize: 20, lineHeight: "30pt"))
+    model.document = Document(layers: [Layer(children: [text])],
+                              selectedLayer: 0,
+                              selection: [ElementSelection(path: [0, 0])])
+    model.stateStore.initPanel("character_panel_content", defaults: [
+        "font_family": "sans-serif",
+        "font_size": 20.0,
+        "style_name": "Regular",
+        "all_caps": false, "small_caps": false,
+        "superscript": false, "subscript": false,
+        "underline": false, "strikethrough": false,
+        "language": "",
+        "anti_aliasing": "Sharp",
+        "leading": 24.0,   // = 20 * 1.2 → Auto
+        "tracking": 0.0,
+        "kerning": "Auto",
+        "vertical_scale": 100.0, "horizontal_scale": 100.0,
+        "baseline_shift": 0.0, "character_rotation": 0.0,
+    ])
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model))
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        #expect(Bool(false), "expected Text"); return
+    }
+    #expect(t.lineHeight == "",
+            "leading at the Auto ratio must write line_height = \"\"")
+}
+
 @Test func characterPanelLiveOverridesTextPath() {
     let model = Model()
     let tp = Element.textPath(TextPath(

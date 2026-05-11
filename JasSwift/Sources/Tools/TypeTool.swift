@@ -377,6 +377,21 @@ class TypeTool: CanvasTool {
             }
             return true
         }
+        if cmd && lower == "v" {
+            // Read the system pasteboard and route through the
+            // tspan-aware paste path so the text lands at the caret
+            // inside the active session — without this, the keystroke
+            // falls through to JasCommands.pasteClipboard which
+            // creates a NEW point-text element on the canvas (and
+            // visually leaves the empty box the user just dragged).
+            if let text = NSPasteboard.general.string(forType: .string),
+               !text.isEmpty
+            {
+                _ = pasteText(ctx, text)
+                bump(); ctx.requestUpdate()
+            }
+            return true
+        }
         switch key {
         case "Escape":
             endSession(ctx); ctx.requestUpdate(); return true

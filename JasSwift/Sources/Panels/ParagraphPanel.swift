@@ -52,20 +52,40 @@ public enum ParagraphPanel {
                 store.initPanel(pid, defaults: ws.panelStateDefaults(pid))
             }
             resetParagraphPanel(store: store, controller: Controller(model: model))
+        case "open_paragraph_justification":
+            // Open the Justification dialog. The DockPanelView dispatch
+            // wrapper compares store.getDialogId() before/after and
+            // bridges the change to the SwiftUI overlay binding.
+            guard let model = model, let ws = WorkspaceData.load() else { return }
+            let store = model.stateStore
+            store.initDialog("paragraph_justification",
+                              defaults: ws.dialogStateDefaults("paragraph_justification"))
+        case "open_paragraph_hyphenation":
+            guard let model = model, let ws = WorkspaceData.load() else { return }
+            let store = model.stateStore
+            store.initDialog("paragraph_hyphenation",
+                              defaults: ws.dialogStateDefaults("paragraph_hyphenation"))
         default:
-            // Justification / Hyphenation dialog launchers land with
-            // their respective dialog wirings in Phase 8 / 9.
             break
         }
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        // Mirror toggles read from the StateStore not from
-        // WorkspaceLayout — the yaml-bind-style `checked: panel.*` is
-        // handled by the menu-item closure that calls
-        // `panelIsChecked` with model context. Until that read path
-        // is threaded through, the menu checkmark is rendered by the
-        // dock view's per-frame StateStore lookup elsewhere.
         false
+    }
+
+    /// Variant that consults the model's StateStore so the
+    /// Hanging Punctuation toggle can render its menu checkmark
+    /// from `panel.hanging_punctuation`. Mirrors the Rust
+    /// `paragraph_panel::is_checked` path.
+    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
+        guard let model = model else { return false }
+        switch cmd {
+        case "toggle_hanging_punctuation":
+            let pid = "paragraph_panel_content"
+            return (model.stateStore.getPanel(pid, "hanging_punctuation") as? Bool) ?? false
+        default:
+            return false
+        }
     }
 }

@@ -363,6 +363,18 @@ class TypeOnPathTool: CanvasTool {
             }
             return true
         }
+        if cmd && lower == "v" {
+            // Same routing as TypeTool: read the system pasteboard
+            // and feed it through pasteText so the text lands at the
+            // caret rather than spawning a new top-level text element.
+            if let text = NSPasteboard.general.string(forType: .string),
+               !text.isEmpty
+            {
+                _ = pasteText(ctx, text)
+                bump(); ctx.requestUpdate()
+            }
+            return true
+        }
         switch key {
         case "Escape":
             endSession(ctx); ctx.requestUpdate(); return true
