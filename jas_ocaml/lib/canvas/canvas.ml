@@ -43,7 +43,7 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
   (* Collapse chevron (only if pane has collapsed_width) *)
   (match config.collapsed_width with
    | Some _ ->
-     let chevron = if collapsed then "\xC2\xBB" else "\xC2\xAB" in (* » or « *)
+     let chevron = if collapsed then "\xC2\xAB" else "\xC2\xBB" in (* « when collapsed → click to expand; » when expanded → click to collapse *)
      make_clickable_label chevron ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
        (match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
         | Some d ->
@@ -531,7 +531,7 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
   rebuild_title_bars ();
 
   (* Initialize dock panel *)
-  let dock_refresh_panel = Dock_panel.create ~get_model ~get_fill_on_top dock_box workspace_layout in
+  let dock_refresh_panel = Dock_panel.create ~get_model ~get_fill_on_top ~window dock_box workspace_layout in
   dock_refresh := (fun () -> refresh_all (); dock_refresh_panel ());
 
   (* Mouse move handler *)

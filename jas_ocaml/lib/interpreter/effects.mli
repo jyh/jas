@@ -163,6 +163,33 @@ val apply_character_panel_to_selection :
 val subscribe_character_panel :
   State_store.t -> (unit -> Controller.controller) -> unit
 
+(** Whether the first selected Text / Text_path has an empty
+    [line_height] (i.e. leading is in Auto mode = 120% of font_size).
+    Used by the dispatch sites that write
+    [character_panel_content.font_size] so they can keep
+    [character_panel_content.leading] tracking the new size while
+    Auto is in effect. Mirrors Rust's
+    [character_element_has_auto_leading]. *)
+val character_element_has_auto_leading : Controller.controller -> bool
+
+(** Post-write hook for Character-panel field dispatches. When the
+    user changes [font_size] and the selected element's [line_height]
+    is empty (Auto), bump [character_panel_content.leading] to
+    [font_size *. 1.2] so the apply pipeline still resolves to the
+    Auto-derived value and the empty element attribute survives the
+    round-trip. Mirrors Rust's [character_panel_post_write]. *)
+val character_panel_post_write :
+  State_store.t -> Controller.controller -> string -> unit
+
+(** Set a Character-panel field then run the auto-leading post-write
+    hook so [font_size] writes keep [leading] tracking the Auto value
+    while the element's [line_height] is empty. Single entry point
+    for [_write_back_bind] to use; the State_store subscription on
+    [character_panel_content] fires the apply pipeline once both the
+    field and (for font_size) the auto-tracked leading have landed. *)
+val set_character_panel_field :
+  State_store.t -> Controller.controller -> string -> Yojson.Safe.t -> unit
+
 (** Subscribe [apply_stroke_panel_to_selection] to global-state writes
     filtered by [is_stroke_render_key]. Stroke state lives in the
     global scope (keys like [stroke_cap], [stroke_align_stroke]), so

@@ -55,6 +55,15 @@ class type_on_path_tool = object (_self)
   val mutable session : Text_edit.t option = None
   val mutable did_snapshot : bool = false
 
+  (* Convert widget-pixel mouse coords to document coords. See
+     [type_tool.ml#to_doc] for the rationale. *)
+  method private to_doc (ctx : Canvas_tool.tool_context) x y =
+    let z = ctx.model#zoom_level in
+    if z = 0.0 then (x, y)
+    else
+      ((x -. ctx.model#view_offset_x) /. z,
+       (y -. ctx.model#view_offset_y) /. z)
+
   method private build_layout (ctx : Canvas_tool.tool_context) =
     match session with
     | None -> None
@@ -166,6 +175,10 @@ class type_on_path_tool = object (_self)
     !result
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
+    (* Keep widget coords as wx/wy for drag preview storage; convert
+       (x, y) to doc coords for hit-tests / cursor / path math. *)
+    let wx, wy = x, y in
+    let (x, y) = _self#to_doc ctx x y in
     ignore (shift, alt);
     (* 1) If editing, check whether the click stays on the edited path *)
     (match session with
@@ -180,10 +193,10 @@ class type_on_path_tool = object (_self)
           ctx.request_update ()
         | _ ->
           _self#end_session ~ctx ();
-          _self#begin_press_no_session ctx x y)
-     | None -> _self#begin_press_no_session ctx x y)
+          _self#begin_press_no_session ctx x y ~wx ~wy)
+     | None -> _self#begin_press_no_session ctx x y ~wx ~wy)
 
-  method private begin_press_no_session (ctx : Canvas_tool.tool_context) x y =
+  method private begin_press_no_session (ctx : Canvas_tool.tool_context) x y ~wx ~wy =
     (* 2) Offset handle drag *)
     (match _self#find_selected_textpath_handle ctx x y with
      | Some (path, _elem) ->
@@ -224,14 +237,19 @@ class type_on_path_tool = object (_self)
              ctx.request_update ()
            | _ -> ())
         | None ->
-          (* 4) Start drag-create *)
-          drag_start <- Some (x, y);
-          drag_end <- Some (x, y);
+          (* 4) Start drag-create. Store widget coords so the
+             screen-space draw_overlay marquee draws at the cursor. *)
+          drag_start <- Some (wx, wy);
+          drag_end <- Some (wx, wy);
           control_pt <- None))
 
   method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(dragging : bool) =
+    (* drag_start/drag_end and control_pt are stored in widget coords
+       so the screen-space draw_overlay marquee draws at the cursor.
+       Hit-tests / cursor / path math need doc coords. *)
+    let wx, wy = x, y in
+    let (x, y) = _self#to_doc ctx x y in
     ignore shift;
-    (* If editing and drag_active, extend cursor *)
     (match session with
      | Some s when Text_edit.drag_active s && dragging ->
        let cursor = _self#cursor_at ctx x y in
@@ -239,7 +257,6 @@ class type_on_path_tool = object (_self)
        Text_edit.set_blink_epoch_ms s (now_ms ());
        ctx.request_update ()
      | _ ->
-       (* Offset handle drag *)
        if offset_dragging then begin
          (match offset_drag_path with
           | Some path ->
@@ -256,9 +273,9 @@ class type_on_path_tool = object (_self)
        end else
          match drag_start with
          | Some (sx, sy) ->
-           drag_end <- Some (x, y);
-           let mx = (sx +. x) /. 2.0 and my = (sy +. y) /. 2.0 in
-           let dx = x -. sx and dy = y -. sy in
+           drag_end <- Some (wx, wy);
+           let mx = (sx +. wx) /. 2.0 and my = (sy +. wy) /. 2.0 in
+           let dx = wx -. sx and dy = wy -. sy in
            let dist = sqrt (dx *. dx +. dy *. dy) in
            if dist > Canvas_tool.drag_threshold then begin
              let nx = -. dy /. dist and ny = dx /. dist in
@@ -268,8 +285,8 @@ class type_on_path_tool = object (_self)
          | None -> ())
 
   method on_release (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
+    let (dx, dy) = _self#to_doc ctx x y in
     ignore (shift, alt);
-    (* If editing, finish drag selection *)
     (match session with
      | Some s when Text_edit.drag_active s ->
        Text_edit.set_drag_active s false;
@@ -297,20 +314,24 @@ class type_on_path_tool = object (_self)
        end else begin
          match drag_start with
          | None -> ()
-         | Some (sx, sy) ->
+         | Some (wsx, wsy) ->
            drag_start <- None;
            drag_end <- None;
-           let w = abs_float (x -. sx) and h = abs_float (y -. sy) in
+           (* drag_start / control_pt are widget coords; the path
+              elements need doc coords. Convert both. *)
+           let (sx, sy) = _self#to_doc ctx wsx wsy in
+           let w = abs_float (dx -. sx) and h = abs_float (dy -. sy) in
            if w <= Canvas_tool.drag_threshold && h <= Canvas_tool.drag_threshold then
              control_pt <- None
            else begin
              ctx.model#snapshot;
              did_snapshot <- true;
              let d = match control_pt with
-               | Some (cx, cy) ->
-                 [Element.MoveTo (sx, sy); Element.CurveTo (cx, cy, cx, cy, x, y)]
+               | Some (wcx, wcy) ->
+                 let (cx, cy) = _self#to_doc ctx wcx wcy in
+                 [Element.MoveTo (sx, sy); Element.CurveTo (cx, cy, cx, cy, dx, dy)]
                | None ->
-                 [Element.MoveTo (sx, sy); Element.LineTo (x, y)]
+                 [Element.MoveTo (sx, sy); Element.LineTo (dx, dy)]
              in
              let elem = Element.make_text_path
                ~fill:(Some Element.{ fill_color = Rgb { r = 0.0; g = 0.0; b = 0.0; a = 1.0 }; fill_opacity = 1.0 })
@@ -356,6 +377,7 @@ class type_on_path_tool = object (_self)
     if session <> None then Some "ibeam" else None
 
   method! paste_text (ctx : Canvas_tool.tool_context) text =
+    let text = Type_tool.sanitize_utf8 text in
     match session with
     | None -> false
     | Some s ->
@@ -418,6 +440,17 @@ class type_on_path_tool = object (_self)
            Text_edit.backspace s;
            bump (); _self#sync_to_model ctx; ctx.request_update ()
          | None -> ());
+        true
+      end else if cmd && (key = "v" || key = "V") then begin
+        (* Same Cmd+V routing as type_tool — see comment there. *)
+        let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
+        GtkBase.Clipboard.request_text clipboard ~callback:(fun text_opt ->
+          match text_opt with
+          | Some t when String.length t > 0 ->
+            let clean = Type_tool.sanitize_utf8 t in
+            if String.length clean > 0 then
+              ignore (_self#paste_text ctx clean)
+          | _ -> ());
         true
       end else if key = "Escape" then begin
         _self#end_session ~ctx (); ctx.request_update (); true

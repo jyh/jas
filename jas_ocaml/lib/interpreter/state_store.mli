@@ -40,6 +40,12 @@ val set_data_path : t -> string -> Yojson.Safe.t -> unit
 val init_panel : t -> string -> (string * Yojson.Safe.t) list -> unit
 val get_panel : t -> string -> string -> Yojson.Safe.t
 val set_panel : t -> string -> string -> Yojson.Safe.t -> unit
+
+(** Snapshot every key/value in [panel_id]'s scope. Used by widget
+    renderers that need to re-evaluate a [bind.disabled] expression
+    against the current panel state. *)
+val get_panel_state : t -> string -> (string * Yojson.Safe.t) list
+
 val set_active_panel : t -> string option -> unit
 val get_active_panel_id : t -> string option
 val get_active_panel_state : t -> (string * Yojson.Safe.t) list

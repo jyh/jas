@@ -44,6 +44,24 @@ let _current_store : State_store.t option ref = ref None
     [_current_store]. *)
 let _current_panel_id : string option ref = ref None
 
+(** Hook fired by [paragraph_panel_resync_from_active_model] — set by
+    [create_panel_body] when the Paragraph panel mounts. None when no
+    Paragraph panel is open. Wiring callers (notably each canvas's
+    [model#on_document_changed]) call the resync helper, which lets
+    the panel widgets refresh whenever the active model's selection
+    changes. *)
+let _paragraph_panel_sync : (unit -> unit) option ref = ref None
+
+(** Trigger a re-sync of the open Paragraph panel from the active
+    model's current selection. No-op when no Paragraph panel is
+    open. Safe to call from any model's [on_document_changed]
+    listener — the sync resolves the active model lazily. *)
+let paragraph_panel_resync_from_active_model () : unit =
+  match !_paragraph_panel_sync with
+  | Some f -> f ()
+  | None -> ()
+
+
 (** Look up a previously registered panel store by content id, or None
     if no panel with that id has mounted yet. Thin wrapper over the
     Panel_menu registry so callers in this module read symmetrically
@@ -107,6 +125,21 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
            | Some model ->
              let ctrl = new Controller.controller ~model () in
              Effects.set_paragraph_panel_field store ctrl field value
+           | None ->
+             State_store.set_panel store panel_id field value
+         end
+         (* Character writes route through the dedicated setter so
+            font_size dispatches keep panel.leading tracking the
+            Auto-derived value (= font_size * 1.2) while the
+            element's line_height is empty. Without this, nudging
+            font_size while in Auto mode turns Auto into a stale
+            numeric override on the next apply. Mirrors Rust's
+            character_panel_post_write. *)
+         else if panel_id = "character_panel_content" then begin
+           match !_get_model_ref () with
+           | Some model ->
+             let ctrl = new Controller.controller ~model () in
+             Effects.set_character_panel_field store ctrl field value
            | None ->
              State_store.set_panel store panel_id field value
          end else
@@ -179,6 +212,8 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "element_preview" -> render_element_preview ~packing el
   | "dropdown" -> render_layers_filter_dropdown ~packing el
   | "tabs" -> render_tabs ~packing ~ctx el
+  | "icon" -> render_icon ~packing el
+  | "icon_select" -> render_icon_select ~packing ~ctx el
   | _ -> render_placeholder ~packing el
 
 and render_container ~packing ~ctx el etype =
@@ -187,35 +222,85 @@ and render_container ~packing ~ctx el etype =
   let is_row = layout_dir = "row" || etype = "row" in
   let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
   if is_row then begin
-    (* Bootstrap-style: when row children declare ``col: N`` weights,
-       give each child a proportional fixed width so labels in
-       column 1 of every row stack up at the same x-coordinate.
-       Without this, labels right-pack against their inputs and rows
-       drift across the dialog. Hardcoded 35px per col fits the
-       Print dialog's content area; tweak if other dialogs need
-       different totals. *)
+    (* Bootstrap-style 12-column grid: when row children declare
+       ``col: N`` weights, lay them out in a GtkGrid with
+       column_homogeneous = true so each column is exactly 1/12 of
+       the row's actual width. Children are attached with
+       ``width = N`` so col-2 spans 2 grid columns, col-12 spans
+       all 12, etc. Every row that uses the same col layout aligns
+       its widgets at the same x positions across rows — that's
+       the "all icons line up in column 1" property the dock
+       panels rely on. Falls back to plain hbox for rows without
+       any col-N children (toolbar-like adjacent buttons). *)
     let children = match el |> member "children" with
       | `List xs -> xs | _ -> [] in
     let weights = List.map (fun c ->
       c |> member "col" |> to_int_option |> Option.value ~default:0
     ) children in
     let any_weighted = List.exists (fun w -> w > 0) weights in
-    let hbox = GPack.hbox ~spacing:gap ~packing () in
-    if any_weighted then
+    if any_weighted then begin
+      let grid = GPack.grid
+        ~col_homogeneous:true
+        ~col_spacings:gap
+        ~packing:(packing) ()
+      in
+      (* Pin grid + cells to 1px minimum. Do NOT set hexpand on the
+         grid: when the grid expands to fill parent, GTK reports the
+         expanded width as its preferred size, which propagates up
+         the chain (vbox → dock_box → pane_container) and pushes the
+         dock pane open well past its set_size_request. Without
+         hexpand the grid sizes to its natural request
+         (≈ 12 × max(child natural / span)), and the parent vbox
+         allocates each row that width — every row ends up the same
+         width as the widest, giving the column alignment we want. *)
+      grid#misc#set_size_request ~width:1 ();
+      let col_cursor = ref 0 in
       List.iter2 (fun child weight ->
-        if weight > 0 then begin
-          let w = weight * 35 in
-          let cell_box = GPack.hbox ~packing:(hbox#pack ~expand:false ~fill:false) () in
-          cell_box#misc#set_size_request ~width:w ();
-          render_element ~packing:(cell_box#pack ~expand:true ~fill:true) ~ctx child
-        end else
-          render_element ~packing:(hbox#pack ~expand:false) ~ctx child
-      ) children weights
-    else
-      render_children ~packing:(hbox#pack ~expand:false) ~ctx el
+        let span = if weight > 0 then weight else 1 in
+        let cell = GPack.hbox () in
+        cell#misc#set_size_request ~width:1 ();
+        (* Honour the per-cell `style.alignment` hint. "start" packs
+           the rendered child without fill so it sits at its natural
+           size on the left of the cell; otherwise the child fills
+           the cell (default — its own halign decides). *)
+        let child_align =
+          child |> member "style" |> safe_member "alignment"
+          |> to_string_option |> Option.value ~default:"" in
+        let cell_pack =
+          if child_align = "start"
+          then cell#pack ~expand:false ~fill:false
+          else cell#pack ~expand:true ~fill:true in
+        render_element ~packing:cell_pack ~ctx child;
+        grid#attach ~left:!col_cursor ~top:0 ~width:span cell#coerce;
+        col_cursor := !col_cursor + span
+      ) children weights;
+      (* Pad to a full 12 columns when the row's weights sum to less.
+         GtkGrid only counts columns that have a child; without this
+         filler a partial row (e.g. col-1 + col-5 = 6) would render
+         as a 6-column homogeneous grid, doubling each col's width
+         and misaligning with rows that fill all 12. Attach a
+         narrow visible label (an hbox alone may not be considered
+         present for column-allocation purposes). *)
+      if !col_cursor < 12 then begin
+        let last = !col_cursor in
+        let pad_span = 12 - last in
+        let filler = GMisc.label ~text:"" () in
+        filler#misc#set_size_request ~width:1 ();
+        grid#attach ~left:last ~top:0 ~width:pad_span filler#coerce
+      end
+    end
+    else begin
+      let alignment =
+        el |> member "style" |> safe_member "alignment" |> to_string_option
+        |> Option.value ~default:"" in
+      let hbox = GPack.hbox ~spacing:gap ~packing () in
+      hbox#misc#set_size_request ~width:1 ();
+      let expand = alignment = "space-between" in
+      render_children ~packing:(hbox#pack ~expand ~fill:false) ~ctx el
+    end
   end else begin
     let vbox = GPack.vbox ~spacing:gap ~packing () in
-    render_children ~packing:(vbox#pack ~expand:false) ~ctx el
+    render_children ~packing:(vbox#pack ~expand:false ~fill:false) ~ctx el
   end
 
 and render_grid ~packing ~ctx el =
@@ -223,7 +308,7 @@ and render_grid ~packing ~ctx el =
   let _cols = el |> member "cols" |> to_int_option |> Option.value ~default:2 in
   (* GTK grid approximated with an HBox *)
   let hbox = GPack.hbox ~spacing:2 ~packing () in
-  render_children ~packing:(hbox#pack ~expand:false) ~ctx el
+  render_children ~packing:(hbox#pack ~expand:false ~fill:false) ~ctx el
 
 and render_text ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -233,6 +318,79 @@ and render_text ~packing ~ctx el =
     else content in
   let lbl = GMisc.label ~text ~packing () in
   lbl#set_xalign 0.0
+
+and render_icon ~packing el =
+  let open Yojson.Safe.Util in
+  let icon_name = el |> member "name" |> to_string_option |> Option.value ~default:"" in
+  let style = el |> member "style" in
+  let size = match style |> safe_member "width" |> to_number_option with
+    | Some n -> int_of_float n
+    | None -> (match style |> safe_member "size" |> to_number_option with
+               | Some n -> int_of_float n | None -> 16) in
+  let opacity = style |> safe_member "opacity" |> to_number_option |> Option.value ~default:1.0 in
+  if icon_name = "" then ()
+  else begin
+    try
+      let pb = Workspace_icon.pixbuf_for_name icon_name size "#cccccc" in
+      let img = GMisc.image ~pixbuf:pb ~packing () in
+      if opacity < 1.0 then img#set_opacity opacity
+    with _ -> ()
+  end
+
+and render_icon_select ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let icon_name = el |> member "icon" |> to_string_option |> Option.value ~default:"" in
+  let style = el |> member "style" in
+  let icon_size = match style |> safe_member "height" |> to_number_option with
+    | Some n -> int_of_float n
+    | None -> 20 in
+  let btn_w = match style |> safe_member "width" |> to_number_option with
+    | Some n -> int_of_float n | None -> 48 in
+  let btn_h = match style |> safe_member "height" |> to_number_option with
+    | Some n -> int_of_float n | None -> 26 in
+  let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  let disabled = match el |> member "bind" |> safe_member "disabled" |> to_string_option with
+    | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+    | None -> false in
+  let btn = GButton.button ~packing ~relief:`NONE () in
+  btn#misc#set_sensitive (not disabled);
+  btn#misc#set_size_request ~width:btn_w ~height:btn_h ();
+  btn#set_valign `CENTER;
+  (match (try Some (Workspace_icon.pixbuf_for_name icon_name icon_size "#cccccc") with _ -> None) with
+   | Some pb ->
+     let img = GMisc.image ~pixbuf:pb () in
+     btn#set_image img#coerce
+   | None -> ());
+  let css =
+    "button { min-width: 0; min-height: 0; padding: 2px; \
+     border: 1px solid #555; border-radius: 3px; \
+     background: #3a3a3a; box-shadow: none; }" in
+  let provider = GObj.css_provider () in
+  provider#load_from_data css;
+  btn#misc#style_context#add_provider provider 800;
+  ignore (btn#connect#clicked ~callback:(fun () ->
+    let menu = GMenu.menu () in
+    List.iter (fun opt ->
+      let label, value = match opt with
+        | `Assoc _ ->
+          let glyph = opt |> member "glyph" |> to_string_option in
+          let lbl = opt |> member "label" |> to_string_option |> Option.value ~default:"" in
+          let display = match glyph with
+            | Some g -> Printf.sprintf "%s  %s" g lbl
+            | None -> lbl in
+          let v = opt |> member "value" |> to_string_option |> Option.value ~default:"" in
+          (display, v)
+        | `String s -> (s, s)
+        | _ -> ("", "") in
+      let mi = GMenu.menu_item ~label ~packing:menu#append () in
+      ignore (mi#connect#activate ~callback:(fun () ->
+        match bind_expr with
+        | Some expr -> _write_back_bind expr (`String value)
+        | None -> ()))
+    ) options;
+    menu#misc#show_all ();
+    menu#popup ~button:1 ~time:(GtkMain.Main.get_current_event_time ())))
 
 and render_button ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -352,6 +510,15 @@ and render_button ~packing ~ctx el =
       | _ -> []
     in
     ignore (btn#connect#clicked ~callback:(fun () ->
+      (* Force the currently-focused entry to commit BEFORE we read
+         dialog/panel state. Without this, a user who types "60" into
+         a number_input and clicks OK without tabbing out leaves the
+         entry's typed value uncommitted — focus-out fires too late
+         (after this clicked handler) so the action runs against the
+         stale default value. Grabbing focus to the button forces any
+         pending entry's focus-out commit handler to run synchronously
+         right now. *)
+      btn#misc#grab_focus ();
       let live_ctx = !Dialog_global.current_build_ctx () in
       let resolved = List.map (fun (k, v) ->
         match v with
@@ -392,44 +559,134 @@ and render_number_input ~packing ~ctx el =
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Number n -> n | _ -> min_val)
     | None -> min_val in
-  let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:1.0 ~value:initial () in
-  let spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
-  (* Write-back: commit on value change so the StateStore, and any
-     subscription on the current panel scope, see the edit.
-     ``value_changed`` fires when the adjustment value changes (arrow
-     buttons, scroll wheel, programmatic set). On lablgtk3 the spin
-     entry's typed text doesn't reach the adjustment until ``update``
-     is called explicitly (default policy is ``IF_VALID`` on
-     focus-out, but Tab in a dialog doesn't always trigger
-     focus-out reliably) — so also wire focus_out_event and the
-     entry's activate (Enter) signal to call spin#update first. *)
-  (match bind_expr with
-   | Some expr ->
-     ignore (spin#connect#value_changed ~callback:(fun () ->
-       _write_back_bind expr (`Float spin#value)));
-     ignore (spin#event#connect#focus_out ~callback:(fun _ ->
-       spin#update;
-       _write_back_bind expr (`Float spin#value);
-       false));
-     ignore (spin#connect#activate ~callback:(fun () ->
-       spin#update;
-       _write_back_bind expr (`Float spin#value)));
-     (* Per-keystroke backstop: spin#connect#value_changed only
-        fires when the underlying adjustment moves, and on lablgtk3
-        Tab in a dialog doesn't reliably trigger the focus-out
-        commit that updates the adjustment. The entry's ``changed``
-        signal fires on every keystroke; parse the text and write
-        back so OK-after-typing-without-Enter sees the typed value. *)
-     (* Spin button is a GtkEntry under the hood; cast to access its
-        text method since GEdit.spin_button doesn't inherit from
-        entry directly. *)
-     let entry_view : GEdit.entry =
-       new GEdit.entry (Gobject.try_cast spin#as_widget "GtkEntry") in
-     ignore (spin#connect#changed ~callback:(fun () ->
-       match float_of_string_opt (String.trim entry_view#text) with
-       | Some v -> _write_back_bind expr (`Float v)
-       | None -> ()))
-   | None -> ())
+  let in_panel = !_current_panel_id <> None in
+  if in_panel then begin
+    (* Panel context: render as a plain GtkEntry. The spin button's
+       +/- steppers add ~50px of natural width which forces every
+       Bootstrap-12 column to be that wide, making panels overflow
+       the dock pane. The plain entry parses on every keystroke,
+       clamps to min/max, and commits on focus-out / Enter — same
+       semantics as the spin button minus the visible steppers. *)
+    let entry = GEdit.entry ~packing ~text:(Printf.sprintf "%g" initial) () in
+    entry#misc#set_size_request ~width:1 ();
+    entry#set_width_chars 4;
+    let suppress = ref false in
+    let clamp v = max min_val (min max_val v) in
+    let commit () =
+      match bind_expr, float_of_string_opt (String.trim entry#text) with
+      | Some expr, Some v ->
+        let cv = clamp v in
+        _write_back_bind expr (`Float cv);
+        (* Reflect the clamped value back into the entry text so the
+           user sees their out-of-range input snapped to a legal value
+           (PG-162). [suppress] keeps the resulting [changed] /
+           subscriber callbacks from re-firing the commit handlers. *)
+        if Float.abs (cv -. v) > 1e-9 then begin
+          suppress := true;
+          entry#set_text (Printf.sprintf "%g" cv);
+          suppress := false
+        end
+      | _ -> ()
+    in
+    (match bind_expr with
+     | Some _ ->
+       (* Commit only on Enter / focus-out. Reflowing on every
+          keystroke (PG-054) would intermix partial values like
+          "-" or "1" into the document and fight the user as they
+          type the rest of the number. *)
+       ignore (entry#connect#activate ~callback:(fun () ->
+         if not !suppress then commit ()));
+       ignore (entry#event#connect#focus_out ~callback:(fun _ ->
+         if not !suppress then commit (); false))
+     | None -> ());
+    (* Subscribe to panel-state updates so the entry refreshes when
+       the user changes selection or another widget writes the same
+       field (PG-055). The [suppress] guard prevents the programmatic
+       set_text from re-firing the commit handlers. *)
+    let disabled_expr =
+      el |> member "bind" |> safe_member "disabled" |> to_string_option in
+    let initial_disabled = match disabled_expr with
+      | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+      | None -> false in
+    entry#misc#set_sensitive (not initial_disabled);
+    (match bind_expr, !_current_store, !_current_panel_id with
+     | Some expr, Some store, Some pid
+       when (let parts = String.split_on_char '.' expr in
+             match parts with "panel" :: _ :: _ -> true | _ -> false) ->
+       let field = match String.split_on_char '.' expr with
+         | _ :: f :: _ -> f | _ -> "" in
+       let _ = expr in
+       let _ = pid in
+       (* Re-evaluate [disabled] against the current panel state on
+          every store change so PG-059 works: when the selection
+          changes from area text to point text, the indent fields
+          become non-interactive. *)
+       let refresh_disabled () =
+         match disabled_expr with
+         | None -> ()
+         | Some dexpr ->
+           let panel_state = State_store.get_panel_state store pid in
+           let panel_obj = `Assoc panel_state in
+           let ctx' = match ctx with
+             | `Assoc pairs ->
+               `Assoc (("panel", panel_obj)
+                       :: List.filter (fun (k, _) -> k <> "panel") pairs)
+             | _ -> `Assoc [("panel", panel_obj)] in
+           let dis = Expr_eval.to_bool (Expr_eval.evaluate dexpr ctx') in
+           entry#misc#set_sensitive (not dis)
+       in
+       State_store.subscribe_panel store pid (fun key v ->
+         if key = field && not entry#is_focus then begin
+           let new_text = match v with
+             | `Float f -> Printf.sprintf "%g" f
+             | `Int i -> string_of_int i
+             | `Null -> ""
+             | _ -> entry#text in
+           if entry#text <> new_text then begin
+             suppress := true;
+             entry#set_text new_text;
+             suppress := false
+           end
+         end;
+         refresh_disabled ())
+     | _ -> ())
+  end else begin
+    let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:1.0 ~value:initial () in
+    let spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
+    (* Write-back: commit on value change so the StateStore, and any
+       subscription on the current panel scope, see the edit.
+       ``value_changed`` fires when the adjustment value changes (arrow
+       buttons, scroll wheel, programmatic set). On lablgtk3 the spin
+       entry's typed text doesn't reach the adjustment until ``update``
+       is called explicitly (default policy is ``IF_VALID`` on
+       focus-out, but Tab in a dialog doesn't always trigger
+       focus-out reliably) — so also wire focus_out_event and the
+       entry's activate (Enter) signal to call spin#update first. *)
+    (match bind_expr with
+     | Some expr ->
+       ignore (spin#connect#value_changed ~callback:(fun () ->
+         _write_back_bind expr (`Float spin#value)));
+       ignore (spin#event#connect#focus_out ~callback:(fun _ ->
+         spin#update;
+         _write_back_bind expr (`Float spin#value);
+         false));
+       ignore (spin#connect#activate ~callback:(fun () ->
+         spin#update;
+         _write_back_bind expr (`Float spin#value)));
+       (* Per-keystroke backstop: spin#connect#value_changed only
+          fires when the underlying adjustment moves, and on lablgtk3
+          Tab in a dialog doesn't reliably trigger the focus-out
+          commit that updates the adjustment. The entry's ``changed``
+          signal fires on every keystroke; parse the text and write
+          back so OK-after-typing-without-Enter sees the typed value. *)
+       let entry_view : GEdit.entry =
+         new GEdit.entry (Gobject.try_cast spin#as_widget "GtkEntry") in
+       ignore (spin#connect#changed ~callback:(fun () ->
+         match float_of_string_opt (String.trim entry_view#text) with
+         | Some v -> _write_back_bind expr (`Float v)
+         | None -> ()))
+     | None -> ())
+  end
 
 and render_text_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -443,6 +700,10 @@ and render_text_input ~packing ~ctx el =
     | None -> "" in
   let entry = GEdit.entry ~packing ~text:initial () in
   if placeholder <> "" then entry#set_placeholder_text placeholder;
+  if !_current_panel_id <> None then begin
+    entry#misc#set_size_request ~width:1 ();
+    entry#set_width_chars 4
+  end;
   (* Write-back on focus-out / Enter (matches number_input's
      commit-on-change semantics rather than commit-per-keystroke). *)
   (match bind_expr with
@@ -473,6 +734,15 @@ and render_length_input ~packing ~ctx el =
   let initial = Length.format pt_value ~unit ~precision in
   let entry = GEdit.entry ~packing ~text:initial () in
   if placeholder <> "" then entry#set_placeholder_text placeholder;
+  (* Same shrinkable rationale as render_number_input — keep panel
+     entries from forcing the dock pane wider than its slot. The
+     entry's natural width is otherwise driven by initial text
+     (e.g. "14.4 pt"), which under col_homogeneous=true pushes the
+     whole grid 12× wider than that single cell. *)
+  if !_current_panel_id <> None then begin
+    entry#misc#set_size_request ~width:1 ();
+    entry#set_width_chars 4
+  end;
   let commit () =
     match bind_expr with
     | None -> ()
@@ -480,7 +750,28 @@ and render_length_input ~packing ~ctx el =
       let entered = entry#text in
       let trimmed = String.trim entered in
       if trimmed = "" then begin
-        if nullable then _write_back_bind expr `Null
+        if nullable then begin
+          (* Character panel's [leading] is Auto when the element's
+             line_height is empty; clearing the field re-derives the
+             Auto-tracked value (font_size * 1.2) and the apply
+             pipeline writes it back out as the empty element
+             attribute. No other Character field is nullable yet.
+             Mirrors Rust's render_length_input Character clear path. *)
+          if expr = "panel.leading" &&
+             !_current_panel_id = Some "character_panel_content" then begin
+            let fs = match !_current_store with
+              | Some s ->
+                (match State_store.get_panel s "character_panel_content"
+                         "font_size" with
+                 | `Int n -> Float.of_int n
+                 | `Float n -> n
+                 | _ -> 12.0)
+              | None -> 12.0 in
+            _write_back_bind expr (`Float (fs *. 1.2));
+            entry#set_text (Length.format (Some (fs *. 1.2)) ~unit ~precision)
+          end else
+            _write_back_bind expr `Null
+        end
         (* Non-nullable empty: revert by re-displaying the bound value. *)
         else entry#set_text initial
       end else begin
@@ -511,6 +802,16 @@ and render_select ~packing ~ctx el =
     | `String s -> s
     | _ -> "") options in
   let (combo, (store, col)) = GEdit.combo_box_text ~packing () in
+  (* In panel context, force the combo to be shrinkable: GTK's default
+     natural size for a combo is the width of the longest option label
+     (e.g. "Portuguese", "Bold Italic"), which can exceed the dock
+     pane's width and push the panel wider than the user's intended
+     layout. Set a tiny minimum, narrow the cellview/button via CSS,
+     and let the cell's expand+fill packing decide the actual width.
+     The popup itself continues to render full-width (GTK pops it up
+     as a separate widget). *)
+  if !_current_panel_id <> None then
+    combo#misc#set_size_request ~width:1 ();
   List.iter (fun opt ->
     let label = match opt with
       | `Assoc _ ->
@@ -554,6 +855,7 @@ and render_select ~packing ~ctx el =
 and render_toggle ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let label = el |> member "label" |> to_string_option |> Option.value ~default:"" in
+  let icon_name = el |> member "icon" |> to_string_option |> Option.value ~default:"" in
   (* Accept either bind.value (the panel-bool convention) or the
      legacy bind.checked. Mirrors the Rust render_toggle dispatch. *)
   let bind_expr =
@@ -566,8 +868,14 @@ and render_toggle ~packing ~ctx el =
   let disabled = match el |> member "bind" |> safe_member "disabled" |> to_string_option with
     | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
     | None -> false in
-  let btn = GButton.check_button ~label ~active:checked ~packing () in
-  btn#misc#set_sensitive (not disabled);
+  let style = el |> member "style" in
+  let icon_size = match style |> safe_member "width" |> to_number_option with
+    | Some n -> int_of_float n
+    | None -> 20 in
+  let icon_pixbuf =
+    if icon_name = "" then None
+    else try Some (Workspace_icon.pixbuf_for_name icon_name icon_size "#cccccc")
+         with _ -> None in
   (* Opacity panel selection-mask bindings route write-backs to the
      document controller (the flag lives on the selected element's
      mask, not on a panel-state key). See OPACITY.md §States.
@@ -579,27 +887,132 @@ and render_toggle ~packing ~ctx el =
       | Some "selection_mask_invert" -> Some `Invert
       | _ -> None
     else None in
-  (match mask_route with
-   | Some route ->
-     ignore (btn#connect#toggled ~callback:(fun () ->
-       match !_get_model_ref () with
+  let on_toggle_active is_active =
+    match mask_route with
+    | Some route ->
+      (match !_get_model_ref () with
        | None -> ()
        | Some m ->
          let ctrl = new Controller.controller ~model:m () in
          (match route with
-          | `Clip -> ctrl#set_mask_clip_on_selection btn#active
-          | `Invert -> ctrl#set_mask_invert_on_selection btn#active)))
-   | None ->
-     (match bind_expr with
-      | Some expr ->
-        ignore (btn#connect#toggled ~callback:(fun () ->
-          _write_back_bind expr (`Bool btn#active)))
-      | None -> ()))
+          | `Clip -> ctrl#set_mask_clip_on_selection is_active
+          | `Invert -> ctrl#set_mask_invert_on_selection is_active))
+    | None ->
+      (match bind_expr with
+       | Some expr -> _write_back_bind expr (`Bool is_active)
+       | None -> ())
+  in
+  match icon_pixbuf with
+  | Some pb ->
+    (* Icon-toggle variant per CHARACTER.md: square 24×24 button with
+       the icon glyph; pressed appearance when checked. Used by All
+       Caps, Snap to Glyph, etc. The cell's `alignment: center` style
+       keeps neighbouring buttons visually separated by leaving the
+       cell's leftover width as gap on either side. *)
+    let btn = GButton.toggle_button ~active:checked ~packing ~relief:`NONE () in
+    btn#set_draw_indicator false;
+    let img = GMisc.image ~pixbuf:pb () in
+    btn#set_image img#coerce;
+    btn#misc#set_sensitive (not disabled);
+    btn#misc#set_size_request ~width:24 ~height:24 ();
+    btn#set_halign `CENTER;
+    btn#set_valign `CENTER;
+    let css =
+      "button { min-width: 0; min-height: 0; padding: 2px; \
+       border: 1px solid #555; border-radius: 3px; \
+       background: #3a3a3a; box-shadow: none; } \
+       button:checked { background: #5a5a5a; border-color: #888; }" in
+    let provider = GObj.css_provider () in
+    provider#load_from_data css;
+    btn#misc#style_context#add_provider provider 800;
+    let suppress = ref false in
+    ignore (btn#connect#toggled ~callback:(fun () ->
+      if not !suppress then on_toggle_active btn#active));
+    (* Subscribe to store changes so the visual state stays in sync
+       with the panel-state — necessary for the paragraph alignment
+       row's mutual-exclusion semantics: when the user clicks
+       align_left, [Effects.apply_paragraph_panel_mutual_exclusion]
+       writes the other six align/justify keys to false in the store,
+       and those writes need to clear their buttons' visual state.
+       Without the subscription a previously-clicked button stays
+       highlighted forever. The [suppress] guard keeps the
+       set_active call from re-firing the toggled write-back. *)
+    (match bind_expr, !_current_store, !_current_panel_id with
+     | Some expr, Some store, Some pid
+       when (let parts = String.split_on_char '.' expr in
+             match parts with "panel" :: _ :: _ -> true | _ -> false) ->
+       let field = match String.split_on_char '.' expr with
+         | _ :: f :: _ -> f | _ -> "" in
+       State_store.subscribe_panel store pid (fun key v ->
+         if key = field then begin
+           let want = match v with `Bool b -> b | _ -> false in
+           if btn#active <> want then begin
+             suppress := true;
+             btn#set_active want;
+             suppress := false
+           end
+         end)
+     | _ -> ())
+  | None ->
+    let btn = GButton.check_button ~label ~active:checked ~packing () in
+    btn#misc#set_sensitive (not disabled);
+    (* Match Dock_panel.theme_text (#cccccc on dark theme). Hardcoded
+       rather than imported to avoid a Dock_panel ↔ Yaml_panel_view
+       module cycle. *)
+    let css = "checkbutton, checkbutton label { color: #cccccc; }" in
+    let provider = GObj.css_provider () in
+    provider#load_from_data css;
+    btn#misc#style_context#add_provider provider 800;
+    let suppress = ref false in
+    ignore (btn#connect#toggled ~callback:(fun () ->
+      if not !suppress then on_toggle_active btn#active));
+    (* Subscribe to panel-state updates so the checkbox refreshes its
+       active-state and its [bind.disabled] when selection or another
+       widget changes the underlying field — same pattern as the
+       icon-toggle branch and as render_number_input. *)
+    (match bind_expr, !_current_store, !_current_panel_id with
+     | Some expr, Some store, Some pid
+       when (let parts = String.split_on_char '.' expr in
+             match parts with "panel" :: _ :: _ -> true | _ -> false) ->
+       let field = match String.split_on_char '.' expr with
+         | _ :: f :: _ -> f | _ -> "" in
+       let disabled_expr =
+         el |> member "bind" |> safe_member "disabled" |> to_string_option in
+       let refresh_disabled () =
+         match disabled_expr with
+         | None -> ()
+         | Some dexpr ->
+           let panel_state = State_store.get_panel_state store pid in
+           let panel_obj = `Assoc panel_state in
+           let ctx' = match ctx with
+             | `Assoc pairs ->
+               `Assoc (("panel", panel_obj)
+                       :: List.filter (fun (k, _) -> k <> "panel") pairs)
+             | _ -> `Assoc [("panel", panel_obj)] in
+           let dis = Expr_eval.to_bool (Expr_eval.evaluate dexpr ctx') in
+           btn#misc#set_sensitive (not dis)
+       in
+       State_store.subscribe_panel store pid (fun key v ->
+         if key = field then begin
+           let want = match v with `Bool b -> b | _ -> false in
+           if btn#active <> want then begin
+             suppress := true;
+             btn#set_active want;
+             suppress := false
+           end
+         end;
+         refresh_disabled ())
+     | _ -> ())
 
 and render_combo_box ~packing ~ctx:_ el =
   let open Yojson.Safe.Util in
   let options = match el |> member "options" with `List l -> l | _ -> [] in
-  let (_combo, (store, col)) = GEdit.combo_box_text ~has_entry:true ~packing () in
+  let (combo, (store, col)) = GEdit.combo_box_text ~has_entry:true ~packing () in
+  (* Same width clamp as render_select — without it the kerning combo
+     ("Optical", "Metrics", "-100" etc) reports a wide natural and
+     forces the homogeneous Bootstrap-12 grid open. *)
+  if !_current_panel_id <> None then
+    combo#misc#set_size_request ~width:1 ();
   List.iter (fun opt ->
     let label = match opt with
       | `Assoc _ ->
@@ -862,7 +1275,7 @@ and render_disclosure ~packing ~ctx el =
     else label in
   let expander = GBin.expander ~label:label_text ~expanded:true ~packing () in
   let vbox = GPack.vbox ~spacing:0 ~packing:expander#add () in
-  render_children ~packing:(vbox#pack ~expand:false) ~ctx el
+  render_children ~packing:(vbox#pack ~expand:false ~fill:false) ~ctx el
 
 and render_panel ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -2000,7 +2413,16 @@ and render_placeholder ~packing el =
         end;
         true))
   end else begin
-    let lbl = GMisc.label ~text:(Printf.sprintf "[%s]" summary) ~packing () in
+    (* Placeholder for not-yet-implemented widget types (icon being
+       the most common). Use a single dot rather than "[summary]"
+       text — in dock panels the placeholder lands in a col-2 cell
+       beside a col-4 input, and a 6-char "[icon]" placeholder
+       (~50px natural) forces per-col-unit ≈ 25px, which inflates
+       the col-4 cell to ~100px (~14 chars wide). The dot keeps
+       its cell narrow so the value box stays the intended size. *)
+    let display = if !_current_panel_id <> None then "·"
+                  else Printf.sprintf "[%s]" summary in
+    let lbl = GMisc.label ~text:display ~packing () in
     lbl#misc#set_size_request ~height:30 ()
   end
 
@@ -2055,7 +2477,7 @@ and to_number_option (j : Yojson.Safe.t) : float option =
 (** Create a YAML-interpreted panel body in a GTK container.
     Returns unit. The panel content is rendered from the compiled
     workspace JSON. *)
-let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None) () =
+let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None) ?max_width:_ () =
   let content_id = Workspace_loader.panel_kind_to_content_id kind in
   match Workspace_loader.load () with
   | None -> ()
@@ -2150,14 +2572,25 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          (toggle_hanging_punctuation, reset_paragraph_panel) and the
          Opacity-panel toggle commands reach into the panel store via
          Panel_menu.lookup_panel_store; the registration above already
-         covers them. Paragraph still needs a one-shot sync from the
-         current selection so the widgets reflect the selected
-         paragraph attrs rather than the YAML defaults. *)
+         covers them. Paragraph also subscribes to document changes
+         so the panel widgets refresh whenever the selection changes
+         to a paragraph wrapper with different attrs (PG-055). *)
+      (* Paragraph panel sync from selection: fires once at panel
+         render time and registers a global hook so any subsequent
+         document change on the active model also re-syncs. The hook
+         re-resolves [get_model] each time so it always sees the
+         currently active tab's model rather than capturing whatever
+         was active when the panel was first rendered (typically the
+         startup dummy model). *)
       (if kind = Paragraph then begin
-         match get_model () with
-         | Some m ->
-           let ctrl = new Controller.controller ~model:m () in
-           Effects.sync_paragraph_panel_from_selection store ctrl
-         | None -> ()
+         let sync () =
+           match get_model () with
+           | Some m ->
+             let ctrl = new Controller.controller ~model:m () in
+             Effects.sync_paragraph_panel_from_selection store ctrl
+           | None -> ()
+         in
+         sync ();
+         _paragraph_panel_sync := Some sync
        end);
       render_element ~packing ~ctx content

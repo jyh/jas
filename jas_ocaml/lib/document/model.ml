@@ -36,6 +36,24 @@ let fresh_filename () =
   incr next_untitled;
   name
 
+(** Bump [next_untitled] past any [Untitled-N] entries already in use
+    (e.g. from session restore). Without this, restoring a session
+    with [Untitled-2] in it then File→New produces a second
+    [Untitled-2] tab — clicking × on the duplicate becomes ambiguous
+    and the session save+reload loop snowballs duplicates. *)
+let advance_next_untitled_past (existing_filenames : string list) : unit =
+  let max_n = ref (!next_untitled - 1) in
+  List.iter (fun fn ->
+    let prefix = "Untitled-" in
+    let pl = String.length prefix in
+    if String.length fn > pl
+    && String.sub fn 0 pl = prefix then
+      match int_of_string_opt (String.sub fn pl (String.length fn - pl)) with
+      | Some n when n > !max_n -> max_n := n
+      | _ -> ()
+  ) existing_filenames;
+  next_untitled := !max_n + 1
+
 class model ?(document = Document.default_document ()) ?filename () =
   let filename = match filename with Some f -> f | None -> fresh_filename () in
   object (_self)

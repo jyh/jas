@@ -113,6 +113,27 @@ let has_no_overrides (t : tspan) : bool =
   && t.transform = None
   && t.xml_lang = None
 
+(** [true] when every tspan in [tspans] can be rendered by the
+    flat / paragraph-aware fast path:
+
+    - Empty paragraph wrappers ([jas_role = Some "paragraph"]) are
+      metadata only — [Text_layout_paragraph.build_segments_from_text]
+      reads them; their character-level fields are ignored at render
+      time, so an empty wrapper never forces the segmented path.
+    - Body tspans (no [jas_role]) must carry no character-level
+      overrides; otherwise the per-tspan font / decoration / dx /
+      transform must go through the segmented draw path.
+
+    Without this, the moment the Paragraph panel inserts an empty
+    wrapper before existing flat content, the renderer flips to
+    the segmented path (single-line) and the paragraph collapses
+    visually. *)
+let render_is_flat (tspans : tspan array) : bool =
+  Array.for_all (fun (t : tspan) ->
+    if t.jas_role = Some "paragraph" then t.content = ""
+    else has_no_overrides t
+  ) tspans
+
 let concat_content (tspans : tspan array) : string =
   let buf = Buffer.create 64 in
   Array.iter (fun (t : tspan) -> Buffer.add_string buf t.content) tspans;
