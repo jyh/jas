@@ -1699,6 +1699,61 @@ let subscribe_character_panel (store : State_store.t)
   State_store.subscribe_panel store "character_panel_content" (fun _key _value ->
     apply_character_panel_to_selection store (ctrl_getter ()))
 
+(** Whether the first selected Text / Text_path has an empty
+    [line_height] (i.e. leading is in Auto mode = 120% of font_size).
+    Used by the dispatch sites that write [character_panel_content.font_size]
+    so they can keep [character_panel_content.leading] tracking the new
+    size while Auto is in effect — without this, Character-panel-driven
+    font changes turn Auto into a stale numeric override on the next
+    apply. Mirrors Rust's [character_element_has_auto_leading]. *)
+let character_element_has_auto_leading (ctrl : Controller.controller) : bool =
+  let doc = ctrl#document in
+  match Document.PathMap.min_binding_opt doc.Document.selection with
+  | None -> false
+  | Some (path, _) ->
+    (try
+      match Document.get_element doc path with
+      | Element.Text t -> t.line_height = ""
+      | Element.Text_path tp -> tp.line_height = ""
+      | _ -> false
+    with _ -> false)
+
+(** Post-write hook for Character-panel field dispatches. When the
+    user changes [font_size] and the selected element's [line_height]
+    is empty (Auto), bump [character_panel_content.leading] so the
+    apply pipeline still resolves to the Auto-derived value
+    (= [font_size *. 1.2]) and the empty element attribute survives
+    the round-trip. Without this, Auto materialises into a stale
+    numeric override the moment the user nudges the size. Mirrors
+    Rust's [character_panel_post_write]. *)
+let character_panel_post_write (store : State_store.t)
+    (ctrl : Controller.controller) (key : string) : unit =
+  if key = "font_size" && character_element_has_auto_leading ctrl then begin
+    let fs = match State_store.get_panel store "character_panel_content" "font_size" with
+      | `Int n -> Float.of_int n
+      | `Float n -> n
+      | _ -> 12.0 in
+    State_store.set_panel store "character_panel_content"
+      "leading" (`Float (fs *. 1.2))
+  end
+
+(** Set field → post-write (auto-leading sync). Called by
+    [_write_back_bind] for every character_panel_content widget write
+    so the [font_size] dispatch keeps [leading] tracking the
+    Auto-derived value (= font_size * 1.2) while the element's
+    [line_height] is empty. The single State_store subscription on
+    [character_panel_content] fires the apply pipeline once both the
+    field and (for font_size) the auto-tracked leading have landed.
+    Mirrors Rust's [set_character_field] + [character_panel_post_write]
+    combo — but consolidated into one entry point so the OCaml
+    [_write_back_bind] router can call it without re-implementing the
+    Auto detection. *)
+let set_character_panel_field (store : State_store.t)
+    (ctrl : Controller.controller) (key : string)
+    (value : Yojson.Safe.t) : unit =
+  State_store.set_panel store "character_panel_content" key value;
+  character_panel_post_write store ctrl key
+
 (** Subscribe [apply_stroke_panel_to_selection] to global writes on
     stroke keys. Filters via [is_stroke_render_key] so non-stroke
     writes don't fire the pipeline. *)
@@ -1797,6 +1852,128 @@ let _paragraph_align_attrs (panel : (string * Yojson.Safe.t) list)
   else if read "justify_all" then (Some "justify", Some "justify")
   else (None, None)
 
+(** Normalize the paragraph-wrapper layout for a text element's
+    tspan array, returning the (possibly new) tspan array and the
+    wrapper indices (always >= 1 after this call). Wrapper tspans
+    must be **empty**-content markers — the paragraph's body lives
+    in subsequent body tspans until the next wrapper or end-of-
+    tspans. Two corruption modes are repaired here:
+
+    1. No wrapper at all → prepend a fresh empty wrapper at index 0.
+    2. A wrapper carries non-empty content (legacy "promote first
+       tspan" path) → demote it to a body tspan (clear [jas_role],
+       keep its content) and prepend a fresh empty wrapper that
+       inherits the legacy wrapper's paragraph attributes.
+
+    [build_segments_from_text] doesn't count wrapper-tspan content
+    toward the segment's char range, so leaving body chars on a
+    wrapper makes the layout's effective slice shorter than the
+    rendered string — the user sees the paragraph collapse to a
+    single line the moment any Paragraph-panel control is clicked.
+
+    Used by every paragraph-panel apply path:
+    [apply_paragraph_panel_to_selection],
+    [apply_justification_dialog_to_selection], and
+    [apply_hyphenation_dialog_to_selection]. *)
+let _ensure_paragraph_wrapper (tspans : Element.tspan array)
+  : Element.tspan array * int list =
+  let lst = ref (Array.to_list tspans) in
+  (* Repair: walk in reverse so insertion at index [i] doesn't
+     shift later indices. *)
+  let len = List.length !lst in
+  for i = len - 1 downto 0 do
+    let t = List.nth !lst i in
+    if t.Element.jas_role = Some "paragraph" && t.content <> "" then begin
+      (* Build a new wrapper with the paragraph attrs lifted off
+         the corrupted tspan; the corrupted tspan keeps its
+         content but loses its wrapper role and paragraph attrs. *)
+      let new_wrapper = { (Tspan.default_tspan ()) with
+        jas_role = Some "paragraph";
+        text_align = t.text_align;
+        text_align_last = t.text_align_last;
+        text_indent = t.text_indent;
+        jas_left_indent = t.jas_left_indent;
+        jas_right_indent = t.jas_right_indent;
+        jas_space_before = t.jas_space_before;
+        jas_space_after = t.jas_space_after;
+        jas_hyphenate = t.jas_hyphenate;
+        jas_hanging_punctuation = t.jas_hanging_punctuation;
+        jas_list_style = t.jas_list_style;
+        jas_word_spacing_min = t.jas_word_spacing_min;
+        jas_word_spacing_desired = t.jas_word_spacing_desired;
+        jas_word_spacing_max = t.jas_word_spacing_max;
+        jas_letter_spacing_min = t.jas_letter_spacing_min;
+        jas_letter_spacing_desired = t.jas_letter_spacing_desired;
+        jas_letter_spacing_max = t.jas_letter_spacing_max;
+        jas_glyph_scaling_min = t.jas_glyph_scaling_min;
+        jas_glyph_scaling_desired = t.jas_glyph_scaling_desired;
+        jas_glyph_scaling_max = t.jas_glyph_scaling_max;
+        jas_auto_leading = t.jas_auto_leading;
+        jas_single_word_justify = t.jas_single_word_justify;
+        jas_hyphenate_min_word = t.jas_hyphenate_min_word;
+        jas_hyphenate_min_before = t.jas_hyphenate_min_before;
+        jas_hyphenate_min_after = t.jas_hyphenate_min_after;
+        jas_hyphenate_limit = t.jas_hyphenate_limit;
+        jas_hyphenate_zone = t.jas_hyphenate_zone;
+        jas_hyphenate_bias = t.jas_hyphenate_bias;
+        jas_hyphenate_capitalized = t.jas_hyphenate_capitalized;
+      } in
+      (* Demote: keep id + content + char-level overrides
+         (font/style/etc.); clear paragraph role + attrs. *)
+      let demoted = { t with
+        jas_role = None;
+        text_align = None;
+        text_align_last = None;
+        text_indent = None;
+        jas_left_indent = None;
+        jas_right_indent = None;
+        jas_space_before = None;
+        jas_space_after = None;
+        jas_hyphenate = None;
+        jas_hanging_punctuation = None;
+        jas_list_style = None;
+        jas_word_spacing_min = None;
+        jas_word_spacing_desired = None;
+        jas_word_spacing_max = None;
+        jas_letter_spacing_min = None;
+        jas_letter_spacing_desired = None;
+        jas_letter_spacing_max = None;
+        jas_glyph_scaling_min = None;
+        jas_glyph_scaling_desired = None;
+        jas_glyph_scaling_max = None;
+        jas_auto_leading = None;
+        jas_single_word_justify = None;
+        jas_hyphenate_min_word = None;
+        jas_hyphenate_min_before = None;
+        jas_hyphenate_min_after = None;
+        jas_hyphenate_limit = None;
+        jas_hyphenate_zone = None;
+        jas_hyphenate_bias = None;
+        jas_hyphenate_capitalized = None;
+      } in
+      (* Replace [t] at index [i] with [demoted], then insert
+         [new_wrapper] before it. *)
+      lst := List.mapi (fun j x -> if j = i then demoted else x) !lst;
+      let prefix = List.filteri (fun j _ -> j < i) !lst in
+      let suffix = List.filteri (fun j _ -> j >= i) !lst in
+      lst := prefix @ (new_wrapper :: suffix)
+    end
+  done;
+  (* Now collect indices of (post-repair) wrappers. *)
+  let arr = Array.of_list !lst in
+  let existing = ref [] in
+  Array.iteri (fun i (t : Element.tspan) ->
+    if t.jas_role = Some "paragraph" then existing := i :: !existing
+  ) arr;
+  if !existing <> [] then (arr, List.rev !existing)
+  else begin
+    (* No wrapper anywhere: prepend an empty one. *)
+    let wrapper = { (Tspan.default_tspan ()) with
+                    jas_role = Some "paragraph" } in
+    let arr2 = Array.append [| wrapper |] arr in
+    (arr2, [0])
+  end
+
 (** Push the YAML-stored paragraph panel state onto every paragraph
     wrapper tspan inside the selection. Per the identity-value rule,
     attrs equal to their default are *omitted* (set to [None]) rather
@@ -1844,18 +2021,10 @@ let apply_paragraph_panel_to_selection (store : State_store.t)
       let elem = Document.get_element acc path in
       match elem with
       | Element.Text r ->
-        let tspans = Array.copy r.tspans in
-        let wrapper_indices = ref [] in
-        Array.iteri (fun i (t : Element.tspan) ->
-          if t.jas_role = Some "paragraph" then
-            wrapper_indices := i :: !wrapper_indices
-        ) tspans;
-        let indices =
-          if !wrapper_indices = [] && Array.length tspans > 0 then begin
-            (* Promote first tspan to paragraph wrapper. *)
-            tspans.(0) <- { tspans.(0) with jas_role = Some "paragraph" };
-            [0]
-          end else List.rev !wrapper_indices in
+        (* Insert empty wrapper (or repair a wrapper that has
+           accidentally accumulated body content) — see
+           [_ensure_paragraph_wrapper] for rationale. *)
+        let (tspans, indices) = _ensure_paragraph_wrapper r.tspans in
         if indices = [] then acc
         else begin
           List.iter (fun i ->
@@ -1876,17 +2045,7 @@ let apply_paragraph_panel_to_selection (store : State_store.t)
           Document.replace_element acc path (Element.Text { r with tspans })
         end
       | Element.Text_path r ->
-        let tspans = Array.copy r.tspans in
-        let wrapper_indices = ref [] in
-        Array.iteri (fun i (t : Element.tspan) ->
-          if t.jas_role = Some "paragraph" then
-            wrapper_indices := i :: !wrapper_indices
-        ) tspans;
-        let indices =
-          if !wrapper_indices = [] && Array.length tspans > 0 then begin
-            tspans.(0) <- { tspans.(0) with jas_role = Some "paragraph" };
-            [0]
-          end else List.rev !wrapper_indices in
+        let (tspans, indices) = _ensure_paragraph_wrapper r.tspans in
         if indices = [] then acc
         else begin
           List.iter (fun i ->
@@ -2032,17 +2191,9 @@ let apply_justification_dialog_to_selection
     let new_doc = Document.PathMap.fold (fun path _ acc ->
       let elem = Document.get_element acc path in
       let update_wrappers tspans =
-        let arr = Array.copy tspans in
-        let wrapper_indices = ref [] in
-        Array.iteri (fun i (t : Element.tspan) ->
-          if t.jas_role = Some "paragraph" then
-            wrapper_indices := i :: !wrapper_indices
-        ) arr;
-        let indices =
-          if !wrapper_indices = [] && Array.length arr > 0 then begin
-            arr.(0) <- { arr.(0) with jas_role = Some "paragraph" };
-            [0]
-          end else List.rev !wrapper_indices in
+        (* Insert empty wrapper (or repair) — see
+           [_ensure_paragraph_wrapper]. *)
+        let (arr, indices) = _ensure_paragraph_wrapper tspans in
         List.iter (fun i ->
           arr.(i) <- { arr.(i) with
             jas_word_spacing_min = ws_min;
@@ -2126,17 +2277,7 @@ let apply_hyphenation_dialog_to_selection
     let new_doc = Document.PathMap.fold (fun path _ acc ->
       let elem = Document.get_element acc path in
       let update_wrappers tspans =
-        let arr = Array.copy tspans in
-        let wrapper_indices = ref [] in
-        Array.iteri (fun i (t : Element.tspan) ->
-          if t.jas_role = Some "paragraph" then
-            wrapper_indices := i :: !wrapper_indices
-        ) arr;
-        let indices =
-          if !wrapper_indices = [] && Array.length arr > 0 then begin
-            arr.(0) <- { arr.(0) with jas_role = Some "paragraph" };
-            [0]
-          end else List.rev !wrapper_indices in
+        let (arr, indices) = _ensure_paragraph_wrapper tspans in
         List.iter (fun i ->
           arr.(i) <- { arr.(i) with
             jas_hyphenate = hyph;

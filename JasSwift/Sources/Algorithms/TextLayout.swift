@@ -33,6 +33,11 @@ public struct LineInfo {
     /// O(line) instead of filtering the whole glyph vector.
     public var glyphStart: Int = 0
     public var glyphEnd: Int = 0
+    /// True when the line was wrapped at a hyphenation breakpoint
+    /// inside a word — the renderer must append a visible hyphen
+    /// glyph at the line's end. The synthetic hyphen advance is
+    /// already baked into the line's last visible glyph's `right`.
+    public var trailingHyphen: Bool = false
 }
 
 public struct TextLayout {
@@ -176,6 +181,224 @@ public func layoutText(_ content: String,
     }
     // Sweep glyphs once to fill line glyph ranges. Glyphs are emitted
     // in line order so a single pass suffices.
+    var gi = 0
+    for li in 0..<lines.count {
+        lines[li].glyphStart = gi
+        while gi < glyphs.count && glyphs[gi].line == li { gi += 1 }
+        lines[li].glyphEnd = gi
+    }
+    return TextLayout(glyphs: glyphs, lines: lines, fontSize: fontSize, charCount: n)
+}
+
+/// Hyphenation options for greedy (non-justify) layout. When passed
+/// to `layoutTextWithHyphen`, the layout will try to break long
+/// words at hyphenation candidates instead of wrapping the whole
+/// word to the next line.
+public struct HyphenOpts {
+    public var minWord: Int
+    public var minBefore: Int
+    public var minAfter: Int
+    /// When false, words starting with an uppercase letter are
+    /// excluded from hyphenation (proper-noun protection).
+    public var allowCapitalized: Bool
+
+    public init(minWord: Int, minBefore: Int, minAfter: Int,
+                allowCapitalized: Bool) {
+        self.minWord = minWord
+        self.minBefore = minBefore
+        self.minAfter = minAfter
+        self.allowCapitalized = allowCapitalized
+    }
+}
+
+/// Variant of [`layoutText`] that consults hyphenation patterns when
+/// a non-whitespace token doesn't fit on the current line. Used by
+/// `layoutTextWithParagraphs` for non-justify segments where
+/// `seg.hyphenate` is set.
+///
+/// Picks the *largest* prefix that still leaves room for a hyphen,
+/// greedy-style. If no break fits, falls through to the standard
+/// wrap-before-token. Words shorter than `minWord` chars and (when
+/// `!allowCapitalized`) words starting with uppercase are skipped.
+/// Sets `LineInfo.trailingHyphen = true` on the line where the
+/// break occurred so the renderer can draw the visible hyphen.
+public func layoutTextWithHyphen(_ content: String,
+                                 maxWidth: Double,
+                                 fontSize: Double,
+                                 opts: HyphenOpts,
+                                 measure: (String) -> Double) -> TextLayout {
+    let lineHeight = fontSize
+    let ascent = fontSize * 0.8
+    let chars = Array(content)
+    let n = chars.count
+    var glyphs: [TextGlyph] = []
+    var lines: [LineInfo] = []
+    var idx = 0
+    var lineNo = 0
+    var lineStart = 0
+    var x: Double = 0
+
+    func pushLine(_ start: Int, _ end: Int, _ hardBreak: Bool, _ width: Double,
+                  _ trailingHyphen: Bool) {
+        let top = Double(lineNo) * lineHeight
+        var info = LineInfo(start: start, end: end, hardBreak: hardBreak,
+                            top: top, baselineY: top + ascent,
+                            height: lineHeight, width: width)
+        info.trailingHyphen = trailingHyphen
+        lines.append(info)
+    }
+    func addGlyph(_ i: Int, _ ln: Int, _ gx: Double, _ gw: Double) {
+        let top = Double(ln) * lineHeight
+        glyphs.append(TextGlyph(idx: i, line: ln, x: gx, right: gx + gw,
+                                baselineY: top + ascent, top: top,
+                                height: lineHeight, isTrailingSpace: false))
+    }
+
+    while idx < n {
+        let c = chars[idx]
+        if c == "\n" {
+            pushLine(lineStart, idx, true, x, false)
+            lineNo += 1
+            lineStart = idx + 1
+            x = 0
+            idx += 1
+            continue
+        }
+        let isWs = isSpaceChar(c)
+        var end = idx + 1
+        while end < n && chars[end] != "\n" && (isSpaceChar(chars[end]) == isWs) {
+            end += 1
+        }
+        if isWs {
+            for k in 0..<(end - idx) {
+                let cw = measure(String(chars[idx + k]))
+                addGlyph(idx + k, lineNo, x, cw)
+                x += cw
+            }
+            idx = end
+            continue
+        }
+        let token = String(chars[idx..<end])
+        let tokenW = measure(token)
+        if maxWidth > 0 && x + tokenW > maxWidth && x > 0 {
+            // Hyphenation: try to split the token at a hyphenation
+            // breakpoint that fits on the current line. Picks the
+            // *largest* prefix that still leaves room for the hyphen,
+            // greedy-style. If no break fits, falls through to the
+            // standard wrap below.
+            var hyphenSplit: (Int, Double)? = nil
+            let tokenChars = Array(token)
+            let startsCapital = tokenChars.first?.isUppercase ?? false
+            let allowed = tokenChars.count >= opts.minWord
+                && (opts.allowCapitalized || !startsCapital)
+            if allowed {
+                let breaks = hyphenate(token, patterns: enUsPatternsSample,
+                                       minBefore: opts.minBefore,
+                                       minAfter: opts.minAfter)
+                let hyphenW = measure("-")
+                let avail = maxWidth - x
+                // Try the largest valid break point first.
+                for bi in stride(from: tokenChars.count - 1, through: 1, by: -1) {
+                    if bi >= breaks.count || !breaks[bi] { continue }
+                    let prefix = String(tokenChars[..<bi])
+                    let prefixW = measure(prefix)
+                    if prefixW + hyphenW <= avail {
+                        hyphenSplit = (bi, prefixW)
+                        break
+                    }
+                }
+            }
+            if let (splitAt, _) = hyphenSplit {
+                // Emit prefix glyphs on the current line, then the
+                // synthetic hyphen, then wrap.
+                for k in 0..<splitAt {
+                    let cw = measure(String(tokenChars[k]))
+                    addGlyph(idx + k, lineNo, x, cw)
+                    x += cw
+                }
+                let hyphenW = measure("-")
+                // Synthetic hyphen carries idx = split point so hit-
+                // test still maps to a real char. The renderer
+                // recognises trailingHyphen on the line and draws the
+                // visible '-' here.
+                addGlyph(idx + splitAt, lineNo, x, hyphenW)
+                let lineW = x + hyphenW
+                pushLine(lineStart, idx + splitAt, false, lineW, true)
+                lineNo += 1
+                lineStart = idx + splitAt
+                x = 0
+                idx = idx + splitAt
+                // Place the tail at x=0 (or char-by-char if it overflows).
+                let tailChars = Array(tokenChars[splitAt...])
+                let tailW = tailChars.reduce(0.0) { $0 + measure(String($1)) }
+                if maxWidth > 0 && tailW > maxWidth {
+                    for (k, ch) in tailChars.enumerated() {
+                        let cw = measure(String(ch))
+                        if x + cw > maxWidth && x > 0 {
+                            pushLine(lineStart, idx + k, false, x, false)
+                            lineNo += 1
+                            lineStart = idx + k
+                            x = 0
+                        }
+                        addGlyph(idx + k, lineNo, x, cw)
+                        x += cw
+                    }
+                } else {
+                    var curX = x
+                    for (k, ch) in tailChars.enumerated() {
+                        let cw = measure(String(ch))
+                        addGlyph(idx + k, lineNo, curX, cw)
+                        curX += cw
+                    }
+                    x = curX
+                }
+                idx = end
+                continue
+            }
+            // No hyphenation break fits — standard wrap-before-token.
+            for gi in 0..<glyphs.count {
+                if glyphs[gi].line == lineNo
+                    && isSpaceChar(chars[glyphs[gi].idx]) {
+                    glyphs[gi].isTrailingSpace = true
+                }
+            }
+            pushLine(lineStart, idx, false, x, false)
+            lineNo += 1
+            lineStart = idx
+            x = 0
+        }
+        if maxWidth > 0 && tokenW > maxWidth && x == 0 {
+            // Char-by-char break for an over-long token.
+            for k in 0..<(end - idx) {
+                let cw = measure(String(chars[idx + k]))
+                if x + cw > maxWidth && x > 0 {
+                    pushLine(lineStart, idx + k, false, x, false)
+                    lineNo += 1
+                    lineStart = idx + k
+                    x = 0
+                }
+                addGlyph(idx + k, lineNo, x, cw)
+                x += cw
+            }
+        } else {
+            var curX = x
+            for k in 0..<(end - idx) {
+                let cw = measure(String(chars[idx + k]))
+                addGlyph(idx + k, lineNo, curX, cw)
+                curX += cw
+            }
+            x = curX
+        }
+        idx = end
+    }
+    pushLine(lineStart, n, false, x, false)
+    if lines.isEmpty {
+        var info = LineInfo(start: 0, end: 0, hardBreak: false,
+                            top: 0, baselineY: ascent, height: lineHeight,
+                            width: 0)
+        info.trailingHyphen = false
+        lines.append(info)
+    }
     var gi = 0
     for li in 0..<lines.count {
         lines[li].glyphStart = gi
@@ -342,6 +565,11 @@ public struct ParagraphSegment: Equatable {
     /// 0 (Better Spacing) ... 6 (Fewer Hyphens). Maps to per-hyphen
     /// penalty value in the composer.
     public var hyphenateBias: Int
+    /// `jas:hyphenate-capitalized` — when false (the default in
+    /// Illustrator / InDesign / Word), proper nouns and other
+    /// words starting with an uppercase letter are NOT broken at
+    /// hyphenation candidates. Avoids breaks like "T-rump".
+    public var hyphenateCapitalized: Bool
 
     public init(charStart: Int = 0, charEnd: Int = 0,
                 leftIndent: Double = 0, rightIndent: Double = 0,
@@ -355,10 +583,11 @@ public struct ParagraphSegment: Equatable {
                 wordSpacingMax: Double = 133,
                 lastLineAlign: TextAlign = .left,
                 hyphenate: Bool = false,
-                hyphenateMinWord: Int = 3,
-                hyphenateMinBefore: Int = 1,
-                hyphenateMinAfter: Int = 1,
-                hyphenateBias: Int = 0) {
+                hyphenateMinWord: Int = 6,
+                hyphenateMinBefore: Int = 2,
+                hyphenateMinAfter: Int = 2,
+                hyphenateBias: Int = 0,
+                hyphenateCapitalized: Bool = false) {
         self.charStart = charStart
         self.charEnd = charEnd
         self.leftIndent = leftIndent
@@ -379,6 +608,7 @@ public struct ParagraphSegment: Equatable {
         self.hyphenateMinBefore = hyphenateMinBefore
         self.hyphenateMinAfter = hyphenateMinAfter
         self.hyphenateBias = hyphenateBias
+        self.hyphenateCapitalized = hyphenateCapitalized
     }
 }
 
@@ -503,6 +733,18 @@ public func layoutTextWithParagraphs(_ content: String,
                                           fontSize: fontSize, seg: seg,
                                           measure: measure) {
             para = kp
+        } else if seg.hyphenate && effectiveMax > 0 {
+            // Plain (non-justify) layout supports hyphenation via a
+            // greedy break-at-largest-fitting-prefix path. Without
+            // this, seg.hyphenate had no effect on left-aligned text
+            // because plain `layoutText` didn't consult patterns.
+            let opts = HyphenOpts(minWord: seg.hyphenateMinWord,
+                                  minBefore: seg.hyphenateMinBefore,
+                                  minAfter: seg.hyphenateMinAfter,
+                                  allowCapitalized: seg.hyphenateCapitalized)
+            para = layoutTextWithHyphen(slice, maxWidth: effectiveMax,
+                                        fontSize: fontSize, opts: opts,
+                                        measure: measure)
         } else {
             para = layoutText(slice, maxWidth: effectiveMax,
                               fontSize: fontSize, measure: measure,
@@ -510,7 +752,18 @@ public func layoutTextWithParagraphs(_ content: String,
         }
         let firstLineExtra: Double = hasList ? 0 : max(0, seg.firstLineIndent)
         let firstLineNoInCombined = allLines.count
+        let linesN = para.lines.count
+        // A segment may span multiple sub-paragraphs (the user typed
+        // "a\nb\nc" then applied panel attrs — one wrapper covers all
+        // three). spaceBefore / spaceAfter are paragraph attributes,
+        // so they must apply between each sub-paragraph too, not just
+        // between top-level segments. Accumulates as we cross hard
+        // breaks within the segment.
+        var subParaDelta: Double = 0
         for (li, line) in para.lines.enumerated() {
+            if li > 0 && para.lines[li - 1].hardBreak {
+                subParaDelta += seg.spaceAfter + seg.spaceBefore
+            }
             let xShift = seg.leftIndent + listIndent + (li == 0 ? firstLineExtra : 0)
             let lineAvail: Double = effectiveMax > 0
                 ? max(0, effectiveMax - (li == 0 ? firstLineExtra : 0)) : 0
@@ -523,7 +776,15 @@ public func layoutTextWithParagraphs(_ content: String,
             var leftHangW: Double = 0
             var rightHangW: Double = 0
             if seg.hangingPunctuation {
-                let allowLeft = seg.textAlign == .left || seg.textAlign == .center
+                // Justify is treated like Left/Center for left-edge
+                // hangs: the body composer stretches the line to fill
+                // the max width, but the leading punctuation should
+                // still hang into the margin so the visible left edge
+                // of the paragraph is straight. Right hangs on Justify
+                // body lines need composer support and stay disabled.
+                let allowLeft = seg.textAlign == .left
+                    || seg.textAlign == .center
+                    || seg.textAlign == .justify
                 let allowRight = seg.textAlign == .right || seg.textAlign == .center
                 if allowLeft, let g = para.glyphs[line.glyphStart..<line.glyphEnd]
                        .first(where: { !$0.isTrailingSpace }) {
@@ -537,8 +798,20 @@ public func layoutTextWithParagraphs(_ content: String,
                 }
             }
             let effectiveVisibleW = max(0, visibleW - leftHangW - rightHangW)
+            // For a justified segment the body lines are stretched to
+            // fill the line width by the composer, so a Justify-arm
+            // shift of 0 leaves them flush with both edges. The LAST
+            // line is *not* stretched (composer convention), so it
+            // needs to be positioned per `seg.lastLineAlign` —
+            // otherwise justify_right / justify_center / justify_left
+            // all visually look like left-aligned.
+            let isLastLineOfSegment = li + 1 == linesN
+            let effectiveAlign: TextAlign =
+                (seg.textAlign == .justify && isLastLineOfSegment)
+                    ? seg.lastLineAlign
+                    : seg.textAlign
             let alignShift: Double
-            switch seg.textAlign {
+            switch effectiveAlign {
             case .left, .justify: alignShift = -leftHangW
             case .center:
                 alignShift = lineAvail > effectiveVisibleW
@@ -551,8 +824,8 @@ public func layoutTextWithParagraphs(_ content: String,
             let totalShift = xShift + alignShift
             let origStart = seg.charStart + line.start
             let origEnd = seg.charStart + line.end
-            let baseline = yOffset + line.baselineY
-            let top = yOffset + line.top
+            let baseline = yOffset + line.baselineY + subParaDelta
+            let top = yOffset + line.top + subParaDelta
             let glyphStart = allGlyphs.count
             for g in para.glyphs[line.glyphStart..<line.glyphEnd] {
                 allGlyphs.append(TextGlyph(
@@ -560,8 +833,8 @@ public func layoutTextWithParagraphs(_ content: String,
                     line: firstLineNoInCombined + li,
                     x: g.x + totalShift,
                     right: g.right + totalShift,
-                    baselineY: g.baselineY + yOffset,
-                    top: g.top + yOffset,
+                    baselineY: g.baselineY + yOffset + subParaDelta,
+                    top: g.top + yOffset + subParaDelta,
                     height: g.height,
                     isTrailingSpace: g.isTrailingSpace))
             }
@@ -573,10 +846,11 @@ public func layoutTextWithParagraphs(_ content: String,
                                 width: visibleW + totalShift)
             info.glyphStart = glyphStart
             info.glyphEnd = glyphEnd
+            info.trailingHyphen = line.trailingHyphen
             allLines.append(info)
         }
         if !para.lines.isEmpty {
-            yOffset += Double(para.lines.count) * lineHeight
+            yOffset += Double(para.lines.count) * lineHeight + subParaDelta
         }
         yOffset += seg.spaceAfter
     }
@@ -659,7 +933,13 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
             while i < sliceChars.count && !sliceChars[i].isWhitespace { i += 1 }
             let word = String(sliceChars[wordStart..<i])
             let wordW = measure(word)
-            if seg.hyphenate && word.count >= seg.hyphenateMinWord {
+            // Hyphenation candidates inside the word. Capitalized
+            // words (proper nouns) are excluded unless explicitly
+            // allowed — without this, "Trump" hyphenates to
+            // "T-rump" via the sample pattern set.
+            let startsCapital = word.first?.isUppercase ?? false
+            if seg.hyphenate && word.count >= seg.hyphenateMinWord
+                && (seg.hyphenateCapitalized || !startsCapital) {
                 let breaks = hyphenate(word, patterns: enUsPatternsSample,
                                         minBefore: seg.hyphenateMinBefore,
                                         minAfter: seg.hyphenateMinAfter)
@@ -689,8 +969,18 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
                                flagged: false,
                                charIdx: paraStart + sliceChars.count))
 
-        guard let breaks = kpCompose(items: items, lineWidths: [maxWidth]),
-              !breaks.isEmpty else {
+        // Try the strict cap first (Knuth's default 10 = "loose" but
+        // typographically acceptable). If no feasible composition
+        // exists at that cap, retry with a much looser cap so the
+        // paragraph still justifies — falling all the way back to
+        // ragged-left would be visually worse than a too-loose body
+        // line. Mirrors Illustrator / InDesign behavior of allowing
+        // looser spacing rather than abandoning justify entirely.
+        let breaksOrNil: [KPBreak]? =
+            kpCompose(items: items, lineWidths: [maxWidth])
+                ?? kpCompose(items: items, lineWidths: [maxWidth],
+                              opts: KPOpts(maxRatio: 100))
+        guard let breaks = breaksOrNil, !breaks.isEmpty else {
             return nil
         }
 
@@ -782,12 +1072,25 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
             }
             let glyphEnd = allGlyphs.count
             let hardBreak = isLast && paraEndExcl < n && chars[paraEndExcl] == "\n"
+            // The renderer needs to draw a visible hyphen at end of
+            // line when the composer broke inside a word at a
+            // hyphenation penalty. The penalty's `width` is the
+            // hyphen advance (already baked into x), and `width > 0`
+            // distinguishes a hyphen penalty from the terminator
+            // penalty (zero width). Source content has no hyphen at
+            // this position, so without the explicit signal the
+            // renderer would draw "exam" instead of "exam-".
+            let trailingHyphen: Bool = {
+                if case .penalty(let pw, _, _, _) = items[to], pw > 0 { return true }
+                return false
+            }()
             var info = LineInfo(start: lineStartChar, end: lineEndChar,
                                 hardBreak: hardBreak,
                                 top: top, baselineY: baselineY,
                                 height: lineHeight, width: x)
             info.glyphStart = glyphStart
             info.glyphEnd = glyphEnd
+            info.trailingHyphen = trailingHyphen
             allLines.append(info)
             nextLineNo += 1
             prevBreak = to

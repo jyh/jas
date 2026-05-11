@@ -57,10 +57,20 @@ public func buildParagraphSegments(
                 wordSpacingMax: t.jasWordSpacingMax ?? 133,
                 lastLineAlign: lla,
                 hyphenate: t.jasHyphenate ?? false,
-                hyphenateMinWord: Int(t.jasHyphenateMinWord ?? 3),
-                hyphenateMinBefore: Int(t.jasHyphenateMinBefore ?? 1),
-                hyphenateMinAfter: Int(t.jasHyphenateMinAfter ?? 1),
-                hyphenateBias: Int(t.jasHyphenateBias ?? 0))
+                // Defaults match Illustrator / InDesign Hyphenation
+                // dialog: 6 / 2 / 2. The previous 3 / 1 / 1 was loose
+                // enough that the sample pattern set produced "T-rump"
+                // (matching ".un1" / "1ru" patterns at min_before=1).
+                hyphenateMinWord: Int(t.jasHyphenateMinWord ?? 6),
+                hyphenateMinBefore: Int(t.jasHyphenateMinBefore ?? 2),
+                hyphenateMinAfter: Int(t.jasHyphenateMinAfter ?? 2),
+                hyphenateBias: Int(t.jasHyphenateBias ?? 0),
+                // Capitalized words (proper nouns: "Trump", "London")
+                // are excluded from hyphenation by default, mirroring
+                // Illustrator / InDesign / MS Word — even with a real
+                // pattern dictionary, breaking proper nouns reads
+                // poorly to most readers.
+                hyphenateCapitalized: t.jasHyphenateCapitalized ?? false)
         } else {
             cursor += bodyChars
         }

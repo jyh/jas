@@ -148,6 +148,10 @@ def _render_text(el, store, ctx, dispatch_fn):
         content = evaluate_text(content, store.eval_context(ctx))
     label = QLabel(str(content))
     label.setWordWrap(True)
+    # Match the panel body's dark theme (THEME_TEXT in dock_panel.py).
+    # Without this label text inherits the system Qt palette and
+    # renders as black, which is illegible on the dark dock.
+    label.setStyleSheet("color: #ccc;")
     return label
 
 
@@ -261,6 +265,129 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
     return btn
 
 
+def _render_icon_select(el, store, ctx, dispatch_fn):
+    """Compact icon-style chooser used for the Paragraph panel's
+    Bullets / Numbered List rows. Renders as a square button showing
+    the workspace [icon] glyph (e.g. ``para_bullets``); clicking opens
+    a popup menu listing each option's per-option [glyph] + [label].
+    Writes the chosen [value] back through [_write_back_bind] /
+    [store.set_panel]. Mirrors the OCaml / Rust port behaviour."""
+    from PySide6.QtWidgets import QPushButton, QMenu
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QIcon
+    style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
+    raw_w = style.get("width") or 48
+    raw_h = style.get("height") or 26
+    w = int(raw_w) if isinstance(raw_w, (int, float)) else 48
+    h = int(raw_h) if isinstance(raw_h, (int, float)) else 26
+    icon_name = el.get("icon") if isinstance(el.get("icon"), str) else None
+    options = el.get("options", []) if isinstance(el.get("options"), list) else []
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+
+    btn = QPushButton()
+    btn.setFixedSize(w, h)
+    pixmap = _workspace_icon_pixmap(icon_name, max(min(w, h) - 6, 12)) if icon_name else None
+    if pixmap is not None:
+        btn.setIcon(QIcon(pixmap))
+        btn.setIconSize(QSize(pixmap.width(), pixmap.height()))
+    btn.setStyleSheet(
+        "QPushButton { background: #3a3a3a; border: 1px solid #555; "
+        "border-radius: 3px; padding: 2px; }"
+        "QPushButton:hover { background: #4a4a4a; }"
+    )
+    summary = el.get("summary")
+    if isinstance(summary, str) and summary:
+        btn.setToolTip(summary)
+
+    menu = QMenu(btn)
+    for opt in options:
+        if not isinstance(opt, dict):
+            continue
+        glyph = str(opt.get("glyph", ""))
+        label = str(opt.get("label", ""))
+        value = str(opt.get("value", ""))
+        action = menu.addAction(f"{glyph}   {label}")
+
+        def _make_handler(v=value):
+            def _on():
+                if value_expr and value_expr.startswith("panel."):
+                    field = value_expr[len("panel."):]
+                    panel_id = ctx.get("_panel_id")
+                    if not panel_id:
+                        return
+                    # Paragraph panel writes go through the full
+                    # set_paragraph_panel_field pipeline so mutual
+                    # exclusion (bullets ↔ numbered_list) and the
+                    # post-write apply_paragraph_panel_to_selection
+                    # both fire — without this, picking a numbered
+                    # style leaves the bullets dropdown set, and the
+                    # wrapper jas_list_style stays at the bullet
+                    # value.
+                    if panel_id == "paragraph_panel_content":
+                        from panels.paragraph_panel_state import (
+                            set_paragraph_panel_field,
+                        )
+                        get_model = ctx.get("_get_model")
+                        model = get_model() if callable(get_model) else None
+                        if model is not None:
+                            set_paragraph_panel_field(store, model, field, v)
+                            return
+                    store.set_panel(panel_id, field, v)
+            return _on
+
+        action.triggered.connect(_make_handler())
+
+    btn.clicked.connect(lambda: menu.exec(btn.mapToGlobal(btn.rect().bottomLeft())))
+    return btn
+
+
+def _render_icon(el, store, ctx, dispatch_fn):
+    """Plain (non-button) icon glyph from workspace icons.yaml.
+
+    Used by the Paragraph panel rows for the indent / space leading
+    glyphs (left-indent, right-indent, etc.). The OCaml / Rust /
+    Swift ports already render these; the Python registry was
+    missing the dispatch entry so each ``- type: icon`` element fell
+    through to the placeholder and the row appeared mostly empty.
+    """
+    from PySide6.QtWidgets import QLabel
+    name = el.get("name") if isinstance(el.get("name"), str) else None
+    style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
+    raw = style.get("width") or style.get("height") or style.get("size") or 20
+    icon_size = int(raw) if isinstance(raw, (int, float)) else 20
+    label = QLabel()
+    label.setFixedSize(icon_size, icon_size)
+    pixmap = _workspace_icon_pixmap(name, icon_size) if name else None
+    if pixmap is not None:
+        label.setPixmap(pixmap)
+    return label
+
+
+_ICONS_CACHE: dict | None = None
+_PIXMAP_CACHE: dict[tuple[str, int], object] = {}
+
+
+def _icons_dict() -> dict:
+    """Cached lookup of the [icons] dict from workspace.yaml. The
+    workspace loader walks ~120 YAML files and takes ~600 ms per call,
+    so the previous one-load-per-icon-render path slowed startup to a
+    crawl once panels with many icon glyphs mounted."""
+    global _ICONS_CACHE
+    if _ICONS_CACHE is not None:
+        return _ICONS_CACHE
+    import os as _os
+    try:
+        from workspace_interpreter.loader import load_workspace
+        ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
+        ws = load_workspace(ws_path)
+    except Exception:
+        _ICONS_CACHE = {}
+        return _ICONS_CACHE
+    _ICONS_CACHE = ws.get("icons", {}) if ws else {}
+    return _ICONS_CACHE
+
+
 def _workspace_icon_pixmap(name: str, size: int):
     """Render a named workspace icon (from icons.yaml) into a QPixmap.
 
@@ -270,17 +397,13 @@ def _workspace_icon_pixmap(name: str, size: int):
     when the icon can't be loaded so the caller can fall back to a
     text label.
     """
+    cached = _PIXMAP_CACHE.get((name, size))
+    if cached is not None:
+        return cached
     from PySide6.QtCore import QByteArray
     from PySide6.QtGui import QPainter, QPixmap
     from PySide6.QtSvg import QSvgRenderer
-    import os as _os
-    try:
-        from workspace_interpreter.loader import load_workspace
-        ws_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "workspace")
-        ws = load_workspace(ws_path)
-    except Exception:
-        return None
-    icons = ws.get("icons", {}) if ws else {}
+    icons = _icons_dict()
     icon_def = icons.get(name)
     if not isinstance(icon_def, dict):
         return None
@@ -301,6 +424,7 @@ def _workspace_icon_pixmap(name: str, size: int):
     painter = QPainter(pixmap)
     renderer.render(painter)
     painter.end()
+    _PIXMAP_CACHE[(name, size)] = pixmap
     return pixmap
 
 
@@ -331,8 +455,15 @@ def _render_slider(el, store, ctx, dispatch_fn):
     return slider
 
 
+_INPUT_DARK_CSS = (
+    "QSpinBox, QLineEdit { color: #ccc; background: #2a2a2a; "
+    "border: 1px solid #555; border-radius: 2px; padding: 1px 4px; }"
+)
+
+
 def _render_number_input(el, store, ctx, dispatch_fn):
     spin = QSpinBox()
+    spin.setStyleSheet(_INPUT_DARK_CSS)
     spin.setMinimum(el.get("min", 0))
     spin.setMaximum(el.get("max", 999999))
     bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
@@ -360,22 +491,39 @@ def _render_number_input(el, store, ctx, dispatch_fn):
             spin.editingFinished.connect(_on_finished)
         elif value_expr.startswith("panel."):
             panel_field = value_expr[len("panel."):]
-            def _on_change_panel(v):
-                pid = store.get_active_panel_id()
-                if pid is not None:
-                    store.set_panel(pid, panel_field, v)
-            spin.valueChanged.connect(_on_change_panel)
+            # Capture the per-widget panel id so writes always land in
+            # the panel that owns this control (matches the
+            # icon_select / icon_toggle path); store.get_active_panel_id
+            # races with whichever panel happens to be focus-active.
+            widget_pid = ctx.get("_panel_id")
+            def _write(v):
+                pid = widget_pid or store.get_active_panel_id()
+                if pid is None:
+                    return
+                if pid == "paragraph_panel_content":
+                    from panels.paragraph_panel_state import (
+                        set_paragraph_panel_field,
+                    )
+                    get_model = ctx.get("_get_model")
+                    model = get_model() if callable(get_model) else None
+                    if model is not None:
+                        set_paragraph_panel_field(store, model, panel_field, v)
+                        return
+                store.set_panel(pid, panel_field, v)
+            # Commit only on Enter / focus-loss (not valueChanged)
+            # so the canvas reflows once per edit, not per keystroke.
+            # Spin-button arrow clicks also count as editingFinished
+            # in Qt, so the user still gets immediate feedback there.
             def _on_finished_panel():
                 spin.interpretText()
-                pid = store.get_active_panel_id()
-                if pid is not None:
-                    store.set_panel(pid, panel_field, spin.value())
+                _write(spin.value())
             spin.editingFinished.connect(_on_finished_panel)
     return spin
 
 
 def _render_text_input(el, store, ctx, dispatch_fn):
     edit = QLineEdit()
+    edit.setStyleSheet(_INPUT_DARK_CSS)
     placeholder = el.get("placeholder", "")
     if placeholder:
         edit.setPlaceholderText(str(placeholder))
@@ -415,6 +563,7 @@ def _render_length_input(el, store, ctx, dispatch_fn):
     from workspace_interpreter.length import format_length, parse_length
 
     edit = QLineEdit()
+    edit.setStyleSheet(_INPUT_DARK_CSS)
     placeholder = el.get("placeholder", "")
     if placeholder:
         edit.setPlaceholderText(str(placeholder))
@@ -454,7 +603,19 @@ def _render_length_input(el, store, ctx, dispatch_fn):
         prior = store.get_panel(panel_id, write_key)
         if not trimmed:
             if nullable:
-                store.set_panel(panel_id, write_key, None)
+                # Character panel ``leading`` is Auto when the
+                # element's line_height is empty; clearing the field
+                # re-derives the Auto-tracked value (font_size × 1.2)
+                # and the apply pipeline writes it back out as the
+                # empty element attribute. No other Character field is
+                # nullable yet. Mirrors Rust ``render_length_input``.
+                if (panel_id == "character_panel_content"
+                        and write_key == "leading"):
+                    fs = store.get_panel(panel_id, "font_size") or 0.0
+                    store.set_panel(panel_id, write_key,
+                                    float(fs) * 1.2)
+                else:
+                    store.set_panel(panel_id, write_key, None)
             else:
                 # Revert to prior display.
                 edit.setText(format_length(prior, unit, precision))
@@ -476,19 +637,123 @@ def _render_length_input(el, store, ctx, dispatch_fn):
 
 
 def _render_toggle(el, store, ctx, dispatch_fn):
+    icon_btn = _maybe_icon_toggle(el, store, ctx)
+    if icon_btn is not None:
+        return icon_btn
     label = el.get("label", "")
     cb = QCheckBox(label)
+    _apply_checkbox_theme(cb)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
     _wire_dialog_checkbox(cb, el, store, ctx)
     return cb
 
 
 def _render_checkbox(el, store, ctx, dispatch_fn):
+    icon_btn = _maybe_icon_toggle(el, store, ctx)
+    if icon_btn is not None:
+        return icon_btn
     label = el.get("label", "")
     cb = QCheckBox(label)
+    _apply_checkbox_theme(cb)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
     _wire_dialog_checkbox(cb, el, store, ctx)
     return cb
+
+
+def _apply_checkbox_theme(cb: QCheckBox) -> None:
+    """Match the panel body's dark theme so the label is legible.
+    Without this the QCheckBox label inherits the system palette and
+    renders as black on the dark dock background."""
+    cb.setStyleSheet(
+        "QCheckBox { color: #ccc; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }"
+    )
+
+
+def _maybe_icon_toggle(el, store, ctx):
+    """If this checkbox / toggle declares ``icon: <name>``, render it
+    as a square checkable button that draws the workspace icon glyph
+    instead of a plain text-label QCheckBox. Used by the Paragraph
+    panel's alignment / justification row and the Bullets / Numbered
+    chooser; the Rust / Swift / OCaml ports take the same branch.
+
+    Wires the toggled signal to ``set_paragraph_panel_field`` so the
+    alignment row's mutual-exclusion + apply pipeline runs on every
+    click (the Rust/Swift/OCaml ports do the same). Subscribes to the
+    panel store so the visual checked-state stays in sync when sibling
+    buttons in the same radio group write [false] back here.
+
+    Returns ``None`` when there is no icon — callers fall through to
+    the plain QCheckBox path.
+    """
+    icon_name = el.get("icon") if isinstance(el.get("icon"), str) else None
+    if not icon_name:
+        return None
+    style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
+    raw = style.get("width") or style.get("height") or style.get("size") or 24
+    size = int(raw) if isinstance(raw, (int, float)) else 24
+    btn = QPushButton()
+    btn.setCheckable(True)
+    btn.setFlat(True)
+    btn.setFixedSize(size, size)
+    pixmap = _workspace_icon_pixmap(icon_name, max(size - 4, 12))
+    if pixmap is not None:
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        btn.setIcon(QIcon(pixmap))
+        btn.setIconSize(QSize(max(size - 4, 12), max(size - 4, 12)))
+    summary = el.get("summary")
+    if isinstance(summary, str) and summary:
+        btn.setToolTip(summary)
+    btn.setStyleSheet(
+        "QPushButton { border: 1px solid #555; border-radius: 3px; "
+        "background: #3a3a3a; padding: 0; }"
+        "QPushButton:checked { background: #5a5a5a; border-color: #888; }"
+    )
+
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    panel_id = ctx.get("_panel_id")
+    field = None
+    if isinstance(value_expr, str) and value_expr.startswith("panel."):
+        field = value_expr[len("panel."):]
+    if field and panel_id:
+        # Initialize from the live panel state.
+        try:
+            cur = store.get_panel(panel_id, field)
+            btn.setChecked(bool(cur))
+        except Exception:
+            pass
+
+        suppress = {"flag": False}
+
+        def _on_toggled(checked: bool):
+            if suppress["flag"]:
+                return
+            get_model = ctx.get("_get_model")
+            model = get_model() if callable(get_model) else None
+            if model is not None and panel_id == "paragraph_panel_content":
+                from panels.paragraph_panel_state import set_paragraph_panel_field
+                set_paragraph_panel_field(store, model, field, bool(checked))
+            else:
+                store.set_panel(panel_id, field, bool(checked))
+
+        btn.toggled.connect(_on_toggled)
+
+        def _on_panel_change(key, value):
+            from shiboken6 import isValid
+            if not isValid(btn):
+                return
+            if key != field:
+                return
+            want = bool(value)
+            if btn.isChecked() != want:
+                suppress["flag"] = True
+                btn.setChecked(want)
+                suppress["flag"] = False
+
+        store.subscribe_panel(panel_id, _on_panel_change)
+    return btn
 
 
 def _wire_dialog_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict):
@@ -1919,6 +2184,17 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
     for key, val in style.items():
         if key in ("gap", "padding", "alignment", "justify"):
             continue  # handled by layout
+        if key == "flex":
+            # flex: N means "stretch in the parent layout". Map to a
+            # horizontally-expanding size policy so spacers / footer
+            # gap widgets actually push neighbours apart. Qt CSS has
+            # no [flex] property; without this branch the value
+            # leaked into setStyleSheet and Qt logged "Unknown
+            # property flex" for every styled child.
+            from PySide6.QtWidgets import QSizePolicy
+            widget.setSizePolicy(QSizePolicy.Expanding,
+                                 widget.sizePolicy().verticalPolicy())
+            continue
         if key == "size":
             sz = int(val)
             widget.setFixedSize(sz, sz)
@@ -1944,6 +2220,11 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
             continue
         if key == "min_height":
             widget.setMinimumHeight(int(val))
+            continue
+        if key in ("overflow", "text_overflow", "white_space"):
+            # HTML/CSS text-truncation properties Qt doesn't support.
+            # Truncation in Qt is done via QFontMetrics.elidedText on
+            # the widget itself, not via stylesheet. Silently skip.
             continue
 
         resolved = str(val)
@@ -2053,8 +2334,26 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
     extra_ctx = {k: v for k, v in ctx.items()
                  if k not in ("state", "panel", "dialog", "param", "tool")}
 
+    # The widget belongs to a specific panel; capture that id so the
+    # binding always evaluates against that panel's state regardless
+    # of which panel is currently active. Without this, opening a
+    # second panel (which calls set_active_panel) would silently
+    # break disabled / visible / value bindings on every other
+    # panel's widgets — eval_context would return the wrong panel's
+    # state and bindings like ``not panel.text_selected`` would
+    # evaluate against ``None``, leaving widgets stuck disabled.
+    widget_panel_id = ctx.get("_panel_id")
+
     def _update_bindings(key, value):
+        try:
+            from shiboken6 import isValid
+            if not isValid(widget):
+                return
+        except Exception:
+            pass
         new_ctx = store.eval_context(extra_ctx)
+        if widget_panel_id:
+            new_ctx["panel"] = store.get_panel_state(widget_panel_id)
         for prop, expr in bindings.items():
             if not isinstance(expr, str):
                 continue
@@ -2294,7 +2593,9 @@ _RENDERERS = {
     "grid": _render_grid,
     "text": _render_text,
     "button": _render_button,
+    "icon": _render_icon,
     "icon_button": _render_icon_button,
+    "icon_select": _render_icon_select,
     "slider": _render_slider,
     "number_input": _render_number_input,
     "text_input": _render_text_input,

@@ -68,6 +68,18 @@ let _opacity_store_bool (key : string) ~(default : bool) : bool =
      | `Bool b -> b
      | _ -> default)
 
+(** Callback for opening a YAML dialog by id. Registered at app
+    startup by [bin/main.ml] (which can import [Yaml_dialog_view]).
+    [Panel_menu] can't import [Yaml_dialog_view] directly because
+    the dep graph routes [Yaml_panel_view] through [Panel_menu]
+    already, so a direct import would form a cycle. *)
+let _dialog_opener : (string -> unit) option ref = ref None
+
+(** Install the dialog-opening callback. Called once at app startup
+    by [bin/main.ml]. Subsequent calls replace the handler. *)
+let register_dialog_opener (f : string -> unit) : unit =
+  _dialog_opener := Some f
+
 (** Helper: dispatch a Paragraph menu command through the live
     State_store + Controller. No-op when the panel isn't mounted or
     the model thunk yields [None]. *)
@@ -1178,6 +1190,20 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     paragraph_menu_dispatch (`Toggle "hanging_punctuation") get_model
   | "reset_paragraph_panel" when kind = Paragraph ->
     paragraph_menu_dispatch `Reset get_model
+  | ("open_paragraph_justification" | "open_paragraph_hyphenation")
+    when kind = Paragraph ->
+    (* Dialog openers route through a registered callback to break
+       the dep cycle: Yaml_panel_view depends on Panel_menu, and
+       Yaml_dialog_view depends on Yaml_panel_view, so Panel_menu
+       cannot import Yaml_dialog_view directly. Bin/main installs a
+       handler on startup; if no handler is registered (test
+       harness, etc.) the click is a no-op. *)
+    let dlg_id = if cmd = "open_paragraph_justification"
+                 then "paragraph_justification"
+                 else "paragraph_hyphenation" in
+    (match !_dialog_opener with
+     | Some open_fn -> open_fn dlg_id
+     | None -> ())
   | "toggle_all_caps" when kind = Character ->
     character_menu_dispatch "all_caps" ["small_caps"]
       ~apply_to_selection:true get_model
@@ -1252,3 +1278,33 @@ let panel_is_checked _kind cmd layout =
       | "toggle_subscript" ->
         _character_store_bool "subscript" ~default:false
       | _ -> false
+
+(** True if the current selection contains at least one area-text
+    element (Text with positive width AND positive height). Used by
+    [panel_command_is_enabled] to gate Paragraph-panel menu items
+    that only act on area text. *)
+let _selection_has_area_text (m : Model.model) : bool =
+  let any = ref false in
+  Document.PathMap.iter (fun _ _ ->
+    if not !any then ()
+  ) m#document.Document.selection;
+  let result = ref false in
+  Document.PathMap.iter (fun path _ ->
+    if not !result then
+      match Document.get_element m#document path with
+      | Element.Text { text_width; text_height; _ }
+        when text_width > 0.0 && text_height > 0.0 -> result := true
+      | _ -> ()
+  ) m#document.Document.selection;
+  let _ = !any in
+  !result
+
+let panel_command_is_enabled (kind : panel_kind) (cmd : string)
+    (m : Model.model) : bool =
+  match kind, cmd with
+  | Paragraph,
+    ( "toggle_hanging_punctuation"
+    | "open_paragraph_justification"
+    | "open_paragraph_hyphenation" ) ->
+    _selection_has_area_text m
+  | _ -> true

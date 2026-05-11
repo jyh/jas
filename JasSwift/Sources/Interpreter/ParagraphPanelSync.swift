@@ -123,6 +123,112 @@ public func paragraphPanelLiveOverrides(model: Model) -> [String: Any] {
     return out
 }
 
+/// Normalize the paragraph-wrapper layout for a text element's
+/// tspans, returning the wrapper indices (always >= 1 after this
+/// call). Wrapper tspans must be **empty**-content markers — the
+/// paragraph's body lives in subsequent body tspans until the next
+/// wrapper or end-of-tspans. Two corruption modes are repaired
+/// here:
+///
+/// 1. No wrapper at all -> prepend a fresh empty wrapper at index 0.
+/// 2. A wrapper carries non-empty content (legacy "promote first
+///    tspan" path) -> demote it to a body tspan (clear `jasRole`,
+///    keep its content) and prepend a fresh empty wrapper that
+///    inherits the legacy wrapper's paragraph attributes.
+///
+/// `buildSegmentsFromText` doesn't count wrapper-tspan content
+/// toward the segment's char range, so leaving body chars on a
+/// wrapper makes the layout's effective slice shorter than the
+/// rendered string — the user sees the paragraph collapse to a
+/// single line the moment any Paragraph-panel control is clicked.
+///
+/// Used by every paragraph-panel apply path:
+/// `applyParagraphPanelToSelection`,
+/// `applyJustificationDialogToSelection`, and
+/// `applyHyphenationDialogToSelection`.
+public func ensureParagraphWrapper(_ tspans: inout [Tspan]) -> [Int] {
+    // Repair: if any wrapper has non-empty content, demote it to a
+    // body tspan and prepend a fresh empty wrapper that inherits
+    // the paragraph attributes.
+    let bad: [Int] = tspans.indices.filter {
+        tspans[$0].jasRole == "paragraph" && !tspans[$0].content.isEmpty
+    }
+    for i in bad.reversed() {
+        let src = tspans[i]
+        // New wrapper inherits paragraph-attr fields from the corrupted
+        // tspan; the corrupted tspan keeps its content + character
+        // overrides but loses its wrapper role and paragraph attrs.
+        let newWrapper = Tspan(
+            jasRole: "paragraph",
+            jasLeftIndent: src.jasLeftIndent,
+            jasRightIndent: src.jasRightIndent,
+            jasHyphenate: src.jasHyphenate,
+            jasHangingPunctuation: src.jasHangingPunctuation,
+            jasListStyle: src.jasListStyle,
+            textAlign: src.textAlign,
+            textAlignLast: src.textAlignLast,
+            textIndent: src.textIndent,
+            jasSpaceBefore: src.jasSpaceBefore,
+            jasSpaceAfter: src.jasSpaceAfter,
+            jasWordSpacingMin: src.jasWordSpacingMin,
+            jasWordSpacingDesired: src.jasWordSpacingDesired,
+            jasWordSpacingMax: src.jasWordSpacingMax,
+            jasLetterSpacingMin: src.jasLetterSpacingMin,
+            jasLetterSpacingDesired: src.jasLetterSpacingDesired,
+            jasLetterSpacingMax: src.jasLetterSpacingMax,
+            jasGlyphScalingMin: src.jasGlyphScalingMin,
+            jasGlyphScalingDesired: src.jasGlyphScalingDesired,
+            jasGlyphScalingMax: src.jasGlyphScalingMax,
+            jasAutoLeading: src.jasAutoLeading,
+            jasSingleWordJustify: src.jasSingleWordJustify,
+            jasHyphenateMinWord: src.jasHyphenateMinWord,
+            jasHyphenateMinBefore: src.jasHyphenateMinBefore,
+            jasHyphenateMinAfter: src.jasHyphenateMinAfter,
+            jasHyphenateLimit: src.jasHyphenateLimit,
+            jasHyphenateZone: src.jasHyphenateZone,
+            jasHyphenateBias: src.jasHyphenateBias,
+            jasHyphenateCapitalized: src.jasHyphenateCapitalized)
+        // Demote the corrupted tspan: keep id + content + per-character
+        // overrides (font/style/etc.), drop paragraph role + attrs.
+        let demoted = Tspan(
+            id: src.id, content: src.content,
+            baselineShift: src.baselineShift, dx: src.dx,
+            fontFamily: src.fontFamily, fontSize: src.fontSize,
+            fontStyle: src.fontStyle, fontVariant: src.fontVariant,
+            fontWeight: src.fontWeight,
+            jasAaMode: src.jasAaMode, jasFractionalWidths: src.jasFractionalWidths,
+            jasKerningMode: src.jasKerningMode, jasNoBreak: src.jasNoBreak,
+            jasRole: nil,
+            // Paragraph attrs cleared (lifted onto the new wrapper):
+            jasLeftIndent: nil, jasRightIndent: nil,
+            jasHyphenate: nil, jasHangingPunctuation: nil,
+            jasListStyle: nil,
+            textAlign: nil, textAlignLast: nil, textIndent: nil,
+            jasSpaceBefore: nil, jasSpaceAfter: nil,
+            jasWordSpacingMin: nil, jasWordSpacingDesired: nil, jasWordSpacingMax: nil,
+            jasLetterSpacingMin: nil, jasLetterSpacingDesired: nil, jasLetterSpacingMax: nil,
+            jasGlyphScalingMin: nil, jasGlyphScalingDesired: nil, jasGlyphScalingMax: nil,
+            jasAutoLeading: nil, jasSingleWordJustify: nil,
+            jasHyphenateMinWord: nil, jasHyphenateMinBefore: nil, jasHyphenateMinAfter: nil,
+            jasHyphenateLimit: nil, jasHyphenateZone: nil, jasHyphenateBias: nil,
+            jasHyphenateCapitalized: nil,
+            // Character-level overrides preserved:
+            letterSpacing: src.letterSpacing, lineHeight: src.lineHeight,
+            rotate: src.rotate, styleName: src.styleName,
+            textDecoration: src.textDecoration, textRendering: src.textRendering,
+            textTransform: src.textTransform, transform: src.transform,
+            xmlLang: src.xmlLang)
+        tspans[i] = demoted
+        tspans.insert(newWrapper, at: i)
+    }
+    // Now collect indices of (post-repair) wrappers.
+    let existing = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
+    if !existing.isEmpty { return existing }
+    // No wrapper anywhere: prepend an empty one.
+    tspans.insert(Tspan(jasRole: "paragraph"), at: 0)
+    return [0]
+}
+
 /// Return a copy of `t` with `jasRole` replaced. Tspan fields are
 /// `let`, so we rebuild via the full initializer rather than mutate.
 public func withJasRole(_ t: Tspan, _ role: String?) -> Tspan {

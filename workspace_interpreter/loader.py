@@ -13,9 +13,25 @@ import yaml
 
 REQUIRED_KEYS = {"version", "app", "theme", "state", "actions", "shortcuts", "menubar", "layout"}
 
+# Module-level cache, keyed by absolute path. The YAML walk reads
+# ~120 files and takes ~600 ms; without this cache the workspace got
+# re-parsed on every panel render, dialog open, tool init, and icon
+# rasterization, multiplying startup latency by ~10x. Tests that
+# need a fresh load can call [reset_workspace_cache].
+_WORKSPACE_CACHE: dict[str, dict] = {}
+
+
+def reset_workspace_cache() -> None:
+    """Drop the cached workspace dicts. Tests call this after editing
+    the on-disk YAML so the next [load_workspace] re-reads."""
+    _WORKSPACE_CACHE.clear()
+
 
 def load_workspace(path: str) -> dict:
     """Load a workspace from a YAML file or a directory of YAML files.
+
+    Cached per absolute path; subsequent calls return the same dict.
+    See [reset_workspace_cache] for tests.
 
     If path is a directory, each *.yaml file is loaded and its top-level
     keys are merged into a single dict.  Recognized subdirectories are
@@ -32,6 +48,10 @@ def load_workspace(path: str) -> dict:
 
     If path is a file, it is loaded as a single YAML document.
     """
+    cache_key = os.path.abspath(path)
+    cached = _WORKSPACE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     if os.path.isdir(path):
         data: dict = {}
         # Load top-level YAML files
@@ -159,6 +179,7 @@ def load_workspace(path: str) -> dict:
                         content = item.get("content")
                         if isinstance(content, dict):
                             resolve_templates(content, templates)
+    _WORKSPACE_CACHE[cache_key] = data
     return data
 
 

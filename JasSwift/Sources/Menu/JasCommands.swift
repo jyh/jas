@@ -596,8 +596,13 @@ public struct JasCommands: Commands {
                                           opacity: newLayers[idx].opacity,
                                           transform: newLayers[idx].transform)
             }
-            model.document = Document(layers: newLayers,
-                                          selectedLayer: doc.selectedLayer, selection: newSelection)
+            // Use `replacing(...)` so artboards / artboardOptions /
+            // documentSetup / printPreferences are preserved. The
+            // designated `Document(layers:...)` initializer's empty
+            // defaults silently drop unset fields — the comment on
+            // `Document.replacing` calls this out as the bug that made
+            // the artboard frame disappear after a selection mutation.
+            model.document = doc.replacing(layers: newLayers, selection: newSelection)
         } else {
             // Plain text: create a Text element
             let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
@@ -609,8 +614,8 @@ public struct JasCommands: Commands {
                                       children: newLayers[idx].children + [elem],
                                       opacity: newLayers[idx].opacity,
                                       transform: newLayers[idx].transform)
-            model.document = Document(layers: newLayers,
-                                          selectedLayer: doc.selectedLayer, selection: newSelection)
+            // Same `replacing(...)` pattern — preserves artboards.
+            model.document = doc.replacing(layers: newLayers, selection: newSelection)
         }
     }
 

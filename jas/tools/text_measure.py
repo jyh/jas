@@ -17,7 +17,11 @@ def make_measurer(family: str, weight: str, style: str, size: float) -> Callable
         from PySide6.QtWidgets import QApplication  # type: ignore
         if QApplication.instance() is None:
             return _stub_measurer(size)
+        # Construct the font to match the canvas painter (int-arg
+        # then setPointSizeF for float precision) and use the same
+        # kerning the painter uses.
         font = QFont(family, int(size))
+        font.setPointSizeF(float(size))
         if weight == "bold":
             font.setBold(True)
         if style == "italic":

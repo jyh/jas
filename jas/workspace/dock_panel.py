@@ -48,10 +48,14 @@ def set_theme(name: str):
 
 
 class DraggableGrip(QLabel):
-    """Grip handle that starts a group drag on mouse press+move."""
-    def __init__(self, payload: str, parent=None):
+    """Grip handle that starts a group drag on mouse press+move.
+    When the drop lands outside any dock area, ``on_external_drop`` is
+    called with the global cursor position so the caller can detach
+    the group into a floating dock."""
+    def __init__(self, payload: str, on_external_drop=None, parent=None):
         super().__init__("\u2801\u2801", parent)
         self._payload = payload
+        self._on_external_drop = on_external_drop
         self.setStyleSheet(f"color: {THEME_TEXT_HINT}; font-size: 10px; padding: 2px 4px;")
         self.setCursor(Qt.OpenHandCursor)
 
@@ -60,14 +64,22 @@ class DraggableGrip(QLabel):
         mime = QMimeData()
         mime.setData(DOCK_DRAG_MIME, self._payload.encode())
         drag.setMimeData(mime)
-        drag.exec(Qt.MoveAction)
+        result = drag.exec(Qt.MoveAction)
+        if result == Qt.IgnoreAction and self._on_external_drop is not None:
+            from PySide6.QtGui import QCursor
+            pt = QCursor.pos()
+            self._on_external_drop(self._payload, pt.x(), pt.y())
 
 
 class DraggableTabButton(QPushButton):
-    """Tab button that starts a panel drag on mouse press+move."""
-    def __init__(self, label: str, payload: str, parent=None):
+    """Tab button that starts a panel drag on mouse press+move.
+    When the drop lands outside any dock area, ``on_external_drop`` is
+    called with the global cursor position so the caller can detach
+    the panel into a floating dock."""
+    def __init__(self, label: str, payload: str, on_external_drop=None, parent=None):
         super().__init__(label, parent)
         self._payload = payload
+        self._on_external_drop = on_external_drop
         self.setFlat(True)
 
     def mouseMoveEvent(self, event):
@@ -75,7 +87,11 @@ class DraggableTabButton(QPushButton):
         mime = QMimeData()
         mime.setData(DOCK_DRAG_MIME, self._payload.encode())
         drag.setMimeData(mime)
-        drag.exec(Qt.MoveAction)
+        result = drag.exec(Qt.MoveAction)
+        if result == Qt.IgnoreAction and self._on_external_drop is not None:
+            from PySide6.QtGui import QCursor
+            pt = QCursor.pos()
+            self._on_external_drop(self._payload, pt.x(), pt.y())
 
 
 class DroppablePanelGroup(QWidget):
@@ -187,7 +203,7 @@ class DockPanelWidget(QWidget):
         self._vbox.addStretch()
 
     def _build_panel_group(self, dock_id, gi, group):
-        widget = DroppablePanelGroup(self._layout_data, dock_id, gi, group, self.rebuild)
+        widget = DroppablePanelGroup(self._layout_data, dock_id, gi, group, self.rebuild_all)
         vbox = QVBoxLayout(widget)
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
@@ -200,13 +216,15 @@ class DockPanelWidget(QWidget):
         hbox.setSpacing(0)
 
         # Grip (draggable — drags whole group)
-        grip = DraggableGrip(f"group:{dock_id}:{gi}")
+        grip = DraggableGrip(f"group:{dock_id}:{gi}",
+                             on_external_drop=self._on_external_drop)
         hbox.addWidget(grip)
 
         # Tab buttons (draggable — drags individual panel)
         for pi, kind in enumerate(group.panels):
             lbl = panel_label(kind)
-            btn = DraggableTabButton(lbl, f"panel:{dock_id}:{gi}:{pi}")
+            btn = DraggableTabButton(lbl, f"panel:{dock_id}:{gi}:{pi}",
+                                     on_external_drop=self._on_external_drop)
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
@@ -216,8 +234,10 @@ class DockPanelWidget(QWidget):
 
         hbox.addStretch()
 
-        # Chevron
-        chevron = QPushButton("\u00BB" if group.collapsed else "\u00AB")
+        # Chevron \u2014 when expanded points \u00BB (click to collapse toward
+        # the right edge); when collapsed points \u00AB (click to expand
+        # back). Mirrors OCaml dock_panel.ml.
+        chevron = QPushButton("\u00AB" if group.collapsed else "\u00BB")
         chevron.setFlat(True)
         chevron.setStyleSheet(f"font-size: 18px; color: {THEME_TEXT_BUTTON}; border: none; padding: 3px 6px;")
         chevron.clicked.connect(lambda _, d=dock_id, g=gi: self._toggle_group(d, g))
@@ -453,6 +473,33 @@ class DockPanelWidget(QWidget):
                 if m is not None:
                     m.snapshot()
 
+            # Paragraph panel menu items (PARAGRAPH.md §Menu): each
+            # action's effects use one of these platform handlers to
+            # mutate panel state + the wrapper tspans of the current
+            # selection. Mirrors the Rust paragraph_panel.rs dispatch
+            # branch and the Swift PanelMenu paragraph cases.
+            def handle_toggle_paragraph_field(data, _ctx, store):
+                # data is the field name (e.g. "hanging_punctuation").
+                # Flip the panel-state bool, push to wrappers via the
+                # standard apply pipeline.
+                m = self._get_model() if self._get_model else None
+                if not isinstance(data, str) or m is None or store is None:
+                    return
+                from panels.paragraph_panel_state import (
+                    set_paragraph_panel_field,
+                )
+                cur = store.get_panel("paragraph_panel_content", data)
+                set_paragraph_panel_field(store, m, data, not bool(cur))
+
+            def handle_reset_paragraph_panel(_data, _ctx, store):
+                m = self._get_model() if self._get_model else None
+                if m is None or store is None:
+                    return
+                from panels.paragraph_panel_state import (
+                    reset_paragraph_panel,
+                )
+                reset_paragraph_panel(store, m)
+
             platform_effects = {
                 "start_timer": handle_start_timer,
                 "cancel_timer": handle_cancel_timer,
@@ -475,6 +522,8 @@ class DockPanelWidget(QWidget):
                 "repeat_boolean_operation": handle_repeat_boolean_operation,
                 "reset_boolean_panel": handle_reset_boolean_panel,
                 "snapshot": handle_snapshot,
+                "toggle_paragraph_field": handle_toggle_paragraph_field,
+                "reset_paragraph_panel": handle_reset_paragraph_panel,
             }
             # Artboard doc effects — ARTBOARDS.md §Menu, §Reordering,
             # §Artboard Options Dialogue. Seven handlers that mutate
@@ -552,6 +601,23 @@ class DockPanelWidget(QWidget):
         self._layout_data.set_active_panel(
             PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
         self.rebuild()
+
+    def _on_external_drop(self, payload: str, x: int, y: int):
+        """Drop landed outside any dock area — detach the dragged
+        panel or group into a floating dock at the cursor."""
+        parts = payload.split(":")
+        try:
+            if parts[0] == "panel" and len(parts) == 4:
+                from_addr = PanelAddr(
+                    group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])),
+                    panel_idx=int(parts[3]))
+                self._layout_data.detach_panel(from_addr, float(x), float(y))
+            elif parts[0] == "group" and len(parts) == 3:
+                from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
+                self._layout_data.detach_group(from_addr, float(x), float(y))
+        except (IndexError, ValueError):
+            return
+        self.rebuild_all()
 
     def _show_panel_menu(self, dock_id, group_idx, kind, panel_idx):
         addr = PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)
@@ -717,14 +783,14 @@ class FloatingDockWindow(QWidget):
         hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(0)
 
-        grip = QLabel("\u2801\u2801")
-        grip.setStyleSheet(f"color: {THEME_TEXT_HINT}; font-size: 10px; padding: 2px 4px;")
+        grip = DraggableGrip(f"group:{dock_id}:{gi}",
+                             on_external_drop=self._on_external_drop)
         hbox.addWidget(grip)
 
         for pi, kind in enumerate(group.panels):
             label = panel_label(kind)
-            btn = QPushButton(label)
-            btn.setFlat(True)
+            btn = DraggableTabButton(label, f"panel:{dock_id}:{gi}:{pi}",
+                                     on_external_drop=self._on_external_drop)
             is_active = pi == group.active
             weight = "bold" if is_active else "normal"
             bg = THEME_BG_TAB if is_active else THEME_BG_TAB_INACTIVE
@@ -747,6 +813,15 @@ class FloatingDockWindow(QWidget):
         self._layout_data.set_active_panel(
             PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
         self._parent_panel.rebuild_floating()
+
+    def _on_external_drop(self, payload: str, x: int, y: int):
+        """Drop landed outside any dock — for a floating panel that
+        means the user dropped onto empty desktop. Re-anchor the
+        floating dock at the cursor; no detach needed since it's
+        already floating."""
+        self._layout_data.set_floating_position(
+            self._fd.dock.id, float(x), float(y))
+        self._parent_panel.rebuild_all()
 
     def mousePressEvent(self, event):
         if event.y() < 20:  # Title bar area

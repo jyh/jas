@@ -1598,11 +1598,10 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
         switch elem {
         case .text(let t):
             var tspans = t.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            // Insert empty wrapper (or repair a wrapper that has
+            // accidentally accumulated body content) — see
+            // `ensureParagraphWrapper` for rationale.
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withParagraphAttrs(
                     tspans[i],
@@ -1619,11 +1618,7 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
             newElem = .text(t.withTspans(tspans))
         case .textPath(let tp):
             var tspans = tp.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withParagraphAttrs(
                     tspans[i],
@@ -1752,11 +1747,7 @@ public func applyJustificationDialogToSelection(
         switch elem {
         case .text(let t):
             var tspans = t.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withJustificationAttrs(
                     tspans[i],
@@ -1768,11 +1759,7 @@ public func applyJustificationDialogToSelection(
             newElem = .text(t.withTspans(tspans))
         case .textPath(let tp):
             var tspans = tp.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withJustificationAttrs(
                     tspans[i],
@@ -1862,11 +1849,7 @@ public func applyHyphenationDialogToSelection(
         switch elem {
         case .text(let t):
             var tspans = t.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withHyphenationAttrs(
                     tspans[i],
@@ -1877,11 +1860,7 @@ public func applyHyphenationDialogToSelection(
             newElem = .text(t.withTspans(tspans))
         case .textPath(let tp):
             var tspans = tp.tspans
-            var wrapperIdx = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
-            if wrapperIdx.isEmpty, !tspans.isEmpty {
-                tspans[0] = withJasRole(tspans[0], "paragraph")
-                wrapperIdx = [0]
-            }
+            let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
                 tspans[i] = withHyphenationAttrs(
                     tspans[i],

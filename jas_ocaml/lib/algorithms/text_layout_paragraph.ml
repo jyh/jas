@@ -134,14 +134,24 @@ let build_segments_from_text (tspans : Element.tspan array) (content : string)
           (match t.jas_word_spacing_max with Some v -> v | None -> 133.0);
         last_line_align = lla;
         hyphenate = (match t.jas_hyphenate with Some v -> v | None -> false);
+        (* Defaults match Illustrator / InDesign Hyphenation dialog:
+           6 / 2 / 2. The previous 3 / 1 / 1 was loose enough that
+           the sample pattern set produced "T-rump" (matching ".un1"
+           / "1ru" patterns at min_before=1). *)
         hyphenate_min_word =
-          (match t.jas_hyphenate_min_word with Some v -> Float.to_int v | None -> 3);
+          (match t.jas_hyphenate_min_word with Some v -> Float.to_int v | None -> 6);
         hyphenate_min_before =
-          (match t.jas_hyphenate_min_before with Some v -> Float.to_int v | None -> 1);
+          (match t.jas_hyphenate_min_before with Some v -> Float.to_int v | None -> 2);
         hyphenate_min_after =
-          (match t.jas_hyphenate_min_after with Some v -> Float.to_int v | None -> 1);
+          (match t.jas_hyphenate_min_after with Some v -> Float.to_int v | None -> 2);
         hyphenate_bias =
           (match t.jas_hyphenate_bias with Some v -> Float.to_int v | None -> 0);
+        (* Capitalized words (proper nouns: "Trump", "London") are
+           excluded from hyphenation by default, mirroring Illustrator
+           / InDesign / MS Word — even with a real pattern dictionary,
+           breaking proper nouns reads poorly to most readers. *)
+        hyphenate_capitalized =
+          (match t.jas_hyphenate_capitalized with Some v -> v | None -> false);
       }
     end else
       cursor := !cursor + body_chars

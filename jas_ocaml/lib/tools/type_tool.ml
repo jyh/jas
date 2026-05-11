@@ -20,6 +20,24 @@ let blink_half_period_ms = 530.0
 
 let now_ms () = Unix.gettimeofday () *. 1000.0
 
+(** Strip invalid UTF-8 bytes from clipboard input. Cairo's
+    [show_text] / [text_extents] crash the canvas draw if any byte
+    in the document text isn't valid UTF-8 — and clipboard content
+    from the OS pasteboard occasionally arrives with stray
+    Latin-1 / Mac-Roman bytes mixed into otherwise-UTF-8 content
+    (e.g. browser copy paths that don't fully transcode). When the
+    payload isn't valid UTF-8 as a whole, drop bytes ≥ 0x80 so we
+    keep ASCII rather than abort the paste entirely. *)
+let sanitize_utf8 s =
+  if String.is_valid_utf_8 s then s
+  else begin
+    let b = Buffer.create (String.length s) in
+    String.iter (fun c ->
+      if Char.code c < 0x80 then Buffer.add_char b c
+    ) s;
+    Buffer.contents b
+  end
+
 let cursor_visible epoch_ms =
   let elapsed = max 0.0 (now_ms () -. epoch_ms) in
   let phase = int_of_float (elapsed /. blink_half_period_ms) in
@@ -94,6 +112,21 @@ class type_tool = object (_self)
   val mutable session : Text_edit.t option = None
   val mutable did_snapshot : bool = false
   val mutable hover_text : bool = false
+
+  (* Convert widget-pixel mouse coords to document coords. Mouse events
+     arrive in widget pixels; all element positions, hit-tests, and
+     text-layout math live in document space. YAML tools get this
+     conversion for free via [pointer_payload]'s ``doc_x`` / ``doc_y``;
+     native tools (this one, type_on_path) must convert at the entry
+     points themselves. Without it, a centred view (default on document
+     open) makes new text elements appear offset down-right by the
+     view's translate. *)
+  method private to_doc (ctx : Canvas_tool.tool_context) x y =
+    let z = ctx.model#zoom_level in
+    if z = 0.0 then (x, y)
+    else
+      ((x -. ctx.model#view_offset_x) /. z,
+       (y -. ctx.model#view_offset_y) /. z)
 
   method private build_layout (ctx : Canvas_tool.tool_context) =
     match session with
@@ -215,27 +248,32 @@ class type_tool = object (_self)
 
   method on_press (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) =
     ignore (shift, alt);
+    (* x, y are widget pixels — keep them that way for drag preview
+       (drawn screen-space). Convert to doc coords only at the
+       doc-coord touch points (hit_test_text, cursor_at,
+       begin_session_new). *)
+    let (dx, dy) = _self#to_doc ctx x y in
     (match session with
      | Some s ->
        let elem = Document.get_element ctx.model#document (Text_edit.path s) in
        let in_elem = match elem with
-         | Element.Text _ -> in_box (text_draw_bounds elem) x y
+         | Element.Text _ -> in_box (text_draw_bounds elem) dx dy
          | _ -> false
        in
        if in_elem then begin
-         let cursor = _self#cursor_at ctx x y in
+         let cursor = _self#cursor_at ctx dx dy in
          Text_edit.set_insertion s cursor ~extend:false;
          Text_edit.set_drag_active s true;
          Text_edit.set_blink_epoch_ms s (now_ms ());
          ctx.request_update ()
        end else begin
          _self#end_session ~ctx ();
-         (match hit_test_text ctx.model#document x y with
+         (match hit_test_text ctx.model#document dx dy with
           | Some (path, elem) ->
             _self#begin_session_existing ctx path elem 0;
             (match session with
              | Some s ->
-               let cursor = _self#cursor_at ctx x y in
+               let cursor = _self#cursor_at ctx dx dy in
                Text_edit.set_insertion s cursor ~extend:false;
                Text_edit.set_drag_active s true;
                Text_edit.set_blink_epoch_ms s (now_ms ());
@@ -246,12 +284,12 @@ class type_tool = object (_self)
             drag_end <- Some (x, y))
        end
      | None ->
-       (match hit_test_text ctx.model#document x y with
+       (match hit_test_text ctx.model#document dx dy with
         | Some (path, elem) ->
           _self#begin_session_existing ctx path elem 0;
           (match session with
            | Some s ->
-             let cursor = _self#cursor_at ctx x y in
+             let cursor = _self#cursor_at ctx dx dy in
              Text_edit.set_insertion s cursor ~extend:false;
              Text_edit.set_drag_active s true;
              Text_edit.set_blink_epoch_ms s (now_ms ());
@@ -263,9 +301,10 @@ class type_tool = object (_self)
 
   method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(dragging : bool) =
     ignore shift;
+    let (dx, dy) = _self#to_doc ctx x y in
     match session with
     | Some s when Text_edit.drag_active s && dragging ->
-      let cursor = _self#cursor_at ctx x y in
+      let cursor = _self#cursor_at ctx dx dy in
       Text_edit.set_insertion s cursor ~extend:true;
       Text_edit.set_blink_epoch_ms s (now_ms ());
       ctx.request_update ()
@@ -275,7 +314,7 @@ class type_tool = object (_self)
         ctx.request_update ()
       end);
       if session = None then
-        hover_text <- (hit_test_text ctx.model#document x y) <> None
+        hover_text <- (hit_test_text ctx.model#document dx dy) <> None
       else
         hover_text <- false
 
@@ -294,12 +333,16 @@ class type_tool = object (_self)
       | Some (sx, sy) ->
         drag_start <- None;
         drag_end <- None;
-        let w = abs_float (x -. sx) in
-        let h = abs_float (y -. sy) in
+        (* drag_start / x,y are widget pixels; convert to doc coords
+           for element creation since text rendering uses doc coords. *)
+        let (dx, dy) = _self#to_doc ctx x y in
+        let (sdx, sdy) = _self#to_doc ctx sx sy in
+        let w = abs_float (dx -. sdx) in
+        let h = abs_float (dy -. sdy) in
         if w > Canvas_tool.drag_threshold || h > Canvas_tool.drag_threshold then
-          _self#begin_session_new ctx (min sx x) (min sy y) w h
+          _self#begin_session_new ctx (min sdx dx) (min sdy dy) w h
         else
-          _self#begin_session_new ctx sx sy 0.0 0.0;
+          _self#begin_session_new ctx sdx sdy 0.0 0.0;
         ctx.request_update ()
 
   method on_double_click (ctx : Canvas_tool.tool_context) (_x : float) (_y : float) =
@@ -325,6 +368,7 @@ class type_tool = object (_self)
     else None
 
   method! paste_text (ctx : Canvas_tool.tool_context) text =
+    let text = sanitize_utf8 text in
     match session with
     | None -> false
     | Some s ->
@@ -395,6 +439,22 @@ class type_tool = object (_self)
            Text_edit.backspace s;
            bump (); _self#sync_to_model ctx; ctx.request_update ()
          | None -> ());
+        true
+      end else if cmd && (key = "v" || key = "V") then begin
+        (* Route Cmd+V into the active text session via paste_text
+           rather than the menu's "Paste" handler (which would create
+           a new element). Returning true consumes the event so the
+           accel-group dispatch never fires the menu callback. The
+           clipboard request is async; the actual insert lands on the
+           next GTK iteration after the OS hands back text. *)
+        let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
+        GtkBase.Clipboard.request_text clipboard ~callback:(fun text_opt ->
+          match text_opt with
+          | Some t when String.length t > 0 ->
+            let clean = sanitize_utf8 t in
+            if String.length clean > 0 then
+              ignore (_self#paste_text ctx clean)
+          | _ -> ());
         true
       end else if key = "Escape" then begin
         _self#end_session ~ctx (); ctx.request_update (); true
@@ -470,8 +530,17 @@ class type_tool = object (_self)
      | _ -> ());
     (* Editing overlay: selection rects, bounding box, caret. Only
        drawn when there is both a rendered layout and an active
-       editing session; absent either, this frame has no overlay. *)
-    match _self#build_layout ctx, session with
+       editing session; absent either, this frame has no overlay.
+       The caret + selection geometry comes from the text layout in
+       document coords (relative to the element's x/y), so we apply
+       the canvas's view transform around them here — without it
+       they'd render at doc coords on a screen-space canvas and
+       appear offset by the view translate / zoom. *)
+    let z = ctx.model#zoom_level in
+    Cairo.save cr;
+    Cairo.translate cr ctx.model#view_offset_x ctx.model#view_offset_y;
+    Cairo.scale cr z z;
+    (match _self#build_layout ctx, session with
     | None, _ | _, None -> ()
     | Some (tr, lay), Some s ->
       if Text_edit.has_selection s then begin
@@ -519,9 +588,10 @@ class type_tool = object (_self)
         in
         let (r, g, b, _) = Element.color_to_rgba color in
         Cairo.set_source_rgba cr r g b 1.0;
-        Cairo.set_line_width cr 1.5;
+        Cairo.set_line_width cr (1.5 /. z);
         Cairo.move_to cr (tr.tr_x +. cx) (tr.tr_y +. cy -. ch *. 0.8);
         Cairo.line_to cr (tr.tr_x +. cx) (tr.tr_y +. cy +. ch *. 0.2);
         Cairo.stroke cr
-      end
+      end);
+    Cairo.restore cr
 end
