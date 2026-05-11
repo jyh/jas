@@ -1484,6 +1484,38 @@ impl AppState {
     ///
     /// Currently wires `font_family`, `font_size`, and `text_decoration`
     /// (from the Underline / Strikethrough toggles). Remaining
+    /// Whether the first selected Text / TextPath has an empty
+    /// ``line_height`` (i.e. leading is in Auto mode = 120% of
+    /// font_size). Used by the dispatch sites that write
+    /// ``character_panel.font_size`` so they can keep
+    /// ``character_panel.leading`` tracking the new size while Auto
+    /// is in effect — without this, Character-panel-driven font
+    /// changes turn Auto into a stale numeric override on the next
+    /// apply.
+    pub(crate) fn character_element_has_auto_leading(&self) -> bool {
+        use crate::geometry::element::Element;
+        let Some(tab) = self.tab() else { return false; };
+        let Some(es) = tab.model.document().selection.first() else { return false; };
+        match tab.model.document().get_element(&es.path) {
+            Some(Element::Text(t)) => t.line_height.is_empty(),
+            Some(Element::TextPath(tp)) => tp.line_height.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Post-write hook for Character-panel field dispatches. When the
+    /// user changes ``font_size`` and the selected element's
+    /// ``line_height`` is empty (Auto), bump ``character_panel.leading``
+    /// so the apply pipeline still resolves to the Auto-derived value
+    /// (= ``font_size × 1.2``) and the empty element attribute survives
+    /// the round-trip. Without this, Auto materialises into a stale
+    /// numeric override the moment the user nudges the size.
+    pub(crate) fn character_panel_post_write(&mut self, key: &str) {
+        if key == "font_size" && self.character_element_has_auto_leading() {
+            self.character_panel.leading = self.character_panel.font_size * 1.2;
+        }
+    }
+
     /// Character-panel fields (All Caps, Small Caps, Super/Sub,
     /// kerning, tracking, scales, baseline shift, rotation, language,
     /// anti-alias, Snap to Glyph) stay in panel-local state until their
@@ -1783,17 +1815,7 @@ impl AppState {
                 Some(Element::Text(t)) => {
                     let mut new_t = t.clone();
                     let mut tspans = new_t.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() {
-                        // Promote the first tspan to a paragraph wrapper.
-                        if !tspans.is_empty() {
-                            tspans[0].jas_role = Some("paragraph".into());
-                            wrapper_idx.push(0);
-                        }
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.text_align = text_align.clone();
@@ -1821,14 +1843,7 @@ impl AppState {
                 Some(Element::TextPath(tp)) => {
                     let mut new_tp = tp.clone();
                     let mut tspans = new_tp.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() && !tspans.is_empty() {
-                        tspans[0].jas_role = Some("paragraph".into());
-                        wrapper_idx.push(0);
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.text_align = text_align.clone();
@@ -2210,14 +2225,7 @@ impl AppState {
                 Some(Element::Text(t)) => {
                     let mut new_t = t.clone();
                     let mut tspans = new_t.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() && !tspans.is_empty() {
-                        tspans[0].jas_role = Some("paragraph".into());
-                        wrapper_idx.push(0);
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.jas_word_spacing_min = ws_min;
@@ -2238,14 +2246,7 @@ impl AppState {
                 Some(Element::TextPath(tp)) => {
                     let mut new_tp = tp.clone();
                     let mut tspans = new_tp.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() && !tspans.is_empty() {
-                        tspans[0].jas_role = Some("paragraph".into());
-                        wrapper_idx.push(0);
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.jas_word_spacing_min = ws_min;
@@ -2319,14 +2320,7 @@ impl AppState {
                 Some(Element::Text(t)) => {
                     let mut new_t = t.clone();
                     let mut tspans = new_t.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() && !tspans.is_empty() {
-                        tspans[0].jas_role = Some("paragraph".into());
-                        wrapper_idx.push(0);
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.jas_hyphenate = hyph;
@@ -2344,14 +2338,7 @@ impl AppState {
                 Some(Element::TextPath(tp)) => {
                     let mut new_tp = tp.clone();
                     let mut tspans = new_tp.tspans.clone();
-                    let mut wrapper_idx: Vec<usize> = tspans.iter().enumerate()
-                        .filter_map(|(i, ts)|
-                            if ts.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-                        .collect();
-                    if wrapper_idx.is_empty() && !tspans.is_empty() {
-                        tspans[0].jas_role = Some("paragraph".into());
-                        wrapper_idx.push(0);
-                    }
+                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
                         let w = &mut tspans[i];
                         w.jas_hyphenate = hyph;
@@ -2451,6 +2438,125 @@ impl AppState {
 /// text_align_last)` pair per PARAGRAPH.md §Alignment sub-mapping
 /// (area text). Returns `(None, None)` for the default
 /// `ALIGN_LEFT_BUTTON` so it is omitted per identity-value rule.
+/// Normalize the paragraph-wrapper layout for a text element's
+/// tspans, returning the wrapper indices (always >= 1 after this
+/// call). Wrapper tspans must be **empty**-content markers — the
+/// paragraph's body lives in subsequent body tspans until the next
+/// wrapper or end-of-tspans. Two corruption modes are repaired
+/// here:
+///
+/// 1. No wrapper at all → prepend a fresh empty wrapper at index 0.
+/// 2. A wrapper carries non-empty content (legacy "promote first
+///    tspan" path) → demote it to a body tspan (clear `jas_role`,
+///    keep its content) and prepend a fresh empty wrapper that
+///    inherits the legacy wrapper's paragraph attributes.
+///
+/// `build_segments_from_text` doesn't count wrapper-tspan content
+/// toward the segment's char range, so leaving body chars on a
+/// wrapper makes the layout's effective slice shorter than the
+/// rendered string — the user sees the paragraph collapse to a
+/// single line the moment any Paragraph-panel control is clicked.
+///
+/// Used by every paragraph-panel apply path:
+/// `apply_paragraph_panel_to_selection`,
+/// `apply_justification_dialog_to_selection`, and
+/// `apply_hyphenation_dialog_to_selection`.
+fn ensure_paragraph_wrapper(tspans: &mut Vec<crate::geometry::tspan::Tspan>) -> Vec<usize> {
+    use crate::geometry::tspan::Tspan;
+    // Repair: if any wrapper has non-empty content, demote it to a
+    // body tspan and prepend a fresh empty wrapper that inherits
+    // the paragraph attributes.
+    let bad: Vec<usize> = tspans.iter().enumerate()
+        .filter_map(|(i, t)|
+            if t.jas_role.as_deref() == Some("paragraph") && !t.content.is_empty() {
+                Some(i)
+            } else { None })
+        .collect();
+    for &i in bad.iter().rev() {
+        // Build a new wrapper with the paragraph attrs lifted off
+        // the corrupted tspan; the corrupted tspan keeps its
+        // content but loses its wrapper role and paragraph attrs.
+        let src = &tspans[i];
+        let new_wrapper = Tspan {
+            jas_role: Some("paragraph".into()),
+            text_align: src.text_align.clone(),
+            text_align_last: src.text_align_last.clone(),
+            text_indent: src.text_indent,
+            jas_left_indent: src.jas_left_indent,
+            jas_right_indent: src.jas_right_indent,
+            jas_space_before: src.jas_space_before,
+            jas_space_after: src.jas_space_after,
+            jas_hyphenate: src.jas_hyphenate,
+            jas_hanging_punctuation: src.jas_hanging_punctuation,
+            jas_list_style: src.jas_list_style.clone(),
+            jas_word_spacing_min: src.jas_word_spacing_min,
+            jas_word_spacing_desired: src.jas_word_spacing_desired,
+            jas_word_spacing_max: src.jas_word_spacing_max,
+            jas_letter_spacing_min: src.jas_letter_spacing_min,
+            jas_letter_spacing_desired: src.jas_letter_spacing_desired,
+            jas_letter_spacing_max: src.jas_letter_spacing_max,
+            jas_glyph_scaling_min: src.jas_glyph_scaling_min,
+            jas_glyph_scaling_desired: src.jas_glyph_scaling_desired,
+            jas_glyph_scaling_max: src.jas_glyph_scaling_max,
+            jas_auto_leading: src.jas_auto_leading,
+            jas_single_word_justify: src.jas_single_word_justify.clone(),
+            jas_hyphenate_min_word: src.jas_hyphenate_min_word,
+            jas_hyphenate_min_before: src.jas_hyphenate_min_before,
+            jas_hyphenate_min_after: src.jas_hyphenate_min_after,
+            jas_hyphenate_limit: src.jas_hyphenate_limit,
+            jas_hyphenate_zone: src.jas_hyphenate_zone,
+            jas_hyphenate_bias: src.jas_hyphenate_bias,
+            jas_hyphenate_capitalized: src.jas_hyphenate_capitalized,
+            ..Tspan::default_tspan()
+        };
+        // Demote the corrupted tspan: keep content + per-character
+        // overrides (font/style/etc.), drop paragraph role + attrs.
+        tspans[i].jas_role = None;
+        tspans[i].text_align = None;
+        tspans[i].text_align_last = None;
+        tspans[i].text_indent = None;
+        tspans[i].jas_left_indent = None;
+        tspans[i].jas_right_indent = None;
+        tspans[i].jas_space_before = None;
+        tspans[i].jas_space_after = None;
+        tspans[i].jas_hyphenate = None;
+        tspans[i].jas_hanging_punctuation = None;
+        tspans[i].jas_list_style = None;
+        tspans[i].jas_word_spacing_min = None;
+        tspans[i].jas_word_spacing_desired = None;
+        tspans[i].jas_word_spacing_max = None;
+        tspans[i].jas_letter_spacing_min = None;
+        tspans[i].jas_letter_spacing_desired = None;
+        tspans[i].jas_letter_spacing_max = None;
+        tspans[i].jas_glyph_scaling_min = None;
+        tspans[i].jas_glyph_scaling_desired = None;
+        tspans[i].jas_glyph_scaling_max = None;
+        tspans[i].jas_auto_leading = None;
+        tspans[i].jas_single_word_justify = None;
+        tspans[i].jas_hyphenate_min_word = None;
+        tspans[i].jas_hyphenate_min_before = None;
+        tspans[i].jas_hyphenate_min_after = None;
+        tspans[i].jas_hyphenate_limit = None;
+        tspans[i].jas_hyphenate_zone = None;
+        tspans[i].jas_hyphenate_bias = None;
+        tspans[i].jas_hyphenate_capitalized = None;
+        tspans.insert(i, new_wrapper);
+    }
+    // Now collect indices of (post-repair) wrappers.
+    let existing: Vec<usize> = tspans.iter().enumerate()
+        .filter_map(|(i, t)|
+            if t.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
+        .collect();
+    if !existing.is_empty() { return existing; }
+    // No wrapper anywhere: prepend an empty one.
+    let wrapper = Tspan {
+        jas_role: Some("paragraph".into()),
+        ..Tspan::default_tspan()
+    };
+    tspans.insert(0, wrapper);
+    vec![0]
+}
+
 fn paragraph_align_attrs(pp: &ParagraphPanelState)
     -> (Option<String>, Option<String>) {
     if pp.align_center { (Some("center".into()), None) }
@@ -3658,5 +3764,229 @@ mod align_panel_state_tests {
         assert_eq!(line.x1, 0.0);
         assert_eq!(line.x2, 0.0);
         assert_eq!(transform_at(&st, vec![0, 1]), Transform::IDENTITY);
+    }
+}
+
+#[cfg(test)]
+mod ensure_paragraph_wrapper_tests {
+    use super::*;
+    use crate::geometry::tspan::Tspan;
+
+    fn body(content: &str) -> Tspan {
+        Tspan { content: content.into(), ..Tspan::default_tspan() }
+    }
+
+    fn wrapper_with_content(content: &str) -> Tspan {
+        Tspan {
+            content: content.into(),
+            jas_role: Some("paragraph".into()),
+            ..Tspan::default_tspan()
+        }
+    }
+
+    #[test]
+    fn no_wrapper_inserts_empty_wrapper_at_index_0() {
+        // Fresh text: just a body tspan with content, no wrapper.
+        // ensure_paragraph_wrapper must prepend an empty wrapper so
+        // build_segments_from_text counts the body's chars toward the
+        // segment range. Without this, area-text wrapping disappears
+        // the moment a paragraph-panel control is clicked.
+        let mut tspans = vec![body("Hello world")];
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(idx, vec![0]);
+        assert_eq!(tspans.len(), 2);
+        assert_eq!(tspans[0].jas_role.as_deref(), Some("paragraph"));
+        assert!(tspans[0].content.is_empty());
+        assert_eq!(tspans[1].content, "Hello world");
+        assert!(tspans[1].jas_role.is_none());
+    }
+
+    #[test]
+    fn wrapper_with_content_is_repaired_to_empty_wrapper_plus_body() {
+        // Legacy "promote first tspan" corruption: a wrapper that
+        // also carries body content. ensure_paragraph_wrapper must
+        // demote it to a body tspan and prepend a fresh empty
+        // wrapper that inherits the paragraph attrs.
+        let mut bad = wrapper_with_content("Hello world");
+        bad.text_align = Some("center".into());
+        bad.jas_left_indent = Some(12.0);
+        let mut tspans = vec![bad];
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(idx, vec![0]);
+        assert_eq!(tspans.len(), 2);
+        // New wrapper at 0 — empty content, paragraph attrs lifted.
+        assert_eq!(tspans[0].jas_role.as_deref(), Some("paragraph"));
+        assert!(tspans[0].content.is_empty());
+        assert_eq!(tspans[0].text_align.as_deref(), Some("center"));
+        assert_eq!(tspans[0].jas_left_indent, Some(12.0));
+        // Demoted body at 1 — keeps content, paragraph attrs cleared.
+        assert!(tspans[1].jas_role.is_none());
+        assert_eq!(tspans[1].content, "Hello world");
+        assert!(tspans[1].text_align.is_none());
+        assert!(tspans[1].jas_left_indent.is_none());
+    }
+
+    #[test]
+    fn empty_wrapper_already_present_returns_existing_index() {
+        // Already in canonical form: empty wrapper followed by body.
+        // ensure_paragraph_wrapper must not insert a duplicate.
+        let mut tspans = vec![
+            Tspan {
+                jas_role: Some("paragraph".into()),
+                ..Tspan::default_tspan()
+            },
+            body("Hello world"),
+        ];
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(idx, vec![0]);
+        assert_eq!(tspans.len(), 2);
+    }
+
+    #[test]
+    fn align_left_click_preserves_full_segment_coverage() {
+        // End-to-end: a fresh area-text element (just-typed content,
+        // no wrapper). User clicks align-left in the Paragraph panel
+        // → apply_paragraph_panel_to_selection runs → the resulting
+        // tspans must yield one segment that covers every char of
+        // the rendered content. Otherwise the layout's effective
+        // slice is shorter than the content, the gap-fill default
+        // segment lays the rest out *under* the same lines, and the
+        // user sees the text collapse to a single visible line.
+        use crate::algorithms::text_layout_paragraph::build_segments_from_text;
+        use crate::geometry::element::{Color, CommonProps, Element, Fill, LayerElem, TextElem};
+        use crate::document::document::{Document, ElementSelection};
+
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let text = TextElem::from_string(
+            0.0, 0.0,
+            "Hello world this is a longer paragraph",
+            "sans-serif", 16.0,
+            "normal", "normal", "none",
+            300.0, 200.0,
+            Some(Fill::new(Color::BLACK)),
+            None,
+            CommonProps::default(),
+        );
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Text(text))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("L".into()),
+                ..Default::default()
+            },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document(doc);
+        // Default panel state has align_left = true — matches the
+        // post-click steady state. The apply must still produce a
+        // segment covering every char regardless.
+        st.apply_paragraph_panel_to_selection();
+
+        let new_elem = st.tab().unwrap().model.document().get_element(&vec![0, 0]).unwrap();
+        let new_t = match new_elem {
+            Element::Text(t) => t,
+            _ => panic!("expected Text"),
+        };
+        assert_eq!(new_t.tspans.len(), 2, "expected wrapper + body");
+        assert_eq!(new_t.tspans[0].jas_role.as_deref(), Some("paragraph"));
+        assert!(new_t.tspans[0].content.is_empty());
+        assert_eq!(new_t.tspans[1].content, "Hello world this is a longer paragraph");
+
+        let content = new_t.content();
+        let segs = build_segments_from_text(&new_t.tspans, &content, true);
+        assert_eq!(segs.len(), 1, "expected one paragraph segment");
+        assert_eq!(segs[0].char_start, 0);
+        assert_eq!(segs[0].char_end, content.chars().count(),
+                   "segment must cover every char so the layout sees the full content");
+    }
+
+    #[test]
+    fn justify_left_click_writes_justify_to_wrapper() {
+        // Fresh area text → user clicks justify_left in the Paragraph
+        // panel → wrapper must carry text-align="justify" and
+        // text-align-last="left", which the renderer's justify_layout
+        // turns into actual word-spacing stretch. Without this the
+        // user sees no visible change ("the justify buttons do
+        // nothing").
+        use crate::algorithms::text_layout::TextAlign;
+        use crate::algorithms::text_layout_paragraph::build_segments_from_text;
+        use crate::geometry::element::{Color, CommonProps, Element, Fill, LayerElem, TextElem};
+        use crate::document::document::{Document, ElementSelection};
+
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let text = TextElem::from_string(
+            0.0, 0.0,
+            "Hello world this is a longer paragraph",
+            "sans-serif", 16.0,
+            "normal", "normal", "none",
+            300.0, 200.0,
+            Some(Fill::new(Color::BLACK)),
+            None,
+            CommonProps::default(),
+        );
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Text(text))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("L".into()),
+                ..Default::default()
+            },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document(doc);
+
+        // Mimic the dispatch sequence the toggle handler runs for a
+        // click on justify_left:
+        //   sync → set field → apply
+        st.sync_paragraph_panel_from_selection();
+        st.paragraph_panel.align_left = false;
+        st.paragraph_panel.align_center = false;
+        st.paragraph_panel.align_right = false;
+        st.paragraph_panel.justify_left = true;
+        st.paragraph_panel.justify_center = false;
+        st.paragraph_panel.justify_right = false;
+        st.paragraph_panel.justify_all = false;
+        st.apply_paragraph_panel_to_selection();
+
+        let new_elem = st.tab().unwrap().model.document().get_element(&vec![0, 0]).unwrap();
+        let new_t = match new_elem {
+            Element::Text(t) => t,
+            _ => panic!("expected Text"),
+        };
+        // Wrapper must carry the justify pair.
+        let wrapper = new_t.tspans.iter()
+            .find(|t| t.jas_role.as_deref() == Some("paragraph"))
+            .expect("wrapper must exist after apply");
+        assert_eq!(wrapper.text_align.as_deref(), Some("justify"),
+                   "wrapper must store text-align=justify");
+        assert_eq!(wrapper.text_align_last.as_deref(), Some("left"),
+                   "wrapper must store text-align-last=left for justify_left");
+        // Segment must surface this as TextAlign::Justify so layout
+        // routes through justify_layout (else justify is invisible).
+        let content = new_t.content();
+        let segs = build_segments_from_text(&new_t.tspans, &content, true);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text_align, TextAlign::Justify,
+                   "segment must be TextAlign::Justify so layout justifies");
     }
 }

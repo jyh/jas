@@ -46,6 +46,16 @@ pub(crate) fn make_keydown_handler(
         let mods = evt.data().modifiers();
         let cmd = mods.meta() || mods.ctrl();
 
+        // If a text input / textarea / select has DOM focus, let it
+        // handle non-modifier keys before any in-canvas tool session
+        // claims them. Otherwise clicking a panel field while a Type
+        // Tool session is open would route the keystroke into the
+        // canvas instead of the panel input. Cmd/Ctrl shortcuts
+        // (Cmd+Z, Cmd+C, …) still pass through to the app handler.
+        if event_targets_input(&evt) && !cmd {
+            return;
+        }
+
         // If the active tool is in a text-editing session, route the
         // event there first. The tool's `on_key_event` consumes printable
         // characters, navigation, deletion, and the in-session shortcuts
@@ -103,12 +113,6 @@ pub(crate) fn make_keydown_handler(
                 );
                 return;
             }
-        }
-
-        // If a text input has focus, let it handle non-modifier keys.
-        // Cmd/Ctrl shortcuts (Cmd+Z, Cmd+C, etc.) still pass through.
-        if event_targets_input(&evt) && !cmd {
-            return;
         }
 
         match key {

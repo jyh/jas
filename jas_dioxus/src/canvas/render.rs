@@ -1171,7 +1171,7 @@ fn draw_element_body(
             // pass covers the visible subset — font + decoration
             // overrides per tspan; per-tspan baseline-shift / rotate /
             // transform / dx / wrapping come in follow-ups.
-            let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
+            let is_flat = e.render_is_flat();
             if !is_flat {
                 draw_segmented_text(ctx, e);
             } else {
@@ -1294,12 +1294,74 @@ fn draw_element_body(
                     .map(|g| g.x)
                     .unwrap_or(0.0);
                 let line_x = e.x + line_x_shift;
-                if rotate_rad == 0.0 {
+                // When the layout stretched glue widths (justify), the
+                // single fill_text path would render each line with the
+                // canvas's *natural* inter-word advance and the result
+                // would look left-flush. Detect that by comparing the
+                // line's last visible glyph's right against the natural
+                // width of the line text — any non-trivial gap means a
+                // glue was stretched and we must position words
+                // individually using the layout's per-glyph x.
+                let line_glyphs = &layout.glyphs[line.glyph_start..line.glyph_end];
+                let last_visible_right = line_glyphs.iter()
+                    .filter(|g| !g.is_trailing_space)
+                    .map(|g| g.right)
+                    .fold(0.0f64, f64::max);
+                let first_visible_x = line_glyphs.iter()
+                    .filter(|g| !g.is_trailing_space)
+                    .map(|g| g.x)
+                    .fold(f64::INFINITY, f64::min);
+                let natural_w = measure(s);
+                let layout_w = (last_visible_right - first_visible_x).max(0.0);
+                let glues_stretched = layout_w > natural_w + 0.5;
+                if rotate_rad == 0.0 && !glues_stretched {
                     // Fast path: single fill_text per line. The CSS
                     // letterSpacing property set earlier handles the
                     // inter-glyph advance.
                     ctx.fill_text(s, line_x, baseline).ok();
-                } else {
+                } else if rotate_rad == 0.0 {
+                    // Justified line: render word-by-word so each
+                    // word lands at the x the composer computed
+                    // (with stretched glue between words).
+                    let chars_v: Vec<char> = s.chars().collect();
+                    let mut word_buf = String::new();
+                    let mut word_x = 0.0f64;
+                    let mut in_word = false;
+                    for (i, g) in line_glyphs.iter().enumerate() {
+                        let ch = chars_v.get(i).copied();
+                        let is_ws = ch.map_or(true, |c| c.is_whitespace());
+                        if !is_ws && !g.is_trailing_space {
+                            if !in_word {
+                                word_x = e.x + g.x;
+                                in_word = true;
+                                word_buf.clear();
+                            }
+                            if let Some(c) = ch { word_buf.push(c); }
+                        } else if in_word {
+                            ctx.fill_text(&word_buf, word_x, baseline).ok();
+                            in_word = false;
+                        }
+                    }
+                    if in_word {
+                        ctx.fill_text(&word_buf, word_x, baseline).ok();
+                    }
+                }
+                if line.trailing_hyphen && rotate_rad == 0.0 {
+                    // Hyphenation broke a word at end of line. The
+                    // composer reserved space for the hyphen but the
+                    // source content has no hyphen char, so the
+                    // renderer must draw the glyph itself. The
+                    // synthetic hyphen sits at the line's rightmost
+                    // glyph x — derive it from the last glyph (which
+                    // the composer emitted with width = hyphen_w).
+                    let hyph_x = line_glyphs.iter()
+                        .filter(|g| !g.is_trailing_space)
+                        .last()
+                        .map(|g| e.x + g.x)
+                        .unwrap_or(line_x);
+                    ctx.fill_text("-", hyph_x, baseline).ok();
+                }
+                if rotate_rad != 0.0 {
                     // Per-glyph rotation: each glyph rotates around
                     // its own (cx, baseline). fill_text takes only a
                     // whole string, so draw one char at a time and
@@ -1333,25 +1395,67 @@ fn draw_element_body(
             // count up; anything else resets) holds across the
             // element's whole content.
             if !segments.is_empty() {
-                let counters = crate::algorithms::text_layout_paragraph::
-                    compute_counters(&segments);
-                for (si, seg) in segments.iter().enumerate() {
-                    let style = match &seg.list_style {
+                // A list-style segment may span multiple paragraphs
+                // (the user typed "a\nb\nc" then clicked bullets — the
+                // model has one wrapper covering all three lines). The
+                // bullet must appear on every paragraph, so walk the
+                // layout's lines and treat any line whose predecessor
+                // ended at a hard break ('\n') as a sub-paragraph
+                // start. Counter values follow the §Counter run rule
+                // across the flattened sub-paragraph sequence.
+                let owning_seg_for_line = |line_start: usize| -> Option<usize> {
+                    segments.iter().position(|s|
+                        s.char_start <= line_start && line_start < s.char_end)
+                };
+                #[derive(Clone)]
+                struct SubPara { line_idx: usize, style: Option<String>, left_indent: f64 }
+                let mut sub_paras: Vec<SubPara> = Vec::new();
+                let mut prev_hard_break = true;
+                for (li, line) in layout.lines.iter().enumerate() {
+                    if prev_hard_break {
+                        let (style, left_indent) = match owning_seg_for_line(line.start) {
+                            Some(si) => (segments[si].list_style.clone(), segments[si].left_indent),
+                            None => (None, 0.0),
+                        };
+                        sub_paras.push(SubPara { line_idx: li, style, left_indent });
+                    }
+                    prev_hard_break = line.hard_break;
+                }
+                // Per-style counter run: consecutive same num-* style
+                // sub-paragraphs continue counting; a different style
+                // (or bullet, or none) breaks the run.
+                let mut counters: Vec<usize> = Vec::with_capacity(sub_paras.len());
+                let mut prev_num: Option<String> = None;
+                let mut current = 0usize;
+                for sp in &sub_paras {
+                    match sp.style.as_deref() {
+                        Some(s) if s.starts_with("num-") => {
+                            if prev_num.as_deref() == Some(s) {
+                                current += 1;
+                            } else {
+                                current = 1;
+                            }
+                            counters.push(current);
+                            prev_num = Some(s.to_string());
+                        }
+                        _ => {
+                            counters.push(0);
+                            prev_num = None;
+                            current = 0;
+                        }
+                    }
+                }
+                for (sp, counter) in sub_paras.iter().zip(counters.iter()) {
+                    let style = match &sp.style {
                         Some(s) if !s.is_empty() => s,
                         _ => continue,
                     };
                     let marker = crate::algorithms::text_layout_paragraph::
-                        marker_text(style, counters[si]);
+                        marker_text(style, *counter);
                     if marker.is_empty() { continue; }
-                    // First-line baseline: find the first layout line
-                    // that starts at or after this segment's char range.
-                    let first_line = layout.lines.iter()
-                        .find(|l| l.start >= seg.char_start);
-                    let baseline = match first_line {
-                        Some(l) => e.y + l.baseline_y + y_shift,
-                        None => continue,
-                    };
-                    let marker_x = e.x + seg.left_indent;
+                    let line = &layout.lines[sp.line_idx];
+                    let baseline = e.y + line.baseline_y + y_shift;
+                    let marker_x = e.x + sp.left_indent;
                     ctx.fill_text(&marker, marker_x, baseline).ok();
                 }
             }
@@ -1745,16 +1849,28 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // children-union bounds here.
         let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
 
-        if is_text_like || is_container {
+        if is_container {
             let (bx, by, bw, bh) = elem.bounds();
             if bw > 0.0 && bh > 0.0 {
                 ctx.stroke_rect(bx, by, bw, bh);
             }
         } else {
-            // Stroke the element's own path in bright blue.
-            ctx.begin_path();
-            trace_element_path(ctx, elem);
-            ctx.stroke();
+            // Text and TextPath show a bbox + corner handles so the
+            // user can grab and resize/move the text frame; other
+            // elements stroke their own path. ``control_points``
+            // returns the 4 bbox corners for text elements (default
+            // fallback) so the same handle-drawing loop below works
+            // unchanged.
+            if is_text_like {
+                let (bx, by, bw, bh) = elem.bounds();
+                if bw > 0.0 && bh > 0.0 {
+                    ctx.stroke_rect(bx, by, bw, bh);
+                }
+            } else {
+                ctx.begin_path();
+                trace_element_path(ctx, elem);
+                ctx.stroke();
+            }
 
             // Draw the control-point squares. A selected CP (per the
             // `Partial` set, or any CP when kind is `All`) gets the

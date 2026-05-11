@@ -4829,6 +4829,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                     match panel_kind {
                         Some(PanelKind::Character) => {
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                            st.character_panel_post_write(&f);
                             st.apply_character_panel_to_selection();
                         }
                         Some(PanelKind::Paragraph) => {
@@ -4996,6 +4997,20 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                     {
                         let mut st = app.borrow_mut();
                         match panel_kind {
+                            Some(PanelKind::Character) => {
+                                // Character panel ``leading`` is Auto when
+                                // the element's line_height is empty;
+                                // clearing the field re-derives the
+                                // Auto-tracked value (font_size × 1.2)
+                                // and the apply pipeline writes it back
+                                // out as the empty element attribute. No
+                                // other Character field is nullable yet.
+                                if f == "leading" {
+                                    st.character_panel.leading =
+                                        st.character_panel.font_size * 1.2;
+                                    st.apply_character_panel_to_selection();
+                                }
+                            }
                             Some(PanelKind::Stroke) | None => {
                                 set_stroke_field(&mut st.stroke_panel, &f, &serde_json::Value::Null);
                                 st.apply_stroke_panel_to_selection();
@@ -5024,6 +5039,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                     match panel_kind {
                         Some(PanelKind::Character) => {
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                            st.character_panel_post_write(&f);
                             st.apply_character_panel_to_selection();
                         }
                         Some(PanelKind::Paragraph) => {
@@ -5241,6 +5257,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                             match panel_kind {
                                 Some(PanelKind::Character) => {
                                     set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                    st.character_panel_post_write(&f);
                                     st.apply_character_panel_to_selection();
                                 }
                                 Some(PanelKind::Paragraph) => {
@@ -5332,6 +5349,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                             match panel_kind {
                                 Some(PanelKind::Character) => {
                                     set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                    st.character_panel_post_write(&f);
                                     st.apply_character_panel_to_selection();
                                 }
                                 Some(PanelKind::Paragraph) => {
@@ -5499,6 +5517,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                 match panel_kind {
                                     Some(PanelKind::Character) => {
                                         set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                        st.character_panel_post_write(&f);
                                         st.apply_character_panel_to_selection();
                                     }
                                     Some(PanelKind::Paragraph) => {
@@ -5610,6 +5629,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 match panel_kind {
                                     Some(PanelKind::Character) => {
                                         set_character_field(&mut st.character_panel, &f, &json_val);
+                                        st.character_panel_post_write(&f);
                                         st.apply_character_panel_to_selection();
                                     }
                                     Some(PanelKind::Paragraph) => {
@@ -5772,28 +5792,40 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             BindTarget::Panel(field) => {
                 let f = field.clone();
                 let app = app.clone();
+                let mut rev_signal = revision;
                 spawn(async move {
-                    let mut st = app.borrow_mut();
-                    match panel_kind {
-                        Some(PanelKind::Character) => {
-                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
-                            st.apply_character_panel_to_selection();
+                    {
+                        let mut st = app.borrow_mut();
+                        match panel_kind {
+                            Some(PanelKind::Character) => {
+                                set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
+                                st.character_panel_post_write(&f);
+                                st.apply_character_panel_to_selection();
+                            }
+                            Some(PanelKind::Paragraph) => {
+                                // Sync first so untouched fields hold the
+                                // selection's current values, not stale
+                                // panel state, before the new field is set
+                                // and the whole panel is re-applied.
+                                st.sync_paragraph_panel_from_selection();
+                                set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
+                                st.apply_paragraph_panel_to_selection();
+                            }
+                            Some(PanelKind::Stroke) | None => {
+                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            }
+                            _ => {}
                         }
-                        Some(PanelKind::Paragraph) => {
-                            // Sync first so untouched fields hold the
-                            // selection's current values, not stale
-                            // panel state, before the new field is set
-                            // and the whole panel is re-applied.
-                            st.sync_paragraph_panel_from_selection();
-                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
-                            st.apply_paragraph_panel_to_selection();
-                        }
-                        Some(PanelKind::Stroke) | None => {
-                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                        }
-                        _ => {}
                     }
+                    // Bump revision *after* the state mutation so the
+                    // re-render sees the new panel state. Bumping
+                    // synchronously outside spawn fires a render before
+                    // the async block runs — first click looks like a
+                    // no-op, second click renders the first click's
+                    // state.
+                    rev_signal += 1;
                 });
+                return;
             }
             BindTarget::None => {}
         }

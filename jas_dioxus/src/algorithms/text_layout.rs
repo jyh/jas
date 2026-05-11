@@ -66,6 +66,11 @@ pub struct LineInfo {
     /// instead of walking the whole glyph vector.
     pub glyph_start: usize,
     pub glyph_end: usize,
+    /// True when the line was wrapped at a hyphenation breakpoint
+    /// inside a word — the renderer must append a visible hyphen
+    /// glyph at the line's end. The synthetic hyphen advance is
+    /// already baked into the line's last visible glyph's `right`.
+    pub trailing_hyphen: bool,
 }
 
 /// Result of laying out a string into wrapped lines.
@@ -180,6 +185,11 @@ pub struct ParagraphSegment {
     /// hyphens), 6 = Fewer Hyphens (expensive hyphens). Maps to a
     /// per-hyphen Penalty value in the composer.
     pub hyphenate_bias: u8,
+    /// `jas:hyphenate-capitalized` — when false (the default in
+    /// Illustrator / InDesign / Word), proper nouns and other
+    /// words starting with an uppercase letter are NOT broken at
+    /// hyphenation candidates. Avoids breaks like "T-rump".
+    pub hyphenate_capitalized: bool,
 }
 
 impl Default for ParagraphSegment {
@@ -196,10 +206,11 @@ impl Default for ParagraphSegment {
             word_spacing_max: 133.0,
             last_line_align: TextAlign::Left,
             hyphenate: false,
-            hyphenate_min_word: 3,
-            hyphenate_min_before: 1,
-            hyphenate_min_after: 1,
+            hyphenate_min_word: 6,
+            hyphenate_min_before: 2,
+            hyphenate_min_after: 2,
             hyphenate_bias: 0,
+            hyphenate_capitalized: false,
         }
     }
 }
@@ -212,6 +223,43 @@ pub fn layout(
     content: &str,
     max_width: f64,
     font_size: f64,
+    measure: &Measurer<'_>,
+) -> TextLayout {
+    layout_inner(content, max_width, font_size, None, measure)
+}
+
+/// Hyphenation options for greedy (non-justify) layout. When `Some`,
+/// the layout will try to break long words at hyphenation candidates
+/// instead of wrapping the whole word to the next line.
+#[derive(Debug, Clone, Copy)]
+pub struct HyphenOpts {
+    pub min_word: usize,
+    pub min_before: usize,
+    pub min_after: usize,
+    /// When false, words starting with an uppercase letter are
+    /// excluded from hyphenation (proper-noun protection).
+    pub allow_capitalized: bool,
+}
+
+/// Variant of [`layout`] that consults hyphenation patterns when a
+/// non-whitespace token doesn't fit on the current line. Used by
+/// `layout_with_paragraphs` for non-justify segments where
+/// `seg.hyphenate` is set.
+pub fn layout_with_hyphen(
+    content: &str,
+    max_width: f64,
+    font_size: f64,
+    opts: HyphenOpts,
+    measure: &Measurer<'_>,
+) -> TextLayout {
+    layout_inner(content, max_width, font_size, Some(opts), measure)
+}
+
+fn layout_inner(
+    content: &str,
+    max_width: f64,
+    font_size: f64,
+    hyph_opts: Option<HyphenOpts>,
     measure: &Measurer<'_>,
 ) -> TextLayout {
     let line_height = font_size;
@@ -247,6 +295,7 @@ pub fn layout(
             width: line_width,
             glyph_start: 0,
             glyph_end: 0,
+            trailing_hyphen: false,
         });
     };
 
@@ -295,9 +344,151 @@ pub fn layout(
 
         // Non-whitespace token: try to fit on current line.
         if max_width > 0.0 && x + token_w > max_width && x > 0.0 {
-            // Wrap before this token. Mark any trailing whitespace at the end
-            // of the previous line as "soft-wrap whitespace" so the cursor
-            // skips past them naturally.
+            // Hyphenation: try to split the token at a hyphenation
+            // breakpoint that fits on the current line. Picks the
+            // *largest* prefix that still leaves room for the hyphen,
+            // greedy-style. If no break fits, falls through to the
+            // standard wrap below.
+            let mut hyphen_split: Option<(usize, f64)> = None;
+            if let Some(opts) = hyph_opts {
+                let token_chars: Vec<char> = token.chars().collect();
+                let starts_capital = token_chars.first()
+                    .map_or(false, |c| c.is_uppercase());
+                let allowed = token_chars.len() >= opts.min_word
+                    && (opts.allow_capitalized || !starts_capital);
+                if allowed {
+                    let breaks = crate::algorithms::hyphenator::hyphenate(
+                        &token,
+                        crate::algorithms::hyphenator::EN_US_PATTERNS_SAMPLE,
+                        opts.min_before,
+                        opts.min_after,
+                    );
+                    let hyphen_w = measure("-");
+                    let avail = max_width - x;
+                    // Try the largest valid break point first.
+                    for bi in (1..token_chars.len()).rev() {
+                        if !*breaks.get(bi).unwrap_or(&false) { continue; }
+                        let prefix: String = token_chars[..bi].iter().collect();
+                        let prefix_w = measure(&prefix);
+                        if prefix_w + hyphen_w <= avail {
+                            hyphen_split = Some((bi, prefix_w));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some((split_at, prefix_w)) = hyphen_split {
+                // Emit the prefix glyphs on the current line, then the
+                // synthetic hyphen, then wrap.
+                let token_chars: Vec<char> = token.chars().collect();
+                for k in 0..split_at {
+                    let cw = measure(&token_chars[k].to_string());
+                    glyphs.push(Glyph {
+                        idx: idx + k,
+                        line: line_no,
+                        x,
+                        right: x + cw,
+                        baseline_y: line_no as f64 * line_height + ascent,
+                        top: line_no as f64 * line_height,
+                        height: line_height,
+                        is_trailing_space: false,
+                    });
+                    x += cw;
+                }
+                let hyphen_w = measure("-");
+                // Synthetic hyphen glyph carries idx = split_at break
+                // point so hit-test still maps to a real char. The
+                // renderer recognises trailing_hyphen on the line and
+                // draws the visible '-' here.
+                glyphs.push(Glyph {
+                    idx: idx + split_at,
+                    line: line_no,
+                    x,
+                    right: x + hyphen_w,
+                    baseline_y: line_no as f64 * line_height + ascent,
+                    top: line_no as f64 * line_height,
+                    height: line_height,
+                    is_trailing_space: false,
+                });
+                let line_w = x + hyphen_w;
+                let _ = prefix_w;
+                // Push the line with trailing_hyphen=true.
+                let top = line_no as f64 * line_height;
+                lines.push(LineInfo {
+                    start: line_start_char,
+                    end: idx + split_at,
+                    hard_break: false,
+                    top,
+                    baseline_y: top + ascent,
+                    height: line_height,
+                    width: line_w,
+                    glyph_start: 0,
+                    glyph_end: 0,
+                    trailing_hyphen: true,
+                });
+                line_no += 1;
+                line_start_char = idx + split_at;
+                x = 0.0;
+                // Continue token processing from the tail.
+                idx = idx + split_at;
+                // Re-measure the tail and let the next iteration re-
+                // tokenize it; simplest is to fall through and let the
+                // `else` Fits-on-line branch place the tail since it's
+                // a fresh token that starts at x=0.
+                let tail_chars = &token_chars[split_at..];
+                let tail_w: f64 = tail_chars.iter()
+                    .map(|c| measure(&c.to_string())).sum();
+                // Even the tail might overflow; reuse the long-word
+                // char-by-char path or just place it (max_width > tail_w
+                // is the common case).
+                if max_width > 0.0 && tail_w > max_width {
+                    // Char-by-char break.
+                    for (k, ch) in tail_chars.iter().enumerate() {
+                        let cw = measure(&ch.to_string());
+                        if x + cw > max_width && x > 0.0 {
+                            push_line(&mut lines, line_no, line_start_char,
+                                      idx + k, false, x);
+                            line_no += 1;
+                            line_start_char = idx + k;
+                            x = 0.0;
+                        }
+                        glyphs.push(Glyph {
+                            idx: idx + k,
+                            line: line_no,
+                            x,
+                            right: x + cw,
+                            baseline_y: line_no as f64 * line_height + ascent,
+                            top: line_no as f64 * line_height,
+                            height: line_height,
+                            is_trailing_space: false,
+                        });
+                        x += cw;
+                    }
+                } else {
+                    let mut cur_x = x;
+                    for (k, ch) in tail_chars.iter().enumerate() {
+                        let cw = measure(&ch.to_string());
+                        glyphs.push(Glyph {
+                            idx: idx + k,
+                            line: line_no,
+                            x: cur_x,
+                            right: cur_x + cw,
+                            baseline_y: line_no as f64 * line_height + ascent,
+                            top: line_no as f64 * line_height,
+                            height: line_height,
+                            is_trailing_space: false,
+                        });
+                        cur_x += cw;
+                    }
+                    x = cur_x;
+                }
+                idx = end;
+                continue;
+            }
+
+            // No hyphenation break fits — fall through to standard
+            // wrap-before-token path.
             for g in glyphs.iter_mut().rev() {
                 if g.line != line_no { break; }
                 if !chars[g.idx].is_whitespace() { break; }
@@ -478,6 +669,14 @@ pub fn layout_with_paragraphs(
         {
             justify_layout(&slice, effective_max_w, font_size, seg, measure)
                 .unwrap_or_else(|| layout(&slice, effective_max_w, font_size, measure))
+        } else if seg.hyphenate && effective_max_w > 0.0 {
+            let opts = HyphenOpts {
+                min_word: seg.hyphenate_min_word,
+                min_before: seg.hyphenate_min_before,
+                min_after: seg.hyphenate_min_after,
+                allow_capitalized: seg.hyphenate_capitalized,
+            };
+            layout_with_hyphen(&slice, effective_max_w, font_size, opts, measure)
         } else {
             layout(&slice, effective_max_w, font_size, measure)
         };
@@ -488,7 +687,17 @@ pub fn layout_with_paragraphs(
         let first_line_extra = if has_list { 0.0 } else { seg.first_line_indent.max(0.0) };
         let lines_n = para_layout.lines.len();
         let first_line_no_in_combined = all_lines.len();
+        // A segment may span multiple sub-paragraphs (the user typed
+        // "a\nb\nc" then applied panel attrs — one wrapper covers all
+        // three). space_before / space_after are paragraph attributes,
+        // so they must apply between each sub-paragraph too, not just
+        // between top-level segments. Accumulates as we cross hard
+        // breaks within the segment.
+        let mut sub_para_delta = 0.0_f64;
         for (li, line) in para_layout.lines.iter().enumerate() {
+            if li > 0 && para_layout.lines[li - 1].hard_break {
+                sub_para_delta += seg.space_after + seg.space_before;
+            }
             let x_shift = seg.left_indent + list_indent
                 + (if li == 0 { first_line_extra } else { 0.0 });
             // text-align horizontal shift within the effective box.
@@ -518,8 +727,14 @@ pub fn layout_with_paragraphs(
             let mut left_hang_w = 0.0_f64;
             let mut right_hang_w = 0.0_f64;
             if seg.hanging_punctuation {
+                // Justify is treated like Left/Center for left-edge
+                // hangs: even though the body composer stretches the
+                // line to fill the max width, the leading punctuation
+                // should still hang into the margin so the visible
+                // left edge stays straight. Right hangs on Justify
+                // body lines need composer support and stay disabled.
                 let allow_left = matches!(seg.text_align,
-                    TextAlign::Left | TextAlign::Center);
+                    TextAlign::Left | TextAlign::Center | TextAlign::Justify);
                 let allow_right = matches!(seg.text_align,
                     TextAlign::Right | TextAlign::Center);
                 if allow_left {
@@ -540,7 +755,22 @@ pub fn layout_with_paragraphs(
                 }
             }
             let effective_visible_w = (visible_w - left_hang_w - right_hang_w).max(0.0);
-            let align_shift = match seg.text_align {
+            // For a justified segment the body lines are stretched to
+            // fill the line width by the composer, so a Justify-arm
+            // shift of 0 leaves them flush with both edges. The LAST
+            // line is *not* stretched (composer convention), so it
+            // needs to be positioned per `seg.last_line_align` —
+            // otherwise justify_right / justify_center / justify_left
+            // all visually look like left-aligned.
+            let is_last_line_of_segment = li + 1 == lines_n;
+            let effective_align = if seg.text_align == TextAlign::Justify
+                && is_last_line_of_segment
+            {
+                seg.last_line_align
+            } else {
+                seg.text_align
+            };
+            let align_shift = match effective_align {
                 TextAlign::Left | TextAlign::Justify => -left_hang_w,
                 TextAlign::Center => {
                     if line_avail > effective_visible_w {
@@ -557,8 +787,8 @@ pub fn layout_with_paragraphs(
             // Char index of this line, in original-content coordinates.
             let orig_start = seg.char_start + line.start;
             let orig_end = seg.char_start + line.end;
-            let baseline = y_offset + line.baseline_y + ascent_padding(line, font_size, ascent);
-            let top = y_offset + line.top;
+            let baseline = y_offset + line.baseline_y + ascent_padding(line, font_size, ascent) + sub_para_delta;
+            let top = y_offset + line.top + sub_para_delta;
             // Re-emit glyphs with the new (x, top, baseline) values.
             let glyph_start = all_glyphs.len();
             for g in &para_layout.glyphs[line.glyph_start..line.glyph_end] {
@@ -567,8 +797,8 @@ pub fn layout_with_paragraphs(
                     line: first_line_no_in_combined + li,
                     x: g.x + total_x_shift,
                     right: g.right + total_x_shift,
-                    baseline_y: g.baseline_y + y_offset,
-                    top: g.top + y_offset,
+                    baseline_y: g.baseline_y + y_offset + sub_para_delta,
+                    top: g.top + y_offset + sub_para_delta,
                     height: g.height,
                     is_trailing_space: g.is_trailing_space,
                 });
@@ -584,10 +814,11 @@ pub fn layout_with_paragraphs(
                 width: visible_w + total_x_shift,
                 glyph_start,
                 glyph_end,
+                trailing_hyphen: line.trailing_hyphen,
             });
         }
         if lines_n > 0 {
-            y_offset += lines_n as f64 * line_height;
+            y_offset += lines_n as f64 * line_height + sub_para_delta;
         }
         y_offset += seg.space_after;
     }
@@ -599,6 +830,7 @@ pub fn layout_with_paragraphs(
             start: 0, end: 0, hard_break: false,
             top: 0.0, baseline_y: ascent, height: line_height,
             width: 0.0, glyph_start: 0, glyph_end: 0,
+            trailing_hyphen: false,
         });
     }
 
@@ -714,6 +946,7 @@ fn justify_layout(
                 start: 0, end: 0, hard_break: false,
                 top: 0.0, baseline_y: ascent, height: line_height,
                 width: 0.0, glyph_start: 0, glyph_end: 0,
+                trailing_hyphen: false,
             }],
             font_size,
             char_count: 0,
@@ -780,9 +1013,15 @@ fn justify_layout(
             while i < slice_chars.len() && !slice_chars[i].is_whitespace() { i += 1; }
             let word: String = slice_chars[word_start..i].iter().collect();
             let word_w = measure(&word);
-            // Hyphenation candidates inside the word.
+            // Hyphenation candidates inside the word. Capitalized
+            // words (proper nouns) are excluded unless explicitly
+            // allowed — without this, "Trump" hyphenates to
+            // "T-rump" via the sample pattern set.
+            let starts_capital = word.chars().next()
+                .map_or(false, |c| c.is_uppercase());
             if seg.hyphenate
                 && word.chars().count() >= seg.hyphenate_min_word
+                && (seg.hyphenate_capitalized || !starts_capital)
             {
                 let breaks = crate::algorithms::hyphenator::hyphenate(
                     &word,
@@ -832,8 +1071,21 @@ fn justify_layout(
             char_idx: para_start + slice_chars.len(),
         });
 
-        let opts = Opts::default();
-        let breaks = compose(&items, &[max_width], &opts)?;
+        // Try the strict cap first (Knuth's default 10 = "loose" but
+        // typographically acceptable). If no feasible composition
+        // exists at that cap, retry with a much looser cap so the
+        // paragraph still justifies — falling all the way back to
+        // ragged-left would be visually worse than a too-loose body
+        // line. Mirrors Illustrator / InDesign behavior of allowing
+        // looser spacing rather than abandoning justify entirely.
+        let mut opts = Opts::default();
+        let breaks = match compose(&items, &[max_width], &opts) {
+            Some(b) => b,
+            None => {
+                opts.max_ratio = 100.0;
+                compose(&items, &[max_width], &opts)?
+            }
+        };
         if breaks.is_empty() { return None; }
 
         // Walk break sequence and render line by line.
@@ -994,6 +1246,18 @@ fn justify_layout(
             // doesn't carry hard_break since there's no '\n' after it.
             let hard_break = is_last && para_end_excl < n
                 && chars[para_end_excl] == '\n';
+            // The renderer needs to draw a visible hyphen at end of
+            // line when the composer broke inside a word at a
+            // hyphenation penalty. The penalty's `width` is the
+            // hyphen advance (already baked into x), and `width > 0`
+            // distinguishes a hyphen penalty from the terminator
+            // penalty (zero width). Source content has no hyphen at
+            // this position, so without the explicit signal the
+            // renderer would draw "exam" instead of "exam-".
+            let trailing_hyphen = matches!(
+                items[to],
+                Item::Penalty { width, .. } if width > 0.0
+            );
             all_lines.push(LineInfo {
                 start: line_start_char,
                 end: line_end_char,
@@ -1004,6 +1268,7 @@ fn justify_layout(
                 width: x,
                 glyph_start,
                 glyph_end,
+                trailing_hyphen,
             });
             next_line_no += 1;
             prev_break = Some(to);
@@ -1017,6 +1282,7 @@ fn justify_layout(
             start: 0, end: 0, hard_break: false,
             top: 0.0, baseline_y: ascent, height: line_height,
             width: 0.0, glyph_start: 0, glyph_end: 0,
+            trailing_hyphen: false,
         });
     }
 
@@ -1481,6 +1747,26 @@ mod tests {
     }
 
     #[test]
+    fn default_segment_with_full_range_wraps_like_no_segments() {
+        // Regression: post-`apply_paragraph_panel_to_selection` the
+        // text element carries a single empty wrapper followed by
+        // the body; build_segments_from_text returns one segment
+        // with default attrs covering the full content range. The
+        // wrapping must still happen — without it the user sees the
+        // paragraph collapse to a single line the moment a
+        // paragraph-panel control is clicked.
+        let m = fixed(10.0);
+        // Width 60 fits "hello " then wraps to "world".
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 11,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("hello world", 60.0, 16.0, &segs, m.as_ref());
+        assert!(l.lines.len() >= 2,
+            "expected wrap-induced multi-line layout; got {} lines", l.lines.len());
+    }
+
+    #[test]
     fn right_indent_narrows_wrap_width() {
         let m = fixed(10.0);
         // Plain "hello world" at width 110 fits on one line; with
@@ -1579,6 +1865,94 @@ mod tests {
         let l = layout_with_paragraphs("abcd", 100.0, 16.0, &segs, m.as_ref());
         // Line 0 (first para) takes y=[0, 16]; +20 space_after; line 1 top = 36.
         assert_eq!(l.lines[1].top, 36.0);
+    }
+
+    #[test]
+    fn greedy_hyphenation_breaks_long_word_on_left_aligned_text() {
+        // The user clicks Hyphenate with default (left-aligned) text.
+        // Plain `layout` ignored seg.hyphenate before — only justify
+        // composed with hyphenation. With layout_with_hyphen the long
+        // word splits at a hyphenation candidate and a visible '-'
+        // marker (trailing_hyphen) appears at end of line.
+        let m = fixed(8.0);
+        let opts = HyphenOpts { min_word: 4, min_before: 2, min_after: 2, allow_capitalized: true };
+        // "go information" — 12 chars natural. At 60 px box, "go " (24)
+        // fits and "information" (88) wraps. With hyphenation we can
+        // try "in-" / "infor-" / "informa-" etc. as line endings.
+        let l = layout_with_hyphen(
+            "go information", 80.0, 16.0, opts, m.as_ref());
+        assert!(l.lines.len() >= 2, "should wrap");
+        // The first line should end at a hyphenation break (trailing_hyphen).
+        let line0 = &l.lines[0];
+        assert!(line0.trailing_hyphen,
+            "first line should end with hyphenation marker; \
+             line0={:?}", line0);
+    }
+
+    #[test]
+    fn hyphenation_skips_capitalized_words_by_default() {
+        // "Trump" matches the sample "1ru" pattern at position 1 →
+        // would break as "T-rump". The capitalized-word protection
+        // (default-on, allow_capitalized=false) must skip this word
+        // entirely.
+        let m = fixed(8.0);
+        let opts = HyphenOpts {
+            min_word: 4, min_before: 1, min_after: 1,
+            allow_capitalized: false,
+        };
+        // 80px box; "stuff Trump" natural = 88. Without hyphen
+        // protection "T-rump" would split. With protection, the whole
+        // word "Trump" wraps to next line and the line ends ragged.
+        let l = layout_with_hyphen(
+            "stuff Trump", 60.0, 16.0, opts, m.as_ref());
+        assert!(l.lines.len() >= 2);
+        // No line may end with trailing_hyphen — the only candidate
+        // would be inside "Trump", and that's blocked.
+        assert!(l.lines.iter().all(|line| !line.trailing_hyphen),
+            "Trump must not be hyphenated; lines={:?}",
+            l.lines.iter().map(|l| l.trailing_hyphen).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn hyphenation_allows_capitalized_when_flag_set() {
+        let m = fixed(8.0);
+        let opts = HyphenOpts {
+            min_word: 4, min_before: 1, min_after: 1,
+            allow_capitalized: true,
+        };
+        let l = layout_with_hyphen(
+            "stuff Trump", 60.0, 16.0, opts, m.as_ref());
+        // With protection off, hyphenation may apply (depends on the
+        // sample patterns matching). We only assert the call doesn't
+        // panic and produces ≥1 line.
+        assert!(!l.lines.is_empty());
+    }
+
+    #[test]
+    fn space_before_after_apply_between_sub_paragraphs_within_segment() {
+        // Regression: the user types "a\nb\nc" then sets space_before
+        // — only one wrapper covers all three lines, so the segment
+        // spans three sub-paragraphs (separated by hard '\n'). Without
+        // applying space_before / space_after at sub-paragraph
+        // boundaries, the lines stack tightly and the panel control
+        // looks like a no-op.
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 5,
+            space_before: 12.0,
+            space_after: 6.0,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs("a\nb\nc", 100.0, 16.0, &segs, m.as_ref());
+        // 3 visible lines (no trailing empty since content doesn't
+        // end with '\n').
+        assert_eq!(l.lines.len(), 3);
+        assert_eq!(l.lines[0].top, 0.0, "first sub-para starts at y=0");
+        // Line 1 top = 16 (line 0) + 6 (space_after of sub-para 0) +
+        //              12 (space_before of sub-para 1) = 34.
+        assert_eq!(l.lines[1].top, 34.0,
+            "sub-paragraph 1 must include space_after + space_before");
+        assert_eq!(l.lines[2].top, 68.0);
     }
 
     #[test]
@@ -1857,6 +2231,117 @@ mod tests {
         let last = l.glyphs.last().unwrap();
         assert!((last.right - 100.0).abs() < 1.0,
                 "justify-all last line: expected right≈100, got {}", last.right);
+    }
+
+    #[test]
+    fn justify_repro_user_paragraph_at_modest_width() {
+        // Reproduces the report: a multi-paragraph area text with
+        // ~3-5 words per line, at a modest box width. Body lines must
+        // be stretched to the right edge; only the very last line is
+        // ragged (or repositioned by last_line_align). Without the
+        // composer succeeding, justify_layout returns None and we
+        // fall back to plain layout — body lines render left-flush.
+        let m = fixed(8.0);  // 8 px per char, 16pt approximation
+        let content = "Your healthcare provider at Genome Medical has \
+                       ordered a genetic test with Invitae on your behalf.\n\n\
+                       Invitae is a genetic information company dedicated to \
+                       helping you answer questions about your genetic health.";
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: content.chars().count(),
+            text_align: TextAlign::Justify,
+            last_line_align: TextAlign::Right,
+            ..Default::default()
+        }];
+        // Try a wide-enough box that the composer needs significant
+        // glue stretch but still within the budget. With 8 px per
+        // char, "Your healthcare provider" is 24 × 8 = 192. A 280-wide
+        // box needs ~88 px of stretch on a line with 2 glues, so per
+        // glue ~44; word_spacing default tops out at +33% so stretch
+        // budget per glue is ~2.6 px. Ratio ≈ 88/(2 × 2.6) ≈ 17 →
+        // exceeds max_ratio 10 → infeasible → composer returns None,
+        // and we silently fall back to plain layout (left-aligned).
+        // Body lines of every sub-paragraph must be stretched to (≈)
+        // box width when justify is applied. The original report:
+        // user clicks justify_right, all body lines stay left-flush
+        // because compose() returns None at the strict max_ratio cap
+        // for one of the sub-paragraphs and the whole segment falls
+        // back to plain layout.
+        for box_w in [200.0_f64, 240.0, 280.0, 320.0] {
+            let l = layout_with_paragraphs(content, box_w, 16.0, &segs, m.as_ref());
+            // Find the first body line of each sub-paragraph (the line
+            // before each hard break). It must reach near the right
+            // edge — within 20px tolerance for loose composition cases.
+            let mut found_at_least_one_body = false;
+            for (i, line) in l.lines.iter().enumerate() {
+                let lg = &l.glyphs[line.glyph_start..line.glyph_end];
+                let lr = lg.iter().map(|g| g.right).fold(0.0f64, f64::max);
+                let is_body = !line.hard_break && i + 1 < l.lines.len()
+                    && l.lines.get(i + 1).is_some();
+                // Skip empty lines (between paragraphs).
+                if line.start == line.end { continue; }
+                if is_body && i == 0 {
+                    found_at_least_one_body = true;
+                    assert!(lr > box_w - 20.0,
+                        "box_w={} line 0 (body): expected stretched ≈{}; \
+                         got right={}",
+                        box_w, box_w, lr);
+                }
+            }
+            assert!(found_at_least_one_body, "test needs ≥1 body line");
+        }
+    }
+
+    #[test]
+    fn justify_right_positions_last_line_flush_right() {
+        // JUSTIFY_RIGHT: text-align="justify", text-align-last="right".
+        // Body lines stretch to fill; the last line is *not* stretched
+        // and must be positioned flush right. Without applying
+        // last_line_align in the alignment shift the last line falls
+        // back to the Justify arm (x=0), and the user sees what looks
+        // like a left-aligned paragraph.
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 17,
+            text_align: TextAlign::Justify,
+            last_line_align: TextAlign::Right,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs(
+            "ab cd ef gh ij kl", 100.0, 16.0, &segs, m.as_ref());
+        assert!(l.lines.len() >= 2, "need ≥2 lines for last-line check");
+        let last_line = l.lines.last().unwrap();
+        let last_glyphs = &l.glyphs[last_line.glyph_start..last_line.glyph_end];
+        let last_right = last_glyphs.iter()
+            .map(|g| g.right)
+            .fold(0.0f64, f64::max);
+        assert!((last_right - 100.0).abs() < 1.0,
+                "justify-right last line should sit flush right; got right={}",
+                last_right);
+    }
+
+    #[test]
+    fn justify_center_positions_last_line_centered() {
+        let m = fixed(10.0);
+        let segs = vec![ParagraphSegment {
+            char_start: 0, char_end: 17,
+            text_align: TextAlign::Justify,
+            last_line_align: TextAlign::Center,
+            ..Default::default()
+        }];
+        let l = layout_with_paragraphs(
+            "ab cd ef gh ij kl", 100.0, 16.0, &segs, m.as_ref());
+        assert!(l.lines.len() >= 2);
+        let last_line = l.lines.last().unwrap();
+        let last_glyphs = &l.glyphs[last_line.glyph_start..last_line.glyph_end];
+        let leftmost = last_glyphs.iter().map(|g| g.x).fold(f64::INFINITY, f64::min);
+        let rightmost = last_glyphs.iter().map(|g| g.right).fold(0.0f64, f64::max);
+        let line_w = rightmost - leftmost;
+        // Center: leading margin should equal trailing margin.
+        let leading = leftmost;
+        let trailing = 100.0 - rightmost;
+        assert!((leading - trailing).abs() < 1.0,
+            "justify-center last line should be centered; line_w={} leading={} trailing={}",
+            line_w, leading, trailing);
     }
 
     #[test]
