@@ -6,6 +6,7 @@ from panels.paragraph_panel_state import (
     sync_paragraph_panel_from_selection,
     apply_paragraph_panel_to_selection,
     apply_paragraph_panel_mutual_exclusion,
+    ensure_paragraph_wrapper,
     reset_paragraph_panel,
     set_paragraph_panel_field,
     subscribe,
@@ -385,8 +386,13 @@ class TestPhase4ApplyToSelection:
         assert w.text_align == "justify"
         assert w.text_align_last == "center"
 
-    def test_promotes_first_tspan_when_no_wrapper_exists(self):
-        # No tspan with jas_role="paragraph" → first tspan promoted.
+    def test_inserts_empty_wrapper_when_none_exists(self):
+        # No tspan with jas_role="paragraph" → ensure_paragraph_wrapper
+        # prepends a fresh EMPTY wrapper at index 0; the original body
+        # tspan keeps its content at index 1. Promoting the first
+        # tspan would have made build_segments_from_text shrink the
+        # segment range to exclude the wrapper's chars and collapse
+        # the paragraph to a single line.
         from geometry.element import Text
         from geometry.tspan import Tspan
         body = Tspan(id=0, content="plain text")
@@ -398,8 +404,12 @@ class TestPhase4ApplyToSelection:
         store.set_panel("paragraph_panel_content", "left_indent", 12.0)
         apply_paragraph_panel_to_selection(store, model)
         elem = model.document.get_element((0, 0))
+        # Empty wrapper at 0; original body at 1.
         assert elem.tspans[0].jas_role == "paragraph"
+        assert elem.tspans[0].content == ""
         assert elem.tspans[0].jas_left_indent == 12.0
+        assert elem.tspans[1].content == "plain text"
+        assert elem.tspans[1].jas_role is None
 
 
 class TestPhase4Reset:
@@ -588,3 +598,94 @@ class TestPhase9HyphenationDialog:
         assert w.jas_hyphenate_zone is None
         assert w.jas_hyphenate_bias is None
         assert w.jas_hyphenate_capitalized is None
+
+
+# ── ensure_paragraph_wrapper repair helper ─────────────────
+
+
+class TestEnsureParagraphWrapper:
+    def test_no_wrapper_inserts_empty_wrapper_at_index_0(self):
+        # Fresh text: just a body tspan with content, no wrapper.
+        # ensure_paragraph_wrapper must prepend an empty wrapper so
+        # build_segments_from_text counts the body's chars toward the
+        # segment range. Without this, area-text wrapping disappears
+        # the moment a paragraph-panel control is clicked.
+        from geometry.tspan import Tspan
+        tspans = [Tspan(id=0, content="Hello world")]
+        idx = ensure_paragraph_wrapper(tspans)
+        assert idx == [0]
+        assert len(tspans) == 2
+        assert tspans[0].jas_role == "paragraph"
+        assert tspans[0].content == ""
+        assert tspans[1].content == "Hello world"
+        assert tspans[1].jas_role is None
+
+    def test_wrapper_with_content_is_repaired_to_empty_wrapper_plus_body(self):
+        # Legacy "promote first tspan" corruption: a wrapper that
+        # carries body content. The repair demotes it to a body tspan
+        # (clears jas_role + paragraph attrs, keeps the content) and
+        # prepends a fresh empty wrapper inheriting the paragraph attrs.
+        from geometry.tspan import Tspan
+        tspans = [
+            Tspan(id=0, content="Hello world", jas_role="paragraph",
+                  jas_left_indent=12.0, text_align="center"),
+        ]
+        idx = ensure_paragraph_wrapper(tspans)
+        assert idx == [0]
+        assert len(tspans) == 2
+        # New empty wrapper at index 0 inherits paragraph attrs.
+        assert tspans[0].jas_role == "paragraph"
+        assert tspans[0].content == ""
+        assert tspans[0].jas_left_indent == 12.0
+        assert tspans[0].text_align == "center"
+        # Demoted tspan keeps content but loses wrapper role + attrs.
+        assert tspans[1].content == "Hello world"
+        assert tspans[1].jas_role is None
+        assert tspans[1].jas_left_indent is None
+        assert tspans[1].text_align is None
+
+    def test_existing_empty_wrapper_returns_index_unchanged(self):
+        from geometry.tspan import Tspan
+        tspans = [
+            Tspan(id=0, content="", jas_role="paragraph"),
+            Tspan(id=1, content="Hello world"),
+        ]
+        idx = ensure_paragraph_wrapper(tspans)
+        assert idx == [0]
+        assert len(tspans) == 2
+        assert tspans[0].content == ""
+        assert tspans[1].content == "Hello world"
+
+    def test_multiple_wrappers_returned_post_repair(self):
+        from geometry.tspan import Tspan
+        tspans = [
+            Tspan(id=0, content="", jas_role="paragraph"),
+            Tspan(id=1, content="first body"),
+            Tspan(id=2, content="", jas_role="paragraph",
+                  jas_left_indent=24.0),
+            Tspan(id=3, content="second body"),
+        ]
+        idx = ensure_paragraph_wrapper(tspans)
+        assert idx == [0, 2]
+        assert len(tspans) == 4
+        assert tspans[2].jas_left_indent == 24.0
+
+    def test_demote_and_prepend_preserves_character_overrides(self):
+        # A corrupted wrapper that ALSO has font overrides: demoting
+        # must keep font_family/font_size/font_weight on the demoted
+        # body tspan so the rendered text still picks them up.
+        from geometry.tspan import Tspan
+        tspans = [
+            Tspan(id=5, content="hello", jas_role="paragraph",
+                  jas_left_indent=10.0,
+                  font_family="serif", font_size=24.0, font_weight="bold"),
+        ]
+        ensure_paragraph_wrapper(tspans)
+        # Demoted tspan retains character-level overrides.
+        assert tspans[1].id == 5
+        assert tspans[1].content == "hello"
+        assert tspans[1].font_family == "serif"
+        assert tspans[1].font_size == 24.0
+        assert tspans[1].font_weight == "bold"
+        # Paragraph attrs lifted to the new wrapper.
+        assert tspans[0].jas_left_indent == 10.0

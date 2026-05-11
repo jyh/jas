@@ -182,6 +182,11 @@ let get_active_panel_state (store : t) : (string * Yojson.Safe.t) list =
   | Some pid -> (match List.assoc_opt pid store.panels with Some s -> s | None -> [])
   | None -> []
 
+let get_panel_state (store : t) (panel_id : string) : (string * Yojson.Safe.t) list =
+  match List.assoc_opt panel_id store.panels with
+  | Some s -> s
+  | None -> []
+
 let destroy_panel (store : t) (panel_id : string) : unit =
   store.panels <- List.filter (fun (k, _) -> k <> panel_id) store.panels;
   if store.active_panel = Some panel_id then store.active_panel <- None

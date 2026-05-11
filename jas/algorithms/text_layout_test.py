@@ -4,6 +4,7 @@ from algorithms.text_layout import (
     layout, ordered_range,
     layout_with_paragraphs, ParagraphSegment, TextAlign,
     build_paragraph_segments,
+    layout_with_hyphen, HyphenOpts,
 )
 
 
@@ -509,3 +510,212 @@ def test_justify_preserves_char_count():
                                 fixed(10.0))
     assert l.char_count == 17
     assert len(l.glyphs) == 17
+
+
+# ── Cross-port fixes ──────────────────────────────────────
+
+
+def test_justify_right_positions_last_line_flush_right():
+    # JUSTIFY_RIGHT: text-align="justify", text-align-last="right".
+    # Body lines stretch to fill; the last line is *not* stretched and
+    # must be positioned flush right. Without applying last_line_align
+    # in the alignment shift the last line falls back to the Justify
+    # arm (x=0), and the user sees what looks like a left-aligned
+    # paragraph.
+    segs = [ParagraphSegment(char_start=0, char_end=17,
+                              text_align=TextAlign.JUSTIFY,
+                              last_line_align=TextAlign.RIGHT)]
+    l = layout_with_paragraphs("ab cd ef gh ij kl", 100.0, 16.0, segs,
+                                fixed(10.0))
+    assert len(l.lines) >= 2
+    last_line = l.lines[-1]
+    last_glyphs = l.glyphs[last_line.glyph_start:last_line.glyph_end]
+    last_right = max((g.right for g in last_glyphs), default=0.0)
+    assert abs(last_right - 100.0) < 1.0, \
+        f"justify-right last line should sit flush right; got right={last_right}"
+
+
+def test_justify_center_positions_last_line_centered():
+    segs = [ParagraphSegment(char_start=0, char_end=17,
+                              text_align=TextAlign.JUSTIFY,
+                              last_line_align=TextAlign.CENTER)]
+    l = layout_with_paragraphs("ab cd ef gh ij kl", 100.0, 16.0, segs,
+                                fixed(10.0))
+    assert len(l.lines) >= 2
+    last_line = l.lines[-1]
+    last_glyphs = l.glyphs[last_line.glyph_start:last_line.glyph_end]
+    leftmost = min((g.x for g in last_glyphs), default=0.0)
+    rightmost = max((g.right for g in last_glyphs), default=0.0)
+    leading = leftmost
+    trailing = 100.0 - rightmost
+    assert abs(leading - trailing) < 1.0, \
+        f"justify-center last line should be centered; leading={leading} trailing={trailing}"
+
+
+def test_default_segment_with_full_range_wraps_like_no_segments():
+    # Regression: post-apply_paragraph_panel_to_selection the text
+    # element carries a single empty wrapper followed by the body;
+    # build_segments_from_text returns one segment with default attrs
+    # covering the full content range. The wrapping must still happen
+    # — without it the user sees the paragraph collapse to a single
+    # line the moment a paragraph-panel control is clicked.
+    segs = [ParagraphSegment(char_start=0, char_end=11)]
+    l = layout_with_paragraphs("hello world", 60.0, 16.0, segs,
+                                fixed(10.0))
+    assert len(l.lines) >= 2, \
+        f"expected wrap-induced multi-line layout; got {len(l.lines)} lines"
+
+
+def test_space_before_after_apply_between_sub_paragraphs_within_segment():
+    # Regression: the user types "a\nb\nc" then sets space_before —
+    # only one wrapper covers all three lines, so the segment spans
+    # three sub-paragraphs (separated by hard '\n'). Without applying
+    # space_before / space_after at sub-paragraph boundaries within
+    # the segment, the lines stack tightly and the panel control
+    # looks like a no-op.
+    segs = [ParagraphSegment(char_start=0, char_end=5,
+                              space_before=12.0, space_after=6.0)]
+    l = layout_with_paragraphs("a\nb\nc", 100.0, 16.0, segs, fixed(10.0))
+    assert len(l.lines) == 3
+    assert l.lines[0].top == 0.0
+    # Line 1 top = 16 (line 0 height) + 6 (space_after of sub-para 0) +
+    # 12 (space_before of sub-para 1) = 34.
+    assert l.lines[1].top == 34.0, \
+        f"sub-paragraph 1 must include space_after + space_before; got {l.lines[1].top}"
+    assert l.lines[2].top == 68.0
+
+
+def test_greedy_hyphenation_breaks_long_word_on_left_aligned_text():
+    # The user clicks Hyphenate with default (left-aligned) text.
+    # Plain ``layout`` ignored seg.hyphenate before — only justify
+    # composed with hyphenation. With layout_with_hyphen the long
+    # word splits at a hyphenation candidate and a visible '-'
+    # marker (trailing_hyphen) appears at end of line.
+    opts = HyphenOpts(min_word=4, min_before=2, min_after=2,
+                       allow_capitalized=True)
+    # "go information" — 12 chars natural. At 80px box, "go " (24)
+    # fits and "information" (88) wraps. With hyphenation we can try
+    # "in-" / "infor-" / "informa-" etc. as line endings.
+    l = layout_with_hyphen("go information", 80.0, 16.0, opts, fixed(8.0))
+    assert len(l.lines) >= 2, "should wrap"
+    line0 = l.lines[0]
+    assert line0.trailing_hyphen, \
+        f"first line should end with hyphenation marker; line0={line0}"
+
+
+def test_hyphenation_skips_capitalized_words_by_default():
+    # "Trump" matches the sample "1ru" pattern at position 1 → would
+    # break as "T-rump". The capitalized-word protection (default-on,
+    # allow_capitalized=False) must skip this word entirely.
+    opts = HyphenOpts(min_word=4, min_before=1, min_after=1,
+                       allow_capitalized=False)
+    # 60px box; "stuff Trump" natural = 88. Without hyphen
+    # protection "T-rump" would split. With protection, the whole
+    # word "Trump" wraps to next line and the line ends ragged.
+    l = layout_with_hyphen("stuff Trump", 60.0, 16.0, opts, fixed(8.0))
+    assert len(l.lines) >= 2
+    # No line may end with trailing_hyphen — the only candidate
+    # would be inside "Trump", and that's blocked.
+    for line in l.lines:
+        assert not line.trailing_hyphen, \
+            f"Trump must not be hyphenated; lines={[ln.trailing_hyphen for ln in l.lines]}"
+
+
+def test_hyphenation_allows_capitalized_when_flag_set():
+    opts = HyphenOpts(min_word=4, min_before=1, min_after=1,
+                       allow_capitalized=True)
+    l = layout_with_hyphen("stuff Trump", 60.0, 16.0, opts, fixed(8.0))
+    # With protection off, hyphenation may apply (depends on the
+    # sample patterns matching). We only assert the call doesn't
+    # raise and produces ≥1 line.
+    assert len(l.lines) >= 1
+
+
+def test_paragraph_layout_routes_to_hyphen_layout_for_left_aligned_with_hyphenate():
+    # When seg.hyphenate is True and seg.text_align is LEFT (not
+    # JUSTIFY), layout_with_paragraphs must route through
+    # layout_with_hyphen so the long word breaks at a hyphenation
+    # candidate. Without this fix the user clicks Hyphenate on
+    # left-aligned text and nothing visibly changes.
+    segs = [ParagraphSegment(char_start=0, char_end=14,
+                              text_align=TextAlign.LEFT,
+                              hyphenate=True,
+                              hyphenate_min_word=4,
+                              hyphenate_min_before=2,
+                              hyphenate_min_after=2)]
+    l = layout_with_paragraphs("go information", 80.0, 16.0, segs,
+                                fixed(8.0))
+    assert len(l.lines) >= 2
+    # The first line should carry a trailing_hyphen.
+    assert l.lines[0].trailing_hyphen, \
+        "left-aligned text with seg.hyphenate=True should hyphenate-break"
+
+
+def test_justify_hyphenation_marks_line_with_trailing_hyphen():
+    # When justify_layout breaks at a hyphen Penalty (width > 0) the
+    # line must carry trailing_hyphen=True so the renderer can draw
+    # the '-' glyph (source content has no hyphen at the break).
+    # We use a long word in a narrow box so hyphenation kicks in.
+    segs = [ParagraphSegment(char_start=0, char_end=15,
+                              text_align=TextAlign.JUSTIFY,
+                              hyphenate=True,
+                              hyphenate_min_word=4,
+                              hyphenate_min_before=2,
+                              hyphenate_min_after=2)]
+    # 8 px per char; "info information" → "info " (40) ok, then
+    # "information" (88) exceeds 60-wide box; the composer may try a
+    # hyphen break.
+    l = layout_with_paragraphs("info information", 60.0, 16.0, segs,
+                                fixed(8.0))
+    # If no hyphenation candidate fits we may still break; tolerate
+    # both — only assert at least one outcome is well-formed.
+    found_hyphen = any(getattr(line, "trailing_hyphen", False)
+                       for line in l.lines)
+    # The fixture above doesn't guarantee a hyphen-break (depends on
+    # the sample patterns) — assert the field exists and serializes
+    # consistently across the whole layout.
+    for line in l.lines:
+        assert hasattr(line, "trailing_hyphen"), \
+            "LineInfo must expose trailing_hyphen flag"
+        # Default for non-hyphen lines must be False.
+        assert isinstance(line.trailing_hyphen, bool)
+
+
+def test_justify_retries_with_looser_max_ratio_when_strict_fails():
+    # When the strict max_ratio (10) makes compose() return None for
+    # one paragraph, the layout should retry with a much looser cap
+    # (100) so the segment still justifies. Without this the segment
+    # falls back to plain layout (left-aligned) and body lines look
+    # left-flush instead of stretched.
+    # Use a very narrow box where some sub-paragraph is infeasible at
+    # max_ratio=10. We synthesize via a small width with words that
+    # need significant glue stretch.
+    # 8 px per char, "Your healthcare provider" = 24 chars natural=192.
+    # In a 200-wide box, "Your healthcare" (15 chars=120) would be
+    # ~one line; the second body needs significant stretch.
+    content = ("Your healthcare provider at Genome Medical has ordered "
+               "a genetic test with Invitae on your behalf.")
+    segs = [ParagraphSegment(
+        char_start=0, char_end=len(content),
+        text_align=TextAlign.JUSTIFY,
+        last_line_align=TextAlign.RIGHT)]
+    # Use widths the strict cap struggles with; the retry must
+    # produce a valid composition rather than returning None.
+    for box_w in (200.0, 240.0, 280.0):
+        l = layout_with_paragraphs(content, box_w, 16.0, segs, fixed(8.0))
+        # Must produce a layout with multiple lines (retry succeeded
+        # rather than falling back to plain layout via None).
+        assert len(l.lines) >= 2, \
+            f"box_w={box_w}: composer failed even with looser max_ratio cap"
+        # First non-empty body line should reach near right edge.
+        for i, line in enumerate(l.lines):
+            line_glyphs = l.glyphs[line.glyph_start:line.glyph_end]
+            if not line_glyphs:
+                continue
+            lr = max((g.right for g in line_glyphs), default=0.0)
+            if i == 0 and not line.hard_break and i + 1 < len(l.lines):
+                # First body line must be stretched within tolerance
+                # of the box width.
+                assert lr > box_w - 20.0, \
+                    f"box_w={box_w} line 0 (body): expected stretched ≈{box_w}; got {lr}"
+                break

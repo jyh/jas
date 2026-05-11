@@ -43,6 +43,11 @@ class LineInfo:
     # rather than filtering the whole glyph list.
     glyph_start: int = 0
     glyph_end: int = 0
+    # True when the line was wrapped at a hyphenation breakpoint
+    # inside a word — the renderer must append a visible hyphen
+    # glyph at the line's end. The synthetic hyphen advance is
+    # already baked into the line's last visible glyph's `right`.
+    trailing_hyphen: bool = False
 
 
 @dataclass
@@ -134,8 +139,44 @@ class TextLayout:
         return line.end
 
 
+@dataclass
+class HyphenOpts:
+    """Hyphenation options for greedy (non-justify) layout. When
+    passed to :func:`layout_with_hyphen`, the layout will try to
+    break long words at hyphenation candidates instead of wrapping
+    the whole word to the next line. Mirrors Rust ``HyphenOpts``."""
+    min_word: int = 6
+    min_before: int = 2
+    min_after: int = 2
+    # When False, words starting with an uppercase letter are
+    # excluded from hyphenation (proper-noun protection).
+    allow_capitalized: bool = False
+
+
 def layout(content: str, max_width: float, font_size: float,
-           measure: Callable[[str], float]) -> TextLayout:
+           measure: Callable[[str], float],
+           first_line_extra: float = 0.0) -> TextLayout:
+    return _layout_inner(content, max_width, font_size, None, measure,
+                         first_line_extra)
+
+
+def layout_with_hyphen(content: str, max_width: float, font_size: float,
+                        opts: HyphenOpts,
+                        measure: Callable[[str], float],
+                        first_line_extra: float = 0.0) -> TextLayout:
+    """Variant of :func:`layout` that consults hyphenation patterns
+    when a non-whitespace token doesn't fit on the current line.
+    Used by :func:`layout_with_paragraphs` for non-justify segments
+    where ``seg.hyphenate`` is set. Mirrors Rust
+    ``layout_with_hyphen``."""
+    return _layout_inner(content, max_width, font_size, opts, measure,
+                         first_line_extra)
+
+
+def _layout_inner(content: str, max_width: float, font_size: float,
+                   hyph_opts: HyphenOpts | None,
+                   measure: Callable[[str], float],
+                   first_line_extra: float = 0.0) -> TextLayout:
     line_height = font_size
     ascent = font_size * 0.8
     glyphs: list[Glyph] = []
@@ -147,12 +188,25 @@ def layout(content: str, max_width: float, font_size: float,
     line_start_char = 0
     x = 0.0
 
-    def push_line(start: int, end: int, hard_break: bool, line_width: float) -> None:
+    # First line is shifted right by ``first_line_extra`` (positive
+    # for indent, the negative-hanging case is handled by the segment
+    # caller). To keep the line from running past the right edge we
+    # narrow the wrap width for that line only.
+    def _line_max(ln: int) -> float:
+        if max_width <= 0.0:
+            return max_width
+        if ln == 0 and first_line_extra > 0.0:
+            return max(0.0, max_width - first_line_extra)
+        return max_width
+
+    def push_line(start: int, end: int, hard_break: bool, line_width: float,
+                   trailing_hyphen: bool = False) -> None:
         top = line_no * line_height
         lines.append(LineInfo(
             start=start, end=end, hard_break=hard_break,
             top=top, baseline_y=top + ascent,
             height=line_height, width=line_width,
+            trailing_hyphen=trailing_hyphen,
         ))
 
     while idx < n:
@@ -182,7 +236,107 @@ def layout(content: str, max_width: float, font_size: float,
             idx = end
             continue
 
-        if max_width > 0.0 and x + token_w > max_width and x > 0.0:
+        if max_width > 0.0 and x + token_w > _line_max(line_no) and x > 0.0:
+            # Hyphenation: try to split the token at a hyphenation
+            # breakpoint that fits on the current line. Picks the
+            # *largest* prefix that still leaves room for the hyphen,
+            # greedy-style. If no break fits, falls through to the
+            # standard wrap below. Mirrors Rust ``layout_inner``
+            # hyphenation branch.
+            hyphen_split: tuple[int, float] | None = None
+            if hyph_opts is not None:
+                token_chars = list(token)
+                starts_capital = (len(token_chars) > 0
+                                   and token_chars[0].isupper())
+                allowed = (len(token_chars) >= hyph_opts.min_word
+                           and (hyph_opts.allow_capitalized
+                                or not starts_capital))
+                if allowed:
+                    from algorithms.hyphenator import (
+                        EN_US_PATTERNS_SAMPLE as _EN, hyphenate as _hyph,
+                    )
+                    breaks = _hyph(token, _EN,
+                                    hyph_opts.min_before,
+                                    hyph_opts.min_after)
+                    hyphen_w = measure("-")
+                    avail = _line_max(line_no) - x
+                    # Try the largest valid break point first.
+                    for bi in range(len(token_chars) - 1, 0, -1):
+                        if not (bi < len(breaks) and breaks[bi]):
+                            continue
+                        prefix = "".join(token_chars[:bi])
+                        prefix_w = measure(prefix)
+                        if prefix_w + hyphen_w <= avail:
+                            hyphen_split = (bi, prefix_w)
+                            break
+
+            if hyphen_split is not None:
+                split_at, _prefix_w = hyphen_split
+                token_chars = list(token)
+                # Emit the prefix glyphs on the current line, then the
+                # synthetic hyphen, then wrap.
+                for k in range(split_at):
+                    cw = measure(token_chars[k])
+                    glyphs.append(Glyph(
+                        idx=idx + k, line=line_no, x=x, right=x + cw,
+                        baseline_y=line_no * line_height + ascent,
+                        top=line_no * line_height, height=line_height,
+                    ))
+                    x += cw
+                hyphen_w = measure("-")
+                # Synthetic hyphen glyph carries idx = split_at break
+                # point so hit-test still maps to a real char. The
+                # renderer recognises trailing_hyphen on the line and
+                # draws the visible '-' here.
+                glyphs.append(Glyph(
+                    idx=idx + split_at, line=line_no,
+                    x=x, right=x + hyphen_w,
+                    baseline_y=line_no * line_height + ascent,
+                    top=line_no * line_height, height=line_height,
+                ))
+                line_w = x + hyphen_w
+                push_line(line_start_char, idx + split_at, False, line_w,
+                           trailing_hyphen=True)
+                line_no += 1
+                line_start_char = idx + split_at
+                x = 0.0
+                # Place the tail token starting at x=0.
+                tail_chars = token_chars[split_at:]
+                tail_w = sum(measure(c) for c in tail_chars)
+                if max_width > 0.0 and tail_w > _line_max(line_no):
+                    # Char-by-char break.
+                    for k, ch in enumerate(tail_chars):
+                        cw = measure(ch)
+                        if x + cw > _line_max(line_no) and x > 0.0:
+                            push_line(line_start_char, idx + split_at + k,
+                                       False, x)
+                            line_no += 1
+                            line_start_char = idx + split_at + k
+                            x = 0.0
+                        glyphs.append(Glyph(
+                            idx=idx + split_at + k, line=line_no,
+                            x=x, right=x + cw,
+                            baseline_y=line_no * line_height + ascent,
+                            top=line_no * line_height, height=line_height,
+                        ))
+                        x += cw
+                else:
+                    cur_x = x
+                    for k, ch in enumerate(tail_chars):
+                        cw = measure(ch)
+                        glyphs.append(Glyph(
+                            idx=idx + split_at + k, line=line_no,
+                            x=cur_x, right=cur_x + cw,
+                            baseline_y=line_no * line_height + ascent,
+                            top=line_no * line_height, height=line_height,
+                        ))
+                        cur_x += cw
+                    x = cur_x
+                idx = end
+                continue
+
+            # No hyphenation break fits — fall through to standard
+            # wrap-before-token path.
             for g in reversed(glyphs):
                 if g.line != line_no:
                     break
@@ -194,10 +348,10 @@ def layout(content: str, max_width: float, font_size: float,
             line_start_char = idx
             x = 0.0
 
-        if max_width > 0.0 and token_w > max_width and x == 0.0:
+        if max_width > 0.0 and token_w > _line_max(line_no) and x == 0.0:
             for k, ch in enumerate(token):
                 cw = measure(ch)
-                if x + cw > max_width and x > 0.0:
+                if x + cw > _line_max(line_no) and x > 0.0:
                     push_line(line_start_char, idx + k, False, x)
                     line_no += 1
                     line_start_char = idx + k
@@ -299,11 +453,20 @@ class ParagraphSegment:
     last_line_align: "TextAlign" = TextAlign.LEFT
     # ── Phase 10: Hyphenation dialog wiring ──
     hyphenate: bool = False
-    hyphenate_min_word: int = 3
-    hyphenate_min_before: int = 1
-    hyphenate_min_after: int = 1
+    # Defaults match Illustrator / InDesign Hyphenation dialog:
+    # 6 / 2 / 2. The previous 3 / 1 / 1 was loose enough that the
+    # sample pattern set produced "T-rump" (matching ".un1" / "1ru"
+    # patterns at min_before=1).
+    hyphenate_min_word: int = 6
+    hyphenate_min_before: int = 2
+    hyphenate_min_after: int = 2
     # 0 (Better Spacing) ... 6 (Fewer Hyphens)
     hyphenate_bias: int = 0
+    # ``jas:hyphenate-capitalized`` — when False (the default in
+    # Illustrator / InDesign / Word), proper nouns and other words
+    # starting with an uppercase letter are NOT broken at
+    # hyphenation candidates. Avoids breaks like "T-rump".
+    hyphenate_capitalized: bool = False
 
 
 def _trimmed_line_width(line: LineInfo, glyphs: list[Glyph]) -> float:
@@ -370,7 +533,8 @@ def layout_with_paragraphs(
                 hyphenate_min_word=p.hyphenate_min_word,
                 hyphenate_min_before=p.hyphenate_min_before,
                 hyphenate_min_after=p.hyphenate_min_after,
-                hyphenate_bias=p.hyphenate_bias)
+                hyphenate_bias=p.hyphenate_bias,
+                hyphenate_capitalized=p.hyphenate_capitalized)
             segs.append(seg)
         cursor = e
     if cursor < n:
@@ -397,20 +561,49 @@ def layout_with_paragraphs(
         effective_max = max(
             0.0, max_width - seg.left_indent - list_indent - seg.right_indent
         ) if max_width > 0.0 else 0.0
+        # Negative first_line_indent (hanging indent) shifts the
+        # first line LEFT of the left-indent edge — keep the sign so
+        # the per-line offset can hang. Pulling the first line into
+        # negative x relies on the segment's left_indent being large
+        # enough to hold it; clipping is a UI concern handled outside
+        # the layout. Mirrors OCaml text_layout.ml.
+        first_line_extra = 0.0 if has_list else seg.first_line_indent
         # Phase 10: justify segments go through the every-line composer
         # instead of greedy first-fit. Falls back to greedy when the
         # composer can't find a feasible composition.
         para: TextLayout
         if seg.text_align == TextAlign.JUSTIFY and effective_max > 0.0:
             kp_para = _justify_layout_segment(slice_str, effective_max,
-                                                font_size, seg, measure)
+                                                font_size, seg, measure,
+                                                first_line_extra)
             para = kp_para if kp_para is not None else layout(
-                slice_str, effective_max, font_size, measure)
+                slice_str, effective_max, font_size, measure,
+                first_line_extra)
+        elif seg.hyphenate and effective_max > 0.0:
+            # Non-justify segment with hyphenate enabled: greedy
+            # layout with the hyphenation-aware breakpoint search.
+            opts = HyphenOpts(
+                min_word=seg.hyphenate_min_word,
+                min_before=seg.hyphenate_min_before,
+                min_after=seg.hyphenate_min_after,
+                allow_capitalized=getattr(seg, "hyphenate_capitalized", False))
+            para = layout_with_hyphen(slice_str, effective_max,
+                                       font_size, opts, measure,
+                                       first_line_extra)
         else:
-            para = layout(slice_str, effective_max, font_size, measure)
-        first_line_extra = 0.0 if has_list else max(0.0, seg.first_line_indent)
+            para = layout(slice_str, effective_max, font_size, measure,
+                          first_line_extra)
         first_line_no_in_combined = line_count
+        # A segment may span multiple sub-paragraphs (the user typed
+        # "a\nb\nc" then applied panel attrs — one wrapper covers all
+        # three). space_before / space_after are paragraph attributes,
+        # so they must apply between each sub-paragraph too, not just
+        # between top-level segments. Accumulates as we cross hard
+        # breaks within the segment.
+        sub_para_delta = 0.0
         for li, line in enumerate(para.lines):
+            if li > 0 and para.lines[li - 1].hard_break:
+                sub_para_delta += seg.space_after + seg.space_before
             x_shift = seg.left_indent + list_indent \
                 + (first_line_extra if li == 0 else 0.0)
             line_avail = max(0.0, effective_max - (first_line_extra if li == 0 else 0.0)) \
@@ -424,7 +617,14 @@ def layout_with_paragraphs(
             left_hang_w = 0.0
             right_hang_w = 0.0
             if seg.hanging_punctuation:
-                allow_left = seg.text_align in (TextAlign.LEFT, TextAlign.CENTER)
+                # Justify is treated like Left/Center for left-edge
+                # hangs: the body composer stretches the line to fill
+                # the max width, but leading punctuation should still
+                # hang into the margin so the visible left edge of the
+                # paragraph is straight. Right hangs on Justify body
+                # lines need composer support and stay disabled.
+                allow_left = seg.text_align in (
+                    TextAlign.LEFT, TextAlign.CENTER, TextAlign.JUSTIFY)
                 allow_right = seg.text_align in (TextAlign.RIGHT, TextAlign.CENTER)
                 line_glyphs = para.glyphs[line.glyph_start:line.glyph_end]
                 first_g = next((g for g in line_glyphs if not g.is_trailing_space), None)
@@ -438,10 +638,27 @@ def layout_with_paragraphs(
                     if is_right_hanger(c):
                         right_hang_w = last_g.right - last_g.x
             effective_visible_w = max(0.0, visible_w - left_hang_w - right_hang_w)
-            if seg.text_align == TextAlign.CENTER:
+            # For a justified segment the body lines are stretched to
+            # fill the line width by the composer, so a Justify-arm
+            # shift of 0 leaves them flush with both edges. The LAST
+            # line of each sub-paragraph (line ending in '\n', plus
+            # the segment's overall final line) is *not* stretched, so
+            # it needs to be positioned per ``seg.last_line_align``.
+            # Without the hard_break check the last visible line of
+            # the first sub-paragraph stays left-aligned even when the
+            # user picked Justify Center / Right.
+            is_last_line_of_segment = (li + 1 == len(para.lines))
+            is_last_line_of_subparagraph = line.hard_break
+            if (seg.text_align == TextAlign.JUSTIFY
+                    and (is_last_line_of_segment
+                         or is_last_line_of_subparagraph)):
+                effective_align = seg.last_line_align
+            else:
+                effective_align = seg.text_align
+            if effective_align == TextAlign.CENTER:
                 align_shift = (line_avail - effective_visible_w) / 2.0 - left_hang_w \
                     if line_avail > effective_visible_w else -left_hang_w
-            elif seg.text_align == TextAlign.RIGHT:
+            elif effective_align == TextAlign.RIGHT:
                 align_shift = line_avail - effective_visible_w \
                     if line_avail > effective_visible_w else 0.0
             else:
@@ -451,8 +668,8 @@ def layout_with_paragraphs(
             total_shift = x_shift + align_shift
             orig_start = seg.char_start + line.start
             orig_end = seg.char_start + line.end
-            top = y_offset + line.top
-            baseline = y_offset + line.baseline_y
+            top = y_offset + line.top + sub_para_delta
+            baseline = y_offset + line.baseline_y + sub_para_delta
             glyph_start = len(all_glyphs)
             for g in para.glyphs[line.glyph_start:line.glyph_end]:
                 all_glyphs.append(Glyph(
@@ -460,8 +677,8 @@ def layout_with_paragraphs(
                     line=first_line_no_in_combined + li,
                     x=g.x + total_shift,
                     right=g.right + total_shift,
-                    baseline_y=g.baseline_y + y_offset,
-                    top=g.top + y_offset,
+                    baseline_y=g.baseline_y + y_offset + sub_para_delta,
+                    top=g.top + y_offset + sub_para_delta,
                     height=g.height,
                     is_trailing_space=g.is_trailing_space))
             glyph_end = len(all_glyphs)
@@ -471,10 +688,11 @@ def layout_with_paragraphs(
                 top=top, baseline_y=baseline,
                 height=line.height,
                 width=visible_w + total_shift,
-                glyph_start=glyph_start, glyph_end=glyph_end))
+                glyph_start=glyph_start, glyph_end=glyph_end,
+                trailing_hyphen=line.trailing_hyphen))
             line_count += 1
         if para.lines:
-            y_offset += len(para.lines) * line_height
+            y_offset += len(para.lines) * line_height + sub_para_delta
         y_offset += seg.space_after
 
     if not all_lines:
@@ -511,6 +729,16 @@ def build_paragraph_segments(
             marker_gap = MARKER_GAP_PT if list_style is not None else 0.0
             ta = _text_align_from(t.text_align, is_area)
             lla = _last_line_align_from(t.text_align_last, ta, is_area)
+            _ws_min = t.jas_word_spacing_min if t.jas_word_spacing_min is not None else 80.0
+            _ws_des = t.jas_word_spacing_desired if t.jas_word_spacing_desired is not None else 100.0
+            _ws_max = t.jas_word_spacing_max if t.jas_word_spacing_max is not None else 133.0
+            # Sanity-clamp: jas_word_spacing_desired out of [min,max] is
+            # invalid data and would produce 0-width or negative glue,
+            # squashing words together. Snap into range.
+            if _ws_des < _ws_min:
+                _ws_des = _ws_min
+            if _ws_des > _ws_max:
+                _ws_des = _ws_max
             current = ParagraphSegment(
                 char_start=cursor, char_end=cursor,
                 left_indent=t.jas_left_indent or 0.0,
@@ -521,15 +749,22 @@ def build_paragraph_segments(
                 text_align=ta,
                 list_style=list_style, marker_gap=marker_gap,
                 hanging_punctuation=bool(t.jas_hanging_punctuation),
-                word_spacing_min=t.jas_word_spacing_min if t.jas_word_spacing_min is not None else 80.0,
-                word_spacing_desired=t.jas_word_spacing_desired if t.jas_word_spacing_desired is not None else 100.0,
-                word_spacing_max=t.jas_word_spacing_max if t.jas_word_spacing_max is not None else 133.0,
+                word_spacing_min=_ws_min,
+                word_spacing_desired=_ws_des,
+                word_spacing_max=_ws_max,
                 last_line_align=lla,
                 hyphenate=bool(t.jas_hyphenate),
-                hyphenate_min_word=int(t.jas_hyphenate_min_word) if t.jas_hyphenate_min_word is not None else 3,
-                hyphenate_min_before=int(t.jas_hyphenate_min_before) if t.jas_hyphenate_min_before is not None else 1,
-                hyphenate_min_after=int(t.jas_hyphenate_min_after) if t.jas_hyphenate_min_after is not None else 1,
-                hyphenate_bias=int(t.jas_hyphenate_bias) if t.jas_hyphenate_bias is not None else 0)
+                # Defaults match Illustrator / InDesign Hyphenation
+                # dialog: 6 / 2 / 2 (was 3 / 1 / 1, which broke
+                # "T-rump" via the sample pattern set).
+                hyphenate_min_word=int(t.jas_hyphenate_min_word) if t.jas_hyphenate_min_word is not None else 6,
+                hyphenate_min_before=int(t.jas_hyphenate_min_before) if t.jas_hyphenate_min_before is not None else 2,
+                hyphenate_min_after=int(t.jas_hyphenate_min_after) if t.jas_hyphenate_min_after is not None else 2,
+                hyphenate_bias=int(t.jas_hyphenate_bias) if t.jas_hyphenate_bias is not None else 0,
+                # Capitalized words (proper nouns) excluded from
+                # hyphenation by default per Illustrator / InDesign /
+                # Word convention.
+                hyphenate_capitalized=bool(t.jas_hyphenate_capitalized) if t.jas_hyphenate_capitalized is not None else False)
         else:
             cursor += body_chars
     if current is not None:
@@ -738,12 +973,13 @@ def _justify_layout_segment(
     font_size: float,
     seg: ParagraphSegment,
     measure: Callable[[str], float],
+    first_line_extra: float = 0.0,
 ) -> TextLayout | None:
     """Justify-mode line layout via the every-line composer. Returns
     ``None`` when no feasible composition exists (caller falls back
     to greedy first-fit). Mirrors Rust ``justify_layout``."""
     from algorithms.knuth_plass import (
-        compose, KPBox, KPGlue, KPPenalty, PENALTY_INFINITY,
+        compose, KPBox, KPGlue, KPOpts, KPPenalty, PENALTY_INFINITY,
     )
     from algorithms.hyphenator import (
         EN_US_PATTERNS_SAMPLE, hyphenate as _hyphenate,
@@ -803,7 +1039,15 @@ def _justify_layout_segment(
                 i += 1
             word = "".join(slice_chars[word_start:i])
             word_w = measure(word)
-            if seg.hyphenate and len(word) >= seg.hyphenate_min_word:
+            # Hyphenation candidates inside the word. Capitalized
+            # words (proper nouns) are excluded unless explicitly
+            # allowed — without this, "Trump" hyphenates to
+            # "T-rump" via the sample pattern set.
+            starts_capital = bool(word) and word[0].isupper()
+            if (seg.hyphenate
+                    and len(word) >= seg.hyphenate_min_word
+                    and (getattr(seg, "hyphenate_capitalized", False)
+                         or not starts_capital)):
                 breaks = _hyphenate(word, EN_US_PATTERNS_SAMPLE,
                                      seg.hyphenate_min_before,
                                      seg.hyphenate_min_after)
@@ -825,15 +1069,59 @@ def _justify_layout_segment(
             else:
                 items.append(KPBox(width=word_w,
                                     char_idx=para_start + word_start))
-        # End-of-paragraph terminator.
-        items.append(KPGlue(width=0.0, stretch=1e9, shrink=0.0,
-                             char_idx=para_start + len(slice_chars)))
-        items.append(KPPenalty(width=0.0, value=-PENALTY_INFINITY,
-                                flagged=False,
-                                char_idx=para_start + len(slice_chars)))
+        # End-of-paragraph terminator. The line-end penalty forces
+        # KP to break here. A fil-glue lets the composer absorb
+        # arbitrary slack into the last line — necessary for
+        # feasibility when the paragraph contains an unbreakable
+        # word wider than the line, or a short last line that can't
+        # stretch to max_width within the regular glue cap. For
+        # Justify All we'd rather omit the fil-glue so KP picks
+        # compositions whose last line stretches reasonably from
+        # regular glues (project_justify_all_kp_fix.md), but
+        # leaving it out makes pathological inputs (a too-long
+        # word, a too-short last line) fail KP and fall back to a
+        # ragged-left greedy layout. Build both item lists and try
+        # the no-fil-glue list first when JUSTIFY is asked; on
+        # failure retry with fil-glue.
+        terminator_idx = para_start + len(slice_chars)
+        items_with_fg = list(items)
+        items_with_fg.append(KPGlue(width=0.0, stretch=1e9, shrink=0.0,
+                                     char_idx=terminator_idx))
+        items_with_fg.append(KPPenalty(width=0.0, value=-PENALTY_INFINITY,
+                                        flagged=False,
+                                        char_idx=terminator_idx))
+        items_no_fg = list(items)
+        items_no_fg.append(KPPenalty(width=0.0, value=-PENALTY_INFINITY,
+                                      flagged=False,
+                                      char_idx=terminator_idx))
 
-        breaks = compose(items, [max_width])
-        if breaks is None or not breaks:
+        # Only the very first line of the very first sub-paragraph
+        # carries the indent — subsequent sub-paragraphs (split on
+        # '\n') start a fresh line at the normal left edge.
+        if k == 0 and first_line_extra > 0.0:
+            line_widths = [max(0.0, max_width - first_line_extra), max_width]
+        else:
+            line_widths = [max_width]
+
+        def _try_compose(items_list):
+            opts = KPOpts()
+            br = compose(items_list, line_widths, opts)
+            if br is None or not br:
+                opts = KPOpts()
+                opts.max_ratio = 100.0
+                br = compose(items_list, line_widths, opts)
+            return br if br else None
+
+        if seg.last_line_align == TextAlign.JUSTIFY:
+            breaks = _try_compose(items_no_fg)
+            items = items_no_fg
+            if not breaks:
+                breaks = _try_compose(items_with_fg)
+                items = items_with_fg
+        else:
+            breaks = _try_compose(items_with_fg)
+            items = items_with_fg
+        if not breaks:
             return None
 
         prev_break: int | None = None
@@ -856,18 +1144,35 @@ def _justify_layout_segment(
                                   if ii + 1 < len(items)
                                   else (n + para_start))
                     ci = item.char_idx
-                    while ci < min(chunk_end, para_start + len(slice_chars)):
-                        ch = chars[ci]
-                        cw = measure(ch)
+                    box_end = min(chunk_end, para_start + len(slice_chars))
+                    # Position chars within the box using *prefix*
+                    # measurements of the box text rather than
+                    # summing single-char widths. KP measured the box
+                    # as a whole (with kerning); summing individual
+                    # chars typically over-reports the width because
+                    # kerning between adjacent glyphs is missing.
+                    # Without this, justified lines visibly overflow
+                    # the right margin by the cumulative kerning gap.
+                    word_text = "".join(chars[ci:box_end])
+                    word_origin = x
+                    pos = ci
+                    prev_w = 0.0
+                    while pos < box_end:
+                        prefix = word_text[:pos - ci + 1]
+                        cur_w = measure(prefix)
+                        cw = cur_w - prev_w
                         all_glyphs.append(Glyph(
-                            idx=ci, line=next_line_no,
-                            x=x, right=x + cw,
+                            idx=pos, line=next_line_no,
+                            x=word_origin + prev_w,
+                            right=word_origin + cur_w,
                             baseline_y=baseline_y, top=top,
                             height=line_height,
                             is_trailing_space=False))
-                        x += cw
-                        line_end_char = ci + 1
-                        ci += 1
+                        prev_w = cur_w
+                        line_end_char = pos + 1
+                        pos += 1
+                    x = word_origin + prev_w
+                    ci = box_end
                 elif isinstance(item, KPGlue):
                     run_end = (items[ii + 1].char_idx
                                 if ii + 1 < len(items)
@@ -920,12 +1225,26 @@ def _justify_layout_segment(
             glyph_end = len(all_glyphs)
             hard_break = (is_last and para_end_excl < n
                           and chars[para_end_excl] == "\n")
+            # The renderer needs to draw a visible hyphen at end of
+            # line when the composer broke inside a word at a
+            # hyphenation penalty. The penalty's ``width`` is the
+            # hyphen advance (already baked into x), and ``width > 0``
+            # distinguishes a hyphen penalty from the terminator
+            # penalty (zero width). Source content has no hyphen at
+            # this position, so without the explicit signal the
+            # renderer would draw "exam" instead of "exam-".
+            trailing_hyphen = False
+            if to_ < len(items):
+                term = items[to_]
+                if isinstance(term, KPPenalty) and term.width > 0:
+                    trailing_hyphen = True
             all_lines.append(LineInfo(
                 start=line_start_char, end=line_end_char,
                 hard_break=hard_break,
                 top=top, baseline_y=baseline_y,
                 height=line_height, width=x,
-                glyph_start=glyph_start, glyph_end=glyph_end))
+                glyph_start=glyph_start, glyph_end=glyph_end,
+                trailing_hyphen=trailing_hyphen))
             next_line_no += 1
             prev_break = to_
 

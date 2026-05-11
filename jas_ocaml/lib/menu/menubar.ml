@@ -251,7 +251,12 @@ let paste_clipboard (model : Model.model) offset () =
         model#set_document { doc with layers = new_layers;
                                       selection = !new_sel }
       end else begin
-        (* Plain text: create a Text element *)
+        (* Plain text: create a Text element. Sanitize first so an
+           OS-clipboard payload with stray non-UTF-8 bytes can't
+           crash the canvas draw — Cairo's show_text aborts on
+           invalid UTF-8. Drop bytes ≥ 0x80 when the input isn't
+           valid UTF-8 as a whole. *)
+        let text = Type_tool.sanitize_utf8 text in
         let elem = Element.make_text (offset) (offset +. 16.0) text in
         let idx = doc.Document.selected_layer in
         let base = match doc.Document.layers.(idx) with
@@ -732,9 +737,15 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
       | _ -> ()
     ))
   in
-  toggle_panel Workspace_layout.Layers "Layers";
+  toggle_panel Workspace_layout.Align "Align";
+  toggle_panel Workspace_layout.Artboards "Artboards";
+  toggle_panel Workspace_layout.Boolean "Boolean";
+  toggle_panel Workspace_layout.Character "Character";
   toggle_panel Workspace_layout.Color "Color";
-  toggle_panel Workspace_layout.Swatches "Swatches";
-  toggle_panel Workspace_layout.Stroke "Stroke";
+  toggle_panel Workspace_layout.Layers "Layers";
+  toggle_panel Workspace_layout.Magic_wand "Magic Wand";
+  toggle_panel Workspace_layout.Opacity "Opacity";
+  toggle_panel Workspace_layout.Paragraph "Paragraph";
   toggle_panel Workspace_layout.Properties "Properties";
-  toggle_panel Workspace_layout.Magic_wand "Magic Wand"
+  toggle_panel Workspace_layout.Stroke "Stroke";
+  toggle_panel Workspace_layout.Swatches "Swatches"

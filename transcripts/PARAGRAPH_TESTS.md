@@ -122,29 +122,29 @@ If any P0 here fails, stop and flag.
               console error; no visual glitch.
       — last: —
 
-- [ ] **PG-002** [wired] All panel controls render without layout collapse.
+- [x] **PG-002** [wired] All panel controls render without layout collapse.
       Do: Visually scan the open Paragraph panel.
       Expect: 7 alignment icons, Bullets + Numbered List dropdowns, Left /
               Right / First-Line indent rows, Space Before / Space After row,
               Hyphenate checkbox. No overlapping controls, no truncated
               labels, padding matches PARAGRAPH.md §Layout.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-003** [wired] Panel collapses and re-expands.
+- [x] **PG-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: —
+      — last: 2026-05-10 python pass (after fixing dock chevron direction)
 
-- [ ] **PG-004** [wired] Panel closes via context menu / X button.
+- [x] **PG-004** [wired] Panel closes via context menu / X button.
       Do: Right-click header → Close, or click the close affordance.
       Expect: Panel disappears; Window → Paragraph now toggles it back on.
-      — last: —
+      — last: 2026-05-10 python pass (added Close Paragraph to YAML menu + Window menu panel toggles)
 
-- [ ] **PG-005** [wired] Panel floats out of the dock.
+- [x] **PG-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; content still
               interactive; returns to dock on drag back.
-      — last: —
+      — last: 2026-05-10 python pass (added drag-to-detach + drag-from-floating-back-to-dock)
 
 ---
 
@@ -152,83 +152,83 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **PG-010** [wired] Default alignment on empty state is Align Left.
+- [x] **PG-010** [wired] Default alignment on empty state is Align Left.
       Setup: No selection.
       Do: Open the panel.
       Expect: `pg_align_left` icon is checked (filled / highlighted); the
               other six alignment buttons are unchecked.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-011** [wired] Click each alignment icon — exactly one stays checked.
+- [x] **PG-011** [wired] Click each alignment icon — exactly one stays checked.
       Setup: Area-text fixture, paragraph selected.
       Do: Click Align Center.
       Expect: Only `pg_align_center` is checked; Align Left unchecks;
               canvas reflows to center.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-012** [wired] Align Left re-selects from any other alignment.
+- [x] **PG-012** [wired] Align Left re-selects from any other alignment.
       Setup: Area-text with Align Right active.
       Do: Click Align Left.
       Expect: Only `pg_align_left` checked; selection reflows left-aligned
               with ragged right edge.
-      — last: —
+      — last: 2026-05-10 python pass
 
 **P1**
 
-- [ ] **PG-013** [wired] Align Center reflows selection.
+- [x] **PG-013** [wired] Align Center reflows selection.
       Setup: Area text with multiple lines.
       Do: Click `pg_align_center`.
       Expect: Every line's midpoint within the wrapping frame; both edges
               ragged.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-014** [wired] Align Right reflows selection.
+- [x] **PG-014** [wired] Align Right reflows selection.
       Setup: Area text with multiple lines.
       Do: Click `pg_align_right`.
       Expect: Every line's right edge flush to the frame's right edge; left
               edge ragged.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-015** [wired] Justify Left stretches body lines only.
+- [x] **PG-015** [wired] Justify Left stretches body lines only.
       Setup: Area text with 3+ lines.
       Do: Click `pg_justify_left`.
       Expect: All lines except the last stretch to both edges with inter-word
               spacing adjusted; last line stays left-aligned with natural
               spacing.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-016** [wired] Justify Center last-line behavior.
+- [x] **PG-016** [wired] Justify Center last-line behavior.
       Setup: Area text with 3+ lines.
       Do: Click `pg_justify_center`.
       Expect: Body lines fill the frame; last line is centered.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-017** [wired] Justify Right last-line behavior.
+- [x] **PG-017** [wired] Justify Right last-line behavior.
       Setup: Area text with 3+ lines.
       Do: Click `pg_justify_right`.
       Expect: Body lines fill the frame; last line is right-aligned.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-018** [wired] Justify All forces the last line too.
+- [x] **PG-018** [wired] Justify All forces the last line too.
       Setup: Area text with 3+ lines.
       Do: Click `pg_justify_all`.
       Expect: Every line fills the frame including the last — inter-word
               spacing on the last line visibly wider than natural.
-      — last: —
+      — last: 2026-05-10 python pass
 
 **P2**
 
-- [ ] **PG-019** [wired] Switching between Justify variants updates text-align-last only.
+- [x] **PG-019** [wired] Switching between Justify variants updates text-align-last only.
       Setup: Justify Left active, selection justified.
       Do: Click Justify Center.
       Expect: Body lines keep their existing break points; only the last line
               visually shifts.
-      — last: —
+      — last: 2026-05-10 python pass (fixed: per-sub-paragraph last-line align — line.hard_break now triggers seg.last_line_align like the segment's final line; without this, every sub-paragraph except the final one stayed left-aligned)
 
-- [ ] **PG-020** [wired] Alignment buttons are 24×22 per yaml.
+- [x] **PG-020** [wired] Alignment buttons are 24×22 per yaml.
       Do: Inspect icon dimensions (browser DevTools or visual).
       Expect: Buttons render at 24×22 px with intended center alignment.
-      — last: —
+      — last: 2026-05-10 python pass
 
 ---
 
@@ -236,49 +236,49 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **PG-030** [wired] Bullets dropdown opens and shows 7 options.
+- [x] **PG-030** [wired] Bullets dropdown opens and shows 7 options.
       Setup: Area text selected.
       Do: Click `pg_bullets`.
       Expect: Dropdown shows: None, •   Disc, ○   Open Circle, ■   Square,
               □   Open Square, –   Dash, ✓   Check (with glyph preview).
-      — last: —
+      — last: 2026-05-10 python pass (with side-fixes: Type-tool screen→doc coord conversion, marquee draws at correct zoom/pan, ShortcutOverride event interception so single-letter keys reach text editor)
 
-- [ ] **PG-031** [wired] Numbered List dropdown opens and shows 6 options.
+- [x] **PG-031** [wired] Numbered List dropdown opens and shows 6 options.
       Setup: Area text selected.
       Do: Click `pg_numbered_list`.
       Expect: Dropdown shows: None, 1.   Decimal, a.   Lower Alpha,
               A.   Upper Alpha, i.   Lower Roman, I.   Upper Roman.
-      — last: —
+      — last: 2026-05-10 python pass
 
 **P1**
 
-- [ ] **PG-032** [wired] Selecting a bullet renders the marker glyph.
+- [x] **PG-032** [wired] Selecting a bullet renders the marker glyph.
       Setup: Area text with 2 paragraphs selected.
       Do: Bullets → •   Disc.
       Expect: Each paragraph gains a disc marker at its left; text is pushed
               right by the 12pt marker gap.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-033** [wired] Selecting a numbered style renders counters.
+- [x] **PG-033** [wired] Selecting a numbered style renders counters.
       Setup: Three paragraphs selected.
       Do: Numbered List → 1.   Decimal.
       Expect: Paragraphs render "1." "2." "3." with the counter gap before
               each body; counter indices follow §Counter run rule.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-034** [wired] Bullets and Numbered List are mutually exclusive.
+- [x] **PG-034** [wired] Bullets and Numbered List are mutually exclusive.
       Setup: Area text with Bullets → •   Disc active.
       Do: Numbered List → 1.   Decimal.
       Expect: Bullets dropdown snaps back to None; canvas markers change from
               discs to decimal counters.
-      — last: —
+      — last: 2026-05-10 python pass (icon_select handler now routes paragraph panel writes through set_paragraph_panel_field for mutual exclusion)
 
-- [ ] **PG-035** [wired] Selecting None clears the marker.
+- [x] **PG-035** [wired] Selecting None clears the marker.
       Setup: Area text with Numbered List active.
       Do: Numbered List → None.
       Expect: Counters disappear; text reflows to the left edge without
               marker gap.
-      — last: —
+      — last: 2026-05-10 python pass
 
 **P2**
 
@@ -306,46 +306,46 @@ If any P0 here fails, stop and flag.
 
 **P0**
 
-- [ ] **PG-050** [wired] Left Indent accepts positive values only.
+- [x] **PG-050** [wired] Left Indent accepts positive values only.
       Setup: Area text selected.
       Do: Enter "24" into `pg_left_indent`.
       Expect: Field accepts 24; every line of the selection shifts right by
               24pt.
-      — last: —
+      — last: 2026-05-10 python pass (number_input handler routes paragraph panel writes through set_paragraph_panel_field)
 
-- [ ] **PG-051** [wired] Right Indent narrows wrap width.
+- [x] **PG-051** [wired] Right Indent narrows wrap width.
       Setup: Area text, one long line selected.
       Do: Enter "36" into `pg_right_indent`.
       Expect: Lines wrap 36pt before the previous right edge; text doesn't
               shift x, just wraps earlier.
-      — last: —
+      — last: 2026-05-10 python pass
 
-- [ ] **PG-052** [wired] First-Line Indent shifts only the first line.
+- [x] **PG-052** [wired] First-Line Indent shifts only the first line.
       Setup: Area text with 3+ lines.
       Do: Enter "24" into `pg_first_line_indent`.
       Expect: Line 1 starts 24pt to the right of the left-indent edge; lines
               2+ start at the normal left edge.
-      — last: —
+      — last: 2026-05-10 python pass (greedy + KP layouts now narrow first-line wrap width by first_line_indent so the indented line doesn't overflow the right margin)
 
 **P1**
 
-- [ ] **PG-053** [wired] Negative First-Line Indent produces hanging indent.
+- [x] **PG-053** [wired] Negative First-Line Indent produces hanging indent.
       Setup: Area text, left_indent = 24, 3+ lines.
       Do: Enter "-12" into `pg_first_line_indent`.
       Expect: Line 1 starts 12pt to the left of lines 2+ (hang); no clipping.
-      — last: —
+      — last: 2026-05-10 python pass (removed max(0.0, ...) clamp on first_line_extra so negative values produce a hang shift)
 
-- [ ] **PG-054** [wired] Indent writes commit on Enter.
+- [x] **PG-054** [wired] Indent writes commit on Enter.
       Setup: Area text selected.
       Do: Enter "36" then press Enter in `pg_left_indent`.
       Expect: Canvas reflows on Enter, not on every keystroke.
-      — last: —
+      — last: 2026-05-10 python pass (number_input panel writes only fire on editingFinished, not valueChanged)
 
-- [ ] **PG-055** [wired] Indent field reflects existing selection attributes.
+- [x] **PG-055** [wired] Indent field reflects existing selection attributes.
       Setup: Select a paragraph wrapper with jas:left-indent=48.
       Do: Observe panel.
       Expect: `pg_left_indent` shows 48.
-      — last: —
+      — last: 2026-05-10 python pass
 
 **P2**
 

@@ -61,6 +61,78 @@ let _platform_effects_for (ctrl : Controller.controller)
   :: ("close_dialog", close_dialog_h)
   :: Yaml_tool_effects.build ctrl
 
+(** Read a Yojson value from the current dialog state list. *)
+let _read_dialog_field (key : string) : Yojson.Safe.t =
+  match List.assoc_opt key (read_state ()) with
+  | Some v -> v
+  | None -> `Null
+
+let _bool_opt v =
+  match v with `Bool b -> Some b | _ -> None
+let _float_opt v =
+  match v with
+  | `Float f -> Some f
+  | `Int n -> Some (float_of_int n)
+  | _ -> None
+let _string_opt v =
+  match v with `String s -> Some s | _ -> None
+
+(** Read the current Hyphenation-dialog state into the values record
+    consumed by [Effects.apply_hyphenation_dialog_to_selection]. *)
+let _hyphenation_values () : Effects.hyphenation_dialog_values =
+  Effects.{
+    hyphenate = _bool_opt (_read_dialog_field "hyphenate");
+    min_word = _float_opt (_read_dialog_field "hyphenate_min_word");
+    min_before = _float_opt (_read_dialog_field "hyphenate_min_before");
+    min_after = _float_opt (_read_dialog_field "hyphenate_min_after");
+    limit = _float_opt (_read_dialog_field "hyphenate_limit");
+    zone = _float_opt (_read_dialog_field "hyphenate_zone");
+    bias = _float_opt (_read_dialog_field "hyphenate_bias");
+    capitalized = _bool_opt (_read_dialog_field "hyphenate_capitalized");
+  }
+
+(** Apply the Paragraph panel's open store to a dialog-driven write.
+    The Paragraph panel store is registered in [Panel_menu] under
+    ``"paragraph_panel_content"``; missing means no Paragraph panel
+    is open and the master mirror is silently skipped. *)
+let _paragraph_panel_store () : State_store.t option =
+  Panel_menu.lookup_panel_store "paragraph_panel_content"
+
+(** Read the current Justification-dialog state into the values
+    record consumed by [Effects.apply_justification_dialog_to_selection]. *)
+let _justification_values () : Effects.justification_dialog_values =
+  Effects.{
+    word_spacing_min = _float_opt (_read_dialog_field "word_spacing_min");
+    word_spacing_desired = _float_opt (_read_dialog_field "word_spacing_desired");
+    word_spacing_max = _float_opt (_read_dialog_field "word_spacing_max");
+    letter_spacing_min = _float_opt (_read_dialog_field "letter_spacing_min");
+    letter_spacing_desired = _float_opt (_read_dialog_field "letter_spacing_desired");
+    letter_spacing_max = _float_opt (_read_dialog_field "letter_spacing_max");
+    glyph_scaling_min = _float_opt (_read_dialog_field "glyph_scaling_min");
+    glyph_scaling_desired = _float_opt (_read_dialog_field "glyph_scaling_desired");
+    glyph_scaling_max = _float_opt (_read_dialog_field "glyph_scaling_max");
+    auto_leading = _float_opt (_read_dialog_field "auto_leading");
+    single_word_justify = _string_opt (_read_dialog_field "single_word_justify");
+  }
+
+(** Native intercept run BEFORE the YAML effects for an
+    [<id>_confirm] dialog action. Reads the live dialog state and
+    invokes the matching apply function. Without this, the YAML
+    confirm action only runs [close_dialog] and the user's edits
+    are silently dropped. *)
+let _maybe_intercept_confirm (action_name : string)
+    (ctrl : Controller.controller) : unit =
+  match action_name with
+  | "paragraph_hyphenation_confirm" ->
+    let values = _hyphenation_values () in
+    let store = match _paragraph_panel_store () with
+      | Some s -> s
+      | None -> State_store.create () in
+    Effects.apply_hyphenation_dialog_to_selection store ctrl values
+  | "paragraph_justification_confirm" ->
+    Effects.apply_justification_dialog_to_selection ctrl (_justification_values ())
+  | _ -> ()
+
 (** Dispatch a YAML action by name with the given resolved params.
     ``dismiss_dialog`` is special-cased to dismiss the dialog widget
     without running effects. All other action names look up the
@@ -74,6 +146,7 @@ let dispatch_action (action_name : string)
   else
     match ctrl, Workspace_loader.load () with
     | Some c, Some ws ->
+      _maybe_intercept_confirm action_name c;
       (match Workspace_loader.json_member "actions" ws.data with
        | Some (`Assoc all_actions) ->
          (match List.assoc_opt action_name all_actions with

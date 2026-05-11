@@ -273,32 +273,14 @@ content:
           col: 4
           children:
             - id: ch_kerning
-              type: combo_box
+              # TEMP: replaced combo_box with number_input to test
+              # whether the combo's wide natural was forcing the dock
+              # pane open. Restore the combo when the width plumbing
+              # is sorted out.
+              type: number_input
               summary: "Kerning"
-              description: >
-                Kerning between characters. Named modes (Auto, Optical,
-                Metrics) pass through to the element's kerning
-                attribute verbatim. Free numeric entry is treated as
-                1/1000 em and serialises to "{N}em". Named-mode text
-                is preserved in the panel and on the element.
+              description: "Kerning between characters."
               style: { width: "100%" }
-              options:
-                - { value: "Auto", label: "Auto" }
-                - { value: "Optical", label: "Optical" }
-                - { value: "Metrics", label: "Metrics" }
-                - { value: "-100", label: "-100" }
-                - { value: "-75", label: "-75" }
-                - { value: "-50", label: "-50" }
-                - { value: "-25", label: "-25" }
-                - { value: "-10", label: "-10" }
-                - { value: "-5", label: "-5" }
-                - { value: "0", label: "0" }
-                - { value: "5", label: "5" }
-                - { value: "10", label: "10" }
-                - { value: "25", label: "25" }
-                - { value: "50", label: "50" }
-                - { value: "75", label: "75" }
-                - { value: "100", label: "100" }
               bind:
                 value: "panel.kerning"
         - type: container
@@ -415,7 +397,7 @@ content:
               icon: char_all_caps
               summary: "All Caps"
               description: "Render the selection in uppercase."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.all_caps"
         - type: container
@@ -427,7 +409,7 @@ content:
               icon: char_small_caps
               summary: "Small Caps"
               description: "Render lowercase letters as x-height-sized capitals."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.small_caps"
         - type: container
@@ -439,7 +421,7 @@ content:
               icon: char_superscript
               summary: "Superscript"
               description: "Position the selection above the baseline."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.superscript"
         - type: container
@@ -451,7 +433,7 @@ content:
               icon: char_subscript
               summary: "Subscript"
               description: "Position the selection below the baseline."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.subscript"
         - type: container
@@ -463,7 +445,7 @@ content:
               icon: char_underline
               summary: "Underline"
               description: "Underline the selected text."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.underline"
         - type: container
@@ -475,7 +457,7 @@ content:
               icon: char_strikethrough
               summary: "Strikethrough"
               description: "Strike through the selected text."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.strikethrough"
 
@@ -578,7 +560,7 @@ content:
               icon: char_snap_baseline
               summary: "Snap: Baseline"
               description: "Snap to the invisible baseline letters sit on."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_baseline"
         - type: container
@@ -590,7 +572,7 @@ content:
               icon: char_snap_x_height
               summary: "Snap: x-Height"
               description: "Snap to the top of lowercase letters (x, a, e, ...)."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_x_height"
         - type: container
@@ -602,7 +584,7 @@ content:
               icon: char_snap_glyph_bounds
               summary: "Snap: Glyph Bounds"
               description: "Snap to the left/right/top/bottom edges of a specific letter."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_glyph_bounds"
         - type: container
@@ -614,7 +596,7 @@ content:
               icon: char_snap_proximity
               summary: "Snap: Proximity Guides"
               description: "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_proximity_guides"
         - type: container
@@ -626,7 +608,7 @@ content:
               icon: char_snap_angular
               summary: "Snap: Angular Guides"
               description: "Snap to the slant lines of letters like V or A."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_angular_guides"
         - type: container
@@ -638,6 +620,6 @@ content:
               icon: char_snap_anchor
               summary: "Snap: Anchor Point"
               description: "Snap to the actual mathematical anchor points on glyph outlines."
-              style: { width: 28, height: 24 }
+              style: { width: 24, height: 24 }
               bind:
                 value: "panel.snap_anchor_point"

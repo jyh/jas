@@ -123,11 +123,11 @@ public enum LayersPanel {
                 opacity: layer.opacity, transform: layer.transform,
                 locked: newLocked, visibility: newVisibility
             )
-            model.document = Document(layers: newLayers,
-                                       selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection,
-                                       artboards: model.document.artboards,
-                                       artboardOptions: model.document.artboardOptions)
+            // .replacing(...) preserves documentSetup / printPreferences
+            // — passing them through the designated init silently drops
+            // any field not enumerated, which would reset the user's
+            // Print dialog state on every layer rename / lock toggle.
+            model.document = model.document.replacing(layers: newLayers)
             return nil
         }
         // Phase 3 Group B: delete/clone/insert. The returned Element (top-
@@ -148,11 +148,8 @@ public enum LayersPanel {
                 let removed = Element.layer(doc.layers[indices[0]])
                 var newLayers = doc.layers
                 newLayers.remove(at: indices[0])
-                model.document = Document(layers: newLayers,
-                                           selectedLayer: doc.selectedLayer,
-                                           selection: doc.selection,
-                                           artboards: doc.artboards,
-                                           artboardOptions: doc.artboardOptions)
+                // See note above: use replacing() to preserve all Document fields.
+                model.document = doc.replacing(layers: newLayers)
                 return removed
             }
             let removed = doc.getElement(indices)
@@ -198,11 +195,8 @@ public enum LayersPanel {
                 let insertIdx = min(indices[0] + 1, doc.layers.count)
                 var newLayers = doc.layers
                 newLayers.insert(layer, at: insertIdx)
-                model.document = Document(layers: newLayers,
-                                           selectedLayer: doc.selectedLayer,
-                                           selection: doc.selection,
-                                           artboards: doc.artboards,
-                                           artboardOptions: doc.artboardOptions)
+                // See note above: use replacing() to preserve all Document fields.
+                model.document = doc.replacing(layers: newLayers)
             } else {
                 model.document = doc.insertElementAfter(indices, element: elem)
             }
@@ -256,11 +250,11 @@ public enum LayersPanel {
             }
             let newLayer = Layer(name: name, children: children)
             newLayers.append(newLayer)
-            model.document = Document(layers: newLayers,
-                                       selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection,
-                                       artboards: model.document.artboards,
-                                       artboardOptions: model.document.artboardOptions)
+            // .replacing(...) preserves documentSetup / printPreferences
+            // — passing them through the designated init silently drops
+            // any field not enumerated, which would reset the user's
+            // Print dialog state on every layer rename / lock toggle.
+            model.document = model.document.replacing(layers: newLayers)
             return nil
         }
 
@@ -370,11 +364,11 @@ public enum LayersPanel {
             let insertIdx = max(0, min(index, model.document.layers.count))
             var newLayers = model.document.layers
             newLayers.insert(elem, at: insertIdx)
-            model.document = Document(layers: newLayers,
-                                       selectedLayer: model.document.selectedLayer,
-                                       selection: model.document.selection,
-                                       artboards: model.document.artboards,
-                                       artboardOptions: model.document.artboardOptions)
+            // .replacing(...) preserves documentSetup / printPreferences
+            // — passing them through the designated init silently drops
+            // any field not enumerated, which would reset the user's
+            // Print dialog state on every layer rename / lock toggle.
+            model.document = model.document.replacing(layers: newLayers)
             return nil
         }
 

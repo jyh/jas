@@ -75,6 +75,24 @@ impl TypeTool {
         self.session.as_ref()
     }
 
+    /// Convert viewport (canvas-element-local) coordinates into document
+    /// coordinates by undoing the model's view transform (zoom + pan).
+    /// Tool entry points receive viewport coords from the dispatch
+    /// site; everything downstream — hit tests, draw bounds, the text
+    /// element's stored x/y — lives in document space, so the
+    /// conversion has to happen up front. Without it, dragging a
+    /// new text rect at non-default zoom/pan creates the element at
+    /// the screen-pixel coordinate, which renders shifted by the
+    /// view transform when the canvas redraws.
+    fn to_doc(model: &Model, x: f64, y: f64) -> (f64, f64) {
+        let z = model.zoom_level;
+        if z == 0.0 {
+            (x, y)
+        } else {
+            ((x - model.view_offset_x) / z, (y - model.view_offset_y) / z)
+        }
+    }
+
     /// Build the layout for the currently edited Text element, if any.
     fn build_layout(&self, model: &Model) -> Option<(TextElem, TextLayout)> {
         let session = self.session.as_ref()?;
@@ -398,6 +416,7 @@ fn relative_luminance(r: f64, g: f64, b: f64) -> f64 {
 
 impl CanvasTool for TypeTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool) {
+        let (x, y) = Self::to_doc(model, x, y);
         // Already editing? Either move the caret inside the same element
         // or end the session and re-process the click.
         if let Some(session) = &self.session {
@@ -452,6 +471,7 @@ impl CanvasTool for TypeTool {
         _alt: bool,
         dragging: bool,
     ) {
+        let (x, y) = Self::to_doc(model, x, y);
         // While editing and dragging: extend selection.
         if let Some(session) = &mut self.session
             && session.drag_active && dragging {
@@ -484,6 +504,7 @@ impl CanvasTool for TypeTool {
     }
 
     fn on_release(&mut self, model: &mut Model, x: f64, y: f64, _shift: bool, _alt: bool) {
+        let (x, y) = Self::to_doc(model, x, y);
         if let Some(session) = self.session.as_mut() {
             session.drag_active = false;
             session.blink_epoch_ms = now_ms();
@@ -726,6 +747,19 @@ impl CanvasTool for TypeTool {
     }
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
+        // Tool state coords (drag rect, caret position, selection
+        // highlights) are stored in document space. The canvas ctx
+        // arrives here in viewport (post-restore) space, so apply
+        // the same view transform `repaint` uses for the document
+        // pass. Saved + restored at exit so other overlays nesting
+        // on top see the original transform.
+        ctx.save();
+        ctx.translate(model.view_offset_x, model.view_offset_y).ok();
+        ctx.scale(model.zoom_level, model.zoom_level).ok();
+        // Stroke / line widths are zoom-invariant: divide by the
+        // zoom so a 1px screen line stays 1px regardless of
+        // zoom_level.
+        let inv_zoom = if model.zoom_level == 0.0 { 1.0 } else { 1.0 / model.zoom_level };
         // Drag-create preview rectangle.
         if self.session.is_none()
             && let State::Dragging {
@@ -741,8 +775,9 @@ impl CanvasTool for TypeTool {
                 let rh = (cur_y - start_y).abs();
                 if rw > 1.0 && rh > 1.0 {
                     ctx.set_stroke_style_str("rgb(100,100,100)");
-                    ctx.set_line_width(1.0);
-                    ctx.set_line_dash(&js_sys::Array::of2(&4.0.into(), &4.0.into()).into())
+                    ctx.set_line_width(inv_zoom);
+                    let dash = 4.0 * inv_zoom;
+                    ctx.set_line_dash(&js_sys::Array::of2(&dash.into(), &dash.into()).into())
                         .ok();
                     ctx.stroke_rect(rx, ry, rw, rh);
                     ctx.set_line_dash(&js_sys::Array::new().into()).ok();
@@ -750,8 +785,14 @@ impl CanvasTool for TypeTool {
             }
 
         // Editing overlay: selection highlights and caret.
-        let Some(session) = &self.session else { return; };
-        let Some((t, lay)) = self.build_layout(model) else { return; };
+        let Some(session) = &self.session else {
+            ctx.restore();
+            return;
+        };
+        let Some((t, lay)) = self.build_layout(model) else {
+            ctx.restore();
+            return;
+        };
 
         let sel_color = selection_color_css(&t);
         let caret_color = accent_color_css(&t);
@@ -802,12 +843,13 @@ impl CanvasTool for TypeTool {
         if cursor_visible(session.blink_epoch_ms) {
             let (cx, cy, ch) = lay.cursor_xy(session.insertion);
             ctx.set_stroke_style_str(&caret_color);
-            ctx.set_line_width(1.5);
+            ctx.set_line_width(1.5 * inv_zoom);
             ctx.begin_path();
             ctx.move_to(t.x + cx, t.y + cy - ch * 0.8);
             ctx.line_to(t.x + cx, t.y + cy + ch * 0.2);
             ctx.stroke();
         }
+        ctx.restore();
     }
 }
 

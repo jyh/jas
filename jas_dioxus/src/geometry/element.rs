@@ -1068,6 +1068,31 @@ impl TextElem {
         self.width > 0.0 && self.height > 0.0
     }
 
+    /// Returns `true` when every tspan can be rendered by the
+    /// flat / paragraph-aware fast path:
+    ///
+    /// - Empty paragraph wrappers (`jas_role == "paragraph"`) are
+    ///   metadata only — `build_segments_from_text` reads them; their
+    ///   character-level fields are ignored at render time, so an
+    ///   empty wrapper never forces the segmented path.
+    /// - Body tspans (no `jas_role`) must carry no character-level
+    ///   overrides; otherwise the per-tspan font / decoration / dx /
+    ///   transform must go through `draw_segmented_text`.
+    ///
+    /// Without this, the moment the Paragraph panel inserts an empty
+    /// wrapper before existing flat content, the renderer flips to
+    /// `draw_segmented_text` (which is single-line) and the paragraph
+    /// collapses visually.
+    pub fn render_is_flat(&self) -> bool {
+        self.tspans.iter().all(|t| {
+            if t.jas_role.as_deref() == Some("paragraph") {
+                t.content.is_empty()
+            } else {
+                t.has_no_overrides()
+            }
+        })
+    }
+
     /// Derived content: the concatenation of each tspan's `content` in
     /// reading order. Replaces the previous flat `content: String` field.
     pub fn content(&self) -> String {
@@ -2162,6 +2187,40 @@ pub fn move_control_points(
                 d: new_d,
                 ..e.clone()
             })
+        }
+        Element::Text(e) => {
+            // Whole-element drag (kind=All): translate. Single-corner
+            // drag: scale font-size / width / height proportionally
+            // about the opposite corner so the fixed corner stays
+            // anchored. Mirrors the Swift implementation.
+            if kind.is_all(4) {
+                let mut new = e.clone();
+                new.x += dx;
+                new.y += dy;
+                return Element::Text(new);
+            }
+            let corner_idx = (0..4).find(|i| kind.contains(*i));
+            let Some(ci) = corner_idx else { return elem.clone(); };
+            let (bx, by, bw, bh) = elem.bounds();
+            let corners = [
+                (bx, by), (bx + bw, by),
+                (bx + bw, by + bh), (bx, by + bh),
+            ];
+            let opp = corners[(ci + 2) % 4];
+            let cur = corners[ci];
+            let nx = cur.0 + dx;
+            let ny = cur.1 + dy;
+            let old_diag = ((cur.0 - opp.0).powi(2) + (cur.1 - opp.1).powi(2)).sqrt();
+            if old_diag <= 0.0 { return elem.clone(); }
+            let new_diag = ((nx - opp.0).powi(2) + (ny - opp.1).powi(2)).sqrt();
+            let scale = (new_diag / old_diag).clamp(0.1, 50.0);
+            let mut new = e.clone();
+            new.x = opp.0 + (e.x - opp.0) * scale;
+            new.y = opp.1 + (e.y - opp.1) * scale;
+            new.font_size = e.font_size * scale;
+            new.width = e.width * scale;
+            new.height = e.height * scale;
+            Element::Text(new)
         }
         _ => elem.clone(),
     }
@@ -4009,6 +4068,74 @@ mod tests {
             "expected w=20 (arc reaches x=20), got w={}", w);
         assert!((h - 20.0).abs() < 1e-6,
             "expected h=20 (arc reaches y=20), got h={}", h);
+    }
+
+    #[test]
+    fn render_is_flat_single_body_no_overrides() {
+        let t = TextElem::from_string(
+            0.0, 0.0, "hello",
+            "sans-serif", 16.0, "normal", "normal", "none",
+            300.0, 200.0, None, None, CommonProps::default(),
+        );
+        assert!(t.render_is_flat());
+    }
+
+    #[test]
+    fn render_is_flat_empty_wrapper_plus_flat_body() {
+        // Regression: after the Paragraph panel inserts a wrapper
+        // before just-typed content the renderer must still take the
+        // paragraph-aware fast path. Otherwise draw_segmented_text
+        // (single-line) renders the body and the paragraph collapses.
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "",
+            "sans-serif", 16.0, "normal", "normal", "none",
+            300.0, 200.0, None, None, CommonProps::default(),
+        );
+        t.tspans = vec![
+            crate::geometry::tspan::Tspan {
+                jas_role: Some("paragraph".into()),
+                ..crate::geometry::tspan::Tspan::default_tspan()
+            },
+            crate::geometry::tspan::Tspan {
+                content: "hello world".into(),
+                ..crate::geometry::tspan::Tspan::default_tspan()
+            },
+        ];
+        assert!(t.render_is_flat(),
+            "wrapper+body must stay on the fast path so wrapping survives");
+    }
+
+    #[test]
+    fn render_is_flat_false_when_wrapper_has_content() {
+        // A wrapper carrying content is corrupt — render_is_flat
+        // refuses it so the segmented path can show that something is
+        // wrong rather than silently dropping the wrapper's chars.
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "",
+            "sans-serif", 16.0, "normal", "normal", "none",
+            300.0, 200.0, None, None, CommonProps::default(),
+        );
+        t.tspans = vec![crate::geometry::tspan::Tspan {
+            jas_role: Some("paragraph".into()),
+            content: "should-be-empty".into(),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        }];
+        assert!(!t.render_is_flat());
+    }
+
+    #[test]
+    fn render_is_flat_false_when_body_has_font_override() {
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "",
+            "sans-serif", 16.0, "normal", "normal", "none",
+            300.0, 200.0, None, None, CommonProps::default(),
+        );
+        t.tspans = vec![crate::geometry::tspan::Tspan {
+            content: "hello".into(),
+            font_weight: Some("bold".into()),
+            ..crate::geometry::tspan::Tspan::default_tspan()
+        }];
+        assert!(!t.render_is_flat());
     }
 
     /// Degenerate arc (zero radius) collapses to a line; bounds match

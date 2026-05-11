@@ -60,6 +60,13 @@ class YamlPanelView(QWidget):
         if self._panel_id == "character_panel_content":
             from panels.panel_menu import set_character_store
             set_character_store(self._store)
+        # Paragraph panel — same pattern: hamburger-menu Hanging
+        # Punctuation toggle and Reset Panel dispatch need to reach
+        # the panel-state bools without threading the store through
+        # every dispatch call site.
+        if self._panel_id == "paragraph_panel_content":
+            from panels.panel_menu import set_paragraph_store
+            set_paragraph_store(self._store)
 
         # Run init expressions
         self._run_init()

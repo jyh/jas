@@ -19,6 +19,14 @@ val default_tspan : unit -> tspan
     parent element. *)
 val has_no_overrides : tspan -> bool
 
+(** [true] when every tspan can be rendered by the flat /
+    paragraph-aware fast path: empty paragraph wrappers are
+    transparent (their character-level fields are ignored at render
+    time) and body tspans must have no overrides. Lets the renderer
+    keep paragraph-aware wrapping after the Paragraph panel inserts
+    an empty wrapper before existing content. *)
+val render_is_flat : tspan array -> bool
+
 (** Concatenation of every tspan's content in reading order. Used to
     reconstruct the derived [Text.content] value. *)
 val concat_content : tspan array -> string

@@ -19,6 +19,7 @@ pub fn PanelMenuOverlay() -> Element {
     let mut panel_menu = use_context::<PanelMenuState>();
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
+    let dialog_ctx = use_context::<crate::interpreter::dialog_view::DialogCtx>();
 
     let Some(open) = (panel_menu.open)() else {
         return rsx! {};
@@ -37,6 +38,8 @@ pub fn PanelMenuOverlay() -> Element {
         match item {
             PanelMenuItem::Action { label, command, shortcut } => {
                 let act = act.clone();
+                let app_for_dialog = app.clone();
+                let dialog_ctx = dialog_ctx.clone();
                 let cmd = command;
                 let display_label = super::panel_dynamic_label(kind, cmd, &st)
                     .unwrap_or_else(|| label.to_string());
@@ -46,9 +49,31 @@ pub fn PanelMenuOverlay() -> Element {
                         style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                         onmousedown: move |evt: Event<MouseData>| {
                             evt.stop_propagation();
-                            (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                super::panel_dispatch(kind, cmd, addr, st);
-                            }));
+                            // Some menu actions open dialogs and need
+                            // a Signal<Option<DialogState>> handle
+                            // (out of reach from the AppState-only
+                            // panel_dispatch). Intercept those here
+                            // and call open_dialog directly.
+                            let dialog_id = match cmd {
+                                "open_paragraph_justification" => Some("paragraph_justification"),
+                                "open_paragraph_hyphenation" => Some("paragraph_hyphenation"),
+                                _ => None,
+                            };
+                            if let Some(did) = dialog_id {
+                                let mut sig = dialog_ctx.0;
+                                let st_borrow = app_for_dialog.borrow();
+                                let live = crate::workspace::dock_panel::
+                                    build_live_state_map(&st_borrow);
+                                drop(st_borrow);
+                                let empty: serde_json::Map<String, serde_json::Value> =
+                                    serde_json::Map::new();
+                                crate::interpreter::dialog_view::open_dialog(
+                                    &mut sig, did, &empty, &live);
+                            } else {
+                                (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    super::panel_dispatch(kind, cmd, addr, st);
+                                }));
+                            }
                             panel_menu.open.set(None);
                         },
                         span { "{display_label}" }

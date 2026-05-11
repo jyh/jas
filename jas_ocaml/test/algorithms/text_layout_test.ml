@@ -454,6 +454,192 @@ let phase10_tests = [
     justify_preserves_char_count;
 ]
 
+(* ── Manual-test fixes ─────────────────────────────────────── *)
+
+let default_segment_with_full_range_wraps_like_no_segments () =
+  (* Regression: post-[apply_paragraph_panel_to_selection] the text
+     element carries a single empty wrapper followed by the body;
+     [build_segments_from_text] returns one segment with default
+     attrs covering the full content range. The wrapping must still
+     happen — without it the user sees the paragraph collapse to a
+     single line the moment a paragraph-panel control is clicked. *)
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 11 }] in
+  let l = Text_layout.layout_with_paragraphs "hello world" 60.0 16.0 segs m in
+  Alcotest.(check bool)
+    (Printf.sprintf "expected wrap-induced multi-line layout; got %d lines"
+       (Array.length l.lines))
+    true (Array.length l.lines >= 2)
+
+let justify_right_positions_last_line_flush_right () =
+  (* JUSTIFY_RIGHT: text-align="justify", text-align-last="right".
+     Body lines stretch to fill; the last line is *not* stretched
+     and must be positioned flush right. Without applying
+     [last_line_align] in the alignment shift the last line falls
+     back to the Justify arm (x=0) and looks left-aligned. *)
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 17;
+                text_align = Text_layout.Justify;
+                last_line_align = Text_layout.Right }] in
+  let l = Text_layout.layout_with_paragraphs
+            "ab cd ef gh ij kl" 100.0 16.0 segs m in
+  Alcotest.(check bool) "need >=2 lines" true (Array.length l.lines >= 2);
+  let last_line = l.lines.(Array.length l.lines - 1) in
+  let last_right = ref 0.0 in
+  for gi = last_line.glyph_start to last_line.glyph_end - 1 do
+    let g = l.glyphs.(gi) in
+    if g.right > !last_right then last_right := g.right
+  done;
+  Alcotest.(check (float 1.0)) "last line flush right" 100.0 !last_right
+
+let justify_center_positions_last_line_centered () =
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 17;
+                text_align = Text_layout.Justify;
+                last_line_align = Text_layout.Center }] in
+  let l = Text_layout.layout_with_paragraphs
+            "ab cd ef gh ij kl" 100.0 16.0 segs m in
+  Alcotest.(check bool) "need >=2 lines" true (Array.length l.lines >= 2);
+  let last_line = l.lines.(Array.length l.lines - 1) in
+  let leftmost = ref infinity in
+  let rightmost = ref 0.0 in
+  for gi = last_line.glyph_start to last_line.glyph_end - 1 do
+    let g = l.glyphs.(gi) in
+    if g.x < !leftmost then leftmost := g.x;
+    if g.right > !rightmost then rightmost := g.right
+  done;
+  let leading = !leftmost in
+  let trailing = 100.0 -. !rightmost in
+  Alcotest.(check (float 1.0)) "centered: leading == trailing"
+    leading trailing
+
+let space_before_after_apply_between_sub_paragraphs_within_segment () =
+  (* Regression: the user types "a\nb\nc" then sets space_before —
+     only one wrapper covers all three lines, so the segment spans
+     three sub-paragraphs (separated by hard '\n'). Without
+     applying space_before / space_after at sub-paragraph
+     boundaries, the lines stack tightly and the panel control
+     looks like a no-op. *)
+  let m = fixed 10.0 in
+  let segs = [{ Text_layout.default_segment with
+                char_start = 0; char_end = 5;
+                space_before = 12.0;
+                space_after = 6.0 }] in
+  let l = Text_layout.layout_with_paragraphs "a\nb\nc" 100.0 16.0 segs m in
+  Alcotest.(check int) "3 visible lines" 3 (Array.length l.lines);
+  Alcotest.(check (float 0.001)) "first sub-para starts at y=0"
+    0.0 l.lines.(0).top;
+  (* Line 1 top = 16 (line 0) + 6 (space_after of sub-para 0) +
+                  12 (space_before of sub-para 1) = 34. *)
+  Alcotest.(check (float 0.001)) "sub-paragraph 1 includes deltas"
+    34.0 l.lines.(1).top;
+  Alcotest.(check (float 0.001)) "sub-paragraph 2 cumulative"
+    68.0 l.lines.(2).top
+
+let greedy_hyphenation_breaks_long_word_on_left_aligned_text () =
+  (* Hyphenate is on with default (left-aligned) text. With
+     [layout_with_hyphen] the long word splits at a hyphenation
+     candidate and a visible '-' marker (trailing_hyphen) appears
+     at end of line. *)
+  let m = fixed 8.0 in
+  let opts = {
+    Text_layout.hyph_min_word = 4;
+    hyph_min_before = 2;
+    hyph_min_after = 2;
+    hyph_allow_capitalized = true;
+  } in
+  let l = Text_layout.layout_with_hyphen
+            "go information" 80.0 16.0 opts m in
+  Alcotest.(check bool) "should wrap" true (Array.length l.lines >= 2);
+  Alcotest.(check bool) "first line ends with hyphenation marker"
+    true l.lines.(0).trailing_hyphen
+
+let hyphenation_skips_capitalized_words_by_default () =
+  (* "Trump" matches the sample "1ru" pattern at position 1 →
+     would break as "T-rump". The capitalized-word protection
+     (default-on, allow_capitalized=false) must skip this word. *)
+  let m = fixed 8.0 in
+  let opts = {
+    Text_layout.hyph_min_word = 4;
+    hyph_min_before = 1;
+    hyph_min_after = 1;
+    hyph_allow_capitalized = false;
+  } in
+  let l = Text_layout.layout_with_hyphen
+            "stuff Trump" 60.0 16.0 opts m in
+  Alcotest.(check bool) "wraps" true (Array.length l.lines >= 2);
+  let any_hyph = Array.fold_left
+    (fun acc (line : Text_layout.line_info) -> acc || line.trailing_hyphen)
+    false l.lines in
+  Alcotest.(check bool) "Trump must not be hyphenated" false any_hyph
+
+(* ── UTF-8 line-split regression ──────────────────────────────
+   line_info.start / line_info.end_ are codepoint indices, not byte
+   offsets. The canvas renderer originally used String.sub on them,
+   which split mid-codepoint when the content had multi-byte UTF-8
+   chars (e.g. en-dashes from a NYT paste) and produced fragments
+   Cairo rejected with INVALID_STRING. The fix uses utf8_sub; these
+   tests pin the invariant. *)
+
+let utf8_sub_is_identity_on_full_ascii () =
+  let s = "hello world" in
+  Alcotest.(check string) "full" s
+    (Text_layout.utf8_sub s 0 (Text_layout.utf8_char_count s))
+
+let utf8_sub_handles_multibyte_chars () =
+  (* "a—b" = 'a' (1 byte) + en-dash U+2014 (3 bytes) + 'b' (1 byte). *)
+  let s = "a\xE2\x80\x94b" in
+  Alcotest.(check int) "char count" 3 (Text_layout.utf8_char_count s);
+  Alcotest.(check string) "char 0..1" "a" (Text_layout.utf8_sub s 0 1);
+  Alcotest.(check string) "char 1..2" "\xE2\x80\x94" (Text_layout.utf8_sub s 1 1);
+  Alcotest.(check string) "char 2..3" "b" (Text_layout.utf8_sub s 2 1);
+  Alcotest.(check string) "full" s (Text_layout.utf8_sub s 0 3)
+
+let line_segments_split_via_utf8_sub_are_valid_utf8 () =
+  (* Multi-line wrapped content with multi-byte chars. The fixed
+     measure makes "—" and "b" the same width as ASCII. *)
+  let m = fixed 10.0 in
+  let content = "Russian — trade — of — the — week" in
+  let lay = Text_layout.layout content 60.0 16.0 m in
+  Array.iter (fun (line : Text_layout.line_info) ->
+    let seg = Text_layout.utf8_sub content line.start
+                (line.end_ - line.start) in
+    Alcotest.(check bool)
+      (Printf.sprintf "line %d-%d valid UTF-8" line.start line.end_)
+      true (String.is_valid_utf_8 seg)
+  ) lay.lines
+
+let layout_with_paragraphs_segments_are_valid_utf8 () =
+  (* Same as above but via the paragraph-aware path the canvas uses. *)
+  let m = fixed 10.0 in
+  let content = "smart \xE2\x80\x9Cquoted\xE2\x80\x9D and en\xE2\x80\x93dash text" in
+  let lay = Text_layout.layout_with_paragraphs content 80.0 16.0 [] m in
+  Array.iter (fun (line : Text_layout.line_info) ->
+    let seg = Text_layout.utf8_sub content line.start
+                (line.end_ - line.start) in
+    Alcotest.(check bool)
+      (Printf.sprintf "line %d-%d valid UTF-8" line.start line.end_)
+      true (String.is_valid_utf_8 seg)
+  ) lay.lines
+
+let manual_test_fixes_tests = [
+  Alcotest.test_case "default_segment_with_full_range_wraps" `Quick
+    default_segment_with_full_range_wraps_like_no_segments;
+  Alcotest.test_case "justify_right_last_line_flush_right" `Quick
+    justify_right_positions_last_line_flush_right;
+  Alcotest.test_case "justify_center_last_line_centered" `Quick
+    justify_center_positions_last_line_centered;
+  Alcotest.test_case "space_before_after_within_segment" `Quick
+    space_before_after_apply_between_sub_paragraphs_within_segment;
+  Alcotest.test_case "greedy_hyphenation_breaks_long_word" `Quick
+    greedy_hyphenation_breaks_long_word_on_left_aligned_text;
+  Alcotest.test_case "hyphenation_skips_capitalized_default" `Quick
+    hyphenation_skips_capitalized_words_by_default;
+]
+
 let () =
   Alcotest.run "TextLayout" [
     "Phase 5 layout", [
@@ -488,4 +674,15 @@ let () =
     "Phase 6 layout list", phase6_layout_list_tests;
     "Phase 7 hanging punctuation", phase7_tests;
     "Phase 10 justify", phase10_tests;
+    "Manual-test fixes", manual_test_fixes_tests;
+    "UTF-8 line split", [
+      Alcotest.test_case "utf8_sub_is_identity_on_full_ascii" `Quick
+        utf8_sub_is_identity_on_full_ascii;
+      Alcotest.test_case "utf8_sub_handles_multibyte_chars" `Quick
+        utf8_sub_handles_multibyte_chars;
+      Alcotest.test_case "line_segments_split_via_utf8_sub_are_valid_utf8" `Quick
+        line_segments_split_via_utf8_sub_are_valid_utf8;
+      Alcotest.test_case "layout_with_paragraphs_segments_are_valid_utf8" `Quick
+        layout_with_paragraphs_segments_are_valid_utf8;
+    ];
   ]

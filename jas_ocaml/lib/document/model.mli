@@ -1,5 +1,11 @@
 (** Observable model that holds the current document. *)
 
+(** Advance the [Untitled-N] counter so a subsequent [fresh_filename]
+    won't collide with any name in [existing_filenames]. Called by
+    session-restore so freshly-created tabs don't reuse a restored
+    [Untitled-N] slot. *)
+val advance_next_untitled_past : string list -> unit
+
 (** Structural view of an in-place text-editing session, exposed to
     callers (the Character panel pipeline) that need to detect an
     active bare-caret editor and prime its next-typed-character
