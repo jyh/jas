@@ -64,7 +64,7 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
     case .stroke: return StrokePanel.isChecked(cmd, layout: layout)
     case .properties: return PropertiesPanel.isChecked(cmd, layout: layout)
     case .character: return CharacterPanel.isCheckedWithModel(cmd, model: model)
-    case .paragraph: return ParagraphPanel.isChecked(cmd, layout: layout)
+    case .paragraph: return ParagraphPanel.isCheckedWithModel(cmd, model: model)
     case .artboards: return ArtboardsPanel.isChecked(cmd, layout: layout)
     case .align: return AlignPanel.isCheckedWithModel(cmd, model: model)
     case .boolean: return BooleanPanel.isChecked(cmd, layout: layout)

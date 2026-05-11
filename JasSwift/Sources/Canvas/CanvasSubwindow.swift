@@ -1244,7 +1244,13 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             // element-level layout already chose the line's char range
             // so wrapping is preserved across formatting changes.
             let lineStr: NSAttributedString = {
-                let isFlat = v.tspans.count == 1 && v.tspans[0].hasNoOverrides
+                // `renderIsFlat` allows any number of empty paragraph
+                // wrappers + body tspans without character overrides
+                // through the fast path. Without that the moment the
+                // Paragraph panel inserts an empty wrapper before flat
+                // content, the slow path would single-line-render the
+                // body and the paragraph would collapse.
+                let isFlat = v.renderIsFlat
                 if isFlat {
                     return NSAttributedString(string: segStr, attributes: attrs)
                 }
@@ -1302,10 +1308,62 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                 }
                 return mutable
             }()
-            if rotRad == 0.0 {
+            // When the layout stretched glue widths (justify), the
+            // single CTLine path would render the line with the
+            // canvas's *natural* inter-word advance and the result
+            // would look left-flush. Detect that by comparing the
+            // line's last visible glyph's right against the natural
+            // width of the line text — any non-trivial gap means a
+            // glue was stretched and we must position words
+            // individually using the layout's per-glyph x.
+            let lineGlyphs = Array(lay.glyphs[line.glyphStart..<line.glyphEnd])
+            let lastVisibleRight = lineGlyphs
+                .filter { !$0.isTrailingSpace }
+                .map { $0.right }
+                .reduce(0.0, max)
+            let firstVisibleX = lineGlyphs
+                .filter { !$0.isTrailingSpace }
+                .map { $0.x }
+                .reduce(Double.infinity, min)
+            let naturalW = measure(segStr)
+            let layoutW = max(0.0, lastVisibleRight - firstVisibleX)
+            let gluesStretched = layoutW > naturalW + 0.5
+            if rotRad == 0.0 && !gluesStretched {
                 let ctLine = CTLineCreateWithAttributedString(lineStr)
                 ctx.textPosition = CGPoint(x: lineX, y: baselineY)
                 CTLineDraw(ctLine, ctx)
+            } else if rotRad == 0.0 {
+                // Justified line: render word-by-word so each word
+                // lands at the x the composer computed (with stretched
+                // glue between words).
+                let charsV = Array(segStr)
+                var wordBuf = ""
+                var wordX: Double = 0
+                var inWord = false
+                for (i, g) in lineGlyphs.enumerated() {
+                    let ch: Character? = i < charsV.count ? charsV[i] : nil
+                    let isWs = ch.map { $0.isWhitespace } ?? true
+                    if !isWs && !g.isTrailingSpace {
+                        if !inWord {
+                            wordX = v.x + g.x
+                            inWord = true
+                            wordBuf = ""
+                        }
+                        if let c = ch { wordBuf.append(c) }
+                    } else if inWord {
+                        let str = NSAttributedString(string: wordBuf, attributes: attrs)
+                        let ctLine = CTLineCreateWithAttributedString(str)
+                        ctx.textPosition = CGPoint(x: wordX, y: baselineY)
+                        CTLineDraw(ctLine, ctx)
+                        inWord = false
+                    }
+                }
+                if inWord {
+                    let str = NSAttributedString(string: wordBuf, attributes: attrs)
+                    let ctLine = CTLineCreateWithAttributedString(str)
+                    ctx.textPosition = CGPoint(x: wordX, y: baselineY)
+                    CTLineDraw(ctLine, ctx)
+                }
             } else {
                 // Per-glyph rotation: draw each char with its own
                 // save / translate / rotate / restore. letter_spacing
@@ -1324,22 +1382,83 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                     cx += measure(String(ch)) + kernPx
                 }
             }
+            if line.trailingHyphen && rotRad == 0.0 {
+                // Hyphenation broke a word at end of line. The
+                // composer reserved space for the hyphen but the
+                // source content has no hyphen char, so the
+                // renderer must draw the glyph itself. The synthetic
+                // hyphen sits at the line's rightmost glyph x —
+                // derive it from the last glyph (which the composer
+                // emitted with width = hyphen_w).
+                let hyphenX = lineGlyphs
+                    .filter { !$0.isTrailingSpace }
+                    .last
+                    .map { v.x + $0.x } ?? lineX
+                let str = NSAttributedString(string: "-", attributes: attrs)
+                let ctLine = CTLineCreateWithAttributedString(str)
+                ctx.textPosition = CGPoint(x: hyphenX, y: baselineY)
+                CTLineDraw(ctLine, ctx)
+            }
         }
-        // Phase 6: list markers. Walk the segments after laying out
-        // the body text and draw each list paragraph's marker glyph
-        // at x = element.x + leftIndent on the first-line baseline.
-        // Counter values are computed once across all segments so
-        // the run rule (consecutive same-style num-* paragraphs
-        // count up; anything else resets) holds across the element.
+        // Phase 6: list markers. A list-style segment may span
+        // multiple paragraphs (the user typed "a\nb\nc" then clicked
+        // bullets — the model has one wrapper covering all three
+        // lines). The bullet must appear on every paragraph, so walk
+        // the layout's lines and treat any line whose predecessor
+        // ended at a hard break ('\n') as a sub-paragraph start.
+        // Counter values follow the §Counter run rule across the
+        // flattened sub-paragraph sequence.
         if !pSegs.isEmpty {
-            let counters = computeCounters(pSegs)
-            for (si, seg) in pSegs.enumerated() {
-                guard let style = seg.listStyle, !style.isEmpty else { continue }
-                let marker = markerText(style, counter: counters[si])
+            func owningSegForLine(_ lineStart: Int) -> Int? {
+                for (i, s) in pSegs.enumerated() {
+                    if s.charStart <= lineStart && lineStart < s.charEnd { return i }
+                }
+                return nil
+            }
+            struct SubPara { let lineIdx: Int; let style: String?; let leftIndent: Double }
+            var subParas: [SubPara] = []
+            var prevHardBreak = true
+            for (li, line) in lay.lines.enumerated() {
+                if prevHardBreak {
+                    let style: String?
+                    let leftIndent: Double
+                    if let si = owningSegForLine(line.start) {
+                        style = pSegs[si].listStyle
+                        leftIndent = pSegs[si].leftIndent
+                    } else {
+                        style = nil
+                        leftIndent = 0
+                    }
+                    subParas.append(SubPara(lineIdx: li, style: style,
+                                            leftIndent: leftIndent))
+                }
+                prevHardBreak = line.hardBreak
+            }
+            // Per-style counter run: consecutive same num-* style
+            // sub-paragraphs continue counting; a different style
+            // (or bullet, or none) breaks the run.
+            var counters: [Int] = []
+            counters.reserveCapacity(subParas.count)
+            var prevNum: String? = nil
+            var current = 0
+            for sp in subParas {
+                if let s = sp.style, s.hasPrefix("num-") {
+                    if prevNum == s { current += 1 } else { current = 1 }
+                    counters.append(current)
+                    prevNum = s
+                } else {
+                    counters.append(0)
+                    prevNum = nil
+                    current = 0
+                }
+            }
+            for (sp, counter) in zip(subParas, counters) {
+                guard let style = sp.style, !style.isEmpty else { continue }
+                let marker = markerText(style, counter: counter)
                 if marker.isEmpty { continue }
-                guard let firstLine = lay.lines.first(where: { $0.start >= seg.charStart }) else { continue }
-                let baselineY = v.y + firstLine.baselineY + yShift
-                let markerX = v.x + seg.leftIndent
+                let line = lay.lines[sp.lineIdx]
+                let baselineY = v.y + line.baselineY + yShift
+                let markerX = v.x + sp.leftIndent
                 let str = NSAttributedString(string: marker, attributes: attrs)
                 let ctLine = CTLineCreateWithAttributedString(str)
                 ctx.textPosition = CGPoint(x: markerX, y: baselineY)
@@ -2423,6 +2542,34 @@ class CanvasNSView: NSView {
     }
 
     // MARK: - Event dispatch
+
+    /// Intercept Cmd-key shortcuts BEFORE the menu's keyboardShortcut
+    /// handlers fire. SwiftUI registers Paste / Cut / Copy / Select All
+    /// / Undo / Redo as system key equivalents, so without this
+    /// override Cmd+V (etc.) hits JasCommands directly even when the
+    /// active type tool has an editing session — the user pressing
+    /// Cmd+V to paste at the caret instead got a *new* text element
+    /// dropped on the canvas. Returning true here consumes the event
+    /// before it reaches the menu.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let ctx = toolContext, activeTool.capturesKeyboard() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let key = canonicalKeyName(event)
+        let mods = KeyMods(
+            shift: event.modifierFlags.contains(.shift),
+            ctrl: event.modifierFlags.contains(.control),
+            alt: event.modifierFlags.contains(.option),
+            cmd: event.modifierFlags.contains(.command)
+        )
+        // Only steal the event when the tool would actually handle it;
+        // otherwise let the menu shortcut fire as usual.
+        if activeTool.onKeyEvent(ctx, key, mods) {
+            ensureBlinkTimer()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         // If the active tool is in an editing session, route ALL key events
