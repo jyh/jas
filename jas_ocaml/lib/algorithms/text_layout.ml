@@ -93,6 +93,11 @@ type line_info = {
   width : float;
   mutable glyph_start : int;
   mutable glyph_end : int;
+  (* True when the line was wrapped at a hyphenation breakpoint
+     inside a word — the renderer must append a visible hyphen
+     glyph at the line's end. The synthetic hyphen advance is
+     already baked into the line's last visible glyph's [right]. *)
+  trailing_hyphen : bool;
 }
 
 type t = {
@@ -102,7 +107,32 @@ type t = {
   char_count : int;
 }
 
-let layout content max_width font_size measure =
+(** Hyphenation options for greedy (non-justify) layout. When passed
+    to [layout_with_hyphen], the layout will try to break long words
+    at hyphenation candidates instead of wrapping the whole word to
+    the next line. *)
+type hyphen_opts = {
+  hyph_min_word : int;
+  hyph_min_before : int;
+  hyph_min_after : int;
+  (* When [false], words starting with an uppercase letter are
+     excluded from hyphenation (proper-noun protection). *)
+  hyph_allow_capitalized : bool;
+}
+
+let layout_inner ?(first_line_indent = 0.0)
+                 content max_width font_size hyph_opts measure =
+  (* The first line's effective wrap width is reduced by
+     first_line_indent (or *increased* if it's negative — hanging
+     indent). After the first line break we revert to the full
+     width. Tracking via [line_extra] avoids passing the indent
+     through every break-decision call site. *)
+  let line_extra = ref first_line_indent in
+  let cur_max () =
+    if max_width > 0.0 then max_width -. !line_extra else 0.0 in
+  (* Reset to no extra indent — call after every line break. Inlined
+     here so callers below stay readable. *)
+  let advance_line () = line_extra := 0.0 in
   let line_height = font_size in
   let ascent = font_size *. 0.8 in
   (* Decode content once into a char array. *)
@@ -130,13 +160,14 @@ let layout content max_width font_size measure =
   let line_start_char = ref 0 in
   let x = ref 0.0 in
 
-  let push_line start end_ hard_break line_width =
+  let push_line ?(trailing_hyphen=false) start end_ hard_break line_width =
     let top = float_of_int !line_no *. line_height in
     lines := {
       start; end_; hard_break;
       top; baseline_y = top +. ascent;
       height = line_height; width = line_width;
       glyph_start = 0; glyph_end = 0;
+      trailing_hyphen;
     } :: !lines
   in
 
@@ -154,6 +185,7 @@ let layout content max_width font_size measure =
     if uchar_is_newline c then begin
       push_line !line_start_char !idx true !x;
       incr line_no;
+      advance_line ();
       line_start_char := !idx + 1;
       x := 0.0;
       incr idx
@@ -174,40 +206,162 @@ let layout content max_width font_size measure =
         done;
         idx := !end_
       end else begin
-        if max_width > 0.0 && !x +. token_w > max_width && !x > 0.0 then begin
-          (* Mark trailing whitespace glyphs on current line as trailing *)
-          List.iter (fun g ->
-            if g.line = !line_no && uchar_is_whitespace chars.(g.idx) then
-              g.is_trailing_space <- true
-          ) !glyphs;
-          push_line !line_start_char !idx false !x;
-          incr line_no;
-          line_start_char := !idx;
-          x := 0.0
-        end;
-        if max_width > 0.0 && token_w > max_width && !x = 0.0 then begin
-          (* Char-by-char break *)
-          for k = !idx to !end_ - 1 do
-            let cw = measure (uchar_str chars.(k)) in
-            if !x +. cw > max_width && !x > 0.0 then begin
-              push_line !line_start_char k false !x;
-              incr line_no;
-              line_start_char := k;
-              x := 0.0
-            end;
-            add_glyph k !line_no !x cw;
-            x := !x +. cw
-          done
+        if max_width > 0.0 && !x +. token_w > cur_max () && !x > 0.0 then begin
+          (* Hyphenation: try to split the token at a hyphenation
+             breakpoint that fits on the current line. Picks the
+             *largest* prefix that still leaves room for the hyphen,
+             greedy-style. If no break fits, falls through to the
+             standard wrap below. *)
+          let hyphen_split = ref None in
+          (match hyph_opts with
+           | None -> ()
+           | Some opts ->
+             let token_len = !end_ - !idx in
+             let starts_capital =
+               if token_len = 0 then false
+               else
+                 let u = chars.(!idx) in
+                 if not (Uchar.is_valid (Uchar.to_int u)) then false
+                 else
+                   let i = Uchar.to_int u in
+                   i >= 0x41 && i <= 0x5A  (* ASCII A-Z *)
+             in
+             let allowed = token_len >= opts.hyph_min_word
+                && (opts.hyph_allow_capitalized || not starts_capital) in
+             if allowed then begin
+               let breaks = Hyphenator.hyphenate token
+                              Hyphenator.en_us_patterns_sample
+                              ~min_before:opts.hyph_min_before
+                              ~min_after:opts.hyph_min_after in
+               let hyphen_w = measure "-" in
+               let avail = cur_max () -. !x in
+               (* Try the largest valid break point first. *)
+               let bi = ref (token_len - 1) in
+               while !hyphen_split = None && !bi >= 1 do
+                 if !bi < Array.length breaks && breaks.(!bi) then begin
+                   let prefix = chars_str !idx (!idx + !bi) in
+                   let prefix_w = measure prefix in
+                   if prefix_w +. hyphen_w <= avail then
+                     hyphen_split := Some (!bi, prefix_w)
+                 end;
+                 decr bi
+               done
+             end);
+          (match !hyphen_split with
+           | Some (split_at, _prefix_w) ->
+             (* Emit the prefix glyphs on the current line, then
+                the synthetic hyphen, then wrap. *)
+             for k = 0 to split_at - 1 do
+               let cw = measure (uchar_str chars.(!idx + k)) in
+               add_glyph (!idx + k) !line_no !x cw;
+               x := !x +. cw
+             done;
+             let hyphen_w = measure "-" in
+             (* Synthetic hyphen glyph carries [idx = split_at]
+                break point so hit-test still maps to a real char.
+                The renderer recognises trailing_hyphen on the line
+                and draws the visible '-' here. *)
+             add_glyph (!idx + split_at) !line_no !x hyphen_w;
+             let line_w = !x +. hyphen_w in
+             push_line ~trailing_hyphen:true
+               !line_start_char (!idx + split_at) false line_w;
+             incr line_no;
+             advance_line ();
+             line_start_char := !idx + split_at;
+             x := 0.0;
+             let tail_start = !idx + split_at in
+             idx := tail_start;
+             (* Place the tail at x=0 (or char-by-char if it
+                overflows). *)
+             let tail_w = ref 0.0 in
+             for k = tail_start to !end_ - 1 do
+               tail_w := !tail_w +. measure (uchar_str chars.(k))
+             done;
+             if max_width > 0.0 && !tail_w > cur_max () then begin
+               for k = tail_start to !end_ - 1 do
+                 let cw = measure (uchar_str chars.(k)) in
+                 if !x +. cw > cur_max () && !x > 0.0 then begin
+                   push_line !line_start_char k false !x;
+                   incr line_no;
+                   advance_line ();
+                   line_start_char := k;
+                   x := 0.0
+                 end;
+                 add_glyph k !line_no !x cw;
+                 x := !x +. cw
+               done
+             end else begin
+               let cur_x = ref !x in
+               for k = tail_start to !end_ - 1 do
+                 let cw = measure (uchar_str chars.(k)) in
+                 add_glyph k !line_no !cur_x cw;
+                 cur_x := !cur_x +. cw
+               done;
+               x := !cur_x
+             end;
+             idx := !end_
+           | None ->
+             (* No hyphenation break fits — standard wrap-before-
+                token path. *)
+             List.iter (fun g ->
+               if g.line = !line_no && uchar_is_whitespace chars.(g.idx) then
+                 g.is_trailing_space <- true
+             ) !glyphs;
+             push_line !line_start_char !idx false !x;
+             incr line_no;
+             advance_line ();
+             line_start_char := !idx;
+             x := 0.0;
+             if max_width > 0.0 && token_w > cur_max () && !x = 0.0 then begin
+               (* Char-by-char break *)
+               for k = !idx to !end_ - 1 do
+                 let cw = measure (uchar_str chars.(k)) in
+                 if !x +. cw > cur_max () && !x > 0.0 then begin
+                   push_line !line_start_char k false !x;
+                   incr line_no;
+                   advance_line ();
+                   line_start_char := k;
+                   x := 0.0
+                 end;
+                 add_glyph k !line_no !x cw;
+                 x := !x +. cw
+               done
+             end else begin
+               let cur_x = ref !x in
+               for k = !idx to !end_ - 1 do
+                 let cw = measure (uchar_str chars.(k)) in
+                 add_glyph k !line_no !cur_x cw;
+                 cur_x := !cur_x +. cw
+               done;
+               x := !cur_x
+             end;
+             idx := !end_)
         end else begin
-          let cur_x = ref !x in
-          for k = !idx to !end_ - 1 do
-            let cw = measure (uchar_str chars.(k)) in
-            add_glyph k !line_no !cur_x cw;
-            cur_x := !cur_x +. cw
-          done;
-          x := !cur_x
-        end;
-        idx := !end_
+          if max_width > 0.0 && token_w > cur_max () && !x = 0.0 then begin
+            (* Char-by-char break *)
+            for k = !idx to !end_ - 1 do
+              let cw = measure (uchar_str chars.(k)) in
+              if !x +. cw > cur_max () && !x > 0.0 then begin
+                push_line !line_start_char k false !x;
+                incr line_no;
+                advance_line ();
+                line_start_char := k;
+                x := 0.0
+              end;
+              add_glyph k !line_no !x cw;
+              x := !x +. cw
+            done
+          end else begin
+            let cur_x = ref !x in
+            for k = !idx to !end_ - 1 do
+              let cw = measure (uchar_str chars.(k)) in
+              add_glyph k !line_no !cur_x cw;
+              cur_x := !cur_x +. cw
+            done;
+            x := !cur_x
+          end;
+          idx := !end_
+        end
       end
     end
   done;
@@ -216,7 +370,8 @@ let layout content max_width font_size measure =
   let lines_arr = if Array.length lines_arr = 0 then
       [| { start = 0; end_ = 0; hard_break = false;
            top = 0.0; baseline_y = ascent; height = line_height; width = 0.0;
-           glyph_start = 0; glyph_end = 0 } |]
+           glyph_start = 0; glyph_end = 0;
+           trailing_hyphen = false } |]
     else lines_arr
   in
   let glyphs_arr = Array.of_list (List.rev !glyphs) in
@@ -234,6 +389,17 @@ let layout content max_width font_size measure =
     lines = lines_arr;
     font_size; char_count = n;
   }
+
+(** Compute layout. If [max_width <= 0] no wrapping (point text). *)
+let layout ?(first_line_indent = 0.0) content max_width font_size measure =
+  layout_inner ~first_line_indent content max_width font_size None measure
+
+(** Variant of [layout] that consults hyphenation patterns when a
+    non-whitespace token doesn't fit on the current line. Used by
+    [layout_with_paragraphs] for non-justify segments where
+    [seg.hyphenate] is set. *)
+let layout_with_hyphen ?(first_line_indent = 0.0) content max_width font_size opts measure =
+  layout_inner ~first_line_indent content max_width font_size (Some opts) measure
 
 let line_for_cursor t cursor =
   let nlines = Array.length t.lines in
@@ -383,6 +549,11 @@ type paragraph_segment = {
   hyphenate_min_before : int;
   hyphenate_min_after : int;
   hyphenate_bias : int;
+  (* [jas:hyphenate-capitalized] — when [false] (the default in
+     Illustrator / InDesign / Word), proper nouns and other words
+     starting with an uppercase letter are NOT broken at
+     hyphenation candidates. Avoids breaks like "T-rump". *)
+  hyphenate_capitalized : bool;
 }
 
 let default_segment = {
@@ -397,10 +568,11 @@ let default_segment = {
   word_spacing_max = 133.0;
   last_line_align = Left;
   hyphenate = false;
-  hyphenate_min_word = 3;
-  hyphenate_min_before = 1;
-  hyphenate_min_after = 1;
+  hyphenate_min_word = 6;
+  hyphenate_min_before = 2;
+  hyphenate_min_after = 2;
   hyphenate_bias = 0;
+  hyphenate_capitalized = false;
 }
 
 (* ── Phase 7: hanging punctuation char-class predicates ── *)
@@ -475,6 +647,7 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
         start = 0; end_ = 0; hard_break = false;
         top = 0.0; baseline_y = ascent; height = line_height;
         width = 0.0; glyph_start = 0; glyph_end = 0;
+        trailing_hyphen = false;
       } |];
       font_size; char_count = 0;
     }
@@ -552,7 +725,21 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
               let word = Buffer.contents buf in
               let word_w = measure word in
               let word_char_count = Array.length word_uchars in
+              (* Capitalized words (proper nouns) are excluded from
+                 hyphenation unless explicitly allowed — without
+                 this, "Trump" hyphenates to "T-rump" via the sample
+                 pattern set. *)
+              let starts_capital =
+                if word_char_count = 0 then false
+                else
+                  let u = word_uchars.(0) in
+                  if not (Uchar.is_valid (Uchar.to_int u)) then false
+                  else
+                    let i = Uchar.to_int u in
+                    (i >= 0x41 && i <= 0x5A)  (* ASCII A-Z *)
+              in
               if seg.hyphenate && word_char_count >= seg.hyphenate_min_word
+                 && (seg.hyphenate_capitalized || not starts_capital)
               then begin
                 let breaks = Hyphenator.hyphenate
                     word Hyphenator.en_us_patterns_sample
@@ -600,18 +787,45 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
               end
             end
           done;
-          (* End-of-paragraph terminator. *)
-          items_list := Knuth_plass.Glue {
-            width = 0.0; stretch = 1e9; shrink = 0.0;
-            char_idx = para_start + len;
-          } :: !items_list;
+          (* End-of-paragraph terminator. The default fil-glue
+             (stretch = 1e9) lets KP find a feasible composition for
+             any input but also makes the last line's badness
+             effectively zero — the optimizer ignores it when
+             choosing breaks, leaving Justify All paragraphs with
+             ugly wide gaps on the last line. For Justify All
+             specifically (last_line_align = Justify), drop the
+             fil-glue so the last line gets the same finite stretch
+             as the body and KP distributes badness evenly across
+             every line. The forced-break Penalty alone keeps the
+             paragraph terminated. Mirrors TeX's
+             ``\rightskip 0pt`` (no flexible space at end). *)
+          if seg.last_line_align <> Justify then
+            items_list := Knuth_plass.Glue {
+              width = 0.0; stretch = 1e9; shrink = 0.0;
+              char_idx = para_start + len;
+            } :: !items_list;
           items_list := Knuth_plass.Penalty {
             width = 0.0; value = -. Knuth_plass.penalty_infinity;
             flagged = false; char_idx = para_start + len;
           } :: !items_list;
           let items = Array.of_list (List.rev !items_list) in
 
-          match Knuth_plass.compose items [| max_width |] with
+          (* Try the strict cap first (Knuth's default 10 = "loose"
+             but typographically acceptable). If no feasible
+             composition exists at that cap, retry with a much
+             looser cap so the paragraph still justifies — falling
+             all the way back to ragged-left would be visually worse
+             than a too-loose body line. Mirrors Illustrator /
+             InDesign behavior of allowing looser spacing rather
+             than abandoning justify entirely. *)
+          let breaks_opt =
+            match Knuth_plass.compose items [| max_width |] with
+            | Some _ as b -> b
+            | None ->
+              let opts = { Knuth_plass.default_opts with max_ratio = 100.0 } in
+              Knuth_plass.compose ~opts items [| max_width |]
+          in
+          match breaks_opt with
           | None -> failed := true
           | Some breaks ->
             let breaks = Array.of_list breaks in
@@ -732,6 +946,18 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
                         (String.get_utf_8_uchar content
                            (char_to_byte content para_end_excl)))
                      (Uchar.of_char '\n') in
+              (* The renderer needs to draw a visible hyphen at end
+                 of line when the composer broke inside a word at a
+                 hyphenation penalty. The penalty's [width] is the
+                 hyphen advance (already baked into x), and [width >
+                 0] distinguishes a hyphen penalty from the
+                 terminator penalty (zero width). Source content has
+                 no hyphen at this position, so without the explicit
+                 signal the renderer would draw "exam" instead of
+                 "exam-". *)
+              let trailing_hyphen = match items.(to_) with
+                | Knuth_plass.Penalty { width; _ } -> width > 0.0
+                | _ -> false in
               all_lines := {
                 start = line_start_char; end_ = !line_end_char;
                 hard_break;
@@ -740,6 +966,7 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
                 width = !x;
                 glyph_start = glyph_start_combined;
                 glyph_end = glyph_end_combined;
+                trailing_hyphen;
               } :: !all_lines;
               incr line_count;
               incr next_line_no;
@@ -759,7 +986,8 @@ and justify_layout (content : string) (max_width : float) (font_size : float)
         if Array.length lines = 0 then
           [| { start = 0; end_ = 0; hard_break = false;
                top = 0.0; baseline_y = ascent; height = line_height;
-               width = 0.0; glyph_start = 0; glyph_end = 0; } |]
+               width = 0.0; glyph_start = 0; glyph_end = 0;
+               trailing_hyphen = false; } |]
         else lines in
       Some { glyphs; lines; font_size; char_count = n }
     end
@@ -815,17 +1043,51 @@ and layout_with_paragraphs (content : string) (max_width : float)
     (* Phase 10: justify segments go through the every-line composer
        instead of greedy first-fit. Falls back to greedy when the
        composer cannot find a feasible composition. *)
+    (* first_line_indent reduces (or expands, when negative) the
+       first line's effective wrap width. Suppressed when a list
+       marker is present — the marker already occupies the first-line
+       position. Justify path doesn't honour fli yet (would need a
+       leading Box in the composer items); fall back to layout there. *)
+    let fli_for_layout =
+      if has_list then 0.0 else seg.first_line_indent in
     let para =
       if seg.text_align = Justify && effective_max > 0.0 then
         match justify_layout slice effective_max font_size seg measure with
         | Some t -> t
-        | None -> layout slice effective_max font_size measure
-      else layout slice effective_max font_size measure in
+        | None -> layout ~first_line_indent:fli_for_layout
+                    slice effective_max font_size measure
+      else if seg.hyphenate && effective_max > 0.0 then
+        let opts = {
+          hyph_min_word = seg.hyphenate_min_word;
+          hyph_min_before = seg.hyphenate_min_before;
+          hyph_min_after = seg.hyphenate_min_after;
+          hyph_allow_capitalized = seg.hyphenate_capitalized;
+        } in
+        layout_with_hyphen ~first_line_indent:fli_for_layout
+          slice effective_max font_size opts measure
+      else layout ~first_line_indent:fli_for_layout
+             slice effective_max font_size measure in
+    (* [first_line_extra] is signed: positive shifts the first line
+       to the right (regular indent), negative shifts it left of the
+       paragraph's left edge (hanging indent). [layout_inner] already
+       widened the first line's wrap width by the same signed amount
+       via its [line_extra] tracking, so the right edge stays aligned
+       with the rest of the paragraph in either direction. *)
     let first_line_extra =
-      if has_list then 0.0 else Float.max 0.0 seg.first_line_indent in
+      if has_list then 0.0 else seg.first_line_indent in
     let first_line_no_in_combined = !line_count in
     let para_lines = Array.length para.lines in
+    (* A segment may span multiple sub-paragraphs (the user typed
+       "a\nb\nc" then applied panel attrs — one wrapper covers all
+       three). [space_before] / [space_after] are paragraph
+       attributes, so they must apply between each sub-paragraph
+       too, not just between top-level segments. Accumulates as we
+       cross hard breaks within the segment. *)
+    let sub_para_delta = ref 0.0 in
     Array.iteri (fun li (line : line_info) ->
+      if li > 0 && para.lines.(li - 1).hard_break then
+        sub_para_delta :=
+          !sub_para_delta +. seg.space_after +. seg.space_before;
       let x_shift = seg.left_indent +. list_indent
                   +. (if li = 0 then first_line_extra else 0.0) in
       let line_avail =
@@ -855,7 +1117,15 @@ and layout_with_paragraphs (content : string) (max_width : float)
       let left_hang_w = ref 0.0 in
       let right_hang_w = ref 0.0 in
       if seg.hanging_punctuation then begin
-        let allow_left = seg.text_align = Left || seg.text_align = Center in
+        (* Justify is treated like Left/Center for left-edge hangs:
+           the body composer stretches the line to fill the max width,
+           but leading punctuation should still hang into the margin
+           so the visible left edge of the paragraph is straight.
+           Right hangs on Justify body lines need composer support
+           and stay disabled. *)
+        let allow_left =
+          seg.text_align = Left || seg.text_align = Center
+          || seg.text_align = Justify in
         let allow_right = seg.text_align = Right || seg.text_align = Center in
         if allow_left then
           (match !first_visible with
@@ -872,7 +1142,18 @@ and layout_with_paragraphs (content : string) (max_width : float)
       end;
       let effective_visible_w =
         Float.max 0.0 (visible_w -. !left_hang_w -. !right_hang_w) in
-      let align_shift = match seg.text_align with
+      (* For a justified segment the body lines are stretched to
+         fill the line width by the composer, so a Justify-arm
+         shift of 0 leaves them flush with both edges. The LAST
+         line is *not* stretched (composer convention), so it
+         needs to be positioned per [seg.last_line_align] —
+         otherwise justify_right / justify_center / justify_left
+         all visually look like left-aligned. *)
+      let is_last_line_of_segment = li + 1 = para_lines in
+      let effective_align =
+        if seg.text_align = Justify && is_last_line_of_segment
+        then seg.last_line_align else seg.text_align in
+      let align_shift = match effective_align with
         | Left | Justify -> -. !left_hang_w
         | Center ->
           if line_avail > effective_visible_w
@@ -885,8 +1166,8 @@ and layout_with_paragraphs (content : string) (max_width : float)
       let total_shift = x_shift +. align_shift in
       let orig_start = seg.char_start + line.start in
       let orig_end = seg.char_start + line.end_ in
-      let baseline = !y_offset +. line.baseline_y in
-      let top = !y_offset +. line.top in
+      let baseline = !y_offset +. line.baseline_y +. !sub_para_delta in
+      let top = !y_offset +. line.top +. !sub_para_delta in
       let glyph_start_combined = !glyph_count in
       for gi = line.glyph_start to line.glyph_end - 1 do
         let g = para.glyphs.(gi) in
@@ -895,8 +1176,8 @@ and layout_with_paragraphs (content : string) (max_width : float)
           line = first_line_no_in_combined + li;
           x = g.x +. total_shift;
           right = g.right +. total_shift;
-          baseline_y = g.baseline_y +. !y_offset;
-          top = g.top +. !y_offset;
+          baseline_y = g.baseline_y +. !y_offset +. !sub_para_delta;
+          top = g.top +. !y_offset +. !sub_para_delta;
           height = g.height;
           is_trailing_space = g.is_trailing_space;
         } :: !all_glyphs;
@@ -911,11 +1192,13 @@ and layout_with_paragraphs (content : string) (max_width : float)
         width = visible_w +. total_shift;
         glyph_start = glyph_start_combined;
         glyph_end = glyph_end_combined;
+        trailing_hyphen = line.trailing_hyphen;
       } :: !all_lines;
       incr line_count
     ) para.lines;
     if para_lines > 0 then
-      y_offset := !y_offset +. (Float.of_int para_lines) *. line_height;
+      y_offset := !y_offset +. (Float.of_int para_lines) *. line_height
+                 +. !sub_para_delta;
     y_offset := !y_offset +. seg.space_after
   ) segs;
 
@@ -925,6 +1208,7 @@ and layout_with_paragraphs (content : string) (max_width : float)
     (* Empty content — keep single-empty-line invariant. *)
     [| { start = 0; end_ = 0; hard_break = false;
          top = 0.0; baseline_y = ascent; height = line_height;
-         width = 0.0; glyph_start = 0; glyph_end = 0 } |]
+         width = 0.0; glyph_start = 0; glyph_end = 0;
+         trailing_hyphen = false } |]
   else lines in
   { glyphs; lines; font_size; char_count = n }

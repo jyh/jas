@@ -455,6 +455,7 @@ let run_text_layout_paragraph vectors =
       hyphenate_min_before = i "hyphenate_min_before" dflt.hyphenate_min_before;
       hyphenate_min_after = i "hyphenate_min_after" dflt.hyphenate_min_after;
       hyphenate_bias = i "hyphenate_bias" dflt.hyphenate_bias;
+      hyphenate_capitalized = b "hyphenate_capitalized";
     }
   in
   List.map (fun tc ->

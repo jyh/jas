@@ -194,6 +194,18 @@ let _draw_segmented_text cr ~x ~y ~fontsize ~fontfamily ~fontweight
   let baseline = y +. fontsize *. 0.8 in
   let cx = ref x in
   Array.iter (fun (t : Element.tspan) ->
+    (* Same UTF-8 guard as the flat-text path — sanitize the tspan
+       content before any Cairo text call. *)
+    let t_content =
+      if String.is_valid_utf_8 t.content then t.content
+      else begin
+        let b = Buffer.create (String.length t.content) in
+        String.iter (fun c ->
+          if Char.code c < 0x80 then Buffer.add_char b c
+        ) t.content;
+        Buffer.contents b
+      end in
+    let t = { t with Element.content = t_content } in
     if t.content = "" then () else begin
       let eff_family = match t.font_family with
         | Some f -> f | None -> fontfamily in
@@ -676,6 +688,20 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
            text_decoration; rotate; horizontal_scale; vertical_scale;
            letter_spacing; kerning; tspans;
            _ } ->
+    (* Defensive UTF-8 guard: Cairo's text_extents / show_text raise
+       Cairo.Error(INVALID_STRING) on non-UTF-8 input, which aborts
+       the whole canvas draw and bricks the app. Sanitize element
+       content here so a stray bad byte (e.g. from clipboard paste)
+       degrades gracefully — invalid bytes are dropped, ASCII kept. *)
+    let content =
+      if String.is_valid_utf_8 content then content
+      else begin
+        let b = Buffer.create (String.length content) in
+        String.iter (fun c ->
+          if Char.code c < 0x80 then Buffer.add_char b c
+        ) content;
+        Buffer.contents b
+      end in
     Cairo.Group.push cr;
     apply_transform cr transform;
     begin match fill with
@@ -689,7 +715,13 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
        tspan falls through to the flat path below. First pass covers
        font + decoration per tspan; per-tspan baseline-shift / rotate
        / transform / dx and wrapping are follow-ups. *)
-    let is_flat = Array.length tspans = 1 && Tspan.has_no_overrides tspans.(0) in
+    (* Empty paragraph wrappers are transparent for the fast path —
+       their character-level fields are ignored at render time, only
+       [build_segments_from_text] consumes them. Without this, the
+       moment the Paragraph panel inserts an empty wrapper before
+       existing flat content the renderer flips to the segmented
+       (single-line) path and the paragraph collapses visually. *)
+    let is_flat = Tspan.render_is_flat tspans in
     if not is_flat then begin
       _draw_segmented_text cr ~x ~y ~fontsize:font_size
         ~fontfamily:font_family ~fontweight:font_weight
@@ -826,7 +858,13 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
       let lay = Text_layout.layout_with_paragraphs
                   content text_width layout_fs psegs measure in
       Array.iter (fun (line : Text_layout.line_info) ->
-        let seg = String.sub content line.start (line.end_ - line.start) in
+        (* line.start / line.end_ are codepoint (char) indices into
+           [content], not byte offsets — use utf8_sub so multi-byte
+           UTF-8 sequences (e.g. NYT en-dashes / smart-quotes) aren't
+           split mid-codepoint, which would produce a fragment Cairo
+           rejects with INVALID_STRING. *)
+        let seg = Text_layout.utf8_sub content line.start
+                    (line.end_ - line.start) in
         let seg = if String.length seg > 0 && seg.[String.length seg - 1] = '\n'
                   then String.sub seg 0 (String.length seg - 1) else seg in
         let base_y = y +. line.baseline_y +. y_shift in
@@ -838,38 +876,188 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
           then lay.glyphs.(line.glyph_start).x
           else 0.0 in
         let base_x = x +. line_x_shift in
-        show_with_spacing seg base_x base_y;
-        draw_line_decorations seg base_x base_y
+        (* When the layout stretched glue widths (justify), the
+           single show_text path would render each line with the
+           canvas's *natural* inter-word advance and the result would
+           look left-flush. Detect that by comparing the line's last
+           visible glyph's right against the natural width of the
+           line text — any non-trivial gap means a glue was stretched
+           and we must position words individually using the layout's
+           per-glyph x. *)
+        let last_visible_right = ref 0.0 in
+        let first_visible_x = ref infinity in
+        for gi = line.glyph_start to line.glyph_end - 1 do
+          let g = lay.glyphs.(gi) in
+          if not g.is_trailing_space then begin
+            if g.right > !last_visible_right then last_visible_right := g.right;
+            if g.x < !first_visible_x then first_visible_x := g.x
+          end
+        done;
+        let layout_w =
+          if !first_visible_x = infinity then 0.0
+          else Float.max 0.0 (!last_visible_right -. !first_visible_x) in
+        let natural_w = measure seg in
+        let glues_stretched = layout_w > natural_w +. 0.5 in
+        if rot_rad <> 0.0 then begin
+          (* Per-glyph rotation path takes the existing
+             show_with_spacing branch. *)
+          show_with_spacing seg base_x base_y;
+          draw_line_decorations seg base_x base_y
+        end else if not glues_stretched then begin
+          (* Fast path: single show_text per line. *)
+          show_with_spacing seg base_x base_y;
+          draw_line_decorations seg base_x base_y
+        end else begin
+          (* Justified line: render word-by-word so each word lands
+             at the x the composer computed (with stretched glue
+             between words). *)
+          let chars_v =
+            let acc = ref [] in
+            Text_layout.utf8_iteri (fun _ u -> acc := u :: !acc) seg;
+            Array.of_list (List.rev !acc)
+          in
+          let buf = Buffer.create 32 in
+          let word_x = ref 0.0 in
+          let in_word = ref false in
+          let flush_word () =
+            if !in_word && Buffer.length buf > 0 then begin
+              let w = Buffer.contents buf in
+              Cairo.move_to cr !word_x base_y;
+              Cairo.show_text cr w
+            end;
+            Buffer.clear buf;
+            in_word := false
+          in
+          let nglyphs = line.glyph_end - line.glyph_start in
+          for i = 0 to nglyphs - 1 do
+            let g = lay.glyphs.(line.glyph_start + i) in
+            let ch_opt = if i < Array.length chars_v
+                         then Some chars_v.(i) else None in
+            let is_ws = match ch_opt with
+              | Some u -> Text_layout.uchar_is_whitespace u
+              | None -> true in
+            if not is_ws && not g.is_trailing_space then begin
+              if not !in_word then begin
+                word_x := x +. g.x;
+                in_word := true;
+                Buffer.clear buf
+              end;
+              (match ch_opt with
+               | Some u -> Buffer.add_utf_8_uchar buf u
+               | None -> ())
+            end else if !in_word then
+              flush_word ()
+          done;
+          flush_word ();
+          draw_line_decorations seg base_x base_y
+        end;
+        (* Hyphenation broke a word at end of line. The composer
+           reserved space for the hyphen but the source content has
+           no hyphen char, so the renderer must draw the glyph
+           itself. The synthetic hyphen sits at the line's rightmost
+           glyph x — derive it from the last glyph (which the
+           composer emitted with width = hyphen_w). *)
+        if line.trailing_hyphen && rot_rad = 0.0 then begin
+          let hyph_x = ref (x +. line_x_shift) in
+          for gi = line.glyph_start to line.glyph_end - 1 do
+            let g = lay.glyphs.(gi) in
+            if not g.is_trailing_space then hyph_x := x +. g.x
+          done;
+          Cairo.move_to cr !hyph_x base_y;
+          Cairo.show_text cr "-"
+        end
       ) lay.lines;
-      (* Phase 6: list markers. Walk the paragraph segments after
-         laying out body text and draw each list paragraph's marker
-         at x = element.x + segment.left_indent on the first-line
-         baseline. Counter values are computed once across all
-         segments so the run rule (consecutive same-style num-*
-         paragraphs count up; bullets / no-style / different num
-         style all reset) holds across the element's content. *)
+      (* Phase 6: list markers. A list-style segment may span
+         multiple paragraphs (the user typed "a\nb\nc" then clicked
+         bullets — the model has one wrapper covering all three
+         lines). The bullet must appear on every paragraph, so walk
+         the layout's lines and treat any line whose predecessor
+         ended at a hard break ('\n') as a sub-paragraph start.
+         Counter values follow the run rule (consecutive same-style
+         num-* increment, anything else resets) across the flattened
+         sub-paragraph sequence. *)
       if psegs <> [] then begin
-        let counters = Text_layout_paragraph.compute_counters psegs in
-        List.iter2 (fun (seg : Text_layout.paragraph_segment) cnt ->
-          match seg.list_style with
+        let psegs_arr = Array.of_list psegs in
+        let owning_seg_for_line line_start =
+          let result = ref None in
+          Array.iteri (fun i (s : Text_layout.paragraph_segment) ->
+            if !result = None
+               && s.char_start <= line_start && line_start < s.char_end
+            then result := Some i
+          ) psegs_arr;
+          !result
+        in
+        (* Collect sub-paragraph starts: line_idx + style + indent. *)
+        let sub_paras = ref [] in
+        let prev_hard_break = ref true in
+        Array.iteri (fun li (line : Text_layout.line_info) ->
+          if !prev_hard_break then begin
+            let (style, left_indent) =
+              match owning_seg_for_line line.start with
+              | Some i ->
+                let s = psegs_arr.(i) in
+                (s.list_style, s.left_indent)
+              | None -> (None, 0.0)
+            in
+            sub_paras := (li, style, left_indent) :: !sub_paras
+          end;
+          prev_hard_break := line.hard_break
+        ) lay.lines;
+        let sub_paras = List.rev !sub_paras in
+        (* Per-style counter run: consecutive same num-* style
+           sub-paragraphs continue counting; a different style (or
+           bullet, or none) breaks the run. *)
+        let counters = ref [] in
+        let prev_num = ref None in
+        let current = ref 0 in
+        List.iter (fun (_, style, _) ->
+          let is_num = match style with
+            | Some s -> String.length s >= 4 && String.sub s 0 4 = "num-"
+            | None -> false
+          in
+          if is_num then begin
+            if !prev_num = style then current := !current + 1
+            else current := 1;
+            counters := !current :: !counters;
+            prev_num := style
+          end else begin
+            counters := 0 :: !counters;
+            prev_num := None;
+            current := 0
+          end
+        ) sub_paras;
+        let counters = List.rev !counters in
+        List.iter2 (fun (li, style, left_indent) cnt ->
+          match style with
           | None -> ()
-          | Some style when style = "" -> ()
-          | Some style ->
-            let marker = Text_layout_paragraph.marker_text style cnt in
+          | Some s when s = "" -> ()
+          | Some s ->
+            let marker = Text_layout_paragraph.marker_text s cnt in
             if String.length marker > 0 then begin
-              let first_line = ref None in
-              Array.iter (fun (l : Text_layout.line_info) ->
-                if !first_line = None && l.start >= seg.char_start then
-                  first_line := Some l
-              ) lay.lines;
-              match !first_line with
-              | None -> ()
-              | Some l ->
-                let baseline = y +. l.baseline_y +. y_shift in
-                let marker_x = x +. seg.left_indent in
-                show_with_spacing marker marker_x baseline
+              let line = lay.lines.(li) in
+              let baseline = y +. line.baseline_y +. y_shift in
+              let marker_x = x +. left_indent in
+              (* Markers are rendered via Pango so font fallback
+                 picks up symbol glyphs (○ ■ □ ✓ etc.) the document
+                 font doesn't have. Cairo's [show_text] selects the
+                 element font directly and shows tofu for any missing
+                 glyph; Pango's font-fallback machinery searches the
+                 system fonts for a covering glyph.
+                 [set_absolute_size] takes Pango units (pixels *
+                 scale) so the marker matches Cairo's pixel font size
+                 — passing the px size to ``"font 16"`` would mean
+                 16pt ≈ 21px and the markers would render too large. *)
+              let layout = Cairo_pango.create_layout cr in
+              let desc = Pango.Font.from_string font_family in
+              Pango.Font.set_absolute_size desc
+                (effective_fs *. float_of_int Pango.scale);
+              Pango.Layout.set_font_description layout desc;
+              Pango.Layout.set_text layout marker;
+              let (_w, h) = Pango.Layout.get_pixel_size layout in
+              Cairo.move_to cr marker_x (baseline -. float_of_int h *. 0.8);
+              Cairo_pango.show_layout cr layout
             end
-        ) psegs counters
+        ) sub_paras counters
       end
     end else begin
       let lines = String.split_on_char '\n' content in
@@ -2141,10 +2329,16 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         true
       ) |> ignore;
 
-      (* Canvas mouse events — dispatched through active tool *)
+      (* Canvas mouse events — dispatched through active tool. The
+         drawing area is made focusable so clicks on the canvas pull
+         keyboard focus away from any panel entry — Backspace then
+         deletes the selected element instead of being swallowed by
+         the entry that previously had focus. *)
+      canvas_area#misc#set_can_focus true;
       canvas_area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
       canvas_area#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 then begin
+          canvas_area#misc#grab_focus ();
           _self#switch_tool;
           let x = GdkEvent.Button.x ev in
           let y = GdkEvent.Button.y ev in
@@ -2160,6 +2354,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         end else false
       ) |> ignore;
       canvas_area#event#connect#motion_notify ~callback:(fun ev ->
+        (* Forward to Dock_panel so a panel-drag preview can track
+           the cursor across the canvas. No-op when no drag is in
+           progress. *)
+        Dock_panel.notify_drag_motion
+          ~x_root:(GdkEvent.Motion.x_root ev)
+          ~y_root:(GdkEvent.Motion.y_root ev);
         _self#switch_tool;
         let x = GdkEvent.Motion.x ev in
         let y = GdkEvent.Motion.y ev in
@@ -2172,14 +2372,26 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       ) |> ignore;
       canvas_area#event#connect#button_release ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 then begin
-          _self#switch_tool;
-          let x = GdkEvent.Button.x ev in
-          let y = GdkEvent.Button.y ev in
-          let shift = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
-          let alt = Gdk.Convert.test_modifier `MOD1 (GdkEvent.Button.state ev) in
-          let ctx = _self#tool_context in
-          active_tool#on_release ctx x y ~shift ~alt;
-          true
+          (* Cooperate with Dock_panel's drag-to-float: if a panel
+             tab is being dragged and the user just released over the
+             canvas (i.e. outside the dock), [Dock_panel.try_handle_drop]
+             detaches the panel into a floating window. Returns true
+             when consumed, in which case we skip the canvas tool's
+             on_release so the active tool doesn't also process the
+             event as a regular click. *)
+          let x_root = GdkEvent.Button.x_root ev in
+          let y_root = GdkEvent.Button.y_root ev in
+          if Dock_panel.try_handle_drop ~x_root ~y_root then true
+          else begin
+            _self#switch_tool;
+            let x = GdkEvent.Button.x ev in
+            let y = GdkEvent.Button.y ev in
+            let shift = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Button.state ev) in
+            let alt = Gdk.Convert.test_modifier `MOD1 (GdkEvent.Button.state ev) in
+            let ctx = _self#tool_context in
+            active_tool#on_release ctx x y ~shift ~alt;
+            true
+          end
         end else false
       ) |> ignore;
 

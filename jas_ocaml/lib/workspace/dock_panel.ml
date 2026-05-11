@@ -13,6 +13,29 @@ type drag_state =
   | Dragging_group of group_addr
   | Dragging_panel of panel_addr
 
+(* Module-level drag state + drop hook. Lets canvas_subwindow's
+   button_release handler check whether a panel-tab drag is in
+   progress and, if the cursor is outside the dock when released,
+   detach the panel into a floating dock. The hook is registered by
+   [create] alongside its private drag_ref so the canvas doesn't need
+   to know dock_panel internals. Returns true when the drag was
+   consumed (so the canvas's own release logic should skip). *)
+let _global_drop_handler : (x_root:float -> y_root:float -> bool) ref =
+  ref (fun ~x_root:_ ~y_root:_ -> false)
+
+let try_handle_drop ~x_root ~y_root : bool =
+  !_global_drop_handler ~x_root ~y_root
+
+(* Drag-motion hook. canvas_subwindow's motion handler calls this so
+   the dock can move the preview popup to track the cursor while a
+   panel drag is in progress. Returns unit; never consumes the event
+   (motion is informational, not a click). *)
+let _global_motion_handler : (x_root:float -> y_root:float -> unit) ref =
+  ref (fun ~x_root:_ ~y_root:_ -> ())
+
+let notify_drag_motion ~x_root ~y_root : unit =
+  !_global_motion_handler ~x_root ~y_root
+
 (* Theme colors — mutable refs resolved from the active appearance *)
 let theme_window_bg = ref "#2e2e2e"
 let theme_bg = ref "#3c3c3c"
@@ -45,9 +68,45 @@ let apply_dark_css w css_str =
   css#load_from_data css_str;
   w#misc#style_context#add_provider css 600
 
-let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspace_layout) =
+let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GPack.box) (layout : workspace_layout) =
   let drag_ref = ref No_drag in
   let _color_panel_refresh = ref (fun () -> ()) in
+
+  (* Drag preview popup — a small undecorated window with the panel's
+     name, repositioned on every motion event so the user has visual
+     feedback that something is being dragged. Created on drag start,
+     destroyed on release. *)
+  let preview_window : GWindow.window option ref = ref None in
+  let destroy_preview () =
+    (match !preview_window with
+     | Some w -> w#destroy (); preview_window := None
+     | None -> ())
+  in
+  let create_preview ~label ~x ~y =
+    destroy_preview ();
+    let win = GWindow.window
+      ~type_hint:`UTILITY ~decorated:false ~resizable:false
+      ~width:120 ~height:24 () in
+    win#set_transient_for window#as_window;
+    win#move ~x:(int_of_float x - 60) ~y:(int_of_float y - 12);
+    let eb = GBin.event_box ~packing:win#add () in
+    apply_dark_css eb (Printf.sprintf
+      "* { background-color: %s; color: %s; border: 1px solid %s; \
+       padding: 4px 8px; }"
+      !theme_bg_tab !theme_text !theme_border);
+    let lbl = GMisc.label ~text:label ~packing:eb#add () in
+    apply_dark_css lbl (Printf.sprintf "* { color: %s; }" !theme_text);
+    win#misc#show_all ();
+    win#present ();
+    preview_window := Some win
+  in
+  let move_preview ~x ~y =
+    match !preview_window with
+    | Some win -> win#move ~x:(int_of_float x - 60) ~y:(int_of_float y - 12)
+    | None -> ()
+  in
+  _global_motion_handler := (fun ~x_root ~y_root ->
+    if !drag_ref <> No_drag then move_preview ~x:x_root ~y:y_root);
 
   let rec rebuild () =
     (* Clear existing children *)
@@ -100,10 +159,27 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
           let grip = GMisc.label ~text:"\xE2\xA0\x81\xE2\xA0\x81" ~packing:grip_eb#add () in
           grip#misc#set_size_request ~width:20 ();
           apply_dark_css grip (Printf.sprintf "* { color: %s; }" !theme_text_hint);
-          grip_eb#event#connect#button_press ~callback:(fun _ ->
-            drag_ref := Dragging_group { dock_id = dock.id; group_idx = gi }; false
+          grip_eb#event#connect#button_press ~callback:(fun ev ->
+            drag_ref := Dragging_group { dock_id = dock.id; group_idx = gi };
+            create_preview ~label:"Group"
+              ~x:(GdkEvent.Button.x_root ev)
+              ~y:(GdkEvent.Button.y_root ev);
+            false
           ) |> ignore;
-          grip_eb#event#add [`BUTTON_PRESS];
+          grip_eb#event#connect#button_release ~callback:(fun ev ->
+            let xr = GdkEvent.Button.x_root ev in
+            let yr = GdkEvent.Button.y_root ev in
+            ignore (try_handle_drop ~x_root:xr ~y_root:yr);
+            destroy_preview ();
+            false
+          ) |> ignore;
+          grip_eb#event#connect#motion_notify ~callback:(fun ev ->
+            notify_drag_motion
+              ~x_root:(GdkEvent.Motion.x_root ev)
+              ~y_root:(GdkEvent.Motion.y_root ev);
+            false
+          ) |> ignore;
+          grip_eb#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION];
 
           (* Tab buttons — set drag state on press, click to activate *)
           Array.iteri (fun pi kind ->
@@ -118,14 +194,46 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                  rebuild ()
                | _ -> ())
             ) |> ignore;
-            btn#event#connect#button_press ~callback:(fun _ ->
-              drag_ref := Dragging_panel { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi }; false
+            btn#event#connect#button_press ~callback:(fun ev ->
+              drag_ref := Dragging_panel { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
+              create_preview ~label
+                ~x:(GdkEvent.Button.x_root ev)
+                ~y:(GdkEvent.Button.y_root ev);
+              false
             ) |> ignore;
-            btn#event#add [`BUTTON_PRESS]
+            (* Tab button has implicit pointer grab from button_press,
+               so the matching release fires on this button regardless
+               of where the cursor moved to. Use x_root/y_root (screen
+               coords) and [try_handle_drop] to detect drops outside
+               the dock and detach into a floating window. Returning
+               false lets the button's normal click logic still run for
+               in-dock releases. *)
+            btn#event#connect#button_release ~callback:(fun ev ->
+              let xr = GdkEvent.Button.x_root ev in
+              let yr = GdkEvent.Button.y_root ev in
+              ignore (try_handle_drop ~x_root:xr ~y_root:yr);
+              destroy_preview ();
+              false
+            ) |> ignore;
+            (* Forward motion to the dock-panel motion hook so the
+               drag preview can track the cursor. The tab button has
+               implicit pointer grab during the drag, so motion events
+               stay on this button until release — without this hook
+               the canvas's motion handler never fires while the user
+               drags from a tab. *)
+            btn#event#connect#motion_notify ~callback:(fun ev ->
+              notify_drag_motion
+                ~x_root:(GdkEvent.Motion.x_root ev)
+                ~y_root:(GdkEvent.Motion.y_root ev);
+              false
+            ) |> ignore;
+            btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION]
           ) group.panels;
 
-          (* Collapse chevron *)
-          let chevron_label = if group.collapsed then "\xC2\xBB" else "\xC2\xAB" in
+          (* Collapse chevron — when expanded points » (click to
+             collapse toward the right edge); when collapsed points «
+             (click to expand back). *)
+          let chevron_label = if group.collapsed then "\xC2\xAB" else "\xC2\xBB" in
           let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
           apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" !theme_text_button !theme_bg_dark);
           chevron#connect#clicked ~callback:(fun () ->
@@ -143,10 +251,14 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                 let menu = GMenu.menu () in
                 let items = Panel_menu.panel_menu active_kind in
                 let addr = { group = { dock_id = dock.id; group_idx = gi }; panel_idx = group.active } in
+                let model = get_model () in
+                let enabled cmd =
+                  Panel_menu.panel_command_is_enabled active_kind cmd model in
                 List.iter (fun item ->
                   match item with
                   | Panel_menu.Action { label; command; _ } ->
                     let mi = GMenu.menu_item ~label ~packing:menu#append () in
+                    mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
@@ -155,6 +267,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                     let checked = Panel_menu.panel_is_checked active_kind command layout in
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active checked;
+                    mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
@@ -163,6 +276,7 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
                     let selected = Panel_menu.panel_is_checked active_kind command layout in
                     let mi = GMenu.check_menu_item ~label ~packing:menu#append () in
                     mi#set_active selected;
+                    mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
                       rebuild ()
@@ -176,12 +290,19 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
             | None -> ()
           end;
 
-          (* Panel body *)
+          (* Panel body — pass [display_width] so render_container can
+             allocate exact pixel widths to each Bootstrap-12 cell.
+             Without this hint the homogeneous grid's natural width
+             (≈ 12 × max(child natural / span)) propagates up through
+             the vbox chain to dock_box, which is hosted by a
+             GtkLayout that doesn't constrain child size — the dock
+             then overflows the viewport. *)
           if not group.collapsed then begin
             match active_panel group with
             | Some kind ->
               let packing = fun w -> group_box#pack ~expand:false w in
-              Yaml_panel_view.create_panel_body ~packing ~kind ~get_model:(fun () -> Some (get_model ())) ()
+              Yaml_panel_view.create_panel_body ~packing ~kind
+                ~get_model:(fun () -> Some (get_model ())) ~max_width:display_width ()
             | None -> ()
           end;
 
@@ -214,6 +335,71 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
         ) dock.groups
       end
   in
+
+  (* Forward-declared rebuilder so the drop hook can call rebuild_all
+     (anchored + floating) — the floating-dock rendering machinery is
+     defined below this point in the file. *)
+  let rebuild_all_ref = ref (fun () -> ()) in
+
+  (* Drop hook for releases that miss every group_eb (i.e. user
+     released outside the dock entirely). canvas_subwindow's
+     button_release calls [try_handle_drop] before its own logic; if
+     a panel drag is in progress and the cursor is outside the dock's
+     allocation, we detach the panel into a new floating dock at the
+     drop point. GTK grabs only block other GtkWindows, not sibling
+     widgets in the same window, so we need this cooperation rather
+     than a global event capture. *)
+  _global_drop_handler := (fun ~x_root ~y_root ->
+    if !drag_ref = No_drag then false
+    else begin
+      let xr = int_of_float x_root in
+      let yr = int_of_float y_root in
+      let alloc = dock_box#misc#allocation in
+      let (pox, poy) =
+        try Gdk.Window.get_origin dock_box#misc#window
+        with _ -> (0, 0) in
+      let dox = pox + alloc.Gtk.x in
+      let doy = poy + alloc.Gtk.y in
+      let outside =
+        xr < dox || xr > dox + alloc.Gtk.width
+        || yr < doy || yr > doy + alloc.Gtk.height
+      in
+      let consumed =
+        match !drag_ref, outside with
+        | Dragging_panel from, true ->
+          ignore (Workspace_layout.detach_panel layout ~from
+                    ~x:x_root ~y:y_root);
+          true
+        | Dragging_panel from, false ->
+          (* Inside the dock area but missed every group_eb — happens
+             when the user drags a panel from a floating window back
+             into the anchored dock (the floating tab's implicit
+             pointer grab swallows the release before any anchored
+             group_eb can fire). Insert as a new group at the end of
+             the anchored dock. *)
+          let from_floating =
+            match Workspace_layout.find_dock layout from.group.dock_id with
+            | Some d ->
+              List.exists (fun (fd : Workspace_layout.floating_dock) ->
+                fd.dock.id = d.id) layout.floating
+            | None -> false in
+          if from_floating then
+            (match Workspace_layout.anchored_dock layout
+                     Workspace_layout.Right with
+             | Some d ->
+               Workspace_layout.insert_panel_as_new_group layout
+                 ~from ~to_dock:d.id
+                 ~at_idx:(Array.length d.groups);
+               true
+             | None -> false)
+          else false
+        | _ -> false
+      in
+      drag_ref := No_drag;
+      if consumed then !rebuild_all_ref ();
+      consumed
+    end);
+  ignore window;
   (* Floating dock windows *)
   let floating_windows : GWindow.window list ref = ref [] in
 
@@ -228,7 +414,19 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
         ~width:(int_of_float fd.dock.width)
         ~height:200
         () in
+      (* Keep the floating panel stacked above the main window so the
+         canvas can't draw over it. transient_for ties its lifetime to
+         the parent (closed when main window closes) and asks the
+         window manager to keep it on top of [window]. *)
+      win#set_transient_for window#as_window;
       win#move ~x:(int_of_float fd.x) ~y:(int_of_float fd.y);
+
+      (* Apply the active theme's background to the window itself so
+         the chrome around the panel content matches the dock — without
+         this the floating panel renders on the GTK default light grey. *)
+      apply_dark_css win
+        (Printf.sprintf "* { background-color: %s; color: %s; }"
+           !theme_bg !theme_text);
 
       let vbox = GPack.vbox ~packing:win#add () in
 
@@ -287,17 +485,54 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
           let label = Panel_menu.panel_label kind in
           let btn = GButton.button ~label ~packing:(tab_bar#pack ~expand:false) () in
           let tab_bg = if pi = group.active then !theme_bg_tab else !theme_bg_tab_inactive in
-          apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: %s; }" !theme_text tab_bg);
+          (* Match the anchored-dock tab CSS — without border / box-shadow /
+             border-radius overrides the GTK default chrome shows through
+             and the tab looks light grey instead of themed. *)
+          apply_dark_css btn (Printf.sprintf
+            "button { color: %s; background: %s; font-size: 11px; \
+             padding: 3px 8px; border: none; border-radius: 0; \
+             box-shadow: none; min-height: 0; }"
+            !theme_text tab_bg);
           btn#connect#clicked ~callback:(fun () ->
-            Workspace_layout.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
-            rebuild_floating ()
-          ) |> ignore
+            (match !drag_ref with
+             | No_drag ->
+               Workspace_layout.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
+               rebuild_floating ()
+             | _ -> ())
+          ) |> ignore;
+          (* Same drag wiring as anchored-dock tabs — lets the user
+             drag a panel out of the floating dock back to the dock or
+             to another floating window. See the anchored handler for
+             the rationale. *)
+          btn#event#connect#button_press ~callback:(fun ev ->
+            drag_ref := Dragging_panel { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
+            create_preview ~label
+              ~x:(GdkEvent.Button.x_root ev)
+              ~y:(GdkEvent.Button.y_root ev);
+            false
+          ) |> ignore;
+          btn#event#connect#button_release ~callback:(fun ev ->
+            ignore (try_handle_drop
+                      ~x_root:(GdkEvent.Button.x_root ev)
+                      ~y_root:(GdkEvent.Button.y_root ev));
+            destroy_preview ();
+            false
+          ) |> ignore;
+          btn#event#connect#motion_notify ~callback:(fun ev ->
+            notify_drag_motion
+              ~x_root:(GdkEvent.Motion.x_root ev)
+              ~y_root:(GdkEvent.Motion.y_root ev);
+            false
+          ) |> ignore;
+          btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION]
         ) group.panels;
         if not group.collapsed then begin
           match Workspace_layout.active_panel group with
           | Some kind ->
             let packing = fun w -> group_box#pack ~expand:false w in
-            Yaml_panel_view.create_panel_body ~packing ~kind ~get_model:(fun () -> Some (get_model ())) ()
+            Yaml_panel_view.create_panel_body ~packing ~kind
+              ~get_model:(fun () -> Some (get_model ()))
+              ~max_width:(int_of_float fd.dock.width) ()
           | None -> ()
         end
       ) fd.dock.groups;
@@ -308,5 +543,6 @@ let create ~get_model ~get_fill_on_top (dock_box : GPack.box) (layout : workspac
   in
 
   let rebuild_all () = rebuild (); rebuild_floating () in
+  rebuild_all_ref := rebuild_all;
   rebuild_all ();
   rebuild_all

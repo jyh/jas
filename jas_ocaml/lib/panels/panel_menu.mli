@@ -52,6 +52,15 @@ val panel_label : panel_kind -> string
 (** Menu items for a panel kind. *)
 val panel_menu : panel_kind -> panel_menu_item list
 
+(* ── Dialog opener registry ──────────────────────────────── *)
+
+(** Install the callback that opens a YAML dialog by id (used by
+    Paragraph panel menu items "Justification…" and "Hyphenation…").
+    [Panel_menu] cannot import [Yaml_dialog_view] directly because
+    [Yaml_panel_view] already routes through [Panel_menu]; bin/main
+    installs the handler at startup. *)
+val register_dialog_opener : (string -> unit) -> unit
+
 (* ── Recent colors bridge ─────────────────────────────────── *)
 
 (** Register a callback fired after [push_recent_color] commits. The
@@ -103,3 +112,9 @@ val panel_dispatch :
 (** Query whether a toggle/radio command is currently checked, for the
     menu's leading-checkmark glyph. *)
 val panel_is_checked : panel_kind -> string -> workspace_layout -> bool
+
+(** Whether a menu command is currently enabled (i.e. should NOT be
+    dimmed). Reads the live model where needed — e.g. paragraph
+    Hanging-Punctuation requires area text in the selection. Default
+    is [true] for any command that doesn't have a specific gate. *)
+val panel_command_is_enabled : panel_kind -> string -> Model.model -> bool

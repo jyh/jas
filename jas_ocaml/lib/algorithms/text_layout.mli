@@ -17,6 +17,14 @@ val char_to_byte : string -> int -> int
 (** Substring from char index [k] spanning [n] chars (UTF-8 safe). *)
 val utf8_sub : string -> int -> int -> string
 
+(** Iterate Unicode chars (as [Uchar.t]) one by one, calling [f]
+    with the char index and the [Uchar.t]. *)
+val utf8_iteri : (int -> Uchar.t -> unit) -> string -> unit
+
+(** Whitespace test mirroring Rust's [char::is_whitespace]
+    (Unicode-aware). *)
+val uchar_is_whitespace : Uchar.t -> bool
+
 type glyph = {
   idx : int;
   line : int;
@@ -38,6 +46,11 @@ type line_info = {
   width : float;
   mutable glyph_start : int;
   mutable glyph_end : int;
+  (** True when the line was wrapped at a hyphenation breakpoint
+      inside a word — the renderer must append a visible hyphen
+      glyph at the line's end. The synthetic hyphen advance is
+      already baked into the line's last visible glyph's [right]. *)
+  trailing_hyphen : bool;
 }
 
 type t = {
@@ -47,8 +60,31 @@ type t = {
   char_count : int;
 }
 
-(** Compute layout. If [max_width <= 0] no wrapping (point text). *)
-val layout : string -> float -> float -> (string -> float) -> t
+(** Compute layout. If [max_width <= 0] no wrapping (point text).
+    [first_line_indent] reduces the first line's effective wrap width
+    (or expands it when negative — hanging indent). *)
+val layout : ?first_line_indent:float ->
+  string -> float -> float -> (string -> float) -> t
+
+(** Hyphenation options for greedy (non-justify) layout. When passed
+    to [layout_with_hyphen], the layout will try to break long words
+    at hyphenation candidates instead of wrapping the whole word to
+    the next line. *)
+type hyphen_opts = {
+  hyph_min_word : int;
+  hyph_min_before : int;
+  hyph_min_after : int;
+  (** When [false], words starting with an uppercase letter are
+      excluded from hyphenation (proper-noun protection). *)
+  hyph_allow_capitalized : bool;
+}
+
+(** Variant of [layout] that consults hyphenation patterns when a
+    non-whitespace token doesn't fit on the current line. Used by
+    [layout_with_paragraphs] for non-justify segments where
+    [seg.hyphenate] is set. *)
+val layout_with_hyphen : ?first_line_indent:float ->
+  string -> float -> float -> hyphen_opts -> (string -> float) -> t
 
 (** Cursor pixel position: returns (x, baseline_y, height). *)
 val cursor_xy : t -> int -> float * float * float
@@ -102,6 +138,11 @@ type paragraph_segment = {
   hyphenate_min_before : int;
   hyphenate_min_after : int;
   hyphenate_bias : int;
+  (** [jas:hyphenate-capitalized] — when [false] (the default in
+      Illustrator / InDesign / Word), proper nouns and other words
+      starting with an uppercase letter are NOT broken at
+      hyphenation candidates. Avoids breaks like "T-rump". *)
+  hyphenate_capitalized : bool;
 }
 
 (** True if [c] may hang into the *left* margin. *)

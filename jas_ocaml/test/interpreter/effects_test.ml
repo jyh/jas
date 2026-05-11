@@ -725,6 +725,106 @@ let _make_rect_model () =
   let doc = Jas.Document.make_document ~selection [| layer |] in
   Jas.Model.create ~document:doc ()
 
+(* ── Character-panel auto-leading post-write (mirrors Rust
+   character_element_has_auto_leading + character_panel_post_write
+   + set_character_panel_field). ─────────────────────────────── *)
+
+(** Build a model with one Text element whose [line_height] is the
+    given string. ""=Auto. *)
+let _text_model_with_line_height lh =
+  let text = match Jas.Element.make_text ~font_size:12.0 0.0 0.0 "hi" with
+    | Jas.Element.Text r -> Jas.Element.Text { r with line_height = lh }
+    | _ -> assert false in
+  let layer = Jas.Element.make_layer [| text |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0])
+  in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let character_auto_leading_tests = [
+  Alcotest.test_case "has_auto_leading_true_for_empty_line_height" `Quick (fun () ->
+    let model = _text_model_with_line_height "" in
+    let ctrl = Jas.Controller.create ~model () in
+    assert (character_element_has_auto_leading ctrl));
+
+  Alcotest.test_case "has_auto_leading_false_for_explicit_line_height" `Quick (fun () ->
+    let model = _text_model_with_line_height "20pt" in
+    let ctrl = Jas.Controller.create ~model () in
+    assert (not (character_element_has_auto_leading ctrl)));
+
+  Alcotest.test_case "has_auto_leading_false_for_non_text_selection" `Quick (fun () ->
+    let model = _make_rect_model () in
+    let ctrl = Jas.Controller.create ~model () in
+    assert (not (character_element_has_auto_leading ctrl)));
+
+  Alcotest.test_case "has_auto_leading_false_for_empty_selection" `Quick (fun () ->
+    let layer = Jas.Element.make_layer [||] in
+    let doc = Jas.Document.make_document [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    assert (not (character_element_has_auto_leading ctrl)));
+
+  Alcotest.test_case "set_font_size_updates_leading_when_auto" `Quick (fun () ->
+    (* Auto leading on the element + font_size write should bump the
+       panel's [leading] to font_size * 1.2 so the apply pipeline
+       still sees Auto and writes empty line_height back out. Without
+       this hook, the stale leading turns Auto into a numeric
+       override the first time the user nudges the size. *)
+    let model = _text_model_with_line_height "" in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "character_panel_content" [
+      ("font_size", `Float 12.0);
+      ("leading", `Float 14.4);   (* = 12 * 1.2 *)
+    ];
+    set_character_panel_field store ctrl "font_size" (`Float 20.0);
+    (* Panel state has been updated to track the new size. *)
+    assert (get_panel store "character_panel_content" "leading"
+            = `Float (20.0 *. 1.2));
+    (* The element's line_height is still empty (Auto preserved). *)
+    match Jas.Document.get_element ctrl#document [0; 0] with
+    | Jas.Element.Text r -> assert (r.line_height = "")
+    | _ -> assert false);
+
+  Alcotest.test_case "set_font_size_leaves_leading_when_explicit" `Quick (fun () ->
+    (* Element has an explicit numeric leading (not Auto). The
+       font_size post-write must NOT touch panel.leading — the user's
+       custom value is preserved across font-size changes. *)
+    let model = _text_model_with_line_height "20pt" in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "character_panel_content" [
+      ("font_size", `Float 12.0);
+      ("leading", `Float 20.0);
+    ];
+    set_character_panel_field store ctrl "font_size" (`Float 20.0);
+    (* Panel.leading is still the user's explicit 20pt. *)
+    assert (get_panel store "character_panel_content" "leading"
+            = `Float 20.0);
+    (* The element's line_height stays at the explicit "20pt". *)
+    match Jas.Document.get_element ctrl#document [0; 0] with
+    | Jas.Element.Text r -> assert (r.line_height = "20pt")
+    | _ -> assert false);
+
+  Alcotest.test_case "set_non_font_size_field_does_not_touch_leading" `Quick (fun () ->
+    (* Writing a non-font_size field on Auto-leading shouldn't move
+       leading either — only font_size triggers the auto-tracking. *)
+    let model = _text_model_with_line_height "" in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "character_panel_content" [
+      ("font_size", `Float 12.0);
+      ("leading", `Float 14.4);
+      ("tracking", `Float 0.0);
+    ];
+    set_character_panel_field store ctrl "tracking" (`Float 50.0);
+    (* Panel.leading unchanged. *)
+    assert (get_panel store "character_panel_content" "leading"
+            = `Float 14.4));
+]
+
 let paragraph_text_kind_tests = [
   Alcotest.test_case "empty_selection_disables_panel" `Quick (fun () ->
     let layer = Jas.Element.make_layer [||] in
@@ -1053,6 +1153,111 @@ let paragraph_phase4_tests = [
     assert (get_panel s "paragraph_panel_content" "justify_right" = `Bool true);
     assert (get_panel s "paragraph_panel_content" "align_left" = `Bool false);
     assert (get_panel s "paragraph_panel_content" "align_center" = `Bool false));
+]
+
+(* ── Manual-test fixes: ensure_paragraph_wrapper ─────────── *)
+
+(** Build a fresh area-text element with NO wrapper — the
+    apply pipeline must insert one (not promote the body). *)
+let _make_area_text_no_wrapper () =
+  let body : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+    id = 0; content = "Hello world" } in
+  let text = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                     0.0 0.0 "Hello world" with
+    | Jas.Element.Text r ->
+      Jas.Element.Text { r with tspans = [| body |] }
+    | _ -> assert false in
+  let layer = Jas.Element.make_layer [| text |] in
+  let selection = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.element_selection_all [0; 0]) in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+(** Build a corrupted text element where the wrapper carries
+    body content (legacy "promote first tspan" output). The
+    apply pipeline must demote it and prepend a fresh empty
+    wrapper that inherits the paragraph attrs. *)
+let _make_area_text_corrupted_wrapper () =
+  let bad : Jas.Element.tspan = { (Jas.Tspan.default_tspan ()) with
+    id = 0; content = "Hello world";
+    jas_role = Some "paragraph";
+    text_align = Some "center";
+    jas_left_indent = Some 12.0 } in
+  let text = match Jas.Element.make_text ~text_width:200.0 ~text_height:100.0
+                     0.0 0.0 "Hello world" with
+    | Jas.Element.Text r ->
+      Jas.Element.Text { r with tspans = [| bad |] }
+    | _ -> assert false in
+  let layer = Jas.Element.make_layer [| text |] in
+  let selection = Jas.Document.PathMap.singleton [0; 0]
+    (Jas.Document.element_selection_all [0; 0]) in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Model.create ~document:doc ()
+
+let manual_test_paragraph_apply_tests = [
+  Alcotest.test_case "no_wrapper_apply_inserts_empty_wrapper" `Quick (fun () ->
+    let model = _make_area_text_no_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       Alcotest.(check int) "expected wrapper + body" 2 (Array.length r.tspans);
+       Alcotest.(check (option string)) "tspan 0 is wrapper"
+         (Some "paragraph") r.tspans.(0).jas_role;
+       Alcotest.(check string) "tspan 0 content empty"
+         "" r.tspans.(0).content;
+       Alcotest.(check (option string)) "tspan 1 not wrapper"
+         None r.tspans.(1).jas_role;
+       Alcotest.(check string) "tspan 1 keeps content"
+         "Hello world" r.tspans.(1).content
+     | _ -> assert false));
+
+  Alcotest.test_case "corrupted_wrapper_demoted_and_repaired" `Quick (fun () ->
+    let model = _make_area_text_corrupted_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       Alcotest.(check int) "expected wrapper + body" 2 (Array.length r.tspans);
+       Alcotest.(check (option string)) "tspan 0 is wrapper"
+         (Some "paragraph") r.tspans.(0).jas_role;
+       Alcotest.(check string) "tspan 0 content empty"
+         "" r.tspans.(0).content;
+       Alcotest.(check (option string)) "tspan 1 not wrapper"
+         None r.tspans.(1).jas_role;
+       Alcotest.(check string) "tspan 1 keeps content"
+         "Hello world" r.tspans.(1).content;
+       Alcotest.(check (option string)) "tspan 1 text_align cleared"
+         None r.tspans.(1).text_align
+     | _ -> assert false));
+
+  Alcotest.test_case "no_wrapper_apply_segment_covers_full_range" `Quick (fun () ->
+    (* End-to-end: after apply, build_segments_from_text must
+       return one segment whose char_range covers every char of
+       the rendered content. *)
+    let model = _make_area_text_no_wrapper () in
+    let ctrl = Jas.Controller.create ~model () in
+    let s = create () in
+    init_panel s "paragraph_panel_content" (_paragraph_panel_defaults ());
+    Jas.Effects.apply_paragraph_panel_to_selection s ctrl;
+    let elem = Jas.Document.get_element model#document [0; 0] in
+    (match elem with
+     | Jas.Element.Text r ->
+       let content = Jas.Tspan.concat_content r.tspans in
+       let segs = Jas.Text_layout_paragraph.build_segments_from_text
+                    r.tspans content true in
+       Alcotest.(check int) "one segment" 1 (List.length segs);
+       let seg = List.hd segs in
+       Alcotest.(check int) "seg.char_start = 0" 0 seg.char_start;
+       Alcotest.(check int) "seg.char_end covers all chars"
+         (Jas.Text_layout.utf8_char_count content) seg.char_end
+     | _ -> assert false));
 ]
 
 (* ── Paragraph panel — Phase 8 Justification dialog OK ───── *)
@@ -1394,8 +1599,10 @@ let () =
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
     "Phase3 pending", phase3_pending_tests;
+    "Character auto-leading", character_auto_leading_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;
     "Paragraph Phase 4", paragraph_phase4_tests;
+    "Manual-test paragraph apply", manual_test_paragraph_apply_tests;
     "Paragraph Phase 8", paragraph_phase8_tests;
     "Paragraph Phase 9", paragraph_phase9_tests;
     "Preview snapshot", preview_snapshot_tests;

@@ -17,6 +17,15 @@ let () =
      Color Panel state. *)
   Jas.Yaml_panel_view.install_recent_colors_bridge ();
 
+  (* Install the Paragraph panel hamburger menu's dialog opener.
+     [Panel_menu] cannot import [Yaml_dialog_view] directly because
+     [Yaml_panel_view] already routes through [Panel_menu]; this
+     callback breaks the cycle. *)
+  Jas.Panel_menu.register_dialog_opener (fun dlg_id ->
+    match Jas.Yaml_dialog_view.open_dialog dlg_id [] [] with
+    | Some ds -> Jas.Yaml_dialog_view.show_dialog ds
+    | None -> ());
+
   let dummy_model = Jas.Model.create () in
   let active_model = ref dummy_model in
   let active_canvas = ref None in
@@ -43,10 +52,18 @@ let () =
     match !notebook_ref, !toolbar_ref, !main_window_ref with
     | Some notebook, Some toolbar, Some main_window ->
       let controller = Jas.Controller.create ~model:new_model () in
-      let on_focus () = active_model := new_model in
+      let on_focus () =
+        active_model := new_model;
+        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ()
+      in
       let on_save () = Jas.Menubar.save new_model main_window () in
       let canvas = Jas.Canvas_subwindow.create
         ~model:new_model ~controller ~toolbar ~on_focus ~on_save notebook in
+      (* Refresh the Paragraph panel when this model's selection
+         changes (PG-055). Safe no-op when no Paragraph panel is
+         open. *)
+      new_model#on_document_changed (fun _ ->
+        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ());
       active_model := new_model;
       active_canvas := Some canvas;
       all_canvases := canvas :: !all_canvases;
@@ -70,6 +87,37 @@ let () =
 
   ignore dock_box; (* Dock panel is created inside create_main_window *)
 
+  (* Restore the previous session's tabs (jas_dioxus / JasSwift do the
+     same — see Session.swift). Each restored canvas re-enters via
+     [add_canvas] so it's wired into the notebook + active_canvas
+     bookkeeping the same way as freshly opened tabs. The active-tab
+     pointer is honoured via a final [goto_page] after all tabs are
+     loaded. *)
+  let restored_active : int option ref = ref None in
+  (match Jas.Session.load_session () with
+   | None -> ()
+   | Some (active_idx, tabs) ->
+     restored_active := active_idx;
+     (* Push the [Untitled-N] counter past any restored slot so the
+        first File→New after restore picks an unused number rather
+        than colliding with a restored tab. *)
+     Jas.Model.advance_next_untitled_past
+       (List.map (fun (fn, _) -> fn) tabs);
+     List.iter (fun (filename, doc) ->
+       let m = Jas.Model.create ~document:doc ~filename () in
+       (* Model.create initializes saved_doc = document so is_modified
+          starts false — restored content is considered saved-state
+          (matches JasSwift / jas_dioxus). *)
+       add_canvas m
+     ) tabs;
+     (* Switch to the restored active tab. Defaults to last-added if
+        no active index. *)
+     (match active_idx with
+      | Some i when i >= 0 ->
+        (try notebook#goto_page i with _ -> ())
+      | _ -> ()));
+  ignore !restored_active;
+
   (* Update active model/canvas when switching tabs *)
   notebook#connect#switch_page ~callback:(fun page_num ->
     let page = notebook#get_nth_page page_num in
@@ -82,8 +130,15 @@ let () =
     let key = GdkEvent.Key.keyval ev in
     (* If a tool is in an editing session (e.g. type tool), give it first
        chance at the full key event before any global shortcuts fire. *)
+    (* Skip routing to the canvas tool when a panel widget (entry,
+       combo, etc.) has focus — typing should land in the focused
+       widget, not in the active text-edit session. The canvas's
+       drawing area only takes focus when clicked, so checking it via
+       [canvas#has_focus] distinguishes "user clicked into a panel
+       input" from "user is editing text on the canvas". *)
     let editing_handled = match !active_canvas with
-      | Some c when c#tool_is_editing -> c#forward_key_event ev
+      | Some c when c#tool_is_editing && c#canvas#has_focus ->
+        c#forward_key_event ev
       | _ -> false
     in
     if editing_handled then true
@@ -99,9 +154,27 @@ let () =
        menu accelerators (Ctrl-N New, Ctrl-P Print, Ctrl-A Select All,
        Ctrl-V Paste, Ctrl-S Save). Without this guard the tool
        shortcut intercepts the keypress and the menu accelerator
-       never sees it. *)
+       never sees it.
+
+       Likewise, when a panel entry has focus (canvas does not), bare
+       letter / minus / etc. keystrokes must reach the entry instead
+       of switching tools — otherwise typing "-12" in a numeric input
+       would activate the Delete-Anchor tool. *)
     else if List.mem `CONTROL (GdkEvent.Key.state ev)
          || List.mem `META (GdkEvent.Key.state ev) then false
+    else if (
+      (* Defer to a focused panel widget that takes text input
+         (GtkEntry, GtkSpinButton, GtkTextView). Otherwise — including
+         the no-focus case at app startup, or when focus is on the
+         canvas / a button — the bare-letter shortcut runs. The C
+         binding raises [Null_pointer] when no widget is focused;
+         treat that as "no input is grabbing the keystroke". *)
+      try
+        let focused = GtkWindow.Window.get_focus main_window#as_window in
+        let tname = Gobject.Type.name (Gobject.get_type focused) in
+        tname = "GtkEntry" || tname = "GtkSpinButton" || tname = "GtkTextView"
+      with _ -> false
+    ) then false
     else if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
       toolbar#select_tool Jas.Toolbar.Selection; true
     end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
@@ -162,7 +235,13 @@ let () =
           | Jas.Model.Content -> ()
       end;
       true
-    end else if key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace then begin
+    end else if (key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace)
+              && (match !active_canvas with
+                  | Some c -> c#canvas#has_focus
+                  | None -> true) then begin
+      (* Delete-selection only fires when the canvas has focus —
+         otherwise Backspace / Delete in a panel entry would also
+         wipe the canvas selection. *)
       let m = !active_model in
       let doc = m#document in
       if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then begin
@@ -293,13 +372,48 @@ let () =
     | None -> false
   ) |> ignore;
 
+  (* Persist the open canvases as a session blob so the next launch
+     can restore them. Called both as a no-modified-tabs fast-path and
+     after the unsaved-changes dialog allows the close. Tabs are
+     written in notebook order so [active_index] stays stable. *)
+  let persist_session () =
+    (* notebook page order — all_canvases is reverse-of-open-order. *)
+    let ordered =
+      List.sort (fun (a : Jas.Canvas_subwindow.canvas_subwindow) b ->
+        compare (notebook#page_num a#widget) (notebook#page_num b#widget))
+        !all_canvases in
+    let tabs = List.map (fun (c : Jas.Canvas_subwindow.canvas_subwindow) ->
+      { Jas.Session.filename = c#model#filename;
+        document = c#model#document })
+      ordered in
+    let active_index =
+      let n = notebook#current_page in
+      if n >= 0 then Some n else None in
+    Jas.Session.save_session ~tabs ~active_index
+  in
+
+  (* SIGINT (Ctrl-C in the terminal) bypasses the GTK delete-event
+     path entirely, so without this handler the session would be lost
+     when the user kills the app from the launching shell. Save and
+     exit. SIGTERM gets the same treatment so [kill PID] is also
+     graceful. *)
+  let handle_signal _ =
+    persist_session ();
+    exit 0
+  in
+  Sys.set_signal Sys.sigint (Sys.Signal_handle handle_signal);
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle handle_signal);
+
   (* Intercept window close to prompt for unsaved changes.
      Collects all modified models. If any exist, shows a dialog with
      Cancel / Don't Save / Save / Save All. Returns true from
      delete_event to block the close, false to allow it. *)
   main_window#event#connect#delete ~callback:(fun _ev ->
     let modified = List.filter (fun c -> c#model#is_modified) !all_canvases in
-    if modified = [] then false
+    if modified = [] then begin
+      persist_session ();
+      false
+    end
     else begin
       let names = String.concat ", "
         (List.map (fun (c : Jas.Canvas_subwindow.canvas_subwindow) ->
@@ -322,15 +436,17 @@ let () =
           Jas.Menubar.save c#model main_window ();
           c#model#is_modified
         ) modified in
+        if not cancelled then persist_session ();
         cancelled  (* true = block close, false = allow *)
       | `ACCEPT ->
         (* Save: save only the active model *)
         let m = !active_model in
         if m#is_modified then begin
           Jas.Menubar.save m main_window ();
-          m#is_modified  (* block if save was cancelled *)
-        end else false
-      | `REJECT -> false  (* Don't Save: allow close *)
+          if m#is_modified then true  (* save cancelled, block close *)
+          else begin persist_session (); false end
+        end else begin persist_session (); false end
+      | `REJECT -> persist_session (); false  (* Don't Save: allow close *)
       | _ -> true  (* Cancel: block close *)
     end
   ) |> ignore;
