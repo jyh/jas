@@ -51,6 +51,11 @@ struct YamlElementView: View {
     /// supplies a closure that bridges to its yamlDialogState
     /// binding). Mirrors the menu-dispatch dialog bridge.
     var onStoreDialogOpened: (() -> Void)? = nil
+    /// Called after the click chain closes the dialog in the store
+    /// (e.g. the color picker's OK / Cancel buttons). The closure
+    /// owner clears its SwiftUI dialogState binding so the modal
+    /// overlay dismisses too.
+    var onStoreDialogClosed: (() -> Void)? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -69,9 +74,56 @@ struct YamlElementView: View {
             // so the panel visualization stays consistent. Edits
             // disappear with the throwaway, which is fine — there's
             // no document to commit them to anyway.
+            //
+            // Double-click opens the color picker dialog for the
+            // clicked attribute (fill or stroke), matching the YAML
+            // template's `action: open_color_picker` behaviour.
+            // Without this, the bypass shipped an empty closure and
+            // double-click was a silent no-op.
             FillStrokeWidget(
                 model: model ?? Model(),
-                onDoubleClick: { _ in }
+                onDoubleClick: { [weak storeRef = model?.stateStore] forFill in
+                    guard let m = model, let store = storeRef else { return }
+                    let ws = WorkspaceData.load()
+                    let actions = ws?.data["actions"] as? [String: Any]
+                    // Augment the dialog-init context with the live
+                    // selection's fill / stroke (uniform summary →
+                    // tab default → app default) so the YAML init
+                    // expression `if param.target == "fill" then
+                    // state.fill_color else state.stroke_color` reads
+                    // the actual canvas color the user is editing.
+                    // Without this, state.X resolves to the workspace
+                    // YAML default and the picker opens on white.
+                    func liveHex(_ isFill: Bool) -> String? {
+                        let resolved: Color? = {
+                            if isFill {
+                                switch selectionFillSummary(m.document) {
+                                case .uniform(let f?): return f.color
+                                case .uniform(nil): return nil
+                                default: return m.defaultFill?.color
+                                }
+                            } else {
+                                switch selectionStrokeSummary(m.document) {
+                                case .uniform(let s?): return s.color
+                                case .uniform(nil): return nil
+                                default: return m.defaultStroke?.color
+                                }
+                            }
+                        }()
+                        return resolved.map { "#" + $0.toHex() }
+                    }
+                    var ctxAug = context
+                    var stateMap = (ctxAug["state"] as? [String: Any]) ?? [:]
+                    if let h = liveHex(true) { stateMap["fill_color"] = h }
+                    if let h = liveHex(false) { stateMap["stroke_color"] = h }
+                    ctxAug["state"] = stateMap
+                    dispatchYamlAction(
+                        "open_color_picker",
+                        params: ["target": forFill ? "fill" : "stroke"],
+                        actions: actions, ctx: ctxAug,
+                        store: store, model: m
+                    )
+                }
             )
         } else {
             let etype = element["type"] as? String ?? "placeholder"
@@ -106,6 +158,12 @@ struct YamlElementView: View {
                 renderColorSwatch()
             case "color_bar":
                 renderColorBar()
+            case "radio_group":
+                renderRadioGroup()
+            case "color_gradient":
+                renderColorGradient()
+            case "color_hue_bar":
+                renderColorHueBar()
             case "gradient_tile":
                 renderGradientTile()
             case "gradient_slider":
@@ -247,17 +305,51 @@ struct YamlElementView: View {
         switch target.scope {
         case .panel:
             commitPanelWrite(key: target.key, value: value)
-            // Color panel hex commit: TextField fires the binding
-            // on Enter / blur (not live). Push the typed hex onto
-            // the recent-colors strip — notifyPanelStateChanged
-            // already updated the active color live, but recent
-            // is committed only on this terminal write.
-            if panelId == "color_panel_content", target.key == "hex",
-               let model = model,
-               let hexStr = value as? String,
-               let color = ColorPanel.colorFromHex(hexStr)
-            {
-                ColorPanel.setActiveColor(color, model: model)
+            // Color panel terminal commits push to the recent-colors
+            // strip. notifyPanelStateChanged already updated the
+            // active color via setActiveColorLive (no recent push);
+            // here we re-fire setActiveColor with the post-commit
+            // panel state so the entry lands in recent. Both the hex
+            // text input and the H / S / B / R / G / B / C / M / Y / K
+            // numeric inputs commit on Enter / blur via this path.
+            if panelId == "color_panel_content", let model = model {
+                // Hex commit: parse the typed hex directly so the
+                // committed color reflects what the user typed
+                // (colorFromPanelState reads h/s/b/r/g/bl per the
+                // mode — those are stale after a hex edit since the
+                // hex commit doesn't ripple back to the other
+                // channels). In Web Safe RGB mode, snap each
+                // channel to the nearest multiple of 51 first
+                // (0/51/102/153/204/255).
+                if target.key == "hex" {
+                    if let hexStr = value as? String,
+                       var color = ColorPanel.colorFromHex(hexStr)
+                    {
+                        let mode = model.stateStore.getPanel(
+                            "color_panel_content", "mode") as? String
+                        if mode == "web_safe_rgb" {
+                            let (r, g, b, _) = color.toRgba()
+                            func snap(_ v: Double) -> Double {
+                                let n = (v * 255.0 / 51.0).rounded() * 51.0
+                                return min(max(n, 0), 255) / 255.0
+                            }
+                            color = Color.rgb(
+                                r: snap(r), g: snap(g), b: snap(b), a: 1.0)
+                        }
+                        ColorPanel.setActiveColor(color, model: model)
+                    }
+                } else {
+                    let colorChannelKeys: Set<String> = [
+                        "h", "s", "b", "r", "g", "bl",
+                        "c", "m", "y", "k",
+                    ]
+                    if colorChannelKeys.contains(target.key),
+                       let color = ColorPanel.colorFromPanelState(
+                            store: model.stateStore)
+                    {
+                        ColorPanel.setActiveColor(color, model: model)
+                    }
+                }
             }
         case .dialog:
             onDialogWrite?(target.key, value)
@@ -304,21 +396,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         }
@@ -432,7 +524,8 @@ struct YamlElementView: View {
                     element: children[i], context: context, model: model,
                     panelId: panelId, onWidgetAction: onWidgetAction,
                     theme: theme, onDialogWrite: onDialogWrite,
-                    onStoreDialogOpened: onStoreDialogOpened
+                    onStoreDialogOpened: onStoreDialogOpened,
+                    onStoreDialogClosed: onStoreDialogClosed
                 )
             }
         }
@@ -451,7 +544,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
             }
         }
     }
@@ -753,6 +846,13 @@ struct YamlElementView: View {
         if let pid = panelId {
             model.stateStore.setActivePanel(pid)
         }
+        // Capture the pre-effect dialog id so a `close_dialog`
+        // effect inside the click chain (color picker OK button)
+        // can be bridged back to whichever overlay binding owns
+        // the modal — without this the store closes the dialog
+        // but the SwiftUI overlay stays visible because nothing
+        // tells the dialogState binding to clear.
+        let beforeDlg = model.stateStore.getDialogId()
         for entry in behavior where (entry["event"] as? String) == "click" {
             // Honor `condition:` so behavior entries can branch on
             // modifier state (e.g. Boolean panel's "alt-click =
@@ -807,6 +907,14 @@ struct YamlElementView: View {
                 )
             }
         }
+        // Bridge: if the click chain closed the dialog (e.g. OK or
+        // Cancel button), notify the overlay so it dismisses too.
+        // Mirrors the open-side bridge in dispatchYamlAction. Without
+        // this, color picker OK / Cancel updated the store but the
+        // SwiftUI modal stayed up.
+        if beforeDlg != nil, model.stateStore.getDialogId() == nil {
+            onStoreDialogClosed?()
+        }
     }
 
     /// Dispatch a YAML action by looking it up in the actions catalog
@@ -832,10 +940,25 @@ struct YamlElementView: View {
                 return
             }
         case "set_active_color_none":
+            // Mirror ColorPanel.setActiveColor: update both the
+            // tab-level default and the active selection so clicking
+            // the None swatch with a shape selected drops that shape's
+            // fill (or stroke). Without the selection write, the swatch
+            // appeared inert when the user expected the rectangle's
+            // fill to clear.
+            let ctrl = Controller(model: model)
             if model.fillOnTop {
                 model.defaultFill = nil
+                if !model.document.selection.isEmpty {
+                    model.snapshot()
+                    ctrl.setSelectionFill(nil)
+                }
             } else {
                 model.defaultStroke = nil
+                if !model.document.selection.isEmpty {
+                    model.snapshot()
+                    ctrl.setSelectionStroke(nil)
+                }
             }
             return
         default:
@@ -876,8 +999,14 @@ struct YamlElementView: View {
     private func renderSlider() -> some View {
         let minVal = element["min"] as? Double ?? 0
         let maxVal = element["max"] as? Double ?? 100
+        // step: snap stride; 0/absent = continuous. Web Safe RGB
+        // sliders pass step: 51 so values snap to the web-safe palette.
+        let stepVal = (element["step"] as? Double)
+            ?? (element["step"] as? Int).map { Double($0) }
+            ?? 0
         let bind = element["bind"] as? [String: Any]
-        let valueExpr = bind?["value"] as? String
+        let valueExpr: String? = (element["bind"] as? String)
+            ?? bind?["value"] as? String
 
         // Get initial value from bind expression
         let initialValue: Double = {
@@ -906,6 +1035,7 @@ struct YamlElementView: View {
             SliderView(
                 value: initialValue,
                 range: minVal...maxVal,
+                step: stepVal,
                 onChange: { newValue in
                     handleSliderWrite(
                         target: writeTarget, value: newValue,
@@ -936,6 +1066,30 @@ struct YamlElementView: View {
         guard let target = target, let model = model else { return }
         switch target.scope {
         case .panel:
+            // For color panel sliders: the panel store may hold stale
+            // h/s/b/r/g/bl/c/m/y/k from before the live override
+            // refreshed the eval ctx. Seed all the OTHER channels
+            // from the active color first so the new color computed
+            // from panel state mixes the dragged channel with the
+            // current (live) sibling values, instead of the YAML
+            // default zeros.
+            if panelId == "color_panel_content",
+               let active = activeColor(model: model)
+            {
+                let modeStr = (model.stateStore.getPanel(
+                    "color_panel_content", "mode") as? String) ?? "hsb"
+                let mode: ColorPanelMode = {
+                    switch modeStr {
+                    case "grayscale": return .grayscale
+                    case "rgb": return .rgb
+                    case "cmyk": return .cmyk
+                    case "web_safe_rgb": return .webSafeRgb
+                    default: return .hsb
+                    }
+                }()
+                ColorPanel.seedSliders(from: active, mode: mode,
+                                       store: model.stateStore)
+            }
             // commitPanelWrite stores the value, bumps
             // panelStateVersion (so SwiftUI re-renders bound
             // widgets like the matching number_input next to the
@@ -947,6 +1101,22 @@ struct YamlElementView: View {
             }
         case .dialog:
             onDialogWrite?(target.key, value)
+        }
+    }
+
+    private func activeColor(model: Model) -> Color? {
+        if model.fillOnTop {
+            switch selectionFillSummary(model.document) {
+            case .uniform(let f?): return f.color
+            case .uniform(nil): return nil
+            default: return model.defaultFill?.color
+            }
+        } else {
+            switch selectionStrokeSummary(model.document) {
+            case .uniform(let s?): return s.color
+            case .uniform(nil): return nil
+            default: return model.defaultStroke?.color
+            }
         }
     }
 
@@ -1006,8 +1176,19 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderNumberInput() -> some View {
         let minVal = element["min"] as? Int ?? 0
-        let bind = element["bind"] as? [String: Any]
-        let valueExpr = bind?["value"] as? String
+        // YAML may declare max numerically; clamp commits to it. Without
+        // this, typing 500 into an R-channel field (max=255) committed
+        // 500 verbatim — the resulting color went past 0xff and produced
+        // a 7-character hex like "1f4ff3b" instead of clamping to 255.
+        let maxVal: Int? = (element["max"] as? Int)
+            ?? (element["max"] as? Double).map { Int($0) }
+        // Bind may be a bare string ("dialog.h") or an object form
+        // ({value: "panel.x"}). Color picker fields use the bare-string
+        // form via the radio_field_row template; without the fallback
+        // bind reads to nil, writeTarget stays nil, and commits silently
+        // no-op (the field accepts typing but Enter resets to 0).
+        let valueExpr: String? = (element["bind"] as? String)
+            ?? (element["bind"] as? [String: Any])?["value"] as? String
         let currentValue: Int = {
             if let e = valueExpr {
                 let result = evaluate(e, context: context)
@@ -1022,12 +1203,24 @@ struct YamlElementView: View {
         // Numeric/missing → fixed-width 45pt (legacy default for align /
         // opacity panels that don't declare a width).
         let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
-        TextField("", value: Binding<Int>(
-            get: { currentValue },
-            set: { newVal in
-                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
+        // Use BufferedTextField (not TextField+Binding<Int>+format)
+        // because the Binding<Int>+format pair fires `set` whenever
+        // the bound value changes externally (e.g. color picker hex
+        // commit causes K to re-derive from the new color), which
+        // re-runs the channel setter and round-trips the color
+        // through cmyk()/hsb()/rgb() — losing precision and visibly
+        // shifting the color. Buffering commits only on actual
+        // user input (Enter / blur after typing).
+        BufferedTextField(
+            placeholder: "",
+            externalValue: String(currentValue),
+            commit: { newVal in
+                guard let parsed = Int(newVal) else { return }
+                var clamped = max(parsed, minVal)
+                if let m = maxVal { clamped = min(clamped, m) }
+                if let t = writeTarget { commitWidgetWrite(target: t, value: clamped) }
             }
-        ), format: .number)
+        )
             .frame(maxWidth: fillsParent ? .infinity : 45)
             .textFieldStyle(.roundedBorder)
             // Override the inherited foregroundColor — dialogs cascade
@@ -1046,8 +1239,9 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderTextInput() -> some View {
         let placeholder = element["placeholder"] as? String ?? ""
-        let bind = element["bind"] as? [String: Any]
-        let valueExpr = bind?["value"] as? String
+        // Bind may be bare string or {value: ...} (see renderNumberInput).
+        let valueExpr: String? = (element["bind"] as? String)
+            ?? (element["bind"] as? [String: Any])?["value"] as? String
         let currentValue: String = {
             if let e = valueExpr {
                 let result = evaluate(e, context: context)
@@ -1057,12 +1251,19 @@ struct YamlElementView: View {
         }()
         let writeTarget = writeBackTarget(valueExpr)
 
-        TextField(placeholder, text: Binding<String>(
-            get: { currentValue },
-            set: { newVal in
+        // Buffered text-input: a direct Binding<String> commits on
+        // every keystroke, which makes the panel re-render and snap
+        // the field back to the previous panel-state value — the user
+        // sees their typed characters disappear. Buffer in a local
+        // @State and commit only on Enter / blur so the typed text
+        // survives the round-trip.
+        BufferedTextField(
+            placeholder: placeholder,
+            externalValue: currentValue,
+            commit: { newVal in
                 if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
             }
-        ))
+        )
             .textFieldStyle(.roundedBorder)
             // Same rationale as renderNumberInput: keep the typed text
             // dark against the system white text-field background.
@@ -1187,6 +1388,204 @@ struct YamlElementView: View {
             // colors that nothing acts on.
             ColorBarView(model: Model(), isDisabled: true)
         }
+    }
+
+    // MARK: - Radio Group / Color Picker widgets
+
+    /// One-or-many radio buttons sharing a single bound value.
+    /// Color picker uses one option per row (channel selector).
+    @ViewBuilder
+    private func renderRadioGroup() -> some View {
+        // Bind may be a bare string ("dialog.radio_channel") or
+        // an object {value: "..."} — the color picker uses bare.
+        let bindExpr: String? = (element["bind"] as? String)
+            ?? (element["bind"] as? [String: Any])?["value"] as? String
+        let current: String = {
+            guard let e = bindExpr else { return "" }
+            let result = evaluate(e, context: context)
+            if case .string(let s) = result { return s }
+            return ""
+        }()
+        let options = (element["options"] as? [[String: Any]]) ?? []
+        let writeTarget = bindExpr.flatMap { writeBackTarget($0) }
+
+        HStack(spacing: 6) {
+            ForEach(0..<options.count, id: \.self) { i in
+                let opt = options[i]
+                let oid = (opt["id"] as? String) ?? ""
+                let label = (opt["label"] as? String) ?? ""
+                let checked = oid == current
+                Button(action: {
+                    if let t = writeTarget {
+                        commitWidgetWrite(target: t, value: oid)
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        SwiftUI.Image(systemName: checked ? "circle.inset.filled" : "circle")
+                            .font(.system(size: 12))
+                        if !label.isEmpty {
+                            SwiftUI.Text(label).font(.system(size: 11))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Square 2D gradient — saturation along x, brightness along y,
+    /// tinted by the current dialog.h. Click / drag updates dialog.s
+    /// and dialog.b.
+    @ViewBuilder
+    private func renderColorGradient() -> some View {
+        let size: CGFloat = 180
+        let hue: Double = {
+            guard let bind = element["bind"] as? [String: Any],
+                  let expr = bind["hue"] as? String else { return 0 }
+            if case .number(let n) = evaluate(expr, context: context) { return n }
+            return 0
+        }()
+        let sat: Double = {
+            guard let bind = element["bind"] as? [String: Any],
+                  let expr = bind["saturation"] as? String else { return 0 }
+            if case .number(let n) = evaluate(expr, context: context) { return n }
+            return 0
+        }()
+        let bri: Double = {
+            guard let bind = element["bind"] as? [String: Any],
+                  let expr = bind["brightness"] as? String else { return 100 }
+            if case .number(let n) = evaluate(expr, context: context) { return n }
+            return 100
+        }()
+        let onDialogWriteCb = onDialogWrite
+        let writeAt: (CGFloat, CGFloat) -> Void = { x, y in
+            let s = max(0, min(100, Double(x) / Double(size) * 100))
+            let b = max(0, min(100, (1.0 - Double(y) / Double(size)) * 100))
+            onDialogWriteCb?("s", s.rounded())
+            onDialogWriteCb?("b", b.rounded())
+        }
+        let (rH, gH, bH) = hsbToRgb(hue, 100, 100)
+        let hueColor = SwiftUI.Color(
+            red: Double(rH) / 255.0,
+            green: Double(gH) / 255.0,
+            blue: Double(bH) / 255.0)
+        ZStack {
+            // White → hue along x
+            LinearGradient(
+                gradient: SwiftUI.Gradient(colors: [.white, hueColor]),
+                startPoint: .leading, endPoint: .trailing)
+            // Transparent → black along y (overlay darkens bottom)
+            LinearGradient(
+                gradient: SwiftUI.Gradient(colors: [.clear, .black]),
+                startPoint: .top, endPoint: .bottom)
+            // Cursor circle
+            SwiftUI.Circle()
+                .strokeBorder(SwiftUI.Color.white, lineWidth: 2)
+                .frame(width: 10, height: 10)
+                .position(x: CGFloat(sat / 100.0) * size,
+                          y: CGFloat((100.0 - bri) / 100.0) * size)
+        }
+        .frame(width: size, height: size)
+        .border(SwiftUI.Color.gray.opacity(0.5))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in writeAt(value.location.x, value.location.y) }
+        )
+    }
+
+    /// Vertical channel bar; click/drag updates the channel selected
+    /// by `dialog.radio_channel`. Default H = rainbow hue; the other
+    /// channels (S / B / R / G / B) ramp the chosen channel from 0 to
+    /// max while holding the others at their current values.
+    private func renderColorHueBar() -> some View {
+        let height: CGFloat = 180
+        let width: CGFloat = 32
+        // Active channel determines bar appearance + value. Defaults
+        // to "h" when no radio_channel set.
+        let channel: String = {
+            if case .string(let s) = evaluate("dialog.radio_channel",
+                                              context: context) {
+                return s
+            }
+            return "h"
+        }()
+        // Read every channel so the inactive ones stay fixed in the
+        // ramp.
+        func dnum(_ key: String, _ def: Double) -> Double {
+            if case .number(let n) = evaluate("dialog.\(key)",
+                                              context: context) {
+                return n
+            }
+            return def
+        }
+        let h = dnum("h", 0)
+        let s = dnum("s", 100)
+        let b = dnum("b", 100)
+        let r = Int(dnum("r", 255))
+        let g = Int(dnum("g", 0))
+        let bl = Int(dnum("bl", 0))
+
+        func sui(_ rH: Int, _ gH: Int, _ bH: Int) -> SwiftUI.Color {
+            SwiftUI.Color(red: Double(rH) / 255.0,
+                          green: Double(gH) / 255.0,
+                          blue: Double(bH) / 255.0)
+        }
+        func hsbCss(_ hh: Double, _ ss: Double, _ bb: Double) -> SwiftUI.Color {
+            let (rH, gH, bH) = hsbToRgb(hh, ss, bb)
+            return sui(Int(rH), Int(gH), Int(bH))
+        }
+
+        let stops: [SwiftUI.Color]
+        let value: Double
+        let maxValue: Double
+        switch channel {
+        case "s":
+            stops = [hsbCss(h, 100, b), hsbCss(h, 0, b)]
+            value = s; maxValue = 100
+        case "b":
+            stops = [hsbCss(h, s, 100), hsbCss(h, s, 0)]
+            value = b; maxValue = 100
+        case "r":
+            stops = [sui(255, g, bl), sui(0, g, bl)]
+            value = Double(r); maxValue = 255
+        case "g":
+            stops = [sui(r, 255, bl), sui(r, 0, bl)]
+            value = Double(g); maxValue = 255
+        case "bl":
+            stops = [sui(r, g, 255), sui(r, g, 0)]
+            value = Double(bl); maxValue = 255
+        default:  // h: rainbow
+            stops = [.red, .yellow, .green, .cyan, .blue, .purple, .red]
+            value = h; maxValue = 359
+        }
+
+        let onDialogWriteCb = onDialogWrite
+        let channelKey = channel
+        let max = maxValue
+        let writeAt: (CGFloat) -> Void = { y in
+            let v = Swift.max(0, Swift.min(max, max - Double(y) / Double(height) * max))
+            onDialogWriteCb?(channelKey, v.rounded())
+        }
+        // Indicator y from current channel value (top = max).
+        let indicatorY = (maxValue - value) / maxValue * Double(height)
+        return ZStack(alignment: .top) {
+            LinearGradient(
+                gradient: SwiftUI.Gradient(colors: stops),
+                startPoint: .top, endPoint: .bottom)
+            Rectangle()
+                .fill(SwiftUI.Color.white)
+                .frame(width: width + 4, height: 3)
+                .border(SwiftUI.Color.black, width: 1)
+                .offset(y: CGFloat(indicatorY) - 1)
+        }
+        .frame(width: width, height: height)
+        .border(SwiftUI.Color.gray.opacity(0.5))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in writeAt(value.location.y) }
+        )
     }
 
     // MARK: - Color Swatch
@@ -1680,7 +2079,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
         } else {
             renderPlaceholder()
         }
@@ -1917,10 +2316,15 @@ struct YamlElementView: View {
         let label = element["label"] as? String ?? ""
         let iconName = element["icon"] as? String ?? ""
         let bind = element["bind"] as? [String: Any]
-        // Accept bind.value or bind.checked: panels prefer ``value``,
-        // dialogs and align/stroke radios use ``checked``. Mirrors the
-        // Rust render_toggle fallback chain.
-        let stateExpr = (bind?["value"] as? String) ?? (bind?["checked"] as? String)
+        // Accept bind.value, bind.checked, or a bare-string bind:
+        // panels prefer ``value``, dialogs / align / stroke radios use
+        // ``checked``, color picker uses bare-string ("dialog.web_only").
+        // Without the bare-string fallback the toggle stays inert
+        // — clicks fire writeTarget=nil and the visual state never
+        // flips.
+        let stateExpr = (bind?["value"] as? String)
+            ?? (bind?["checked"] as? String)
+            ?? (element["bind"] as? String)
         let isChecked: Bool = {
             if let e = stateExpr {
                 return evaluate(e, context: context).toBool()
@@ -2084,7 +2488,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
         }
     }
 
@@ -2144,7 +2548,7 @@ struct YamlElementView: View {
             // Content
             VStack {
                 if let content = activeContent {
-                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened)
+                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
                 Spacer()
             }
@@ -2155,9 +2559,60 @@ struct YamlElementView: View {
 }
 
 /// A simple slider wrapper to avoid @State in the recursive view.
+/// Text input that buffers keystrokes locally and only fires `commit`
+/// on Enter or blur. Mirrors the controlled-but-uncommitted pattern
+/// from renderNumberInput's TextField/.number binding (which only
+/// fires on Enter / Tab) for plain-string inputs like the Color
+/// panel hex field. Without this, every keystroke went through
+/// commitWidgetWrite → commitPanelWrite → re-render, and the field
+/// snapped back to the previous panel-state value mid-typing.
+private struct BufferedTextField: View {
+    let placeholder: String
+    let externalValue: String
+    let commit: (String) -> Void
+    @State private var text: String = ""
+    @State private var syncOnNextChange: Bool = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .focused($focused)
+            .onAppear { text = externalValue }
+            .onChange(of: externalValue) { newValue in
+                // After a commit we always pull the post-commit
+                // (possibly transformed, e.g. Web Safe snap) value
+                // back even if focus stayed (Enter). Outside of a
+                // commit, only sync when unfocused so a re-render
+                // mid-typing doesn't clobber the user's input.
+                if syncOnNextChange {
+                    text = newValue
+                    syncOnNextChange = false
+                } else if !focused, newValue != text {
+                    text = newValue
+                }
+            }
+            // Tab fires onSubmit AND focused→false; Enter fires only
+            // onSubmit. The guard in commitIfChanged makes the Tab
+            // double-call a no-op.
+            .onSubmit { commitIfChanged() }
+            .onChange(of: focused) { isFocused in
+                if !isFocused { commitIfChanged() }
+            }
+    }
+
+    private func commitIfChanged() {
+        guard text != externalValue else { return }
+        syncOnNextChange = true
+        commit(text)
+    }
+}
+
 private struct SliderView: View {
     @State var value: Double
     let range: ClosedRange<Double>
+    /// Snap step. 0 = continuous (default). Web Safe RGB sliders use
+    /// 51 to snap to 0 / 51 / 102 / 153 / 204 / 255.
+    var step: Double = 0
     /// Live callback fired on every drag tick (passes the current
     /// value). Used by the Color panel's HSB / RGB / CMYK sliders
     /// to update the active fill or stroke color in real time
@@ -2167,20 +2622,29 @@ private struct SliderView: View {
     /// the resulting color onto the recent-colors strip).
     var onCommit: ((Double) -> Void)? = nil
 
+    private func snap(_ v: Double) -> Double {
+        guard step > 0 else { return v }
+        let snapped = (v / step).rounded() * step
+        return min(max(snapped, range.lowerBound), range.upperBound)
+    }
+
     var body: some View {
-        Slider(
-            value: Binding(
-                get: { value },
-                set: { newValue in
-                    value = newValue
-                    onChange?(newValue)
-                }
-            ),
-            in: range,
-            onEditingChanged: { editing in
-                if !editing { onCommit?(value) }
+        let binding = Binding<Double>(
+            get: { value },
+            set: { newValue in
+                let v = step > 0 ? snap(newValue) : newValue
+                value = v
+                onChange?(v)
             }
         )
+        let onEdit: (Bool) -> Void = { editing in
+            if !editing { onCommit?(value) }
+        }
+        if step > 0 {
+            return AnyView(Slider(value: binding, in: range, step: step, onEditingChanged: onEdit))
+        } else {
+            return AnyView(Slider(value: binding, in: range, onEditingChanged: onEdit))
+        }
     }
 }
 
@@ -3170,13 +3634,17 @@ struct YamlPanelBodyView: View {
     /// overlay binding (mirrors `dispatchWithDialogBridge` for the
     /// menu path).
     var onStoreDialogOpened: (() -> Void)? = nil
+    /// Forwarded close-side bridge — fires when a widget click chain
+    /// closes the store's dialog (e.g. color picker OK / Cancel).
+    var onStoreDialogClosed: (() -> Void)? = nil
 
     var body: some View {
         YamlElementView(
             element: contentSpec, context: context, model: model,
             panelId: panelId, theme: theme,
             onDialogWrite: onDialogWrite,
-            onStoreDialogOpened: onStoreDialogOpened
+            onStoreDialogOpened: onStoreDialogOpened,
+            onStoreDialogClosed: onStoreDialogClosed
         )
             .padding(4)
     }

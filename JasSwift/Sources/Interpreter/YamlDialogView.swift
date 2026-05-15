@@ -156,6 +156,36 @@ func buildDialogEvalContext(
     return ctx
 }
 
+/// Dialog ctx that also resolves YAML-defined getters via the store.
+///
+/// Color picker H/S/B/R/G/B/C/M/Y/K/hex are declared with `get:`
+/// expressions in the YAML state block; they aren't stored in the
+/// dialog map. Plain `state["h"]` lookup returns nil, so a widget
+/// bound to `dialog.h` would render 0. This variant computes each
+/// getter via `StateStore.getDialogWithOuter` and merges the values
+/// into the `dialog` map so renderer expressions see them.
+func buildDialogEvalContextWithGetters(
+    store: StateStore?,
+    state: [String: Any],
+    params: [String: Any],
+    outer: [String: Any]
+) -> [String: Any] {
+    var dialog = state
+    if let store = store, let dlgId = store.getDialogId(),
+       let ws = WorkspaceData.load(),
+       let dlgDef = ws.dialog(dlgId),
+       let stateDefs = dlgDef["state"] as? [String: Any]
+    {
+        for (key, defn) in stateDefs {
+            guard let d = defn as? [String: Any], d["get"] != nil else { continue }
+            if let v = store.getDialogWithOuter(key, outer: outer) {
+                dialog[key] = v
+            }
+        }
+    }
+    return buildDialogEvalContext(state: dialog, params: params, outer: outer)
+}
+
 /// Convert a Value to Any? for storage.
 private func valueToAnyDlg(_ v: Value) -> Any? {
     switch v {
@@ -273,7 +303,8 @@ struct YamlDialogOverlay: View {
         let content = dlgDef?["content"] as? [String: Any]
 
         if let content = content {
-            let ctx = buildDialogEvalContext(
+            let ctx = buildDialogEvalContextWithGetters(
+                store: model?.stateStore,
                 state: ds.state,
                 params: ds.params,
                 outer: outerScope()
@@ -284,7 +315,8 @@ struct YamlDialogOverlay: View {
                 model: model,
                 onWidgetAction: handleDialogWidgetAction,
                 theme: theme,
-                onDialogWrite: handleDialogStateWrite
+                onDialogWrite: handleDialogStateWrite,
+                onStoreDialogClosed: { dialogState = nil }
             )
                 .foregroundColor(SwiftUI.Color(nsColor: theme.text))
                 .padding(4)
@@ -292,16 +324,48 @@ struct YamlDialogOverlay: View {
     }
 
     /// Receive a write from a dialog-body widget bound to ``dialog.X``.
-    /// Updates both the SwiftUI ``dialogState`` binding (so the dialog
-    /// re-renders with the typed value) and the underlying StateStore
-    /// dialog map (so any prop ``set:`` setter or ``on_change`` hook
-    /// fires, and so a later ``yamlDialogStateFromStore`` snapshot
-    /// would observe the same value).
+    /// Updates the underlying StateStore (which runs the prop's set
+    /// lambda when present) and re-syncs the SwiftUI ``dialogState``
+    /// binding from the post-write store snapshot. The earlier
+    /// implementation also wrote `value` into `ds.state[key]`
+    /// directly, which bypassed the setter — fields with get/set
+    /// (color picker H/S/B/R/G/B/C/M/Y/K) ended up with the typed
+    /// value in `state[key]` but stale derived values everywhere
+    /// else, and the field snapped back to its computed-from-color
+    /// value on the next render.
     private func handleDialogStateWrite(_ key: String, _ value: Any?) {
-        model?.stateStore.setDialog(key, value)
-        guard var ds = dialogState else { return }
-        ds.state[key] = value
-        dialogState = ds
+        guard let store = model?.stateStore else {
+            guard var ds = dialogState else { return }
+            ds.state[key] = value
+            dialogState = ds
+            return
+        }
+        store.setDialog(key, value)
+        // Color picker "Only Web Colors": when toggled on, snap each
+        // RGB channel to multiples of 51 (0/51/102/153/204/255). The
+        // r/g/bl setters route through the YAML lambdas which rebuild
+        // dialog.color, so subsequent reads of h/s/b/r/g/bl/c/m/y/k/hex
+        // see the snapped value.
+        if key == "web_only", let on = value as? Bool, on {
+            func snap(_ v: Int) -> Int {
+                let n = (Double(v) / 51.0).rounded() * 51.0
+                return min(max(Int(n), 0), 255)
+            }
+            func ival(_ k: String) -> Int {
+                if let any = store.getDialog(k) {
+                    if let i = any as? Int { return i }
+                    if let d = any as? Double { return Int(d.rounded()) }
+                }
+                return 0
+            }
+            store.setDialog("r", snap(ival("r")))
+            store.setDialog("g", snap(ival("g")))
+            store.setDialog("bl", snap(ival("bl")))
+        }
+        if var ds = dialogState {
+            ds.state = store.getDialogState()
+            dialogState = ds
+        }
     }
 
     /// Dispatch a dialog-body widget-level ``action:`` click. Params
