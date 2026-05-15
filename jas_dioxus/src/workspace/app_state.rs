@@ -1009,13 +1009,31 @@ impl AppState {
 
     /// Set the active color (fill or stroke, per fill_on_top) without pushing to recent colors.
     /// Used for live slider drag updates.
+    ///
+    /// Also writes the new color to the active selection — without
+    /// that, the canvas doesn't animate during drag (selection fill
+    /// stays at its pre-drag color until release) and the Color panel's
+    /// selection-priority live overrides keep the sliders / hex stuck
+    /// on the stale selection value. Skip the snapshot so the per-tick
+    /// drag doesn't bloat the undo stack — `set_active_color` (called
+    /// on pointer-up) snapshots once for the whole drag.
     pub(crate) fn set_active_color_live(&mut self, color: Color) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if self.fill_on_top {
-                tab.model.default_fill = Some(Fill::new(color));
+                let new_fill = Some(Fill::new(color));
+                tab.model.default_fill = new_fill;
+                if !tab.model.document().selection.is_empty() {
+                    crate::document::controller::Controller::set_selection_fill(
+                        &mut tab.model, new_fill);
+                }
             } else {
                 let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
-                tab.model.default_stroke = Some(Stroke::new(color, width));
+                let new_stroke = Some(Stroke::new(color, width));
+                tab.model.default_stroke = new_stroke;
+                if !tab.model.document().selection.is_empty() {
+                    crate::document::controller::Controller::set_selection_stroke(
+                        &mut tab.model, new_stroke);
+                }
             }
         }
     }

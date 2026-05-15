@@ -250,6 +250,11 @@ pub(crate) fn MenuBarView(
                             }
                         } else {
                             st.workspace_layout.show_panel(super::workspace::PanelKind::Color);
+                            // Per COLOR.md §Panel initialization rule:
+                            // color_panel_mode is panel-local and
+                            // resets to its default (HSB) on each
+                            // reopen — not persisted across close.
+                            st.color_panel_mode = super::color_panel_view::ColorMode::Hsb;
                         }
                     }));
                 }

@@ -54,11 +54,23 @@ color_picker:
       type: number
       get: "rgb_b(color)"
       set: "fun v -> let r = rgb_r(color) in let g = rgb_g(color) in color <- rgb(r, g, v)"
-    # CMYK — read-only derived from color
-    c:  { type: number, get: "cmyk_c(color)" }
-    m:  { type: number, get: "cmyk_m(color)" }
-    y:  { type: number, get: "cmyk_y(color)" }
-    k:  { type: number, get: "cmyk_k(color)" }
+    # CMYK — derived from color; setters rebuild color via cmyk()
+    c:
+      type: number
+      get: "cmyk_c(color)"
+      set: "fun v -> color <- cmyk(v, cmyk_m(color), cmyk_y(color), cmyk_k(color))"
+    m:
+      type: number
+      get: "cmyk_m(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), v, cmyk_y(color), cmyk_k(color))"
+    y:
+      type: number
+      get: "cmyk_y(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), v, cmyk_k(color))"
+    k:
+      type: number
+      get: "cmyk_k(color)"
+      set: "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), cmyk_y(color), v)"
     # Hex — derived from color, setter parses hex to color
     hex:
       type: string
@@ -81,13 +93,19 @@ color_picker:
           - id: cp_eyedropper
             type: icon_button
             summary: "Eyedropper"
-            description: "Click to sample a color from the canvas"
+            description: >
+              Closes the dialog and switches to the Eyedropper tool so
+              the next canvas click samples a source element's
+              appearance. The sampled fill (or stroke, per the active
+              attribute) becomes the new active color — re-open the
+              picker to continue editing.
             icon: "eyedropper"
             style: { size: 18 }
             behavior:
               - event: click
                 effects:
-                  - log: "eyedropper: activate color sampling"
+                  - set: { active_tool: "\"eyedropper\"" }
+                action: dismiss_dialog
 
       # Main layout: left (gradient) + center (fields) + right (buttons)
       - type: container

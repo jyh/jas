@@ -58,36 +58,30 @@ pub fn eval(source: &str, ctx: &serde_json::Value) -> Value {
 
 /// Evaluate an expression body that may contain `target <- value_expr`.
 ///
-/// Parses `<-` assignments pragmatically (string split, not full AST).
-/// Returns a list of (target_name, evaluated_value) pairs.
-/// Handles sequenced assignments: `a <- e1; b <- e2`.
+/// Parses the source as a full AST so constructs like
+/// `let r = rgb_r(color) in let g = rgb_g(color) in color <- rgb(r, g, v)`
+/// evaluate correctly — the let-bound `r` / `g` are in scope for the
+/// RHS of the `<-`. Returns a list of `(target_name, evaluated_value)`
+/// pairs in the order assignments fire.
 pub fn eval_with_store(source: &str, ctx: &serde_json::Value) -> Vec<(String, Value)> {
-    let mut assignments: Vec<(String, Value)> = Vec::new();
-    // Split on ';' for sequencing
-    for part in source.split(';') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        // Check for <- assignment
-        // Find "<-" that's not inside a string
-        if let Some(arrow_pos) = part.find("<-") {
-            let target = part[..arrow_pos].trim();
-            let value_expr = part[arrow_pos + 2..].trim();
-            // Evaluate the value expression
-            // Build updated context with previous assignments applied
-            let mut updated_ctx = ctx.as_object().cloned().unwrap_or_default();
-            for (k, v) in &assignments {
-                updated_ctx.insert(k.clone(), super::effects::value_to_json(v));
-            }
-            let val = eval(value_expr, &serde_json::Value::Object(updated_ctx));
-            assignments.push((target.to_string(), val));
-        } else {
-            // Not an assignment — evaluate for side effects (ignored)
-            eval(part, ctx);
-        }
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let assignments: Rc<RefCell<Vec<(String, Value)>>> = Rc::new(RefCell::new(Vec::new()));
+    let assignments_for_cb = assignments.clone();
+    let cb: expr_eval::StoreCb = Box::new(move |name: &str, val: &Value| {
+        assignments_for_cb.borrow_mut().push((name.to_string(), val.clone()));
+    });
+    let ast_opt = expr_parser::parse(source);
+    if let Some(ast) = ast_opt {
+        expr_eval::eval_node_with_store(&ast, ctx, Some(&cb));
+    } else {
+        log::warn!("eval_with_store parse failed: {source:?}");
     }
-    assignments
+    drop(cb);
+    Rc::try_unwrap(assignments)
+        .ok()
+        .map(|c| c.into_inner())
+        .unwrap_or_default()
 }
 
 /// Evaluate a text string with embedded {{expr}} regions.
