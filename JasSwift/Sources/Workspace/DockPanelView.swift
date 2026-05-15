@@ -5,22 +5,25 @@ import UniformTypeIdentifiers
 
 // MARK: - Drag Payload Encoding
 
-private let dockDragUTType = UTType.plainText
+// `internal` (default) so the canvas-level drop-to-detach handler in
+// ContentView.swift can decode the same payload format the dock-tab
+// `.onDrag` modifier writes.
+let dockDragUTType = UTType.plainText
 
-private func encodeGroupDrag(_ addr: GroupAddr) -> String {
+func encodeGroupDrag(_ addr: GroupAddr) -> String {
     "group:\(addr.dockId.value):\(addr.groupIdx)"
 }
 
-private func encodePanelDrag(_ addr: PanelAddr) -> String {
+func encodePanelDrag(_ addr: PanelAddr) -> String {
     "panel:\(addr.group.dockId.value):\(addr.group.groupIdx):\(addr.panelIdx)"
 }
 
-private enum DecodedDrag {
+enum DecodedDrag {
     case group(GroupAddr)
     case panel(PanelAddr)
 }
 
-private func decodeDrag(_ s: String) -> DecodedDrag? {
+func decodeDrag(_ s: String) -> DecodedDrag? {
     let parts = s.split(separator: ":")
     if parts.count == 3, parts[0] == "group",
        let did = Int(parts[1]), let gi = Int(parts[2]) {
@@ -245,6 +248,16 @@ public struct PanelGroupView: View {
             let overrides = paragraphPanelLiveOverrides(model: m)
             for (k, v) in overrides { panelMap[k] = v }
         }
+        // Color panel — sliders / hex must reflect the active color
+        // (selection's fill/stroke or tab default), not the stored
+        // panel state. Without this, switching to a differently-
+        // coloured selection leaves the sliders stuck on the YAML
+        // init values from first open. Mirrors the Rust dock's
+        // build_live_panel_overrides color block.
+        if contentId == "color_panel_content", let m = model,
+           let overrides = colorPanelLiveOverrides(model: m) {
+            for (k, v) in overrides { panelMap[k] = v }
+        }
         // Render-time layers-panel selection, if the layers panel is
         // currently initialised in the shared store. buildPanelCtx runs
         // for whichever panel is being rendered, so it may not be the
@@ -414,6 +427,9 @@ public struct PanelGroupView: View {
                 panelIsChecked(activeKind, cmd: cmd,
                                layout: workspaceLayout, model: model)
             },
+            isEnabled: { cmd in
+                panelIsEnabled(activeKind, cmd: cmd, model: model)
+            },
             onSelect: dispatchWithDialogBridge
         )
     }
@@ -428,6 +444,7 @@ private struct HamburgerMenuButton: View {
     let items: [PanelMenuItem]
     let color: NSColor
     let isChecked: (String) -> Bool
+    let isEnabled: (String) -> Bool
     let onSelect: (String) -> Void
 
     var body: some View {
@@ -444,14 +461,24 @@ private struct HamburgerMenuButton: View {
 
     private func showMenu() {
         let menu = NSMenu()
+        // Without this, NSMenu auto-enables items whose target
+        // responds to the selector and overrides our explicit
+        // `isEnabled = false` for disabled commands like Invert /
+        // Complement when the active attribute is none.
+        menu.autoenablesItems = false
         for item in items {
             switch item {
             case .action(let label, let command, _):
-                menu.addItem(buildItem(label: label, command: command, checked: false))
+                menu.addItem(buildItem(label: label, command: command,
+                                       checked: false, enabled: isEnabled(command)))
             case .toggle(let label, let command):
-                menu.addItem(buildItem(label: label, command: command, checked: isChecked(command)))
+                menu.addItem(buildItem(label: label, command: command,
+                                       checked: isChecked(command),
+                                       enabled: isEnabled(command)))
             case .radio(let label, let command, _):
-                menu.addItem(buildItem(label: label, command: command, checked: isChecked(command)))
+                menu.addItem(buildItem(label: label, command: command,
+                                       checked: isChecked(command),
+                                       enabled: isEnabled(command)))
             case .separator:
                 menu.addItem(NSMenuItem.separator())
             }
@@ -464,7 +491,8 @@ private struct HamburgerMenuButton: View {
         }
     }
 
-    private func buildItem(label: String, command: String, checked: Bool) -> NSMenuItem {
+    private func buildItem(label: String, command: String,
+                           checked: Bool, enabled: Bool) -> NSMenuItem {
         let item = NSMenuItem(
             title: label,
             action: #selector(MenuActionTarget.fire(_:)),
@@ -474,6 +502,7 @@ private struct HamburgerMenuButton: View {
         item.target = target
         item.representedObject = target  // retain
         item.state = checked ? .on : .off
+        item.isEnabled = enabled
         return item
     }
 }
@@ -594,5 +623,49 @@ private struct PanelBodyObserver: View {
             model: model, panelId: panelId, theme: theme,
             onStoreDialogOpened: onStoreDialogOpened
         )
+    }
+}
+
+// MARK: - Canvas-level drop-to-detach
+
+/// SwiftUI DropDelegate bound to the canvas root. Catches dock-tab /
+/// dock-grip drags that release outside any dock area and converts the
+/// drop into a detach-into-floating-dock at the cursor position.
+///
+/// The dock's own `.onDrop` handles tab-into-tab reordering and group
+/// movement; this delegate fires only when the drop lands on the
+/// canvas (an area with no dock-side drop handler), giving the
+/// "drag a tab onto the canvas to float it" gesture.
+struct DockDetachDropDelegate: DropDelegate {
+    @Binding var workspaceLayout: WorkspaceLayout
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [dockDragUTType])
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [dockDragUTType]).first else {
+            return false
+        }
+        let location = info.location
+        // Capture a binding to the workspace layout so the async
+        // load-completion handler can mutate it back on the main
+        // thread; SwiftUI bindings are not thread-safe.
+        let layoutBinding = $workspaceLayout
+        provider.loadObject(ofClass: NSString.self) { item, _ in
+            guard let payload = item as? String,
+                  let decoded = decodeDrag(payload) else { return }
+            DispatchQueue.main.async {
+                switch decoded {
+                case .panel(let addr):
+                    _ = layoutBinding.wrappedValue.detachPanel(
+                        addr, x: Double(location.x), y: Double(location.y))
+                case .group(let addr):
+                    _ = layoutBinding.wrappedValue.detachGroup(
+                        addr, x: Double(location.x), y: Double(location.y))
+                }
+            }
+        }
+        return true
     }
 }

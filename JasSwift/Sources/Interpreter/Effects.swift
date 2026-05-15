@@ -541,8 +541,25 @@ private func runOne(
             resolvedParams[k] = valueToAny(val)
         }
 
+        // Extract per-state get / set props so dialog widget edits
+        // route through the YAML setters (color picker channel
+        // setters: `fun v -> color <- hsb(v, ...)`). Without this,
+        // typing into H / S / B fields wrote h=N directly into the
+        // dialog state map but never updated `color`, and the next
+        // re-render evaluated `dialog.h` against the stored map
+        // — which had no `h` entry, so the field snapped back to 0.
+        var props: [String: [String: Any]] = [:]
+        for (key, defn) in stateDefs {
+            guard let d = defn as? [String: Any] else { continue }
+            var p: [String: Any] = [:]
+            if let g = d["get"] { p["get"] = g }
+            if let s = d["set"] { p["set"] = s }
+            if !p.isEmpty { props[key] = p }
+        }
         // Init dialog
-        store.initDialog(dlgId, defaults: defaults, params: resolvedParams.isEmpty ? nil : resolvedParams)
+        store.initDialog(dlgId, defaults: defaults,
+                         params: resolvedParams.isEmpty ? nil : resolvedParams,
+                         props: props.isEmpty ? nil : props)
 
         // Evaluate init expressions.
         // Two passes: Swift Dictionary doesn't preserve insertion order,
