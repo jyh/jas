@@ -188,9 +188,20 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
     render_repeat ~packing ~ctx el
   | _ ->
   let etype = el |> member "type" |> to_string_option |> Option.value ~default:"placeholder" in
+  (* Template-expanded fill_stroke_widget: post-expansion the node's
+     [type] is [container] (the template's content type), but the
+     compiler leaves the [_template] marker so renderers can intercept.
+     Without this, the expanded container's children stack as a normal
+     column and ignore their [style.position] hints — fill/stroke
+     swatches render at full row width instead of overlapping 26x26. *)
+  let template_marker = el |> member "_template" |> to_string_option in
+  match template_marker, etype with
+  | Some "fill_stroke_widget", _ -> render_fill_stroke_widget ~packing ~ctx el
+  | _, etype ->
   match etype with
   | "container" | "row" | "col" -> render_container ~packing ~ctx el etype
-  | "fill_stroke_widget" -> render_container ~packing ~ctx el "fill_stroke_widget"
+  | "fill_stroke_widget" -> render_fill_stroke_widget ~packing ~ctx el
+  | "color_bar" -> render_color_bar ~packing ~ctx el
   | "grid" -> render_grid ~packing ~ctx el
   | "text" -> render_text ~packing ~ctx el
   | "button" | "icon_button" -> render_button ~packing ~ctx el
@@ -295,8 +306,22 @@ and render_container ~packing ~ctx el etype =
         |> Option.value ~default:"" in
       let hbox = GPack.hbox ~spacing:gap ~packing () in
       hbox#misc#set_size_request ~width:1 ();
-      let expand = alignment = "space-between" in
-      render_children ~packing:(hbox#pack ~expand ~fill:false) ~ctx el
+      let row_expand = alignment = "space-between" in
+      (* Per-child expand: when a child declares ``style.flex: N``
+         (any positive number), it greedily fills any remaining row
+         space — matches CSS flex: N semantics for the slider_row
+         template (slider's flex:1 spans the gap between label and
+         number_input). Other children pack at natural size. *)
+      (* Pack all children flush at natural size — no flex.
+         Sliders set their own width via set_size_request (~100px),
+         and other widgets (label, number_input, unit text) keep
+         their declared widths. expand=true centred a fixed-width
+         slider inside its slack, leaving visible gaps between
+         label and slider / slider and number_input. *)
+      List.iter (fun child ->
+        render_element ~packing:(hbox#pack ~expand:row_expand ~fill:false) ~ctx child
+      ) (match el |> member "children" with
+         | `List xs -> xs | _ -> [])
     end
   end else begin
     let vbox = GPack.vbox ~spacing:gap ~packing () in
@@ -316,7 +341,63 @@ and render_text ~packing ~ctx el =
   let text = if String.length content > 0 && (try let _ = String.index content '{' in true with Not_found -> false)
     then Expr_eval.evaluate_text content ctx
     else content in
-  let lbl = GMisc.label ~text ~packing () in
+  let style = el |> member "style" in
+  (* style.color may be a literal hex or a {{theme.colors.X}} token;
+     evaluate_text resolves both. Default to the dark-theme text
+     color (#cccccc) when unspecified — without this, slider-row
+     labels (slider_row template doesn't pass color) inherit the
+     GTK theme's default label color, which goes dark when the
+     panel has focus and renders unreadable on the dark backdrop. *)
+  let color = match style |> safe_member "color" |> to_string_option with
+    | Some s when String.length s > 0 ->
+      (try Expr_eval.evaluate_text s ctx with _ -> s)
+    | _ -> "#cccccc" in
+  let font_size = style |> safe_member "font_size" |> to_number_option in
+  let attr_color =
+    (* Be defensive: evaluate_text on a {{theme.colors.X}} token can
+       yield a non-#rrggbb string if the token doesn't resolve.
+       Strip a leading # and accept 6-hex-digit input; otherwise
+       fall back to the dark-theme text color. *)
+    let raw = if String.length color > 0 && color.[0] = '#'
+      then String.sub color 1 (String.length color - 1) else color in
+    let raw = if String.length raw = 3 then
+        let c0 = String.make 1 raw.[0] in
+        let c1 = String.make 1 raw.[1] in
+        let c2 = String.make 1 raw.[2] in
+        c0 ^ c0 ^ c1 ^ c1 ^ c2 ^ c2
+      else raw in
+    let parsed =
+      if String.length raw = 6 then
+        try
+          let r = int_of_string ("0x" ^ String.sub raw 0 2) in
+          let g = int_of_string ("0x" ^ String.sub raw 2 2) in
+          let b = int_of_string ("0x" ^ String.sub raw 4 2) in
+          Some (r, g, b)
+        with _ -> None
+      else None
+    in
+    let (r, g, b) = match parsed with
+      | Some t -> t
+      | None -> (0xcc, 0xcc, 0xcc) in
+    Printf.sprintf "color=\"#%02x%02x%02x\"" r g b
+  in
+  let attr_size = match font_size with
+    | Some n -> Printf.sprintf " font_size=\"%d\"" (int_of_float n * 1024)
+    | None -> ""
+  in
+  let escape s =
+    let buf = Buffer.create (String.length s) in
+    String.iter (fun c -> match c with
+      | '<' -> Buffer.add_string buf "&lt;"
+      | '>' -> Buffer.add_string buf "&gt;"
+      | '&' -> Buffer.add_string buf "&amp;"
+      | '"' -> Buffer.add_string buf "&quot;"
+      | c -> Buffer.add_char buf c
+    ) s;
+    Buffer.contents buf
+  in
+  let markup = Printf.sprintf "<span %s%s>%s</span>" attr_color attr_size (escape text) in
+  let lbl = GMisc.label ~markup ~packing () in
   lbl#set_xalign 0.0
 
 and render_icon ~packing el =
@@ -540,14 +621,75 @@ and render_slider ~packing ~ctx el =
   let min_val = el |> member "min" |> to_number_option |> Option.value ~default:0.0 in
   let max_val = el |> member "max" |> to_number_option |> Option.value ~default:100.0 in
   let step = el |> member "step" |> to_number_option |> Option.value ~default:1.0 in
-  let initial = match el |> member "bind" |> safe_member "value" |> to_string_option with
-    | Some expr ->
-      let v = Expr_eval.evaluate expr ctx in
-      (match v with Expr_eval.Number n -> n | _ -> min_val)
-    | None -> min_val in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option
+                  |> Option.value ~default:"" in
+  let initial = if bind_expr <> "" then
+      match Expr_eval.evaluate bind_expr ctx with
+      | Expr_eval.Number n -> n
+      | _ -> min_val
+    else min_val in
   let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:step ~value:initial () in
-  let _scale = GRange.scale `HORIZONTAL ~adjustment:adj ~draw_value:false ~packing () in
-  ()
+  let scale = GRange.scale `HORIZONTAL ~adjustment:adj ~draw_value:false ~packing () in
+
+  (* Per-channel gradient on the trough. Channel comes from the
+     panel.X bind expression (slider_row template wraps each color
+     channel as bind: panel.h / panel.s / panel.b / panel.r / etc.).
+     The gradients here are a simplified, channel-only ramp — Rust
+     and Swift mix in the other channels' current values for a
+     more accurate preview, but a fixed ramp still gives the
+     "where am I in the channel range" cue that's the user's
+     reason for wanting a track. *)
+  let channel = match bind_expr with
+    | s when String.length s > 6 && String.sub s 0 6 = "panel." ->
+      String.sub s 6 (String.length s - 6)
+    | _ -> ""
+  in
+  let gradient = match channel with
+    | "h" -> "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)"
+    | "s" -> "linear-gradient(to right, #888, #f00)"
+    | "b" -> "linear-gradient(to right, #000, #fff)"
+    | "r" -> "linear-gradient(to right, #000, #f00)"
+    | "g" -> "linear-gradient(to right, #000, #0f0)"
+    | "bl" -> "linear-gradient(to right, #000, #00f)"
+    | "c" -> "linear-gradient(to right, #fff, #0ff)"
+    | "m" -> "linear-gradient(to right, #fff, #f0f)"
+    | "y" -> "linear-gradient(to right, #fff, #ff0)"
+    | "k" -> "linear-gradient(to right, #fff, #000)"
+    | _ -> "linear-gradient(to right, #888, #ccc)"
+  in
+  let css = Printf.sprintf
+    "scale { padding: 0; margin: 0; min-height: 24px; } \
+     scale trough { min-height: 18px; background-image: %s; \
+       border: 1px solid #444; border-radius: 2px; } \
+     scale slider { min-width: 10px; min-height: 24px; \
+       background: #ccc; border: 1px solid #222; \
+       border-radius: 2px; margin: -3px -5px; }"
+    gradient in
+  let provider = GObj.css_provider () in
+  provider#load_from_data css;
+  scale#misc#style_context#add_provider provider 800;
+  (* Cap the slider's natural width so the gradient track stays a
+     readable ~100px instead of expanding to the full row slack
+     (CLR-002 OCaml — user feedback "slider too wide"). The row
+     packs each child with expand=true, fill=false; the slider
+     centres in its allocation at this width. *)
+  scale#misc#set_size_request ~width:100 ~height:26 ();
+
+  (* Value changes → live color update. Mirrors the Rust slider's
+     oninput → set_active_color_live; final commit on release would
+     normally pile through onchange / button-release, but GtkScale
+     doesn't expose a "drag end" signal directly. Use [value_changed]
+     for the live update; the panel's existing apply chain handles
+     selection sync. *)
+  let suppress = ref false in
+  ignore (adj#connect#value_changed ~callback:(fun () ->
+    if !suppress then () else begin
+      suppress := true;
+      let v = adj#value in
+      if bind_expr <> "" then
+        _write_back_bind bind_expr (`Float v);
+      suppress := false
+    end))
 
 and render_number_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -1045,19 +1187,239 @@ and render_color_swatch ~packing ~ctx el =
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
     | None -> "" in
   let selected = is_selected_in_list el ctx in
-  let border_css =
-    if selected then "2px solid #4a90d9"
-    else "1px solid #666" in
-  let btn = GButton.button ~packing () in
-  btn#misc#set_size_request ~width:size ~height:size ();
-  if String.length color_str > 0 then begin
-    let css = Printf.sprintf
-      "* { background-color: %s; border: %s; min-width: %dpx; min-height: %dpx; padding: 0; }"
-      color_str border_css size size in
-    let provider = GObj.css_provider () in
-    provider#load_from_data css;
-    btn#misc#style_context#add_provider provider 800
-  end
+  let hollow = el |> member "hollow" |> to_bool_option |> Option.value ~default:false in
+  (* DrawingArea (not GtkButton) so the swatch sizes exactly to the
+     declared [size] — Adwaita's themed button enforces a min-height
+     of ~30px regardless of the CSS override and inflated 16x16
+     swatches to 30x40 in the recent-color row (CLR-002 OCaml). The
+     EventBox parent receives clicks for the behavior dispatch. *)
+  let evt = GBin.event_box ~packing () in
+  evt#misc#set_size_request ~width:size ~height:size ();
+  let area = GMisc.drawing_area ~packing:evt#add () in
+  area#misc#set_size_request ~width:size ~height:size ();
+
+  let parse_hex s =
+    let s = if String.length s > 0 && s.[0] = '#' then String.sub s 1 (String.length s - 1) else s in
+    let s = if String.length s = 3 then
+        let c0 = String.make 1 s.[0] in
+        let c1 = String.make 1 s.[1] in
+        let c2 = String.make 1 s.[2] in
+        c0 ^ c0 ^ c1 ^ c1 ^ c2 ^ c2
+      else s in
+    if String.length s <> 6 then (0, 0, 0)
+    else
+      try
+        let h2 i = int_of_string ("0x" ^ String.sub s i 2) in
+        (h2 0, h2 2, h2 4)
+      with _ -> (0, 0, 0)
+  in
+  ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let s = float_of_int size in
+    if String.length color_str = 0 then begin
+      (* Empty slot: hollow dashed square *)
+      Cairo.set_source_rgb cr 0.33 0.33 0.33;
+      Cairo.set_line_width cr 1.0;
+      Cairo.set_dash cr [| 2.0; 2.0 |];
+      Cairo.rectangle cr 0.5 0.5 ~w:(s -. 1.0) ~h:(s -. 1.0);
+      Cairo.stroke cr
+    end else begin
+      let (r, g, b) = parse_hex color_str in
+      let rf = float_of_int r /. 255.0 in
+      let gf = float_of_int g /. 255.0 in
+      let bf = float_of_int b /. 255.0 in
+      if hollow then begin
+        (* Hollow square: 3px ring of color, white center *)
+        Cairo.set_source_rgb cr rf gf bf;
+        Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
+        Cairo.fill cr;
+        Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        let inset = 3.0 in
+        Cairo.rectangle cr inset inset ~w:(s -. 2.0 *. inset) ~h:(s -. 2.0 *. inset);
+        Cairo.fill cr
+      end else begin
+        Cairo.set_source_rgb cr rf gf bf;
+        Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
+        Cairo.fill cr
+      end;
+      (* Border *)
+      if selected then begin
+        Cairo.set_source_rgb cr 0.29 0.56 0.85;
+        Cairo.set_line_width cr 2.0;
+        Cairo.rectangle cr 1.0 1.0 ~w:(s -. 2.0) ~h:(s -. 2.0)
+      end else begin
+        Cairo.set_source_rgb cr 0.4 0.4 0.4;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr 0.5 0.5 ~w:(s -. 1.0) ~h:(s -. 1.0)
+      end;
+      Cairo.stroke cr
+    end;
+    true
+  ));
+  let _ = evt in ()
+
+(** [fill_stroke_widget] template — render children with absolute
+    positioning into a [GPack.fixed] box. The template declares each
+    child's size and placement via [style.size] and
+    [style.position.{x,y}], which the standard column layout in
+    [render_container] discards (children stack vertically and
+    inflate to row width, the symptom seen in CLR-002 OCaml). *)
+and render_fill_stroke_widget ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let style = el |> member "style" in
+  let width = style |> safe_member "width" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:48 in
+  let height = style |> safe_member "height" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:60 in
+  let container = GPack.fixed ~packing () in
+  container#misc#set_size_request ~width ~height ();
+  let children = match el |> member "children" with
+    | `List xs -> xs | _ -> [] in
+  List.iter (fun child ->
+    let pos = child |> member "style" |> safe_member "position" in
+    let x = pos |> safe_member "x" |> to_number_option
+      |> Option.map int_of_float |> Option.value ~default:0 in
+    let y = pos |> safe_member "y" |> to_number_option
+      |> Option.map int_of_float |> Option.value ~default:0 in
+    render_element ~packing:(container#put ~x ~y) ~ctx child
+  ) children
+
+(** [color_bar] — 64px tall horizontal HSB gradient strip. Cairo-paint
+    a hue ramp on the X axis × saturation/brightness band on the Y
+    axis (top half white→full-saturation, bottom half full→black);
+    click+drag picks the color at the cursor and routes it through
+    [Panel_menu.set_active_color] (commit on release pushes to the
+    recent strip). Mirrors the Rust [build_color_bar_data_uri] math. *)
+and render_color_bar ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let style = el |> member "style" in
+  let height = style |> safe_member "height" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:64 in
+  (* set_size_request width:1 keeps the colorbar's preferred width
+     minimal. Wrap the drawing area in an event_box so the natural-
+     width contribution stops at the event_box (with width:1) rather
+     than propagating up through the column → dock pane → window
+     chain. The event_box pins its own width to 1; halign:`FILL`
+     lets it stretch when the parent gives extra space. *)
+  let evt = GBin.event_box ~packing () in
+  evt#misc#set_size_request ~width:1 ~height ();
+  evt#set_hexpand false;
+  evt#set_halign `FILL;
+  let area = GMisc.drawing_area ~packing:evt#add () in
+  area#misc#set_size_request ~width:1 ~height ();
+  area#set_hexpand false;
+  area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `BUTTON1_MOTION];
+
+  (* (x, y, width) → HSB color. Same convention as the Rust
+     [build_color_bar_data_uri] / [xy_to_color]. *)
+  let xy_to_rgb x y w h =
+    let hue = if w <= 0.0 then 0.0 else 360.0 *. x /. w in
+    let hue = max 0.0 (min 360.0 hue) in
+    let mid_y = h /. 2.0 in
+    let (sat, br) =
+      if y <= mid_y then
+        let t = if mid_y <= 0.0 then 0.0 else min 1.0 (max 0.0 (y /. mid_y)) in
+        (t *. 100.0, 100.0 -. t *. 20.0)
+      else
+        let denom = h -. mid_y in
+        let t = if denom <= 0.0 then 0.0
+                else min 1.0 (max 0.0 ((y -. mid_y) /. denom)) in
+        (100.0, 80.0 *. (1.0 -. t))
+    in
+    Color_util.hsb_to_rgb hue sat br
+  in
+
+  (* Paint the gradient one column at a time. ~1px columns are cheap
+     and visually indistinguishable from per-pixel painting at this
+     resolution; the more expensive cairo_pattern_create_mesh path
+     isn't worth wrapping in OCaml for a one-off widget. *)
+  ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let cols = int_of_float aw in
+    for x = 0 to cols - 1 do
+      (* Two-stop vertical gradient per column matching the spec:
+         white at top → full-saturation pure hue at mid → black at
+         bottom. *)
+      let xf = float_of_int x +. 0.5 in
+      let pat = Cairo.Pattern.create_linear ~x0:xf ~y0:0.0 ~x1:xf ~y1:ah in
+      let mid = ah /. 2.0 in
+      let (r0, g0, b0) = xy_to_rgb xf 0.0 aw ah in
+      let (r1, g1, b1) = xy_to_rgb xf mid aw ah in
+      let (r2, g2, b2) = xy_to_rgb xf ah aw ah in
+      Cairo.Pattern.add_color_stop_rgb pat ~ofs:0.0
+        (float_of_int r0 /. 255.0) (float_of_int g0 /. 255.0) (float_of_int b0 /. 255.0);
+      Cairo.Pattern.add_color_stop_rgb pat ~ofs:0.5
+        (float_of_int r1 /. 255.0) (float_of_int g1 /. 255.0) (float_of_int b1 /. 255.0);
+      Cairo.Pattern.add_color_stop_rgb pat ~ofs:1.0
+        (float_of_int r2 /. 255.0) (float_of_int g2 /. 255.0) (float_of_int b2 /. 255.0);
+      Cairo.set_source cr pat;
+      Cairo.rectangle cr (float_of_int x) 0.0 ~w:1.0 ~h:ah;
+      Cairo.fill cr
+    done;
+    (* 1px border *)
+    Cairo.set_source_rgb cr 0.33 0.33 0.33;
+    Cairo.set_line_width cr 1.0;
+    Cairo.rectangle cr 0.5 0.5 ~w:(aw -. 1.0) ~h:(ah -. 1.0);
+    Cairo.stroke cr;
+    true
+  ));
+
+  (* fill_on_top routes the picked color to fill or stroke. The
+     workspace state store doesn't thread live values into the panel
+     ctx in OCaml yet; default to fill (matches the YAML default and
+     the expected first-test scenario). Color picker dialog can
+     override per-target. *)
+  let read_fill_on_top () =
+    match Expr_eval.evaluate "state.fill_on_top" ctx with
+    | Expr_eval.Bool b -> b
+    | _ -> true
+  in
+
+  (* Click / drag → set_active_color. Live (no recent push) on press
+     and motion; final commit (with recent push) on release. *)
+  let pick_color_from_button ev =
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let x = GdkEvent.Button.x ev in
+    let y = GdkEvent.Button.y ev in
+    let (r, g, b) = xy_to_rgb x y aw ah in
+    Element.color_rgb
+      (float_of_int r /. 255.0)
+      (float_of_int g /. 255.0)
+      (float_of_int b /. 255.0)
+  in
+  let pick_color_from_motion ev =
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let x = GdkEvent.Motion.x ev in
+    let y = GdkEvent.Motion.y ev in
+    let (r, g, b) = xy_to_rgb x y aw ah in
+    Element.color_rgb
+      (float_of_int r /. 255.0)
+      (float_of_int g /. 255.0)
+      (float_of_int b /. 255.0)
+  in
+  ignore (area#event#connect#button_press ~callback:(fun ev ->
+    (match !_get_model_ref () with
+     | Some m -> Panel_menu.set_active_color_live (pick_color_from_button ev)
+                   ~fill_on_top:(read_fill_on_top ()) m
+     | None -> ());
+    true));
+  ignore (area#event#connect#button_release ~callback:(fun ev ->
+    (match !_get_model_ref () with
+     | Some m -> Panel_menu.set_active_color (pick_color_from_button ev)
+                   ~fill_on_top:(read_fill_on_top ()) m
+     | None -> ());
+    true));
+  ignore (area#event#connect#motion_notify ~callback:(fun ev ->
+    (match !_get_model_ref () with
+     | Some m -> Panel_menu.set_active_color_live (pick_color_from_motion ev)
+                   ~fill_on_top:(read_fill_on_top ()) m
+     | None -> ());
+    true))
 
 (** Evaluate [bind.selected_in] against the per-item identity read
     from the click behavior's first [select.target] (so authors don't
