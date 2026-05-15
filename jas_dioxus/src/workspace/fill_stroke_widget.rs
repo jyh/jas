@@ -9,6 +9,24 @@ use crate::geometry::element::{Color, Fill, Stroke};
 
 // ColorPickerCtx removed — color picker now uses YAML dialog system via DialogCtx
 
+/// Inline SVG diagonal: a single red stroke from lower-left to
+/// upper-right, sized to fill its parent square. Drawn as an overlay
+/// on top of a "None" fill or stroke square so the user sees the
+/// standard Illustrator / Photoshop "no fill" indicator. Uses
+/// dangerous_inner_html because Dioxus rsx! emits `svg` / `line`
+/// tags into the HTML namespace by default; the browser then ignores
+/// them. The other SVG icons in this codebase use the same pattern.
+const NONE_DIAGONAL_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='28' x2='28' y2='0' stroke='red' stroke-width='2'/></svg>";
+
+fn none_diagonal() -> Element {
+    rsx! {
+        div {
+            style: "position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;",
+            dangerous_inner_html: "{NONE_DIAGONAL_SVG}",
+        }
+    }
+}
+
 #[component]
 pub(crate) fn FillStrokeWidgetView(
     fill_summary: FillSummary,
@@ -45,6 +63,8 @@ pub(crate) fn FillStrokeWidgetView(
     let stroke_css = fs_display_bg(&stroke_display);
     let fill_label = fs_display_label(&fill_display);
     let stroke_label = fs_display_label(&stroke_display);
+    let fill_is_none = matches!(fill_display, FsDisplay::None);
+    let stroke_is_none = matches!(stroke_display, FsDisplay::None);
     // Active attribute determines mode button highlight
     let active_is_none = if fill_on_top {
         matches!(fill_display, FsDisplay::None)
@@ -108,6 +128,9 @@ pub(crate) fn FillStrokeWidgetView(
                                 st.fill_on_top = false;
                             }));
                         },
+                        if stroke_is_none {
+                            { none_diagonal() }
+                        }
                         if stroke_label.is_some() {
                             div {
                                 style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
@@ -126,6 +149,9 @@ pub(crate) fn FillStrokeWidgetView(
                                 st.fill_on_top = true;
                             }));
                         },
+                        if fill_is_none {
+                            { none_diagonal() }
+                        }
                         if fill_label.is_some() {
                             div {
                                 style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
@@ -154,6 +180,9 @@ pub(crate) fn FillStrokeWidgetView(
                                 );
                             }
                         },
+                        if fill_is_none {
+                            { none_diagonal() }
+                        }
                         if fill_label.is_some() {
                             div {
                                 style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",
@@ -180,6 +209,9 @@ pub(crate) fn FillStrokeWidgetView(
                                 );
                             }
                         },
+                        if stroke_is_none {
+                            { none_diagonal() }
+                        }
                         if stroke_label.is_some() {
                             div {
                                 style: "width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:{THEME_TEXT};",

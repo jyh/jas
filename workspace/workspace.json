@@ -26164,19 +26164,23 @@
         },
         "c": {
           "type": "number",
-          "get": "cmyk_c(color)"
+          "get": "cmyk_c(color)",
+          "set": "fun v -> color <- cmyk(v, cmyk_m(color), cmyk_y(color), cmyk_k(color))"
         },
         "m": {
           "type": "number",
-          "get": "cmyk_m(color)"
+          "get": "cmyk_m(color)",
+          "set": "fun v -> color <- cmyk(cmyk_c(color), v, cmyk_y(color), cmyk_k(color))"
         },
         "y": {
           "type": "number",
-          "get": "cmyk_y(color)"
+          "get": "cmyk_y(color)",
+          "set": "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), v, cmyk_k(color))"
         },
         "k": {
           "type": "number",
-          "get": "cmyk_k(color)"
+          "get": "cmyk_k(color)",
+          "set": "fun v -> color <- cmyk(cmyk_c(color), cmyk_m(color), cmyk_y(color), v)"
         },
         "hex": {
           "type": "string",
@@ -26212,7 +26216,7 @@
                 "id": "cp_eyedropper",
                 "type": "icon_button",
                 "summary": "Eyedropper",
-                "description": "Click to sample a color from the canvas",
+                "description": "Closes the dialog and switches to the Eyedropper tool so the next canvas click samples a source element's appearance. The sampled fill (or stroke, per the active attribute) becomes the new active color \u2014 re-open the picker to continue editing.\n",
                 "icon": "eyedropper",
                 "style": {
                   "size": 18
@@ -26222,9 +26226,12 @@
                     "event": "click",
                     "effects": [
                       {
-                        "log": "eyedropper: activate color sampling"
+                        "set": {
+                          "active_tool": "\"eyedropper\""
+                        }
                       }
-                    ]
+                    ],
+                    "action": "dismiss_dialog"
                   }
                 ]
               }

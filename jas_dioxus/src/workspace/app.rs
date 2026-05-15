@@ -660,9 +660,9 @@ pub fn App() -> Element {
     let mut popup_slot = use_signal(|| Option::<usize>::None);
 
     // Dock drag-and-drop state.
-    let drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
+    let mut drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
     let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
-    let was_dropped = use_signal(|| false);
+    let mut was_dropped = use_signal(|| false);
     let mut last_drag_pos = use_signal(|| (0.0f64, 0.0f64));
     // Floating dock title bar drag (dock_id, offset_x, offset_y).
     let mut title_drag = use_signal(|| Option::<(super::workspace::DockId, f64, f64)>::None);
@@ -674,6 +674,8 @@ pub fn App() -> Element {
         last_drag_pos,
         title_drag,
     });
+
+
     // Pane drag-and-drop state.
     // (pane_id, offset_x, offset_y)
     let mut pane_drag = use_signal(|| Option::<(super::workspace::PaneId, f64, f64)>::None);
@@ -1110,6 +1112,59 @@ pub fn App() -> Element {
                             drop_target_sig.set(Some(DropTarget::Edge(edge)));
                         }
                     }
+                }
+            },
+            // Dock-tab dragend handler at the app level. The dock-tab
+            // div fires ondragstart, which writes drag_source — that
+            // signal write triggers a dock_panel re-render, which
+            // destroys the source DOM element before the user
+            // releases. The element-bound ondragend then never fires.
+            // Binding here at the always-mounted root catches the
+            // bubbled event regardless of source-element lifecycle.
+            // Dock-tab dragend handler at the app-level container.
+            // Bound here (not on the source tab) because the dock_panel
+            // re-renders mid-drag when ondragstart writes drag_source,
+            // which would destroy a source-bound listener. peek() in
+            // build_dock_groups now suppresses that re-render, but the
+            // app-level binding is still preferable since it gives a
+            // single canonical drop site.
+            ondragend: {
+                let act = act.clone();
+                move |_| {
+                    use super::workspace::DragPayload;
+                    if !was_dropped() {
+                        if let Some(payload) = drag_source() {
+                            let (x, y) = last_drag_pos();
+                            let cur_tgt = drop_target_sig();
+                            (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                let _result = match payload {
+                                    DragPayload::Panel(addr) => {
+                                        if let Some(DropTarget::Edge(edge)) = cur_tgt {
+                                            if let Some(fid) = st.workspace_layout.detach_panel(addr, x, y) {
+                                                st.workspace_layout.snap_to_edge(fid, edge);
+                                                Some(fid)
+                                            } else { None }
+                                        } else {
+                                            st.workspace_layout.detach_panel(addr, x, y)
+                                        }
+                                    }
+                                    DragPayload::Group(addr) => {
+                                        if let Some(DropTarget::Edge(edge)) = cur_tgt {
+                                            if let Some(fid) = st.workspace_layout.detach_group(addr, x, y) {
+                                                st.workspace_layout.snap_to_edge(fid, edge);
+                                                Some(fid)
+                                            } else { None }
+                                        } else {
+                                            st.workspace_layout.detach_group(addr, x, y)
+                                        }
+                                    }
+                                };
+                            }));
+                        }
+                    }
+                    drag_source.set(None);
+                    drop_target_sig.set(None);
+                    was_dropped.set(false);
                 }
             },
             style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; background:{THEME_BG_DARK}; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",

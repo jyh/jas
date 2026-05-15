@@ -94,6 +94,15 @@ pub fn is_checked(cmd: &str, state: &AppState) -> bool {
     false
 }
 
+/// Query whether a menu command is enabled. Invert / Complement need
+/// an active color (fill or stroke per `fill_on_top`) to operate on.
+pub fn is_enabled(cmd: &str, state: &AppState) -> bool {
+    match cmd {
+        "invert_color" | "complement_color" => state.active_color().is_some(),
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
