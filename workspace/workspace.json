@@ -14074,7 +14074,7 @@
                 "description": "Six-character hex string (RRGGBB, no # prefix). Editing and pressing Enter or Tab commits the value, updates the active color, and adds it to recent colors. Non-hex characters are rejected. In Web Safe RGB mode, the entered value is snapped to the nearest web-safe color on commit.\n",
                 "placeholder": "000000",
                 "style": {
-                  "width": 52
+                  "width": 64
                 },
                 "bind": {
                   "value": "panel.hex",
