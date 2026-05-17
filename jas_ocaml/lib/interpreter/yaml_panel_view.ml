@@ -31,7 +31,8 @@
 
 open Workspace_layout
 
-(** Module-level ref to the model accessor, set by create_panel_body. *)
+(** Module-level ref to the model accessor, set by create_panel_body.
+    Hoisted above [update_color_panel_widgets] which reads it. *)
 let _get_model_ref : (unit -> Model.model option) ref = ref (fun () -> None)
 
 (** Module-level ref to the panel-local state store, set by
@@ -43,6 +44,218 @@ let _current_store : State_store.t option ref = ref None
     "stroke_panel"). Set by create_panel_body alongside
     [_current_store]. *)
 let _current_panel_id : string option ref = ref None
+
+(** Module-level rebuild hook. Set by dock_panel.create after each
+    rebuild so widget click handlers (notably the color_swatch in
+    the fill_stroke widget, whose z-order depends on
+    [state.fill_on_top]) can force a structural re-render after
+    state writes. Without this, [bind: { z_index: ... }] is
+    evaluated only at render time and the swatch stack stays
+    stale. *)
+let panel_rerender_hook : (unit -> unit) ref = ref (fun () -> ())
+
+(** Per-panel-body re-renderers, registered by dock_panel each time
+    it builds a panel. The function tears down the body's existing
+    children and re-runs create_panel_body inside the same body
+    container — so the tab bar, chevron, and hamburger don't get
+    rebuilt (and don't flash). [schedule_panel_rerender] fires
+    these instead of the full dock rebuild when available. *)
+let _panel_body_renderers :
+  (Workspace_layout.panel_kind, (unit -> unit)) Hashtbl.t =
+  Hashtbl.create 16
+
+let register_panel_body_renderer kind render_fn =
+  Hashtbl.replace _panel_body_renderers kind render_fn
+
+let clear_panel_body_renderers () =
+  Hashtbl.clear _panel_body_renderers
+
+(** Targeted update slots for color-panel widgets that should react
+    to selection-change without a body rebuild (the rebuild visibly
+    pulses the hex entry as its Adwaita theming resolves). On
+    document change, [update_color_panel_widgets] computes the new
+    fill/stroke from the active selection and:
+      - sets each swatch's color ref + queue_draws its drawing area
+      - calls [set_text] on the hex entry
+    Widgets are re-registered on every body rebuild. *)
+type color_panel_slots = {
+  mutable fill_swatch : (GMisc.drawing_area * string ref) option;
+  mutable stroke_swatch : (GMisc.drawing_area * string ref) option;
+  mutable hex_entry : GEdit.entry option;
+  mutable recent_swatches : (GMisc.drawing_area * string ref) option array;
+}
+let _color_panel_slots : color_panel_slots = {
+  fill_swatch = None;
+  stroke_swatch = None;
+  hex_entry = None;
+  recent_swatches = Array.make 10 None;
+}
+
+let clear_color_panel_slots () =
+  _color_panel_slots.fill_swatch <- None;
+  _color_panel_slots.stroke_swatch <- None;
+  _color_panel_slots.hex_entry <- None;
+  Array.fill _color_panel_slots.recent_swatches 0
+    (Array.length _color_panel_slots.recent_swatches) None
+
+(** Refresh the 10 recent-color swatches from the panel store's
+    [recent_colors] list. Called from the recent_colors bridge so a
+    commit (Black/White/Recent click, hex Enter, slider release)
+    repaints the recent strip in-place instead of needing a body
+    rebuild. *)
+let update_recent_color_widgets () =
+  match !_current_store, !_current_panel_id with
+  | Some store, Some pid ->
+    let rc = match State_store.get_panel store pid "recent_colors" with
+      | `List items ->
+        Array.of_list
+          (List.map (function
+             | `String s -> s
+             | _ -> "") items)
+      | _ -> [||] in
+    Array.iteri (fun i slot ->
+      match slot with
+      | None -> ()
+      | Some (area, color_ref) ->
+        let new_color = if i < Array.length rc then rc.(i) else "" in
+        if !color_ref <> new_color then begin
+          color_ref := new_color;
+          area#misc#queue_draw ()
+        end
+    ) _color_panel_slots.recent_swatches
+  | _ -> ()
+
+let _hash_hex c = "#" ^ Element.color_to_hex c
+
+(* Same per-element fill/stroke extraction as create_panel_body's
+   selection_overrides — duplicated here so the listener can compute
+   the new colors without invoking the full ctx-rebuild path. *)
+let _elem_fill_color (e : Element.element) =
+  match e with
+  | Element.Rect { fill = Some f; _ }
+  | Element.Circle { fill = Some f; _ }
+  | Element.Ellipse { fill = Some f; _ }
+  | Element.Polyline { fill = Some f; _ }
+  | Element.Polygon { fill = Some f; _ }
+  | Element.Path { fill = Some f; _ } -> Some f.Element.fill_color
+  | _ -> None
+
+let _elem_stroke_color (e : Element.element) =
+  match e with
+  | Element.Line { stroke = Some s; _ }
+  | Element.Rect { stroke = Some s; _ }
+  | Element.Circle { stroke = Some s; _ }
+  | Element.Ellipse { stroke = Some s; _ }
+  | Element.Polyline { stroke = Some s; _ }
+  | Element.Polygon { stroke = Some s; _ }
+  | Element.Path { stroke = Some s; _ } -> Some s.Element.stroke_color
+  | _ -> None
+
+(* Re-entry guard: writing [state.fill_color] inside this function
+   fires [Effects.subscribe_active_color], which snapshots + writes
+   the model's selection fill — triggering a model change → another
+   on_document_changed → another call here → infinite loop /
+   beachball. The flag short-circuits the second entry. *)
+let _in_color_panel_update = ref false
+let update_color_panel_widgets () =
+  if !_in_color_panel_update then () else
+  match !_get_model_ref () with
+  | None -> ()
+  | Some m ->
+    _in_color_panel_update := true;
+    Fun.protect
+      ~finally:(fun () -> _in_color_panel_update := false)
+    @@ fun () ->
+    let elem_opt =
+      match Document.PathMap.bindings m#document.Document.selection with
+      | (path, _) :: _ ->
+        (try Some (Document.get_element m#document path) with _ -> None)
+      | [] -> None in
+    let fill_color = match elem_opt with
+      | Some e -> _elem_fill_color e
+      | None ->
+        (match m#default_fill with
+         | Some f -> Some f.Element.fill_color
+         | None -> None) in
+    let stroke_color = match elem_opt with
+      | Some e -> _elem_stroke_color e
+      | None ->
+        (match m#default_stroke with
+         | Some s -> Some s.Element.stroke_color
+         | None -> None) in
+    (* Also persist the new active colors into the store so widgets
+       that DO go through a rebuild path later (mode switch, etc.)
+       see the up-to-date values. *)
+    (match !_current_store with
+     | Some store ->
+       (match fill_color with
+        | Some c -> State_store.set store "fill_color" (`String (_hash_hex c))
+        | None -> ());
+       (match stroke_color with
+        | Some c -> State_store.set store "stroke_color" (`String (_hash_hex c))
+        | None -> ())
+     | None -> ());
+    let fc_str = match fill_color with
+      | Some c -> _hash_hex c | None -> "" in
+    let sc_str = match stroke_color with
+      | Some c -> _hash_hex c | None -> "" in
+    (match _color_panel_slots.fill_swatch with
+     | Some (area, color_ref) ->
+       color_ref := fc_str;
+       area#misc#queue_draw ()
+     | None -> ());
+    (match _color_panel_slots.stroke_swatch with
+     | Some (area, color_ref) ->
+       color_ref := sc_str;
+       area#misc#queue_draw ()
+     | None -> ());
+    (match _color_panel_slots.hex_entry with
+     | Some entry ->
+       let hex = match fill_color, stroke_color with
+         | Some c, _ -> Element.color_to_hex c  (* fill_on_top default *)
+         | None, Some c -> Element.color_to_hex c
+         | None, None -> "" in
+       if not entry#is_focus && entry#text <> hex then
+         entry#set_text hex
+     | None -> ())
+
+(** Schedule a panel rebuild to run after the current event handler
+    returns. Calling the hook synchronously from inside an
+    entry's [activate] / [focus_out] handler (cp_hex commit) tears
+    down the entry while GTK is still operating on it →
+    use-after-free + segfault. The Idle callback defers the
+    rebuild to the next main-loop iteration, after the handler
+    chain unwinds. Dedupes concurrent calls via [_rerender_pending]
+    so a burst of state writes (or a flurry of on_document_changed
+    fires during a drag) coalesces into a single rebuild.
+
+    Prefers the per-panel body renderers (fast path — only the
+    panel content reflows, dock title bars stay put) over the
+    full dock rebuild. Falls back to [panel_rerender_hook] when
+    no per-panel renderers are registered (e.g. before dock_panel
+    has built the dock for the first time). *)
+let _rerender_pending = ref false
+let schedule_panel_rerender () =
+  if not !_rerender_pending then begin
+    _rerender_pending := true;
+    ignore (GMain.Idle.add (fun () ->
+      _rerender_pending := false;
+      if Hashtbl.length _panel_body_renderers > 0 then
+        Hashtbl.iter (fun _ render -> render ()) _panel_body_renderers
+      else
+        !panel_rerender_hook ();
+      false
+    ))
+  end
+
+(** Guard so we register the on_document_changed listener once per
+    model instance (instead of once per panel rebuild, which would
+    accumulate listeners). Reset when a different model appears so
+    multi-document setups still get the listener wired. *)
+let _doc_listener_registered_for : Model.model option ref = ref None
+
+(* _get_model_ref / _current_store / _current_panel_id hoisted to top
+   of file so [update_color_panel_widgets] can read them. *)
 
 (** Hook fired by [paragraph_panel_resync_from_active_model] — set by
     [create_panel_body] when the Paragraph panel mounts. None when no
@@ -94,7 +307,12 @@ let install_recent_colors_bridge () =
           match State_store.get_panel store pid "recent_colors" with
           | `Null -> ()  (* panel hasn't seeded recent_colors *)
           | _ ->
-            State_store.set_panel store pid "recent_colors" rc_json))
+            State_store.set_panel store pid "recent_colors" rc_json);
+      (* Repaint the recent strip in-place using the just-updated
+         panel.recent_colors values — without this the swatches'
+         captured color_str stays stale and the new color doesn't
+         appear until a body rebuild fires for some other reason. *)
+      update_recent_color_widgets ())
   end
 
 (** Parse a bind expression like "panel.X" or "state.X" and write
@@ -142,12 +360,166 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
              Effects.set_character_panel_field store ctrl field value
            | None ->
              State_store.set_panel store panel_id field value
+         end
+         (* Color panel hex field: commit the parsed RGB through
+            [Panel_menu.set_active_color] so the model's default
+            fill/stroke, the canvas selection, and the recent-colors
+            list all pick up the change. Mirrors the Rust
+            [renderer.rs] PanelKind::Color/"hex" branch. Bail
+            silently on unparseable input so the user's typed value
+            isn't silently zeroed. *)
+         else if panel_id = "color_panel_content" && field = "hex" then begin
+           State_store.set_panel store panel_id field value;
+           (match value with
+            | `String s ->
+              let trimmed = String.trim s in
+              let trimmed = if String.length trimmed > 0 && trimmed.[0] = '#'
+                then String.sub trimmed 1 (String.length trimmed - 1)
+                else trimmed in
+              (match Element.color_from_hex trimmed with
+               | Some color ->
+                 let fill_on_top = match State_store.get store "fill_on_top" with
+                   | `Bool b -> b | _ -> true in
+                 (match !_get_model_ref () with
+                  | Some m ->
+                    Panel_menu.set_active_color color ~fill_on_top m
+                  | None -> ());
+                 (* Also mirror the new color into [state.fill_color]
+                    / [state.stroke_color] so the panel's fill_swatch
+                    (bound to [color: state.fill_color]) reflects the
+                    edit on the next rebuild — Panel_menu.set_active_color
+                    only mutates the model, not the panel's state store. *)
+                 let hex_with_hash = "#" ^ Element.color_to_hex color in
+                 let key = if fill_on_top then "fill_color" else "stroke_color" in
+                 State_store.set store key (`String hex_with_hash);
+                 schedule_panel_rerender ()
+               | None -> ())
+            | _ -> ())
          end else
            State_store.set_panel store panel_id field value
        | "state" :: field :: _ ->
          State_store.set store field value
        | _ -> ())
     | _ -> ()
+
+(** Dispatch a click on a YAML element by walking its [behavior]
+    array. Supports the three patterns the color panel uses:
+      1. [effects: [{ set: { key: <expr-or-literal> } }]] —
+         fill_stroke widget swatches write [state.fill_on_top] to
+         flip the active target.
+      2. [action: <name>, params: { ... }] — recent / black / white
+         swatches use [set_active_color] with a color expression;
+         the None swatch uses [set_active_color_none].
+      3. [condition: <expr>] gates the dispatch — recent slots use
+         this so empty slots are no-ops.
+    Mirrors the Rust [renderer.rs] color_swatch click handler.
+    Used by both [render_color_swatch] and the icon_button branch
+    of [render_button] (cp_none_swatch and the fill_stroke widget's
+    swap / reset / mode icons).
+
+    Returns true iff any [effects: [{set: ...}]] entries fired — the
+    caller uses this to decide whether to schedule a panel
+    re-render. Action-only dispatches (set_active_color* etc.)
+    don't change panel-local state, so the canvas refresh from the
+    model write is enough; skipping the dock rebuild avoids the
+    visible flicker on every Black / White / Recent click. *)
+let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  let wrote_state = ref false in
+  let behaviors = match el |> member "behavior" with
+    | `List bs -> bs | _ -> [] in
+  List.iter (fun b ->
+    let event = b |> member "event" |> to_string_option
+                |> Option.value ~default:"" in
+    if event = "click" then begin
+      let cond_passes = match b |> member "condition" |> to_string_option with
+        | Some cond_expr ->
+          (match Expr_eval.evaluate cond_expr ctx with
+           | Expr_eval.Bool true -> true
+           | Expr_eval.Bool false -> false
+           | v -> Expr_eval.to_bool v)
+        | None -> true in
+      if cond_passes then begin
+        let resolve_value v =
+          match v with
+          | `String expr_str ->
+            (try Effects.value_to_json
+                   (Expr_eval.evaluate expr_str ctx)
+             with _ -> v)
+          | _ -> v
+        in
+        (match b |> member "effects" with
+         | `List effects ->
+           List.iter (fun e ->
+             match e |> member "set" with
+             | `Assoc pairs ->
+               List.iter (fun (k, v) ->
+                 _write_back_bind ("state." ^ k) (resolve_value v);
+                 wrote_state := true
+               ) pairs
+             | _ -> ()
+           ) effects
+         | _ -> ());
+        (match b |> member "action" |> to_string_option with
+         | Some action_name when action_name <> "" ->
+           let params_list = match b |> member "params" with
+             | `Assoc pairs ->
+               List.map (fun (k, v) -> (k, resolve_value v)) pairs
+             | _ -> [] in
+           (match !_get_model_ref () with
+            | None -> ()
+            | Some m ->
+              let fill_on_top = match !_current_store with
+                | Some s ->
+                  (match State_store.get s "fill_on_top" with
+                   | `Bool b -> b | _ -> true)
+                | None -> true in
+              (* Direct routes for the color-panel actions —
+                 dispatch_yaml_action's effects pipeline doesn't
+                 wire the [set: { fill_color: ... }] target into
+                 the model in non-layer panels, so the action
+                 would otherwise no-op. Mirrors the click-handler
+                 shortcuts the Rust / Swift ports take. *)
+              match action_name with
+              | "set_active_color" ->
+                let color_opt =
+                  match List.assoc_opt "color" params_list with
+                  | Some (`String hex) ->
+                    Element.color_from_hex
+                      (if String.length hex > 0 && hex.[0] = '#'
+                       then String.sub hex 1 (String.length hex - 1)
+                       else hex)
+                  | _ -> None
+                in
+                (match color_opt with
+                 | Some color -> Panel_menu.set_active_color color ~fill_on_top m
+                 | None -> ())
+              | "set_active_color_none" ->
+                if fill_on_top then begin
+                  m#set_default_fill None;
+                  if not (Document.PathMap.is_empty
+                            m#document.Document.selection) then begin
+                    m#snapshot;
+                    let ctrl = Controller.create ~model:m () in
+                    ctrl#set_selection_fill None
+                  end
+                end else begin
+                  m#set_default_stroke None;
+                  if not (Document.PathMap.is_empty
+                            m#document.Document.selection) then begin
+                    m#snapshot;
+                    let ctrl = Controller.create ~model:m () in
+                    ctrl#set_selection_stroke None
+                  end
+                end
+              | _ ->
+                Panel_menu.dispatch_yaml_action
+                  ~params:params_list action_name m)
+         | _ -> ())
+      end
+    end
+  ) behaviors;
+  !wrote_state
 
 (** Layers-panel mutable state — collapsed rows, panel selection, rename
     state, drag source/target, search filter, hidden type filter, saved
@@ -232,6 +604,18 @@ and render_container ~packing ~ctx el etype =
   let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
   let is_row = layout_dir = "row" || etype = "row" in
   let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
+  (* Explicit [style.width] / [style.height] on the container itself —
+     used by spacer containers (empty children, fixed width) inserted
+     to align widgets across rows. Without honouring these, an empty
+     container collapses to 0 px and adjacent widgets pack tight,
+     breaking the column-alignment the spacer was meant to establish
+     (e.g. cp_hex_row's 108-px spacer below the slider rows). *)
+  let explicit_width =
+    el |> member "style" |> safe_member "width" |> to_number_option
+    |> Option.map int_of_float in
+  let explicit_height =
+    el |> member "style" |> safe_member "height" |> to_number_option
+    |> Option.map int_of_float in
   if is_row then begin
     (* Bootstrap-style 12-column grid: when row children declare
        ``col: N`` weights, lay them out in a GtkGrid with
@@ -305,7 +689,11 @@ and render_container ~packing ~ctx el etype =
         el |> member "style" |> safe_member "alignment" |> to_string_option
         |> Option.value ~default:"" in
       let hbox = GPack.hbox ~spacing:gap ~packing () in
-      hbox#misc#set_size_request ~width:1 ();
+      (match explicit_width, explicit_height with
+       | Some w, Some h -> hbox#misc#set_size_request ~width:w ~height:h ()
+       | Some w, None -> hbox#misc#set_size_request ~width:w ()
+       | None, Some h -> hbox#misc#set_size_request ~width:1 ~height:h ()
+       | None, None -> hbox#misc#set_size_request ~width:1 ());
       let row_expand = alignment = "space-between" in
       (* Per-child expand: when a child declares ``style.flex: N``
          (any positive number), it greedily fills any remaining row
@@ -325,6 +713,11 @@ and render_container ~packing ~ctx el etype =
     end
   end else begin
     let vbox = GPack.vbox ~spacing:gap ~packing () in
+    (match explicit_width, explicit_height with
+     | Some w, Some h -> vbox#misc#set_size_request ~width:w ~height:h ()
+     | Some w, None -> vbox#misc#set_size_request ~width:w ()
+     | None, Some h -> vbox#misc#set_size_request ~width:(-1) ~height:h ()
+     | None, None -> ());
     render_children ~packing:(vbox#pack ~expand:false ~fill:false) ~ctx el
   end
 
@@ -530,6 +923,24 @@ and render_button ~packing ~ctx el =
     | None ->
       GButton.button ~label ~packing ()
   in
+  (* Icon buttons declare a [style.size] (typically 16–24px). Without
+     [set_size_request], the GtkButton inflates to the theme's natural
+     button height (~30px on Adwaita) — visible in CLR-002 OCaml as
+     the fill_stroke_widget swap/reset/mode buttons bursting out of
+     their declared 19px / 15px boxes. Also drop the default theme
+     padding via CSS so the icon image fills the requested size
+     instead of leaving a ~6px frame around it. *)
+  if etype = "icon_button" then begin
+    let size = match el |> member "style" |> safe_member "size" |> to_number_option with
+      | Some n -> int_of_float n
+      | None -> 20
+    in
+    btn#misc#set_size_request ~width:size ~height:size ();
+    let provider = GObj.css_provider () in
+    provider#load_from_data
+      "button { padding: 0; margin: 0; min-width: 0; min-height: 0; border: 0; background: transparent; }";
+    btn#misc#style_context#add_provider provider 800
+  end;
   (* Opacity panel: op_make_mask dispatches controller make or
      release based on selection_has_mask. The button has no
      ``action`` in yaml — routing is resolved here against the
@@ -575,6 +986,19 @@ and render_button ~packing ~ctx el =
       | Some m ->
         let ctrl = new Controller.controller ~model:m () in
         ctrl#toggle_mask_linked_on_selection))
+  end;
+  (* Behavior-array click dispatch (icon_buttons in panels: the color
+     panel's cp_none_swatch uses ``behavior: [event: click, action:
+     set_active_color_none]`` rather than the top-level ``action:``
+     form below). Skip in dialog context — dialog buttons go through
+     the top-level ``action:`` path which routes via Dialog_global. *)
+  if etype = "icon_button" && !_current_panel_id <> None then begin
+    ignore (btn#connect#clicked ~callback:(fun () ->
+      let wrote_state = dispatch_click_behaviors el ctx in
+      (* Only redraw if a [set:] effect actually changed panel-bound
+         state; action-only dispatches let the model+canvas refresh
+         pipeline do the work without a flickery dock rebuild. *)
+      if wrote_state then schedule_panel_rerender ()))
   end;
   (* Generic ``action: <name>`` dispatch — used by dialog buttons
      (OK / Done / Print / Cancel / icon-button toggles). Resolves
@@ -658,22 +1082,26 @@ and render_slider ~packing ~ctx el =
     | _ -> "linear-gradient(to right, #888, #ccc)"
   in
   let css = Printf.sprintf
-    "scale { padding: 0; margin: 0; min-height: 24px; } \
-     scale trough { min-height: 18px; background-image: %s; \
+    "scale { padding: 0 5px; margin: 0 4px; min-height: 12px; } \
+     scale trough { min-height: 8px; background-image: %s; \
        border: 1px solid #444; border-radius: 2px; } \
-     scale slider { min-width: 10px; min-height: 24px; \
+     scale trough highlight, scale highlight { \
+       background-image: none; background-color: transparent; \
+       border: 0; box-shadow: none; } \
+     scale slider { min-width: 10px; min-height: 12px; \
        background: #ccc; border: 1px solid #222; \
-       border-radius: 2px; margin: -3px -5px; }"
+       border-radius: 2px; margin: -2px 0; }"
     gradient in
   let provider = GObj.css_provider () in
   provider#load_from_data css;
   scale#misc#style_context#add_provider provider 800;
-  (* Cap the slider's natural width so the gradient track stays a
-     readable ~100px instead of expanding to the full row slack
-     (CLR-002 OCaml — user feedback "slider too wide"). The row
-     packs each child with expand=true, fill=false; the slider
-     centres in its allocation at this width. *)
-  scale#misc#set_size_request ~width:100 ~height:26 ();
+  (* Cap the slider at ~100px wide × 12px tall so the gradient track
+     stays compact instead of expanding to the full row slack and
+     wasting vertical space (CLR-002 OCaml — user feedback "slider
+     too wide / too tall"). The row packs each child with
+     expand=true, fill=false; the slider centres in its allocation
+     at this size. *)
+  scale#misc#set_size_request ~width:100 ~height:12 ();
 
   (* Value changes → live color update. Mirrors the Rust slider's
      oninput → set_active_color_live; final commit on release would
@@ -712,6 +1140,14 @@ and render_number_input ~packing ~ctx el =
     let entry = GEdit.entry ~packing ~text:(Printf.sprintf "%g" initial) () in
     entry#misc#set_size_request ~width:1 ();
     entry#set_width_chars 4;
+    (* Slim down the Adwaita default ~30px-tall entry to match the
+       12px slider track + slim swatches the row sits in. Without
+       this CSS override the value boxes dominate the row height
+       (user feedback during CLR-002 OCaml). *)
+    let provider = GObj.css_provider () in
+    provider#load_from_data
+      "entry { min-height: 16px; padding: 1px 4px; }";
+    entry#misc#style_context#add_provider provider 800;
     let suppress = ref false in
     let clamp v = max min_val (min max_val v) in
     let commit () =
@@ -843,8 +1279,29 @@ and render_text_input ~packing ~ctx el =
   let entry = GEdit.entry ~packing ~text:initial () in
   if placeholder <> "" then entry#set_placeholder_text placeholder;
   if !_current_panel_id <> None then begin
+    (* Match render_number_input's sizing pattern exactly: shrinkable
+       size_request width:1 paired with width_chars set to the input
+       width converted from pixels to character columns (~8 px/char
+       in the Adwaita label font). Passing a fixed pixel width via
+       the GtkEntry constructor caused the hex field to "pulse"
+       during selection-change rebuilds — the natural width
+       reported by GTK kept disagreeing with the requested width
+       across layout passes. width_chars-driven sizing stays stable. *)
+    let style_width = el |> member "style" |> safe_member "width"
+                      |> to_number_option |> Option.map int_of_float in
     entry#misc#set_size_request ~width:1 ();
-    entry#set_width_chars 4
+    (match style_width with
+     | Some w -> entry#set_width_chars (max 1 (w / 8))
+     | None -> entry#set_width_chars 4);
+    let provider = GObj.css_provider () in
+    provider#load_from_data
+      "entry { min-height: 16px; padding: 1px 4px; }";
+    entry#misc#style_context#add_provider provider 800;
+    (* Register the hex entry so document-change updates land here
+       directly (avoids the pulse from a body rebuild). *)
+    (match el |> member "id" |> to_string_option with
+     | Some "cp_hex" -> _color_panel_slots.hex_entry <- Some entry
+     | _ -> ())
   end;
   (* Write-back on focus-out / Enter (matches number_input's
      commit-on-change semantics rather than commit-per-keystroke). *)
@@ -1181,11 +1638,15 @@ and render_color_swatch ~packing ~ctx el =
      ``to_number_option`` and round so either form works. *)
   let size = el |> member "style" |> safe_member "size" |> to_number_option
              |> Option.map int_of_float |> Option.value ~default:16 in
-  let color_str = match el |> member "bind" |> safe_member "color" |> to_string_option with
+  let initial_color = match el |> member "bind" |> safe_member "color" |> to_string_option with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
     | None -> "" in
+  (* Mutable color ref so [update_color_panel_widgets] can refresh
+     the fill/stroke swatch without rebuilding the panel body — the
+     draw callback dereferences this each frame. *)
+  let color_ref = ref initial_color in
   let selected = is_selected_in_list el ctx in
   let hollow = el |> member "hollow" |> to_bool_option |> Option.value ~default:false in
   (* DrawingArea (not GtkButton) so the swatch sizes exactly to the
@@ -1213,7 +1674,37 @@ and render_color_swatch ~packing ~ctx el =
         (h2 0, h2 2, h2 4)
       with _ -> (0, 0, 0)
   in
+  (* Dispatch the swatch's [behavior] array on click. Mirrors the
+     Rust [renderer.rs] color_swatch click handler. *)
+  evt#event#add [`BUTTON_PRESS];
+  ignore (evt#event#connect#button_press ~callback:(fun ev ->
+    if GdkEvent.Button.button ev = 1 then begin
+      let wrote_state = dispatch_click_behaviors el ctx in
+      if wrote_state then schedule_panel_rerender ();
+      true
+    end else false
+  ));
+  (* Register fill/stroke swatch + recent slots so document-change
+     and recent-color-push updates land on them without a body
+     rebuild. The id check picks the widgets we know how to update
+     in place; cp_black / cp_white / other swatches stay through
+     the rebuild path. *)
+  (match el |> member "id" |> to_string_option with
+   | Some "cp_fill_swatch" ->
+     _color_panel_slots.fill_swatch <- Some (area, color_ref)
+   | Some "cp_stroke_swatch" ->
+     _color_panel_slots.stroke_swatch <- Some (area, color_ref)
+   | Some id_str
+     when String.length id_str > 10
+       && String.sub id_str 0 10 = "cp_recent_" ->
+     let suffix = String.sub id_str 10 (String.length id_str - 10) in
+     (match int_of_string_opt suffix with
+      | Some i when i >= 0 && i < Array.length _color_panel_slots.recent_swatches ->
+        _color_panel_slots.recent_swatches.(i) <- Some (area, color_ref)
+      | _ -> ())
+   | _ -> ());
   ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let color_str = !color_ref in
     let s = float_of_int size in
     if String.length color_str = 0 then begin
       (* Empty slot: hollow dashed square *)
@@ -1274,14 +1765,39 @@ and render_fill_stroke_widget ~packing ~ctx el =
   container#misc#set_size_request ~width ~height ();
   let children = match el |> member "children" with
     | `List xs -> xs | _ -> [] in
-  List.iter (fun child ->
+  (* Sort children by [bind.z_index] so siblings with explicit
+     stacking land in paint order (GtkFixed paints children in the
+     order they're added — first child at the bottom, last on top).
+     fill_swatch and stroke_swatch both bind z_index to expressions
+     that depend on [state.fill_on_top]; without this sort the
+     swatches always stack in document order and the active-swatch
+     swap (CLR-141 / CLR-142) is visually a no-op. Children without
+     a [z_index] bind default to 0 and keep their document order
+     via a stable sort. *)
+  let z_of child =
+    match child |> member "bind" |> safe_member "z_index" with
+    | `String expr ->
+      (try
+         match Expr_eval.evaluate expr ctx with
+         | Expr_eval.Number n -> int_of_float n
+         | _ -> 0
+       with _ -> 0)
+    | `Int n -> n
+    | `Float f -> int_of_float f
+    | _ -> 0
+  in
+  let indexed = List.mapi (fun i c -> (i, c)) children in
+  let sorted = List.stable_sort (fun (_, a) (_, b) ->
+    compare (z_of a) (z_of b)
+  ) indexed in
+  List.iter (fun (_, child) ->
     let pos = child |> member "style" |> safe_member "position" in
     let x = pos |> safe_member "x" |> to_number_option
       |> Option.map int_of_float |> Option.value ~default:0 in
     let y = pos |> safe_member "y" |> to_number_option
       |> Option.map int_of_float |> Option.value ~default:0 in
     render_element ~packing:(container#put ~x ~y) ~ctx child
-  ) children
+  ) sorted
 
 (** [color_bar] — 64px tall horizontal HSB gradient strip. Cairo-paint
     a hue ramp on the X axis × saturation/brightness band on the Y
@@ -2848,8 +3364,108 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
     | None -> ()
     | Some content ->
       let state_defaults = Workspace_loader.state_defaults ws in
-      let state_obj = `Assoc state_defaults in
       let panel_defaults = Workspace_loader.panel_state_defaults ws content_id in
+      (* Reuse the previously-registered store across panel rebuilds
+         so state writes survive a dock re-render. Without this every
+         rebuild allocates a fresh store with default state, silently
+         dropping any [state.X] / [panel.X] writes the user has made
+         (e.g. fill_on_top toggled by clicking the fill/stroke swatch
+         in the color panel). *)
+      let store, is_new_store = match Panel_menu.lookup_panel_store content_id with
+        | Some s -> s, false
+        | None -> State_store.create (), true in
+      if is_new_store then
+        State_store.init_panel store content_id panel_defaults;
+      (* Build [state] / [panel] objects in the render ctx as
+         [defaults] overridden by the store's live entries. The
+         renderer evaluates bind: expressions against this ctx once
+         at element creation; reading live values here ensures the
+         next rebuild sees the current state, not the static
+         defaults. *)
+      let merge_overrides defaults overrides =
+        List.fold_left (fun acc (k, v) ->
+          (k, v) :: List.filter (fun (k', _) -> k' <> k) acc
+        ) defaults overrides
+      in
+      let live_state = State_store.get_all store in
+      (* Sync state.fill_color / state.stroke_color from the active
+         selection (or default fill/stroke if nothing's selected) so
+         the color panel's fill_stroke widget tracks the canvas.
+         Without this the fill/stroke swatches keep showing the
+         last hex-committed value even after the user picks a
+         different rectangle. *)
+      let hash_hex c = "#" ^ Element.color_to_hex c in
+      let elem_fill_color (e : Element.element) =
+        match e with
+        | Element.Rect { fill = Some f; _ }
+        | Element.Circle { fill = Some f; _ }
+        | Element.Ellipse { fill = Some f; _ }
+        | Element.Polyline { fill = Some f; _ }
+        | Element.Polygon { fill = Some f; _ }
+        | Element.Path { fill = Some f; _ } -> Some f.Element.fill_color
+        | _ -> None in
+      let elem_stroke_color (e : Element.element) =
+        match e with
+        | Element.Line { stroke = Some s; _ }
+        | Element.Rect { stroke = Some s; _ }
+        | Element.Circle { stroke = Some s; _ }
+        | Element.Ellipse { stroke = Some s; _ }
+        | Element.Polyline { stroke = Some s; _ }
+        | Element.Polygon { stroke = Some s; _ }
+        | Element.Path { stroke = Some s; _ } -> Some s.Element.stroke_color
+        | _ -> None in
+      (* Build a fill/stroke override list. The override is intentionally
+         tri-state per channel: emit a real color when we know one
+         (selected element OR model default), an explicit [`Null] when
+         the channel is "none" (selected element has [fill = None] —
+         user clicked the None swatch on that side), and SKIP when we
+         have no information (no selection AND no model default).
+         Skipping lets the workspace state default (white fill / black
+         stroke) flow through, which is what users expect when they
+         haven't picked anything yet. Earlier this always wrote [`Null],
+         which forced the fill swatch to render as a dashed empty slot
+         on startup. *)
+      let selection_overrides = match get_model () with
+        | None -> []
+        | Some m ->
+          let elem_opt =
+            match Document.PathMap.bindings m#document.Document.selection with
+            | (path, _) :: _ ->
+              (try Some (Document.get_element m#document path)
+               with _ -> None)
+            | [] -> None in
+          let fc_override = match elem_opt with
+            | Some e ->
+              [("fill_color",
+                match elem_fill_color e with
+                | Some c -> `String (hash_hex c)
+                | None -> `Null)]
+            | None ->
+              (match m#default_fill with
+               | Some f -> [("fill_color",
+                             `String (hash_hex f.Element.fill_color))]
+               | None -> [])  (* let workspace default through *)
+          in
+          let sc_override = match elem_opt with
+            | Some e ->
+              [("stroke_color",
+                match elem_stroke_color e with
+                | Some c -> `String (hash_hex c)
+                | None -> `Null)]
+            | None ->
+              (match m#default_stroke with
+               | Some s -> [("stroke_color",
+                             `String (hash_hex s.Element.stroke_color))]
+               | None -> [])
+          in
+          fc_override @ sc_override in
+      let state_pairs =
+        merge_overrides
+          (merge_overrides state_defaults live_state)
+          selection_overrides in
+      let state_obj = `Assoc state_pairs in
+      let live_panel = State_store.get_panel_state store content_id in
+      let panel_pairs = merge_overrides panel_defaults live_panel in
       let icons_obj = Workspace_loader.icons ws in
       let swatch_libs = Workspace_loader.swatch_libraries ws in
       let brush_libs = Workspace_loader.brush_libraries ws in
@@ -2884,29 +3500,35 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       in
       let ctx = `Assoc ([
         ("state", state_obj);
-        ("panel", `Assoc panel_defaults);
+        ("panel", `Assoc panel_pairs);
         ("icons", icons_obj);
         ("data", data_obj);
         ("active_document", active_document_view);
         ("document", document_view);
         ("_get_model", `Null)  (* Placeholder; actual model passed via closure *)
       ] @ selection_preds) in
-      (* Panel-local state store: seeded with the yaml-declared
-         defaults, lives for the life of the panel body. Widget
-         callbacks write into it via [_write_back_bind]; a
-         subscription wired below pushes Character-panel writes
-         through to the selected text element. *)
-      let store = State_store.create () in
-      State_store.init_panel store content_id panel_defaults;
       _current_store := Some store;
       _current_panel_id := Some content_id;
-      (* Register the new panel store for cross-panel bridges
+      (* Register the panel store for cross-panel bridges
          (recent_colors etc.) AND for menu-command dispatchers that
          reach back into panel state (paragraph / opacity menus). The
-         single registry replaces an earlier per-panel ref-cell pair. *)
+         single registry replaces an earlier per-panel ref-cell pair.
+         No-op if already registered (reusing the same store). *)
       Panel_menu.register_panel_store content_id store;
       (* Store get_model in a ref accessible from render_tree_view *)
       _get_model_ref := get_model;
+      (* Register an on_document_changed listener so changing the
+         canvas selection (or any other document mutation) triggers
+         a panel rebuild. The selection-color overrides computed
+         above re-read the (now-current) selection on each rebuild,
+         so the fill/stroke widget tracks the canvas. Guarded by
+         [_doc_listener_registered_for] so a panel rebuild doesn't
+         keep stacking listeners — they'd accumulate without bound
+         and fire N times per document change after N rebuilds. *)
+      (* on_document_changed listener registration moved to [main.ml]'s
+         dummy_model setup + add_canvas — see
+         [update_color_panel_widgets]. Per-panel-body subscription was
+         unreliable across tab switches. *)
       (* Wire the Character-panel apply pipeline. [get_model] is
          already a thunk returning the live model; we adapt it to
          yield a Controller when one is available. *)

@@ -1,5 +1,17 @@
 (** Menubar for the main window. *)
 
+(* Module-level state for syncing Window menu check items after panel
+   visibility changes that originate outside the menubar (right-click
+   Close on a panel header, dock layout restore, etc.). The Window menu
+   is built once at startup; this ref points at a sync closure that
+   reads the live workspace_layout and pokes each registered
+   check_menu_item's [#set_active] so the checkmarks stay truthful.
+   Set inside [create]; called from canvas.ml's [dock_refresh] which
+   already fires on every panel/dock state change. *)
+let _sync_panel_checks_ref : (unit -> unit) ref = ref (fun () -> ())
+
+let sync_panel_checks () = !_sync_panel_checks_ref ()
+
 let group_selection (model : Model.model) () =
   let doc = model#document in
   let sel = doc.Document.selection in
@@ -688,7 +700,10 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      ));
      ignore (window_factory#add_separator ());
      let toggle_pane kind label =
-       ignore (window_factory#add_item label ~callback:(fun () ->
+       let active = match Workspace_layout.panes layout with
+         | Some pl -> Pane.is_pane_visible pl kind
+         | None -> false in
+       ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
          Workspace_layout.panes_mut layout (fun pl ->
            if Pane.is_pane_visible pl kind then
              Pane.hide_pane pl kind
@@ -703,9 +718,18 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
 
   ignore (window_factory#add_separator ());
 
-  (* Panel toggles *)
+  (* Panel toggles — check-menu items so the Window menu shows a
+     checkmark next to each visible panel. The menu is built once at
+     startup; check states are kept truthful by [sync_panel_checks]
+     (assigned below), which canvas.ml's dock_refresh fires after any
+     panel/dock state change. *)
+  let panel_checks : (Workspace_layout.panel_kind, GMenu.check_menu_item) Hashtbl.t =
+    Hashtbl.create 16 in
   let toggle_panel kind label =
-    ignore (window_factory#add_item label ~callback:(fun () ->
+    let active = match workspace_layout with
+      | Some layout -> Workspace_layout.is_panel_visible layout kind
+      | None -> false in
+    let item = window_factory#add_check_item label ~active ~callback:(fun _ ->
       match workspace_layout, refresh_dock with
       | Some layout, Some refresh ->
         if Workspace_layout.is_panel_visible layout kind then begin
@@ -735,7 +759,8 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
           Workspace_layout.show_panel layout kind;
         refresh ()
       | _ -> ()
-    ))
+    ) in
+    Hashtbl.replace panel_checks kind item
   in
   toggle_panel Workspace_layout.Align "Align";
   toggle_panel Workspace_layout.Artboards "Artboards";
@@ -748,4 +773,17 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   toggle_panel Workspace_layout.Paragraph "Paragraph";
   toggle_panel Workspace_layout.Properties "Properties";
   toggle_panel Workspace_layout.Stroke "Stroke";
-  toggle_panel Workspace_layout.Swatches "Swatches"
+  toggle_panel Workspace_layout.Swatches "Swatches";
+
+  (* Wire the sync closure: canvas.ml's dock_refresh calls this after
+     any panel state change to keep the Window menu checkmarks
+     truthful even when the change originated outside the menubar
+     (right-click Close, layout restore, panel drag-out, etc.). *)
+  _sync_panel_checks_ref := (fun () ->
+    match workspace_layout with
+    | Some layout ->
+      Hashtbl.iter (fun kind item ->
+        let visible = Workspace_layout.is_panel_visible layout kind in
+        if item#active <> visible then item#set_active visible
+      ) panel_checks
+    | None -> ())

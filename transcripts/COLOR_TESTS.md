@@ -118,7 +118,7 @@ If any P0 here fails, stop and flag.
 - [x] **CLR-001** [wired] Panel opens via Window menu.
       Do: Select Window → Color.
       Expect: Color panel appears in dock or floating; no console error.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: Window menu items converted from add_item to add_check_item; sync_panel_checks fires from canvas's dock_refresh so external visibility changes (close, drag-out, layout restore) flip the checkmark)
 
 - [x] **CLR-002** [wired] All panel rows render without layout collapse.
       Do: Visually scan the open Color panel.
@@ -126,23 +126,23 @@ If any P0 here fails, stop and flag.
               fill/stroke widget + 3–4 mode-specific sliders. Row 3: Hex
               input (6 chars). Row 4: 64px color bar. No overlapping
               controls, no truncated labels.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: librsvg installed + loaders.cache patched so GdkPixbuf renders SVG icons; render_button honours style.size on icon_button + CSS-overrides padding; render_slider sizes 100×12 with channel-gradient trough + transparent highlight; render_number_input + render_text_input slimmed to 16px min-height; render_fill_stroke_widget sorts children by bind.z_index so fill_on_top swaps render order; hex field width 64; hamburger and chevron swapped in dock title bar)
 
 - [x] **CLR-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass
 
 - [x] **CLR-004** [wired] Panel closes via context menu / X button.
       Do: Right-click header → Close, or click the close affordance.
       Expect: Panel disappears; Window → Color reopens it.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: is_panel_visible rewritten to check actual dock placement; previously a panel absent from the layout but also absent from hidden_panels stayed permanently "checked" in the Window menu)
 
 - [x] **CLR-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; controls remain
               interactive; returns to dock on drag back.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: peek() in build_dock_groups stops mid-drag re-renders; ondragend on app-level container. swift: canvas-level DropDelegate (DockDetachDropDelegate) catches drops outside any dock and detaches into a floating dock.)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (rust: peek() in build_dock_groups stops mid-drag re-renders; ondragend on app-level container. swift: canvas-level DropDelegate (DockDetachDropDelegate) catches drops outside any dock and detaches into a floating dock.)
 
 ---
 
@@ -153,30 +153,30 @@ If any P0 here fails, stop and flag.
       Do: Click `cp_none_swatch`.
       Expect: Rectangle fill renders as none (transparent / outline only);
               SVG attribute reads `fill="none"`.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: live state map exposes selection summaries; render_color_swatch distinguishes explicit-none from missing-bind. swift: set_active_color_none now also writes to the selection via Controller.setSelectionFill(nil) — was only updating defaultFill before)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_button (icon_button branch in panel context) now dispatches via dispatch_click_behaviors; set_active_color_none has a direct route in dispatch_click_behaviors that clears default_fill / default_stroke + the selection's fill / stroke per fill_on_top (Panel_menu.dispatch_yaml_action's effects pipeline doesn't reach panel-targets cleanly). rust: live state map exposes selection summaries; render_color_swatch distinguishes explicit-none from missing-bind. swift: set_active_color_none now also writes to the selection via Controller.setSelectionFill(nil) — was only updating defaultFill before)
 
 - [x] **CLR-011** [wired] None swatch is a no-op when already none.
       Setup: Fill already none.
       Do: Click `cp_none_swatch`.
       Expect: No change; recent-colors list unchanged.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
 
 - [x] **CLR-012** [wired] Black swatch commits #000000.
       Setup: Fill = anything other than black.
       Do: Click `cp_black_swatch`.
       Expect: Fill becomes black; sliders / hex update; black added to recent.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_color_swatch click dispatch via dispatch_click_behaviors; set_active_color action routes through Panel_menu.set_active_color which pushes the color into model.recent_colors; recent-colors bridge listener writes panel.recent_colors AND calls update_recent_color_widgets to repaint the registered slot DrawingAreas in-place. cp_recent_0..9 register themselves into _color_panel_slots.recent_swatches keyed by their id suffix)
 
 - [x] **CLR-013** [wired] White swatch commits #ffffff.
       Setup: Fill = anything other than white.
       Do: Click `cp_white_swatch`.
       Expect: Fill becomes white; sliders / hex update; white added to recent.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
 
 - [x] **CLR-014** [wired] Vertical rule renders between fixed and recent.
       Do: Visually inspect.
       Expect: 1px vertical separator between cp_white_swatch and cp_recent_0.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
 
 ---
 
@@ -807,5 +807,24 @@ _No retired or won't-fix tests yet._
 
 ## Enhancements
 
-_No non-blocking follow-ups raised yet. Manual testing surfaces ideas here
-with `ENH-NNN` prefix and italicized trailer noting the test + date._
+- **ENH-001** Re-use the YAML `fill_stroke_widget` template in the native
+  toolbars. Today the OCaml toolbar (`jas_ocaml/lib/tools/toolbar.ml`
+  `fs_area`, ~250 lines) and the Swift toolbar (`JasSwift/Sources/Canvas/
+  ContentView.swift` `FillStrokeWidget`, ~300 lines) hand-roll their own
+  fill/stroke indicators with custom Cairo / SwiftUI Canvas paint and
+  manual hit-testing — separate from the YAML-driven widget the color
+  panel uses. Refactor in three steps: (1) expose a
+  `render_fill_stroke_widget_standalone` helper that accepts an explicit
+  `ctx` instead of reading from the active panel store, (2) thread
+  `swap_fill_stroke` / `reset_fill_stroke` / `set_fill_type_*` through
+  the dispatch layer so YAML click handlers work outside a panel,
+  (3) replace the hand-rolled widgets in OCaml + Swift toolbars with the
+  shared template. Bonus: Rust's `FillStrokeWidgetView` is already a
+  shared component — slotting it into the Rust toolbar is just a
+  `rsx!` insertion. Tradeoff: requires moving `fill_on_top` out of the
+  toolbar's local state into the same store the color panel writes,
+  which is cleaner long-term but is a meaningful refactor.
+  _Raised during CLR-002 OCaml on 2026-05-15._
+
+_Manual testing surfaces ideas here with `ENH-NNN` prefix and italicized
+trailer noting the test + date._

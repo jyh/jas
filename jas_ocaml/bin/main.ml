@@ -27,6 +27,13 @@ let () =
     | None -> ());
 
   let dummy_model = Jas.Model.create () in
+  (* On any document change, refresh the color panel's fill/stroke
+     swatches + hex entry in-place (no body rebuild). The full
+     panel rebuild caused a visible pulse on every selection
+     change; the targeted update only touches the 3 widgets that
+     actually depend on selection-driven state. *)
+  dummy_model#on_document_changed (fun _ ->
+    Jas.Yaml_panel_view.update_color_panel_widgets ());
   let active_model = ref dummy_model in
   let active_canvas = ref None in
   let all_canvases : Jas.Canvas_subwindow.canvas_subwindow list ref = ref [] in
@@ -47,14 +54,16 @@ let () =
       let n = notebook#page_num c#widget in
       if n >= 0 then notebook#goto_page n;
       active_model := c#model;
-      active_canvas := Some c
+      active_canvas := Some c;
+      Jas.Yaml_panel_view.update_color_panel_widgets ()
     | _, _ ->
     match !notebook_ref, !toolbar_ref, !main_window_ref with
     | Some notebook, Some toolbar, Some main_window ->
       let controller = Jas.Controller.create ~model:new_model () in
       let on_focus () =
         active_model := new_model;
-        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ()
+        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ();
+        Jas.Yaml_panel_view.update_color_panel_widgets ()
       in
       let on_save () = Jas.Menubar.save new_model main_window () in
       let canvas = Jas.Canvas_subwindow.create
@@ -64,12 +73,24 @@ let () =
          open. *)
       new_model#on_document_changed (fun _ ->
         Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ());
+      (* Also refresh the color panel's fill/stroke + hex widgets
+         in-place on every document change — targeted update
+         instead of a full body rebuild so the user doesn't see a
+         visible pulse on every selection change. *)
+      new_model#on_document_changed (fun _ ->
+        Jas.Yaml_panel_view.update_color_panel_widgets ());
       active_model := new_model;
       active_canvas := Some canvas;
       all_canvases := canvas :: !all_canvases;
       (* Switch to the new tab *)
       let n = notebook#page_num canvas#widget in
-      notebook#goto_page n
+      notebook#goto_page n;
+      (* Refresh the color panel's fill/stroke + hex from this
+         canvas's initial selection. Model.create doesn't fire
+         on_document_changed for the doc supplied via constructor,
+         so session restore would otherwise leave the panel
+         showing the previous model's colors (or defaults). *)
+      Jas.Yaml_panel_view.update_color_panel_widgets ()
     | _ -> ()
   in
 
