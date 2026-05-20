@@ -80,22 +80,32 @@ class ColorBarWidget(QWidget):
             t = (y - mid_y) / (h - mid_y) if h > mid_y else 0
             sat, br = 100, 80 * (1 - t)
 
-        # Update panel state
-        panel_id = self._store.get_active_panel_id()
+        # The active_panel_id is a global race against any sibling
+        # panel's init / activate — pin to the widget's own panel
+        # via ctx._panel_id so writes always land in color_panel_
+        # content (CLR-124 Python — drag wrote h/s/b into
+        # whichever panel happened to be active last, e.g.
+        # artboards_panel_content, and the Color panel saw no
+        # change).
+        panel_id = self._ctx.get("_panel_id") or self._store.get_active_panel_id()
         if panel_id:
             self._store.set_panel(panel_id, "h", round(hue) % 360)
             self._store.set_panel(panel_id, "s", round(sat))
             self._store.set_panel(panel_id, "b", round(br))
 
-            # Compute the hex color and update
             r, g, b = hsb_to_rgb(hue, sat, br)
             from workspace_interpreter.color_util import rgb_to_hex
             hex_color = rgb_to_hex(r, g, b)
-            self._store.set_panel(panel_id, "hex",
-                                  hex_color[1:] if hex_color.startswith("#") else hex_color)
 
             if commit:
-                # Set the active color in global state
+                # Only write panel.hex on release — the bridge in
+                # jas_app treats every panel.hex write as a "hex
+                # field commit" and pushes to recent_colors. Live
+                # drag would push every intermediate color into
+                # recent (CLR-124 Python).
+                self._store.set_panel(
+                    panel_id, "hex",
+                    hex_color[1:] if hex_color.startswith("#") else hex_color)
                 fill_on_top = self._store.get("fill_on_top")
                 if fill_on_top:
                     self._store.set("fill_color", hex_color)

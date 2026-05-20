@@ -26,6 +26,17 @@ class YamlDialogView(QDialog):
         parent: Parent widget.
     """
 
+    def keyPressEvent(self, event):
+        from PySide6.QtCore import Qt as _Qt
+        # Swallow Enter/Return at the dialog level — the picker has
+        # number_inputs that need to fire editingFinished on Enter
+        # rather than have Qt auto-accept the dialog. Escape still
+        # closes (calls reject) via the default QDialog behavior.
+        if event.key() in (_Qt.Key_Return, _Qt.Key_Enter):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def __init__(self, dialog_id: str, store: StateStore,
                  dispatch_fn=None, ctx: dict | None = None,
                  parent: QWidget | None = None):
@@ -68,6 +79,25 @@ class YamlDialogView(QDialog):
             widget = render_element(content, store, eval_ctx, self._dispatch_dialog_action)
             if widget:
                 layout.addWidget(widget)
+
+        # Subscribe to dialog state so inline effects that call
+        # close_dialog (e.g. the picker's OK button) actually close
+        # the QDialog window. The button's effect runs through
+        # workspace_interpreter.run_effects → store.close_dialog(),
+        # which clears the store but doesn't touch the widget. The
+        # action-dispatch path covers the dismiss_dialog case;
+        # inline effects need this hook.
+        self._closing = False
+        def _on_state(key, _value):
+            if self._closing:
+                return
+            if store.get_dialog_id() is None:
+                self._closing = True
+                try:
+                    self.accept()
+                except RuntimeError:
+                    pass
+        store.subscribe(None, _on_state)
 
     def _dispatch_dialog_action(self, action_name: str, params: dict):
         """Dispatch actions from dialog buttons."""

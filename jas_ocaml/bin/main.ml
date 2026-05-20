@@ -26,7 +26,23 @@ let () =
     | Some ds -> Jas.Yaml_dialog_view.show_dialog ds
     | None -> ());
 
+  (* Color panel's swatch double-click (and any other yaml caller
+     that wants to open a dialog with params) routes through this
+     hook. Yaml_panel_view can't reach Yaml_dialog_view directly
+     without a module cycle. *)
+  Jas.Yaml_panel_view.open_yaml_dialog_hook := (fun dlg_id raw_params ->
+    match Jas.Yaml_dialog_view.open_dialog dlg_id raw_params [] with
+    | Some ds -> Jas.Yaml_dialog_view.show_dialog ds
+    | None -> ());
+
   let dummy_model = Jas.Model.create () in
+  (* On any document change, refresh the color panel's fill/stroke
+     swatches + hex entry in-place (no body rebuild). The full
+     panel rebuild caused a visible pulse on every selection
+     change; the targeted update only touches the 3 widgets that
+     actually depend on selection-driven state. *)
+  dummy_model#on_document_changed (fun _ ->
+    Jas.Yaml_panel_view.update_color_panel_widgets ());
   let active_model = ref dummy_model in
   let active_canvas = ref None in
   let all_canvases : Jas.Canvas_subwindow.canvas_subwindow list ref = ref [] in
@@ -47,14 +63,16 @@ let () =
       let n = notebook#page_num c#widget in
       if n >= 0 then notebook#goto_page n;
       active_model := c#model;
-      active_canvas := Some c
+      active_canvas := Some c;
+      Jas.Yaml_panel_view.update_color_panel_widgets ()
     | _, _ ->
     match !notebook_ref, !toolbar_ref, !main_window_ref with
     | Some notebook, Some toolbar, Some main_window ->
       let controller = Jas.Controller.create ~model:new_model () in
       let on_focus () =
         active_model := new_model;
-        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ()
+        Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ();
+        Jas.Yaml_panel_view.update_color_panel_widgets ()
       in
       let on_save () = Jas.Menubar.save new_model main_window () in
       let canvas = Jas.Canvas_subwindow.create
@@ -64,12 +82,24 @@ let () =
          open. *)
       new_model#on_document_changed (fun _ ->
         Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ());
+      (* Also refresh the color panel's fill/stroke + hex widgets
+         in-place on every document change — targeted update
+         instead of a full body rebuild so the user doesn't see a
+         visible pulse on every selection change. *)
+      new_model#on_document_changed (fun _ ->
+        Jas.Yaml_panel_view.update_color_panel_widgets ());
       active_model := new_model;
       active_canvas := Some canvas;
       all_canvases := canvas :: !all_canvases;
       (* Switch to the new tab *)
       let n = notebook#page_num canvas#widget in
-      notebook#goto_page n
+      notebook#goto_page n;
+      (* Refresh the color panel's fill/stroke + hex from this
+         canvas's initial selection. Model.create doesn't fire
+         on_document_changed for the doc supplied via constructor,
+         so session restore would otherwise leave the panel
+         showing the previous model's colors (or defaults). *)
+      Jas.Yaml_panel_view.update_color_panel_widgets ()
     | _ -> ()
   in
 
@@ -80,6 +110,52 @@ let () =
   notebook_ref := Some notebook;
   let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model toolbar_fixed in
   toolbar_ref := Some toolbar;
+  (* Read the active appearance's text color so YAML text labels
+     (slider H/S/B/%/# captions etc.) re-skin when the user switches
+     between Dark / Medium / Light Gray. Routed through a hook
+     because Yaml_panel_view can't depend on Dock_panel without
+     creating a cycle. *)
+  Jas.Yaml_panel_view.theme_text_hook := (fun () -> !Jas.Dock_panel.theme_text);
+  (* Route YAML ``set: { active_tool: "<name>" }`` effects from
+     dialog buttons through the toolbar. The color picker's
+     eyedropper button sets active_tool="eyedropper" and dismisses
+     the dialog; without this hook the set effect would write to a
+     scratch store and the canvas tool wouldn't change. *)
+  Jas.Yaml_panel_view.set_active_tool_hook := (fun name ->
+    let tool = match name with
+      | "selection" -> Some Jas.Toolbar.Selection
+      | "partial_selection" -> Some Jas.Toolbar.Partial_selection
+      | "interior_selection" -> Some Jas.Toolbar.Interior_selection
+      | "magic_wand" -> Some Jas.Toolbar.Magic_wand
+      | "pen" -> Some Jas.Toolbar.Pen
+      | "add_anchor_point" -> Some Jas.Toolbar.Add_anchor_point
+      | "delete_anchor_point" -> Some Jas.Toolbar.Delete_anchor_point
+      | "anchor_point" -> Some Jas.Toolbar.Anchor_point
+      | "pencil" -> Some Jas.Toolbar.Pencil
+      | "paintbrush" -> Some Jas.Toolbar.Paintbrush
+      | "blob_brush" -> Some Jas.Toolbar.Blob_brush
+      | "path_eraser" -> Some Jas.Toolbar.Path_eraser
+      | "smooth" -> Some Jas.Toolbar.Smooth
+      | "type_tool" -> Some Jas.Toolbar.Type_tool
+      | "type_on_path" -> Some Jas.Toolbar.Type_on_path
+      | "line" -> Some Jas.Toolbar.Line
+      | "rect" -> Some Jas.Toolbar.Rect
+      | "rounded_rect" -> Some Jas.Toolbar.Rounded_rect
+      | "ellipse" -> Some Jas.Toolbar.Ellipse
+      | "polygon" -> Some Jas.Toolbar.Polygon
+      | "star" -> Some Jas.Toolbar.Star
+      | "lasso" -> Some Jas.Toolbar.Lasso
+      | "scale" -> Some Jas.Toolbar.Scale
+      | "rotate" -> Some Jas.Toolbar.Rotate
+      | "shear" -> Some Jas.Toolbar.Shear
+      | "hand" -> Some Jas.Toolbar.Hand
+      | "zoom" -> Some Jas.Toolbar.Zoom
+      | "artboard" -> Some Jas.Toolbar.Artboard
+      | "eyedropper" -> Some Jas.Toolbar.Eyedropper
+      | _ -> None in
+    match tool with
+    | Some t -> toolbar#select_tool t
+    | None -> ());
   (* Tool to restore when spacebar pass-through to Hand releases.
      None when no Space-held pass-through is active. Per
      HAND_TOOL.md Spacebar pass-through. *)
@@ -118,11 +194,34 @@ let () =
       | _ -> ()));
   ignore !restored_active;
 
-  (* Update active model/canvas when switching tabs *)
+  (* Prune [all_canvases] when a tab is closed. The close-button
+     handler in canvas_subwindow calls notebook#remove_page but has
+     no reference to [all_canvases]; without this, persist_session
+     would re-save the closed canvas's model and the tab would
+     reappear after restart. *)
+  notebook#connect#page_removed ~callback:(fun page _page_num ->
+    all_canvases := List.filter (fun (c : Jas.Canvas_subwindow.canvas_subwindow) ->
+      c#widget#misc#get_oid <> page#misc#get_oid
+    ) !all_canvases
+  ) |> ignore;
+
+  (* Update active model/canvas when switching tabs. The per-canvas
+     on_focus callback only fires when the canvas is clicked, which
+     misses the case where the user switches tabs via the tab bar —
+     the panel state (recent colors, fill/stroke, etc.) would keep
+     showing the previous tab's model until the user clicked into
+     the new tab's canvas. *)
   notebook#connect#switch_page ~callback:(fun page_num ->
     let page = notebook#get_nth_page page_num in
-    (* Find the canvas whose widget matches this page *)
-    ignore page  (* We track focus via on_focus callbacks on click *)
+    match List.find_opt (fun (c : Jas.Canvas_subwindow.canvas_subwindow) ->
+      c#widget#misc#get_oid = page#misc#get_oid
+    ) !all_canvases with
+    | Some c ->
+      active_model := c#model;
+      active_canvas := Some c;
+      Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ();
+      Jas.Yaml_panel_view.update_color_panel_widgets ()
+    | None -> ()
   ) |> ignore;
 
   (* Keyboard shortcuts: V = Selection, A = Partial Selection, \ = Line *)

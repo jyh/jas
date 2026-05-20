@@ -500,8 +500,25 @@ let close_panel l addr =
   cleanup l addr.group.dock_id;
   bump l
 
+let is_panel_visible l kind =
+  (* True iff the panel kind currently appears in some loaded dock
+     group (anchored or floating). [hidden_panels] is only the list
+     of user-closed panels remembered across show/hide cycles — it
+     is not the source of truth for "is on screen right now". A
+     panel can be absent from [hidden_panels] yet absent from every
+     dock (e.g. a layout that simply omits Artboards); the Window
+     menu checkmark must follow the on-screen state, not the
+     closed-list state. *)
+  let in_dock_groups groups =
+    Array.exists (fun (g : panel_group) ->
+      Array.exists ((=) kind) g.panels
+    ) groups
+  in
+  List.exists (fun (_, (d : dock)) -> in_dock_groups d.groups) l.anchored
+  || List.exists (fun (fd : floating_dock) -> in_dock_groups fd.dock.groups) l.floating
+
 let show_panel l kind =
-  if List.mem kind l.hidden_panels then begin
+  if not (is_panel_visible l kind) then begin
     l.hidden_panels <- List.filter (fun k -> k <> kind) l.hidden_panels;
     (match l.anchored with
      | (_, d) :: _ ->
@@ -515,9 +532,6 @@ let show_panel l kind =
      | [] -> ());
     bump l
   end
-
-let is_panel_visible l kind =
-  not (List.mem kind l.hidden_panels)
 
 let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity; Magic_wand]
 

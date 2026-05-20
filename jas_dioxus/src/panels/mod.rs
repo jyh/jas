@@ -112,6 +112,15 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
     }
 }
 
+/// Query whether a menu command is enabled for a panel kind. Defaults
+/// to `true` for panels / commands without a state-conditional rule.
+pub(crate) fn panel_is_enabled(kind: PanelKind, cmd: &str, state: &AppState) -> bool {
+    match kind {
+        PanelKind::Color => color_panel::is_enabled(cmd, state),
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

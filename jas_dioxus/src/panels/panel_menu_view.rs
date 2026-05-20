@@ -43,12 +43,31 @@ pub fn PanelMenuOverlay() -> Element {
                 let cmd = command;
                 let display_label = super::panel_dynamic_label(kind, cmd, &st)
                     .unwrap_or_else(|| label.to_string());
+                let enabled = super::panel_is_enabled(kind, cmd, &st);
+                let (color, cursor, opacity) = if enabled {
+                    (THEME_TEXT, "pointer", "1")
+                } else {
+                    (THEME_TEXT_HINT, "default", "0.5")
+                };
                 rsx! {
                     div {
                         class: "jas-menu-item",
-                        style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                        onmousedown: move |evt: Event<MouseData>| {
+                        style: "padding:4px 24px 4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                        // Stop the mousedown so the backdrop doesn't
+                        // dismiss the menu before our onclick fires.
+                        onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                        // Run the action on click (mouse-up inside the
+                        // item) rather than mousedown, so the
+                        // mouseup/click event is consumed by the menu
+                        // item — otherwise dismissing the menu on
+                        // mousedown exposes whatever is underneath
+                        // (e.g. a recent-color swatch) and the click
+                        // bubbles to that target instead.
+                        onclick: move |evt: Event<MouseData>| {
                             evt.stop_propagation();
+                            if !enabled {
+                                return;
+                            }
                             // Some menu actions open dialogs and need
                             // a Signal<Option<DialogState>> handle
                             // (out of reach from the AppState-only
@@ -96,7 +115,8 @@ pub fn PanelMenuOverlay() -> Element {
                     div {
                         class: "jas-menu-item",
                         style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                        onmousedown: move |evt: Event<MouseData>| {
+                        onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                        onclick: move |evt: Event<MouseData>| {
                             evt.stop_propagation();
                             (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                                 super::panel_dispatch(kind, cmd, addr, st);
@@ -117,7 +137,8 @@ pub fn PanelMenuOverlay() -> Element {
                     div {
                         class: "jas-menu-item",
                         style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                        onmousedown: move |evt: Event<MouseData>| {
+                        onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                        onclick: move |evt: Event<MouseData>| {
                             evt.stop_propagation();
                             (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                                 super::panel_dispatch(kind, cmd, addr, st);

@@ -16,7 +16,7 @@ radio_field_row:
     children:
       - { type: radio_group, id: "${radio_id}", options: [{id: "${channel}", label: ""}], bind: "dialog.radio_channel" }
       - { type: text, content: "${label}:" }
-      - { type: number_input, id: "${input_id}", style: { width: 45 }, min: "${min}", max: "${max}", bind: "${bind}" }
+      - { type: number_input, id: "${input_id}", style: { width: 60 }, min: "${min}", max: "${max}", bind: "${bind}" }
       - { type: text, content: "${unit}" }
 
 cmyk_field_row:
@@ -33,5 +33,5 @@ cmyk_field_row:
     style: { gap: 2, alignment: center }
     children:
       - { type: text, content: "${label}:" }
-      - { type: number_input, id: "${id_prefix}", style: { width: 40 }, min: "${min}", max: "${max}", bind: "${bind}" }
+      - { type: number_input, id: "${id_prefix}", style: { width: 55 }, min: "${min}", max: "${max}", bind: "${bind}" }
       - { type: text, content: "%" }

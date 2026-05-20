@@ -24,7 +24,11 @@ pub(crate) fn fs_display_bg(d: &FsDisplay) -> String {
             let (r, g, b, _) = c.to_rgba();
             format!("rgb({},{},{})", (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
         }
-        FsDisplay::None => "linear-gradient(to bottom right, #fff 45%, transparent 45%, transparent 50%, #f00 50%, #f00 55%, transparent 55%, transparent 100%, #fff 100%)".into(),
+        // The diagonal red "no fill" indicator is drawn as an inline
+        // SVG child element by the widget (see is_none() callers),
+        // so the bare background here is a clean solid white that
+        // the diagonal sits on top of.
+        FsDisplay::None => "#fff".into(),
         FsDisplay::Mixed => "#888".into(),
     }
 }

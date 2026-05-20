@@ -768,6 +768,32 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         Color (Color_util.rgb_to_hex r g b)
     end
 
+    (* cmyk: (c, m, y, k) -> color  (each 0-100) *)
+    else if name = "cmyk" then begin
+      if List.length args <> 4 then Null
+      else
+        let vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
+        let get_float v = match v with Number n -> n | _ -> 0.0 in
+        let c = get_float (List.nth vals 0) /. 100.0 in
+        let m = get_float (List.nth vals 1) /. 100.0 in
+        let y = get_float (List.nth vals 2) /. 100.0 in
+        let k = get_float (List.nth vals 3) /. 100.0 in
+        let r = Float.to_int (Float.round ((1.0 -. c) *. (1.0 -. k) *. 255.0)) in
+        let g = Float.to_int (Float.round ((1.0 -. m) *. (1.0 -. k) *. 255.0)) in
+        let b = Float.to_int (Float.round ((1.0 -. y) *. (1.0 -. k) *. 255.0)) in
+        Color (Color_util.rgb_to_hex r g b)
+    end
+
+    (* grayscale: (k) -> color  (k is 0-100, 0=white, 100=black) *)
+    else if name = "grayscale" then begin
+      if List.length args <> 1 then Null
+      else
+        let arg = eval_node ~local_env ?store_cb (List.hd args) ctx in
+        let k = match arg with Number n -> n | _ -> 0.0 in
+        let v = Float.to_int (Float.round ((1.0 -. k /. 100.0) *. 255.0)) in
+        Color (Color_util.rgb_to_hex v v v)
+    end
+
     (* invert: color -> color *)
     else if name = "invert" then begin
       if List.length args <> 1 then Null

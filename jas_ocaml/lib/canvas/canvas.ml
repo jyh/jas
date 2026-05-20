@@ -532,7 +532,7 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
 
   (* Initialize dock panel *)
   let dock_refresh_panel = Dock_panel.create ~get_model ~get_fill_on_top ~window dock_box workspace_layout in
-  dock_refresh := (fun () -> refresh_all (); dock_refresh_panel ());
+  dock_refresh := (fun () -> refresh_all (); dock_refresh_panel (); Menubar.sync_panel_checks ());
 
   (* Mouse move handler *)
   ignore (pane_container#event#connect#motion_notify ~callback:(fun ev ->

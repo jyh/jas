@@ -312,13 +312,25 @@ let set_active_color color ~fill_on_top (m : Model.model) =
   let hex = Element.color_to_hex color in
   push_recent_color hex m
 
-(** Set the active color without pushing to recent colors (live slider drag). *)
+(** Set the active color without pushing to recent colors (live slider drag).
+    Mirrors [set_active_color] minus the [push_recent_color] tail — drag
+    intermediates shouldn't pollute the recent strip, but still need to
+    show in the canvas (selection) and the default fill/stroke so a
+    subsequent click on an unfilled element picks up the dragged value. *)
 let set_active_color_live color ~fill_on_top (m : Model.model) =
-  if fill_on_top then
-    m#set_default_fill (Some (Element.make_fill color))
-  else begin
+  if fill_on_top then begin
+    m#set_default_fill (Some (Element.make_fill color));
+    if not (Document.PathMap.is_empty m#document.Document.selection) then begin
+      let ctrl = Controller.create ~model:m () in
+      ctrl#set_selection_fill (Some (Element.make_fill color))
+    end
+  end else begin
     let width = match m#default_stroke with Some s -> s.stroke_width | None -> 1.0 in
-    m#set_default_stroke (Some (Element.make_stroke ~width color))
+    m#set_default_stroke (Some (Element.make_stroke ~width color));
+    if not (Document.PathMap.is_empty m#document.Document.selection) then begin
+      let ctrl = Controller.create ~model:m () in
+      ctrl#set_selection_stroke (Some (Element.make_stroke ~width color))
+    end
   end
 
 (** Dispatch a layers action through the compiled YAML effects (Phase 3).
@@ -1138,12 +1150,43 @@ let dispatch_yaml_action
 (** Dispatch a menu command for a panel kind. *)
 let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
     ?(get_panel_selection = fun () -> []) () =
-  (* Mode changes *)
+  (* Mode changes: track on the layout (controls the menu's
+     [checked_when]) AND mirror into the color panel store so the
+     YAML bind `panel.mode == "<mode>"` on each slider group sees
+     the change on the next render. Without the store mirror the
+     menu radios flip but the visible sliders stay on HSB. *)
   (match color_panel_mode_of_command cmd with
-   | Some mode -> layout.color_panel_mode <- mode
+   | Some mode ->
+     layout.color_panel_mode <- mode;
+     let mode_str = match mode with
+       | Grayscale -> "grayscale"
+       | Rgb_mode -> "rgb"
+       | Hsb_mode -> "hsb"
+       | Cmyk_mode -> "cmyk"
+       | Web_safe_rgb -> "web_safe_rgb" in
+     (match lookup_panel_store "color_panel_content" with
+      | Some store ->
+        State_store.set_panel store "color_panel_content" "mode"
+          (`String mode_str)
+      | None -> ())
    | None -> ());
   match cmd with
-  | "close_panel" -> close_panel layout addr
+  | "close_panel" ->
+    close_panel layout addr;
+    (* Reset color-panel mode to the YAML default (HSB) on close
+       per CLR-028 — the spec says the mode is panel-local and
+       should re-derive from the active color on reopen. Otherwise
+       layout.color_panel_mode + panel.mode in the store both
+       persist across the close/reopen cycle and the panel comes
+       back in whichever mode the user last chose. *)
+    if kind = Color then begin
+      layout.color_panel_mode <- Hsb_mode;
+      match lookup_panel_store "color_panel_content" with
+      | Some store ->
+        State_store.set_panel store "color_panel_content" "mode"
+          (`String "hsb")
+      | None -> ()
+    end
   | "new_layer" when kind = Layers ->
     dispatch_yaml_action ~panel_selection:(get_panel_selection ()) "new_layer" (get_model ())
   | ("toggle_all_layers_visibility" | "toggle_all_layers_outline"
@@ -1158,6 +1201,20 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
   | "exit_isolation_mode" when kind = Layers ->
     dispatch_yaml_action "exit_isolation_mode" (get_model ())
   | "invert_color" when kind = Color ->
+    (* Read fill_on_top from the Color panel's own state store
+       (the fill/stroke widget writes there on swatch click)
+       instead of the toolbar's flag — the two desync when the
+       user picks a side in the panel without clicking the
+       toolbar, so the menu would otherwise invert the wrong
+       side (and the panel's hex display would track the side
+       the panel thinks is active, leaving an inverted fill
+       behind a stroke-side display showing black). *)
+    let fill_on_top =
+      match lookup_panel_store "color_panel_content" with
+      | Some store ->
+        (match State_store.get store "fill_on_top" with
+         | `Bool b -> b | _ -> fill_on_top)
+      | None -> fill_on_top in
     let m = get_model () in
     let color = if fill_on_top then
       Option.map (fun (f : Element.fill) -> f.fill_color) m#default_fill
@@ -1171,6 +1228,12 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
        set_active_color inverted ~fill_on_top m
      | None -> ())
   | "complement_color" when kind = Color ->
+    let fill_on_top =
+      match lookup_panel_store "color_panel_content" with
+      | Some store ->
+        (match State_store.get store "fill_on_top" with
+         | `Bool b -> b | _ -> fill_on_top)
+      | None -> fill_on_top in
     let m = get_model () in
     let color = if fill_on_top then
       Option.map (fun (f : Element.fill) -> f.fill_color) m#default_fill
@@ -1307,4 +1370,17 @@ let panel_command_is_enabled (kind : panel_kind) (cmd : string)
     | "open_paragraph_justification"
     | "open_paragraph_hyphenation" ) ->
     _selection_has_area_text m
+  | Color, ("invert_color" | "complement_color") ->
+    (* The Color panel's Invert / Complement actions require a real
+       color on the active side. Read state.fill_on_top from the
+       Color panel's store (mirrors the dispatcher's source of
+       truth) and check the matching model default. *)
+    let fill_on_top =
+      match lookup_panel_store "color_panel_content" with
+      | Some store ->
+        (match State_store.get store "fill_on_top" with
+         | `Bool b -> b | _ -> true)
+      | None -> true in
+    if fill_on_top then m#default_fill <> None
+    else m#default_stroke <> None
   | _ -> true

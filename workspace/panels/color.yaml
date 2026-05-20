@@ -154,6 +154,10 @@ menu:
   - label: "Create New Swatch..."
     disabled: true
     description: "Disabled; will be enabled when the Swatches panel is implemented."
+  - separator
+  - label: "Close Color"
+    action: close_panel
+    params: { panel: color }
 
 content:
   type: container
@@ -465,7 +469,7 @@ content:
             rejected. In Web Safe RGB mode, the entered value is snapped
             to the nearest web-safe color on commit.
           placeholder: "000000"
-          style: { width: 52 }
+          style: { width: 64 }
           bind:
             value: "panel.hex"
             disabled: "if state.fill_on_top then state.fill_color == null else state.stroke_color == null"

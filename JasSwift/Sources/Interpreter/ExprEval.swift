@@ -1089,6 +1089,26 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         let (r, g, b) = hsbToRgb(h, s, bv)
         return Value.colorValue(rgbToHex(r, g, b))
 
+    // cmyk: (c, m, y, k) -> color  (each 0-100)
+    case "cmyk":
+        guard args.count == 4 else { return .null }
+        let vals = args.map { evalNode($0, ctx) }
+        let c = valToDouble(vals[0]) / 100.0
+        let m = valToDouble(vals[1]) / 100.0
+        let y = valToDouble(vals[2]) / 100.0
+        let k = valToDouble(vals[3]) / 100.0
+        let r = UInt8(((1.0 - c) * (1.0 - k) * 255.0).rounded())
+        let g = UInt8(((1.0 - m) * (1.0 - k) * 255.0).rounded())
+        let b = UInt8(((1.0 - y) * (1.0 - k) * 255.0).rounded())
+        return Value.colorValue(rgbToHex(r, g, b))
+
+    // grayscale: (k) -> color  (k is 0-100, 0=white, 100=black)
+    case "grayscale":
+        guard args.count == 1 else { return .null }
+        let k = valToDouble(evalNode(args[0], ctx))
+        let v = UInt8(((1.0 - k / 100.0) * 255.0).rounded())
+        return Value.colorValue(rgbToHex(v, v, v))
+
     // invert: color -> color
     case "invert":
         guard args.count == 1 else { return .null }
