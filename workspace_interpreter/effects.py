@@ -1109,8 +1109,14 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
             return
         ctrl = controller_getter()
         model = ctrl.model
-        fill_on_top = bool(store.get("fill_on_top"))
-        if fill_on_top and key == "fill_color":
+        # Apply by KEY only, not gated on fill_on_top — explicit
+        # writes to fill_color / stroke_color (Color panel toolbar
+        # swap, reset_fill_stroke action, picker OK with target=
+        # fill) should always land on the matching side regardless
+        # of which swatch is currently "active" in the panel. Was
+        # previously gated, which made reset_fill_stroke (sets
+        # both keys in one effect) apply only one side per click.
+        if key == "fill_color":
             raw = store.get("fill_color")
             if isinstance(raw, str):
                 color = Color.from_hex(raw)
@@ -1125,7 +1131,7 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
             if model.document.selection:
                 model.snapshot()
                 ctrl.set_selection_fill(fill)
-        elif (not fill_on_top) and key == "stroke_color":
+        elif key == "stroke_color":
             raw = store.get("stroke_color")
             existing_width = model.default_stroke.width if model.default_stroke else 1.0
             if isinstance(raw, str):
