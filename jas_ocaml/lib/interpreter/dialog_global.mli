@@ -8,10 +8,24 @@ val current_outer_scope : (string * Yojson.Safe.t) list ref
 val current_close : (unit -> unit) ref
 val current_build_ctx : (unit -> Yojson.Safe.t) ref
 
-(** Read the live dialog state list, or [[]] when no dialog is open. *)
+type prop_def = {
+  prop_get : string option;
+  prop_set : string option;
+}
+val current_props : (string * prop_def) list ref
+
+val add_state_change_listener : (unit -> unit) -> unit
+val clear_state_change_listeners : unit -> unit
+
+(** Read the live dialog state list, or [[]] when no dialog is open.
+    Evaluates [get:] getters in [current_props] so derived keys
+    reflect the canonical underlying state. *)
 val read_state : unit -> (string * Yojson.Safe.t) list
 
-(** Set [key] in the live dialog state. No-op when no dialog is open. *)
+(** Set [key] in the live dialog state. Runs the [set:] lambda from
+    [current_props] when present; otherwise stores [value] directly.
+    Fires registered state-change listeners after the write. No-op
+    when no dialog is open. *)
 val set_field : string -> Yojson.Safe.t -> unit
 
 (** Close the active dialog widget. *)

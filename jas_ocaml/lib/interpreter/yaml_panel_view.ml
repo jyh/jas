@@ -54,6 +54,13 @@ let _current_panel_id : string option ref = ref None
     stale. *)
 let panel_rerender_hook : (unit -> unit) ref = ref (fun () -> ())
 
+(** Hook for menubar's Window-menu check-state resync. Set by
+    [Menubar.create] (which itself depends on Yaml_panel_view via
+    paragraph_panel_resync_from_active_model, so going the other
+    way creates a cycle); called from [Dock_panel] after the panel-
+    menu Close action so the Window menu reflects the change. *)
+let panel_check_sync_hook : (unit -> unit) ref = ref (fun () -> ())
+
 (** Per-panel-body re-renderers, registered by dock_panel each time
     it builds a panel. The function tears down the body's existing
     children and re-runs create_panel_body inside the same body
@@ -81,12 +88,20 @@ let clear_panel_body_renderers () =
 type color_panel_slots = {
   mutable fill_swatch : (GMisc.drawing_area * string ref) option;
   mutable stroke_swatch : (GMisc.drawing_area * string ref) option;
+  (* Event-box wrappers for the fill/stroke swatches — these are the
+     widgets actually packed into the GtkFixed in
+     [render_fill_stroke_widget], and what we need GdkWindow handles
+     for to raise the active swatch above its sibling on a swap. *)
+  mutable fill_swatch_evt : GBin.event_box option;
+  mutable stroke_swatch_evt : GBin.event_box option;
   mutable hex_entry : GEdit.entry option;
   mutable recent_swatches : (GMisc.drawing_area * string ref) option array;
 }
 let _color_panel_slots : color_panel_slots = {
   fill_swatch = None;
   stroke_swatch = None;
+  fill_swatch_evt = None;
+  stroke_swatch_evt = None;
   hex_entry = None;
   recent_swatches = Array.make 10 None;
 }
@@ -94,6 +109,8 @@ let _color_panel_slots : color_panel_slots = {
 let clear_color_panel_slots () =
   _color_panel_slots.fill_swatch <- None;
   _color_panel_slots.stroke_swatch <- None;
+  _color_panel_slots.fill_swatch_evt <- None;
+  _color_panel_slots.stroke_swatch_evt <- None;
   _color_panel_slots.hex_entry <- None;
   Array.fill _color_panel_slots.recent_swatches 0
     (Array.length _color_panel_slots.recent_swatches) None
@@ -157,6 +174,21 @@ let _elem_stroke_color (e : Element.element) =
    on_document_changed → another call here → infinite loop /
    beachball. The flag short-circuits the second entry. *)
 let _in_color_panel_update = ref false
+
+(* True while [_write_back_bind] is forwarding a panel-channel
+   write (h/s/b/r/g/bl/c/m/y/k) into [set_active_color_live]. The
+   resulting on_document_changed → update_color_panel_widgets
+   would otherwise recompute panel.h/s/b/... from RGB and clobber
+   the just-typed channel (gray RGB has no defined hue → H
+   collapses to 0 when the user drags S to 0). *)
+let _panel_channel_edit_in_flight = ref false
+
+(* True while [_write_back_bind]'s dialog branch is running the
+   web_only snap pass (issuing set_field "r"/"g"/"bl"). The snap
+   calls themselves are color-affecting dialog writes, so without
+   this guard they would recurse and infinitely re-snap each
+   channel. *)
+let _dialog_snap_in_flight = ref false
 let update_color_panel_widgets () =
   if !_in_color_panel_update then () else
   match !_get_model_ref () with
@@ -195,6 +227,63 @@ let update_color_panel_widgets () =
         | Some c -> State_store.set store "stroke_color" (`String (_hash_hex c))
         | None -> ())
      | None -> ());
+    (* Refresh panel.h / s / b / r / g / bl / c / m / y / k / hex
+       from whichever side is active (fill_on_top). The YAML's
+       init: expressions seed these only at panel mount; without
+       refreshing them here, switching modes or selections leaves
+       slider values stale at the panel-state defaults.
+
+       Skipped when the change originated from a panel-channel edit
+       (slider drag / number-input commit): the user-typed channel
+       values are already authoritative, and round-tripping through
+       RGB→HSB would clobber them (e.g. dragging S to 0 makes RGB
+       gray, which has no defined hue → recomputed H snaps to 0
+       and the H slider jumps away from the user-chosen 120°). The
+       [_panel_channel_edit_in_flight] flag is set by
+       [_write_back_bind] for the duration of the channel write. *)
+    (match !_current_store, !_current_panel_id with
+     | Some store, Some pid when pid = "color_panel_content"
+                              && not !_panel_channel_edit_in_flight ->
+       let fill_on_top = match State_store.get store "fill_on_top" with
+         | `Bool b -> b | _ -> true in
+       let active = if fill_on_top then fill_color else stroke_color in
+       (match active with
+        | Some c ->
+          let (r, g, b) = Element.color_to_rgba c
+            |> fun (r, g, b, _) ->
+              (int_of_float (Float.round (r *. 255.0)),
+               int_of_float (Float.round (g *. 255.0)),
+               int_of_float (Float.round (b *. 255.0))) in
+          let (h, s, br) = Color_util.rgb_to_hsb r g b in
+          let (cy, mg, yl, k) = Color_util.rgb_to_cmyk r g b in
+          let set_n k v =
+            State_store.set_panel store pid k (`Float (float_of_int v)) in
+          set_n "h" h; set_n "s" s; set_n "b" br;
+          set_n "r" r; set_n "g" g; set_n "bl" b;
+          set_n "c" cy; set_n "m" mg; set_n "y" yl; set_n "k" k;
+          (* Color_util.rgb_to_hex prepends '#'; the YAML spec for
+             panel.hex is "6 chars, no # prefix" and Expr_eval
+             classifies leading-# strings as Color values, which
+             render_text_input's [Expr_eval.Str s -> s | _ -> ""]
+             match drops — producing an empty initial after a
+             panel-body rebuild fires from the menu (Invert /
+             Complement / mode switch). Strip the # so the value
+             stays a plain string in the store. *)
+          let hex_no_hash = Color_util.rgb_to_hex r g b in
+          let hex_no_hash =
+            if String.length hex_no_hash > 0 && hex_no_hash.[0] = '#'
+            then String.sub hex_no_hash 1 (String.length hex_no_hash - 1)
+            else hex_no_hash in
+          State_store.set_panel store pid "hex" (`String hex_no_hash)
+        | None -> ());
+       (* Refresh panel.recent_colors from the active model. The
+          recent-colors bridge updates the panel store on push, but
+          a tab switch / new-document focus change doesn't push —
+          without this sync the panel keeps showing the previous
+          document's recents until the user commits a new color. *)
+       State_store.set_panel store pid "recent_colors"
+         (`List (List.map (fun s -> `String s) m#recent_colors))
+     | _ -> ());
     let fc_str = match fill_color with
       | Some c -> _hash_hex c | None -> "" in
     let sc_str = match stroke_color with
@@ -211,13 +300,74 @@ let update_color_panel_widgets () =
      | None -> ());
     (match _color_panel_slots.hex_entry with
      | Some entry ->
-       let hex = match fill_color, stroke_color with
-         | Some c, _ -> Element.color_to_hex c  (* fill_on_top default *)
-         | None, Some c -> Element.color_to_hex c
-         | None, None -> "" in
+       let fill_on_top = match !_current_store with
+         | Some store ->
+           (match State_store.get store "fill_on_top" with
+            | `Bool b -> b | _ -> true)
+         | None -> true in
+       let active = if fill_on_top then fill_color else stroke_color in
+       let hex = match active with
+         | Some c -> Element.color_to_hex c
+         | None -> "" in
        if not entry#is_focus && entry#text <> hex then
          entry#set_text hex
-     | None -> ())
+     | None -> ());
+    (* Repaint the recent-colors strip — the panel store's recent
+       list was just refreshed from the active model above, but the
+       cp_recent_* drawing areas hold their own color refs and need
+       a queue_draw. Mirrors the bridge's call site so a tab switch
+       updates the strip exactly the way a push_recent_color does. *)
+    update_recent_color_widgets ()
+
+(** Compute the current color from the color panel state and commit
+    it through [Panel_menu.set_active_color] — i.e. the same path
+    as a swatch click, including the recent-colors push. Used by
+    the slider's button_release handler (drag end) and the
+    number_input's commit handler (Enter/Tab on H/S/B/etc. value
+    boxes) so each discrete edit produces one recent entry.
+    Mid-drag and per-keystroke live updates go through
+    [Panel_menu.set_active_color_live] instead (no recent push). *)
+let commit_color_panel_to_recent (store : State_store.t) (panel_id : string) : unit =
+  let pf name =
+    match State_store.get_panel store panel_id name with
+    | `Float f -> f
+    | `Int i -> float_of_int i
+    | _ -> 0.0 in
+  let mode = match State_store.get_panel store panel_id "mode" with
+    | `String s -> s | _ -> "hsb" in
+  let color_opt =
+    match mode with
+    | "hsb" ->
+      let (r, g, b) = Color_util.hsb_to_rgb (pf "h") (pf "s") (pf "b") in
+      Some (Element.color_rgb
+              (float_of_int r /. 255.0)
+              (float_of_int g /. 255.0)
+              (float_of_int b /. 255.0))
+    | "rgb" | "web_safe_rgb" ->
+      Some (Element.color_rgb
+              (pf "r" /. 255.0) (pf "g" /. 255.0) (pf "bl" /. 255.0))
+    | "grayscale" ->
+      let v = 1.0 -. (pf "k") /. 100.0 in
+      Some (Element.color_rgb v v v)
+    | "cmyk" ->
+      let c = pf "c" /. 100.0 in
+      let m = pf "m" /. 100.0 in
+      let y = pf "y" /. 100.0 in
+      let k = pf "k" /. 100.0 in
+      let r = (1.0 -. c) *. (1.0 -. k) in
+      let g = (1.0 -. m) *. (1.0 -. k) in
+      let b = (1.0 -. y) *. (1.0 -. k) in
+      Some (Element.color_rgb r g b)
+    | _ -> None in
+  match color_opt, !_get_model_ref () with
+  | Some color, Some m ->
+    let fill_on_top = match State_store.get store "fill_on_top" with
+      | `Bool b -> b | _ -> true in
+    _panel_channel_edit_in_flight := true;
+    Fun.protect
+      ~finally:(fun () -> _panel_channel_edit_in_flight := false)
+      (fun () -> Panel_menu.set_active_color color ~fill_on_top m)
+  | _ -> ()
 
 (** Schedule a panel rebuild to run after the current event handler
     returns. Calling the hook synchronously from inside an
@@ -264,6 +414,39 @@ let _doc_listener_registered_for : Model.model option ref = ref None
     the panel widgets refresh whenever the active model's selection
     changes. *)
 let _paragraph_panel_sync : (unit -> unit) option ref = ref None
+
+(** Hook fired after a fill/stroke swatch click flips
+    [state.fill_on_top]. Set by [render_fill_stroke_widget] with the
+    captured parent [GPack.fixed] and per-child positions; rerunning
+    [fixed#put] for both swatches in the active-on-top order pushes
+    the active one to the tail of GtkFixed's paint list (= on top).
+    No-op when no fill/stroke widget is currently mounted. *)
+let fill_stroke_swap_hook : (unit -> unit) ref = ref (fun () -> ())
+
+(** Hook for opening a YAML-defined dialog by id with raw params.
+    Set in main.ml at startup using [Yaml_dialog_view.open_dialog]
+    + [show_dialog] — going through Yaml_dialog_view directly here
+    would create a Yaml_panel_view ↔ Yaml_dialog_view cycle. *)
+let open_yaml_dialog_hook :
+  (string -> (string * Yojson.Safe.t) list -> unit) ref =
+  ref (fun _ _ -> ())
+
+(** Hook for switching the active canvas's toolbar tool from a YAML
+    effect (``set: { active_tool: "<name>" }``). The color picker's
+    eyedropper icon and other in-dialog tool-switch shortcuts need
+    this to actually change the canvas tool — without it the [set:]
+    effect is a silent no-op since the dialog scope has no store
+    that owns active_tool. Wired in main.ml against the active
+    canvas's toolbar. *)
+let set_active_tool_hook : (string -> unit) ref = ref (fun _ -> ())
+
+(** Hook returning the active appearance's text color. Used by
+    [render_text]'s default when [style.color] is unset, so labels
+    re-skin when the user switches between Dark / Medium / Light
+    Gray. Wired in main.ml at startup against [Dock_panel.theme_text]
+    — referencing that ref directly would create a Yaml_panel_view ↔
+    Dock_panel cycle. *)
+let theme_text_hook : (unit -> string) ref = ref (fun () -> "#cccccc")
 
 (** Trigger a re-sync of the open Paragraph panel from the active
     model's current selection. No-op when no Paragraph panel is
@@ -312,7 +495,15 @@ let install_recent_colors_bridge () =
          panel.recent_colors values — without this the swatches'
          captured color_str stays stale and the new color doesn't
          appear until a body rebuild fires for some other reason. *)
-      update_recent_color_widgets ())
+      update_recent_color_widgets ();
+      (* Also refresh the fill/stroke swatches + hex entry + slider
+         state. set_active_color goes through this bridge for every
+         commit (swatch click, hex commit, Invert/Complement menu,
+         …); when there is no selection the model defaults change
+         but on_document_changed never fires, so the panel widgets
+         keep showing the previous color until update is called
+         explicitly. *)
+      update_color_panel_widgets ())
   end
 
 (** Parse a bind expression like "panel.X" or "state.X" and write
@@ -329,7 +520,47 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
        dialog state so OK button params (resolved at click time)
        see the typed value. Without this the widget edit was a
        silent no-op for any dialog widget. *)
-    Dialog_global.set_field field value
+    Dialog_global.set_field field value;
+    (* Color picker "Only Web Colors": while the toggle is on, snap
+       each RGB channel of the current color to multiples of 51
+       (0/51/102/153/204/255). Fires both on toggle-on and after any
+       color-affecting edit (gradient, hue bar, hex commit, channel
+       value boxes) so the snap is continuous. Writing through the
+       r/g/bl setters rebuilds [color] via the rgb() lambda so all
+       derived channels (HSB, CMYK, hex) and the preview swatch
+       refresh from the snapped color. Reads route through
+       [read_state] (= the YAML get-lambdas) so they see the
+       canonical color, not stale init-only stored r/g/bl. The
+       [_dialog_snap_in_flight] guard prevents the snap's own r/g/bl
+       writes from re-triggering the snap pass. *)
+    let color_affecting = match field with
+      | "h" | "s" | "b" | "r" | "g" | "bl"
+      | "c" | "m" | "y" | "k" | "hex" | "color" -> true
+      | _ -> false in
+    let web_only_on () =
+      match List.assoc_opt "web_only" (Dialog_global.read_state ()) with
+      | Some (`Bool b) -> b | _ -> false in
+    let should_snap =
+      (field = "web_only" && value = `Bool true)
+      || (color_affecting && web_only_on ()) in
+    if should_snap && not !_dialog_snap_in_flight then begin
+      _dialog_snap_in_flight := true;
+      Fun.protect
+        ~finally:(fun () -> _dialog_snap_in_flight := false)
+        (fun () ->
+          let live = Dialog_global.read_state () in
+          let read_i k =
+            match List.assoc_opt k live with
+            | Some (`Float f) -> int_of_float (Float.round f)
+            | Some (`Int i) -> i
+            | _ -> 0 in
+          let snap x =
+            let v = Float.round (float_of_int x /. 51.0) *. 51.0 in
+            max 0.0 (min 255.0 v) in
+          Dialog_global.set_field "r" (`Float (snap (read_i "r")));
+          Dialog_global.set_field "g" (`Float (snap (read_i "g")));
+          Dialog_global.set_field "bl" (`Float (snap (read_i "bl"))))
+    end
   | _ ->
     match !_current_store, !_current_panel_id with
     | Some store, Some panel_id ->
@@ -378,6 +609,20 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
                 else trimmed in
               (match Element.color_from_hex trimmed with
                | Some color ->
+                 (* Web Safe RGB mode: snap each channel to the
+                    nearest multiple of 51 on commit, per the YAML
+                    description ("In Web Safe RGB mode, the entered
+                    value is snapped to the nearest web-safe color
+                    on commit"). Other modes pass through unchanged. *)
+                 let color = match State_store.get_panel store panel_id "mode" with
+                   | `String "web_safe_rgb" ->
+                     let (r, g, b, _) = Element.color_to_rgba color in
+                     let snap c =
+                       let v = Float.round (c *. 255.0 /. 51.0) *. 51.0 in
+                       max 0.0 (min 255.0 v) /. 255.0 in
+                     Element.color_rgb (snap r) (snap g) (snap b)
+                   | _ -> color
+                 in
                  let fill_on_top = match State_store.get store "fill_on_top" with
                    | `Bool b -> b | _ -> true in
                  (match !_get_model_ref () with
@@ -387,15 +632,93 @@ let _write_back_bind (bind_expr : string) (value : Yojson.Safe.t) : unit =
                  (* Also mirror the new color into [state.fill_color]
                     / [state.stroke_color] so the panel's fill_swatch
                     (bound to [color: state.fill_color]) reflects the
-                    edit on the next rebuild — Panel_menu.set_active_color
-                    only mutates the model, not the panel's state store. *)
-                 let hex_with_hash = "#" ^ Element.color_to_hex color in
+                    edit — Panel_menu.set_active_color only mutates the
+                    model, not the panel's state store. The model
+                    mutation triggers on_document_changed →
+                    update_color_panel_widgets, which refreshes the
+                    swatches, hex entry, and slider state in-place;
+                    no body rebuild needed (would pulse the entry). *)
+                 let snapped_hex = Element.color_to_hex color in
+                 let hex_with_hash = "#" ^ snapped_hex in
                  let key = if fill_on_top then "fill_color" else "stroke_color" in
                  State_store.set store key (`String hex_with_hash);
-                 schedule_panel_rerender ()
+                 (* Reflect the snapped hex back into the entry. The
+                    on_document_changed path skips set_text while the
+                    entry is focused (to avoid clobbering mid-typing),
+                    but the user just pressed Enter / Tab so the
+                    snapped value is the new authoritative state and
+                    should replace what they typed. *)
+                 (match _color_panel_slots.hex_entry with
+                  | Some entry when entry#text <> snapped_hex ->
+                    entry#set_text snapped_hex
+                  | _ -> ())
                | None -> ())
             | _ -> ())
-         end else
+         end
+         (* Color panel color channels (h, s, b, r, g, bl, c, m, y, k):
+            compute the new color from the panel state with this one
+            field changed, then push to the model via
+            [Panel_menu.set_active_color_live]. Mirrors Rust's
+            [compute_color_from_panel] + slider oninput handler. The
+            model mutation triggers on_document_changed →
+            update_color_panel_widgets, which writes back the recomputed
+            channels (including the just-changed one, after RGB
+            round-trip) and refreshes swatches + hex entry. *)
+         else if panel_id = "color_panel_content"
+                 && List.mem field ["h"; "s"; "b"; "r"; "g"; "bl"; "c"; "m"; "y"; "k"] then begin
+           State_store.set_panel store panel_id field value;
+           let new_val = match value with
+             | `Float f -> f
+             | `Int i -> float_of_int i
+             | _ -> 0.0 in
+           let pf name =
+             if name = field then new_val
+             else match State_store.get_panel store panel_id name with
+               | `Float f -> f
+               | `Int i -> float_of_int i
+               | _ -> 0.0 in
+           let mode = match State_store.get_panel store panel_id "mode" with
+             | `String s -> s
+             | _ -> "hsb" in
+           let color_opt =
+             match mode with
+             | "hsb" ->
+               let (r, g, b) = Color_util.hsb_to_rgb (pf "h") (pf "s") (pf "b") in
+               Some (Element.color_rgb
+                       (float_of_int r /. 255.0)
+                       (float_of_int g /. 255.0)
+                       (float_of_int b /. 255.0))
+             | "rgb" | "web_safe_rgb" ->
+               Some (Element.color_rgb
+                       (pf "r" /. 255.0) (pf "g" /. 255.0) (pf "bl" /. 255.0))
+             | "grayscale" ->
+               let v = 1.0 -. (pf "k") /. 100.0 in
+               Some (Element.color_rgb v v v)
+             | "cmyk" ->
+               let c = pf "c" /. 100.0 in
+               let m = pf "m" /. 100.0 in
+               let y = pf "y" /. 100.0 in
+               let k = pf "k" /. 100.0 in
+               let r = (1.0 -. c) *. (1.0 -. k) in
+               let g = (1.0 -. m) *. (1.0 -. k) in
+               let b = (1.0 -. y) *. (1.0 -. k) in
+               Some (Element.color_rgb r g b)
+             | _ -> None in
+           (match color_opt, !_get_model_ref () with
+            | Some color, Some m ->
+              let fill_on_top = match State_store.get store "fill_on_top" with
+                | `Bool b -> b | _ -> true in
+              _panel_channel_edit_in_flight := true;
+              Fun.protect
+                ~finally:(fun () -> _panel_channel_edit_in_flight := false)
+                (fun () ->
+                  Panel_menu.set_active_color_live color ~fill_on_top m;
+                  let hex_with_hash = "#" ^ Element.color_to_hex color in
+                  let key = if fill_on_top then "fill_color" else "stroke_color" in
+                  State_store.set store key (`String hex_with_hash))
+            | _ -> ())
+         end
+         else
            State_store.set_panel store panel_id field value
        | "state" :: field :: _ ->
          State_store.set store field value
@@ -492,7 +815,14 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                   | _ -> None
                 in
                 (match color_opt with
-                 | Some color -> Panel_menu.set_active_color color ~fill_on_top m
+                 | Some color ->
+                   Panel_menu.set_active_color color ~fill_on_top m;
+                   (* on_document_changed only fires when there's a
+                      selection; with nothing selected the
+                      set_default_fill call doesn't reach the panel
+                      widgets, so a recent-swatch click goes
+                      invisible. Force a refresh here. *)
+                   update_color_panel_widgets ()
                  | None -> ())
               | "set_active_color_none" ->
                 if fill_on_top then begin
@@ -512,6 +842,104 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                     ctrl#set_selection_stroke None
                   end
                 end
+              | "reset_fill_stroke" ->
+                (* Reset to workspace defaults: white fill + black
+                   stroke + fill_on_top. The YAML action's [set:]
+                   effect writes to state.fill_color /
+                   state.stroke_color, but subscribe_active_color
+                   only propagates the side matching fill_on_top —
+                   so the other side stays stale. Apply both sides
+                   to the model + selection directly. *)
+                let new_fill = Some (Element.make_fill Element.white) in
+                let new_stroke = Some (Element.make_stroke Element.black) in
+                m#set_default_fill new_fill;
+                m#set_default_stroke new_stroke;
+                (match !_current_store with
+                 | Some store ->
+                   State_store.set store "fill_on_top" (`Bool true)
+                 | None -> ());
+                if not (Document.PathMap.is_empty
+                          m#document.Document.selection) then begin
+                  m#snapshot;
+                  let ctrl = Controller.create ~model:m () in
+                  ctrl#set_selection_fill new_fill;
+                  ctrl#set_selection_stroke new_stroke
+                end;
+                update_color_panel_widgets ();
+                !fill_stroke_swap_hook ()
+              | "swap_fill_stroke" ->
+                (* Direct route. The YAML action's [swap:] effect
+                   only flips state.fill_color / state.stroke_color
+                   in the store; subscribe_active_color then only
+                   propagates the side matching fill_on_top to the
+                   model, leaving the other side stale. Mirror the
+                   toolbar's swap_fill_stroke logic and apply both
+                   sides to the model + selection.
+
+                   Read the source fill/stroke from the SELECTION
+                   first (a selected rectangle may already have
+                   fill=purple / stroke=green even though the model
+                   defaults drifted away to black). Falls back to
+                   the model defaults when nothing is selected. *)
+                let elem_opt =
+                  match Document.PathMap.bindings
+                          m#document.Document.selection with
+                  | (path, _) :: _ ->
+                    (try Some (Document.get_element m#document path)
+                     with _ -> None)
+                  | [] -> None in
+                let sel_fill = match elem_opt with
+                  | Some e ->
+                    (match e with
+                     | Element.Rect { fill; _ }
+                     | Element.Circle { fill; _ }
+                     | Element.Ellipse { fill; _ }
+                     | Element.Polyline { fill; _ }
+                     | Element.Polygon { fill; _ }
+                     | Element.Path { fill; _ } -> Some fill
+                     | _ -> None)
+                  | None -> None in
+                let sel_stroke = match elem_opt with
+                  | Some e ->
+                    (match e with
+                     | Element.Line { stroke; _ }
+                     | Element.Rect { stroke; _ }
+                     | Element.Circle { stroke; _ }
+                     | Element.Ellipse { stroke; _ }
+                     | Element.Polyline { stroke; _ }
+                     | Element.Polygon { stroke; _ }
+                     | Element.Path { stroke; _ } -> Some stroke
+                     | _ -> None)
+                  | None -> None in
+                let old_fill = match sel_fill with
+                  | Some f -> f
+                  | None -> m#default_fill in
+                let old_stroke = match sel_stroke with
+                  | Some s -> s
+                  | None -> m#default_stroke in
+                let new_fill = match old_stroke with
+                  | Some s ->
+                    Some { Element.fill_color = s.Element.stroke_color;
+                           fill_opacity = s.Element.stroke_opacity }
+                  | None -> None in
+                let new_stroke = match old_fill with
+                  | Some f ->
+                    let width = match old_stroke with
+                      | Some s -> s.Element.stroke_width | None -> 1.0 in
+                    Some (Element.make_stroke ~width
+                            ~opacity:f.Element.fill_opacity
+                            f.Element.fill_color)
+                  | None -> None in
+                m#set_default_fill new_fill;
+                m#set_default_stroke new_stroke;
+                if not (Document.PathMap.is_empty
+                          m#document.Document.selection) then begin
+                  m#snapshot;
+                  let ctrl = Controller.create ~model:m () in
+                  ctrl#set_selection_fill new_fill;
+                  ctrl#set_selection_stroke new_stroke
+                end;
+                update_color_panel_widgets ()
               | _ ->
                 Panel_menu.dispatch_yaml_action
                   ~params:params_list action_name m)
@@ -520,6 +948,59 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
     end
   ) behaviors;
   !wrote_state
+
+(** Dispatch a double-click on a YAML element by walking its
+    [behavior] array for [event: double_click] entries. Currently
+    used by the fill/stroke swatch's open_color_picker entry — a
+    YAML action that fires [open_dialog] with the color_picker id.
+    Falls through to [Panel_menu.dispatch_yaml_action] like the
+    single-click action path so any future double_click action
+    works without extra plumbing. *)
+let dispatch_double_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : unit =
+  let open Yojson.Safe.Util in
+  let behaviors = match el |> member "behavior" with
+    | `List bs -> bs | _ -> [] in
+  List.iter (fun b ->
+    let event = b |> member "event" |> to_string_option
+                |> Option.value ~default:"" in
+    if event = "double_click" then begin
+      (match b |> member "action" |> to_string_option with
+       | Some action_name when action_name <> "" ->
+         (* Don't replace bare-word values like [target: fill] with
+            Null. resolve_value returns Null whenever the string
+            isn't a bound identifier (Expr_eval treats undefined
+            names as Null) — losing the literal would turn
+            [param.target] into Null in the dialog and the picker's
+            [if param.target == "fill"] branch always falls to else. *)
+         let resolve_param v =
+           match v with
+           | `String s when String.contains s '.' ->
+             (try Effects.value_to_json
+                    (Expr_eval.evaluate s ctx)
+              with _ -> v)
+           | _ -> v
+         in
+         let params_list = match b |> member "params" with
+           | `Assoc pairs ->
+             List.map (fun (k, v) -> (k, resolve_param v)) pairs
+           | _ -> [] in
+         (* open_color_picker → open the YAML-defined color_picker
+            dialog directly. The YAML action's [open_dialog:] effect
+            only initializes state in the store; the actual GTK
+            dialog window is created via [open_yaml_dialog_hook]
+            (set by main.ml from Yaml_dialog_view — going through
+            Yaml_dialog_view directly here would form a cycle). *)
+         (if action_name = "open_color_picker" then
+            !open_yaml_dialog_hook "color_picker" params_list
+          else
+            match !_get_model_ref () with
+            | None -> ()
+            | Some m ->
+              Panel_menu.dispatch_yaml_action
+                ~params:params_list action_name m)
+       | _ -> ())
+    end
+  ) behaviors
 
 (** Layers-panel mutable state — collapsed rows, panel selection, rename
     state, drag source/target, search filter, hidden type filter, saved
@@ -585,6 +1066,9 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "toggle" | "checkbox" -> render_toggle ~packing ~ctx el
   | "combo_box" -> render_combo_box ~packing ~ctx el
   | "color_swatch" -> render_color_swatch ~packing ~ctx el
+  | "color_gradient" -> render_color_gradient ~packing ~ctx el
+  | "color_hue_bar" -> render_color_hue_bar ~packing ~ctx el
+  | "radio_group" -> render_radio_group ~packing ~ctx el
   | "gradient_tile" -> render_gradient_tile ~packing ~ctx el
   | "gradient_slider" -> render_gradient_slider ~packing ~ctx el
   | "separator" -> render_separator ~packing el
@@ -736,15 +1220,16 @@ and render_text ~packing ~ctx el =
     else content in
   let style = el |> member "style" in
   (* style.color may be a literal hex or a {{theme.colors.X}} token;
-     evaluate_text resolves both. Default to the dark-theme text
-     color (#cccccc) when unspecified — without this, slider-row
-     labels (slider_row template doesn't pass color) inherit the
-     GTK theme's default label color, which goes dark when the
-     panel has focus and renders unreadable on the dark backdrop. *)
+     evaluate_text resolves both. Default to the active appearance's
+     text color when unspecified — without this, slider-row labels
+     (slider_row template doesn't pass color) inherit the GTK
+     theme's default label color and stay light against the Light
+     Gray appearance's pale bg (CLR-262). Routed through
+     [theme_text_hook] to avoid a Yaml_panel_view ↔ Dock_panel cycle. *)
   let color = match style |> safe_member "color" |> to_string_option with
     | Some s when String.length s > 0 ->
       (try Expr_eval.evaluate_text s ctx with _ -> s)
-    | _ -> "#cccccc" in
+    | _ -> !theme_text_hook () in
   let font_size = style |> safe_member "font_size" |> to_number_option in
   let attr_color =
     (* Be defensive: evaluate_text on a {{theme.colors.X}} token can
@@ -941,6 +1426,19 @@ and render_button ~packing ~ctx el =
       "button { padding: 0; margin: 0; min-width: 0; min-height: 0; border: 0; background: transparent; }";
     btn#misc#style_context#add_provider provider 800
   end;
+  (* style.opacity < 1.0 — render the button dimmed AND insensitive.
+     Used by the color picker's "Color Swatches" button as a yaml
+     placeholder (CLR-231). Mirrors the Rust placeholder rendering.
+     lablgtk3's misc_ops doesn't expose set_opacity, so route through
+     a CSS provider against the button's style context. *)
+  (match el |> member "style" |> safe_member "opacity" |> to_number_option with
+   | Some o when o < 1.0 ->
+     let provider = GObj.css_provider () in
+     provider#load_from_data
+       (Printf.sprintf "button { opacity: %.3f; }" o);
+     btn#misc#style_context#add_provider provider 900;
+     btn#misc#set_sensitive false
+   | _ -> ());
   (* Opacity panel: op_make_mask dispatches controller make or
      release based on selection_has_mask. The button has no
      ``action`` in yaml — routing is resolved here against the
@@ -1000,6 +1498,129 @@ and render_button ~packing ~ctx el =
          pipeline do the work without a flickery dock rebuild. *)
       if wrote_state then schedule_panel_rerender ()))
   end;
+  (* Inline behavior dispatch for buttons in dialogs (Color Picker
+     OK button writes [if param.target == fill then set fill_color
+     = dialog.color else set stroke_color = dialog.color; close_dialog]
+     directly inline rather than naming an action). Route through
+     Effects.run_effects so [if] / [set] / [close_dialog] all work,
+     using the Color panel's store so its subscribe_active_color
+     bridge picks up the fill_color / stroke_color writes and pushes
+     them into the model + selection. *)
+  if !Dialog_global.current_id <> None then begin
+    match el |> member "behavior" with
+    | `List behaviors when behaviors <> [] ->
+      let rec has_close_dialog effects =
+        List.exists (fun e ->
+          match e with
+          | `Assoc fields when List.mem_assoc "close_dialog" fields -> true
+          | `Assoc fields ->
+            (* close_dialog can also live inside if/then/else branches. *)
+            (match List.assoc_opt "if" fields with
+             | Some (`Assoc cond) ->
+               let then_ = match List.assoc_opt "then" cond with
+                 | Some (`List l) -> l | _ -> [] in
+               let else_ = match List.assoc_opt "else" cond with
+                 | Some (`List l) -> l | _ -> [] in
+               has_close_dialog then_ || has_close_dialog else_
+             | _ ->
+               (match List.assoc_opt "then" fields with
+                | Some (`List l) -> has_close_dialog l
+                | _ -> false))
+          | _ -> false
+        ) effects in
+      ignore (btn#connect#clicked ~callback:(fun () ->
+        btn#misc#grab_focus ();
+        List.iter (fun b ->
+          let event = b |> member "event" |> to_string_option
+                      |> Option.value ~default:"" in
+          if event = "click" then begin
+            (* Intercept any ``set: { active_tool: <expr> }`` effects
+               and dispatch through [set_active_tool_hook] — the color
+               picker's eyedropper writes the tool name this way to
+               switch the canvas's active tool. The store-write done
+               by [Effects.run_effects] would otherwise land in the
+               Color panel's store, which doesn't drive the canvas. *)
+            let live_ctx = !Dialog_global.current_build_ctx () in
+            (match b |> member "effects" with
+             | `List effects ->
+               List.iter (fun e ->
+                 match e with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "set" fields with
+                    | Some (`Assoc set_pairs) ->
+                      (match List.assoc_opt "active_tool" set_pairs with
+                       | Some (`String expr_str) ->
+                         let v = Expr_eval.evaluate expr_str live_ctx in
+                         let name = (match v with
+                           | Expr_eval.Str s -> s
+                           | _ -> "") in
+                         if name <> "" then !set_active_tool_hook name
+                       | _ -> ())
+                    | _ -> ())
+                 | _ -> ()
+               ) effects
+             | _ -> ());
+            (match b |> member "effects" with
+            | `List effects ->
+              let ctx_pairs = match live_ctx with
+                | `Assoc p -> p | _ -> [] in
+              let store =
+                match Panel_menu.lookup_panel_store "color_panel_content" with
+                | Some s -> s
+                | None -> State_store.create () in
+              Effects.run_effects effects ctx_pairs store;
+              (* Effects.run_effects's [close_dialog] handler only
+                 clears State_store dialog state; the GTK dialog
+                 window stays open without an explicit close. *)
+              if has_close_dialog effects then Dialog_global.close ();
+              (* Color picker OK: push the committed color into the
+                 model's recent_colors list. The fill_color /
+                 stroke_color set effect lands in
+                 [subscribe_active_color] which updates the default
+                 fill/stroke and selection but does NOT push to
+                 recent — that lives in [Panel_menu.push_recent_color]
+                 and is called by the panel's own commit paths.
+                 Without this, OK silently skips the recent strip.
+                 Mirrors the Rust [renderer.rs] color picker OK
+                 push_recent branch. *)
+              if !Dialog_global.current_id = Some "color_picker" then begin
+                let dialog_color =
+                  Expr_eval.evaluate "dialog.color" live_ctx in
+                let hex_opt = match dialog_color with
+                  | Expr_eval.Color c -> Some c
+                  | Expr_eval.Str s when String.length s > 0 && s.[0] = '#' ->
+                    Some s
+                  | _ -> None in
+                match hex_opt, !_get_model_ref () with
+                | Some hex, Some m ->
+                  let hex_no_hash =
+                    if String.length hex > 0 && hex.[0] = '#'
+                    then String.sub hex 1 (String.length hex - 1)
+                    else hex in
+                  Panel_menu.push_recent_color hex_no_hash m
+                | _ -> ()
+              end;
+              update_color_panel_widgets ()
+            | _ -> ());
+            (* Behavior-level ``action:`` — the eyedropper declares
+               ``action: dismiss_dialog`` alongside its set-tool
+               effect; the top-level ``action:`` handler below only
+               sees element-level [el.action], so without this
+               in-line dispatch the dialog stays open after the
+               tool switch. *)
+            (match b |> member "action" |> to_string_option with
+             | Some "dismiss_dialog" -> Dialog_global.close ()
+             | Some other when other <> "" ->
+               Dialog_global.dispatch_action other []
+                 (match !_get_model_ref () with
+                  | Some m -> Some (new Controller.controller ~model:m ())
+                  | None -> None)
+                 (fun () -> Dialog_global.close ())
+             | _ -> ())
+          end
+        ) behaviors))
+    | _ -> ()
+  end;
   (* Generic ``action: <name>`` dispatch — used by dialog buttons
      (OK / Done / Print / Cancel / icon-button toggles). Resolves
      ``params`` against the live dialog ctx (so values typed into
@@ -1052,7 +1673,12 @@ and render_slider ~packing ~ctx el =
       | Expr_eval.Number n -> n
       | _ -> min_val
     else min_val in
-  let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:step ~value:initial () in
+  (* lablgtk3's GData.adjustment defaults page_size to 10 (matching
+     the GtkScrollbar conventions), which clamps the GtkScale's
+     reachable max to (upper - page_size) — so an H slider with
+     upper=359 stops at 349 unless we pin page_size:0. *)
+  let adj = GData.adjustment ~lower:min_val ~upper:max_val
+              ~step_incr:step ~page_size:0.0 ~value:initial () in
   let scale = GRange.scale `HORIZONTAL ~adjustment:adj ~draw_value:false ~packing () in
 
   (* Per-channel gradient on the trough. Channel comes from the
@@ -1114,16 +1740,80 @@ and render_slider ~packing ~ctx el =
     if !suppress then () else begin
       suppress := true;
       let v = adj#value in
+      (* Snap to step. GtkAdjustment's step_incr only governs keyboard
+         arrow-key increments — drag motion is unsnapped. Web Safe
+         RGB depends on snapping (step=51) to land on the safe palette
+         entries. Round-to-nearest mirrors the Rust slider's snap. *)
+      let v_snap =
+        if step > 0.0 && step <> 1.0 then
+          Float.round (v /. step) *. step
+        else v in
+      if v_snap <> v then adj#set_value v_snap;
       if bind_expr <> "" then
-        _write_back_bind bind_expr (`Float v);
+        _write_back_bind bind_expr (`Float v_snap);
       suppress := false
-    end))
+    end));
+
+  (* Subscribe to panel-state updates so the slider thumb tracks
+     selection-change / hex-commit / swatch-click updates to the
+     active color (update_color_panel_widgets writes panel.h /
+     panel.s / panel.b / panel.r / etc. — without this listener the
+     slider stays parked at its initial value). [suppress] keeps
+     the programmatic adjustment from re-firing the value_changed
+     write-back. *)
+  (match bind_expr, !_current_store, !_current_panel_id with
+   | expr, Some store, Some pid
+     when String.length expr > 6 && String.sub expr 0 6 = "panel." ->
+     let field = String.sub expr 6 (String.length expr - 6) in
+     State_store.subscribe_panel store pid (fun key v ->
+       if key = field then begin
+         let new_val = match v with
+           | `Float f -> Some f
+           | `Int i -> Some (float_of_int i)
+           | _ -> None in
+         match new_val with
+         | Some v when v <> adj#value ->
+           let prev = !suppress in
+           suppress := true;
+           Fun.protect ~finally:(fun () -> suppress := prev)
+             (fun () -> adj#set_value v)
+         | _ -> ()
+       end)
+   | _ -> ());
+
+  (* Pointer-up commits the final color through
+     [Panel_menu.set_active_color] (drag itself goes through
+     set_active_color_live — see _write_back_bind for color channels)
+     so the recent-colors strip gets exactly one entry per drag
+     gesture instead of either zero (live-only) or hundreds
+     (one per tick). Mirrors the Rust slider's onchange. Reads the
+     current panel state directly so any of the 10 color channels
+     can trigger the commit. *)
+  (match bind_expr, !_current_store, !_current_panel_id with
+   | expr, Some store, Some pid
+     when pid = "color_panel_content"
+          && String.length expr > 6 && String.sub expr 0 6 = "panel."
+          && List.mem (String.sub expr 6 (String.length expr - 6))
+               ["h"; "s"; "b"; "r"; "g"; "bl"; "c"; "m"; "y"; "k"] ->
+     scale#event#add [`BUTTON_RELEASE];
+     ignore (scale#event#connect#button_release ~callback:(fun _ev ->
+       commit_color_panel_to_recent store pid;
+       false))
+   | _ -> ())
 
 and render_number_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let min_val = el |> member "min" |> to_number_option |> Option.value ~default:0.0 in
   let max_val = el |> member "max" |> to_number_option |> Option.value ~default:100.0 in
-  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  (* [bind:] supports both forms: a bare string ("dialog.h") and an
+     object ({ value: "dialog.h", disabled: "..." }). The color
+     picker's number_inputs use the bare-string form via the
+     radio_field_row template; without this fallback the picker's
+     H/S/B fields never bound at all and never updated on state
+     change. *)
+  let bind_expr = match el |> member "bind" with
+    | `String s -> Some s
+    | obj -> obj |> safe_member "value" |> to_string_option in
   let initial = match bind_expr with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
@@ -1163,7 +1853,22 @@ and render_number_input ~packing ~ctx el =
           suppress := true;
           entry#set_text (Printf.sprintf "%g" cv);
           suppress := false
-        end
+        end;
+        (* Color panel channel commit (Enter / Tab / focus-out on
+           an H/S/B/etc. value box): _write_back_bind already routed
+           the new value through set_active_color_live (no recent
+           push). A discrete commit should also push to recent so
+           the entry's value lands in the recent-colors strip,
+           mirroring slider pointer-up and swatch click. *)
+        (match !_current_store, !_current_panel_id with
+         | Some st, Some pid
+           when pid = "color_panel_content"
+                && String.length expr > 6
+                && String.sub expr 0 6 = "panel."
+                && List.mem (String.sub expr 6 (String.length expr - 6))
+                     ["h"; "s"; "b"; "r"; "g"; "bl"; "c"; "m"; "y"; "k"] ->
+           commit_color_panel_to_recent st pid
+         | _ -> ())
       | _ -> ()
     in
     (match bind_expr with
@@ -1187,6 +1892,28 @@ and render_number_input ~packing ~ctx el =
       | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
       | None -> false in
     entry#misc#set_sensitive (not initial_disabled);
+    (* Dialog scope: subscribe to dialog state changes so the entry
+       text follows derived state (e.g. moving the color picker's
+       2D gradient writes dialog.s + dialog.b which the H/S/B value
+       boxes need to reflect; the s/b setters also rebuild
+       dialog.color which the hex entry then reads via get:). *)
+    (match bind_expr, !Dialog_global.current_id with
+     | Some expr, Some _
+       when String.length expr > 7 && String.sub expr 0 7 = "dialog." ->
+       Dialog_global.add_state_change_listener (fun () ->
+         if not entry#is_focus then begin
+           let live_ctx = !Dialog_global.current_build_ctx () in
+           let new_text = match Expr_eval.evaluate expr live_ctx with
+             | Expr_eval.Number n -> Printf.sprintf "%g" n
+             | Expr_eval.Str s -> s
+             | _ -> entry#text in
+           if entry#text <> new_text then begin
+             suppress := true;
+             entry#set_text new_text;
+             suppress := false
+           end
+         end)
+     | _ -> ());
     (match bind_expr, !_current_store, !_current_panel_id with
      | Some expr, Some store, Some pid
        when (let parts = String.split_on_char '.' expr in
@@ -1269,7 +1996,9 @@ and render_number_input ~packing ~ctx el =
 and render_text_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let placeholder = el |> member "placeholder" |> to_string_option |> Option.value ~default:"" in
-  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  let bind_expr = match el |> member "bind" with
+    | `String s -> Some s
+    | obj -> obj |> safe_member "value" |> to_string_option in
   let initial = match bind_expr with
     | Some expr ->
       (match Expr_eval.evaluate expr ctx with
@@ -1312,7 +2041,23 @@ and render_text_input ~packing ~ctx el =
      ignore (entry#event#connect#focus_out ~callback:(fun _ ->
        _write_back_bind expr (`String entry#text);
        false))
-   | None -> ())
+   | None -> ());
+
+  (* Dialog scope: subscribe to dialog state changes so e.g. the
+     color picker's hex field reflects the canonical [dialog.color]
+     as the user moves the 2D gradient / hue bar / value boxes. *)
+  (match bind_expr, !Dialog_global.current_id with
+   | Some expr, Some _
+     when String.length expr > 7 && String.sub expr 0 7 = "dialog." ->
+     Dialog_global.add_state_change_listener (fun () ->
+       if not entry#is_focus then begin
+         let live_ctx = !Dialog_global.current_build_ctx () in
+         let new_text = match Expr_eval.evaluate expr live_ctx with
+           | Expr_eval.Str s -> s
+           | _ -> entry#text in
+         if entry#text <> new_text then entry#set_text new_text
+       end)
+   | _ -> ())
 
 and render_length_input ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -1455,12 +2200,17 @@ and render_toggle ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let label = el |> member "label" |> to_string_option |> Option.value ~default:"" in
   let icon_name = el |> member "icon" |> to_string_option |> Option.value ~default:"" in
-  (* Accept either bind.value (the panel-bool convention) or the
-     legacy bind.checked. Mirrors the Rust render_toggle dispatch. *)
-  let bind_expr =
-    match el |> member "bind" |> safe_member "value" |> to_string_option with
-    | Some s -> Some s
-    | None -> el |> member "bind" |> safe_member "checked" |> to_string_option in
+  (* Accept the bare-string form ("dialog.web_only"), bind.value (the
+     panel-bool convention), or legacy bind.checked. The color
+     picker's Only-Web-Colors toggle uses the bare-string form;
+     without this fallback the toggle never bound and the snap
+     branch in [_write_back_bind] never fired. *)
+  let bind_expr = match el |> member "bind" with
+    | `String s -> Some s
+    | obj ->
+      (match obj |> safe_member "value" |> to_string_option with
+       | Some s -> Some s
+       | None -> obj |> safe_member "checked" |> to_string_option) in
   let checked = match bind_expr with
     | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
     | None -> false in
@@ -1638,7 +2388,8 @@ and render_color_swatch ~packing ~ctx el =
      ``to_number_option`` and round so either form works. *)
   let size = el |> member "style" |> safe_member "size" |> to_number_option
              |> Option.map int_of_float |> Option.value ~default:16 in
-  let initial_color = match el |> member "bind" |> safe_member "color" |> to_string_option with
+  let color_bind_expr = el |> member "bind" |> safe_member "color" |> to_string_option in
+  let initial_color = match color_bind_expr with
     | Some expr ->
       let v = Expr_eval.evaluate expr ctx in
       (match v with Expr_eval.Color c -> c | Expr_eval.Str s -> s | _ -> "")
@@ -1658,6 +2409,21 @@ and render_color_swatch ~packing ~ctx el =
   evt#misc#set_size_request ~width:size ~height:size ();
   let area = GMisc.drawing_area ~packing:evt#add () in
   area#misc#set_size_request ~width:size ~height:size ();
+
+  (* Dialog scope: subscribe to dialog state changes so the swatch
+     (e.g. color_picker's preview, bound to [dialog.color]) repaints
+     when the user moves the gradient / hue bar / value boxes. *)
+  (match color_bind_expr, !Dialog_global.current_id with
+   | Some expr, Some _
+     when String.length expr > 7 && String.sub expr 0 7 = "dialog." ->
+     Dialog_global.add_state_change_listener (fun () ->
+       let live_ctx = !Dialog_global.current_build_ctx () in
+       (match Expr_eval.evaluate expr live_ctx with
+        | Expr_eval.Color c -> color_ref := c
+        | Expr_eval.Str s -> color_ref := s
+        | _ -> ());
+       area#misc#queue_draw ())
+   | _ -> ());
 
   let parse_hex s =
     let s = if String.length s > 0 && s.[0] = '#' then String.sub s 1 (String.length s - 1) else s in
@@ -1679,8 +2445,55 @@ and render_color_swatch ~packing ~ctx el =
   evt#event#add [`BUTTON_PRESS];
   ignore (evt#event#connect#button_press ~callback:(fun ev ->
     if GdkEvent.Button.button ev = 1 then begin
-      let wrote_state = dispatch_click_behaviors el ctx in
-      if wrote_state then schedule_panel_rerender ();
+      (* Rebuild the panel/state portions of ctx from the live store
+         before dispatching. The ctx captured at widget creation
+         time has stale panel.recent_colors etc. — the bridge writes
+         new recent entries into the store but doesn't update the
+         captured Yojson; a recent-swatch click using stale ctx
+         resolves [panel.recent_colors.0] to null and the condition
+         gate ([panel.recent_colors.0 != null]) fails silently. *)
+      let click_ctx =
+        match !_current_store, !_current_panel_id, ctx with
+        | Some store, Some pid, `Assoc pairs ->
+          let live_panel = State_store.get_panel_state store pid in
+          let live_state = State_store.get_all store in
+          let pairs' = List.filter
+            (fun (k, _) -> k <> "panel" && k <> "state") pairs in
+          `Assoc (("panel", `Assoc live_panel)
+                  :: ("state", `Assoc live_state) :: pairs')
+        | _ -> ctx in
+      (* TWO_BUTTON_PRESS fires GTK's double-click after the second
+         BUTTON_PRESS. Dispatch double_click behaviors (e.g. the
+         fill_stroke_widget's open_color_picker action) and skip
+         the single-click dispatch — the first half of the double
+         already fired it. *)
+      if GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+        dispatch_double_click_behaviors el click_ctx;
+        true
+      end else
+      let fill_on_top_before = match !_current_store with
+        | Some store ->
+          (match State_store.get store "fill_on_top" with
+           | `Bool b -> b | _ -> true)
+        | None -> true in
+      let wrote_state = dispatch_click_behaviors el click_ctx in
+      if wrote_state then begin
+        update_color_panel_widgets ();
+        (* Only re-order the fill/stroke swatches when fill_on_top
+           actually flipped — the swap removes/re-adds both event
+           boxes from the GtkFixed, and that reset of the gdk
+           window apparently clears GTK3's double-click tracking,
+           so a second click on the same swatch arrives as a fresh
+           single BUTTON_PRESS instead of TWO_BUTTON_PRESS and the
+           color-picker double-click never fires. *)
+        let fill_on_top_after = match !_current_store with
+          | Some store ->
+            (match State_store.get store "fill_on_top" with
+             | `Bool b -> b | _ -> true)
+          | None -> true in
+        if fill_on_top_before <> fill_on_top_after then
+          !fill_stroke_swap_hook ()
+      end;
       true
     end else false
   ));
@@ -1691,9 +2504,11 @@ and render_color_swatch ~packing ~ctx el =
      the rebuild path. *)
   (match el |> member "id" |> to_string_option with
    | Some "cp_fill_swatch" ->
-     _color_panel_slots.fill_swatch <- Some (area, color_ref)
+     _color_panel_slots.fill_swatch <- Some (area, color_ref);
+     _color_panel_slots.fill_swatch_evt <- Some evt
    | Some "cp_stroke_swatch" ->
-     _color_panel_slots.stroke_swatch <- Some (area, color_ref)
+     _color_panel_slots.stroke_swatch <- Some (area, color_ref);
+     _color_panel_slots.stroke_swatch_evt <- Some evt
    | Some id_str
      when String.length id_str > 10
        && String.sub id_str 0 10 = "cp_recent_" ->
@@ -1703,30 +2518,67 @@ and render_color_swatch ~packing ~ctx el =
         _color_panel_slots.recent_swatches.(i) <- Some (area, color_ref)
       | _ -> ())
    | _ -> ());
+  let widget_id =
+    el |> member "id" |> to_string_option |> Option.value ~default:"" in
+  let is_active_color_swatch =
+    widget_id = "cp_fill_swatch" || widget_id = "cp_stroke_swatch" in
   ignore (area#misc#connect#draw ~callback:(fun cr ->
     let color_str = !color_ref in
     let s = float_of_int size in
     if String.length color_str = 0 then begin
-      (* Empty slot: hollow dashed square *)
-      Cairo.set_source_rgb cr 0.33 0.33 0.33;
-      Cairo.set_line_width cr 1.0;
-      Cairo.set_dash cr [| 2.0; 2.0 |];
-      Cairo.rectangle cr 0.5 0.5 ~w:(s -. 1.0) ~h:(s -. 1.0);
-      Cairo.stroke cr
+      if is_active_color_swatch then begin
+        (* "None" indicator on the fill/stroke widget. The solid
+           fill variant paints a white square; the hollow stroke
+           variant paints only a dark 6-px ring with a transparent
+           center so the parent background shows through. Both
+           overlay a red diagonal + gray border. Recent slots
+           without a color keep the dashed-empty rendering below. *)
+        if hollow then begin
+          Cairo.set_source_rgb cr 0.2 0.2 0.2;
+          Cairo.set_fill_rule cr Cairo.EVEN_ODD;
+          Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
+          let inset = 6.0 in
+          Cairo.rectangle cr inset inset ~w:(s -. 2.0 *. inset) ~h:(s -. 2.0 *. inset);
+          Cairo.fill cr;
+          Cairo.set_fill_rule cr Cairo.WINDING
+        end else begin
+          Cairo.set_source_rgb cr 1.0 1.0 1.0;
+          Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
+          Cairo.fill cr
+        end;
+        Cairo.set_source_rgb cr 1.0 0.0 0.0;
+        Cairo.set_line_width cr (max 1.5 (s /. 16.0));
+        (* "None" diagonal runs upper-right -> lower-left, matching
+           the cp_none_swatch icon's orientation. *)
+        Cairo.move_to cr 0.0 s;
+        Cairo.line_to cr s 0.0;
+        Cairo.stroke cr;
+        Cairo.set_source_rgb cr 0.4 0.4 0.4;
+        Cairo.set_line_width cr 1.0;
+        Cairo.rectangle cr 0.5 0.5 ~w:(s -. 1.0) ~h:(s -. 1.0);
+        Cairo.stroke cr
+      end else begin
+        (* Empty slot: hollow dashed square *)
+        Cairo.set_source_rgb cr 0.33 0.33 0.33;
+        Cairo.set_line_width cr 1.0;
+        Cairo.set_dash cr [| 2.0; 2.0 |];
+        Cairo.rectangle cr 0.5 0.5 ~w:(s -. 1.0) ~h:(s -. 1.0);
+        Cairo.stroke cr
+      end
     end else begin
       let (r, g, b) = parse_hex color_str in
       let rf = float_of_int r /. 255.0 in
       let gf = float_of_int g /. 255.0 in
       let bf = float_of_int b /. 255.0 in
       if hollow then begin
-        (* Hollow square: 3px ring of color, white center *)
+        (* Hollow square: 6px ring of color, transparent center *)
         Cairo.set_source_rgb cr rf gf bf;
+        Cairo.set_fill_rule cr Cairo.EVEN_ODD;
         Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
-        Cairo.fill cr;
-        Cairo.set_source_rgb cr 1.0 1.0 1.0;
-        let inset = 3.0 in
+        let inset = 6.0 in
         Cairo.rectangle cr inset inset ~w:(s -. 2.0 *. inset) ~h:(s -. 2.0 *. inset);
-        Cairo.fill cr
+        Cairo.fill cr;
+        Cairo.set_fill_rule cr Cairo.WINDING
       end else begin
         Cairo.set_source_rgb cr rf gf bf;
         Cairo.rectangle cr 0.0 0.0 ~w:s ~h:s;
@@ -1790,14 +2642,49 @@ and render_fill_stroke_widget ~packing ~ctx el =
   let sorted = List.stable_sort (fun (_, a) (_, b) ->
     compare (z_of a) (z_of b)
   ) indexed in
+  let fill_pos = ref (0, 0) in
+  let stroke_pos = ref (0, 0) in
   List.iter (fun (_, child) ->
     let pos = child |> member "style" |> safe_member "position" in
     let x = pos |> safe_member "x" |> to_number_option
       |> Option.map int_of_float |> Option.value ~default:0 in
     let y = pos |> safe_member "y" |> to_number_option
       |> Option.map int_of_float |> Option.value ~default:0 in
+    (match child |> member "id" |> to_string_option with
+     | Some "cp_fill_swatch" -> fill_pos := (x, y)
+     | Some "cp_stroke_swatch" -> stroke_pos := (x, y)
+     | _ -> ());
     render_element ~packing:(container#put ~x ~y) ~ctx child
-  ) sorted
+  ) sorted;
+
+  (* Install the swap hook so subsequent fill/stroke clicks can
+     restack the active swatch on top without a body rebuild. The
+     hook captures [container] and the per-child positions in a
+     closure; [render_color_swatch]'s button_press handler fires it
+     after flipping [state.fill_on_top]. *)
+  fill_stroke_swap_hook := (fun () ->
+    let fill_on_top = match !_current_store with
+      | Some store ->
+        (match State_store.get store "fill_on_top" with
+         | `Bool b -> b | _ -> true)
+      | None -> true in
+    match _color_panel_slots.fill_swatch_evt,
+          _color_panel_slots.stroke_swatch_evt with
+    | Some fill_evt, Some stroke_evt ->
+      let (fx, fy) = !fill_pos in
+      let (sx, sy) = !stroke_pos in
+      (* Remove both, then re-add in the order that puts the
+         active swatch last (= on top in GtkFixed's paint order). *)
+      container#remove (fill_evt :> GObj.widget);
+      container#remove (stroke_evt :> GObj.widget);
+      if fill_on_top then begin
+        container#put (stroke_evt :> GObj.widget) ~x:sx ~y:sy;
+        container#put (fill_evt :> GObj.widget) ~x:fx ~y:fy
+      end else begin
+        container#put (fill_evt :> GObj.widget) ~x:fx ~y:fy;
+        container#put (stroke_evt :> GObj.widget) ~x:sx ~y:sy
+      end
+    | _ -> ())
 
 (** [color_bar] — 64px tall horizontal HSB gradient strip. Cairo-paint
     a hue ramp on the X axis × saturation/brightness band on the Y
@@ -1918,23 +2805,299 @@ and render_color_bar ~packing ~ctx el =
       (float_of_int g /. 255.0)
       (float_of_int b /. 255.0)
   in
+  (* [Model.set_default_fill] / [set_default_stroke] don't fire the
+     on_document_changed listeners (only [set_document] does), so a
+     color-bar pick that lands solely in the model defaults — i.e.
+     no selection to also write through — never reaches
+     [update_color_panel_widgets]. Call it explicitly after each
+     set_active_color* so the hex entry, swatches, and slider state
+     refresh whether or not a selection exists. *)
   ignore (area#event#connect#button_press ~callback:(fun ev ->
     (match !_get_model_ref () with
      | Some m -> Panel_menu.set_active_color_live (pick_color_from_button ev)
                    ~fill_on_top:(read_fill_on_top ()) m
      | None -> ());
+    update_color_panel_widgets ();
     true));
   ignore (area#event#connect#button_release ~callback:(fun ev ->
     (match !_get_model_ref () with
      | Some m -> Panel_menu.set_active_color (pick_color_from_button ev)
                    ~fill_on_top:(read_fill_on_top ()) m
      | None -> ());
+    update_color_panel_widgets ();
     true));
   ignore (area#event#connect#motion_notify ~callback:(fun ev ->
     (match !_get_model_ref () with
      | Some m -> Panel_menu.set_active_color_live (pick_color_from_motion ev)
                    ~fill_on_top:(read_fill_on_top ()) m
      | None -> ());
+    update_color_panel_widgets ();
+    true))
+
+(** [radio_group] — a single radio button slot. The YAML repeats
+    [radio_group] entries (one per channel: H, S, B, R, G, …) and
+    binds them all to [dialog.radio_channel]; clicking writes the
+    option's id ([h], [s], …) so only the matching slot renders as
+    active. Mirrors the radio-row look from the Rust color picker
+    (small circle, hollow when inactive, filled when active).
+
+    Drawn as a 12 px GtkDrawingArea — using a real [GButton.radio_button]
+    would group each instance in its own group (no mutual exclusion)
+    AND inflate to the Adwaita ~30 px min-height. The drawing-area
+    approach reads the bind value at paint time, so mutual exclusion
+    falls out of the shared dialog state automatically. *)
+and render_radio_group ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let bind_expr = el |> member "bind" |> to_string_option
+                  |> Option.value ~default:"" in
+  let read_active () : string =
+    if bind_expr = "" then ""
+    else match Expr_eval.evaluate bind_expr ctx with
+      | Expr_eval.Str s -> s
+      | _ -> "" in
+  let read_active_live () : string =
+    (* Fresh read against the live dialog state — the captured ctx
+       is a snapshot from render time. *)
+    if bind_expr <> "" && !Dialog_global.current_state <> None then
+      let live_ctx = !Dialog_global.current_build_ctx () in
+      match Expr_eval.evaluate bind_expr live_ctx with
+      | Expr_eval.Str s -> s
+      | _ -> read_active ()
+    else read_active () in
+  let option_id_of opt =
+    opt |> member "id" |> to_string_option |> Option.value ~default:"" in
+  List.iter (fun opt ->
+    let option_id = option_id_of opt in
+    let size = 12 in
+    let evt = GBin.event_box ~packing () in
+    evt#misc#set_size_request ~width:size ~height:size ();
+    let area = GMisc.drawing_area ~packing:evt#add () in
+    area#misc#set_size_request ~width:size ~height:size ();
+    ignore (area#misc#connect#draw ~callback:(fun cr ->
+      let s = float_of_int size in
+      let cx = s /. 2.0 and cy = s /. 2.0 in
+      let r_outer = (s /. 2.0) -. 1.0 in
+      Cairo.set_line_width cr 1.0;
+      Cairo.set_source_rgb cr 0.35 0.35 0.35;
+      Cairo.arc cr cx cy ~r:r_outer ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.stroke cr;
+      if read_active_live () = option_id then begin
+        Cairo.set_source_rgb cr 0.2 0.5 0.95;
+        Cairo.arc cr cx cy ~r:(r_outer -. 2.0)
+          ~a1:0.0 ~a2:(2.0 *. Float.pi);
+        Cairo.fill cr
+      end;
+      true));
+    Dialog_global.add_state_change_listener (fun () ->
+      area#misc#queue_draw ());
+    evt#event#add [`BUTTON_PRESS];
+    ignore (evt#event#connect#button_press ~callback:(fun ev ->
+      if GdkEvent.Button.button ev = 1 then begin
+        if bind_expr <> "" then
+          _write_back_bind bind_expr (`String option_id);
+        true
+      end else false))
+  ) options
+
+(** [color_gradient] — square HSB-H 2D gradient. X = saturation, Y =
+    brightness (top=100), tinted by the bound [hue]. Click/drag
+    writes [saturation] + [brightness] to the dialog state; the
+    current point is marked with a small circle indicator. Mirrors
+    the Rust [color_picker] [color_gradient] math. *)
+and render_color_gradient ~packing ~ctx:_ el =
+  let open Yojson.Safe.Util in
+  let style = el |> member "style" in
+  let min_size = style |> safe_member "min_width" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:180 in
+  let hue_expr = el |> member "bind" |> safe_member "hue"
+    |> to_string_option |> Option.value ~default:"" in
+  let sat_expr = el |> member "bind" |> safe_member "saturation"
+    |> to_string_option |> Option.value ~default:"" in
+  let br_expr = el |> member "bind" |> safe_member "brightness"
+    |> to_string_option |> Option.value ~default:"" in
+  let read_n expr =
+    if expr = "" then 0.0
+    else
+      let live_ctx = !Dialog_global.current_build_ctx () in
+      match Expr_eval.evaluate expr live_ctx with
+      | Expr_eval.Number n -> n
+      | _ -> 0.0
+  in
+  let evt = GBin.event_box ~packing () in
+  evt#misc#set_size_request ~width:min_size ~height:min_size ();
+  let area = GMisc.drawing_area ~packing:evt#add () in
+  area#misc#set_size_request ~width:min_size ~height:min_size ();
+  area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `BUTTON1_MOTION];
+  ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let hue = read_n hue_expr in
+    let cols = int_of_float aw in
+    for x = 0 to cols - 1 do
+      let xf = float_of_int x +. 0.5 in
+      let sat = if aw <= 0.0 then 0.0 else 100.0 *. xf /. aw in
+      let pat = Cairo.Pattern.create_linear ~x0:xf ~y0:0.0 ~x1:xf ~y1:ah in
+      let (r0, g0, b0) = Color_util.hsb_to_rgb hue sat 100.0 in
+      let (r1, g1, b1) = Color_util.hsb_to_rgb hue sat 0.0 in
+      Cairo.Pattern.add_color_stop_rgb pat ~ofs:0.0
+        (float_of_int r0 /. 255.0)
+        (float_of_int g0 /. 255.0)
+        (float_of_int b0 /. 255.0);
+      Cairo.Pattern.add_color_stop_rgb pat ~ofs:1.0
+        (float_of_int r1 /. 255.0)
+        (float_of_int g1 /. 255.0)
+        (float_of_int b1 /. 255.0);
+      Cairo.set_source cr pat;
+      Cairo.rectangle cr (float_of_int x) 0.0 ~w:1.0 ~h:ah;
+      Cairo.fill cr
+    done;
+    let sat = read_n sat_expr in
+    let br = read_n br_expr in
+    let cx = aw *. sat /. 100.0 in
+    let cy = ah *. (1.0 -. br /. 100.0) in
+    Cairo.set_source_rgb cr 1.0 1.0 1.0;
+    Cairo.set_line_width cr 2.0;
+    Cairo.arc cr cx cy ~r:6.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.stroke cr;
+    Cairo.set_source_rgb cr 0.0 0.0 0.0;
+    Cairo.set_line_width cr 1.0;
+    Cairo.arc cr cx cy ~r:7.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.stroke cr;
+    Cairo.set_source_rgb cr 0.33 0.33 0.33;
+    Cairo.set_line_width cr 1.0;
+    Cairo.rectangle cr 0.5 0.5 ~w:(aw -. 1.0) ~h:(ah -. 1.0);
+    Cairo.stroke cr;
+    true));
+  Dialog_global.add_state_change_listener (fun () -> area#misc#queue_draw ());
+  let pick_at x y =
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let x = max 0.0 (min aw x) in
+    let y = max 0.0 (min ah y) in
+    let sat = if aw <= 0.0 then 0.0 else 100.0 *. x /. aw in
+    let br = if ah <= 0.0 then 0.0 else 100.0 *. (1.0 -. y /. ah) in
+    if sat_expr <> "" then _write_back_bind sat_expr (`Float sat);
+    if br_expr <> "" then _write_back_bind br_expr (`Float br)
+  in
+  ignore (area#event#connect#button_press ~callback:(fun ev ->
+    pick_at (GdkEvent.Button.x ev) (GdkEvent.Button.y ev);
+    true));
+  ignore (area#event#connect#motion_notify ~callback:(fun ev ->
+    pick_at (GdkEvent.Motion.x ev) (GdkEvent.Motion.y ev);
+    true))
+
+(** [color_hue_bar] — vertical ramp that re-tints per the active
+    radio channel. H = rainbow hue, S = grey→hue saturation, B =
+    black→hue brightness, R/G/B = black→primary, … . Click/drag
+    writes the matching channel into the dialog state. Mirrors the
+    Rust color picker's per-channel hue colorbar. *)
+and render_color_hue_bar ~packing ~ctx:_ el =
+  let open Yojson.Safe.Util in
+  let style = el |> member "style" in
+  let width = style |> safe_member "width" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:32 in
+  let min_height = style |> safe_member "min_height" |> to_number_option
+    |> Option.map int_of_float |> Option.value ~default:100 in
+  let read_n key =
+    let live_ctx = !Dialog_global.current_build_ctx () in
+    match Expr_eval.evaluate ("dialog." ^ key) live_ctx with
+    | Expr_eval.Number n -> n
+    | _ -> 0.0
+  in
+  let read_str key =
+    let live_ctx = !Dialog_global.current_build_ctx () in
+    match Expr_eval.evaluate ("dialog." ^ key) live_ctx with
+    | Expr_eval.Str s -> s
+    | _ -> ""
+  in
+  (* Channel descriptors: target field name + range max + per-row
+     RGB ramp. The pattern matches the Rust render_color_hue_bar's
+     six branches and the spec's "per-channel ramp" semantics. *)
+  let channel_spec () =
+    match read_str "radio_channel" with
+    | "s" ->
+      let h = read_n "h" and b = read_n "b" in
+      ("s", 100.0, (fun t ->
+        Color_util.hsb_to_rgb h (t *. 100.0) b))
+    | "b" ->
+      let h = read_n "h" and s = read_n "s" in
+      ("b", 100.0, (fun t ->
+        Color_util.hsb_to_rgb h s (t *. 100.0)))
+    | "r" ->
+      let g = read_n "g" and bl = read_n "bl" in
+      ("r", 255.0, (fun t ->
+        (int_of_float (Float.round (t *. 255.0)),
+         int_of_float g, int_of_float bl)))
+    | "g" ->
+      let r = read_n "r" and bl = read_n "bl" in
+      ("g", 255.0, (fun t ->
+        (int_of_float r,
+         int_of_float (Float.round (t *. 255.0)),
+         int_of_float bl)))
+    | "bl" ->
+      let r = read_n "r" and g = read_n "g" in
+      ("bl", 255.0, (fun t ->
+        (int_of_float r, int_of_float g,
+         int_of_float (Float.round (t *. 255.0)))))
+    | _ -> (* "h" default *)
+      ("h", 360.0, (fun t -> Color_util.hsb_to_rgb (t *. 360.0) 100.0 100.0))
+  in
+  let evt = GBin.event_box ~packing () in
+  evt#misc#set_size_request ~width ~height:min_height ();
+  let area = GMisc.drawing_area ~packing:evt#add () in
+  area#misc#set_size_request ~width ~height:min_height ();
+  area#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `BUTTON1_MOTION];
+  ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let alloc = area#misc#allocation in
+    let aw = float_of_int alloc.Gtk.width in
+    let ah = float_of_int alloc.Gtk.height in
+    let (field, max_v, ramp) = channel_spec () in
+    let rows = int_of_float ah in
+    for y = 0 to rows - 1 do
+      let t = if ah <= 0.0 then 0.0 else (float_of_int y +. 0.5) /. ah in
+      let (r, g, b) = ramp t in
+      Cairo.set_source_rgb cr
+        (float_of_int r /. 255.0)
+        (float_of_int g /. 255.0)
+        (float_of_int b /. 255.0);
+      Cairo.rectangle cr 0.0 (float_of_int y) ~w:aw ~h:1.0;
+      Cairo.fill cr
+    done;
+    let v = read_n field in
+    let y = if max_v <= 0.0 then 0.0 else ah *. v /. max_v in
+    Cairo.set_source_rgb cr 0.0 0.0 0.0;
+    Cairo.set_line_width cr 1.0;
+    Cairo.move_to cr (-1.0) y;
+    Cairo.line_to cr 5.0 (y -. 4.0);
+    Cairo.line_to cr 5.0 (y +. 4.0);
+    Cairo.Path.close cr;
+    Cairo.fill cr;
+    Cairo.move_to cr (aw +. 1.0) y;
+    Cairo.line_to cr (aw -. 5.0) (y -. 4.0);
+    Cairo.line_to cr (aw -. 5.0) (y +. 4.0);
+    Cairo.Path.close cr;
+    Cairo.fill cr;
+    Cairo.set_source_rgb cr 0.33 0.33 0.33;
+    Cairo.rectangle cr 0.5 0.5 ~w:(aw -. 1.0) ~h:(ah -. 1.0);
+    Cairo.stroke cr;
+    true));
+  Dialog_global.add_state_change_listener (fun () -> area#misc#queue_draw ());
+  let pick_at y =
+    let alloc = area#misc#allocation in
+    let ah = float_of_int alloc.Gtk.height in
+    let y = max 0.0 (min ah y) in
+    let (field, max_v, _) = channel_spec () in
+    let v = if ah <= 0.0 then 0.0 else max_v *. y /. ah in
+    _write_back_bind ("dialog." ^ field) (`Float v)
+  in
+  ignore (area#event#connect#button_press ~callback:(fun ev ->
+    pick_at (GdkEvent.Button.y ev);
+    true));
+  ignore (area#event#connect#motion_notify ~callback:(fun ev ->
+    pick_at (GdkEvent.Motion.y ev);
     true))
 
 (** Evaluate [bind.selected_in] against the per-item identity read

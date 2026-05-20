@@ -1774,40 +1774,45 @@ let subscribe_stroke_panel (store : State_store.t)
 let subscribe_active_color (store : State_store.t)
     (ctrl_getter : unit -> Controller.controller) : unit =
   State_store.subscribe_global store (fun key _value ->
-    if key = "fill_color" || key = "stroke_color" then begin
+    (* Apply by KEY only, not gated on fill_on_top — explicit writes
+       to state.fill_color (Color Panel toolbar swap, picker OK with
+       target=fill) should always land on the fill side regardless
+       of which swatch is currently "active" in the panel. Earlier
+       this was gated and the picker's OK silently dropped writes
+       when the panel's fill_on_top didn't agree with the picker's
+       target. *)
+    if key = "fill_color" then begin
       let ctrl = ctrl_getter () in
       let m = ctrl#model in
-      let fill_on_top = match State_store.get store "fill_on_top" with
-        | `Bool b -> b | _ -> true in
-      if fill_on_top && key = "fill_color" then begin
-        let fill = match State_store.get store "fill_color" with
-          | `String hex ->
-            (match Element.color_from_hex hex with
-             | Some c -> Some (Element.make_fill c)
-             | None -> None)
-          | `Null -> None
-          | _ -> None in
-        m#set_default_fill fill;
-        if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-          m#snapshot;
-          ctrl#set_selection_fill fill
-        end
-      end else if (not fill_on_top) && key = "stroke_color" then begin
-        let stroke = match State_store.get store "stroke_color" with
-          | `String hex ->
-            (match Element.color_from_hex hex with
-             | Some c ->
-               let width = match m#default_stroke with
-                 | Some s -> s.stroke_width | None -> 1.0 in
-               Some (Element.make_stroke ~width c)
-             | None -> None)
-          | `Null -> None
-          | _ -> None in
-        m#set_default_stroke stroke;
-        if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-          m#snapshot;
-          ctrl#set_selection_stroke stroke
-        end
+      let fill = match State_store.get store "fill_color" with
+        | `String hex ->
+          (match Element.color_from_hex hex with
+           | Some c -> Some (Element.make_fill c)
+           | None -> None)
+        | `Null -> None
+        | _ -> None in
+      m#set_default_fill fill;
+      if not (Document.PathMap.is_empty m#document.Document.selection) then begin
+        m#snapshot;
+        ctrl#set_selection_fill fill
+      end
+    end else if key = "stroke_color" then begin
+      let ctrl = ctrl_getter () in
+      let m = ctrl#model in
+      let stroke = match State_store.get store "stroke_color" with
+        | `String hex ->
+          (match Element.color_from_hex hex with
+           | Some c ->
+             let width = match m#default_stroke with
+               | Some s -> s.stroke_width | None -> 1.0 in
+             Some (Element.make_stroke ~width c)
+           | None -> None)
+        | `Null -> None
+        | _ -> None in
+      m#set_default_stroke stroke;
+      if not (Document.PathMap.is_empty m#document.Document.selection) then begin
+        m#snapshot;
+        ctrl#set_selection_stroke stroke
       end
     end)
 

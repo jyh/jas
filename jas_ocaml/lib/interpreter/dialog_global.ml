@@ -31,18 +31,89 @@ let current_close : (unit -> unit) ref = ref (fun () -> ())
 let current_build_ctx : (unit -> Yojson.Safe.t) ref =
   ref (fun () -> `Assoc [])
 
-(** Read the live dialog state list. *)
+(** Live dialog state get/set property table, populated by
+    [Yaml_dialog_view.show_dialog] from the YAML's [state:] block.
+    Keys with [get:] expressions evaluate on demand; keys with
+    [set:] expressions run a lambda that can mutate sibling keys via
+    the [<-] operator. Drives the color_picker's
+    [h] / [s] / [b] / [r] / [g] / [bl] / [c] / [m] / [y] / [k] / [hex]
+    bidirectional sync with the canonical [color] value. *)
+type prop_def = {
+  prop_get : string option;
+  prop_set : string option;
+}
+let current_props : (string * prop_def) list ref = ref []
+
+(** Listener registry — widgets subscribe to dialog state changes so
+    they can repaint / set_text in place when a setter mutates a
+    sibling key (e.g. typing into the H value box also flips
+    [color], which the preview swatch + 2D gradient + hue bar need
+    to see). Cleared by [Yaml_dialog_view.show_dialog] on dialog
+    teardown so listeners from a closed dialog don't keep firing. *)
+let _state_change_listeners : (unit -> unit) list ref = ref []
+let add_state_change_listener (cb : unit -> unit) : unit =
+  _state_change_listeners := cb :: !_state_change_listeners
+let clear_state_change_listeners () : unit =
+  _state_change_listeners := []
+let _fire_state_change () : unit =
+  List.iter (fun cb -> try cb () with _ -> ()) !_state_change_listeners
+
+(** Read the live dialog state list. Evaluates any [get:] getters
+    against the stored state so derived keys (e.g. color_picker's
+    [h] = [hsb_h(color)]) reflect the canonical underlying value. *)
 let read_state () : (string * Yojson.Safe.t) list =
   match !current_state with
-  | Some r -> !r
   | None -> []
+  | Some r ->
+    let stored = !r in
+    if !current_props = [] then stored
+    else
+      let local_ctx = `Assoc stored in
+      List.fold_left (fun acc (key, prop) ->
+        match prop.prop_get with
+        | Some get_expr ->
+          (try
+            let v = Expr_eval.evaluate get_expr local_ctx in
+            (key, Expr_eval.value_to_json v)
+              :: List.filter (fun (k, _) -> k <> key) acc
+          with _ -> acc)
+        | None -> acc
+      ) stored !current_props
 
-(** Set [key] in the live dialog state. No-op when no dialog is open. *)
+(** Set [key] in the live dialog state. Runs the [set:] lambda when
+    one is declared (color_picker channels write through
+    [fun v -> color <- ...]); otherwise stores the value directly.
+    Fires state-change listeners after the write completes so
+    Cairo widgets bound to derived keys can queue_draw. No-op when
+    no dialog is open. *)
 let set_field (key : string) (value : Yojson.Safe.t) : unit =
   match !current_state with
-  | Some r ->
-    r := (key, value) :: List.filter (fun (k, _) -> k <> key) !r
   | None -> ()
+  | Some r ->
+    (match List.assoc_opt key !current_props with
+     | Some prop when prop.prop_set <> None ->
+       let set_expr = match prop.prop_set with Some e -> e | None -> "" in
+       let local_ctx = `Assoc !r in
+       let store_cb target v =
+         r := (target, Expr_eval.value_to_json v)
+           :: List.filter (fun (k, _) -> k <> target) !r
+       in
+       (try
+         let setter_val = Expr_eval.evaluate ~store_cb set_expr local_ctx in
+         (match setter_val with
+          | Expr_eval.Closure (params, body, captured_env)
+            when List.length params = 1 ->
+            let param_name = List.hd params in
+            let arg_val = Expr_eval.value_of_json value in
+            let call_env = (param_name, arg_val) :: captured_env in
+            ignore (Expr_eval.eval_node ~local_env:call_env ~store_cb body local_ctx)
+          | _ -> ())
+       with _ -> ())
+     | Some prop when prop.prop_get <> None ->
+       () (* read-only — getter without setter; ignore writes *)
+     | _ ->
+       r := (key, value) :: List.filter (fun (k, _) -> k <> key) !r);
+    _fire_state_change ()
 
 (** Close the active dialog widget. *)
 let close () : unit = !current_close ()

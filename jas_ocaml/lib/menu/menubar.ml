@@ -10,6 +10,13 @@
    already fires on every panel/dock state change. *)
 let _sync_panel_checks_ref : (unit -> unit) ref = ref (fun () -> ())
 
+(* Suppress check-menu-item activate callbacks fired by our own
+   set_active calls in sync_panel_checks. Without this, the
+   programmatic state update calls the toggle handler, which closes
+   the panel, which re-fires sync_panel_checks via dock_refresh,
+   which loops forever (beachball). *)
+let _suppress_check_callback = ref false
+
 let sync_panel_checks () = !_sync_panel_checks_ref ()
 
 let group_selection (model : Model.model) () =
@@ -704,12 +711,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
          | Some pl -> Pane.is_pane_visible pl kind
          | None -> false in
        ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
-         Workspace_layout.panes_mut layout (fun pl ->
-           if Pane.is_pane_visible pl kind then
-             Pane.hide_pane pl kind
-           else
-             Pane.show_pane pl kind);
-         refresh ()
+         if !_suppress_check_callback then () else begin
+           Workspace_layout.panes_mut layout (fun pl ->
+             if Pane.is_pane_visible pl kind then
+               Pane.hide_pane pl kind
+             else
+               Pane.show_pane pl kind);
+           refresh ()
+         end
        ))
      in
      toggle_pane Pane.Toolbar "Toolbar";
@@ -730,6 +739,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
       | Some layout -> Workspace_layout.is_panel_visible layout kind
       | None -> false in
     let item = window_factory#add_check_item label ~active ~callback:(fun _ ->
+      if !_suppress_check_callback then () else
       match workspace_layout, refresh_dock with
       | Some layout, Some refresh ->
         if Workspace_layout.is_panel_visible layout kind then begin
@@ -782,8 +792,16 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   _sync_panel_checks_ref := (fun () ->
     match workspace_layout with
     | Some layout ->
+      _suppress_check_callback := true;
+      Fun.protect
+        ~finally:(fun () -> _suppress_check_callback := false)
+      @@ fun () ->
       Hashtbl.iter (fun kind item ->
         let visible = Workspace_layout.is_panel_visible layout kind in
         if item#active <> visible then item#set_active visible
       ) panel_checks
-    | None -> ())
+    | None -> ());
+  (* Also expose via the Yaml_panel_view hook so dock_panel (which
+     can't depend on Menubar without a module cycle) can fire the
+     sync after panel-menu Close. *)
+  Yaml_panel_view.panel_check_sync_hook := sync_panel_checks
