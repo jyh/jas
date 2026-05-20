@@ -38,9 +38,15 @@ class YamlPanelView(QWidget):
         # (e.g. op_make_mask / selection_mask_* in opacity_panel).
         self._ctx["_panel_id"] = self._panel_id
 
-        # Initialize panel state
+        # Initialize panel state — but only on FIRST mount. When the
+        # dock rebuilds (e.g. after a hamburger menu command),
+        # YamlPanelView gets reconstructed; if we init_panel again
+        # the user's just-made change (mode, recent_colors, etc.)
+        # gets wiped back to YAML defaults (CLR-022 Python).
         defaults = panel_state_defaults(panel_spec)
-        self._store.init_panel(self._panel_id, defaults)
+        existing = store.get_panel_state(self._panel_id)
+        if not existing:
+            self._store.init_panel(self._panel_id, defaults)
         self._store.set_active_panel(self._panel_id)
 
         # Opacity panel — stash the store handle in panel_menu so
@@ -81,6 +87,13 @@ class YamlPanelView(QWidget):
             widget = render_element(content, store, self._ctx, dispatch_fn)
             if widget:
                 layout.addWidget(widget)
+                # Propagate the rendered content's minimumHeight up
+                # to the panel view so the dock's outer layout
+                # (DroppablePanelGroup → DockPanelWidget's scroll
+                # area) allocates enough vertical space. We avoid
+                # touching minimumWidth here so the QScrollArea
+                # viewport can still shrink the panel width.
+                self.setMinimumHeight(widget.minimumHeight())
 
     def _run_init(self):
         """Evaluate init expressions against current global state."""

@@ -828,14 +828,65 @@ def set_active_color(color, model) -> None:
     push_recent_color(color.to_hex(), model)
 
 
+def _compute_helper(panel_state: dict, mode: str):
+    """Recompute the active color from the Color panel's channel
+    values + mode. Shared between the live slider-drag bridge in
+    jas_app and the slider-release commit path in yaml_renderer.
+    Returns None when the mode isn't recognised.
+    """
+    from geometry.element import Color
+    import colorsys
+
+    def _f(name):
+        v = panel_state.get(name)
+        if isinstance(v, (int, float)):
+            return float(v)
+        return 0.0
+
+    if mode == "hsb":
+        h = _f("h") / 360.0
+        s = _f("s") / 100.0
+        b = _f("b") / 100.0
+        r, g, bl = colorsys.hsv_to_rgb(h, s, b)
+        return Color.rgb(r, g, bl)
+    if mode in ("rgb", "web_safe_rgb"):
+        return Color.rgb(_f("r") / 255.0, _f("g") / 255.0, _f("bl") / 255.0)
+    if mode == "grayscale":
+        v = 1.0 - _f("k") / 100.0
+        return Color.rgb(v, v, v)
+    if mode == "cmyk":
+        c = _f("c") / 100.0
+        m = _f("m") / 100.0
+        y = _f("y") / 100.0
+        k = _f("k") / 100.0
+        r = (1.0 - c) * (1.0 - k)
+        g = (1.0 - m) * (1.0 - k)
+        bl = (1.0 - y) * (1.0 - k)
+        return Color.rgb(r, g, bl)
+    return None
+
+
 def set_active_color_live(color, model) -> None:
-    """Set the active color without pushing to recent colors (live slider drag)."""
+    """Set the active color and apply to current selection without
+    pushing to recent_colors (live slider drag / value-box typing).
+    Mirrors [set_active_color] minus the recent-colors push and the
+    [model.snapshot] checkpoint — live edits coalesce into one
+    snapshot when the user releases the slider via [set_active_color]
+    or commits via the value box.
+    """
     from geometry.element import Fill, Stroke
+    from document.controller import Controller
     if model.fill_on_top:
         model.default_fill = Fill(color=color)
+        if model.document.selection:
+            ctrl = Controller(model)
+            ctrl.set_selection_fill(Fill(color=color))
     else:
         width = model.default_stroke.width if model.default_stroke else 1.0
         model.default_stroke = Stroke(color=color, width=width)
+        if model.document.selection:
+            ctrl = Controller(model)
+            ctrl.set_selection_stroke(Stroke(color=color, width=width))
 
 
 _recent_colors_listeners: list = []
