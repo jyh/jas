@@ -346,9 +346,18 @@ class StateStore:
             local["active_document"] = self._active_document_view()
             if self._dialog_params is not None:
                 local["param"] = dict(self._dialog_params)
-            # Store callback: assignments in the setter write to dialog state
+            # Store callback: assignments in the setter write to
+            # dialog state. Notify subscribers so widgets bound to
+            # the mutated key (e.g. preview swatch reading
+            # dialog.color, channel value boxes reading dialog.h)
+            # repaint when the setter rebuilds the canonical color
+            # from a sibling channel write. Without the notify the
+            # color picker's R/G/B/H/S/B inputs would each only
+            # update the value they were typed into, leaving every
+            # other widget stale (CLR-210/213 Python).
             def store_cb(target, val):
                 self._dialog[target] = val.value
+                self._notify(f"dialog.{target}", val.value)
             local["__store_cb__"] = store_cb
             # Evaluate the setter lambda
             setter_val = evaluate(prop["set"], local)
@@ -392,6 +401,11 @@ class StateStore:
         # close_dialog can be invoked from inside an on_change-fired
         # chain, and the guard must remain set until run_effects
         # unwinds.
+        # Notify global subscribers so YamlDialogView can call
+        # self.accept() / self.reject() — the inline OK button's
+        # close_dialog effect doesn't go through the action
+        # dispatch path that would close the widget directly.
+        self._notify("dialog._closed", None)
 
     # ── Dialog on_change hook (Phase 1.7b) ─────────────────────
 
@@ -805,7 +819,31 @@ class StateStore:
         # read as tool.<id>.<key>. Populated by YamlTool.
         ctx["tool"] = {tid: dict(scope) for tid, scope in self._tools.items()}
         if self._dialog_id is not None:
-            ctx["dialog"] = dict(self._dialog)
+            # Evaluate any get: lambdas in dialog props so derived
+            # keys (e.g. color_picker's h = hsb_h(color)) appear in
+            # the dialog namespace alongside the canonical stored
+            # values. Without this a `bind: "dialog.r"` on a value
+            # box reads None instead of the computed RGB channel
+            # (CLR-210 Python).
+            dlg = dict(self._dialog)
+            for key, prop in self._dialog_props.items():
+                if "get" not in prop:
+                    continue
+                try:
+                    from workspace_interpreter.expr import evaluate
+                    local = dict(self._dialog)
+                    local["state"] = dict(self._state)
+                    local["panel"] = (
+                        dict(self._panels[self._active_panel])
+                        if self._active_panel and self._active_panel in self._panels
+                        else {}
+                    )
+                    if self._dialog_params is not None:
+                        local["param"] = dict(self._dialog_params)
+                    dlg[key] = evaluate(prop["get"], local).value
+                except Exception:
+                    pass
+            ctx["dialog"] = dlg
             if self._dialog_params is not None:
                 ctx["param"] = dict(self._dialog_params)
         ctx["active_document"] = self._active_document_view()

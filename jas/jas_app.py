@@ -838,15 +838,22 @@ class MainWindow(QMainWindow):
             if active is None:
                 return
             color_busy["flag"] = True
+            # Also set _color_channel_in_flight so the channel
+            # bridge skips the cascading set_panel writes —
+            # otherwise each panel.X write fires the bridge, which
+            # mutates the model via set_active_color_live, which
+            # fires on_document_changed, which triggers another
+            # _resync_color_panel and the cascade can race the
+            # selection's actual fill (CLR-218 Python — selection
+            # has red, panel ends up showing cyan from a stale
+            # cascade step).
+            prev_in_flight = getattr(self, "_color_channel_in_flight", False)
+            self._color_channel_in_flight = True
             try:
-                # Pass prior so the H preservation logic survives
-                # the second-pass resync that runs after the bridge
-                # mutates the model — otherwise dragging S to 0
-                # writes preserved H=226 first, then immediately
-                # overwrites with H=0 via this resync.
                 _sync_panel_channels_from_color(
                     self._yaml_state, active, prior=ps)
             finally:
+                self._color_channel_in_flight = prev_in_flight
                 color_busy["flag"] = False
 
         model.on_document_changed(_resync_color_panel)
@@ -864,9 +871,17 @@ class MainWindow(QMainWindow):
         # Initial sync — on_document_changed only fires on later
         # mutations, so without these the Color panel and toolbar
         # widget show their YAML defaults until the user moves the
-        # selection or edits a color (CLR-022..29 Python).
+        # selection or edits a color (CLR-022..29 Python). Run
+        # synchronously now and again on the next event-loop tick
+        # so the resync catches widgets that get constructed
+        # after add_canvas finishes (the Color panel's body isn't
+        # rendered until the dock rebuilds — its subscribers
+        # aren't wired in time to see the synchronous set).
         _resync_color_panel()
         _resync_toolbar_fs()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, _resync_color_panel)
+        QTimer.singleShot(0, _resync_toolbar_fs)
 
         tab_label()
         self._update_canvas_logo()
