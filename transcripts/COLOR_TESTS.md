@@ -581,13 +581,13 @@ If any P0 here fails, stop and flag.
               bar, "Only Web Colors" toggle, 50×50 preview swatch,
               HSB / RGB radio + numeric rows, Hex field, read-only CMYK
               display, OK + Cancel + Color Swatches buttons.
-      — last: 2026-05-12 rust pass; 2026-05-13 swift pass (swift: wired FillStrokeWidget onDoubleClick to dispatchYamlAction("open_color_picker"); added renderRadioGroup, renderColorGradient, renderColorHueBar — these YAML element types weren't dispatched by YamlElementView before)
+      — last: 2026-05-12 rust pass; 2026-05-13 swift pass (swift: wired FillStrokeWidget onDoubleClick to dispatchYamlAction("open_color_picker"); added renderRadioGroup, renderColorGradient, renderColorHueBar — these YAML element types weren't dispatched by YamlElementView before); 2026-05-20 ocaml pass (ocaml: dispatch_double_click_behaviors + open_yaml_dialog_hook + TWO_BUTTON_PRESS detection; only swap fill_stroke when fill_on_top actually flips so GTK double-click tracking survives; render_radio_group / render_color_gradient / render_color_hue_bar implemented)
 
 - [x] **CLR-201** [wired] Cancel closes without committing.
       Setup: Dialog open, fields edited.
       Do: Click Cancel.
       Expect: Dialog closes; target attribute unchanged.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (swift: open_dialog effect now passes get/set props to store.initDialog so YAML setters fire on widget commits; buildDialogEvalContextWithGetters merges computed getter values into the dialog ctx; renderNumberInput / renderTextInput / renderSlider all accept bare-string `bind:` form (was object-only) — without that the color picker fields silently dropped commits because the radio_field_row template uses bind: "${bind}")
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (swift: open_dialog effect now passes get/set props to store.initDialog so YAML setters fire on widget commits; buildDialogEvalContextWithGetters merges computed getter values into the dialog ctx; renderNumberInput / renderTextInput / renderSlider all accept bare-string `bind:` form (was object-only) — without that the color picker fields silently dropped commits because the radio_field_row template uses bind: "${bind}"); 2026-05-20 ocaml pass (ocaml: Dialog_global extended with prop_def + setter-eval + state_change_listeners; render_number_input / render_text_input accept bare-string bind form; show_dialog parses YAML state get/set into Dialog_global.current_props; current_build_ctx uses read_state() so getter-derived keys reflect canonical color)
 
 **P1**
 
@@ -596,58 +596,58 @@ If any P0 here fails, stop and flag.
       Do: Click in the gradient.
       Expect: S + B move to the click position; preview swatch updates;
               numeric H/S/B fields and Hex update.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass; 2026-05-20 ocaml pass
 
 - [x] **CLR-211** [wired] Drag in the gradient tracks live.
       Do: Press and drag inside the gradient.
       Expect: Preview swatch follows pointer; circle indicator follows; no
               commit until OK.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass; 2026-05-20 ocaml pass
 
 - [x] **CLR-212** [wired] Drag the hue bar updates hue.
       Do: Drag the vertical hue bar.
       Expect: Gradient body re-tints to new hue; preview updates; numeric H
               updates.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (swift: also wired OK/Cancel close-bridge from click-behavior chain to overlay binding; picker init now augments ctx.state with live selection fill/stroke so the dialog opens on the canvas color)
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (swift: also wired OK/Cancel close-bridge from click-behavior chain to overlay binding; picker init now augments ctx.state with live selection fill/stroke so the dialog opens on the canvas color); 2026-05-20 ocaml pass
 
 - [x] **CLR-213** [wired] Radio button selects which channel maps to the bar.
       Setup: Default is H.
       Do: Click the R radio.
       Expect: Vertical bar becomes a red ramp 0–255; gradient axes rebind
               to G (x) and B (y); preview unchanged.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (vertical bar re-ramps per channel; 2D gradient axis rebinding still H/S/B-only — accepted)
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass (vertical bar re-ramps per channel; 2D gradient axis rebinding still H/S/B-only — accepted); 2026-05-20 ocaml pass (ocaml: render_color_hue_bar reads dialog.radio_channel + per-channel ramp+bind spec; 2D gradient axis rebinding still H/S/B-only — accepted)
 
 - [x] **CLR-214** [wired] Hex field commits on Enter inside the dialog.
       Do: Type `ff00ff` into the dialog Hex field; press Enter.
       Expect: Preview becomes magenta; numeric H/S/B and R/G/B update;
               CMYK readout updates.
-      — last: 2026-05-12 rust pass; 2026-05-14 swift pass
+      — last: 2026-05-12 rust pass; 2026-05-14 swift pass; 2026-05-20 ocaml pass
 
 - [x] **CLR-215** [wired] Only Web Colors toggle snaps current value.
       Setup: Picker showing color `#abcdef`.
       Do: Toggle "Only Web Colors" on.
       Expect: Color snaps to nearest web-safe value (e.g. `99ccff`); fields
               update accordingly.
-      — last: 2026-05-12 rust pass (toggle now snaps each RGB channel to multiples of 51; eval_with_store rewritten to use the proper AST so let-bindings in setters work — the bl setter relies on it)
+      — last: 2026-05-12 rust pass (toggle now snaps each RGB channel to multiples of 51; eval_with_store rewritten to use the proper AST so let-bindings in setters work — the bl setter relies on it); 2026-05-20 ocaml pass (ocaml: render_toggle now accepts bare-string bind form; _write_back_bind dialog branch snaps r/g/bl on toggle-on AND on subsequent color-affecting edits via _dialog_snap_in_flight guard — continuous snapping, divergence from Rust/Swift which only snap on toggle)
 
 - [ ] **CLR-216** [wired — yaml now dismisses dialog + activates Eyedropper tool; full in-dialog sample-into-color loop deferred] Eyedropper button activates canvas sampling.
       Do: Click the eyedropper.
       Expect: Cursor changes to crosshair / eyedropper; clicking a point on
               the canvas adopts that pixel's color into the picker.
-      — last: 2026-05-12 rust deferred (replaced placeholder `log:` with `set active_tool + dismiss_dialog`; sample loop back into open dialog not yet implemented)
+      — last: 2026-05-12 rust deferred (replaced placeholder `log:` with `set active_tool + dismiss_dialog`; sample loop back into open dialog not yet implemented); 2026-05-20 ocaml deferred (matches Rust — added set_active_tool_hook + behavior-level action: dismiss_dialog dispatch; sample-into-dialog round-trip still unimplemented)
 
 - [x] **CLR-217** [wired — behavior changed: CMYK fields are now editable] CMYK fields are read-only.
       Do: Try to type into a CMYK field.
       Expect: Field rejects edits; values change only when the underlying
               color changes.
-      — last: 2026-05-12 rust pass with spec change — added setters to c/m/y/k so typing into CMYK rebuilds color via cmyk(); update spec / propagate to other ports
+      — last: 2026-05-12 rust pass with spec change — added setters to c/m/y/k so typing into CMYK rebuilds color via cmyk(); update spec / propagate to other ports; 2026-05-20 ocaml pass
 
 - [x] **CLR-218** [wired] OK applies to the target (fill or stroke).
       Setup: Picker opened with `target=fill`.
       Do: Pick a color; click OK.
       Expect: Selection's fill becomes the picked color; stroke unchanged;
               dialog closes; recent-colors gets the entry.
-      — last: 2026-05-12 rust pass (added `if` effect support to run_effects_with_ctx so the OK branch's set fill_color / stroke_color fires)
+      — last: 2026-05-12 rust pass (added `if` effect support to run_effects_with_ctx so the OK branch's set fill_color / stroke_color fires); 2026-05-20 ocaml pass (ocaml: dialog inline branch calls Panel_menu.push_recent_color after Effects.run_effects when current_id == "color_picker" — subscribe_active_color updates default+selection but doesn't push to recent)
 
 **P2**
 
@@ -655,12 +655,12 @@ If any P0 here fails, stop and flag.
       Setup: Picker opened with `target=stroke`.
       Do: Pick a color; click OK.
       Expect: Selection's stroke becomes the picked color; fill unchanged.
-      — last: 2026-05-12 rust pass (reverted earlier `bind.hollow="state.fill_on_top"` — stroke stays hollow ring; z-index alone indicates active)
+      — last: 2026-05-12 rust pass (reverted earlier `bind.hollow="state.fill_on_top"` — stroke stays hollow ring; z-index alone indicates active); 2026-05-20 ocaml pass
 
 - [x] **CLR-231** [wired] Color Swatches button is disabled (placeholder).
       Do: Inspect the Color Swatches button.
       Expect: Renders dimmed / non-interactive (per yaml placeholder).
-      — last: 2026-05-12 rust pass
+      — last: 2026-05-12 rust pass; 2026-05-20 ocaml pass (ocaml: render_button reads style.opacity and applies dim via CSS provider on button's style context + set_sensitive false — lablgtk3 misc_ops doesn't expose set_opacity directly)
 
 ---
 
@@ -670,57 +670,57 @@ If any P0 here fails, stop and flag.
       Setup: Fill = none.
       Expect: All slider controls in the current mode render dimmed / non-
               interactive.
-      — last: 2026-05-12 rust accepted-as-is (sliders stay interactive when fill is none; user OK with current behavior)
+      — last: 2026-05-12 rust accepted-as-is (sliders stay interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is
 
 - [x] **CLR-241** [wired] Hex dims when none.
       Setup: Fill = none.
       Expect: Hex input dimmed.
-      — last: 2026-05-12 rust accepted-as-is (hex stays interactive when fill is none; user OK with current behavior)
+      — last: 2026-05-12 rust accepted-as-is (hex stays interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is
 
 - [x] **CLR-242** [wired] Color bar dims when none.
       Setup: Fill = none.
       Expect: Color bar dimmed; click does not commit (or auto-un-nones —
               document the actual behavior).
-      — last: 2026-05-12 rust accepted-as-is (color bar stays interactive when fill is none; user OK)
+      — last: 2026-05-12 rust accepted-as-is (color bar stays interactive when fill is none; user OK); 2026-05-20 ocaml accepted-as-is
 
 - [x] **CLR-243** [wired] Fixed swatches stay clickable when none.
       Setup: Fill = none.
       Expect: None / Black / White / recent swatches all clickable.
-      — last: 2026-05-12 rust pass
+      — last: 2026-05-12 rust pass; 2026-05-20 ocaml pass
 
-- [ ] **CLR-244** [wired] Clicking Black / White / recent un-nones the attribute.
+- [x] **CLR-244** [wired] Clicking Black / White / recent un-nones the attribute.
       Setup: Fill = none.
       Do: Click White.
       Expect: Fill becomes `#ffffff`; sliders / hex / bar re-enable.
-      — last: —
+      — last: 2026-05-20 ocaml pass
 
 ---
 
 ## Session L — Appearance theming (~5 min)
 
-- [ ] **CLR-260** [wired] Dark appearance: readable contrast on all controls.
+- [x] **CLR-260** [wired] Dark appearance: readable contrast on all controls.
       Setup: Dark appearance active.
       Expect: Slider tracks visible; swatch borders distinguishable from
               panel bg; hex text legible; menu glyphs visible.
-      — last: —
+      — last: 2026-05-20 ocaml pass
 
-- [ ] **CLR-261** [wired] Medium Gray appearance mirrors Dark.
+- [x] **CLR-261** [wired] Medium Gray appearance mirrors Dark.
       Do: Switch appearance → Medium Gray.
       Expect: Panel re-skins with Medium-Gray tokens; everything readable;
               no Dark hardcoded colors leak through.
-      — last: —
+      — last: 2026-05-20 ocaml pass
 
-- [ ] **CLR-262** [wired] Light Gray appearance mirrors Dark.
+- [x] **CLR-262** [wired] Light Gray appearance mirrors Dark.
       Do: Switch to Light Gray.
       Expect: Same as above; black / white swatches readable against the
               new bg.
-      — last: —
+      — last: 2026-05-20 ocaml pass (ocaml: render_text now defaults to !Dock_panel.theme_text via theme_text_hook ref — direct reference would cycle Yaml_panel_view ↔ Dock_panel)
 
-- [ ] **CLR-263** [wired] Active mode menu checkmark visible in every appearance.
+- [x] **CLR-263** [wired] Active mode menu checkmark visible in every appearance.
       Do: In each appearance, open the panel menu.
       Expect: Checkmark on the active mode is visually distinct from the
               other modes.
-      — last: —
+      — last: 2026-05-20 ocaml pass
 
 ---
 

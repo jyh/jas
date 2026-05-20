@@ -45,10 +45,21 @@ let open_dialog ?(outer_scope : (string * Yojson.Safe.t) list = [])
       let state_ctx = `Assoc (
         ("state", `Assoc live_state) :: outer_scope
       ) in
+      (* Resolve params only when the value is an expression
+         (contains a dot — identifier path access). Bare-word values
+         like [target: fill] are already literal at this point — the
+         caller's click-behavior resolver attempted to evaluate them
+         and fell back to the raw string when the identifier wasn't
+         bound. Re-evaluating "fill" here would return Null (Expr_eval
+         treats undefined identifiers as Null) and the dialog's
+         [if param.target == "fill"] branch would silently fall
+         through to the else branch. *)
       let resolved_params = List.map (fun (k, v) ->
-        let expr_str = match v with `String s -> s | _ -> "" in
-        let result = Expr_eval.evaluate expr_str state_ctx in
-        (k, Effects.value_to_json result)
+        match v with
+        | `String s when String.contains s '.' ->
+          let result = Expr_eval.evaluate s state_ctx in
+          (k, Effects.value_to_json result)
+        | _ -> (k, v)
       ) raw_params in
       let dialog_state = ref defaults in
       let init_ctx_for () : Yojson.Safe.t =
@@ -118,14 +129,37 @@ let show_dialog ?(parent : GWindow.window option)
       let state_defaults = Workspace_loader.state_defaults ws in
       let icons = Workspace_loader.icons ws in
       let live_state = ref ds.state in
+      (* Parse state get/set props from the YAML so dialog widgets'
+         write-backs run the declared setter (e.g. color_picker's
+         h-setter rebuilds [color] from the new h + existing s/b).
+         Without props, channel edits would be silent no-ops on the
+         canonical color and the preview swatch / hue bar wouldn't
+         follow the typed value. *)
+      let props = match List.assoc_opt "state" dlg_def with
+        | Some (`Assoc state_defs) ->
+          List.filter_map (fun (key, def) ->
+            match def with
+            | `Assoc fields ->
+              let get = match List.assoc_opt "get" fields with
+                | Some (`String s) -> Some s | _ -> None in
+              let set = match List.assoc_opt "set" fields with
+                | Some (`String s) -> Some s | _ -> None in
+              if get = None && set = None then None
+              else Some (key, { Dialog_global.prop_get = get; prop_set = set })
+            | _ -> None
+          ) state_defs
+        | _ -> []
+      in
       Dialog_global.current_state := Some live_state;
       Dialog_global.current_id := Some ds.id;
       Dialog_global.current_outer_scope := outer_scope;
+      Dialog_global.current_props := props;
+      Dialog_global.clear_state_change_listeners ();
       Dialog_global.current_close := (fun () -> dialog#destroy ());
       Dialog_global.current_build_ctx := (fun () ->
         `Assoc (
           ("state", `Assoc state_defaults) ::
-          ("dialog", `Assoc !live_state) ::
+          ("dialog", `Assoc (Dialog_global.read_state ())) ::
           ("param", `Assoc ds.params) ::
           ("icons", icons) ::
           outer_scope
@@ -143,6 +177,8 @@ let show_dialog ?(parent : GWindow.window option)
       Dialog_global.current_state := None;
       Dialog_global.current_id := None;
       Dialog_global.current_outer_scope := [];
+      Dialog_global.current_props := [];
+      Dialog_global.clear_state_change_listeners ();
       Dialog_global.current_close := (fun () -> ());
       Dialog_global.current_build_ctx := (fun () -> `Assoc [])
     | _ -> ()

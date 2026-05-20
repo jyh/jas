@@ -263,7 +263,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Toggle { label; command } ->
                     let checked = Panel_menu.panel_is_checked active_kind command layout in
@@ -272,7 +273,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Radio { label; command; _ } ->
                     let selected = Panel_menu.panel_is_checked active_kind command layout in
@@ -281,7 +283,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Separator ->
                     let _sep = GMenu.separator_item ~packing:menu#append () in
