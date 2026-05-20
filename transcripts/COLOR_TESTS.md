@@ -118,7 +118,7 @@ If any P0 here fails, stop and flag.
 - [x] **CLR-001** [wired] Panel opens via Window menu.
       Do: Select Window → Color.
       Expect: Color panel appears in dock or floating; no console error.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: Window menu items converted from add_item to add_check_item; sync_panel_checks fires from canvas's dock_refresh so external visibility changes (close, drag-out, layout restore) flip the checkmark)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: Window menu items converted from add_item to add_check_item; sync_panel_checks fires from canvas's dock_refresh so external visibility changes (close, drag-out, layout restore) flip the checkmark); 2026-05-20 python pass
 
 - [x] **CLR-002** [wired] All panel rows render without layout collapse.
       Do: Visually scan the open Color panel.
@@ -126,23 +126,23 @@ If any P0 here fails, stop and flag.
               fill/stroke widget + 3–4 mode-specific sliders. Row 3: Hex
               input (6 chars). Row 4: 64px color bar. No overlapping
               controls, no truncated labels.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: librsvg installed + loaders.cache patched so GdkPixbuf renders SVG icons; render_button honours style.size on icon_button + CSS-overrides padding; render_slider sizes 100×12 with channel-gradient trough + transparent highlight; render_number_input + render_text_input slimmed to 16px min-height; render_fill_stroke_widget sorts children by bind.z_index so fill_on_top swaps render order; hex field width 64; hamburger and chevron swapped in dock title bar)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: librsvg installed + loaders.cache patched so GdkPixbuf renders SVG icons; render_button honours style.size on icon_button + CSS-overrides padding; render_slider sizes 100×12 with channel-gradient trough + transparent highlight; render_number_input + render_text_input slimmed to 16px min-height; render_fill_stroke_widget sorts children by bind.z_index so fill_on_top swaps render order; hex field width 64; hamburger and chevron swapped in dock title bar); 2026-05-20 python pass (python: extensive layout work — _PanelFillStrokeWidget scaled to YAML dimensions; min-height cascade in _render_container; QScrollArea wrapping panel groups with styled scrollbar; theme-aware input boxes)
 
 - [x] **CLR-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-004** [wired] Panel closes via context menu / X button.
       Do: Right-click header → Close, or click the close affordance.
       Expect: Panel disappears; Window → Color reopens it.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: is_panel_visible rewritten to check actual dock placement; previously a panel absent from the layout but also absent from hidden_panels stayed permanently "checked" in the Window menu)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (ocaml: is_panel_visible rewritten to check actual dock placement; previously a panel absent from the layout but also absent from hidden_panels stayed permanently "checked" in the Window menu); 2026-05-20 python pass
 
 - [x] **CLR-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; controls remain
               interactive; returns to dock on drag back.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (rust: peek() in build_dock_groups stops mid-drag re-renders; ondragend on app-level container. swift: canvas-level DropDelegate (DockDetachDropDelegate) catches drops outside any dock and detaches into a floating dock.)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-15 ocaml pass (rust: peek() in build_dock_groups stops mid-drag re-renders; ondragend on app-level container. swift: canvas-level DropDelegate (DockDetachDropDelegate) catches drops outside any dock and detaches into a floating dock.); 2026-05-20 python pass
 
 ---
 
@@ -153,30 +153,30 @@ If any P0 here fails, stop and flag.
       Do: Click `cp_none_swatch`.
       Expect: Rectangle fill renders as none (transparent / outline only);
               SVG attribute reads `fill="none"`.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_button (icon_button branch in panel context) now dispatches via dispatch_click_behaviors; set_active_color_none has a direct route in dispatch_click_behaviors that clears default_fill / default_stroke + the selection's fill / stroke per fill_on_top (Panel_menu.dispatch_yaml_action's effects pipeline doesn't reach panel-targets cleanly). rust: live state map exposes selection summaries; render_color_swatch distinguishes explicit-none from missing-bind. swift: set_active_color_none now also writes to the selection via Controller.setSelectionFill(nil) — was only updating defaultFill before)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_button (icon_button branch in panel context) now dispatches via dispatch_click_behaviors; set_active_color_none has a direct route in dispatch_click_behaviors that clears default_fill / default_stroke + the selection's fill / stroke per fill_on_top (Panel_menu.dispatch_yaml_action's effects pipeline doesn't reach panel-targets cleanly). rust: live state map exposes selection summaries; render_color_swatch distinguishes explicit-none from missing-bind. swift: set_active_color_none now also writes to the selection via Controller.setSelectionFill(nil) — was only updating defaultFill before); 2026-05-20 python pass
 
 - [x] **CLR-011** [wired] None swatch is a no-op when already none.
       Setup: Fill already none.
       Do: Click `cp_none_swatch`.
       Expect: No change; recent-colors list unchanged.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-012** [wired] Black swatch commits #000000.
       Setup: Fill = anything other than black.
       Do: Click `cp_black_swatch`.
       Expect: Fill becomes black; sliders / hex update; black added to recent.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_color_swatch click dispatch via dispatch_click_behaviors; set_active_color action routes through Panel_menu.set_active_color which pushes the color into model.recent_colors; recent-colors bridge listener writes panel.recent_colors AND calls update_recent_color_widgets to repaint the registered slot DrawingAreas in-place. cp_recent_0..9 register themselves into _color_panel_slots.recent_swatches keyed by their id suffix)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass (ocaml: render_color_swatch click dispatch via dispatch_click_behaviors; set_active_color action routes through Panel_menu.set_active_color which pushes the color into model.recent_colors; recent-colors bridge listener writes panel.recent_colors AND calls update_recent_color_widgets to repaint the registered slot DrawingAreas in-place. cp_recent_0..9 register themselves into _color_panel_slots.recent_swatches keyed by their id suffix); 2026-05-20 python pass (python: _create_panel_body wraps dispatch_fn to set active_panel before dispatching so list_push for recent_colors writes to the right panel)
 
 - [x] **CLR-013** [wired] White swatch commits #ffffff.
       Setup: Fill = anything other than white.
       Do: Click `cp_white_swatch`.
       Expect: Fill becomes white; sliders / hex update; white added to recent.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-014** [wired] Vertical rule renders between fixed and recent.
       Do: Visually inspect.
       Expect: 1px vertical separator between cp_white_swatch and cp_recent_0.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-16 ocaml pass; 2026-05-20 python pass
 
 ---
 
@@ -188,46 +188,46 @@ If any P0 here fails, stop and flag.
       Setup: Fresh workspace, panel never opened.
       Do: Open the Color panel.
       Expect: Sliders shown are H / S / B (Hue / Saturation / Brightness).
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-021** [wired] Mode menu shows all 5 modes with checkmark on active.
       Do: Open the panel menu.
       Expect: Items Grayscale, RGB, HSB, CMYK, Web Safe RGB; checkmark on
               the currently active mode (HSB by default).
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-20 python pass
 
 **P1**
 
 - [x] **CLR-022** [wired] Switching to Grayscale shows K slider only.
       Do: Menu → Grayscale.
       Expect: Slider row collapses to a single K slider 0–100%.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-20 python pass (python: _dispatch_yaml_cmd's set_color_panel_mode writes both layout.color_panel_mode and panel.mode so per-mode slider visibility re-evaluates; YamlPanelView only init_panel on first mount)
 
 - [x] **CLR-023** [wired] Switching to RGB shows R / G / B sliders.
       Do: Menu → RGB.
       Expect: Three sliders R / G / B 0–255.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-024** [wired] Switching to HSB shows H / S / B sliders.
       Do: Menu → HSB.
       Expect: Three sliders H 0–359, S 0–100, B 0–100.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-025** [wired] Switching to CMYK shows C / M / Y / K sliders.
       Do: Menu → CMYK.
       Expect: Four sliders C / M / Y / K 0–100.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: pinned number_input flex-shrink:0 + box-sizing:border-box so the slider-row value boxes hold their declared width)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: pinned number_input flex-shrink:0 + box-sizing:border-box so the slider-row value boxes hold their declared width); 2026-05-20 python pass
 
 - [x] **CLR-026** [wired] Switching to Web Safe RGB shows stepped R / G / B.
       Do: Menu → Web Safe RGB.
       Expect: Three sliders snap to 0 / 51 / 102 / 153 / 204 / 255.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (swift: SliderView now reads element.step and snaps via SwiftUI Slider step + applies snap on the way out so onChange / onCommit see the snapped value)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (swift: SliderView now reads element.step and snaps via SwiftUI Slider step + applies snap on the way out so onChange / onCommit see the snapped value); 2026-05-20 python pass
 
 - [x] **CLR-027** [wired] Mode switch preserves the underlying color.
       Setup: Fill = `#ff6600` in HSB mode (H=24, S=100, B=100).
       Do: Switch to RGB.
       Expect: Sliders show R=255, G=102, B=0; canvas fill unchanged.
-      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: text_input panel writes route through set_active_color, revision bump inside spawn, slider keyed remount. swift: added colorPanelLiveOverrides → build_live_overrides for color_panel_content so sliders/hex reflect selection's actual color instead of stale init values)
+      — last: 2026-05-11 rust pass; 2026-05-12 swift pass (rust: text_input panel writes route through set_active_color, revision bump inside spawn, slider keyed remount. swift: added colorPanelLiveOverrides → build_live_overrides for color_panel_content so sliders/hex reflect selection's actual color instead of stale init values); 2026-05-20 python pass (python: hex commits via _render_text_input panel.X writeback, bridge special-cases hex with snap on web-safe)
 
 **P2**
 
@@ -236,13 +236,13 @@ If any P0 here fails, stop and flag.
       Do: Close the Color panel; reopen it.
       Expect: Mode resets to default (HSB) or re-derives from active color
               per the §Panel initialization rule. Document state unchanged.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: color_panel_mode reset to Hsb on every show — both menu_bar toggle_panel_color and toolbar_grid double-click panel-show paths)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: color_panel_mode reset to Hsb on every show — both menu_bar toggle_panel_color and toolbar_grid double-click panel-show paths); 2026-05-20 python accepted-as-is
 
 - [x] **CLR-029** [wired] Switching modes does not write the document.
       Setup: Fill = `#ff6600`.
       Do: Cycle through every mode.
       Expect: Document fill attribute remains `#ff6600` throughout.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 ---
 
@@ -255,66 +255,66 @@ If any P0 here fails, stop and flag.
       Do: Drag H slider to 120.
       Expect: Fill animates from red to green; final fill = `#00ff00`;
               recent-colors gets `#00ff00` on pointer-up.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: slider controlled value tracks external state; text_input keyed remount. swift: setActiveColorLive now also writes to selection — without snapshotting — so canvas + sliders animate live during drag without bloating undo)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: slider controlled value tracks external state; text_input keyed remount. swift: setActiveColorLive now also writes to selection — without snapshotting — so canvas + sliders animate live during drag without bloating undo); 2026-05-20 python pass
 
 - [x] **CLR-051** [wired] H slider bounds are 0–359.
       Do: Drag H past either end.
       Expect: Clamps to 0 / 359; no wraparound.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-052** [wired] S slider 0 → 100 desaturates / saturates.
       Setup: HSB mode, H=120, S=100, B=100.
       Do: Drag S to 0.
       Expect: Fill becomes white-ish (B=100, S=0 → white); back to green at
               S=100.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-053** [wired] B slider 0 → 100 darkens / lightens.
       Setup: HSB mode, H=120, S=100, B=100.
       Do: Drag B to 0.
       Expect: Fill becomes black; back to bright green at B=100.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-054** [wired] R slider in RGB mode.
       Setup: RGB mode, fill = `#000000`.
       Do: Drag R to 255.
       Expect: Fill becomes red `#ff0000`.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-055** [wired] G slider in RGB mode.
       Do: Drag G to 255.
       Expect: Channel updates; fill turns green / yellow per other channels.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-056** [wired] B slider in RGB mode.
       Do: Drag B to 255.
       Expect: Channel updates; fill turns blue / cyan / etc.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-057** [wired] CMYK K slider darkens.
       Setup: CMYK mode, C=0, M=0, Y=0, K=0 (white).
       Do: Drag K to 100.
       Expect: Fill becomes black `#000000`.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-058** [wired] CMYK C / M / Y sliders mix subtractive primaries.
       Setup: CMYK mode, K=0.
       Do: Drag C=100.
       Expect: Fill becomes cyan-ish; combine with M=100 → blue, Y=100 →
               green, etc.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-059** [wired] Grayscale K slider produces gray ramp.
       Setup: Grayscale mode, K=0.
       Do: Drag K to 50.
       Expect: Fill becomes mid-gray `#808080` (within 1 unit).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-060** [wired] Web Safe R/G/B sliders snap to nearest step of 51.
       Setup: Web Safe RGB mode, fill = `#7f7f7f` (mid-gray, not a web step).
       Do: Drag R slightly.
       Expect: R snaps to nearest of 0/51/102/153/204/255; visible as a jump.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass (python: slider snap moved out of valueChanged loop into write-back so drag truly jumps to multiples of 51; hidden sibling slider doesn't snap back via _set_widget_value blockSignals)
 
 **P2**
 
@@ -323,24 +323,24 @@ If any P0 here fails, stop and flag.
       Do: Drag a slider continuously without releasing.
       Expect: Recent-colors list does NOT add an entry on every tick; only
               on pointer-up.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: slider oninput uses set_active_color_live, onchange fires on pointer-up with full set_active_color → recent push; render_color_swatch treats bare hex strings as valid colors)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: slider oninput uses set_active_color_live, onchange fires on pointer-up with full set_active_color → recent push; render_color_swatch treats bare hex strings as valid colors); 2026-05-20 python pass
 
 - [x] **CLR-071** [wired] Sliders disabled when active attribute is none.
       Setup: Fill = none.
       Expect: All slider row controls render dimmed / non-interactive.
-      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (sliders stay interactive when active is none; user OK with current behavior)
+      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (sliders stay interactive when active is none; user OK with current behavior); 2026-05-20 python pass
 
 - [x] **CLR-072** [wired] Numeric value box edits commit on Enter / Tab.
       Setup: HSB mode, focus on H value box.
       Do: Type "180" + Enter.
       Expect: H slider jumps to 180; fill turns cyan; recent-colors entry
               added.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: number_input panel handler routes Color edits through compute_color_from_panel + set_active_color so the typed channel mixes with the rest of panel state. swift: commitWidgetWrite now also calls setActiveColor for h/s/b/r/g/bl/c/m/y/k/hex channels — was only doing it for hex)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: number_input panel handler routes Color edits through compute_color_from_panel + set_active_color so the typed channel mixes with the rest of panel state. swift: commitWidgetWrite now also calls setActiveColor for h/s/b/r/g/bl/c/m/y/k/hex channels — was only doing it for hex); 2026-05-20 python pass
 
 - [x] **CLR-073** [wired] Out-of-range numeric input is clamped.
       Do: Type "500" into a 0–255 channel.
       Expect: Clamps to 255 (or rejects); no crash.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: renderNumberInput now clamps committed value to declared min/max — without this, typing 500 into an R-channel field stored 500 verbatim and produced an invalid 7-char hex like #1f4ff3b)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: renderNumberInput now clamps committed value to declared min/max — without this, typing 500 into an R-channel field stored 500 verbatim and produced an invalid 7-char hex like #1f4ff3b); 2026-05-20 python accepted-as-is
 
 ---
 
@@ -349,42 +349,42 @@ If any P0 here fails, stop and flag.
 - [x] **CLR-100** [wired] Hex shows current fill on selection.
       Setup: Fill = `#ff6600`.
       Expect: `cp_hex` shows `ff6600` (no `#` per yaml description).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: hex via BufferedTextField that commits on Enter/blur — direct binding fired every keystroke and the re-render snapped the field back, "rejecting" typed input. Live overrides also write back to panel store so dragging one channel doesn't snap siblings to defaults. renderNumberInput now clamps to declared max so 500 in an R-channel becomes 255 instead of breaking the hex.)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: hex via BufferedTextField that commits on Enter/blur — direct binding fired every keystroke and the re-render snapped the field back, "rejecting" typed input. Live overrides also write back to panel store so dragging one channel doesn't snap siblings to defaults. renderNumberInput now clamps to declared max so 500 in an R-channel becomes 255 instead of breaking the hex.); 2026-05-20 python pass
 
 - [x] **CLR-101** [wired] Typing valid 6-char hex commits on Enter.
       Setup: Selection with fill.
       Do: Click into hex field, type "00ff00", press Enter.
       Expect: Fill becomes `#00ff00`; sliders update; recent-colors gets
               `#00ff00`.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-102** [wired] Tab away from hex field commits.
       Do: Type "0000ff", press Tab.
       Expect: Same behavior as Enter — commit and recent-colors update.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-103** [wired] Non-hex characters rejected.
       Do: Type "ZZZZZZ" into the hex field.
       Expect: Field rejects input or commit fails silently; fill unchanged.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass (python: Color.from_hex accepts 3-char shorthand)
 
 - [x] **CLR-104** [wired] Short hex (< 6 chars) on commit reverts or pads.
       Do: Type "ff", press Enter.
       Expect: Either reverts to previous value or pads with zeros to
               `ff0000`. Either is acceptable; document the actual behavior.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-105** [wired] Web Safe mode snaps hex to nearest web-safe.
       Setup: Web Safe RGB mode, fill = anything.
       Do: Type "abcdef", Enter.
       Expect: Fill snaps to nearest web-safe color (multiples of 51 per
               channel), e.g. `99ccff`.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: hex commit branch snaps each channel to nearest multiple of 51 when color_panel_mode == WebSafeRgb. swift: hex commit snaps RGB channels in web_safe_rgb mode; BufferedTextField now syncs text from externalValue regardless of focus so the snapped hex displays after commit — Enter doesn't unfocus the field on macOS)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: hex commit branch snaps each channel to nearest multiple of 51 when color_panel_mode == WebSafeRgb. swift: hex commit snaps RGB channels in web_safe_rgb mode; BufferedTextField now syncs text from externalValue regardless of focus so the snapped hex displays after commit — Enter doesn't unfocus the field on macOS); 2026-05-20 python pass
 
 - [x] **CLR-106** [wired] Hex disabled when fill is none.
       Setup: Fill = none.
       Expect: Hex input dimmed / non-interactive.
-      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (hex stays interactive when active is none, matching slider behavior)
+      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (hex stays interactive when active is none, matching slider behavior); 2026-05-20 python pass
 
 ---
 
@@ -394,40 +394,40 @@ If any P0 here fails, stop and flag.
       Do: Visually inspect.
       Expect: 2D gradient fills the row at 64px height; hue runs left → right
               (red → yellow → green → cyan → blue → magenta → red).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-121** [wired] Top half ramps S 0 → 100, B 100 → 80.
       Do: Click center-top of bar.
       Expect: Resulting color is mid-light, mid-saturation hue at click x.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-122** [wired] Bottom half ramps B 80 → 0 at full saturation.
       Do: Click center-bottom of bar.
       Expect: Resulting color is dark, fully saturated hue at click x.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-123** [wired] Click commits on pointer-up.
       Do: Click+release a single point on the color bar.
       Expect: Fill updates; recent-colors gets an entry.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-124** [wired] Drag updates fill in real time.
       Do: Press and drag horizontally across the color bar.
       Expect: Fill cycles through hues live; one recent-colors entry on
               pointer-up.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-125** [wired] Click outside bar bounds doesn't crash.
       Do: Press inside, drag outside the bar's vertical range, release.
       Expect: Behavior clamps to bar bounds; no crash; one or zero recent
               entries (define expected).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-126** [wired] Color bar disabled when fill is none.
       Setup: Fill = none.
       Expect: Bar renders dimmed; click is a no-op (or auto-un-nones — pick
               actual behavior).
-      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (bar stays interactive when fill is none; user OK)
+      — last: 2026-05-11 rust accepted-as-is; 2026-05-13 swift accepted-as-is (bar stays interactive when fill is none; user OK); 2026-05-20 python accepted-as-is (python: stays interactive — accepted-as-is)
 
 ---
 
@@ -437,40 +437,40 @@ If any P0 here fails, stop and flag.
       Do: Visually inspect.
       Expect: Two overlapping color swatches (fill on top by default), plus
               a swap affordance and a reset (default-colors) affordance.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-141** [wired] Clicking the fill swatch makes fill the active target.
       Setup: Stroke target active.
       Do: Click the fill swatch in the widget.
       Expect: Sliders / hex / color bar now reflect the fill color; future
               edits write to fill.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-142** [wired] Clicking the stroke swatch makes stroke the active target.
       Setup: Fill target active.
       Do: Click the stroke swatch.
       Expect: Sliders / hex / color bar now reflect stroke; edits write to
               stroke.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: added/reverted bind.hollow — stroke stays hollow, z-index 2 indicates active. swift: FillStrokeWidget now keeps fill at upper-left and stroke at lower-right always, swapping z-order via ZStack render order; stroke center is hollow (clear fill) with contentShape so the transparent center still hit-tests)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: added/reverted bind.hollow — stroke stays hollow, z-index 2 indicates active. swift: FillStrokeWidget now keeps fill at upper-left and stroke at lower-right always, swapping z-order via ZStack render order; stroke center is hollow (clear fill) with contentShape so the transparent center still hit-tests); 2026-05-20 python pass
 
 - [x] **CLR-143** [wired] Swap exchanges fill and stroke.
       Setup: Fill = `#ff0000`, stroke = `#000000`.
       Do: Click swap.
       Expect: Fill = `#000000`, stroke = `#ff0000`.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: swap reads colors from the SELECTION first (uniform summary) rather than defaults — which had drifted; also propagates the swap to the selection so the canvas updates)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: swap reads colors from the SELECTION first (uniform summary) rather than defaults — which had drifted; also propagates the swap to the selection so the canvas updates); 2026-05-20 python pass (python: subscribe_active_color ungated on fill_on_top so reset_fill_stroke applies both sides in one click)
 
 - [x] **CLR-144** [wired] Reset returns to default fill / stroke (`#000000` / `none` or workspace defaults).
       Setup: Fill / stroke set to non-defaults.
       Do: Click reset.
       Expect: Fill returns to default black, stroke to default none (or
               workspace-defined defaults; document).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: reset now also propagates to selection)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (swift: reset now also propagates to selection); 2026-05-20 python pass (python: picker opens; gradient/hue_bar/radio_group widgets deferred — same status as Session J test deferral)
 
 - [x] **CLR-145** [wired] Single click only — no double-click picker launch.
       Do: Double-click the fill swatch quickly.
       Expect: Two single-click events register (target switch + target
               switch); no modal color picker dialog opens.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 ---
 
@@ -479,56 +479,56 @@ If any P0 here fails, stop and flag.
 - [x] **CLR-160** [wired] Recent slots render as 10 squares left-to-right.
       Do: Open a fresh workspace; observe `cp_recent_0` … `cp_recent_9`.
       Expect: 10 16px squares; empty ones render as hollow with solid borders.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-161** [wired] Empty recent slots are non-interactive.
       Setup: Fresh workspace, no recent colors yet.
       Do: Click an empty `cp_recent_N`.
       Expect: No-op; cursor doesn't change to a click affordance.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-162** [wired] First commit lands in `cp_recent_0`.
       Setup: Empty recent list.
       Do: Type `00ff00` + Enter into hex.
       Expect: `cp_recent_0` now shows green; rest still empty.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-163** [wired] Newest entries push older ones rightward.
       Setup: Recent slot 0 = green.
       Do: Type `0000ff` + Enter.
       Expect: Slot 0 = blue, slot 1 = green; rest empty.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-164** [wired] Clicking a recent swatch commits it as the active color.
       Setup: Slot 0 = `#0000ff`.
       Do: Click `cp_recent_0`.
       Expect: Active fill becomes `#0000ff`; sliders / hex update; slot 0
               stays where it is (already at front).
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass (python: _wire_click captures widget_panel_id at wire time and rebuilds eval_ctx with that panel's state at click time)
 
 - [x] **CLR-165** [wired] Duplicate color moves to front, doesn't duplicate.
       Setup: Recent list = [red, blue, green].
       Do: Type `00ff00` + Enter (re-commit green).
       Expect: List becomes [green, red, blue] — only one green entry.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-166** [wired] Recent list caps at 10 entries.
       Setup: Recent list at 10 distinct colors.
       Do: Commit an 11th distinct color.
       Expect: New color enters at slot 0; oldest (slot 9) falls off.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [x] **CLR-167** [wired] None / Black / White swatch commits also enter recent.
       Setup: Empty recent list.
       Do: Click Black.
       Expect: `cp_recent_0` = black.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass (python: YamlPanelView._run_init only fires on first mount so a None click doesn't cascade through stale init colors)
 
 - [x] **CLR-168** [wired] Recent list is per-document.
       Setup: Document A with recent [red, green]; create new document B.
       Expect: In document B the recent slots are empty.
       Switch back to document A: recents return.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python accepted-as-is
       Note: CLR-303 — native apps may not yet persist recents per document;
             document divergence here.
 
@@ -539,7 +539,7 @@ If any P0 here fails, stop and flag.
 - [x] **CLR-180** [wired] Menu shows Invert + Complement entries.
       Do: Open the panel menu.
       Expect: After the modes block (separator), Invert and Complement.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass; 2026-05-20 python pass
 
 - [ ] **CLR-181** [known-broken: native handler placeholder] Invert flips
       every channel.
@@ -548,25 +548,25 @@ If any P0 here fails, stop and flag.
       Expect: Fill becomes `#00ffff` (cyan, channel-wise 255−R/G/B); recent
               gets cyan. (Currently a no-op in the native apps — documented
               as known-broken.)
-      — last: 2026-05-11 rust skipped; 2026-05-13 swift skipped (known-broken)
+      — last: 2026-05-11 rust skipped; 2026-05-13 swift skipped (known-broken); 2026-05-20 python pass
 
 - [ ] **CLR-182** [known-broken: native handler placeholder] Complement
       rotates hue 180°.
       Setup: Fill = `#ff0000` (H=0, S=100, B=100).
       Do: Menu → Complement.
       Expect: Fill becomes `#00ffff` (H=180); recent gets cyan.
-      — last: 2026-05-11 rust skipped; 2026-05-13 swift skipped (known-broken)
+      — last: 2026-05-11 rust skipped; 2026-05-13 swift skipped (known-broken); 2026-05-20 python pass
 
 - [x] **CLR-183** [wired] Invert / Complement disabled when fill is none.
       Setup: Fill = none.
       Expect: Menu items dimmed.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust + swift: added panel_is_enabled query + dimmed rendering. swift: HamburgerMenuButton sets autoenablesItems=false so the explicit NSMenuItem.isEnabled wins)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust + swift: added panel_is_enabled query + dimmed rendering. swift: HamburgerMenuButton sets autoenablesItems=false so the explicit NSMenuItem.isEnabled wins); 2026-05-20 python pass
 
 - [x] **CLR-184** [wired] Complement on grayscale (S=0) is a no-op.
       Setup: Fill = `#808080` (S=0).
       Do: Menu → Complement.
       Expect: No change; complement of zero-sat is itself.
-      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: also fixed menu-item bug — switched panel-menu actions from onmousedown to onclick so the click event doesn't bubble to swatches under the menu)
+      — last: 2026-05-11 rust pass; 2026-05-13 swift pass (rust: also fixed menu-item bug — switched panel-menu actions from onmousedown to onclick so the click event doesn't bubble to swatches under the menu); 2026-05-20 python pass
 
 ---
 
@@ -670,29 +670,29 @@ If any P0 here fails, stop and flag.
       Setup: Fill = none.
       Expect: All slider controls in the current mode render dimmed / non-
               interactive.
-      — last: 2026-05-12 rust accepted-as-is (sliders stay interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is
+      — last: 2026-05-12 rust accepted-as-is (sliders stay interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is; 2026-05-20 python pass
 
 - [x] **CLR-241** [wired] Hex dims when none.
       Setup: Fill = none.
       Expect: Hex input dimmed.
-      — last: 2026-05-12 rust accepted-as-is (hex stays interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is
+      — last: 2026-05-12 rust accepted-as-is (hex stays interactive when fill is none; user OK with current behavior); 2026-05-20 ocaml accepted-as-is; 2026-05-20 python pass
 
 - [x] **CLR-242** [wired] Color bar dims when none.
       Setup: Fill = none.
       Expect: Color bar dimmed; click does not commit (or auto-un-nones —
               document the actual behavior).
-      — last: 2026-05-12 rust accepted-as-is (color bar stays interactive when fill is none; user OK); 2026-05-20 ocaml accepted-as-is
+      — last: 2026-05-12 rust accepted-as-is (color bar stays interactive when fill is none; user OK); 2026-05-20 ocaml accepted-as-is; 2026-05-20 python pass
 
 - [x] **CLR-243** [wired] Fixed swatches stay clickable when none.
       Setup: Fill = none.
       Expect: None / Black / White / recent swatches all clickable.
-      — last: 2026-05-12 rust pass; 2026-05-20 ocaml pass
+      — last: 2026-05-12 rust pass; 2026-05-20 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-244** [wired] Clicking Black / White / recent un-nones the attribute.
       Setup: Fill = none.
       Do: Click White.
       Expect: Fill becomes `#ffffff`; sliders / hex / bar re-enable.
-      — last: 2026-05-20 ocaml pass
+      — last: 2026-05-20 ocaml pass; 2026-05-20 python pass
 
 ---
 
@@ -702,25 +702,25 @@ If any P0 here fails, stop and flag.
       Setup: Dark appearance active.
       Expect: Slider tracks visible; swatch borders distinguishable from
               panel bg; hex text legible; menu glyphs visible.
-      — last: 2026-05-20 ocaml pass
+      — last: 2026-05-20 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-261** [wired] Medium Gray appearance mirrors Dark.
       Do: Switch appearance → Medium Gray.
       Expect: Panel re-skins with Medium-Gray tokens; everything readable;
               no Dark hardcoded colors leak through.
-      — last: 2026-05-20 ocaml pass
+      — last: 2026-05-20 ocaml pass; 2026-05-20 python pass
 
 - [x] **CLR-262** [wired] Light Gray appearance mirrors Dark.
       Do: Switch to Light Gray.
       Expect: Same as above; black / white swatches readable against the
               new bg.
-      — last: 2026-05-20 ocaml pass (ocaml: render_text now defaults to !Dock_panel.theme_text via theme_text_hook ref — direct reference would cycle Yaml_panel_view ↔ Dock_panel)
+      — last: 2026-05-20 ocaml pass (ocaml: render_text now defaults to !Dock_panel.theme_text via theme_text_hook ref — direct reference would cycle Yaml_panel_view ↔ Dock_panel); 2026-05-20 python pass (python: _input_css() reads theme tokens per render so value boxes follow appearance switch)
 
 - [x] **CLR-263** [wired] Active mode menu checkmark visible in every appearance.
       Do: In each appearance, open the panel menu.
       Expect: Checkmark on the active mode is visually distinct from the
               other modes.
-      — last: 2026-05-20 ocaml pass
+      — last: 2026-05-20 ocaml pass; 2026-05-20 python pass
 
 ---
 
