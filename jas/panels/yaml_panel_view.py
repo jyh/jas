@@ -38,10 +38,18 @@ class YamlPanelView(QWidget):
         # (e.g. op_make_mask / selection_mask_* in opacity_panel).
         self._ctx["_panel_id"] = self._panel_id
 
-        # Initialize panel state
+        # Initialize panel state — but only on FIRST mount. When the
+        # dock rebuilds (e.g. after a hamburger menu command),
+        # YamlPanelView gets reconstructed; if we init_panel again
+        # the user's just-made change (mode, recent_colors, etc.)
+        # gets wiped back to YAML defaults (CLR-022 Python).
         defaults = panel_state_defaults(panel_spec)
-        self._store.init_panel(self._panel_id, defaults)
+        existing = store.get_panel_state(self._panel_id)
+        first_mount = not existing
+        if first_mount:
+            self._store.init_panel(self._panel_id, defaults)
         self._store.set_active_panel(self._panel_id)
+        self._first_mount = first_mount
 
         # Opacity panel — stash the store handle in panel_menu so
         # the hamburger-menu toggle commands
@@ -68,8 +76,15 @@ class YamlPanelView(QWidget):
             from panels.panel_menu import set_paragraph_store
             set_paragraph_store(self._store)
 
-        # Run init expressions
-        self._run_init()
+        # Run init expressions ONLY on first mount. Re-running on
+        # dock rebuild would write back the YAML's init defaults
+        # via set_panel, each fire dragging in the color bridge to
+        # recompute / mirror the canvas — which on a None-fill
+        # click cascades through the channel writes and snaps the
+        # canvas back through a series of stale colors (CLR-167
+        # Python).
+        if first_mount:
+            self._run_init()
 
         # Build UI
         layout = QVBoxLayout(self)
@@ -81,6 +96,13 @@ class YamlPanelView(QWidget):
             widget = render_element(content, store, self._ctx, dispatch_fn)
             if widget:
                 layout.addWidget(widget)
+                # Propagate the rendered content's minimumHeight up
+                # to the panel view so the dock's outer layout
+                # (DroppablePanelGroup → DockPanelWidget's scroll
+                # area) allocates enough vertical space. We avoid
+                # touching minimumWidth here so the QScrollArea
+                # viewport can still shrink the panel width.
+                self.setMinimumHeight(widget.minimumHeight())
 
     def _run_init(self):
         """Evaluate init expressions against current global state."""

@@ -72,3 +72,14 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
     case .magicWand: return MagicWandPanel.isChecked(cmd, layout: layout)
     }
 }
+
+/// Query whether a menu command is enabled for a panel kind. Defaults
+/// to `true` for panels / commands without a state-conditional rule.
+/// Mirrors Rust's `panel_is_enabled`.
+public func panelIsEnabled(_ kind: PanelKind, cmd: String,
+                           model: Model? = nil) -> Bool {
+    switch kind {
+    case .color: return ColorPanel.isEnabled(cmd, model: model)
+    default: return true
+    }
+}

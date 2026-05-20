@@ -2434,9 +2434,17 @@ let create ?(model = Model.create ()) ~controller ~toolbar ?(on_focus = fun () -
      removing the page. *)
   let tab_hbox = GPack.hbox ~spacing:4 () in
   let tab_label = GMisc.label ~text:model#filename ~packing:tab_hbox#add () in
+  (* Adwaita's default label color is dark grey, which is illegible
+     against the dark workspace tab strip. Force a light text color
+     on the tab label + the close button's "×" label so both stay
+     visible at the workspace's dark/medium-gray appearance. *)
+  let provider = new GObj.css_provider (GtkData.CssProvider.create ()) in
+  provider#load_from_data "label { color: #cccccc; }";
+  tab_label#misc#style_context#add_provider provider 800;
   let close_btn = GButton.button ~packing:tab_hbox#add () in
   close_btn#set_relief `NONE;
-  ignore (GMisc.label ~text:"\xC3\x97" ~packing:close_btn#add ());
+  let close_label = GMisc.label ~text:"\xC3\x97" ~packing:close_btn#add () in
+  close_label#misc#style_context#add_provider provider 800;
   notebook#append_page ~tab_label:tab_hbox#coerce sub#widget |> ignore;
   (* Close button handler *)
   close_btn#connect#clicked ~callback:(fun () ->

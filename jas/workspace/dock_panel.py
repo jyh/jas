@@ -2,6 +2,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMenu,
+    QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt, QMimeData, QPoint
 from PySide6.QtGui import QDrag
@@ -158,6 +159,7 @@ class DockPanelWidget(QWidget):
         dock = self._layout_data.anchored_dock(self._edge)
         if dock is None or not dock.groups:
             self.setFixedWidth(0)
+            self._notify_window_dock_changed()
             return
 
         if dock.collapsed:
@@ -166,6 +168,24 @@ class DockPanelWidget(QWidget):
         else:
             self.setFixedWidth(int(dock.width))
             self._build_expanded(dock)
+        self._notify_window_dock_changed()
+
+    def _notify_window_dock_changed(self) -> None:
+        # Fire the window's Window-menu checkmark resync if it has one
+        # — drag-out to floating, header X close, and layout-restore
+        # all change panel visibility without going through the menu's
+        # _toggle_panel path, so without this the checkmarks would
+        # stay stuck on stale state. Mirrors the OCaml dock_refresh →
+        # sync_panel_checks wiring.
+        win = self.window()
+        if win is None:
+            return
+        syncer = getattr(win, 'sync_panel_menu_checks', None)
+        if callable(syncer):
+            try:
+                syncer()
+            except Exception:
+                pass
 
     def _build_collapsed(self, dock):
         # Toggle button
@@ -188,19 +208,58 @@ class DockPanelWidget(QWidget):
         self._vbox.addStretch()
 
     def _build_expanded(self, dock):
-        # Toggle button
+        # Toggle button (stays outside the scroll area so it's always
+        # visible at the top of the dock).
         toggle = QPushButton("\u25B6")
         toggle.setFixedHeight(20)
         toggle.setFlat(True)
         toggle.clicked.connect(lambda: self._toggle_dock(dock.id))
         self._vbox.addWidget(toggle)
 
-        # Panel groups
+        # Wrap panel groups in a QScrollArea so the combined min-
+        # height of all expanded panels can exceed the dock's
+        # allocated height \u2014 the user scrolls instead of having
+        # panels squeezed below their content's required size.
+        # widgetResizable=True lets the inner widget grow with the
+        # scroll area's width (we still want full panel width).
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        scroll.setFrameShape(QFrame.NoFrame)
+        # macOS uses overlay scrollbars by default — they paint on
+        # top of the viewport rather than taking width from it,
+        # which clips right-anchored panel content like the slider
+        # value boxes. Force a styled non-overlay scrollbar via QSS
+        # AND reserve its width by setting an explicit viewport
+        # right margin so the inner widget stops before the bar.
+        scroll.setStyleSheet(
+            "QScrollBar:vertical { background: transparent; "
+            "width: 12px; margin: 0; }"
+            "QScrollBar::handle:vertical { background: #5a5a5a; "
+            "border-radius: 4px; min-height: 24px; }"
+            "QScrollBar::handle:vertical:hover { background: #6a6a6a; }"
+            "QScrollBar::add-line:vertical, "
+            "QScrollBar::sub-line:vertical { height: 0; border: 0; }"
+            "QScrollBar::add-page:vertical, "
+            "QScrollBar::sub-page:vertical { background: transparent; }"
+        )
+        inner = QWidget()
+        # Lock the inner widget to dock.width - scrollbar width so
+        # panel groups (and their slider value boxes) don't extend
+        # under the scrollbar. On macOS the native QScrollArea
+        # viewport doesn't always reserve room for a styled QSS
+        # scrollbar; fixing the inner width sidesteps that.
+        inner.setFixedWidth(max(0, int(dock.width) - 12))
+        inner_vbox = QVBoxLayout(inner)
+        inner_vbox.setContentsMargins(0, 0, 0, 0)
+        inner_vbox.setSpacing(0)
         for gi, group in enumerate(dock.groups):
             group_widget = self._build_panel_group(dock.id, gi, group)
-            self._vbox.addWidget(group_widget)
-
-        self._vbox.addStretch()
+            inner_vbox.addWidget(group_widget)
+        inner_vbox.addStretch()
+        scroll.setWidget(inner)
+        self._vbox.addWidget(scroll)
 
     def _build_panel_group(self, dock_id, gi, group):
         widget = DroppablePanelGroup(self._layout_data, dock_id, gi, group, self.rebuild_all)
@@ -271,6 +330,21 @@ class DockPanelWidget(QWidget):
         sep.setStyleSheet(f"background: {THEME_BORDER};")
         vbox.addWidget(sep)
 
+        # Propagate the body's min-height (which the renderer set
+        # from the panel content's required height) up to the
+        # group, plus the tab bar + separator overhead. This lets
+        # the dock's outer scroll area allocate enough vertical
+        # room for each group without forcing width constraints
+        # (which would clip the scrollbar over panel content).
+        total_h = 0
+        for i in range(vbox.count()):
+            item = vbox.itemAt(i)
+            if item is None or item.widget() is None:
+                continue
+            total_h += item.widget().minimumHeight() or item.widget().sizeHint().height()
+        if total_h > 0:
+            widget.setMinimumHeight(total_h)
+
         return widget
 
     def _create_panel_body(self, kind: PanelKind) -> QWidget:
@@ -319,10 +393,22 @@ class DockPanelWidget(QWidget):
                     ctx["document"] = {
                         "recent_colors": list(getattr(model, "recent_colors", [])),
                     }
+            # Wrap dispatch_fn so each widget click in this panel
+            # first re-points the store's active panel id to this
+            # panel's content id. Without this, list_push effects
+            # (panel.recent_colors) write to whichever panel was
+            # last initialized — typically a sibling — and the
+            # Color panel's Black / White / Recent swatches never
+            # add to recent_colors (CLR-012 Python).
+            panel_id = panel_spec.get("id", "")
+            def _dispatch_with_active(action_name, params, _pid=panel_id):
+                if _pid and self._state_store is not None:
+                    self._state_store.set_active_panel(_pid)
+                return self._dispatch_yaml_action(action_name, params)
             return YamlPanelView(
                 panel_spec=panel_spec,
                 store=self._state_store,
-                dispatch_fn=self._dispatch_yaml_action,
+                dispatch_fn=_dispatch_with_active,
                 ctx=ctx,
             )
         # Fallback: simple label placeholder
@@ -652,6 +738,19 @@ class DockPanelWidget(QWidget):
                 elif item.kind == PanelMenuItemKind.SEPARATOR:
                     menu.addSeparator()
 
+        # Apply the active theme to the menu so item text matches
+        # the dock chrome's text color — without this Qt picks the
+        # default system menu colors which can render dark on dark
+        # in the Dark Gray appearance.
+        menu.setStyleSheet(
+            f"QMenu {{ background: {THEME_BG_DARK}; color: {THEME_TEXT}; "
+            f"border: 1px solid {THEME_BORDER}; }}"
+            f"QMenu::item {{ padding: 4px 18px; }}"
+            f"QMenu::item:selected {{ background: {THEME_BG_TAB}; }}"
+            f"QMenu::item:disabled {{ color: {THEME_TEXT_HINT}; }}"
+            f"QMenu::separator {{ height: 1px; background: {THEME_BORDER}; "
+            f"margin: 4px 6px; }}"
+        )
         menu.exec(self.cursor().pos())
 
     def _get_panel_state(self, kind: PanelKind) -> dict:
@@ -684,6 +783,30 @@ class DockPanelWidget(QWidget):
             mode = params["mode"]
             cmd = f"mode_{mode}"
             panel_dispatch(kind, cmd, addr, self._layout_data)
+            # Also push the mode into the YAML panel state so the
+            # color panel's `visible: panel.mode == "<mode>"`
+            # bindings on the per-mode slider columns re-evaluate
+            # and only the selected mode's sliders show. Without
+            # this the layout's color_panel_mode is updated but the
+            # panel state's `mode` key stays at its init value, so
+            # the visible sliders don't change (CLR-022 Python).
+            if self._state_store is not None:
+                self._state_store.set_panel("color_panel_content", "mode", mode)
+                # Switching to Web Safe RGB snaps the current
+                # color to the nearest web-safe step (multiples of
+                # 51). Other modes don't snap. Mirrors the OCaml
+                # set_color_panel_mode → web-safe-snap branch.
+                if mode == "web_safe_rgb":
+                    ps = self._state_store.get_panel_state(
+                        "color_panel_content") or {}
+                    def _snap(name):
+                        v = ps.get(name)
+                        if isinstance(v, (int, float)):
+                            n = int(round(v / 51.0) * 51)
+                            n = max(0, min(255, n))
+                            self._state_store.set_panel(
+                                "color_panel_content", name, n)
+                    _snap("r"); _snap("g"); _snap("bl")
         elif action_name == "invert_active_color":
             panel_dispatch(kind, "invert_color", addr, self._layout_data,
                           model=self._get_model() if self._get_model else None)

@@ -244,6 +244,14 @@ public struct ContentView: View {
                 }
             }
             .coordinateSpace(name: "paneContainer")
+            // Catch dock-tab / dock-grip drags that release outside any
+            // dock area (i.e. on the canvas) and convert the drop into
+            // a detach-into-floating-dock at the cursor. Without this
+            // the drag visually moves the tab but the drop is a no-op
+            // — the user can't pop a panel out of the dock. Mirrors
+            // OCaml's canvas-side drop-handler hook in dock_panel.ml.
+            .onDrop(of: [dockDragUTType], delegate: DockDetachDropDelegate(
+                workspaceLayout: $workspace.workspaceLayout))
             .frame(minWidth: 640, minHeight: 480)
             .overlay {
                 SwiftUI.Color.clear
@@ -835,22 +843,49 @@ struct FillStrokeWidget: View {
             .buttonStyle(.plain)
             .position(x: 4, y: totalSize - 4)
 
-            // Background square (behind)
-            fillStrokeSquare(isFill: !model.fillOnTop)
-                .position(x: offset + squareSize / 2, y: offset + squareSize / 2)
-
-            // Foreground square (on top)
-            fillStrokeSquare(isFill: model.fillOnTop)
-                .position(x: squareSize / 2, y: squareSize / 2)
+            // Fill always at upper-left, stroke always at lower-right.
+            // ZStack render order determines z-order: render the
+            // INACTIVE one first (behind) and the active one second
+            // (on top). Without this, switching active swapped the
+            // squares' positions instead of just changing what's on
+            // top — surprising and against Illustrator convention.
+            if model.fillOnTop {
+                fillStrokeSquare(isFill: false)
+                    .position(x: offset + squareSize / 2, y: offset + squareSize / 2)
+                fillStrokeSquare(isFill: true)
+                    .position(x: squareSize / 2, y: squareSize / 2)
+            } else {
+                fillStrokeSquare(isFill: true)
+                    .position(x: squareSize / 2, y: squareSize / 2)
+                fillStrokeSquare(isFill: false)
+                    .position(x: offset + squareSize / 2, y: offset + squareSize / 2)
+            }
         }
         .frame(width: totalSize, height: totalSize)
     }
 
     @ViewBuilder
     private func fillStrokeSquare(isFill: Bool) -> some View {
-        let color: SwiftUI.Color? = isFill
-            ? model.defaultFill.map { swiftColor($0.color) }
-            : model.defaultStroke.map { swiftColor($0.color) }
+        // Resolve from the selection first so the widget tracks the
+        // canvas — selecting a differently-coloured shape should
+        // surface its colors here, not the (potentially stale) tab
+        // defaults. Falls back to defaults when no selection.
+        let resolved: Color? = {
+            if isFill {
+                switch selectionFillSummary(model.document) {
+                case .uniform(let f?): return f.color
+                case .uniform(nil): return nil
+                default: return model.defaultFill?.color
+                }
+            } else {
+                switch selectionStrokeSummary(model.document) {
+                case .uniform(let s?): return s.color
+                case .uniform(nil): return nil
+                default: return model.defaultStroke?.color
+                }
+            }
+        }()
+        let color: SwiftUI.Color? = resolved.map(swiftColor)
 
         ZStack {
             if let c = color {
@@ -861,9 +896,13 @@ struct FillStrokeWidget: View {
                         .frame(width: squareSize, height: squareSize)
                         .border(SwiftUI.Color.gray.opacity(0.5), width: 0.5)
                 } else {
-                    // Stroke square: thick border, transparent center
+                    // Stroke square: thick colored border, transparent
+                    // center (hollow ring). Matches Illustrator's
+                    // stroke-swatch convention; the user can see the
+                    // fill behind through the center when stroke is
+                    // on top.
                     Rectangle()
-                        .fill(SwiftUI.Color(nsColor: NSColor(white: 0.25, alpha: 1.0)))
+                        .fill(SwiftUI.Color.clear)
                         .frame(width: squareSize, height: squareSize)
                         .overlay(
                             Rectangle()
@@ -885,6 +924,11 @@ struct FillStrokeWidget: View {
                 }
             }
         }
+        // Force the entire square's bounds to hit-test, even where
+        // the fill is transparent (hollow stroke swatch). Without
+        // contentShape, clicks on the stroke ring's center fell
+        // through and the active-target switch never fired.
+        .contentShape(Rectangle().size(width: squareSize, height: squareSize))
         .onTapGesture(count: 2) {
             onDoubleClick(isFill)
         }
@@ -895,23 +939,51 @@ struct FillStrokeWidget: View {
     }
 
     private func swapColors() {
-        let oldFill = model.defaultFill
-        let oldStroke = model.defaultStroke
-        if let s = oldStroke {
-            model.defaultFill = Fill(color: s.color)
-        } else {
-            model.defaultFill = nil
-        }
-        if let f = oldFill {
-            model.defaultStroke = Stroke(color: f.color)
-        } else {
-            model.defaultStroke = nil
+        // Pull current colors from the SELECTION first (matching what
+        // the widget displays — see fillStrokeSquare). Fall back to
+        // tab defaults when no selection / non-uniform. Swapping based
+        // on defaults alone produced "random" colors when the
+        // defaults had drifted from the selection's actual fill /
+        // stroke (e.g. the user changed colors via Color panel
+        // slider edits that wrote to the selection).
+        let curFill: Fill? = {
+            switch selectionFillSummary(model.document) {
+            case .uniform(let f?): return f
+            case .uniform(nil): return nil
+            default: return model.defaultFill
+            }
+        }()
+        let curStroke: Stroke? = {
+            switch selectionStrokeSummary(model.document) {
+            case .uniform(let s?): return s
+            case .uniform(nil): return nil
+            default: return model.defaultStroke
+            }
+        }()
+        let newFill: Fill? = curStroke.map { Fill(color: $0.color) }
+        let newStroke: Stroke? = curFill.map { Stroke(color: $0.color) }
+        model.defaultFill = newFill
+        model.defaultStroke = newStroke
+        if !model.document.selection.isEmpty {
+            let ctrl = Controller(model: model)
+            model.snapshot()
+            ctrl.setSelectionFill(newFill)
+            ctrl.setSelectionStroke(newStroke)
         }
     }
 
     private func resetDefaults() {
+        // Reset both the tab default and the selection (if any) so
+        // the canvas reflects the new defaults right away.
         model.defaultFill = nil
-        model.defaultStroke = Stroke(color: .black)
+        let newStroke = Stroke(color: .black)
+        model.defaultStroke = newStroke
+        if !model.document.selection.isEmpty {
+            let ctrl = Controller(model: model)
+            model.snapshot()
+            ctrl.setSelectionFill(nil)
+            ctrl.setSelectionStroke(newStroke)
+        }
     }
 
     private func swiftColor(_ c: Color) -> SwiftUI.Color {

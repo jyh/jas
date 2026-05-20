@@ -113,8 +113,41 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     let mut m = serde_json::Map::new();
     m.insert("mode".into(), J::String(mode_str.into()));
 
-    // Compute slider values from the active color
-    if let Some(color) = st.active_color() {
+    // Resolve the "active color" the color panel should reflect.
+    // Priority: the selection's uniform fill/stroke (so changing
+    // selection updates the sliders) → tab default → app default.
+    // Without this, active_color() returned only the tab/app default,
+    // which is unchanged when the user clicks a differently-colored
+    // shape on the canvas — the sliders would stay stuck on the old
+    // panel-init values.
+    let panel_color: Option<crate::geometry::element::Color> = {
+        use crate::document::controller::{FillSummary, StrokeSummary,
+            selection_fill_summary, selection_stroke_summary};
+        st.tab().and_then(|t| {
+            if st.fill_on_top {
+                match selection_fill_summary(t.model.document()) {
+                    FillSummary::Uniform(Some(f)) => Some(f.color),
+                    FillSummary::Uniform(None) => None,
+                    _ => t.model.default_fill.map(|f| f.color),
+                }
+            } else {
+                match selection_stroke_summary(t.model.document()) {
+                    StrokeSummary::Uniform(Some(s)) => Some(s.color),
+                    StrokeSummary::Uniform(None) => None,
+                    _ => t.model.default_stroke.map(|s| s.color),
+                }
+            }
+        }).or_else(|| {
+            if st.fill_on_top {
+                st.app_default_fill.map(|f| f.color)
+            } else {
+                st.app_default_stroke.map(|s| s.color)
+            }
+        })
+    };
+
+    // Compute slider values from the resolved active color
+    if let Some(color) = panel_color {
         let (rf, gf, bf, _) = color.to_rgba();
         let r = (rf * 255.0).round() as u8;
         let g = (gf * 255.0).round() as u8;
@@ -608,22 +641,61 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     m.insert("fill_on_top".into(), J::Bool(st.fill_on_top));
     m.insert("active_tool".into(), J::String(tool_kind_name(st.active_tool).into()));
 
-    // Override fill/stroke colors from tab state or app-level defaults.
-    let fill_color = st.tab()
-        .and_then(|t| t.model.default_fill)
-        .or(st.app_default_fill);
-    let stroke_color = st.tab()
-        .and_then(|t| t.model.default_stroke)
-        .or(st.app_default_stroke);
-    if let Some(fill) = fill_color {
-        let (r, g, b, _) = fill.color.to_rgba();
-        m.insert("fill_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
-            (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
+    // Override fill/stroke colors from the active selection's fill /
+    // stroke summary (so the Color panel's swatch reflects whatever
+    // the user just clicked on the canvas), falling back to the tab
+    // / app-level defaults when nothing is selected. Empty string for
+    // "uniform but no fill" (the swatch renderer treats empty as the
+    // diagonal-line "no fill" indicator).
+    let (sel_fill_summary, sel_stroke_summary) = st.tab()
+        .map(|t| (
+            crate::document::controller::selection_fill_summary(t.model.document()),
+            crate::document::controller::selection_stroke_summary(t.model.document()),
+        ))
+        .unwrap_or_else(|| (
+            crate::document::controller::FillSummary::NoSelection,
+            crate::document::controller::StrokeSummary::NoSelection,
+        ));
+    use crate::document::controller::{FillSummary, StrokeSummary};
+    let fill_string: Option<String> = match sel_fill_summary {
+        FillSummary::Uniform(Some(f)) => {
+            let (r, g, b, _) = f.color.to_rgba();
+            Some(format!("#{:02x}{:02x}{:02x}",
+                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8))
+        }
+        FillSummary::Uniform(None) => Some(String::new()),
+        FillSummary::Mixed => None,
+        FillSummary::NoSelection => st.tab()
+            .and_then(|t| t.model.default_fill)
+            .or(st.app_default_fill)
+            .map(|f| {
+                let (r, g, b, _) = f.color.to_rgba();
+                format!("#{:02x}{:02x}{:02x}",
+                    (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+            }),
+    };
+    let stroke_string: Option<String> = match sel_stroke_summary {
+        StrokeSummary::Uniform(Some(s)) => {
+            let (r, g, b, _) = s.color.to_rgba();
+            Some(format!("#{:02x}{:02x}{:02x}",
+                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8))
+        }
+        StrokeSummary::Uniform(None) => Some(String::new()),
+        StrokeSummary::Mixed => None,
+        StrokeSummary::NoSelection => st.tab()
+            .and_then(|t| t.model.default_stroke)
+            .or(st.app_default_stroke)
+            .map(|s| {
+                let (r, g, b, _) = s.color.to_rgba();
+                format!("#{:02x}{:02x}{:02x}",
+                    (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+            }),
+    };
+    if let Some(s) = fill_string {
+        m.insert("fill_color".into(), J::String(s));
     }
-    if let Some(stroke) = stroke_color {
-        let (r, g, b, _) = stroke.color.to_rgba();
-        m.insert("stroke_color".into(), J::String(format!("#{:02x}{:02x}{:02x}",
-            (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)));
+    if let Some(s) = stroke_string {
+        m.insert("stroke_color".into(), J::String(s));
     }
 
     // Mutable swatch libraries for rendering
@@ -725,13 +797,19 @@ pub(crate) fn build_dock_groups(
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
     let group_count = groups.len();
-    let cur_drag = drag_source();
-    let cur_drop = drop_target_sig();
+    // peek() reads drag_source / drop_target_sig without subscribing
+    // the dock_panel render to them. Subscribing causes a full
+    // dock_panel re-render mid-drag (when ondragstart writes the
+    // signal), which destroys the source DOM element and kills the
+    // browser's drag operation — dragend / drop / mouseup never
+    // fire and the panel can't be detached. Drop-target visualization
+    // (carets, highlights) is sacrificed but the drag actually works.
+    let cur_drag = drag_source.peek().clone();
+    let cur_drop = drop_target_sig.peek().clone();
 
     groups.iter().enumerate().map(|(gi, group)| {
         let act_tabs = act.clone();
         let act_chevron = act.clone();
-        let act_collapse = act.clone();
         let act_drop = act.clone();
         let group_collapsed = group.collapsed;
 
@@ -748,7 +826,6 @@ pub(crate) fn build_dock_groups(
 
         // Tab bar buttons — each tab is individually draggable
         let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
-            let act_dragend = act_tabs.clone();
             let act_click = act_tabs.clone();
             let label = crate::panels::panel_label(kind);
             let is_active = pi == group.active;
@@ -785,28 +862,12 @@ pub(crate) fn build_dock_groups(
                         })));
                         was_dropped.set(false);
                     },
-                    ondragend: move |_| {
-                        if !was_dropped() {
-                            let (x, y) = last_drag_pos();
-                            let cur_tgt = drop_target_sig();
-                            (act_dragend.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                let addr = PanelAddr {
-                                    group: GroupAddr { dock_id: did, group_idx: gi },
-                                    panel_idx: pi,
-                                };
-                                if let Some(DropTarget::Edge(edge)) = cur_tgt {
-                                    if let Some(fid) = st.workspace_layout.detach_panel(addr, x, y) {
-                                        st.workspace_layout.snap_to_edge(fid, edge);
-                                    }
-                                } else {
-                                    st.workspace_layout.detach_panel(addr, x, y);
-                                }
-                            }));
-                        }
-                        drag_source.set(None);
-                        drop_target_sig.set(None);
-                        was_dropped.set(false);
-                    },
+                    // ondragend is handled at the app-level container
+                    // (see app.rs). The dock_panel re-renders mid-drag
+                    // when drag_source changes, destroying this div
+                    // before release; a handler bound here would never
+                    // fire. The bubbled event reaches the always-
+                    // mounted app root reliably.
                     ondragover: move |evt: Event<DragData>| {
                         evt.prevent_default();
                         evt.stop_propagation();
@@ -979,27 +1040,9 @@ pub(crate) fn build_dock_groups(
                             })));
                             was_dropped.set(false);
                         },
-                        ondragend: move |_| {
-                            if !was_dropped() {
-                                let (x, y) = last_drag_pos();
-                                let cur_tgt = drop_target_sig();
-                                let act_detach = act_collapse.clone();
-                                (act_detach.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    let addr = GroupAddr { dock_id: did, group_idx: gi };
-                                    if let Some(DropTarget::Edge(edge)) = cur_tgt {
-                                        // Detach then snap to edge
-                                        if let Some(fid) = st.workspace_layout.detach_group(addr, x, y) {
-                                            st.workspace_layout.snap_to_edge(fid, edge);
-                                        }
-                                    } else {
-                                        st.workspace_layout.detach_group(addr, x, y);
-                                    }
-                                }));
-                            }
-                            drag_source.set(None);
-                            drop_target_sig.set(None);
-                            was_dropped.set(false);
-                        },
+                        // ondragend handled at app-level (see app.rs)
+                        // — same re-render-destroys-source rationale
+                        // as the panel-tab grip above.
                         "\u{2801}\u{2801}"
                     }
 

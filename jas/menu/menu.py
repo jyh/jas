@@ -301,13 +301,26 @@ def create_menus(window: QMainWindow) -> None:
                             layout.close_panel(PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi))
                             if hasattr(window, 'dock_panel'):
                                 window.dock_panel.rebuild()
+                            if hasattr(window, 'sync_panel_menu_checks'):
+                                window.sync_panel_menu_checks()
                             return
         else:
             layout.show_panel(kind)
             if hasattr(window, 'dock_panel'):
                 window.dock_panel.rebuild()
+        if hasattr(window, 'sync_panel_menu_checks'):
+            window.sync_panel_menu_checks()
 
+    # Panel toggle entries: track each QAction by PanelKind so the
+    # checkmark can be re-synced from layout state after any change
+    # — close from header X, drag-out to floating, layout restore,
+    # programmatic show/close. Without sync_panel_menu_checks, the
+    # menu's checkmark only updated when the menu action itself
+    # toggled the panel (the user-clicked path), so external
+    # visibility changes left stale checks. Mirrors the OCaml
+    # sync_panel_checks pattern (CLR-001 OCaml notes).
     from workspace.workspace_layout import PanelKind
+    panel_menu_actions: dict = {}
     for kind, label in [(PanelKind.LAYERS, "&Layers"), (PanelKind.COLOR, "&Color"),
                         (PanelKind.SWATCHES, "&Swatches"), (PanelKind.STROKE, "&Stroke"),
                         (PanelKind.PROPERTIES, "&Properties"),
@@ -319,7 +332,25 @@ def create_menus(window: QMainWindow) -> None:
                         (PanelKind.OPACITY, "&Opacity"),
                         (PanelKind.MAGIC_WAND, "&Magic Wand")]:
         action = window_menu.addAction(label)
+        action.setCheckable(True)
         action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))
+        panel_menu_actions[kind] = action
+
+    def _sync_panel_menu_checks() -> None:
+        if not hasattr(window, 'workspace_layout'):
+            return
+        layout = window.workspace_layout
+        for k, act in panel_menu_actions.items():
+            try:
+                act.setChecked(layout.is_panel_visible(k))
+            except Exception:
+                pass
+
+    # Stash the syncer on the window so dock_panel.rebuild can fire
+    # it after a rebuild and external paths (drag-out, layout
+    # restore) can also flip the checks.
+    window.sync_panel_menu_checks = _sync_panel_menu_checks
+    _sync_panel_menu_checks()
 
 
 def _refresh(window):

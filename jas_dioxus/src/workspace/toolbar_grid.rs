@@ -279,6 +279,13 @@ pub(crate) fn ToolbarGrid(
                                 if let Some(panel_kind) = panel_id_to_kind(&panel_id) {
                                     (act_dbl.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                                         st.workspace_layout.show_panel(panel_kind);
+                                        if panel_kind == super::workspace::PanelKind::Color {
+                                            // Per COLOR.md §Panel
+                                            // initialization rule:
+                                            // mode resets to default
+                                            // (HSB) on each reopen.
+                                            st.color_panel_mode = super::color_panel_view::ColorMode::Hsb;
+                                        }
                                     }));
                                 }
                                 return;

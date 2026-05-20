@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QSizePolicy, QSpacerItem,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 from workspace_interpreter.expr import evaluate, evaluate_text
 from workspace_interpreter.state_store import StateStore
@@ -39,6 +40,18 @@ def render_element(el: dict, store: StateStore, ctx: dict,
         return _render_repeat(el, store, ctx, dispatch_fn)
 
     etype = el.get("type", "placeholder")
+
+    # Templates leave a ``_template:`` marker on the expanded element
+    # so the renderer can recognise the template by name. The
+    # fill_stroke_widget template expands to a generic container of
+    # swatches/buttons positioned via style.position.{x,y}, which the
+    # default container renderer ignores — the swatches stack
+    # vertically and end up hidden behind the chrome. Detect the
+    # marker here and substitute the toolbar's purpose-built
+    # FillStrokeWidget so the panel matches the toolbar pixel-for-
+    # pixel (CLR-002 Python).
+    if el.get("_template") == "fill_stroke_widget":
+        return _render_fill_stroke_widget(el, store, ctx, dispatch_fn)
 
     # Check native widget registry first
     native = widget_registry.create(etype, el, store, ctx)
@@ -120,7 +133,59 @@ def _render_container(el, store, ctx, dispatch_fn):
         else:
             layout.addWidget(child_widget)
 
+    # Propagate child minimum heights up to this container's
+    # minimumHeight without touching width. Qt's layouts compute
+    # minimumSize from children but only update the widget's
+    # minimumSize automatically if SetMinimumSize is enabled —
+    # which also forces minimumWidth, blocking the scroll-area
+    # viewport from shrinking the content to fit (CLR-002 Python).
+    # Setting height-only avoids that.
+    _set_min_height_from_children(widget, layout, is_row)
     return widget
+
+
+def _set_min_height_from_children(widget, layout, is_row: bool):
+    """Set widget.minimumHeight from children's minimumHeights.
+
+    Row (QHBoxLayout): max of children's mins (height = tallest).
+    Column (QVBoxLayout): sum of children's mins + spacing + margins.
+
+    Skips children that are explicitly hidden via setVisible(False)
+    — e.g. the Color panel's cp_sliders_grayscale / cp_sliders_rgb
+    / cp_sliders_cmyk / cp_sliders_web_safe siblings under
+    cp_sliders_col, only one of which is visible at a time. Without
+    this skip the column's min would be 5× the active mode's
+    height and the visible slider rows would stretch to fill the
+    inflated column.
+    """
+    margins = layout.contentsMargins()
+    margin_h = margins.top() + margins.bottom()
+    spacing = layout.spacing() if layout.spacing() > 0 else 0
+    child_mins = []
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item is None:
+            continue
+        w = item.widget()
+        if w is None:
+            continue
+        # isVisibleTo(parent) returns False only when setVisible(False)
+        # was explicitly called on the child (e.g. bind.visible
+        # binding evaluated false). isHidden() / isVisible() would
+        # falsely report ALL freshly-created widgets as hidden
+        # since the dock hasn't been shown yet.
+        if not w.isVisibleTo(widget):
+            continue
+        child_mins.append(w.minimumSize().height())
+    if not child_mins:
+        return
+    if is_row:
+        total = max(child_mins)
+    else:
+        total = sum(child_mins) + spacing * max(0, len(child_mins) - 1)
+    total += margin_h
+    if total > widget.minimumHeight():
+        widget.setMinimumHeight(total)
 
 
 def _render_grid(el, store, ctx, dispatch_fn):
@@ -170,6 +235,35 @@ def _render_button(el, store, ctx, dispatch_fn):
     else:
         label = static_label
     btn = QPushButton(label)
+    # Style with the active theme's text color so dialog buttons
+    # (OK / Cancel / Color Swatches) render readable text on Dark
+    # Gray — without this Qt's default uses near-black system text
+    # which disappears on dark backgrounds (CLR-200/231 Python).
+    try:
+        from workspace.dock_panel import THEME_TEXT
+        btn.setStyleSheet(f"QPushButton {{ color: {THEME_TEXT}; }}")
+    except Exception:
+        pass
+    # style.opacity < 1 — render dimmed AND insensitive. Used by
+    # the color picker's "Color Swatches" button as a YAML
+    # placeholder (CLR-231 Python).
+    try:
+        st = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
+        op = st.get("opacity")
+        if isinstance(op, (int, float)) and op < 1.0:
+            from PySide6.QtWidgets import QGraphicsOpacityEffect
+            effect = QGraphicsOpacityEffect(btn)
+            effect.setOpacity(float(op))
+            btn.setGraphicsEffect(effect)
+            btn.setEnabled(False)
+    except Exception:
+        pass
+    # Don't claim Enter as the dialog's default — that would let
+    # Enter inside a number_input dismiss the picker as if the
+    # user clicked OK, before the value-box's editingFinished
+    # commits the typed value to dialog state (CLR-214 Python).
+    btn.setAutoDefault(False)
+    btn.setDefault(False)
     # Opacity panel: op_make_mask dispatches Controller make or
     # release based on selection_has_mask. The button has no
     # `action` in yaml — routing is resolved here against the
@@ -449,25 +543,144 @@ def _wire_opacity_link_indicator_click(btn: QPushButton, el: dict, ctx: dict):
 
 def _render_slider(el, store, ctx, dispatch_fn):
     slider = QSlider(Qt.Horizontal)
-    slider.setMinimum(el.get("min", 0))
-    slider.setMaximum(el.get("max", 100))
-    slider.setSingleStep(el.get("step", 1))
+    # min / max / step may arrive as expression strings (template
+    # substitution leaves them as the literal "${max}" when used
+    # via slider_row template params); coerce to int with a safe
+    # fallback.
+    def _i(v, default):
+        if isinstance(v, (int, float)):
+            return int(v)
+        if isinstance(v, str):
+            try:
+                return int(float(v))
+            except ValueError:
+                return default
+        return default
+    slider.setMinimum(_i(el.get("min", 0), 0))
+    slider.setMaximum(_i(el.get("max", 100), 100))
+    step = _i(el.get("step", 1), 1)
+    slider.setSingleStep(step)
+    if step > 1:
+        slider.setPageStep(step)
+
+    raw_bind = el.get("bind")
+    if isinstance(raw_bind, dict):
+        value_expr = raw_bind.get("value") if isinstance(raw_bind.get("value"), str) else None
+    elif isinstance(raw_bind, str):
+        value_expr = raw_bind
+    else:
+        value_expr = None
+    bind = raw_bind if isinstance(raw_bind, dict) else {}
+    if value_expr is not None:
+        try:
+            init_result = evaluate(value_expr, store.eval_context(ctx))
+            if isinstance(init_result.value, (int, float)):
+                slider.setValue(int(init_result.value))
+        except Exception:
+            pass
+
+    # Writeback path: drag fires valueChanged per pixel, so push the
+    # new value into panel/dialog state on every change. Without
+    # this the slider is purely cosmetic — moving the H slider
+    # doesn't update panel.h and the canvas color stays put
+    # (CLR-022..29 Python).
+    if isinstance(value_expr, str):
+        if value_expr.startswith("panel."):
+            panel_field = value_expr[len("panel."):]
+            widget_pid = ctx.get("_panel_id")
+            # Snap to step before writing — Qt's setSingleStep only
+            # governs keyboard arrows, so drag / click would write
+            # raw 0–255 values to the panel state. Snapping at the
+            # write boundary forces the Web Safe RGB sliders to
+            # commit only multiples of 51 (CLR-060 Python).
+            def _on_change(v, _f=panel_field, _pid=widget_pid, _s=step):
+                snapped = int(round(v / _s) * _s) if _s > 1 else int(v)
+                # Bounce the slider's visible position back to the
+                # snapped value so the thumb sits on a step edge.
+                if _s > 1 and snapped != int(v):
+                    slider.blockSignals(True)
+                    slider.setValue(snapped)
+                    slider.blockSignals(False)
+                pid = _pid or store.get_active_panel_id()
+                if pid is not None:
+                    store.set_panel(pid, _f, snapped)
+            slider.valueChanged.connect(_on_change)
+            # Slider release on a Color-panel channel commits the
+            # final color into the model's recent_colors list. Live
+            # drag goes through set_active_color_live which only
+            # updates the default + selection; the recent push and
+            # the undo snapshot belong to the commit point
+            # (CLR-022..29 Python).
+            if widget_pid == "color_panel_content" and panel_field in (
+                "h", "s", "b", "r", "g", "bl", "c", "m", "y", "k"):
+                get_model = ctx.get("_get_model")
+                def _on_release():
+                    model = get_model() if callable(get_model) else None
+                    if model is None:
+                        return
+                    from panels.panel_menu import (
+                        set_active_color, _compute_helper)
+                    ps = store.get_panel_state("color_panel_content") or {}
+                    mode = ps.get("mode", "hsb")
+                    color = _compute_helper(ps, mode)
+                    if color is not None:
+                        model.snapshot()
+                        set_active_color(color, model)
+                slider.sliderReleased.connect(_on_release)
+        elif value_expr.startswith("dialog."):
+            field = value_expr[len("dialog."):]
+            def _on_change_dlg(v, _f=field):
+                store.set_dialog(_f, int(v))
+            slider.valueChanged.connect(_on_change_dlg)
     return slider
 
 
-_INPUT_DARK_CSS = (
-    "QSpinBox, QLineEdit { color: #ccc; background: #2a2a2a; "
-    "border: 1px solid #555; border-radius: 2px; padding: 1px 4px; }"
-)
+def _input_css():
+    """Build the QSpinBox / QLineEdit stylesheet from the active
+    appearance's theme tokens so value boxes re-skin alongside the
+    rest of the panel (CLR-261/262 Python — was hardcoded dark on
+    every appearance).
+    """
+    try:
+        from workspace.dock_panel import (
+            THEME_TEXT, THEME_BG_DARK, THEME_BORDER,
+        )
+        return (
+            f"QSpinBox, QLineEdit {{ color: {THEME_TEXT}; "
+            f"background: {THEME_BG_DARK}; "
+            f"border: 1px solid {THEME_BORDER}; "
+            f"border-radius: 2px; padding: 2px 4px; }}"
+        )
+    except Exception:
+        return (
+            "QSpinBox, QLineEdit { color: #ccc; background: #2a2a2a; "
+            "border: 1px solid #555; border-radius: 2px; padding: 2px 4px; }"
+        )
+
+
+_INPUT_DARK_CSS = _input_css()
+_INPUT_MIN_HEIGHT = 26
 
 
 def _render_number_input(el, store, ctx, dispatch_fn):
     spin = QSpinBox()
-    spin.setStyleSheet(_INPUT_DARK_CSS)
+    spin.setStyleSheet(_input_css())
+    spin.setMinimumHeight(_INPUT_MIN_HEIGHT)
     spin.setMinimum(el.get("min", 0))
     spin.setMaximum(el.get("max", 999999))
-    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
-    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    # Accept both the dict form (bind: { value: "panel.X" }) and
+    # the bare-string form (bind: "dialog.X") — the color picker
+    # uses the bare-string form via the radio_field_row template,
+    # so without this the picker's H/S/B/etc. value boxes never
+    # commit (CLR-214 Python).
+    raw_bind = el.get("bind")
+    if isinstance(raw_bind, dict):
+        value_expr = raw_bind.get("value") if isinstance(raw_bind.get("value"), str) else None
+    elif isinstance(raw_bind, str):
+        value_expr = raw_bind
+    else:
+        value_expr = None
+    bind = raw_bind if isinstance(raw_bind, dict) else {}
     # Initial value from bind.value (panel.X or dialog.X).
     if value_expr is not None:
         try:
@@ -482,12 +695,45 @@ def _render_number_input(el, store, ctx, dispatch_fn):
     if isinstance(value_expr, str):
         if value_expr.startswith("dialog."):
             field = value_expr[len("dialog."):]
+            # Only commit when the user has actually edited the box
+            # (typed or clicked the spinner) since the last commit.
+            # editingFinished otherwise re-fires on focus loss with
+            # the stale value, and the YAML setter cascades — e.g.
+            # clicking OK after editing the hex field triggers the H
+            # box's editingFinished with H=180, which runs the H
+            # setter and rewrites color back from #ff0000 to cyan
+            # (CLR-218 Python).
+            user_edited = [False]
+            le = spin.lineEdit()
+            if le is not None:
+                le.textEdited.connect(lambda _t: user_edited.__setitem__(0, True))
             def _on_change(v):
+                # textEdited didn't fire — must be spin arrows
+                # (those change value without textEdited), so this
+                # IS a user edit. valueChanged also fires for
+                # programmatic setValue, which we want to skip —
+                # those happen during binding refresh AFTER a
+                # sibling setter (H box gets refreshed when hex set
+                # changes color → dialog.h getter recomputes). Use
+                # the dedup check to distinguish: if the value
+                # matches current dialog state, the change was a
+                # binding sync, not a user edit.
+                cur = store.get_dialog(field)
+                if isinstance(cur, (int, float)) and int(cur) == int(v):
+                    return
+                user_edited[0] = True
                 store.set_dialog(field, v)
             spin.valueChanged.connect(_on_change)
             def _on_finished():
+                if not user_edited[0]:
+                    return
+                user_edited[0] = False
                 spin.interpretText()
-                store.set_dialog(field, spin.value())
+                v = spin.value()
+                cur = store.get_dialog(field)
+                if isinstance(cur, (int, float)) and int(cur) == int(v):
+                    return
+                store.set_dialog(field, v)
             spin.editingFinished.connect(_on_finished)
         elif value_expr.startswith("panel."):
             panel_field = value_expr[len("panel."):]
@@ -523,15 +769,22 @@ def _render_number_input(el, store, ctx, dispatch_fn):
 
 def _render_text_input(el, store, ctx, dispatch_fn):
     edit = QLineEdit()
-    edit.setStyleSheet(_INPUT_DARK_CSS)
+    edit.setStyleSheet(_input_css())
+    edit.setMinimumHeight(_INPUT_MIN_HEIGHT)
     placeholder = el.get("placeholder", "")
     if placeholder:
         edit.setPlaceholderText(str(placeholder))
     max_len = el.get("max_length")
     if max_len:
         edit.setMaxLength(int(max_len))
-    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
-    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    raw_bind = el.get("bind")
+    if isinstance(raw_bind, dict):
+        value_expr = raw_bind.get("value") if isinstance(raw_bind.get("value"), str) else None
+    elif isinstance(raw_bind, str):
+        value_expr = raw_bind
+    else:
+        value_expr = None
+    bind = raw_bind if isinstance(raw_bind, dict) else {}
     if value_expr is not None:
         try:
             init = evaluate(value_expr, store.eval_context(ctx))
@@ -542,12 +795,21 @@ def _render_text_input(el, store, ctx, dispatch_fn):
             pass
     if isinstance(value_expr, str) and value_expr.startswith("dialog."):
         field = value_expr[len("dialog."):]
-        # Commit on focus loss / Enter (editingFinished) so OK reads
-        # the typed value. textChanged would fire per keystroke
-        # which is noisier than the dialog needs.
         def _on_finished():
-            store.set_dialog(field, edit.text())
+            v = edit.text()
+            cur = store.get_dialog(field)
+            if isinstance(cur, str) and cur == v:
+                return
+            store.set_dialog(field, v)
         edit.editingFinished.connect(_on_finished)
+    elif isinstance(value_expr, str) and value_expr.startswith("panel."):
+        panel_field = value_expr[len("panel."):]
+        widget_pid = ctx.get("_panel_id")
+        def _on_finished_panel():
+            pid = widget_pid or store.get_active_panel_id()
+            if pid is not None:
+                store.set_panel(pid, panel_field, edit.text())
+        edit.editingFinished.connect(_on_finished_panel)
     return edit
 
 
@@ -563,7 +825,7 @@ def _render_length_input(el, store, ctx, dispatch_fn):
     from workspace_interpreter.length import format_length, parse_length
 
     edit = QLineEdit()
-    edit.setStyleSheet(_INPUT_DARK_CSS)
+    edit.setStyleSheet(_input_css())
     placeholder = el.get("placeholder", "")
     if placeholder:
         edit.setPlaceholderText(str(placeholder))
@@ -757,11 +1019,20 @@ def _maybe_icon_toggle(el, store, ctx):
 
 
 def _wire_dialog_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict):
-    """Initialise + wire writeback for ``bind.checked: dialog.X`` on a
-    checkbox/toggle. No-op for non-dialog binds (those flow through
-    _apply_bindings + the panel-level subscriber)."""
-    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
-    checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
+    """Initialise + wire writeback for ``bind.checked: dialog.X``
+    OR the bare-string ``bind: dialog.X`` form (used by the color
+    picker's Only-Web-Colors toggle) on a checkbox / toggle. No-op
+    for non-dialog binds (those flow through _apply_bindings +
+    the panel-level subscriber)."""
+    raw_bind = el.get("bind")
+    if isinstance(raw_bind, dict):
+        checked_expr = raw_bind.get("checked") if isinstance(raw_bind.get("checked"), str) else None
+        if checked_expr is None:
+            checked_expr = raw_bind.get("value") if isinstance(raw_bind.get("value"), str) else None
+    elif isinstance(raw_bind, str):
+        checked_expr = raw_bind
+    else:
+        checked_expr = None
     if not isinstance(checked_expr, str):
         return
     try:
@@ -775,8 +1046,22 @@ def _wire_dialog_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx: dict)
         field = checked_expr[len("dialog."):]
         def _on_toggled(state: int):
             from PySide6.QtCore import Qt as _Qt
-            store.set_dialog(field, state == _Qt.CheckState.Checked.value
-                             or bool(state))
+            new_val = state == _Qt.CheckState.Checked.value or bool(state)
+            store.set_dialog(field, new_val)
+            # Color picker "Only Web Colors": when toggled ON, snap
+            # each RGB channel of the current color to multiples of
+            # 51 by writing through the r/g/bl setters (which rebuild
+            # canonical color via the rgb() lambda).
+            if field == "web_only" and new_val:
+                for ch in ("r", "g", "bl"):
+                    try:
+                        cur = store.get_dialog(ch)
+                        if isinstance(cur, (int, float)):
+                            snapped = round(cur / 51.0) * 51
+                            snapped = max(0, min(255, int(snapped)))
+                            store.set_dialog(ch, snapped)
+                    except Exception:
+                        pass
         cb.stateChanged.connect(_on_toggled)
 
 
@@ -847,6 +1132,398 @@ def _render_combo_box(el, store, ctx, dispatch_fn):
         else:
             combo.addItem(str(opt), str(opt))
     return combo
+
+
+class _PanelFillStrokeWidget(QWidget):
+    """Color-panel variant of the toolbar's FillStrokeWidget that
+    scales proportionally to its allocated size so it fits in the
+    panel's YAML-declared height (~60 px) without clipping.
+
+    The toolbar's widget is hardcoded to 64x80, which forces the
+    color panel row to grow and overlaps the next row downstream.
+    This widget mirrors the toolbar's paint exactly (overlapping
+    fill + stroke squares with hollow stroke ring, swap-arrow
+    glyph, default-reset icon, and 3 mode buttons across the
+    bottom) but every position and size is derived from the
+    requested overall size. Mode buttons live at y = size * 0.78,
+    matching the YAML template's [mode_y: size * 94/100] ratio
+    minus a few px so they fit within the panel's row height.
+
+    Signals match FillStrokeWidget so the panel renderer's signal
+    wiring stays consistent across widgets.
+    """
+
+    from PySide6.QtCore import Signal as _Signal
+    fill_clicked = _Signal()
+    stroke_clicked = _Signal()
+    fill_double_clicked = _Signal()
+    stroke_double_clicked = _Signal()
+    swap_clicked = _Signal()
+    default_clicked = _Signal()
+    fill_none_clicked = _Signal()
+    stroke_none_clicked = _Signal()
+
+    def __init__(self, width=48, height=60, parent=None):
+        super().__init__(parent)
+        self._fill_color = QColor(255, 255, 255)
+        self._stroke_color = QColor(0, 0, 0)
+        self._fill_on_top = True
+        self.setFixedSize(int(width), int(height))
+
+    def set_fill_color(self, color):
+        self._fill_color = color
+        self.update()
+
+    def set_stroke_color(self, color):
+        self._stroke_color = color
+        self.update()
+
+    def set_fill_on_top(self, on_top):
+        self._fill_on_top = bool(on_top)
+        self.update()
+
+    def _swatch_rect(self, which):
+        from PySide6.QtCore import QRect
+        w = self.width()
+        h = self.height()
+        # Proportions match the YAML template:
+        #   swatch_size = size * 55/100
+        #   fill_x, fill_y = size * 9/100
+        #   stroke_x, stroke_y = size * 33/100
+        # Use the smaller of w/h as the base so the widget stays
+        # square-ish in tall cells.
+        base = min(w, int(h * 64.0 / 80.0))
+        sq = max(8, int(base * 0.55))
+        if which == "fill":
+            return QRect(int(base * 0.09), int(base * 0.09), sq, sq)
+        else:
+            return QRect(int(base * 0.33), int(base * 0.33), sq, sq)
+
+    def _swap_rect(self):
+        from PySide6.QtCore import QRect
+        w = self.width()
+        h = self.height()
+        base = min(w, int(h * 64.0 / 80.0))
+        sz = int(base * 0.30)
+        x = int(base * 0.64)
+        y = int(base * 0.03)
+        return QRect(x, y, sz, sz)
+
+    def _reset_rect(self):
+        from PySide6.QtCore import QRect
+        w = self.width()
+        h = self.height()
+        base = min(w, int(h * 64.0 / 80.0))
+        # Slightly smaller than the YAML's 30% so the mode-button
+        # row below has breathing room — at h=60 a 30% reset
+        # touches a 24% mode button, looking cramped.
+        sz = int(base * 0.22)
+        x = int(base * 0.03)
+        y = int(base * 0.68)
+        return QRect(x, y, sz, sz)
+
+    def _mode_button_rects(self):
+        from PySide6.QtCore import QRect
+        w = self.width()
+        h = self.height()
+        base = min(w, int(h * 64.0 / 80.0))
+        sz = max(8, int(base * 0.22))
+        # Bottom-pin with a 2-px margin so the reset icon (which
+        # ends around 68%+22%=90% of base) gets a few extra pixels
+        # of vertical gap before the mode-button row.
+        y = max(0, h - sz - 2)
+        gap = max(2, int(base * 0.03))
+        x0 = int(base * 0.06)
+        return [
+            QRect(x0,                       y, sz, sz),
+            QRect(x0 + (sz + gap) * 1,      y, sz, sz),
+            QRect(x0 + (sz + gap) * 2,      y, sz, sz),
+        ]
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QPen
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        fr = self._swatch_rect("fill")
+        sr = self._swatch_rect("stroke")
+
+        def draw_fill(r):
+            if self._fill_color is not None:
+                painter.setPen(QPen(QColor("#666"), 1))
+                painter.setBrush(self._fill_color)
+            else:
+                painter.setPen(QPen(QColor("#666"), 1))
+                painter.setBrush(QColor(255, 255, 255))
+            painter.drawRect(r)
+            if self._fill_color is None:
+                painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+                painter.drawLine(r.left() + 1, r.bottom() - 1,
+                                 r.right() - 1, r.top() + 1)
+
+        def draw_stroke(r):
+            if self._stroke_color is None:
+                painter.setPen(QPen(QColor(128, 128, 128), 1))
+                painter.setBrush(QColor(255, 255, 255))
+                painter.drawRect(r)
+                painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+                painter.drawLine(r.left() + 1, r.bottom() - 1,
+                                 r.right() - 1, r.top() + 1)
+            else:
+                bw = max(3, r.width() // 5)  # border width scaled
+                # outline
+                painter.setPen(QPen(QColor(128, 128, 128), 1))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(r)
+                # colored ring
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(self._stroke_color)
+                painter.drawRect(r.left() + 1, r.top() + 1,
+                                 r.width() - 1, bw)
+                painter.drawRect(r.left() + 1, r.bottom() - bw,
+                                 r.width() - 1, bw)
+                painter.drawRect(r.left() + 1, r.top() + bw,
+                                 bw, r.height() - 2 * bw)
+                painter.drawRect(r.right() - bw, r.top() + bw,
+                                 bw, r.height() - 2 * bw)
+                # white center
+                painter.setBrush(QColor(255, 255, 255))
+                painter.drawRect(r.left() + bw + 1, r.top() + bw + 1,
+                                 r.width() - 2 * bw - 1,
+                                 r.height() - 2 * bw - 1)
+
+        if self._fill_on_top:
+            draw_stroke(sr); draw_fill(fr)
+        else:
+            draw_fill(fr); draw_stroke(sr)
+
+        # Swap arrow
+        wr = self._swap_rect()
+        painter.setPen(QPen(_icon_color_or_ccc(), 1))
+        # 4-line arrow glyph
+        painter.drawLine(wr.left(), wr.top(),
+                         wr.left() + wr.width(), wr.top())
+        painter.drawLine(wr.left() + wr.width(), wr.top(),
+                         wr.left() + wr.width(),
+                         wr.top() + wr.height())
+        painter.drawLine(wr.left() + wr.width(),
+                         wr.top() + wr.height(),
+                         wr.left() + wr.width() - 3,
+                         wr.top() + wr.height() - 3)
+        painter.drawLine(wr.left() + wr.width(),
+                         wr.top() + wr.height(),
+                         wr.left() + wr.width() + 3,
+                         wr.top() + wr.height() - 3)
+
+        # Reset icon — small fill + stroke pair
+        rr = self._reset_rect()
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawRect(rr.left() + 3, rr.top() + 3,
+                         rr.width() - 4, rr.height() - 4)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0), 2))
+        painter.drawRect(rr.left(), rr.top(),
+                         rr.width() - 4, rr.height() - 4)
+
+        # Mode buttons
+        rects = self._mode_button_rects()
+        # Color (filled square)
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QColor("#666"))
+        painter.drawRect(rects[0])
+        # Gradient placeholder (dim)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QColor("#444"))
+        painter.drawRect(rects[1])
+        # None (white box with red diagonal)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QColor("#fff"))
+        painter.drawRect(rects[2])
+        painter.setPen(QPen(QColor(255, 0, 0), 1.5))
+        painter.drawLine(rects[2].left() + 1,
+                         rects[2].bottom() - 1,
+                         rects[2].right() - 1,
+                         rects[2].top() + 1)
+
+    def _hit(self, x, y):
+        fr = self._swatch_rect("fill")
+        sr = self._swatch_rect("stroke")
+        if self._swap_rect().contains(x, y):
+            return "swap"
+        if self._reset_rect().contains(x, y):
+            return "reset"
+        rects = self._mode_button_rects()
+        if rects[2].contains(x, y):
+            return "none"
+        if self._fill_on_top:
+            if fr.contains(x, y): return "fill"
+            if sr.contains(x, y): return "stroke"
+        else:
+            if sr.contains(x, y): return "stroke"
+            if fr.contains(x, y): return "fill"
+        return None
+
+    def mousePressEvent(self, event):
+        x, y = int(event.position().x()), int(event.position().y())
+        what = self._hit(x, y)
+        if what == "swap":
+            self.swap_clicked.emit()
+        elif what == "reset":
+            self.default_clicked.emit()
+        elif what == "none":
+            if self._fill_on_top:
+                self.fill_none_clicked.emit()
+            else:
+                self.stroke_none_clicked.emit()
+        elif what == "fill":
+            self._fill_on_top = True
+            self.fill_clicked.emit()
+            self.update()
+        elif what == "stroke":
+            self._fill_on_top = False
+            self.stroke_clicked.emit()
+            self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        x, y = int(event.position().x()), int(event.position().y())
+        what = self._hit(x, y)
+        if what == "fill":
+            self._fill_on_top = True
+            self.update()
+            self.fill_double_clicked.emit()
+        elif what == "stroke":
+            self._fill_on_top = False
+            self.update()
+            self.stroke_double_clicked.emit()
+
+
+def _icon_color_or_ccc():
+    """Return the active theme's icon color, or a sane #ccc fallback
+    when the theme module isn't importable from this context."""
+    try:
+        from tools.toolbar import _icon_color
+        return _icon_color()
+    except Exception:
+        return QColor("#cccccc")
+
+
+def _render_fill_stroke_widget(el, store, ctx, dispatch_fn):
+    """Substitute the YAML fill_stroke_widget template's expanded
+    container with the panel's scalable [_PanelFillStrokeWidget].
+
+    Reads the YAML's style.width / style.height (set by the
+    template's [width: size] + [height: size * 124/100] defaults
+    via params overrides in color.yaml) so the widget shrinks to
+    fit the panel row's allocated height — avoids the
+    layout-overflow that an unscalable toolbar-sized 64x80 widget
+    would create.
+
+    Live colors come from a global-store subscription on
+    [fill_color] / [stroke_color] / [fill_on_top]; signals forward
+    to the YAML's declared action names through [dispatch_fn].
+    """
+    style = el.get("style", {}) or {}
+    try:
+        width = int(float(style.get("width", 48)))
+    except (TypeError, ValueError):
+        width = 48
+    try:
+        height = int(float(style.get("height", 60)))
+    except (TypeError, ValueError):
+        height = 60
+    # min_height is honoured if larger than computed height (color
+    # panel passes {min_height: 60} alongside its 48-wide widget).
+    try:
+        min_h = int(float(style.get("min_height", 0)))
+    except (TypeError, ValueError):
+        min_h = 0
+    if min_h > height:
+        height = min_h
+
+    fs = _PanelFillStrokeWidget(width=width, height=height)
+
+    def _qcolor(hex_str):
+        if not isinstance(hex_str, str) or not hex_str:
+            return None
+        s = hex_str
+        if s.startswith("#"):
+            s = s[1:]
+        if len(s) == 3:
+            s = "".join(c * 2 for c in s)
+        if len(s) != 6:
+            return None
+        try:
+            r = int(s[0:2], 16)
+            g = int(s[2:4], 16)
+            b = int(s[4:6], 16)
+        except ValueError:
+            return None
+        return QColor(r, g, b)
+
+    # Wrap in RuntimeError guards so when the dock rebuilds (which
+    # deletes this widget) but the global store still holds the
+    # subscription, the next state.fill_color write doesn't crash
+    # with "Internal C++ object already deleted" (CLR-012 Python).
+    # A safe-to-call lambda that probes the C++ object lifetime up
+    # front avoids invoking set_* on a dead widget.
+    def _sync():
+        try:
+            fs.isVisible()  # probes the underlying Qt object's lifetime
+        except RuntimeError:
+            return
+        ec = store.eval_context(ctx)
+        try:
+            fc = evaluate("state.fill_color", ec)
+            fc_val = fc.value if hasattr(fc, "value") else fc
+        except Exception:
+            fc_val = None
+        try:
+            sc = evaluate("state.stroke_color", ec)
+            sc_val = sc.value if hasattr(sc, "value") else sc
+        except Exception:
+            sc_val = None
+        try:
+            ft = evaluate("state.fill_on_top", ec)
+            ft_val = ft.value if hasattr(ft, "value") else ft
+        except Exception:
+            ft_val = True
+        try:
+            fs.set_fill_color(_qcolor(fc_val) if fc_val else None)
+            fs.set_stroke_color(_qcolor(sc_val) if sc_val else None)
+            fs.set_fill_on_top(bool(ft_val) if ft_val is not None else True)
+        except RuntimeError:
+            return
+
+    _sync()
+    store.subscribe(None, lambda *_: _sync())
+
+    if dispatch_fn:
+        fs.swap_clicked.connect(lambda: dispatch_fn("swap_fill_stroke", {}))
+        fs.default_clicked.connect(lambda: dispatch_fn("reset_fill_stroke", {}))
+        fs.fill_double_clicked.connect(
+            lambda: dispatch_fn("open_color_picker", {"target": "fill"}))
+        fs.stroke_double_clicked.connect(
+            lambda: dispatch_fn("open_color_picker", {"target": "stroke"}))
+        fs.fill_none_clicked.connect(lambda: dispatch_fn("set_fill_none", {}))
+        fs.stroke_none_clicked.connect(lambda: dispatch_fn("set_stroke_none", {}))
+
+    # Click on fill / stroke swatch flips both the YAML state key
+    # (so other widgets bound to state.fill_on_top — e.g. slider
+    # disabled bindings, the channel write-back bridge — pick up
+    # the change) AND the model attribute (so set_active_color_live
+    # / set_active_color route to the right side; the bridge reads
+    # model.fill_on_top directly).
+    get_model = ctx.get("_get_model")
+    def _set_active_side(top: bool):
+        store.set("fill_on_top", top)
+        m = get_model() if callable(get_model) else None
+        if m is not None:
+            m.fill_on_top = top
+    fs.fill_clicked.connect(lambda: _set_active_side(True))
+    fs.stroke_clicked.connect(lambda: _set_active_side(False))
+
+    return fs
 
 
 def _render_color_swatch(el, store, ctx, dispatch_fn):
@@ -1091,6 +1768,290 @@ def _render_gradient_slider(el, store, ctx, dispatch_fn):
                 "gradient_slider_stop_click", {"stop_index": j}
             ))
 
+    return container
+
+
+class _ColorGradientWidget(QWidget):
+    """2D HSB gradient for the color picker dialog. Horizontal =
+    saturation, vertical = brightness, colored by the current hue.
+    Click / drag writes dialog.s + dialog.b.
+    """
+    def __init__(self, store, hue_expr, sat_expr, br_expr, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import Qt as _Qt
+        self._store = store
+        self._hue_expr = hue_expr
+        self._sat_expr = sat_expr
+        self._br_expr = br_expr
+        self.setMinimumSize(180, 180)
+        self.setCursor(_Qt.CrossCursor)
+        self._dragging = False
+        store.subscribe(None, lambda *_: self._on_state_change())
+
+    def _on_state_change(self):
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _read_n(self, expr):
+        if not expr:
+            return 0.0
+        try:
+            r = evaluate(expr, self._store.eval_context({}))
+            return float(r.value) if r.value is not None else 0.0
+        except Exception:
+            return 0.0
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QImage, QColor, QPen
+        from workspace_interpreter.color_util import hsb_to_rgb
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            return
+        hue = self._read_n(self._hue_expr)
+        img = QImage(w, h, QImage.Format_RGB32)
+        for y in range(h):
+            br = 100.0 * (1.0 - y / max(h - 1, 1))
+            for x in range(w):
+                sat = 100.0 * x / max(w - 1, 1)
+                r, g, b = hsb_to_rgb(hue, sat, br)
+                img.setPixelColor(x, y, QColor(r, g, b))
+        painter.drawImage(0, 0, img)
+        # Indicator circle at current (sat, br)
+        sat = self._read_n(self._sat_expr)
+        br = self._read_n(self._br_expr)
+        cx = int(w * sat / 100.0)
+        cy = int(h * (1.0 - br / 100.0))
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.drawEllipse(cx - 6, cy - 6, 12, 12)
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.drawEllipse(cx - 7, cy - 7, 14, 14)
+
+    def _pick(self, x, y):
+        w, h = max(self.width(), 1), max(self.height(), 1)
+        x = max(0.0, min(float(x), w - 1))
+        y = max(0.0, min(float(y), h - 1))
+        sat = 100.0 * x / (w - 1) if w > 1 else 0
+        br = 100.0 * (1.0 - y / (h - 1)) if h > 1 else 0
+        if self._sat_expr.startswith("dialog."):
+            self._store.set_dialog(self._sat_expr[len("dialog."):], sat)
+        if self._br_expr.startswith("dialog."):
+            self._store.set_dialog(self._br_expr[len("dialog."):], br)
+
+    def mousePressEvent(self, event):
+        from PySide6.QtCore import Qt as _Qt
+        if event.button() == _Qt.LeftButton:
+            self._dragging = True
+            self._pick(event.position().x(), event.position().y())
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self._pick(event.position().x(), event.position().y())
+
+    def mouseReleaseEvent(self, event):
+        self._dragging = False
+
+
+def _render_color_gradient(el, store, ctx, dispatch_fn):
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    hue_expr = bind.get("hue", "dialog.h")
+    sat_expr = bind.get("saturation", "dialog.s")
+    br_expr = bind.get("brightness", "dialog.b")
+    style = el.get("style", {}) or {}
+    w = style.get("min_width", 180)
+    h = style.get("min_height", 180)
+    widget = _ColorGradientWidget(store, hue_expr, sat_expr, br_expr)
+    try:
+        widget.setMinimumSize(int(w), int(h))
+    except (TypeError, ValueError):
+        pass
+    return widget
+
+
+class _ColorHueBarWidget(QWidget):
+    """Vertical channel ramp for the color picker. Re-tints per the
+    active radio channel (H = rainbow, S = grey→hue, B = black→hue,
+    R/G/B = black→primary). Click/drag writes the matching channel.
+    """
+    def __init__(self, store, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import Qt as _Qt
+        self._store = store
+        self.setMinimumSize(28, 100)
+        self.setCursor(_Qt.CrossCursor)
+        self._dragging = False
+        store.subscribe(None, lambda *_: self._on_state_change())
+
+    def _on_state_change(self):
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _read(self, expr):
+        try:
+            r = evaluate(expr, self._store.eval_context({}))
+            return r.value
+        except Exception:
+            return None
+
+    def _read_n(self, name):
+        v = self._read(f"dialog.{name}")
+        return float(v) if isinstance(v, (int, float)) else 0.0
+
+    def _channel_spec(self):
+        from workspace_interpreter.color_util import hsb_to_rgb
+        ch = self._read("dialog.radio_channel")
+        if not isinstance(ch, str):
+            ch = "h"
+        if ch == "s":
+            h = self._read_n("h"); b = self._read_n("b")
+            return ("s", 100.0, lambda t: hsb_to_rgb(h, t * 100.0, b))
+        if ch == "b":
+            h = self._read_n("h"); s = self._read_n("s")
+            return ("b", 100.0, lambda t: hsb_to_rgb(h, s, t * 100.0))
+        if ch == "r":
+            g = int(self._read_n("g")); bl = int(self._read_n("bl"))
+            return ("r", 255.0, lambda t: (int(round(t * 255)), g, bl))
+        if ch == "g":
+            r = int(self._read_n("r")); bl = int(self._read_n("bl"))
+            return ("g", 255.0, lambda t: (r, int(round(t * 255)), bl))
+        if ch == "bl":
+            r = int(self._read_n("r")); g = int(self._read_n("g"))
+            return ("bl", 255.0, lambda t: (r, g, int(round(t * 255))))
+        return ("h", 360.0, lambda t: hsb_to_rgb(t * 360.0, 100.0, 100.0))
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor, QPen
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            return
+        field, max_v, ramp = self._channel_spec()
+        # Map t=0 to the BOTTOM of the bar and t=1 to the TOP so
+        # the high-value end (full red / 100% brightness / etc.)
+        # appears at the top. Matches the 2D gradient's convention
+        # of brightness increasing upward.
+        for y in range(h):
+            t = 1.0 - (y + 0.5) / h
+            r, g, b = ramp(t)
+            painter.fillRect(0, y, w, 1, QColor(r, g, b))
+        # Indicator at current value of the active channel
+        v = self._read_n(field)
+        # Invert position to match the painted ramp direction.
+        y = int(h - h * v / max_v) if max_v > 0 else 0
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.drawLine(0, y, w, y)
+        painter.setPen(QPen(QColor(255, 255, 255), 1))
+        painter.drawLine(0, y - 1, w, y - 1)
+
+    def _pick(self, y):
+        h = max(self.height(), 1)
+        y = max(0.0, min(float(y), h - 1))
+        field, max_v, _ = self._channel_spec()
+        # Invert: high values toward the top of the widget.
+        v = max_v * (1.0 - y / (h - 1)) if h > 1 else 0
+        self._store.set_dialog(field, v)
+
+    def mousePressEvent(self, event):
+        from PySide6.QtCore import Qt as _Qt
+        if event.button() == _Qt.LeftButton:
+            self._dragging = True
+            self._pick(event.position().y())
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self._pick(event.position().y())
+
+    def mouseReleaseEvent(self, event):
+        self._dragging = False
+
+
+def _render_color_hue_bar(el, store, ctx, dispatch_fn):
+    widget = _ColorHueBarWidget(store)
+    style = el.get("style", {}) or {}
+    w = style.get("width", 28)
+    min_h = style.get("min_height", 100)
+    try:
+        widget.setFixedWidth(int(w))
+        widget.setMinimumHeight(int(min_h))
+    except (TypeError, ValueError):
+        pass
+    return widget
+
+
+class _RadioOptionWidget(QWidget):
+    """Single circular radio indicator. Filled when the bound state
+    equals the option's id."""
+    def __init__(self, store, bind_expr, option_id, parent=None):
+        super().__init__(parent)
+        self._store = store
+        self._bind_expr = bind_expr
+        self._option_id = option_id
+        self.setFixedSize(14, 14)
+        from PySide6.QtCore import Qt as _Qt
+        self.setCursor(_Qt.PointingHandCursor)
+        store.subscribe(None, lambda *_: self._on_state_change())
+
+    def _on_state_change(self):
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _is_selected(self):
+        try:
+            r = evaluate(self._bind_expr, self._store.eval_context({}))
+            return r.value == self._option_id
+        except Exception:
+            return False
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+        from PySide6.QtCore import Qt as _Qt
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QBrush(_Qt.NoBrush))
+        painter.drawEllipse(2, 2, 10, 10)
+        if self._is_selected():
+            painter.setPen(QPen(QColor("#ccc"), 1))
+            painter.setBrush(QBrush(QColor("#ccc")))
+            painter.drawEllipse(4, 4, 6, 6)
+
+    def mousePressEvent(self, event):
+        from PySide6.QtCore import Qt as _Qt
+        if event.button() == _Qt.LeftButton:
+            if self._bind_expr.startswith("dialog."):
+                key = self._bind_expr[len("dialog."):]
+                self._store.set_dialog(key, self._option_id)
+
+
+def _render_radio_group(el, store, ctx, dispatch_fn):
+    bind = el.get("bind")
+    bind_expr = bind if isinstance(bind, str) else (
+        bind.get("value") if isinstance(bind, dict) else None
+    )
+    options = el.get("options", []) or []
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    for opt in options:
+        if not isinstance(opt, dict):
+            continue
+        opt_id = opt.get("id", "")
+        opt_label = opt.get("label", "")
+        if not opt_id:
+            continue
+        if bind_expr:
+            indicator = _RadioOptionWidget(store, bind_expr, opt_id)
+            layout.addWidget(indicator)
+        if opt_label:
+            lbl = QLabel(opt_label)
+            layout.addWidget(lbl)
     return container
 
 
@@ -2226,6 +3187,14 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
             # Truncation in Qt is done via QFontMetrics.elidedText on
             # the widget itself, not via stylesheet. Silently skip.
             continue
+        if key in ("flex_shrink", "flex_grow", "flex_basis", "aspect_ratio"):
+            # Flex-box / aspect-ratio CSS properties Qt's stylesheet
+            # engine doesn't understand. ``flex`` is already special-
+            # cased above; flex_shrink / flex_grow / flex_basis came
+            # along on the same widgets (swatches.yaml, layer_options
+            # dialog) and were leaking into setStyleSheet, producing
+            # "Unknown property flex-shrink" log spam. Silently skip.
+            continue
 
         resolved = str(val)
         if isinstance(val, str) and "{{" in val:
@@ -2275,6 +3244,12 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
     determine per-item identity).
     """
     bindings = el.get("bind") or {}
+    # Some YAML widgets use the bare-string `bind:` form (e.g.
+    # toggles, text_input fields bound to a single value). Wrap
+    # those so _apply_bindings can iterate uniformly — without
+    # this, .items() on a bare string raises AttributeError.
+    if isinstance(bindings, str):
+        bindings = {"value": bindings}
     if not bindings:
         return
 
@@ -2297,8 +3272,13 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
             border = "border: 2px solid #4a90d9"
         else:
             border = "border: 1px solid #666"
-        if color and isinstance(color, str) and color.startswith("#"):
-            return f"background: {color}; {border}"
+        # Accept both "#rrggbb" and bare "rrggbb" — model.recent_colors
+        # stores values from Color.to_hex() which is hash-less, while
+        # state.fill_color uses the hash-prefixed form.
+        if isinstance(color, str) and color:
+            s = color if color.startswith("#") else "#" + color
+            if len(s) in (4, 7):
+                return f"background: {s}; {border}"
         return f"background: transparent; {border.replace('solid', 'dashed').replace('#666', '#555')}"
 
     eval_ctx = store.eval_context(ctx)
@@ -2384,23 +3364,46 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
         for e in bindings.values()
     )
     if has_panel_binding:
-        panel_id = store.get_active_panel_id()
+        # Subscribe to the panel this widget BELONGS to (captured
+        # from ctx._panel_id), not the store's current active panel
+        # — those can diverge during multi-panel render (the
+        # active panel id is global and reflects whichever panel
+        # most recently called set_active_panel). Without this,
+        # cp_sliders_grayscale's `visible: panel.mode == "grayscale"`
+        # binding subscribes to an unrelated panel and never fires
+        # when the Color panel's mode changes (CLR-022 Python).
+        panel_id = widget_panel_id or store.get_active_panel_id()
         if panel_id:
             store.subscribe_panel(panel_id, _update_bindings)
 
 
 def _set_widget_value(widget: QWidget, value):
-    """Set the value of a widget based on its type."""
+    """Set the value of a widget based on its type.
+
+    Block signals during setValue so propagating bindings (e.g. a
+    hidden Web Safe RGB slider tracking panel.r changes) don't
+    fire their own valueChanged handlers and write back snapped
+    values that fight the user's input in the visible mode's
+    sibling slider (CLR-060 Python — RGB drag snapped to 51 after
+    Web Safe use because the hidden web_safe slider snapped panel
+    .r back on every echo).
+    """
     if isinstance(widget, QSlider):
         try:
+            widget.blockSignals(True)
             widget.setValue(int(float(value)) if value is not None else 0)
         except (TypeError, ValueError):
             pass
+        finally:
+            widget.blockSignals(False)
     elif isinstance(widget, QSpinBox):
         try:
+            widget.blockSignals(True)
             widget.setValue(int(float(value)) if value is not None else 0)
         except (TypeError, ValueError):
             pass
+        finally:
+            widget.blockSignals(False)
     elif isinstance(widget, QLineEdit):
         # length_input stashes unit / precision so the displayed text
         # routes through Length.format instead of plain str().
@@ -2444,23 +3447,90 @@ def _apply_behaviors(widget: QWidget, behaviors: list, store: StateStore,
 def _wire_click(widget, action, params, condition, effects, store, ctx, dispatch_fn):
     if not hasattr(widget, "clicked"):
         return
+    # Capture the widget's panel id at wire time so condition /
+    # param evaluation uses THIS widget's panel state, not the
+    # global active panel (which can drift between widget renders
+    # and clicks). Without this, the recent-swatch condition
+    # `panel.recent_colors.0 != null` evaluates against an
+    # unrelated panel's empty state and the click silently no-ops.
+    widget_pid = ctx.get("_panel_id")
+
+    def _build_eval_ctx():
+        # Strip the scope namespaces from ctx so they don't shadow
+        # the freshly-evaluated values from store.eval_context.
+        # ctx was captured at wire time (which for dialogs is at
+        # render time, before any user edits) and contains a stale
+        # "dialog" snapshot — eval_context.update(extra) would
+        # otherwise overwrite the live dialog state with the
+        # initial one and OK reads the original color
+        # (CLR-218 Python).
+        extra = {k: v for k, v in ctx.items()
+                 if k not in ("state", "panel", "dialog", "param", "tool", "active_document")}
+        ec = store.eval_context(extra)
+        if widget_pid:
+            ec["panel"] = store.get_panel_state(widget_pid)
+        return ec
 
     def on_click():
         if condition:
-            eval_ctx = store.eval_context(ctx)
+            eval_ctx = _build_eval_ctx()
             cond_result = evaluate(condition, eval_ctx)
             if not cond_result.to_bool():
                 return
         if action:
             resolved_params = {}
-            eval_ctx = store.eval_context(ctx)
+            eval_ctx = _build_eval_ctx()
             for k, v in params.items():
                 r = evaluate(str(v), eval_ctx)
                 resolved_params[k] = r.value
-            dispatch_fn(action, resolved_params)
+            if dispatch_fn:
+                dispatch_fn(action, resolved_params)
         if effects:
             from workspace_interpreter.effects import run_effects
-            run_effects(effects, ctx, store)
+            ec_for_effects = _build_eval_ctx()
+            # Picker OK: capture the dialog's color + target so we
+            # can apply directly to the model. The effects.set
+            # fill_color short-circuits when state.fill_color is
+            # already at that value (from the live-preview bridge
+            # updates during drag), which means subscribe_active_color
+            # doesn't fire and the model isn't refreshed.
+            picker_color = None
+            picker_target = None
+            try:
+                if store.get_dialog_id() == "color_picker":
+                    dlg = ec_for_effects.get("dialog") or {}
+                    raw = dlg.get("color")
+                    if isinstance(raw, str) and raw:
+                        picker_color = raw
+                    p = ec_for_effects.get("param") or {}
+                    picker_target = p.get("target")
+            except Exception:
+                pass
+            run_effects(effects, ec_for_effects, store)
+            if picker_color:
+                try:
+                    from geometry.element import Color
+                    from panels.panel_menu import set_active_color
+                    col = Color.from_hex(picker_color)
+                    m = None
+                    try:
+                        from PySide6.QtWidgets import QApplication
+                        for w in QApplication.topLevelWidgets():
+                            am = getattr(w, "active_model", None)
+                            if callable(am):
+                                m = am()
+                                if m is not None:
+                                    break
+                    except Exception:
+                        pass
+                    if m is not None and col is not None:
+                        if picker_target == "fill":
+                            m.fill_on_top = True
+                        elif picker_target == "stroke":
+                            m.fill_on_top = False
+                        set_active_color(col, m)
+                except Exception:
+                    pass
 
     widget.clicked.connect(lambda _=None: on_click())
 
@@ -2605,13 +3675,16 @@ _RENDERERS = {
     "select": _render_select,
     "combo_box": _render_combo_box,
     "color_swatch": _render_color_swatch,
+    "color_gradient": _render_color_gradient,
+    "color_hue_bar": _render_color_hue_bar,
+    "radio_group": _render_radio_group,
     "gradient_tile": _render_gradient_tile,
     "gradient_slider": _render_gradient_slider,
     "separator": _render_separator,
     "spacer": _render_spacer,
     "disclosure": _render_disclosure,
     "panel": _render_panel,
-    "fill_stroke_widget": _render_container,
+    "fill_stroke_widget": lambda el, s, c, d: _render_fill_stroke_widget(el, s, c, d),
     "tree_view": _render_tree_view,
     "element_preview": _render_element_preview,
     "dropdown": _render_dropdown,

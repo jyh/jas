@@ -93,6 +93,7 @@ fn render_el(
         "select" => render_select(el, ctx, rctx),
         "icon_select" => render_icon_select(el, ctx, rctx),
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
+        "radio_group" => render_radio_group(el, ctx, rctx),
         "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
         "gradient_tile" => render_gradient_tile(el, ctx, rctx),
@@ -682,6 +683,29 @@ fn run_effects_with_ctx(
         // Defer dialog effects — they need the dialog signal, not AppState
         if effect.get("open_dialog").is_some() || effect.get("close_dialog").is_some() {
             dialog_effects.push(effect.clone());
+        }
+        // if: { condition, then, else } — used by the color picker's OK
+        // button to branch between `set fill_color` and `set stroke_color`
+        // based on `param.target`. Recursively run the chosen branch
+        // through this same function so its set / close_dialog / etc.
+        // effects are honored and any deferred dialog effects bubble up.
+        if let Some(if_val) = effect.get("if") {
+            let (cond_expr, then_arr, else_arr) = match if_val {
+                serde_json::Value::String(s) => (
+                    s.clone(),
+                    effect.get("then").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+                    effect.get("else").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+                ),
+                serde_json::Value::Object(obj) => (
+                    obj.get("condition").and_then(|v| v.as_str()).unwrap_or("false").to_string(),
+                    obj.get("then").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+                    obj.get("else").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+                ),
+                _ => continue,
+            };
+            let took_then = super::expr::eval(&cond_expr, &eval_ctx).to_bool();
+            let branch = if took_then { &then_arr } else { &else_arr };
+            dialog_effects.extend(run_effects_with_ctx(branch, extra_ctx, st));
         }
     }
     dialog_effects
@@ -3935,10 +3959,26 @@ fn dialog_field(bind_expr: &str) -> String {
 }
 
 /// Classify a bind expression as dialog, panel, or state field.
+#[derive(Clone)]
 enum BindTarget {
     Dialog(String),
     Panel(String),
     None,
+}
+
+/// Read the "value" bind expression from an element.
+///
+/// Supports two YAML forms:
+///   `bind: "dialog.x"` — bare string (dialogs / templates often use this)
+///   `bind: { value: "dialog.x" }` — object form (panels use this)
+fn read_bind_value(el: &serde_json::Value) -> &str {
+    el.get("bind")
+        .and_then(|b| {
+            b.get("value")
+                .and_then(|v| v.as_str())
+                .or_else(|| b.as_str())
+        })
+        .unwrap_or("")
 }
 
 fn classify_bind(bind_expr: &str) -> BindTarget {
@@ -3981,10 +4021,18 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         .map(|s| format!("background:{s};"))
         .unwrap_or_default();
     // Bootstrap grid: col: N → class="col-N", type: row → class="row"
+    // Neutralize Bootstrap's gutter (--bs-gutter-x default 1.5rem = 24px,
+    // which gives row margin-left: -12px and col padding-left: 12px). The
+    // negative row margin makes col children overflow the parent's content
+    // box on the left when the parent's padding is < 12px (e.g. cp_content
+    // uses padding:4). Setting --bs-gutter-x:0 keeps the col flex sizing
+    // (col-3 still = 25%) but removes the offset so cols sit flush with
+    // the row's parent's content edge.
     let col_class = el.get("col").and_then(|c| c.as_u64())
         .map(|c| format!("col-{c}"))
         .unwrap_or_default();
     let row_class = if etype == "row" { "row" } else { "" };
+    let gutter_reset = if etype == "row" { "--bs-gutter-x:0;" } else { "" };
     // If any child uses position: {x, y}, this container needs position:relative
     let has_abs_children = el.get("children")
         .and_then(|c| c.as_array())
@@ -4009,9 +4057,9 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         format!("display:flex;flex-direction:{dir};")
     };
     let style = if visible {
-        format!("{flex_dir}{pos_style}{color_default}{base_style};{bind_bg}")
+        format!("{flex_dir}{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
     } else {
-        format!("display:none;{pos_style}{color_default}{base_style};{bind_bg}")
+        format!("display:none;{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
     };
     let css_class = format!("{row_class} {col_class}").trim().to_string();
     let children = render_children(el, ctx, rctx);
@@ -4710,25 +4758,59 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             min: "{min}",
             max: "{max}",
             step: "{step}",
-            initial_value: "{value}",
+            // Controlled `value:` so external state writes (hex
+            // commit, swatch click, mode-equivalent recompute) move
+            // the thumb. `initial_value:` would leave the input as
+            // an uncontrolled element after first render, so the
+            // thumb would stay stuck on the original value. A keyed
+            // remount works for one-shot inputs (number_input) but
+            // breaks slider drag — the DOM element is destroyed mid-
+            // drag, the pointer capture is lost, and the user can't
+            // continue the drag past the first oninput.
+            value: "{value}",
             disabled: disabled,
             style: "flex:1;{style}",
-            oninput: move |evt: Event<FormData>| {
-                let new_val: f64 = evt.value().parse().unwrap_or(0.0);
-                // Dialog binding
-                if !dlg_field.is_empty() {
-                    if let Some(mut ds) = dialog_signal() {
-                        ds.set_value(&dlg_field, serde_json::json!(new_val));
-                        dialog_signal.set(Some(ds));
+            // oninput fires on every drag tick — use the "live"
+            // setter that updates the canvas color but skips the
+            // recent-colors push (CLR-070). onchange fires on
+            // pointer-up and commits the final color (full
+            // set_active_color, which dedupes + adds to recent).
+            oninput: {
+                let app = app.clone();
+                let mut revision = revision;
+                let panel = panel.clone();
+                let panel_field = panel_field.clone();
+                let dlg_field = dlg_field.clone();
+                move |evt: Event<FormData>| {
+                    let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                    if !dlg_field.is_empty() {
+                        if let Some(mut ds) = dialog_signal() {
+                            ds.set_value(&dlg_field, serde_json::json!(new_val));
+                            dialog_signal.set(Some(ds));
+                        }
+                        revision += 1;
+                        return;
                     }
-                    revision += 1;
-                    return;
+                    if panel_field.is_empty() { return; }
+                    let color = compute_color_from_panel(&panel_field, new_val, &panel);
+                    if let Some(color) = color {
+                        let app = app.clone();
+                        let mut revision = revision;
+                        spawn(async move {
+                            app.borrow_mut().set_active_color_live(color);
+                            revision += 1;
+                        });
+                    }
                 }
-                // Panel binding
+            },
+            onchange: move |evt: Event<FormData>| {
+                let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                if !dlg_field.is_empty() { return; }
                 if panel_field.is_empty() { return; }
                 let color = compute_color_from_panel(&panel_field, new_val, &panel);
                 if let Some(color) = color {
                     let app = app.clone();
+                    let mut revision = revision;
                     spawn(async move {
                         app.borrow_mut().set_active_color(color);
                         revision += 1;
@@ -4788,7 +4870,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     let max_clamp = el.get("max").and_then(|m| m.as_f64());
     let style = build_style(el, ctx);
 
-    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let bind_expr = read_bind_value(el);
     let value = if !bind_expr.is_empty() {
         let result = expr::eval(bind_expr, ctx);
         match result {
@@ -4812,10 +4894,12 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // keeps its existing weight → app_default_stroke sync; Character
     // pushes changes through apply_character_panel_to_selection.
     let panel_kind = rctx.panel_kind;
+    let panel_for_color = ctx.get("panel").cloned().unwrap_or(serde_json::Value::Null);
     let panel_handler = if let BindTarget::Panel(ref field) = bind_target {
         let f = field.clone();
         let app = app.clone();
         let mut revision = revision;
+        let panel_ctx = panel_for_color.clone();
         Some(EventHandler::new(move |evt: Event<FormData>| {
             let mut new_val: f64 = evt.value().parse().unwrap_or(0.0);
             if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
@@ -4823,6 +4907,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
+            let panel_ctx = panel_ctx.clone();
             spawn(async move {
                 {
                     let mut st = app.borrow_mut();
@@ -4860,7 +4945,21 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
                             // Phase 1: panel-local only; selection sync deferred.
                         }
-                        // Artboards, Layers, Color, Swatches, Properties:
+                        Some(PanelKind::Color) => {
+                            // Slider value-box edits commit by
+                            // mixing the typed channel with the
+                            // other channels from current panel
+                            // state, then routing through
+                            // set_active_color (push-to-recent).
+                            // The slider's own oninput uses
+                            // set_active_color_live; this path is
+                            // the type-Enter or Tab commit and
+                            // matches a pointer-up.
+                            if let Some(color) = compute_color_from_panel(&f, new_val, &panel_ctx) {
+                                st.set_active_color(color);
+                            }
+                        }
+                        // Artboards, Layers, Swatches, Properties:
                         // no-op for number_input writes until their per-panel state
                         // structs land. Drops the edit silently rather than
                         // corrupting stroke state.
@@ -4887,7 +4986,16 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 value: "{value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                // flex-shrink:0 — when the parent row sets `flex:1`
+                // on the slider, the slider's flex-grow eats remaining
+                // space but the default flex-shrink:1 on the
+                // number_input lets it collapse to ~16px on narrow
+                // rows. Pinning shrink to 0 keeps the input at its
+                // declared yaml width regardless of row width.
+                // box-sizing:border-box so the yaml `width` includes
+                // the border + padding, matching the visual size the
+                // author asked for.
+                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);padding:1px 4px;{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5121,7 +5229,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let style = build_style(el, ctx);
     let visibility_style = if is_visible(el, ctx) { "" } else { "display:none;" };
 
-    let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+    let bind_expr = read_bind_value(el);
     let value = if !bind_expr.is_empty() {
         let result = expr::eval(bind_expr, ctx);
         match result {
@@ -5172,6 +5280,16 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
 
     rsx! {
         input {
+            // Identity-coupled key forces remount when the bound
+            // value changes externally (e.g. slider drag updates
+            // the hex string via the live state map). Without this
+            // the input keeps its DOM .value from first render and
+            // the displayed text drifts out of sync with state.
+            // While the user is actively typing, no state change
+            // fires (text inputs commit on Enter/blur, not per
+            // keystroke), so the remount only happens on external
+            // updates and doesn't interrupt typing.
+            key: "{id}-{value}",
             id: "{id}",
             r#type: "text",
             placeholder: "{placeholder}",
@@ -5247,36 +5365,78 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                             ds.set_value(field, serde_json::json!(new_val));
                             dialog_signal.set(Some(ds));
                         }
+                        revision += 1;
                     }
                     BindTarget::Panel(field) => {
                         let f = field.clone();
                         let v = new_val.clone();
                         let app = app.clone();
+                        let mut revision = revision;
                         spawn(async move {
-                            let mut st = app.borrow_mut();
-                            match panel_kind {
-                                Some(PanelKind::Character) => {
-                                    set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
-                                    st.character_panel_post_write(&f);
-                                    st.apply_character_panel_to_selection();
+                            {
+                                let mut st = app.borrow_mut();
+                                match panel_kind {
+                                    Some(PanelKind::Character) => {
+                                        set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
+                                        st.character_panel_post_write(&f);
+                                        st.apply_character_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Paragraph) => {
+                                        st.sync_paragraph_panel_from_selection();
+                                        set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
+                                        st.apply_paragraph_panel_to_selection();
+                                    }
+                                    Some(PanelKind::Stroke) | None => {
+                                        set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
+                                    }
+                                    Some(PanelKind::Color) if f == "hex" => {
+                                        // The Color panel's hex input is the only
+                                        // text_input in that panel; commit it as
+                                        // an active-color write so the canvas, the
+                                        // sliders, and the recent-colors list all
+                                        // pick up the change. Strip a leading '#'
+                                        // (the YAML omits it from the bound value
+                                        // but tolerate paste) and bail on invalid
+                                        // input to avoid a no-op rebuild.
+                                        let trimmed = v.trim().trim_start_matches('#');
+                                        if let Some(mut color) = crate::geometry::element::Color::from_hex(trimmed) {
+                                            // Web Safe RGB mode: snap each
+                                            // channel to the nearest multiple
+                                            // of 51 (0/51/102/153/204/255)
+                                            // before commit. The sliders are
+                                            // already step=51 but the hex
+                                            // input is unrestricted, so the
+                                            // snap has to happen here.
+                                            if st.color_panel_mode == crate::workspace::color_panel_view::ColorMode::WebSafeRgb {
+                                                let (r, g, b, _) = color.to_rgba();
+                                                let snap = |c: f64| -> f64 {
+                                                    let q = ((c * 255.0).round() / 51.0).round() * 51.0;
+                                                    q / 255.0
+                                                };
+                                                color = crate::geometry::element::Color::rgb(
+                                                    snap(r), snap(g), snap(b));
+                                            }
+                                            st.set_active_color(color);
+                                        }
+                                    }
+                                    // Artboards, Layers, Swatches, Properties,
+                                    // remaining Color fields: no-op until their
+                                    // per-panel state lands.
+                                    _ => {}
                                 }
-                                Some(PanelKind::Paragraph) => {
-                                    st.sync_paragraph_panel_from_selection();
-                                    set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
-                                    st.apply_paragraph_panel_to_selection();
-                                }
-                                Some(PanelKind::Stroke) | None => {
-                                    set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                }
-                                // Artboards, Layers, Color, Swatches, Properties:
-                                // no-op until their per-panel state lands.
-                                _ => {}
                             }
+                            // Bump revision AFTER state mutation so the
+                            // re-render sees the new state. Bumping
+                            // outside the spawn would race with the
+                            // async write and the renderer would pick
+                            // up the pre-commit values.
+                            revision += 1;
                         });
                     }
-                    BindTarget::None => {}
+                    BindTarget::None => {
+                        revision += 1;
+                    }
                 }
-                revision += 1;
             },
             oninput: move |evt: Event<FormData>| {
                 // The layers-panel search input still commits live, so
@@ -5690,11 +5850,12 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
 
-    // Accept either bind.value or bind.checked; panels prefer `value`
-    // (matches the convention used elsewhere), dialog binds have
-    // historically used `checked`. We fall back cleanly.
+    // Accept either bind.value, bind.checked, or a bare-string bind;
+    // panels prefer object form with `value`, dialog YAML often uses
+    // a bare-string form (`bind: "dialog.x"`).
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str())
         .or_else(|| el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()))
+        .or_else(|| el.get("bind").and_then(|b| b.as_str()))
         .unwrap_or("");
     let checked = if !bind_expr.is_empty() {
         expr::eval(bind_expr, ctx).to_bool()
@@ -5786,6 +5947,30 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
                     ds.set_value(field, serde_json::json!(new_val));
+                    // Color-picker "Only Web Colors": when toggled on,
+                    // snap the working color to the nearest web-safe
+                    // (each RGB channel rounded to multiples of 51).
+                    // Use get_value (not ds.state) so the read goes
+                    // through the YAML get-lambdas — the stored R/G/B
+                    // are init-only and go stale once the user edits
+                    // color via the gradient/hue bar/hex.
+                    if field == "web_only" && new_val {
+                        let snap = |x: i64| -> i64 {
+                            let v = ((x as f64) / 51.0).round() * 51.0;
+                            v.clamp(0.0, 255.0) as i64
+                        };
+                        let to_i = |v: serde_json::Value| -> i64 {
+                            v.as_i64()
+                                .or_else(|| v.as_f64().map(|n| n.round() as i64))
+                                .unwrap_or(0)
+                        };
+                        let cur_r = to_i(ds.get_value("r"));
+                        let cur_g = to_i(ds.get_value("g"));
+                        let cur_bl = to_i(ds.get_value("bl"));
+                        ds.set_value("r", serde_json::json!(snap(cur_r)));
+                        ds.set_value("g", serde_json::json!(snap(cur_g)));
+                        ds.set_value("bl", serde_json::json!(snap(cur_bl)));
+                    }
                     dialog_signal.set(Some(ds));
                 }
             }
@@ -5861,6 +6046,86 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     }
 }
 
+/// Render a group of radio buttons sharing a single bound value.
+///
+/// Each entry in `options` is `{id, label}`; when `option.id` equals the
+/// current bind value the radio is checked. Click sets the bind to the
+/// option's id. The Color Picker uses one option per row to select
+/// which channel maps to the colorbar axis (see workspace YAML
+/// `radio_field_row` template + `color_picker` dialog).
+fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let bind_expr = el.get("bind").and_then(|b| b.as_str()).unwrap_or("");
+    let current = match expr::eval(bind_expr, ctx) {
+        Value::Str(s) => s,
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        _ => String::new(),
+    };
+
+    let options: Vec<(String, String)> = el.get("options")
+        .and_then(|o| o.as_array())
+        .map(|arr| arr.iter().map(|opt| {
+            let oid = opt.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let lbl = opt.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            (oid, lbl)
+        }).collect())
+        .unwrap_or_default();
+
+    let bind_target = classify_bind(bind_expr);
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+
+    let group_name = if bind_expr.is_empty() { id.clone() } else { bind_expr.to_string() };
+
+    let _ = app;
+    let radios: Vec<Element> = options.into_iter().map(|(oid, label)| {
+        let checked = oid == current;
+        let checked_attr = if checked { "true" } else { "false" };
+        let input_id = format!("{}_{}", id, oid);
+        let oid_for_click = oid.clone();
+        let bind_target = bind_target.clone();
+        let group = group_name.clone();
+        rsx! {
+            label {
+                style: "display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;",
+                input {
+                    r#type: "radio",
+                    name: "{group}",
+                    id: "{input_id}",
+                    value: "{oid}",
+                    checked: "{checked_attr}",
+                    onchange: move |_| {
+                        let oid = oid_for_click.clone();
+                        if let BindTarget::Dialog(field) = &bind_target {
+                            if let Some(mut ds) = dialog_signal() {
+                                ds.set_value(field, serde_json::json!(oid));
+                                dialog_signal.set(Some(ds));
+                            }
+                        }
+                        revision += 1;
+                    },
+                }
+                if !label.is_empty() {
+                    span { "{label}" }
+                }
+            }
+        }
+    }).collect();
+
+    let extra_style = build_style(el, ctx);
+    rsx! {
+        span {
+            id: "{id}",
+            style: "display:inline-flex;gap:6px;align-items:center;{extra_style}",
+            for r in radios {
+                {r}
+            }
+        }
+    }
+}
+
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let size = el.get("style")
@@ -5868,31 +6133,50 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         .and_then(|s| s.as_u64())
         .unwrap_or(16);
 
-    let color = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
+    // Returns (color_string, explicit_none). explicit_none=true marks
+    // the "intentionally no fill / no stroke" case (eval returns the
+    // empty string), distinct from "missing bind / unset slot" which
+    // also returns empty but should render as a hollow placeholder
+    // rather than the red-diagonal "no fill" indicator. Bare hex
+    // strings without a leading '#' (recent_colors stores them that
+    // way) are also valid colors and need a '#' prepended.
+    let (color, explicit_none) = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
         // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
         if bind_color.starts_with('#') && bind_color.contains('.') {
             let inner = &bind_color[1..];
             let result = expr::eval(inner, ctx);
             match result {
-                Value::Str(s) => format!("#{s}"),
-                Value::Color(c) => c,
-                _ => String::new(),
+                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
+                Value::Color(c) => (c, false),
+                Value::Str(_) => (String::new(), true),
+                _ => (String::new(), false),
             }
         } else {
             let result = expr::eval(bind_color, ctx);
             match result {
-                Value::Color(c) => c,
-                Value::Str(s) if s.starts_with('#') => s,
-                _ => String::new(),
+                Value::Color(c) => (c, false),
+                Value::Str(s) if s.starts_with('#') => (s, false),
+                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
+                Value::Str(_) => (String::new(), true),
+                _ => (String::new(), false),
             }
         }
     } else {
-        String::new()
+        (String::new(), false)
     };
 
     let bg = if color.is_empty() { "transparent".to_string() } else { color.clone() };
     let border = if color.is_empty() { "1px dashed var(--jas-border,#555)" } else { "1px solid var(--jas-border,#666)" };
-    let hollow = el.get("hollow").and_then(|h| h.as_bool()).unwrap_or(false);
+    // hollow may be a static attribute OR a bind expression. The Color
+    // panel's stroke swatch uses bind.hollow = "not state.fill_on_top"
+    // so the active swatch renders as a solid filled square (visually
+    // dominating the inactive one) and the inactive renders as the
+    // standard hollow ring.
+    let hollow = el.get("bind")
+        .and_then(|b| b.get("hollow"))
+        .and_then(|v| v.as_str())
+        .map(|expr| expr::eval(expr, ctx).to_bool())
+        .unwrap_or_else(|| el.get("hollow").and_then(|h| h.as_bool()).unwrap_or(false));
 
     // Build positioning from style (handles position: {x, y} → absolute)
     let extra_style = build_style(el, ctx);
@@ -5946,14 +6230,34 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         border
     };
 
+    // Diagonal "no fill" indicator only when the bind explicitly
+    // resolved to an empty color (FillSummary::Uniform(None) etc.).
+    // Empty / unbound recent slots stay as plain hollow placeholders.
+    let is_none = explicit_none;
+    // Make "no fill / no stroke" swatches white so the red diagonal
+    // reads against a clean background (matches Illustrator /
+    // Photoshop / OCaml + Python ports). Without this the swatch was
+    // a transparent rectangle that just inherited the toolbar bg.
+    let none_bg = if is_none { "#fff" } else { bg.as_str() };
     let style = if hollow {
-        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {bg};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
+        // Hollow ("stroke") swatch: a thick colored border around a
+        // transparent center. When stroke is None, render the border
+        // as white (instead of transparent + invisible) so the user
+        // sees a hollow ring with the red diagonal across it —
+        // matches Illustrator's no-stroke indicator.
+        let hollow_border = if is_none { "#fff" } else { bg.as_str() };
+        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {hollow_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{bg};border:{final_border};cursor:pointer;box-sizing:border-box;{z_style}{extra_style}")
+        format!("width:{size}px;height:{size}px;background:{none_bg};border:{final_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);
     let on_dblclick = build_dblclick_handler(el, ctx, rctx);
+
+    // Diagonal "no fill" indicator — drawn via dangerous_inner_html
+    // since Dioxus rsx! emits SVG tags into the HTML namespace by
+    // default and the browser would ignore them.
+    const NONE_DIAG_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='100' x2='100' y2='0' stroke='red' stroke-width='8'/></svg>";
 
     rsx! {
         div {
@@ -5962,6 +6266,12 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             style: "{style}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
+            if is_none {
+                div {
+                    style: "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;",
+                    dangerous_inner_html: "{NONE_DIAG_SVG}",
+                }
+            }
         }
     }
 }
@@ -6162,50 +6472,83 @@ fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &Re
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
 
-    let on_click = move |evt: Event<MouseData>| {
-        let coords = evt.data().element_coordinates();
-        let x = coords.x;
-        let y = coords.y;
-        // Read the element's CSS width from the DOM
-        let width: f64 = {
-            #[cfg(target_arch = "wasm32")]
-            {
-                web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|d| d.get_element_by_id("jas-yaml-color-bar"))
-                    .map(|el| el.client_width() as f64)
-                    .unwrap_or(200.0)
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            { 200.0 }
-        };
+    // Maps an (x, y) inside the bar to an HSB color following the
+    // same gradient convention as build_color_bar_data_uri.
+    let xy_to_color = |x: f64, y: f64, width: f64| -> Color {
         let height = 64.0_f64;
-
-        let hue = 360.0 * x / width;
+        let hue = (360.0 * x / width.max(1.0)).clamp(0.0, 360.0);
         let mid_y = height / 2.0;
         let (sat, br) = if y <= mid_y {
-            let t = y / mid_y;
+            let t = (y / mid_y).clamp(0.0, 1.0);
             (t * 100.0, 100.0 - t * 20.0)
         } else {
-            let t = (y - mid_y) / (height - mid_y);
+            let t = ((y - mid_y) / (height - mid_y)).clamp(0.0, 1.0);
             (100.0, 80.0 * (1.0 - t))
         };
-
         let (r, g, b) = crate::interpreter::color_util::hsb_to_rgb(hue, sat, br);
-        let color = Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
-        let app = app.clone();
-        spawn(async move {
-            app.borrow_mut().set_active_color(color);
-            revision += 1;
-        });
+        Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
     };
 
+    let read_width = || -> f64 {
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("jas-yaml-color-bar"))
+                .map(|el| el.client_width() as f64)
+                .unwrap_or(200.0)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        { 200.0 }
+    };
+
+    let app_down = app.clone();
+    let app_move = app.clone();
+    let app_up = app.clone();
+    let mut rev_down = revision;
+    let mut rev_move = revision;
+    let mut rev_up = revision;
+
     rsx! {
-        img {
+        div {
             id: "jas-yaml-color-bar",
-            src: "{data_uri}",
-            style: "width:100%;height:64px;cursor:crosshair;border:1px solid var(--jas-border,#555);border-radius:1px;",
-            onclick: on_click,
+            style: "width:100%;height:64px;cursor:crosshair;border:1px solid var(--jas-border,#555);border-radius:1px;background-image:url('{data_uri}');background-size:100% 100%;background-repeat:no-repeat;user-select:none;-webkit-user-drag:none;",
+            // Pointer-driven drag: down → set_active_color_live, move
+            // (with button held) → live updates, up → final
+            // set_active_color which pushes to recent. The element is
+            // a div (not an img) so the browser doesn't intercept the
+            // drag with native image-drag.
+            onmousedown: move |evt: Event<MouseData>| {
+                evt.stop_propagation();
+                let coords = evt.data().element_coordinates();
+                let color = xy_to_color(coords.x, coords.y, read_width());
+                let app = app_down.clone();
+                spawn(async move {
+                    app.borrow_mut().set_active_color_live(color);
+                    rev_down += 1;
+                });
+            },
+            onmousemove: move |evt: Event<MouseData>| {
+                if !evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+                    return;
+                }
+                let coords = evt.data().element_coordinates();
+                let color = xy_to_color(coords.x, coords.y, read_width());
+                let app = app_move.clone();
+                spawn(async move {
+                    app.borrow_mut().set_active_color_live(color);
+                    rev_move += 1;
+                });
+            },
+            onmouseup: move |evt: Event<MouseData>| {
+                let coords = evt.data().element_coordinates();
+                let color = xy_to_color(coords.x, coords.y, read_width());
+                let app = app_up.clone();
+                spawn(async move {
+                    app.borrow_mut().set_active_color(color);
+                    rev_up += 1;
+                });
+            },
         }
     }
 }
@@ -6232,26 +6575,41 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
         "linear-gradient(to bottom, transparent, #000), linear-gradient(to right, #fff, {hue_css})"
     );
 
-    let app = rctx.app.clone();
+    let _ = rctx.app.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
-    let mut revision = rctx.revision;
+    let mut rev_down = rctx.revision;
+    let mut rev_move = rctx.revision;
 
-    let on_click = move |evt: Event<MouseData>| {
-        let coords = evt.data().element_coordinates();
-        let x = coords.x;
-        let y = coords.y;
-        // Assume 180x180 element size
+    let xy_to_sb = move |x: f64, y: f64| -> (f64, f64) {
         let width = 180.0_f64;
         let height = 180.0_f64;
         let sat = (x / width * 100.0).clamp(0.0, 100.0);
         let bri = ((1.0 - y / height) * 100.0).clamp(0.0, 100.0);
+        (sat, bri)
+    };
 
+    let on_mousedown = move |evt: Event<MouseData>| {
+        let coords = evt.data().element_coordinates();
+        let (sat, bri) = xy_to_sb(coords.x, coords.y);
         if let Some(mut ds) = dialog_signal() {
-            // Use set_value — triggers setter which updates color via <-
             ds.set_value("s", serde_json::json!(sat.round() as i64));
             ds.set_value("b", serde_json::json!(bri.round() as i64));
             dialog_signal.set(Some(ds));
-            revision += 1;
+            rev_down += 1;
+        }
+    };
+
+    let on_mousemove = move |evt: Event<MouseData>| {
+        if !evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+            return;
+        }
+        let coords = evt.data().element_coordinates();
+        let (sat, bri) = xy_to_sb(coords.x, coords.y);
+        if let Some(mut ds) = dialog_signal() {
+            ds.set_value("s", serde_json::json!(sat.round() as i64));
+            ds.set_value("b", serde_json::json!(bri.round() as i64));
+            dialog_signal.set(Some(ds));
+            rev_move += 1;
         }
     };
 
@@ -6272,8 +6630,9 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
     rsx! {
         div {
             id: "{id}",
-            style: "width:180px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;{style}",
-            onclick: on_click,
+            style: "width:180px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            onmousedown: on_mousedown,
+            onmousemove: on_mousemove,
             // Position indicator circle
             div {
                 style: "position:absolute;left:{cursor_x - 5.0}px;top:{cursor_y - 5.0}px;width:10px;height:10px;border:2px solid #fff;border-radius:50%;pointer-events:none;box-sizing:border-box;box-shadow:0 0 2px rgba(0,0,0,0.5);",
@@ -6283,47 +6642,121 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
 }
 
 /// Render a vertical hue bar for the color picker dialog.
-/// Shows a rainbow gradient; click to select hue (0-360).
+///
+/// The bar's gradient and value channel are driven by
+/// `dialog.radio_channel` (h / s / b / r / g / bl). For H the bar is a
+/// hue rainbow; for the other channels it ramps that one channel from
+/// 0 to its max while holding the others at their current values.
 fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
 
-    // Rainbow hue gradient
-    let bg = "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)";
+    // Active radio channel determines the bar's appearance + value.
+    let channel = match expr::eval("dialog.radio_channel", ctx) {
+        Value::Str(s) => s,
+        _ => "h".to_string(),
+    };
 
-    // Current hue for position indicator
-    let hue = el.get("bind")
-        .and_then(|b| b.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|e| match expr::eval(e, ctx) { Value::Number(n) => n, _ => 0.0 })
-        .unwrap_or(0.0);
+    // Read current color components for the gradient (non-target
+    // channels stay fixed; target channel is what the bar selects).
+    let get_num = |expr_str: &str, default: f64| -> f64 {
+        match expr::eval(expr_str, ctx) {
+            Value::Number(n) => n,
+            _ => default,
+        }
+    };
+    let h = get_num("dialog.h", 0.0);
+    let s = get_num("dialog.s", 100.0);
+    let b = get_num("dialog.b", 100.0);
+    let r = get_num("dialog.r", 255.0) as u8;
+    let g = get_num("dialog.g", 0.0) as u8;
+    let bl = get_num("dialog.bl", 0.0) as u8;
+
+    use crate::interpreter::color_util::hsb_to_rgb;
+
+    // Helper: format a HSB triple as `rgb(R,G,B)`.
+    let hsb_css = |h: f64, s: f64, b: f64| -> String {
+        let (rr, gg, bb) = hsb_to_rgb(h, s, b);
+        format!("rgb({rr},{gg},{bb})")
+    };
+
+    // Build the gradient + value range for the active channel.
+    let (bg, current_value, max_value) = match channel.as_str() {
+        "s" => {
+            // Saturation ramp at current h+b — top (high sat) to bottom (low).
+            let top = hsb_css(h, 100.0, b);
+            let bot = hsb_css(h, 0.0, b);
+            (format!("linear-gradient(to bottom, {top}, {bot})"), s, 100.0)
+        }
+        "b" => {
+            // Brightness ramp at current h+s — top (high) to bottom (black).
+            let top = hsb_css(h, s, 100.0);
+            let bot = hsb_css(h, s, 0.0);
+            (format!("linear-gradient(to bottom, {top}, {bot})"), b, 100.0)
+        }
+        "r" => {
+            // Red ramp at current g+bl — top (255 red) to bottom (0 red).
+            (format!("linear-gradient(to bottom, rgb(255,{g},{bl}), rgb(0,{g},{bl}))"), r as f64, 255.0)
+        }
+        "g" => {
+            (format!("linear-gradient(to bottom, rgb({r},255,{bl}), rgb({r},0,{bl}))"), g as f64, 255.0)
+        }
+        "bl" => {
+            (format!("linear-gradient(to bottom, rgb({r},{g},255), rgb({r},{g},0))"), bl as f64, 255.0)
+        }
+        // Default H: rainbow hue gradient, top=0° to bottom=360°.
+        _ => (
+            "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)".to_string(),
+            h,
+            359.0,
+        ),
+    };
 
     let mut dialog_signal = rctx.dialog_ctx.0;
-    let mut revision = rctx.revision;
+    let mut rev_down = rctx.revision;
+    let mut rev_move = rctx.revision;
+    let channel_for_handler = channel.clone();
 
-    let on_click = move |evt: Event<MouseData>| {
-        let coords = evt.data().element_coordinates();
-        let y = coords.y;
-        // Bar height from style or default 180
+    // For top-is-max channels (every channel here), y=0 is max and
+    // y=height is 0. Convert pointer y → channel value.
+    let max_val_for_handler = max_value;
+    let channel_for_down = channel_for_handler.clone();
+    let channel_for_move = channel_for_handler.clone();
+    let y_to_val = move |y: f64, max: f64| -> f64 {
         let height = 180.0_f64;
-        let new_hue = (y / height * 360.0).clamp(0.0, 359.0);
+        (max - y / height * max).clamp(0.0, max)
+    };
 
+    let on_mousedown = move |evt: Event<MouseData>| {
+        let new_val = y_to_val(evt.data().element_coordinates().y, max_val_for_handler);
         if let Some(mut ds) = dialog_signal() {
-            // Use set_value — triggers setter which updates color via <-
-            ds.set_value("h", serde_json::json!(new_hue.round() as i64));
+            ds.set_value(&channel_for_down, serde_json::json!(new_val.round() as i64));
             dialog_signal.set(Some(ds));
-            revision += 1;
+            rev_down += 1;
         }
     };
 
-    // Position indicator
-    let indicator_y = hue / 360.0 * 180.0;
+    let on_mousemove = move |evt: Event<MouseData>| {
+        if !evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+            return;
+        }
+        let new_val = y_to_val(evt.data().element_coordinates().y, max_val_for_handler);
+        if let Some(mut ds) = dialog_signal() {
+            ds.set_value(&channel_for_move, serde_json::json!(new_val.round() as i64));
+            dialog_signal.set(Some(ds));
+            rev_move += 1;
+        }
+    };
+
+    // Indicator y from current channel value (top = max).
+    let indicator_y = (max_value - current_value) / max_value * 180.0;
 
     rsx! {
         div {
             id: "{id}",
-            style: "width:32px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;{style}",
-            onclick: on_click,
+            style: "width:32px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            onmousedown: on_mousedown,
+            onmousemove: on_mousemove,
             // Position indicator arrow
             div {
                 style: "position:absolute;left:-2px;right:-2px;top:{indicator_y - 1.0}px;height:3px;background:#fff;border:1px solid #000;pointer-events:none;box-sizing:border-box;",

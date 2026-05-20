@@ -109,6 +109,12 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
     if !drag_ref <> No_drag then move_preview ~x:x_root ~y:y_root);
 
   let rec rebuild () =
+    (* Clear the per-panel body-renderer registry — the closures
+       captured the previous dock's body_containers, which we're
+       about to destroy. Without this, [schedule_panel_rerender]
+       would dispatch into freed widgets after a structural dock
+       rebuild. *)
+    Yaml_panel_view.clear_panel_body_renderers ();
     (* Clear existing children *)
     List.iter (fun w -> w#destroy ()) dock_box#children;
 
@@ -230,16 +236,12 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
             btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION]
           ) group.panels;
 
-          (* Collapse chevron — when expanded points » (click to
-             collapse toward the right edge); when collapsed points «
-             (click to expand back). *)
-          let chevron_label = if group.collapsed then "\xC2\xAB" else "\xC2\xBB" in
-          let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
-          apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" !theme_text_button !theme_bg_dark);
-          chevron#connect#clicked ~callback:(fun () ->
-            toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
-            rebuild ()
-          ) |> ignore;
+          (* Header trailing controls — order (left-to-right): chevron,
+             then hamburger. Both pack from [END], so the FIRST one
+             packed lands at the rightmost edge: pack hamburger before
+             chevron to put hamburger on the right. When the group is
+             collapsed the hamburger is suppressed so only the chevron
+             remains on the right edge. *)
 
           (* Hamburger menu button — hidden when collapsed *)
           if not group.collapsed then begin
@@ -261,7 +263,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Toggle { label; command } ->
                     let checked = Panel_menu.panel_is_checked active_kind command layout in
@@ -270,7 +273,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Radio { label; command; _ } ->
                     let selected = Panel_menu.panel_is_checked active_kind command layout in
@@ -279,7 +283,8 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                     mi#misc#set_sensitive (enabled command);
                     mi#connect#activate ~callback:(fun () ->
                       Panel_menu.panel_dispatch active_kind command addr layout ~fill_on_top:(get_fill_on_top ()) ~get_model ~get_panel_selection:Layers_panel_state.get_panel_selection ();
-                      rebuild ()
+                      rebuild ();
+                      !Yaml_panel_view.panel_check_sync_hook ()
                     ) |> ignore
                   | Panel_menu.Separator ->
                     let _sep = GMenu.separator_item ~packing:menu#append () in
@@ -289,6 +294,18 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
               ) |> ignore
             | None -> ()
           end;
+
+          (* Collapse chevron — packed AFTER the hamburger so it lands to
+             the LEFT of it. When expanded points » (click to collapse
+             toward the right edge); when collapsed points « (click to
+             expand back). *)
+          let chevron_label = if group.collapsed then "\xC2\xAB" else "\xC2\xBB" in
+          let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
+          apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" !theme_text_button !theme_bg_dark);
+          chevron#connect#clicked ~callback:(fun () ->
+            toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
+            rebuild ()
+          ) |> ignore;
 
           (* Panel body — pass [display_width] so render_container can
              allocate exact pixel widths to each Bootstrap-12 cell.
@@ -300,9 +317,31 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
           if not group.collapsed then begin
             match active_panel group with
             | Some kind ->
-              let packing = fun w -> group_box#pack ~expand:false w in
-              Yaml_panel_view.create_panel_body ~packing ~kind
-                ~get_model:(fun () -> Some (get_model ())) ~max_width:display_width ()
+              (* Wrap the panel body in its OWN container so a state
+                 change can repaint just the body without touching
+                 the tab bar / chevron / hamburger (which otherwise
+                 flash + resize every rebuild). [render_body] tears
+                 down the body_container's existing children and
+                 re-runs create_panel_body. Registered globally so
+                 [schedule_panel_rerender] hits this fast path
+                 instead of the full dock rebuild. *)
+              let body_container =
+                GPack.vbox ~packing:(group_box#pack ~expand:false) () in
+              let render_body () =
+                (* Clear targeted-update slots first — render_color_swatch
+                   re-registers them when the body re-mounts, but any
+                   stale references would otherwise queue_draw on
+                   already-destroyed widgets. *)
+                if kind = Workspace_layout.Color then
+                  Yaml_panel_view.clear_color_panel_slots ();
+                List.iter (fun w -> w#destroy ()) body_container#children;
+                let packing = fun w -> body_container#pack ~expand:false w in
+                Yaml_panel_view.create_panel_body ~packing ~kind
+                  ~get_model:(fun () -> Some (get_model ()))
+                  ~max_width:display_width ()
+              in
+              render_body ();
+              Yaml_panel_view.register_panel_body_renderer kind render_body
             | None -> ()
           end;
 
@@ -544,5 +583,10 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
 
   let rebuild_all () = rebuild (); rebuild_floating () in
   rebuild_all_ref := rebuild_all;
+  (* Expose the rebuild to the YAML widget click handlers so they
+     can force a structural re-render after state writes that
+     change bind: { z_index, color, ... } evaluations — the
+     color_swatch fill/stroke click is the canonical case. *)
+  Yaml_panel_view.panel_rerender_hook := rebuild_all;
   rebuild_all ();
   rebuild_all
