@@ -824,10 +824,6 @@ class MainWindow(QMainWindow):
             ps = self._yaml_state.get_panel_state("color_panel_content")
             if ps is None:
                 return
-            # Mirror both fill_color and stroke_color from the
-            # selection (or defaults) so the fill/stroke widget
-            # paints both swatches correctly. The channel sliders
-            # follow the active side per fill_on_top.
             fill_color, stroke_color = _selection_fill_and_stroke(model)
             if fill_color is not None:
                 self._yaml_state.set("fill_color", "#" + fill_color.to_hex())
@@ -843,7 +839,13 @@ class MainWindow(QMainWindow):
                 return
             color_busy["flag"] = True
             try:
-                _sync_panel_channels_from_color(self._yaml_state, active)
+                # Pass prior so the H preservation logic survives
+                # the second-pass resync that runs after the bridge
+                # mutates the model — otherwise dragging S to 0
+                # writes preserved H=226 first, then immediately
+                # overwrites with H=0 via this resync.
+                _sync_panel_channels_from_color(
+                    self._yaml_state, active, prior=ps)
             finally:
                 color_busy["flag"] = False
 
@@ -1453,22 +1455,34 @@ class MainWindow(QMainWindow):
                 from geometry.element import Color
                 hex_str = _value if isinstance(_value, str) else ""
                 color = Color.from_hex(hex_str)
+                # In Web Safe RGB mode, snap each channel to the
+                # nearest multiple of 51 on commit so the hex
+                # follows the same rule the sliders enforce.
+                if color is not None and mode == "web_safe_rgb":
+                    r, g, bl, _a = color.to_rgba()
+                    def _snap_f(v):
+                        return round(v * 255 / 51) * 51 / 255.0
+                    color = Color.rgb(_snap_f(r), _snap_f(g), _snap_f(bl))
             else:
                 color = _compute_color_from_panel(ps, mode)
             if color is None:
                 return
             self._color_channel_in_flight = True
             try:
-                # Hex commit is the commit point — push to recent.
-                # Live drag of h/s/b/r/g/bl etc. uses set_active_color
-                # _live (no push); slider release handles its own
-                # commit via _on_release in _render_slider.
                 if key == "hex":
                     from panels.panel_menu import set_active_color
                     model.snapshot()
                     set_active_color(color, model)
                 else:
                     set_active_color_live(color, model)
+                # Refresh the toolbar widget immediately — the
+                # on_document_changed listener for the toolbar
+                # bails out when _color_channel_in_flight is set
+                # (so live slider drag doesn't fight the bridge),
+                # which means hex Enter / channel commits leave
+                # the toolbar widget at the pre-edit color until
+                # the next doc change. Sync explicitly here.
+                self._sync_fill_stroke_widget()
                 # Mirror the new color into state.fill_color /
                 # stroke_color so the FillStrokeWidget preview
                 # swatch (bound to state.fill_color / state.stroke
@@ -1486,8 +1500,23 @@ class MainWindow(QMainWindow):
                 # .bl etc.). The _color_channel_in_flight guard
                 # prevents the recursive set_panel calls from
                 # re-entering this bridge.
+                # Pass the live panel state so the sync can
+                # preserve the user's H value when S/B drag to 0
+                # — RGB→HSB collapses H to 0 at zero saturation /
+                # brightness (gray / black have no defined hue),
+                # and without the preserve the H slider snaps to
+                # 0 whenever S or B touches 0.
+                # When key="hex" in web_safe mode, the typed hex
+                # has been snapped above — overwrite the user's
+                # typed text with the snapped form by clearing
+                # exclude (the hex field's binding repaints from
+                # panel.hex). Otherwise skip the channel being
+                # actively edited to avoid fighting the user's
+                # input.
+                snap_exclude = "" if (key == "hex" and mode == "web_safe_rgb") else key
                 _sync_panel_channels_from_color(
-                    self._yaml_state, color, exclude=key)
+                    self._yaml_state, color, exclude=snap_exclude,
+                    prior=ps)
             finally:
                 self._color_channel_in_flight = False
 
@@ -1560,12 +1589,18 @@ def _resolve_path(doc, path):
         return None
 
 
-def _sync_panel_channels_from_color(store, color, exclude: str = ""):
+def _sync_panel_channels_from_color(store, color, exclude: str = "",
+                                     prior: dict | None = None):
     """Recompute every Color panel channel value (h/s/b/r/g/bl/c/m/
     y/k/hex) from [color] and write them back into the
     color_panel_content state. Skips the [exclude] key so the
     widget the user is currently driving (slider being dragged,
     value box being typed in) doesn't fight the user's input.
+
+    [prior] is the panel state from BEFORE the user's edit; used
+    to preserve H when S or B drag to 0 (gray and black have no
+    defined hue in RGB→HSB conversion, so the recompute would
+    snap H to 0 and lose the user's choice).
     """
     import colorsys
     r, g, bl, _ = color.to_rgba()
@@ -1576,6 +1611,17 @@ def _sync_panel_channels_from_color(store, color, exclude: str = ""):
     h_deg = int(round(h * 360)) % 360
     s_pct = int(round(s * 100))
     b_pct = int(round(b * 100))
+    # Preserve prior H when this RGB has no defined hue (s=0 or
+    # b=0). Keeps the H slider sticky while the user drags S/B
+    # through zero. Only applies when the user wasn't editing H.
+    if prior is not None and exclude != "h" and (s_pct == 0 or b_pct == 0):
+        prior_h = prior.get("h")
+        if isinstance(prior_h, (int, float)):
+            h_deg = int(prior_h)
+    # Preserve prior C/M/Y when K=100 (pure black) — CMYK
+    # decomposition divides by (1-K) and the c=m=y=0 fallback
+    # would silently wipe the user's earlier CMYK values when
+    # the user drags grayscale K to 100 or CMYK K to 100.
     # CMYK from RGB
     k = 1.0 - max(r, g, bl)
     if k >= 1.0 - 1e-6:
@@ -1588,6 +1634,20 @@ def _sync_panel_channels_from_color(store, color, exclude: str = ""):
     m_pct = int(round(m * 100))
     y_pct = int(round(y_c * 100))
     k_pct = int(round(k * 100))
+    # When K=100 the CMYK decomposition is undefined and c/m/y
+    # collapse to 0 — preserve the user's prior values so dragging
+    # Grayscale K to 100 (or CMYK K to 100) doesn't silently wipe
+    # what they had set earlier.
+    if prior is not None and k_pct >= 100:
+        for src, dst in (("c", "c_pct"), ("m", "m_pct"), ("y", "y_pct")):
+            prior_v = prior.get(src)
+            if isinstance(prior_v, (int, float)) and exclude != src:
+                if dst == "c_pct":
+                    c_pct = int(prior_v)
+                elif dst == "m_pct":
+                    m_pct = int(prior_v)
+                elif dst == "y_pct":
+                    y_pct = int(prior_v)
     hex_str = color.to_hex()
     writes = {
         "h": h_deg, "s": s_pct, "b": b_pct,

@@ -62,8 +62,13 @@ class Color:
 
     @staticmethod
     def from_hex(s: str) -> "Color | None":
-        """Parse 6-char hex string (optional # prefix). Returns None on invalid."""
+        """Parse a hex string (optional # prefix). Accepts both
+        6-char (``rrggbb``) and 3-char shorthand (``rgb`` → ``rrggbb``).
+        Returns None on invalid input.
+        """
         s = s.lstrip("#")
+        if len(s) == 3:
+            s = s[0] * 2 + s[1] * 2 + s[2] * 2
         if len(s) != 6:
             return None
         try:

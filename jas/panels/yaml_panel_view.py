@@ -45,9 +45,11 @@ class YamlPanelView(QWidget):
         # gets wiped back to YAML defaults (CLR-022 Python).
         defaults = panel_state_defaults(panel_spec)
         existing = store.get_panel_state(self._panel_id)
-        if not existing:
+        first_mount = not existing
+        if first_mount:
             self._store.init_panel(self._panel_id, defaults)
         self._store.set_active_panel(self._panel_id)
+        self._first_mount = first_mount
 
         # Opacity panel — stash the store handle in panel_menu so
         # the hamburger-menu toggle commands
@@ -74,8 +76,15 @@ class YamlPanelView(QWidget):
             from panels.panel_menu import set_paragraph_store
             set_paragraph_store(self._store)
 
-        # Run init expressions
-        self._run_init()
+        # Run init expressions ONLY on first mount. Re-running on
+        # dock rebuild would write back the YAML's init defaults
+        # via set_panel, each fire dragging in the color bridge to
+        # recompute / mirror the canvas — which on a None-fill
+        # click cascades through the channel writes and snaps the
+        # canvas back through a series of stale colors (CLR-167
+        # Python).
+        if first_mount:
+            self._run_init()
 
         # Build UI
         layout = QVBoxLayout(self)

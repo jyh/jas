@@ -235,6 +235,15 @@ def _render_button(el, store, ctx, dispatch_fn):
     else:
         label = static_label
     btn = QPushButton(label)
+    # Style with the active theme's text color so dialog buttons
+    # (OK / Cancel / Color Swatches) render readable text on Dark
+    # Gray — without this Qt's default uses near-black system text
+    # which disappears on dark backgrounds (CLR-200/231 Python).
+    try:
+        from workspace.dock_panel import THEME_TEXT
+        btn.setStyleSheet(f"QPushButton {{ color: {THEME_TEXT}; }}")
+    except Exception:
+        pass
     # Opacity panel: op_make_mask dispatches Controller make or
     # release based on selection_has_mask. The button has no
     # `action` in yaml — routing is resolved here against the
@@ -529,7 +538,10 @@ def _render_slider(el, store, ctx, dispatch_fn):
         return default
     slider.setMinimum(_i(el.get("min", 0), 0))
     slider.setMaximum(_i(el.get("max", 100), 100))
-    slider.setSingleStep(_i(el.get("step", 1), 1))
+    step = _i(el.get("step", 1), 1)
+    slider.setSingleStep(step)
+    if step > 1:
+        slider.setPageStep(step)
 
     bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
     value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
@@ -550,10 +562,22 @@ def _render_slider(el, store, ctx, dispatch_fn):
         if value_expr.startswith("panel."):
             panel_field = value_expr[len("panel."):]
             widget_pid = ctx.get("_panel_id")
-            def _on_change(v, _f=panel_field, _pid=widget_pid):
+            # Snap to step before writing — Qt's setSingleStep only
+            # governs keyboard arrows, so drag / click would write
+            # raw 0–255 values to the panel state. Snapping at the
+            # write boundary forces the Web Safe RGB sliders to
+            # commit only multiples of 51 (CLR-060 Python).
+            def _on_change(v, _f=panel_field, _pid=widget_pid, _s=step):
+                snapped = int(round(v / _s) * _s) if _s > 1 else int(v)
+                # Bounce the slider's visible position back to the
+                # snapped value so the thumb sits on a step edge.
+                if _s > 1 and snapped != int(v):
+                    slider.blockSignals(True)
+                    slider.setValue(snapped)
+                    slider.blockSignals(False)
                 pid = _pid or store.get_active_panel_id()
                 if pid is not None:
-                    store.set_panel(pid, _f, int(v))
+                    store.set_panel(pid, _f, snapped)
             slider.valueChanged.connect(_on_change)
             # Slider release on a Color-panel channel commits the
             # final color into the model's recent_colors list. Live
@@ -2820,6 +2844,12 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
     determine per-item identity).
     """
     bindings = el.get("bind") or {}
+    # Some YAML widgets use the bare-string `bind:` form (e.g.
+    # toggles, text_input fields bound to a single value). Wrap
+    # those so _apply_bindings can iterate uniformly — without
+    # this, .items() on a bare string raises AttributeError.
+    if isinstance(bindings, str):
+        bindings = {"value": bindings}
     if not bindings:
         return
 
@@ -2948,17 +2978,32 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
 
 
 def _set_widget_value(widget: QWidget, value):
-    """Set the value of a widget based on its type."""
+    """Set the value of a widget based on its type.
+
+    Block signals during setValue so propagating bindings (e.g. a
+    hidden Web Safe RGB slider tracking panel.r changes) don't
+    fire their own valueChanged handlers and write back snapped
+    values that fight the user's input in the visible mode's
+    sibling slider (CLR-060 Python — RGB drag snapped to 51 after
+    Web Safe use because the hidden web_safe slider snapped panel
+    .r back on every echo).
+    """
     if isinstance(widget, QSlider):
         try:
+            widget.blockSignals(True)
             widget.setValue(int(float(value)) if value is not None else 0)
         except (TypeError, ValueError):
             pass
+        finally:
+            widget.blockSignals(False)
     elif isinstance(widget, QSpinBox):
         try:
+            widget.blockSignals(True)
             widget.setValue(int(float(value)) if value is not None else 0)
         except (TypeError, ValueError):
             pass
+        finally:
+            widget.blockSignals(False)
     elif isinstance(widget, QLineEdit):
         # length_input stashes unit / precision so the displayed text
         # routes through Length.format instead of plain str().
@@ -3002,20 +3047,34 @@ def _apply_behaviors(widget: QWidget, behaviors: list, store: StateStore,
 def _wire_click(widget, action, params, condition, effects, store, ctx, dispatch_fn):
     if not hasattr(widget, "clicked"):
         return
+    # Capture the widget's panel id at wire time so condition /
+    # param evaluation uses THIS widget's panel state, not the
+    # global active panel (which can drift between widget renders
+    # and clicks). Without this, the recent-swatch condition
+    # `panel.recent_colors.0 != null` evaluates against an
+    # unrelated panel's empty state and the click silently no-ops.
+    widget_pid = ctx.get("_panel_id")
+
+    def _build_eval_ctx():
+        ec = store.eval_context(ctx)
+        if widget_pid:
+            ec["panel"] = store.get_panel_state(widget_pid)
+        return ec
 
     def on_click():
         if condition:
-            eval_ctx = store.eval_context(ctx)
+            eval_ctx = _build_eval_ctx()
             cond_result = evaluate(condition, eval_ctx)
             if not cond_result.to_bool():
                 return
         if action:
             resolved_params = {}
-            eval_ctx = store.eval_context(ctx)
+            eval_ctx = _build_eval_ctx()
             for k, v in params.items():
                 r = evaluate(str(v), eval_ctx)
                 resolved_params[k] = r.value
-            dispatch_fn(action, resolved_params)
+            if dispatch_fn:
+                dispatch_fn(action, resolved_params)
         if effects:
             from workspace_interpreter.effects import run_effects
             run_effects(effects, ctx, store)

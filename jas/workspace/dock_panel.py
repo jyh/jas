@@ -792,6 +792,21 @@ class DockPanelWidget(QWidget):
             # the visible sliders don't change (CLR-022 Python).
             if self._state_store is not None:
                 self._state_store.set_panel("color_panel_content", "mode", mode)
+                # Switching to Web Safe RGB snaps the current
+                # color to the nearest web-safe step (multiples of
+                # 51). Other modes don't snap. Mirrors the OCaml
+                # set_color_panel_mode → web-safe-snap branch.
+                if mode == "web_safe_rgb":
+                    ps = self._state_store.get_panel_state(
+                        "color_panel_content") or {}
+                    def _snap(name):
+                        v = ps.get(name)
+                        if isinstance(v, (int, float)):
+                            n = int(round(v / 51.0) * 51)
+                            n = max(0, min(255, n))
+                            self._state_store.set_panel(
+                                "color_panel_content", name, n)
+                    _snap("r"); _snap("g"); _snap("bl")
         elif action_name == "invert_active_color":
             panel_dispatch(kind, "invert_color", addr, self._layout_data,
                           model=self._get_model() if self._get_model else None)
