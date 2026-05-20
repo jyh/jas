@@ -12737,6 +12737,14 @@
           "label": "Create New Swatch...",
           "disabled": true,
           "description": "Disabled; will be enabled when the Swatches panel is implemented."
+        },
+        "separator",
+        {
+          "label": "Close Color",
+          "action": "close_panel",
+          "params": {
+            "panel": "color"
+          }
         }
       ],
       "content": {

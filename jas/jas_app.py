@@ -329,6 +329,8 @@ class MainWindow(QMainWindow):
         #   2. YAML push    (list_push panel.recent_colors) →
         #      update model.recent_colors and mirror to siblings.
         self._setup_recent_colors_bridge()
+        self._setup_color_panel_channel_bridge()
+        self._setup_fill_on_top_bridge()
 
         # Dock pane
         self.dock_panel = DockPanelWidget(self.workspace_layout, get_model=self.active_model,
@@ -806,6 +808,64 @@ class MainWindow(QMainWindow):
             print(f"[para_resync] post-sync text_selected={ts}", flush=True)
         model.on_document_changed(_resync_paragraph_panel)
 
+        # Re-sync the Color panel from the selection's fill/stroke
+        # (or the model defaults when nothing is selected) on every
+        # document change. Without this, selecting an element with
+        # a different fill leaves the Color panel showing the
+        # previously-active color and its sliders / hex are out of
+        # sync (CLR-022..29 Python).
+        color_busy = {"flag": False}
+
+        def _resync_color_panel(_doc=None):
+            if color_busy["flag"]:
+                return
+            if getattr(self, "_color_channel_in_flight", False):
+                return  # live drag is owning the writes
+            ps = self._yaml_state.get_panel_state("color_panel_content")
+            if ps is None:
+                return
+            # Mirror both fill_color and stroke_color from the
+            # selection (or defaults) so the fill/stroke widget
+            # paints both swatches correctly. The channel sliders
+            # follow the active side per fill_on_top.
+            fill_color, stroke_color = _selection_fill_and_stroke(model)
+            if fill_color is not None:
+                self._yaml_state.set("fill_color", "#" + fill_color.to_hex())
+            else:
+                self._yaml_state.set("fill_color", None)
+            if stroke_color is not None:
+                self._yaml_state.set("stroke_color", "#" + stroke_color.to_hex())
+            else:
+                self._yaml_state.set("stroke_color", None)
+            active = (fill_color if getattr(model, "fill_on_top", True)
+                      else stroke_color)
+            if active is None:
+                return
+            color_busy["flag"] = True
+            try:
+                _sync_panel_channels_from_color(self._yaml_state, active)
+            finally:
+                color_busy["flag"] = False
+
+        model.on_document_changed(_resync_color_panel)
+        # Keep the toolbar's fill/stroke widget in sync with the
+        # current selection too — _resync_color_panel mirrors the
+        # YAML state, this catches the toolbar widget. Skip while
+        # a slider drag owns the writes (the channel bridge
+        # already pushed the live color to both widgets).
+        def _resync_toolbar_fs(_doc=None):
+            if getattr(self, "_color_channel_in_flight", False):
+                return
+            self._sync_fill_stroke_widget()
+        model.on_document_changed(_resync_toolbar_fs)
+
+        # Initial sync — on_document_changed only fires on later
+        # mutations, so without these the Color panel and toolbar
+        # widget show their YAML defaults until the user moves the
+        # selection or edits a color (CLR-022..29 Python).
+        _resync_color_panel()
+        _resync_toolbar_fs()
+
         tab_label()
         self._update_canvas_logo()
 
@@ -1229,21 +1289,26 @@ class MainWindow(QMainWindow):
             self._yaml_state.close_dialog()
 
     def _sync_fill_stroke_widget(self):
-        """Update the toolbar fill/stroke indicator from the active model."""
+        """Update the toolbar fill/stroke indicator from the current
+        selection (or the model defaults when nothing is
+        selected). Mirrors the Color panel's swatch — both widgets
+        should always show the same colors and z-order.
+        """
         m = self.active_model()
         fs = self.toolbar.fill_stroke_widget
-        if m:
-            if m.default_fill is not None:
-                r, g, b, _ = m.default_fill.color.to_rgba()
-                fs.set_fill_color(QColor(round(r * 255), round(g * 255), round(b * 255)))
-            else:
-                fs.set_fill_color(None)
-            if m.default_stroke is not None:
-                r, g, b, _ = m.default_stroke.color.to_rgba()
-                fs.set_stroke_color(QColor(round(r * 255), round(g * 255), round(b * 255)))
-            else:
-                fs.set_stroke_color(None)
-            fs.set_fill_on_top(m.fill_on_top)
+        if m is None:
+            return
+        fill_color, stroke_color = _selection_fill_and_stroke(m)
+
+        def _to_q(c):
+            if c is None:
+                return None
+            r, g, b, _ = c.to_rgba()
+            return QColor(round(r * 255), round(g * 255), round(b * 255))
+
+        fs.set_fill_color(_to_q(fill_color))
+        fs.set_stroke_color(_to_q(stroke_color))
+        fs.set_fill_on_top(m.fill_on_top)
 
     _RECENT_COLORS_PANELS = ("color_panel_content", "swatches_panel_content")
 
@@ -1276,7 +1341,8 @@ class MainWindow(QMainWindow):
             self._rc_mirroring = True
             try:
                 for pid in self._RECENT_COLORS_PANELS:
-                    if self._yaml_state.get_panel(pid, "recent_colors") is not None:
+                    ps = self._yaml_state.get_panel_state(pid)
+                    if ps is not None:
                         self._yaml_state.set_panel(
                             pid, "recent_colors", list(model.recent_colors))
             finally:
@@ -1335,6 +1401,242 @@ class MainWindow(QMainWindow):
         # Catch panels already initialized before this point.
         for pid in self._RECENT_COLORS_PANELS:
             _ensure_panel_subscribed(pid)
+
+    def _setup_fill_on_top_bridge(self):
+        """Mirror state.fill_on_top → model.fill_on_top and refresh
+        the toolbar's FillStrokeWidget. Without this, clicking the
+        Color panel's fill/stroke swatch updates the panel's
+        widget but the toolbar's widget stays at the old z-order,
+        and the color-channel bridge writes to the wrong side.
+        """
+        def _on_change(key, value):
+            if key != "fill_on_top":
+                return
+            m = self.active_model()
+            if m is None:
+                return
+            new = bool(value)
+            if m.fill_on_top != new:
+                m.fill_on_top = new
+            self._sync_fill_stroke_widget()
+        self._yaml_state.subscribe(["fill_on_top"], _on_change)
+
+    _COLOR_CHANNEL_KEYS = ("h", "s", "b", "r", "g", "bl",
+                           "c", "m", "y", "k", "hex")
+
+    def _setup_color_panel_channel_bridge(self):
+        """Subscribe to color_panel_content's channel keys (h/s/b/r/
+        g/bl/c/m/y/k) so a slider drag or value-box commit
+        recomputes the active color from the panel's current mode
+        and pushes it onto the model. Mirrors the OCaml
+        [_write_back_bind] color-channel branch.
+        """
+        from panels.panel_menu import set_active_color_live
+
+        self._color_channel_in_flight = False
+
+        def _on_color_panel_change(key, _value):
+            if key not in self._COLOR_CHANNEL_KEYS:
+                return
+            if self._color_channel_in_flight:
+                return
+            model = self.active_model()
+            if model is None:
+                return
+            ps = self._yaml_state.get_panel_state("color_panel_content") or {}
+            mode = ps.get("mode", "hsb")
+            # When the user commits the hex field, compute from the
+            # typed hex string directly — the per-mode channel
+            # values are stale until the bridge round-trips. For
+            # all other channels, compute from the mode's tuple.
+            if key == "hex":
+                from geometry.element import Color
+                hex_str = _value if isinstance(_value, str) else ""
+                color = Color.from_hex(hex_str)
+            else:
+                color = _compute_color_from_panel(ps, mode)
+            if color is None:
+                return
+            self._color_channel_in_flight = True
+            try:
+                # Hex commit is the commit point — push to recent.
+                # Live drag of h/s/b/r/g/bl etc. uses set_active_color
+                # _live (no push); slider release handles its own
+                # commit via _on_release in _render_slider.
+                if key == "hex":
+                    from panels.panel_menu import set_active_color
+                    model.snapshot()
+                    set_active_color(color, model)
+                else:
+                    set_active_color_live(color, model)
+                # Mirror the new color into state.fill_color /
+                # stroke_color so the FillStrokeWidget preview
+                # swatch (bound to state.fill_color / state.stroke
+                # _color) repaints to follow the live drag.
+                hex_str = "#" + color.to_hex()
+                if getattr(model, "fill_on_top", True):
+                    self._yaml_state.set("fill_color", hex_str)
+                else:
+                    self._yaml_state.set("stroke_color", hex_str)
+                # Recompute ALL the sibling channels in panel state
+                # so the hex field, the OTHER mode's slider values,
+                # and any value box NOT currently driving the edit
+                # stay in sync with the new color (e.g. dragging
+                # the H slider updates panel.hex / panel.r / .g /
+                # .bl etc.). The _color_channel_in_flight guard
+                # prevents the recursive set_panel calls from
+                # re-entering this bridge.
+                _sync_panel_channels_from_color(
+                    self._yaml_state, color, exclude=key)
+            finally:
+                self._color_channel_in_flight = False
+
+        def _subscribe():
+            self._yaml_state.subscribe_panel(
+                "color_panel_content", _on_color_panel_change)
+
+        # Color panel may already be initialized (init_panel ran for
+        # the first mount). Subscribe immediately; the state store
+        # silently drops the subscription if the panel doesn't yet
+        # exist, and the recent-colors bridge's init_panel hook
+        # re-registers on remount.
+        _subscribe()
+
+
+def _selection_fill_and_stroke(model):
+    """Return (fill_color, stroke_color) for the current selection,
+    or the model defaults when nothing is selected. Either / both
+    may be None when the element has no fill / stroke.
+    """
+    if model is None:
+        return None, None
+    doc = getattr(model, "document", None)
+    sel = getattr(doc, "selection", None) if doc is not None else None
+    fill_color = None
+    stroke_color = None
+    if sel:
+        first_es = next(iter(sel), None)
+        path_tuple = getattr(first_es, "path", first_es)
+        if path_tuple is not None:
+            elem = _resolve_path(doc, path_tuple)
+            if elem is not None:
+                fill = getattr(elem, "fill", None)
+                if fill is not None:
+                    fill_color = fill.color
+                stroke = getattr(elem, "stroke", None)
+                if stroke is not None:
+                    stroke_color = stroke.color
+                return fill_color, stroke_color
+    # Selection-less: model defaults
+    df = getattr(model, "default_fill", None)
+    if df is not None:
+        fill_color = df.color
+    ds = getattr(model, "default_stroke", None)
+    if ds is not None:
+        stroke_color = ds.color
+    return fill_color, stroke_color
+
+
+def _resolve_path(doc, path):
+    """Walk the document tree to the element at the given path tuple.
+
+    Top level is doc.layers (tuple of Layer); each Layer / Group has
+    .children (tuple of Element). Walks indices through nested
+    children until exhausted, returns the final element.
+    """
+    if doc is None or path is None:
+        return None
+    layers = getattr(doc, "layers", None)
+    if not layers:
+        return None
+    cur = None
+    items = layers
+    try:
+        for idx in path:
+            cur = items[idx]
+            items = getattr(cur, "children", None) or ()
+        return cur
+    except (IndexError, TypeError):
+        return None
+
+
+def _sync_panel_channels_from_color(store, color, exclude: str = ""):
+    """Recompute every Color panel channel value (h/s/b/r/g/bl/c/m/
+    y/k/hex) from [color] and write them back into the
+    color_panel_content state. Skips the [exclude] key so the
+    widget the user is currently driving (slider being dragged,
+    value box being typed in) doesn't fight the user's input.
+    """
+    import colorsys
+    r, g, bl, _ = color.to_rgba()
+    ri = int(round(r * 255))
+    gi = int(round(g * 255))
+    bli = int(round(bl * 255))
+    h, s, b = colorsys.rgb_to_hsv(r, g, bl)
+    h_deg = int(round(h * 360)) % 360
+    s_pct = int(round(s * 100))
+    b_pct = int(round(b * 100))
+    # CMYK from RGB
+    k = 1.0 - max(r, g, bl)
+    if k >= 1.0 - 1e-6:
+        c = m = y_c = 0.0
+    else:
+        c = (1.0 - r - k) / (1.0 - k)
+        m = (1.0 - g - k) / (1.0 - k)
+        y_c = (1.0 - bl - k) / (1.0 - k)
+    c_pct = int(round(c * 100))
+    m_pct = int(round(m * 100))
+    y_pct = int(round(y_c * 100))
+    k_pct = int(round(k * 100))
+    hex_str = color.to_hex()
+    writes = {
+        "h": h_deg, "s": s_pct, "b": b_pct,
+        "r": ri, "g": gi, "bl": bli,
+        "c": c_pct, "m": m_pct, "y": y_pct, "k": k_pct,
+        "hex": hex_str,
+    }
+    for key, val in writes.items():
+        if key == exclude:
+            continue
+        store.set_panel("color_panel_content", key, val)
+
+
+def _compute_color_from_panel(ps, mode):
+    """Recompute the active color from a color panel's channel
+    values + mode. Returns None when channel values are missing or
+    the mode is unrecognised. Mirrors the OCaml
+    [_write_back_bind]'s color-channel switch.
+    """
+    from geometry.element import Color
+    import colorsys
+
+    def _f(name):
+        v = ps.get(name)
+        if isinstance(v, (int, float)):
+            return float(v)
+        return 0.0
+
+    if mode == "hsb":
+        h = _f("h") / 360.0
+        s = _f("s") / 100.0
+        b = _f("b") / 100.0
+        r, g, bl = colorsys.hsv_to_rgb(h, s, b)
+        return Color.rgb(r, g, bl)
+    if mode in ("rgb", "web_safe_rgb"):
+        return Color.rgb(_f("r") / 255.0, _f("g") / 255.0, _f("bl") / 255.0)
+    if mode == "grayscale":
+        v = 1.0 - _f("k") / 100.0
+        return Color.rgb(v, v, v)
+    if mode == "cmyk":
+        c = _f("c") / 100.0
+        m = _f("m") / 100.0
+        y = _f("y") / 100.0
+        k = _f("k") / 100.0
+        r = (1.0 - c) * (1.0 - k)
+        g = (1.0 - m) * (1.0 - k)
+        bl = (1.0 - y) * (1.0 - k)
+        return Color.rgb(r, g, bl)
+    return None
 
 
 def main():
