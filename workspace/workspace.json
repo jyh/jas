@@ -26369,7 +26369,7 @@
                                 "type": "number_input",
                                 "id": "cp_h",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 359,
@@ -26409,7 +26409,7 @@
                                 "type": "number_input",
                                 "id": "cp_s",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -26449,7 +26449,7 @@
                                 "type": "number_input",
                                 "id": "cp_b",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -26572,7 +26572,7 @@
                                 "type": "number_input",
                                 "id": "cp_r",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 255,
@@ -26612,7 +26612,7 @@
                                 "type": "number_input",
                                 "id": "cp_g",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 255,
@@ -26652,7 +26652,7 @@
                                 "type": "number_input",
                                 "id": "cp_bl",
                                 "style": {
-                                  "width": 45
+                                  "width": 60
                                 },
                                 "min": 0,
                                 "max": 255,
@@ -26714,7 +26714,7 @@
                                 "type": "number_input",
                                 "id": "cp_c",
                                 "style": {
-                                  "width": 40
+                                  "width": 55
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -26743,7 +26743,7 @@
                                 "type": "number_input",
                                 "id": "cp_m",
                                 "style": {
-                                  "width": 40
+                                  "width": 55
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -26772,7 +26772,7 @@
                                 "type": "number_input",
                                 "id": "cp_y",
                                 "style": {
-                                  "width": 40
+                                  "width": 55
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -26801,7 +26801,7 @@
                                 "type": "number_input",
                                 "id": "cp_k",
                                 "style": {
-                                  "width": 40
+                                  "width": 55
                                 },
                                 "min": 0,
                                 "max": 100,
@@ -35248,7 +35248,7 @@
             "type": "number_input",
             "id": "${input_id}",
             "style": {
-              "width": 45
+              "width": 60
             },
             "min": "${min}",
             "max": "${max}",
@@ -35298,7 +35298,7 @@
             "type": "number_input",
             "id": "${id_prefix}",
             "style": {
-              "width": 40
+              "width": 55
             },
             "min": "${min}",
             "max": "${max}",
