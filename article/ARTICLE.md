@@ -421,17 +421,25 @@ designed. Each one would have been silently wrong in a single
 implementation. With five implementations and manual cross-checking, each
 was visible within hours of the relevant manual test session.
 
-**Figure 2.** The Color Panel rendered in all five ports (left to right:
-jas_dioxus / Rust, JasSwift, jas_ocaml, jas / Python, jas_flask), each
-showing the active color `#3580c4` on the Dark Gray theme. All five
+<table>
+<tr>
+<td align="center"><img src="figures/color_panel/jas_dioxus.png" width="200"/><br/><sub>jas_dioxus (Rust)</sub></td>
+<td align="center"><img src="figures/color_panel/jas_swift.png" width="200"/><br/><sub>JasSwift</sub></td>
+<td align="center"><img src="figures/color_panel/jas_ocaml.png" width="200"/><br/><sub>jas_ocaml</sub></td>
+<td align="center"><img src="figures/color_panel/jas_python.png" width="200"/><br/><sub>jas (Python)</sub></td>
+<td align="center"><img src="figures/color_panel/jas_flask.png" width="200"/><br/><sub>jas_flask</sub></td>
+</tr>
+</table>
+
+**Figure 2.** The Color Panel rendered in all five ports, each showing
+the active color `#3580c4` on the Dark Gray theme. All five
 implementations are driven by the same 890 lines of YAML specification.
 Visible-by-inspection equivalence is the figure's intent: the active
 color swatch, recent-color strip, slider arrangement, hex field, and
 color bar appear in equivalent layout positions across the ports, with
 platform-native variation in slider styling, spinbox controls, and tab
 presentation. The bugs documented above were caught by precisely this
-kind of side-by-side comparison. Screenshots:
-`article/figures/color_panel/jas_{dioxus,swift,ocaml,python,flask}.png`.
+kind of side-by-side comparison.
 
 ### 4.3 Cost and correctness trade-offs
 
