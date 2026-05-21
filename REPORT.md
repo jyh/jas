@@ -276,11 +276,12 @@ Total figure space: ~1.8 pages of ~10.
 
 ---
 
-## 8. Related work citations (~10)
+## 8. Related work citations (~11)
 
 | Cite | Use |
 |---|---|
 | Avizienis 1985 | N-version programming, abandoned on cost; §4, §8 |
+| Knight and Leveson 1986 | Empirical critique of N-version independence; §4, §8 |
 | McKeeman 1998 | Differential testing original; §4, §8 |
 | Yang et al. 2011 (CSmith) | Differential testing in compilers; §4, §8 |
 | Roşu & Şerbănuţă | K-Framework; §3, §8 |

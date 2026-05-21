@@ -317,4 +317,146 @@ the per-port code carries the platform-specific machinery.
 
 ---
 
-<!-- DRAFT IN PROGRESS — sections 4–9 forthcoming -->
+## 4. Parallel implementations as correctness check
+
+### 4.1 N implementations as differential testing
+
+The five implementations exist not only to demonstrate that the
+specification is portable, but to make divergence between them observable.
+Two ports producing visibly different output from the same specification
+reveal a flaw — either in the specification (it permits more than one
+reasonable interpretation), in one of the implementations (it has a bug),
+or in both. The shared specification provides the contract; the parallel
+implementations provide the cross-check.
+
+This is differential testing [McKeeman 1998] applied to interactive
+application code. Differential testing has succeeded most prominently in
+compiler validation [Yang et al. 2011], where multiple independent compilers
+already exist as targets to compare against. In this work, the
+implementations are not independent — they are derived from a shared
+specification — but they are independent enough in their use of native
+platform features (rendering, layout, event handling, state management) that
+bugs in either the spec or the implementations surface when output diverges.
+
+In practice, much of this differential testing was performed manually rather
+than automated. For each user-visible feature, a transcript file (e.g.,
+`transcripts/COLOR_TESTS.md`) lists numbered scenarios that an operator runs
+in each port and marks with a pass date. Automated tests catch state-level
+divergence; manual transcripts catch visual, timing, and behavioral
+divergence that automated tests miss.
+
+### 4.2 Spec underspecification: bugs found by divergence
+
+The most informative divergences are not implementation bugs but
+specification gaps. The specification permits a reasonable interpretation,
+two ports adopt different reasonable interpretations, and the divergence
+forces the specification to be sharpened. Five examples from the Color
+Panel illustrate the pattern.
+
+**Hue collapses to zero when saturation drops to zero.** When the
+saturation slider is dragged to zero in HSB mode, the hue channel becomes
+mathematically meaningless — the color is gray at any hue. The Python and
+Rust ports initially snapped hue to zero when saturation reached zero, a
+literal reading of the HSB → RGB conversion. The OCaml port preserved the
+prior hue value. The user-visible effect: dragging saturation to zero and
+back up in Python or Rust produced a red, not the green the user had been
+working with. Cross-port testing surfaced this within the first hour of
+manual Color Panel testing. The specification was updated to require
+explicit preservation of degenerate-channel values.
+
+**CMYK channels collapse when K reaches 100.** A parallel case in the CMYK
+model. At K=100, the displayed color is black regardless of C, M, and Y.
+Three of the four native ports initially zeroed C/M/Y when K crossed 100.
+The fourth preserved them. The user-visible effect: dragging K back down
+from 100 should restore the working color, not produce black. The
+specification was updated to require channel preservation on degenerate
+transitions.
+
+**Web Safe RGB snap timing.** The Web Safe RGB mode constrains channel
+values to multiples of 51. Initial implementations differed on *when* the
+snap should occur: on slider drag, on slider release, on widget write-back,
+or on display only. Two ports snapped on display and produced incorrect
+committed values; one snapped on drag and produced jumpy visual feedback.
+The specification was updated to require snap-on-write-back: the value
+visible during drag is the snapped value, and the committed value matches
+what is shown.
+
+**Hex commit reverts on dialog OK.** The modal color picker dialog exposes a
+hex field. When the user typed a new hex value and pressed OK, three of
+four ports correctly applied the new color, but one (Python) reverted to
+the previous value. The cause was that the dialog's evaluation context had
+captured a snapshot of the hex field before the typed-in value flowed
+through the get/set lambda chain. The specification required clarification
+on when the dialog evaluation context must be rebuilt against typed-in
+values rather than the render-time snapshot.
+
+**Recent colors push during slider drag.** Recent colors should be added on
+commit (slider release, hex Enter, swatch click), not during drag. Two
+ports initially added every intermediate drag value to the recent list,
+producing a stream of slight variations of the same color. The
+specification was updated to make commit semantics explicit and to require
+ports to push only on commit events.
+
+These divergences are not anomalies; they are the methodology working as
+designed. Each one would have been silently wrong in a single
+implementation. With five implementations and manual cross-checking, each
+was visible within hours of the relevant manual test session.
+
+### 4.3 Cost and correctness trade-offs
+
+The cost of N implementations is linear in N: each port requires its own
+renderer code, its own manual testing pass, its own propagation of bug
+fixes. In this project, total manual testing across five ports accounts
+for the largest share of remaining developer time, more than spec writing
+or per-port implementation.
+
+The correctness benefit is sub-linear. Most spec-completeness bugs surface
+between N=1 and N=2 — the moment a second implementation reveals that the
+first made an unstated choice. N=3 catches a residual layer of subtler
+bugs that depend on three-way comparison (one port agrees with the spec on
+a subtle reading, two ports diverge in different directions). Beyond N=3,
+additional implementations primarily verify that earlier-caught spec
+refinements have been correctly propagated, and serve as protection against
+regression on previously-found classes of bugs.
+
+For this project, N=5 was chosen for reasons beyond differential testing —
+diversity of platforms, languages, and frameworks — but a smaller N (3 or
+4) would likely have provided most of the correctness benefit at
+proportionally lower cost. The right N is a project-specific decision
+driven by platform coverage requirements as much as by differential testing
+economics.
+
+### 4.4 Connection to N-version programming
+
+N-version programming [Avizienis 1985] proposed multiple
+independently-developed implementations as a path to software fault
+tolerance: if N implementations are independent in their failure modes,
+voting among them can mask single-implementation faults. The approach was
+largely abandoned in practice because the cost of developing N independent
+implementations of any substantial system was prohibitive, and because
+empirical work [Knight and Leveson 1986] suggested that
+independently-developed implementations often shared correlated failure
+modes anyway.
+
+AI-paired engineering changes the cost argument fundamentally. With a
+shared specification and AI handling most of the per-port implementation
+work, N implementations across N different languages and frameworks become
+feasible for a single developer. The independence concern is genuinely
+weakened: the implementations share a specification (deliberately) and
+share priors from AI training data (less deliberately). However, the
+implementations differ substantially in their use of native platform
+features — UI frameworks, rendering models, state management idioms — which
+provides a degree of platform-induced diversity that human-team N-version
+programs of the 1980s could not easily achieve, since those programs
+typically used the same language and platform across the N versions.
+
+This is not a claim that N-version differential testing is now formally
+equivalent to N-version programming as Avizienis proposed it. It is a
+claim that the *economic argument* against N-version programming has
+shifted, and that a methodology that uses N implementations as a
+differential-testing layer rather than a fault-tolerance voting layer is
+now practical for a single developer.
+
+---
+
+<!-- DRAFT IN PROGRESS — sections 5–9 forthcoming -->
