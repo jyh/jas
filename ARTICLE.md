@@ -727,4 +727,76 @@ different results.
 
 ---
 
-<!-- DRAFT IN PROGRESS — sections 8–9 forthcoming -->
+## 8. Related work
+
+**Executable specifications.** Spec-as-contract has a long lineage in
+language semantics and compilers — POSIX conformance, ECMA-262 / test262,
+the WebAssembly reference interpreter [Haas et al. 2017], and the
+K-Framework [Roşu and Şerbănuţă 2010]. These projects use an executable
+spec to anchor multiple implementations, typically with one "reference"
+implementation and a conformance test suite. This work shares the
+spec-as-contract pattern but applies it to application-level semantics —
+UI, reactive state, dialog flows — and shifts from one-reference-plus-tests
+to N peer implementations developed in parallel.
+
+**Differential testing and N-version programming.** Differential testing
+[McKeeman 1998] has succeeded in compiler validation [Yang et al. 2011],
+where multiple independent compilers already exist. N-version programming
+[Avizienis 1985] proposed multiple independently-developed implementations
+for software fault tolerance, but was largely abandoned because the cost
+of developing N independent implementations was prohibitive; empirical
+work [Knight and Leveson 1986] further showed that
+independently-developed implementations often shared correlated failure
+modes. **AI fundamentally changes that economic argument.** This paper is,
+to my knowledge, the first existence proof that N implementations
+developed against a shared specification, with AI handling most of the
+per-port mechanical work, are feasible for a single developer. The N
+implementations here span five distinct programming languages and UI
+frameworks, providing implementation diversity that may exceed what was
+achievable in single-language N-version projects of the 1980s.
+
+**AI productivity literature.** Controlled studies of AI-assisted
+development [Peng et al. 2023; Ziegler et al. 2024] measure narrow tasks
+and report 0–80% productivity gains. A recent rigorous study [METR 2025]
+found negative effects on experienced developers working on familiar code,
+complicating the picture. This paper complements those studies with a
+project-scale case report measuring not per-task speed but feasibility of
+scope. The methodologies measure different things; both contribute to
+understanding when and how AI is useful.
+
+**Comparable applications.** Vector illustration applications represent
+decades of development by sustained teams. Adobe Illustrator has been
+developed since 1987; Inkscape, the leading open-source comparison, since
+2003. Commercial alternatives such as Affinity Designer and Figma also
+represent multi-developer-year efforts by sustained teams. The artifact
+described here does not match these in feature completeness; the
+contribution is to demonstrate that a substantial subset is achievable in
+approximately 120 developer-hours across five platforms by a single
+developer.
+
+---
+
+## 9. Conclusion
+
+This paper reports a single-developer case study in AI-paired software
+engineering: five working ports of a vector illustration application,
+sharing one executable YAML specification, built across approximately 120
+evening hours over seven calendar weeks. The methodology relies on two
+safeguards — a precise executable specification that consolidates design
+decisions, and parallel implementations that function as a built-in
+differential-testing layer. I argue these safeguards together make
+feasible for a single developer a scope of work that would conventionally
+require multiple developer-years.
+
+The methodology generalizes to other domains that can be described
+declaratively. It is less clear how far it extends into domains with deep
+imperative interaction or into projects without a clear notion of
+platform-spanning equivalence. The economic argument for N implementations
+— once impractical, now feasible — appears to me the most durable claim of
+this work; the specific productivity numbers will shift as AI capability
+shifts. The artifact and accompanying methodology documents are available
+at github.com/jyh/jas.
+
+---
+
+<!-- BIBLIOGRAPHY TO FOLLOW -->
