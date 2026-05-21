@@ -162,4 +162,159 @@ specific methodology.
 
 ---
 
-<!-- DRAFT IN PROGRESS — sections 3–9 forthcoming -->
+## 3. The executable specification
+
+### 3.1 What the specification is
+
+The specification is approximately 23,000 lines of YAML organized as a
+directory tree under `workspace/`. It declares the application's panels,
+dialogs, tools, menus, keyboard shortcuts, theme tokens, and document state
+model. It is *executable* in the sense that each implementation contains a
+generic interpreter that reads the YAML at startup and constructs working UI
+directly from it, rather than treating the YAML as documentation that has
+been re-encoded in each port.
+
+Each declarative construct in the YAML has a corresponding native renderer
+in each port. A `container` becomes a `VBox` in PySide6, a `VStack` in
+SwiftUI, a `<div>` in HTML, a Cairo layout group in OCaml's GTK binding, and
+a `dioxus::div` in Rust. A `number_input` becomes the platform's native
+numeric-input widget. Behavioral semantics — bidirectional bindings, dialog
+state with get/set lambdas, action dispatch, slider snap-on-write,
+theme-aware styling — are also part of the YAML and are evaluated by the
+same interpreter that constructs the widgets.
+
+This approach has a lineage in executable specifications for language
+semantics, discussed in Section 8. The contribution here is to apply the
+pattern to interactive application UI: not just the static structure of the
+interface, but its reactive behavior under user input.
+
+### 3.2 The shared interpreter and the escape hatch
+
+Each port carries two layers of code: a shared interpreter that loads YAML
+and dispatches it through generic renderers, and a per-port escape hatch for
+platform-specific concerns that the generic renderers cannot adequately
+express. The shared interpreter is approximately 12,500 lines (originating
+in Python and reused or ported to the other languages); the per-port
+renderer layers vary substantially in size, reflecting how often each
+platform requires native code that the generic dispatch cannot produce.
+
+The escape hatch is not a flaw in the methodology; it is the methodology's
+load-bearing flexibility. Custom canvas widgets, hardware-accelerated
+drawing surfaces, platform-specific gesture handling, and complex state
+synchronization with native UI frameworks (such as SwiftUI's reactive
+`@ObservedObject` model) all fall outside what YAML can practically
+describe. The discipline is that everything *that can* be expressed in YAML
+is expressed in YAML; native code exists only where the specification's
+expressive power runs out.
+
+### 3.3 Running example: the Color Panel
+
+The Color Panel illustrates the architecture in a compact form. The YAML
+specification for the Color Panel comprises four files:
+
+- `workspace/panels/color.yaml` (493 lines) — the panel layout, slider rows
+  by mode (HSB / RGB / CMYK / Grayscale / Web Safe), fill-stroke widget
+  binding, recent-colors strip, mode buttons, hamburger menu
+- `workspace/dialogs/color_picker.yaml` (250 lines) — the modal color picker
+  with hex field, 2D gradient, hue bar, channel inputs, color-swatches link
+- `workspace/templates/color_picker_fields.yaml` (37 lines) — reusable
+  HSB / RGB / CMYK row template
+- `workspace/templates/fill_stroke_widget.yaml` (110 lines) — the small
+  fill / stroke selector widget
+
+Total: 890 lines of declarative YAML, written once and consumed by all five
+implementations.
+
+The per-port native code dedicated to the Color Panel ranges from zero to
+over a thousand lines. The OCaml port carries no dedicated color-panel
+code: the generic YAML interpreter is sufficient. The Swift port adds 59
+lines of state-bridging code (`ColorPanelSync.swift`) to mediate between the
+YAML-driven state model and SwiftUI's reactive update cycle. The Python
+port adds approximately 123 lines for a custom color-bar widget painted
+with QPainter. The Rust port adds approximately 1,300 lines spread across
+three files (`color_panel_view.rs`, `color_panel.rs`,
+`fill_stroke_widget.rs`) implementing the gradient widget, the hue bar, and
+a custom fill-stroke composite — immediate-mode rendering that does not fit
+the Dioxus declarative idiom.
+
+This distribution is informative. The platforms whose UI idioms are closely
+aligned with the YAML's declarative model require very little native code;
+the platforms where the model collides with a different rendering paradigm
+require more. The amount of native code per port is, in effect, a measure of
+how well the specification's expressive power matches the target framework.
+Section 4 returns to this distribution as a correctness benefit, as
+cross-port comparison reveals where the specification is underspecified.
+
+**Figure 4.** An excerpt from `workspace/panels/color.yaml` showing the
+top-level container, two concrete widgets (an icon button and a color
+swatch), their bindings, and click behaviors. The full file is 493 lines;
+the form below illustrates the declarative style.
+
+```yaml
+content:
+  type: container
+  id: cp_content
+  layout: column
+  style: { padding: 4, gap: 6 }
+  children:
+
+    # Row 1: Fixed swatches | rule | Recent colors
+    - type: container
+      id: cp_swatches_row
+      layout: row
+      style: { gap: 2, alignment: center }
+      children:
+
+        - id: cp_none_swatch
+          type: icon_button
+          icon: color_none
+          summary: "None"
+          style: { size: 16 }
+          behavior:
+            - event: click
+              action: set_active_color_none
+
+        - id: cp_black_swatch
+          type: color_swatch
+          summary: "Black"
+          style: { size: 16 }
+          bind:
+            color: "#000000"
+          behavior:
+            - event: click
+              action: set_active_color
+              params: { color: "#000000" }
+```
+
+### 3.4 Sub-linear cost across N implementations
+
+The headline implication is this: 890 lines of declarative YAML drove five
+working Color Panel implementations, with per-port native code totaling
+roughly 1,500 lines spread across four of the five ports. The fifth port is
+fully YAML-driven.
+
+In conventional cross-platform development, each port carries the full
+conceptual load of a feature independently. Color picker logic, slider
+snapping, mode-button state, bidirectional channel bindings — all of these
+would be reimplemented in each language and framework. The specification
+consolidates these decisions into a single artifact. When a new feature is
+added (a new slider mode, a new dialog field, a new keyboard shortcut), it
+is added to the YAML once, and propagates to all five ports through their
+interpreters. When a behavioral detail is refined — for example, the
+HSB-degenerate-at-S=0 case discussed as a vignette in Section 4 — it is
+refined in one place.
+
+The cost of the specification is paid once and amortizes sub-linearly across
+N implementations. The cost of per-port renderer code is paid per port, but
+is much smaller than the cost of a full per-port implementation because the
+renderer code only implements the escape hatch — the part the spec cannot
+express. Across the project, native code totals approximately 300,000 lines
+spread across five ports; the shared specification plus interpreter totals
+approximately 35,000 lines. The interpretation is not that the project is
+"8.5 times smaller" — much of the native code is platform glue with no YAML
+counterpart — but that the specification carries the conceptual work, and
+the per-port code carries the platform-specific machinery.
+
+---
+
+<!-- DRAFT IN PROGRESS — sections 4–9 forthcoming -->
