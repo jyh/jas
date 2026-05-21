@@ -459,4 +459,272 @@ now practical for a single developer.
 
 ---
 
-<!-- DRAFT IN PROGRESS — sections 5–9 forthcoming -->
+## 5. AI-paired engineering in practice
+
+### 5.1 The dialog-and-review loop
+
+The methodology centers on two iterative loops. The outer loop turns prose
+design documents into the YAML specification: a design doc describes the
+objective in English, an analysis prompt surfaces inconsistencies and
+missing detail, conversation clarifies the design, and the design doc is
+rewritten with the clarifications. Only then does YAML get written. The
+analysis prompt used throughout the project:
+
+> *Please read and understand these requirements. Analyze them for
+> inconsistencies and completeness. Make suggestions for improvements. Rank
+> your responses in priority from high to low, and giving each a number.
+> What are the benefits? What are the downsides? Be ready for a deep dive
+> into any of the suggestions.*
+
+The inner loop refines the implementation: a feature is implemented in
+YAML, ports are updated, manual tests reveal divergences, and the spec or
+implementations are refined. Periodically — typically every one to two
+weeks — a codebase-wide review is invoked:
+
+> *Review the entire codebase and evaluate it for clarity, maintainability,
+> efficiency, complexity, safety, test coverage, pattern consistency,
+> conformity with style conventions, functional equivalence across
+> languages, and anything else of importance. Make suggestions for
+> improvements, ranking them in priority from high to low, and giving each
+> a number.*
+
+Both prompts produce ranked lists. The developer picks items to deep-dive.
+The ranked-numbered-deep-dive structure externalizes prioritization,
+prevents the conversation from drifting into the first item the AI
+surfaces, and produces a record that can be revisited.
+
+### 5.2 Memory as persistent state
+
+Claude Code provides a file-based memory system that persists across
+sessions. Across the seven weeks of the project, 57 memory files
+accumulated, falling into four categories: *user* (the developer's
+background and preferences), *feedback* (corrections the AI should not
+repeat), *project* (state of in-progress features and decisions), and
+*reference* (where to find external information). Memory entries are
+written by the AI when explicit feedback is given and read at the start of
+new sessions.
+
+Memory is not optional. Without it, every session begins fresh, and
+decisions accumulated over weeks must be re-established. With it, the AI
+carries forward intent — features deferred, patterns preferred, bugs seen
+and avoided. Memory is the closest analog in AI-paired development to the
+accumulated context that experienced colleagues bring to a project.
+
+### 5.3 Manual testing as the dominant remaining cost
+
+Manual testing was the slowest part of the project. Automated tests catch
+state-level divergence and regression, but the visual and behavioral
+details of UI rendering — focus order, animation timing, theme color
+application, scroll-bar positioning, gesture recognition — require human
+inspection. The project's manual-testing protocol uses transcript files
+(e.g., `transcripts/COLOR_TESTS.md`) with numbered scenarios that an
+operator runs across each port and marks with pass dates. The transcripts
+serve as both a test specification and a historical record of cross-port
+differences.
+
+Most manual testing sessions were routine: scenarios pass, dates get
+logged, the next feature is queued. A smaller fraction surfaced
+challenging problems whose cause was non-obvious. These were generally not
+fundamental flaws in the methodology; they were details that the
+specification had not yet been forced to disambiguate.
+
+### 5.4 Delegation patterns
+
+Claude Code supports delegation to subagents — auxiliary AI invocations
+with their own context windows. Subagents helped most when the task was
+independent and well-scoped: finding every place where a symbol is
+referenced, summarizing the current state of a feature across all ports.
+They hurt when the task required cross-file design judgment or
+ownership-chain reasoning, where the subagent could not see the surrounding
+context that justified an existing pattern. A memory entry that survived
+from early in the project captures the recurring failure mode:
+
+> *Subagents over-flag Swift `@ObservedObject` patterns as bugs. Verify
+> against the ownership chain before acting; subagents frequently misflag
+> correct patterns.*
+
+The general rule: subagent summaries describe intent, not effect. Verify
+the diff that resulted from a subagent's recommendation, not the summary.
+
+### 5.5 Honest failure modes
+
+Several AI failure modes recurred throughout the project, even with the
+safeguards described in Sections 3 and 4 in place.
+
+*Long-context drift.* In sessions extending beyond a few hours, the AI
+gradually loses track of earlier decisions, re-introducing patterns that
+were rejected earlier or suggesting "improvements" to code that was
+deliberately load-bearing. Mitigated by memory entries for durable
+decisions and periodic session restarts.
+
+*Confident hallucinations of symbols and file paths.* The AI sometimes
+invents file names, functions, or APIs that do not exist, presented with
+high confidence. The mitigation is habitual cross-checking via grep before
+acting on AI-supplied references.
+
+*Optimistic completion summaries.* The AI occasionally reports a task as
+complete when the implementation is partial or has introduced regressions.
+The mitigation is direct diff inspection rather than trusting the summary.
+
+*Spec underspecification surfacing late.* When the YAML specification
+permits multiple reasonable interpretations, the AI picks one confidently
+without flagging the ambiguity. This is not a flaw of the AI per se; it is
+a property that means underspecification surfaces only at integration time.
+
+*`--dangerously-skip-permissions` trade-off.* The project was developed
+primarily with this flag enabled, meaning the AI could modify files and
+run commands without per-action confirmation. This was essential for
+development velocity. The safety net was the combination of automated
+tests, manual testing, and N implementations: a destructive change would
+either break a test or produce a visible divergence between ports. The
+trade-off is operational; it is not appropriate for every project.
+
+### 5.6 Tooling implications and recommendations
+
+The features that mattered most for this project, in approximate order of
+impact: persistent file-based memory across sessions; project-level
+instructions in `CLAUDE.md`; file-editing tools that the AI can use
+directly; the `--dangerously-skip-permissions` trust mode; a long context
+window (1M tokens) that allows sessions to proceed without re-explaining
+state; and the slash-command and task-tracking facilities of Claude Code.
+
+The features I would most want from future iterations: stronger guardrails
+against hallucinated symbols, perhaps via tighter integration with
+language servers; better cross-session retention without explicit memory
+writes; collaborative shared memory across multiple developers; and more
+principled handling of "design fork" decision points, where the AI is
+currently inclined to choose confidently rather than surface the choice.
+
+These observations are tuned to Claude Opus 4.6 and 4.7 and to Claude Code
+as it existed in April–May 2026; Section 7 discusses this snapshot
+limitation.
+
+---
+
+## 6. Evidence and results
+
+### 6.1 Project artifacts
+
+The artifact comprises five working ports of a vector illustration
+application plus a shared specification. Total source line counts at the
+time of writing:
+
+| Component | Language | LOC |
+|---|---|---|
+| jas_dioxus | Rust | 95,371 |
+| JasSwift | Swift | 71,883 |
+| jas_ocaml | OCaml | 69,043 |
+| jas | Python (PySide6) | 59,069 |
+| jas_flask | Python + HTML | 5,239 |
+| Shared specification | YAML | 22,866 |
+| Shared interpreter | Python | 12,569 |
+| **Total** | | **~336,000** |
+
+The five ports together contain approximately 4,600 automated test
+functions and 36 manual-test transcript files. The Color Panel alone
+defines 98 numbered manual scenarios. The application implements 27
+tools, 14 panels, and 22 dialogs, declared in the YAML specification and
+rendered through the per-port renderers described in Section 3.
+
+The repository history records 1,807 commits over 48 calendar days, with
+40 of those days containing at least one commit (an activity rate of 83%
+across the calendar span). Cross-port divergence is explicitly noted in
+32 commit messages and is implicit in many more — propagation merges
+following the standard order (Flask → Rust → Swift → OCaml → Python) carry
+the divergences observed in earlier ports forward into later ones.
+
+### 6.2 Effort
+
+The author worked on the project during evening hours outside professional
+employment. The 48-day calendar span comprises roughly seven weeks, with
+active days clustering on weeknights and weekends. The total developer
+effort is difficult to measure precisely; commit-time clustering and the
+calendar pattern of active days suggest an estimate of 120 to 160 evening
+hours. This is consistent with the author's recollection of roughly three
+to four hours per active evening across the seven weeks.
+
+### 6.3 Comparison to conventional development
+
+Mature vector illustration applications of comparable scope represent
+decades of team development. Adobe Illustrator has shipped continuously
+since 1987; Inkscape has been actively developed since 2003. Affinity
+Designer, the closest commercial single-team comparison, has been in
+development since the early 2010s and continues to be produced by a
+sustained team. None of these is directly commensurable with a
+single-developer, single-language port; the comparison is approximate.
+
+A more constrained comparison is to estimate what one developer working
+full-time without AI assistance would require to produce a single port at
+the scope reported here — paths, text, layers, transforms, document model,
+panels, dialogs, tools, undo, save and restore, PDF export. Conservative
+estimates for a single working port of comparable scope, by a competent
+developer using conventional tools and frameworks, run from one to two
+developer-years. Five such ports, even sharing a single specification,
+would conventionally represent multiple developer-years.
+
+The artifact described in this paper represents approximately 120 to 160
+developer-hours, distributed across five ports over seven calendar weeks.
+This is not a controlled comparison and the productivity ratio is not a
+measurement. It is, however, consistent with a claim that AI-paired
+engineering under the conditions of Sections 3 and 4 changes the scope of
+work feasible for a single developer by at least one and possibly two
+orders of magnitude.
+
+---
+
+## 7. Limitations
+
+This is a single-developer case study, and several limitations apply. I
+name them explicitly here in the order most likely to affect
+interpretation of the central claims.
+
+**Single developer, no controlled comparison.** The case study has N=1
+developer and no control group, no parallel non-AI baseline, and no
+replication by other developers. The 120 to 160 developer-hour estimate
+is derived from commit timestamps and the calendar pattern of active days;
+it is not tracked time, and the conversion from "active hour-bucket" to
+"focused hour" carries some uncertainty. Comparisons to mature applications
+(Section 6.3) are scope anchors, not commensurable baselines.
+
+**Scope vs. mature applications.** The artifact implements a substantial
+subset of the feature set found in mature vector illustration applications
+but is not complete relative to them. It lacks gradient mesh, advanced
+text shaping at the level of professional typesetting engines, raster
+effects, full SVG round-trip fidelity, plugins, and color management
+beyond basic profiles. Pixel-level visual conformance across ports was
+not formally measured; the implementations look similar by inspection but
+exact conformance has not been verified.
+
+**Developer expertise as confound.** I have used vector illustration
+applications since 1990 and have substantial prior experience in OCaml and
+Python; less so in Swift and Rust. Domain familiarity reduced design
+uncertainty during specification writing. Language expertise reduced
+friction in reviewing and correcting AI-generated code. A developer
+without this background, attempting the same methodology, might find the
+productivity gain smaller; the methodology has not been tested under that
+condition.
+
+**Generalization limits.** The methodology depends on a domain that can be
+described declaratively. UI panels, dialogs, and tool behavior fit this
+constraint; domains with deep imperative interaction (game engines,
+real-time graphics pipelines, kernel code) may not. The N-version revival
+claim is contingent on AI being capable of producing per-port mechanical
+work at low cost; this is contingent on AI capability at any given moment.
+Manual testing scales linearly with N, and at much larger N or much larger
+feature surface this could become the dominant cost. AI-generated
+implementations also share priors from training data, making them less
+independent than human-team N-version programs.
+
+**AI capability is a moving target.** Results reported here used Claude
+Opus 4.6 and 4.7 as accessed via Claude Code during April and May 2026.
+Workflow patterns described — the dialog loop, the codebase-review prompt,
+persistent memory, `--dangerously-skip-permissions` — are tuned to current
+model capability and to current Claude Code tooling. Both are changing
+rapidly. A less-capable model or a less-supportive client would likely
+introduce friction the present methodology does not exhibit. The case
+study is a snapshot; replication six to twelve months later may yield
+different results.
+
+---
+
+<!-- DRAFT IN PROGRESS — sections 8–9 forthcoming -->
