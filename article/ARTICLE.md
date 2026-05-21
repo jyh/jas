@@ -422,11 +422,16 @@ implementation. With five implementations and manual cross-checking, each
 was visible within hours of the relevant manual test session.
 
 **Figure 2.** The Color Panel rendered in all five ports (left to right:
-jas_dioxus / Rust, JasSwift, jas_ocaml, jas / Python, jas_flask). Each
-implementation is driven by the same 890 lines of YAML specification.
-Visible-by-inspection equivalence is intentional; the bugs documented above
-were caught by precisely this kind of side-by-side comparison.
-*[Screenshots to be captured before submission.]*
+jas_dioxus / Rust, JasSwift, jas_ocaml, jas / Python, jas_flask), each
+showing the active color `#3580c4` on the Dark Gray theme. All five
+implementations are driven by the same 890 lines of YAML specification.
+Visible-by-inspection equivalence is the figure's intent: the active
+color swatch, recent-color strip, slider arrangement, hex field, and
+color bar appear in equivalent layout positions across the ports, with
+platform-native variation in slider styling, spinbox controls, and tab
+presentation. The bugs documented above were caught by precisely this
+kind of side-by-side comparison. Screenshots:
+`article/figures/color_panel/jas_{dioxus,swift,ocaml,python,flask}.png`.
 
 ### 4.3 Cost and correctness trade-offs
 
