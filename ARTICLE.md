@@ -799,4 +799,46 @@ at github.com/jyh/jas.
 
 ---
 
-<!-- BIBLIOGRAPHY TO FOLLOW -->
+## References
+
+Adobe Inc. (2026). *Adobe Illustrator* product information.
+https://www.adobe.com/products/illustrator.html (accessed 2026-05-20).
+
+Avizienis, A. (1985). The N-Version Approach to Fault-Tolerant Software.
+*IEEE Transactions on Software Engineering*, SE-11(12), 1491–1501.
+
+Haas, A., Rossberg, A., Schuff, D. L., Titzer, B. L., Holman, M., Gohman,
+D., Wagner, L., Zakai, A., and Bakker, J. F. (2017). Bringing the Web up to
+Speed with WebAssembly. In *Proceedings of the 38th ACM SIGPLAN Conference
+on Programming Language Design and Implementation (PLDI '17)*, 185–200.
+
+Inkscape Project. (2026). *Inkscape: Free and Open-Source Vector Graphics
+Software*. https://inkscape.org (accessed 2026-05-20).
+
+Knight, J. C., and Leveson, N. G. (1986). An experimental evaluation of the
+assumption of independence in multiversion programming. *IEEE Transactions
+on Software Engineering*, SE-12(1), 96–109.
+
+McKeeman, W. M. (1998). Differential Testing for Software. *Digital
+Technical Journal*, 10(1), 100–107.
+
+METR. (2025). Measuring the Impact of Early-2025 AI on Experienced
+Open-Source Developer Productivity. arXiv preprint. *[arXiv ID to verify
+before submission]*
+
+Peng, S., Kalliamvakou, E., Cihon, P., and Demirer, M. (2023). The Impact
+of AI on Developer Productivity: Evidence from GitHub Copilot. *arXiv
+preprint arXiv:2302.06590*.
+
+Roşu, G., and Şerbănuţă, T. F. (2010). An Overview of the K Semantic
+Framework. *Journal of Logic and Algebraic Programming*, 79(6), 397–434.
+
+Yang, X., Chen, Y., Eide, E., and Regehr, J. (2011). Finding and
+Understanding Bugs in C Compilers. In *Proceedings of the 32nd ACM SIGPLAN
+Conference on Programming Language Design and Implementation (PLDI '11)*,
+283–294.
+
+Ziegler, A., Kalliamvakou, E., Li, X. A., Rice, A., Rifkin, D., Simister,
+S., Sittampalam, G., and Aftandilian, E. (2024). Measuring GitHub Copilot's
+Impact on Productivity. *Communications of the ACM*, 67(3), 54–63.
+
