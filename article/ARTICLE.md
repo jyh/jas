@@ -900,9 +900,6 @@ available at github.com/jyh/jas.
 
 ## References
 
-Adobe Inc. (2026). *Adobe Illustrator* product information.
-https://www.adobe.com/products/illustrator.html (accessed 2026-05-20).
-
 Avizienis, A. (1985). The N-Version Approach to Fault-Tolerant Software.
 *IEEE Transactions on Software Engineering*, SE-11(12), 1491–1501.
 doi:10.1109/TSE.1985.231893
@@ -930,6 +927,9 @@ https://arxiv.org/abs/2507.09089
 Peng, S., Kalliamvakou, E., Cihon, P., and Demirer, M. (2023). The Impact
 of AI on Developer Productivity: Evidence from GitHub Copilot. *arXiv
 preprint arXiv:2302.06590*.
+
+Pfiffner, P. (2003). *Inside the Publishing Revolution: The Adobe Story*.
+Berkeley, CA: Peachpit Press. ISBN 978-0321115645.
 
 Roşu, G., and Şerbănuţă, T. F. (2010). An Overview of the K Semantic
 Framework. *Journal of Logic and Algebraic Programming*, 79(6), 397–434.
