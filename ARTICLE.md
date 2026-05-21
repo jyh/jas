@@ -315,6 +315,20 @@ approximately 35,000 lines. The interpretation is not that the project is
 counterpart — but that the specification carries the conceptual work, and
 the per-port code carries the platform-specific machinery.
 
+**Figure 3.** Color Panel spec amortization. Shared YAML (890 lines) drives
+five working implementations; per-port native code varies from 0 (OCaml,
+fully YAML-driven) to 1,309 (Rust, with custom canvas widgets for the
+gradient, hue bar, and fill-stroke composite). To be rendered as a
+horizontal stacked bar chart in the final paper.
+
+| Port | Shared YAML | Per-port native | Total |
+|------|-------------|-----------------|-------|
+| OCaml | 890 | 0 | 890 |
+| Swift | 890 | 59 | 949 |
+| Python | 890 | 123 | 1,013 |
+| Rust | 890 | 1,309 | 2,199 |
+| Flask | 890 | ~0 | 890 |
+
 ---
 
 ## 4. Parallel implementations as correctness check
@@ -401,6 +415,13 @@ These divergences are not anomalies; they are the methodology working as
 designed. Each one would have been silently wrong in a single
 implementation. With five implementations and manual cross-checking, each
 was visible within hours of the relevant manual test session.
+
+**Figure 2.** The Color Panel rendered in all five ports (left to right:
+jas_dioxus / Rust, JasSwift, jas_ocaml, jas / Python, jas_flask). Each
+implementation is driven by the same 890 lines of YAML specification.
+Visible-by-inspection equivalence is intentional; the bugs documented above
+were caught by precisely this kind of side-by-side comparison.
+*[Screenshots to be captured before submission.]*
 
 ### 4.3 Cost and correctness trade-offs
 
@@ -493,6 +514,44 @@ The ranked-numbered-deep-dive structure externalizes prioritization,
 prevents the conversation from drifting into the first item the AI
 surfaces, and produces a record that can be revisited.
 
+**Figure 1.** Methodology workflow. The outer loop turns prose design into
+YAML specification; the inner loop refines the specification through
+manual testing across ports. Memory and the periodic codebase-review
+prompt cross-cut both loops.
+
+```
+                   [Design doc (prose)]
+                            |
+                            v
+                   [Analysis prompt]
+                            |
+                            v
+                   [Clarifying conversation]
+                            |
+                            v
+                   [Revised design doc]
+                            |
+                            v
+                   [YAML specification]  <-----+
+                            |                  |
+                            v                  | Refine
+                   [Implement in N ports]      |
+                            |                  |
+                            v                  |
+                   [Automated + manual tests] -+
+                            |
+                            v
+        (every 1–2 weeks)   [Codebase review prompt]
+                            |
+                            v
+                   [Ranked improvement list]
+                            |
+                            v
+                            +--> back to design doc
+
+   Cross-cutting: file-based memory (57 entries), CLAUDE.md project rules
+```
+
 ### 5.2 Memory as persistent state
 
 Claude Code provides a file-based memory system that persists across
@@ -509,6 +568,32 @@ decisions accumulated over weeks must be re-established. With it, the AI
 carries forward intent — features deferred, patterns preferred, bugs seen
 and avoided. Memory is the closest analog in AI-paired development to the
 accumulated context that experienced colleagues bring to a project.
+
+**Figure 5.** Example memory entry (`feedback_swift_ownership_review.md`).
+The frontmatter classifies the entry type and gives it a stable identity;
+the body states the rule, the precipitating incident, and the verification
+procedure. This is the entry quoted in Section 5.4.
+
+```markdown
+---
+name: Verify Swift @ObservedObject claims against ownership chain
+description: Before acting on a subagent's flag of @ObservedObject vs
+  @StateObject, trace the ownership chain to the construction site
+type: feedback
+---
+Subagent code reviews of SwiftUI frequently misflag `@ObservedObject` as
+"should be `@StateObject`". Don't propagate that claim without checking
+who constructs the object.
+
+**Why:** A subagent flagged ContentView.swift:110 as wrong, but
+JasApp.swift:53 owns the object via `@StateObject` and passes it down —
+the textbook pattern. Swapping ContentView to `@StateObject` would have
+been an actual regression.
+
+**How to apply:** When a review flags `@ObservedObject`, find the object's
+construction site. If the owner uses `@StateObject` and passes the value
+down, the receiver's `@ObservedObject` is correct.
+```
 
 ### 5.3 Manual testing as the dominant remaining cost
 
