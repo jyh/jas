@@ -11,6 +11,10 @@
 \usepackage{listings}
 \usepackage{hyperref}
 \usepackage[round,authoryear]{natbib}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{shapes,arrows.meta,positioning,calc}
 
 \hypersetup{
   colorlinks=true,
@@ -378,26 +382,41 @@ of the native code is platform glue with no YAML counterpart --- but that
 the specification carries the conceptual work, and the per-port code
 carries the platform-specific machinery.
 
-\begin{table}[h]
+\begin{figure}[h]
 \centering
+\begin{tikzpicture}
+\begin{axis}[
+  xbar stacked,
+  width=0.85\textwidth,
+  height=5.5cm,
+  bar width=0.45cm,
+  xlabel={Lines of code},
+  symbolic y coords={Flask, Rust, Python, Swift, OCaml},
+  ytick=data,
+  enlarge y limits=0.18,
+  xmin=0,
+  xmax=2400,
+  legend style={at={(0.5,-0.28)}, anchor=north, legend columns=-1,
+                font=\small, /tikz/every even column/.append style={column sep=0.5cm}},
+  tick label style={font=\small},
+  label style={font=\small},
+  nodes near coords align={horizontal}
+]
+\addplot[fill=blue!30, draw=blue!50!black]
+  coordinates {(890,Flask) (890,Rust) (890,Python) (890,Swift) (890,OCaml)};
+\addplot[fill=orange!60, draw=orange!50!black]
+  coordinates {(0,Flask) (1309,Rust) (123,Python) (59,Swift) (0,OCaml)};
+\legend{Shared YAML (890), Per-port native code}
+\end{axis}
+\end{tikzpicture}
 \caption{Color Panel spec amortization. Shared YAML (890 lines) drives
 five working implementations; per-port native code varies from 0 (OCaml,
-fully YAML-driven) to 1{,}309 (Rust, with custom canvas widgets for the
-gradient, hue bar, and fill-stroke composite). To be rendered as a
-horizontal stacked bar chart in the final paper.}
+fully YAML-driven; Flask, fully server-side YAML) to 1{,}309 (Rust, with
+custom canvas widgets for the gradient, hue bar, and fill-stroke
+composite). Specific values: OCaml 0, Swift 59, Python 123, Rust 1{,}309,
+Flask $\sim$0.}
 \label{fig:amortization}
-\begin{tabular}{lrrr}
-\toprule
-Port & Shared YAML & Per-port native & Total \\
-\midrule
-OCaml & 890 & 0 & 890 \\
-Swift & 890 & 59 & 949 \\
-Python & 890 & 123 & 1{,}013 \\
-Rust & 890 & 1{,}309 & 2{,}199 \\
-Flask & 890 & $\sim$0 & 890 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\end{figure}
 
 \section{Parallel implementations as correctness check}
 \label{sec:nimpl}
@@ -602,38 +621,48 @@ surfaces, and produces a record that can be revisited.
 
 \begin{figure}[h]
 \centering
-\begin{verbatim}
-                   [Design doc (prose)]
-                            |
-                            v
-                   [Analysis prompt]
-                            |
-                            v
-                   [Clarifying conversation]
-                            |
-                            v
-                   [Revised design doc]
-                            |
-                            v
-                   [YAML specification]  <-----+
-                            |                  |
-                            v                  | Refine
-                   [Implement in N ports]      |
-                            |                  |
-                            v                  |
-                   [Automated + manual tests] -+
-                            |
-                            v
-        (every 1-2 weeks)   [Codebase review prompt]
-                            |
-                            v
-                   [Ranked improvement list]
-                            |
-                            v
-                            +--> back to design doc
+\begin{tikzpicture}[
+  node distance=0.45cm,
+  proc/.style={rectangle, draw, rounded corners,
+               minimum width=5cm, minimum height=0.65cm,
+               font=\small, align=center, inner sep=2pt},
+  arrow/.style={->, thick, >=Stealth},
+  feedback/.style={->, thick, >=Stealth, gray!70!black, dashed}
+]
+\node[proc] (n1) {Design doc (prose)};
+\node[proc, below=of n1] (n2) {Analysis prompt};
+\node[proc, below=of n2] (n3) {Clarifying conversation};
+\node[proc, below=of n3] (n4) {Revised design doc};
+\node[proc, below=of n4] (n5) {YAML specification};
+\node[proc, below=of n5] (n6) {Implement in $N$ ports};
+\node[proc, below=of n6] (n7) {Automated + manual tests};
+\node[proc, below=of n7] (n8) {Codebase review (every 1--2 weeks)};
 
-   Cross-cutting: file-based memory (57 entries), CLAUDE.md project rules
-\end{verbatim}
+\draw[arrow] (n1) -- (n2);
+\draw[arrow] (n2) -- (n3);
+\draw[arrow] (n3) -- (n4);
+\draw[arrow] (n4) -- (n5);
+\draw[arrow] (n5) -- (n6);
+\draw[arrow] (n6) -- (n7);
+\draw[arrow] (n7) -- (n8);
+
+% Refine loop: tests back to spec
+\draw[feedback]
+  (n7.east) -- ++(1.2,0)
+  node[midway, above, font=\scriptsize, black]{refine}
+  |- (n5.east);
+
+% Review feedback to design doc
+\draw[feedback]
+  (n8.west) -- ++(-1.2,0)
+  |- (n1.west);
+
+% Cross-cutting note
+\node[below=0.6cm of n8, text width=7.5cm, align=center,
+      font=\footnotesize\itshape]
+  {Cross-cutting: file-based memory (57 entries),
+   \texttt{CLAUDE.md} project rules};
+\end{tikzpicture}
 \caption{Methodology workflow. The outer loop turns prose design into
 YAML specification; the inner loop refines the specification through
 manual testing across ports. Memory and the periodic codebase-review
