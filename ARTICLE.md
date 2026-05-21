@@ -169,10 +169,13 @@ specific methodology.
 The specification is approximately 23,000 lines of YAML organized as a
 directory tree under `workspace/`. It declares the application's panels,
 dialogs, tools, menus, keyboard shortcuts, theme tokens, and document state
-model. It is *executable* in the sense that each implementation contains a
-generic interpreter that reads the YAML at startup and constructs working UI
-directly from it, rather than treating the YAML as documentation that has
-been re-encoded in each port.
+model.[^repo] It is *executable* in the sense that each implementation
+contains a generic interpreter that reads the YAML at startup and
+constructs working UI directly from it, rather than treating the YAML as
+documentation that has been re-encoded in each port.
+
+[^repo]: The full source for the specification and all five implementations
+    is available at github.com/jyh/jas.
 
 Each declarative construct in the YAML has a corresponding native renderer
 in each port. A `container` becomes a `VBox` in PySide6, a `VStack` in
@@ -197,6 +200,9 @@ express. The shared interpreter is approximately 12,500 lines (originating
 in Python and reused or ported to the other languages); the per-port
 renderer layers vary substantially in size, reflecting how often each
 platform requires native code that the generic dispatch cannot produce.
+The interpreter is itself an artifact of the project — a reusable,
+language-agnostic engine for evaluating a declarative UI specification —
+and represents a non-trivial portion of the project's design work.
 
 The escape hatch is not a flaw in the methodology; it is the methodology's
 load-bearing flexibility. Custom canvas widgets, hardware-accelerated
@@ -288,10 +294,9 @@ content:
 
 ### 3.4 Sub-linear cost across N implementations
 
-The headline implication is this: 890 lines of declarative YAML drove five
-working Color Panel implementations, with per-port native code totaling
-roughly 1,500 lines spread across four of the five ports. The fifth port is
-fully YAML-driven.
+The headline implication: five working Color Panel implementations from
+890 lines of shared YAML, with native code totaling roughly 1,500 lines
+across four ports. The fifth is fully YAML-driven.
 
 In conventional cross-platform development, each port carries the full
 conceptual load of a feature independently. Color picker logic, slider
@@ -371,12 +376,12 @@ Panel illustrate the pattern.
 saturation slider is dragged to zero in HSB mode, the hue channel becomes
 mathematically meaningless — the color is gray at any hue. The Python and
 Rust ports initially snapped hue to zero when saturation reached zero, a
-literal reading of the HSB → RGB conversion. The OCaml port preserved the
-prior hue value. The user-visible effect: dragging saturation to zero and
-back up in Python or Rust produced a red, not the green the user had been
-working with. Cross-port testing surfaced this within the first hour of
-manual Color Panel testing. The specification was updated to require
-explicit preservation of degenerate-channel values.
+literal reading of the HSB → RGB conversion. The OCaml and Swift ports
+preserved the prior hue value. The user-visible effect: dragging
+saturation to zero and back up in Python or Rust produced a red, not the
+green the user had been working with. Cross-port testing surfaced this
+within the first hour of manual Color Panel testing. The specification
+was updated to require explicit preservation of degenerate-channel values.
 
 **CMYK channels collapse when K reaches 100.** A parallel case in the CMYK
 model. At K=100, the displayed color is black regardless of C, M, and Y.
@@ -879,8 +884,17 @@ imperative interaction or into projects without a clear notion of
 platform-spanning equivalence. The economic argument for N implementations
 — once impractical, now feasible — appears to me the most durable claim of
 this work; the specific productivity numbers will shift as AI capability
-shifts. The artifact and accompanying methodology documents are available
-at github.com/jyh/jas.
+shifts.
+
+For a reader interested in replicating the approach, the minimal recipe
+is: choose a domain that can be described declaratively; pick N ports
+across distinct languages and UI frameworks (N=3 captures most of the
+correctness benefit); use AI for per-port mechanical work; iterate
+between a prose design document and the executable specification via the
+analysis prompt (Section 5.1); cross-test ports manually using numbered
+transcript files; and maintain memory across sessions for accumulated
+decisions. The artifact and accompanying methodology documents are
+available at github.com/jyh/jas.
 
 ---
 
