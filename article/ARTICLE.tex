@@ -15,6 +15,7 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 \usetikzlibrary{shapes,arrows.meta,positioning,calc}
+\usepackage{subcaption}
 
 \hypersetup{
   colorlinks=true,
@@ -509,17 +510,45 @@ was visible within hours of the relevant manual test session.
 
 \begin{figure}[h]
 \centering
-\fbox{\parbox{0.9\textwidth}{
-\centering
-\emph{[Color Panel screenshots in all five ports, left to right:
-jas\_dioxus / Rust, JasSwift, jas\_ocaml, jas / Python, jas\_flask.
-To be captured before submission.]}
-}}
-\caption{The Color Panel rendered in all five ports. Each implementation
-is driven by the same 890 lines of YAML specification.
-Visible-by-inspection equivalence is intentional; the bugs documented
-in Section~\ref{sec:vignettes} were caught by precisely this kind of
-side-by-side comparison.}
+\begin{subfigure}[t]{0.19\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/color_panel/jas_dioxus.png}
+  \caption{jas\_dioxus (Rust)}
+  \label{fig:cp-rust}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.19\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/color_panel/jas_swift.png}
+  \caption{JasSwift}
+  \label{fig:cp-swift}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.19\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/color_panel/jas_ocaml.png}
+  \caption{jas\_ocaml}
+  \label{fig:cp-ocaml}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.19\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/color_panel/jas_python.png}
+  \caption{jas (Python)}
+  \label{fig:cp-python}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.19\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/color_panel/jas_flask.png}
+  \caption{jas\_flask}
+  \label{fig:cp-flask}
+\end{subfigure}
+\caption{The Color Panel rendered in all five ports, each showing the
+active color \texttt{\#3580c4} on the Dark Gray theme. All five
+implementations are driven by the same 890 lines of YAML specification.
+Visible-by-inspection equivalence is the figure's intent: the active
+color swatch, recent-color strip, slider arrangement, hex field, and
+color bar appear in equivalent layout positions across the ports, with
+platform-native variation in slider styling, spinbox controls, and tab
+presentation. The bugs documented in Section~\ref{sec:vignettes} were
+caught by precisely this kind of side-by-side comparison.}
 \label{fig:screenshots}
 \end{figure}
 
