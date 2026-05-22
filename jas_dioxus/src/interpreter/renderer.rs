@@ -273,6 +273,29 @@ fn apply_dialog_confirm(
                 }
             }
         }
+        "save_swatch_library_confirm" => {
+            // Save dialog 'name' field. Serialize the active swatch
+            // library (selected_library) to JSON and trigger a
+            // browser file download. The Flask-target test plan
+            // expects a server-side write to workspace/swatches/;
+            // in the Dioxus browser app this is a download.
+            let name = dialog.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if name.is_empty() {
+                return;
+            }
+            let lib_id = st.swatches_panel.selected_library.clone();
+            if let Some(lib) = st.swatch_libraries.get(&lib_id).cloned() {
+                let mut out = lib;
+                // Overwrite the saved library's name to match the
+                // dialog input rather than the source file's name.
+                if let Some(obj) = out.as_object_mut() {
+                    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
+                }
+                let json = serde_json::to_string_pretty(&out).unwrap_or_default();
+                let filename = format!("{name}.json");
+                crate::workspace::clipboard::download_file(&filename, &json);
+            }
+        }
         // Phase 8: Justification dialog OK. Commit the 11 dialog
         // fields as jas:* attributes onto every paragraph wrapper
         // tspan in the selection. Mixed-selection semantics: each
