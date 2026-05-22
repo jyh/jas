@@ -6286,18 +6286,14 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or(false);
 
-    // Selected: keep the swatch's own 1px border, and stack two
-    // box-shadow rings outside the tile to mark selection — a 1px
-    // contrast ring (white-ish in dark themes) sitting between the
-    // swatch border and the accent ring, then a 2px accent ring.
-    // The double ring stays distinguishable regardless of the swatch
-    // fill color or appearance bg.
-    let final_border = border;
-    let selected_halo = if selected {
-        "box-shadow:0 0 0 1px var(--jas-bg,#222), 0 0 0 3px var(--jas-accent,#4a90d9);"
+    // Selected: 2px accent outline replacing the 1px border. Shifted
+    // border via box-shadow keeps the visual size consistent.
+    let final_border = if selected {
+        "2px solid var(--jas-accent,#4a90d9)"
     } else {
-        ""
+        border
     };
+    let selected_halo = "";
 
     // Diagonal "no fill" indicator only when the bind explicitly
     // resolved to an empty color (FillSummary::Uniform(None) etc.).
