@@ -254,21 +254,21 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Left.
       Expect: The middle rect's left edge sits exactly at the midpoint of the
               leftmost and rightmost left edges; extremal rects do not move.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix for visibility: render_icon_button now always emits explicit opacity/pointer-events in style so the diff updates DOM on disabled transitions, commit d4b29ba)
 
 - [ ] **AL-041** [wired] Distribute Horizontal Center evenly spaces centers.
       Setup: 3-rect fixture.
       Do: Click Distribute Horizontal Center.
       Expect: Middle rect's horizontal center equidistant from the other two
               centers along the horizontal axis; extremals do not move.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-042** [wired] Distribute Top evenly spaces top edges.
       Setup: 3 rects at y = 0, 40, 120.
       Do: Click Distribute Top.
       Expect: Middle rect's top edge moves to y = 60 (midpoint); others
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -277,20 +277,20 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Right.
       Expect: Middle rect's right edge at the midpoint of extremal right
               edges; extremals unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-044** [wired] Distribute Vertical Center evenly spaces vertical
   centers.
       Setup: 3-rect fixture vertically spread.
       Do: Click Distribute Vertical Center.
       Expect: Middle vertical center equidistant from the other two.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-045** [wired] Distribute Bottom evenly spaces bottom edges.
       Setup: 3-rect fixture vertically spread.
       Do: Click Distribute Bottom.
       Expect: Middle bottom edge at the midpoint of extremal bottoms.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -300,21 +300,21 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Left.
       Expect: Result matches AL-040 — operation sorts internally by position,
               not selection order.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-047** [wired] Distribute on already-evenly-spaced selection is a
   no-op.
       Setup: Three rects with equal left-edge spacing.
       Do: Click Distribute Left.
       Expect: No motion; no undo entry or a clean no-op entry.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-048** [wired] Distribute with 5+ elements remains monotonic.
       Setup: Five rects at random x.
       Do: Click Distribute Horizontal Center.
       Expect: Final centers equidistant — the interior three shift so the
               five centers form an arithmetic progression between extremals.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
