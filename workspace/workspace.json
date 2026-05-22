@@ -18744,6 +18744,15 @@
                     "params": {
                       "color": "panel.recent_colors.0"
                     }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.0 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
+                      "color": "panel.recent_colors.0"
+                    }
                   }
                 ]
               },
@@ -18763,6 +18772,15 @@
                     "condition": "panel.recent_colors.1 != null",
                     "action": "set_active_color",
                     "params": {
+                      "color": "panel.recent_colors.1"
+                    }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.1 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
                       "color": "panel.recent_colors.1"
                     }
                   }
@@ -18786,6 +18804,15 @@
                     "params": {
                       "color": "panel.recent_colors.2"
                     }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.2 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
+                      "color": "panel.recent_colors.2"
+                    }
                   }
                 ]
               },
@@ -18805,6 +18832,15 @@
                     "condition": "panel.recent_colors.3 != null",
                     "action": "set_active_color",
                     "params": {
+                      "color": "panel.recent_colors.3"
+                    }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.3 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
                       "color": "panel.recent_colors.3"
                     }
                   }
@@ -18828,6 +18864,15 @@
                     "params": {
                       "color": "panel.recent_colors.4"
                     }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.4 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
+                      "color": "panel.recent_colors.4"
+                    }
                   }
                 ]
               },
@@ -18847,6 +18892,15 @@
                     "condition": "panel.recent_colors.5 != null",
                     "action": "set_active_color",
                     "params": {
+                      "color": "panel.recent_colors.5"
+                    }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.5 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
                       "color": "panel.recent_colors.5"
                     }
                   }
@@ -18870,6 +18924,15 @@
                     "params": {
                       "color": "panel.recent_colors.6"
                     }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.6 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
+                      "color": "panel.recent_colors.6"
+                    }
                   }
                 ]
               },
@@ -18889,6 +18952,15 @@
                     "condition": "panel.recent_colors.7 != null",
                     "action": "set_active_color",
                     "params": {
+                      "color": "panel.recent_colors.7"
+                    }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.7 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
                       "color": "panel.recent_colors.7"
                     }
                   }
@@ -18912,6 +18984,15 @@
                     "params": {
                       "color": "panel.recent_colors.8"
                     }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.8 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
+                      "color": "panel.recent_colors.8"
+                    }
                   }
                 ]
               },
@@ -18931,6 +19012,15 @@
                     "condition": "panel.recent_colors.9 != null",
                     "action": "set_active_color",
                     "params": {
+                      "color": "panel.recent_colors.9"
+                    }
+                  },
+                  {
+                    "event": "double_click",
+                    "condition": "panel.recent_colors.9 != null",
+                    "action": "open_swatch_options",
+                    "params": {
+                      "mode": "create",
                       "color": "panel.recent_colors.9"
                     }
                   }
@@ -18971,9 +19061,7 @@
                   },
                   "do": {
                     "type": "color_swatch",
-                    "style": {
-                      "size": 16
-                    },
+                    "size": "{{panel.thumbnail_size}}",
                     "bind": {
                       "color": "swatch.color",
                       "selected_in": "panel.selected_swatches"
