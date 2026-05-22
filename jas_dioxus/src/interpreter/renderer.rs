@@ -6128,10 +6128,18 @@ fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let size = el.get("style")
-        .and_then(|s| s.get("size"))
-        .and_then(|s| s.as_u64())
-        .unwrap_or(16);
+    // Size resolution: top-level `size: "<small|medium|large>"` (used by
+    // library swatches whose size follows panel.thumbnail_size) takes
+    // precedence over `style: { size: N }` (used by the fixed-size
+    // recent-colors row and other tile widgets).
+    let size: u64 = if let Some(size_key) = el.get("size").and_then(|v| v.as_str()) {
+        match size_key { "small" => 16, "medium" => 32, "large" => 64, _ => 16 }
+    } else {
+        el.get("style")
+            .and_then(|s| s.get("size"))
+            .and_then(|s| s.as_u64())
+            .unwrap_or(16)
+    };
 
     // Returns (color_string, explicit_none). explicit_none=true marks
     // the "intentionally no fill / no stroke" case (eval returns the

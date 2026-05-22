@@ -19061,9 +19061,7 @@
                   },
                   "do": {
                     "type": "color_swatch",
-                    "style": {
-                      "size": 16
-                    },
+                    "size": "{{panel.thumbnail_size}}",
                     "bind": {
                       "color": "swatch.color",
                       "selected_in": "panel.selected_swatches"
