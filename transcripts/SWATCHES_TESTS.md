@@ -122,7 +122,7 @@ If any P0 here fails, stop and flag.
 - [ ] **SWP-001** [wired] Panel opens via Window menu.
       Do: Select Window → Swatches.
       Expect: Swatches panel appears in dock or floating; no console error.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-002** [wired] All panel rows render without layout collapse.
       Do: Visually scan the open panel.
@@ -130,23 +130,23 @@ If any P0 here fails, stop and flag.
               swatch slots row; library disclosure with name + triangle;
               swatch grid below the disclosure. No overlapping controls,
               no truncated labels.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-004** [wired] Panel closes via context menu / X button.
       Do: Right-click header → Close, or click the close affordance.
       Expect: Panel disappears; Window → Swatches reopens it.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window; controls stay interactive;
               returns to dock on drag back.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 ---
 
