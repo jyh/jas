@@ -293,8 +293,13 @@ fn apply_dialog_confirm(
                 }
                 let json = serde_json::to_string_pretty(&out).unwrap_or_default();
                 let filename = format!("{name}.json");
-                crate::workspace::clipboard::save_file_via_picker(
-                    &filename, &json, "application/json");
+                // showSaveFilePicker requires user activation, but the
+                // Save button's dispatch goes through Dioxus's spawn,
+                // which detaches from the click and loses the
+                // activation. Fall back to a normal browser download —
+                // matches how SVG Save and PDF Export persist files in
+                // the same app.
+                crate::workspace::clipboard::download_file(&filename, &json);
             }
         }
         // Phase 8: Justification dialog OK. Commit the 11 dialog
