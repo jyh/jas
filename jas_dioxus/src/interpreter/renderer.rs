@@ -6957,6 +6957,9 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "paragraph_panel_content"  => Some(PanelKind::Paragraph),
             "artboards_panel_content"  => Some(PanelKind::Artboards),
             "opacity_panel_content"    => Some(PanelKind::Opacity),
+            "align_panel_content"      => Some(PanelKind::Align),
+            "boolean_panel_content"    => Some(PanelKind::Boolean),
+            "magic_wand_panel_content" => Some(PanelKind::MagicWand),
             _ => None,
         });
         let mut child = rctx.clone();
