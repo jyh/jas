@@ -159,14 +159,14 @@ verify the Swatches-panel surface only.
 - [ ] **SWP-010** [wired] Recent row renders 10 swatch slots.
       Do: Visually inspect.
       Expect: 10 16×16 squares left-to-right; empty slots render hollow.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-011** [wired] Single-click on a recent swatch sets active color.
       Setup: At least one recent color present (e.g. via Color panel).
       Do: Click `sp_recent_0`.
       Expect: Selection's active fill (or stroke per `state.fill_on_top`)
               becomes that color.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-012** [wired] Double-click on a recent swatch opens Swatch Options
       dialog in create mode.
@@ -174,13 +174,13 @@ verify the Swatches-panel surface only.
       Do: Double-click `sp_recent_0`.
       Expect: Modal Swatch Options dialog opens; name field empty; color
               preview shows the recent color.
-      — last: —
+      — last: 2026-05-21 rust pass (YAML fix: added event: double_click → open_swatch_options(mode=create) to sp_recent_0..9; spec at SWATCHES.md line 42 always required this but YAML had only single-click wired)
 
 - [ ] **SWP-013** [wired] Recent row stays in sync with the Color panel.
       Setup: Color panel + Swatches panel both visible.
       Do: Commit a new color via the Color panel hex field.
       Expect: Same color now appears at slot 0 of both panels' recent rows.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 ---
 
