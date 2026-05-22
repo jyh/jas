@@ -191,25 +191,25 @@ verify the Swatches-panel surface only.
       Do: Open the Swatches panel.
       Expect: Library disclosure shows "Web Colors"; triangle expanded;
               216 swatch tiles rendered below.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-021** [wired] Web Colors library has 216 swatches.
       Do: Count rendered swatches under the Web Colors disclosure.
       Expect: 216 (6×6×6 web-safe RGB cube).
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-022** [wired] Each Web Colors swatch is web-safe.
       Setup: Web Colors library expanded.
       Do: Hover or click any swatch; check the resulting color via the
           Color panel.
       Expect: Each channel value is in {0, 51, 102, 153, 204, 255}.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-023** [wired] Default library name matches its file's `name` field.
       Do: Inspect the disclosure label vs `workspace/swatches/web_colors.json`.
       Expect: Disclosure shows "Web Colors" (the file's `name` field, not
               the file stem `web_colors`).
-      — last: —
+      — last: 2026-05-21 rust pass
 
 ---
 
