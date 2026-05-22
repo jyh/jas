@@ -257,13 +257,13 @@ verify the Swatches-panel surface only.
       Expect: Rectangle fill becomes that red; the swatch gains a 2px
               accent outline (`jas-selected`); recent-colors row picks up
               the new color.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-051** [wired] Single-click on a swatch sets stroke when stroke is on top.
       Setup: `state.fill_on_top=false` (stroke active).
       Do: Click a swatch.
       Expect: Selection's stroke becomes the swatch color; fill unchanged.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 **P1**
 
@@ -271,33 +271,33 @@ verify the Swatches-panel surface only.
       Setup: Swatch already selected; selection's fill = its color.
       Do: Click the same swatch again.
       Expect: No change; recent-colors does not duplicate.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-053** [wired] Shift-click extends the selection.
       Setup: Swatch A selected.
       Do: Shift+click swatch B (in the same library).
       Expect: Both A and B carry the `jas-selected` outline; active color
               follows the most recently clicked.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-054** [wired] Cmd / Ctrl-click toggles a swatch in the selection.
       Setup: A and B selected.
       Do: Cmd/Ctrl-click A.
       Expect: A deselects (outline removed); B remains selected.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-055** [wired] Plain click on a different swatch replaces selection.
       Setup: A and B selected.
       Do: Click swatch C.
       Expect: Only C is selected; A and B lose their outlines.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-056** [wired] Double-click on a swatch opens Swatch Options in edit mode.
       Setup: A swatch present (default library).
       Do: Double-click any swatch.
       Expect: Modal Swatch Options dialog opens; name field shows that
               swatch's name; color preview matches.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 **P2**
 
@@ -306,12 +306,12 @@ verify the Swatches-panel surface only.
       Do: Click a swatch in B.
       Expect: B's swatch selected; A's selection persists (per-library
               `selected_swatches`).
-      — last: —
+      — last: 2026-05-21 rust blocked — requires two-library state; open_swatch_library not wired in Rust dispatch (same root as SWP-034)
 
 - [ ] **SWP-058** [wired] Selection visual is a 2px accent outline.
       Do: Select any swatch; inspect.
       Expect: 2px outline in the appearance's accent color around the tile.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 ---
 
