@@ -361,58 +361,58 @@ verify the Swatches-panel surface only.
       Expect: A new swatch with that color appears at the end of the
               currently selected library; Swatch Options dialog opens in
               create mode with the color preview matching.
-      — last: —
+      — last: 2026-05-21 rust pass (new_swatch dispatches through actions.yaml's open_dialog effect, not swatches_panel.rs)
 
 - [ ] **SWP-101** [wired] New Swatch dialog Cancel discards.
       Setup: As SWP-100, dialog open.
       Do: Click Cancel.
       Expect: No new swatch persisted (the appended swatch is discarded).
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-102** [wired] New Swatch dialog OK names + persists.
       Setup: As SWP-100; dialog open.
       Do: Enter name "Brand Orange" → OK.
       Expect: New swatch persists in the selected library with the entered
               name; library file gains the entry.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-110** [wired] Duplicate Swatch enabled only when ≥1 swatch selected.
       Setup: No swatch selected.
       Expect: Menu → Duplicate Swatch is dimmed.
-      — last: —
+      — last: 2026-05-21 rust pass (Rust fix: added is_enabled to swatches_panel for duplicate_swatch / delete_swatch; wired through panel_is_enabled in panels/mod.rs)
 
 - [ ] **SWP-111** [wired] Duplicate inserts a copy after the original.
       Setup: Swatch "Red" selected (color `#ff0000`).
       Do: Menu → Duplicate Swatch.
       Expect: A new swatch "Red copy" appears immediately after; selection
               moves to the copy; original keeps its position.
-      — last: —
+      — last: 2026-05-21 rust pass (Rust fix: implemented duplicate_swatch in swatches_panel.rs; forward-iterates selection indices with an offset counter so each insert keeps subsequent originals at the right slot)
 
 - [ ] **SWP-112** [wired] Duplicate of a multi-selection inserts copies for each.
       Setup: Two swatches A, B selected.
       Do: Menu → Duplicate Swatch.
       Expect: "A copy" inserted after A, "B copy" after B; the two copies
               become the new selection.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-120** [wired] Delete Swatch enabled only when ≥1 swatch selected.
       Setup: No selection.
       Expect: Menu → Delete Swatch is dimmed.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-121** [wired] Delete removes the selected swatches.
       Setup: One swatch selected.
       Do: Menu → Delete Swatch.
       Expect: Swatch removed from the library; selection cleared; library
               file (when next saved) reflects the removal.
-      — last: —
+      — last: 2026-05-21 rust pass (Rust fix: implemented delete_swatch in swatches_panel.rs; reverse-iterates indices so each removal doesn't shift the remaining)
 
 - [ ] **SWP-122** [known-broken: no undo] Cmd+Z does not restore deleted swatches.
       Setup: Delete a swatch.
       Do: Cmd+Z (Undo).
       Expect: (Target) deleted swatch restored. (Current) deletion is
               permanent; document the regression here.
-      — last: —
+      — last: 2026-05-21 rust — known-broken confirmed (Cmd+Z does not restore the deleted swatch; matches the known-broken list)
 
 ---
 
