@@ -4493,10 +4493,14 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     // Disabled styling: grey out + block pointer events so the
     // button doesn't respond to clicks. Opacity panel's
     // LINK_INDICATOR disables itself when the selection has no mask.
+    // Both branches set the same properties so Dioxus's diff always
+    // updates the style attribute on transition (empty fallback let
+    // stale opacity:0.35 persist in the DOM when disabled flipped to
+    // false).
     let disabled_style = if disabled {
         "opacity:0.35;pointer-events:none;"
     } else {
-        ""
+        "opacity:1;pointer-events:auto;"
     };
 
     let layout_style = if !label_text.is_empty() {
