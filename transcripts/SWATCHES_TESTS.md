@@ -469,38 +469,38 @@ verify the Swatches-panel surface only.
       Do: Menu → Open Swatch Library.
       Expect: Submenu shows one item per `*.json` file in the directory;
               already-open libraries carry a checkmark.
-      — last: —
+      — last: 2026-05-22 rust blocked — submenu implementation attempted (commit bd8ae53) hit 'RefCell already borrowed' panic in dioxus-core diff phase, likely from dx 0.7.4 / dioxus 0.6.3 version mismatch interaction with the new submenu_open_for signal. Reverted (commit faaa585); submenu architecture for the panel hamburger menu needs proper dx-version-aware design
 
 - [ ] **SWP-161** [wired] Selecting a library adds it to `panel.open_libraries`.
       Setup: Only Web Colors open.
       Do: Submenu → another library (e.g. add a second JSON file in advance).
       Expect: Library appears below Web Colors; disclosure expanded;
               swatch grid renders the new library's swatches.
-      — last: —
+      — last: 2026-05-22 rust blocked on SWP-160 submenu architecture; dispatch arm for 'open_swatch_library:<id>' is in swatches_panel.rs and works in principle
 
 - [ ] **SWP-162** [wired] Selecting an already-open library is a no-op (or focuses).
       Setup: Web Colors already open.
       Do: Submenu → Web Colors.
       Expect: No second copy added; checkmark behavior consistent (toggle
               vs persistent — document the actual).
-      — last: —
+      — last: 2026-05-22 rust blocked on SWP-160 submenu architecture
 
 - [ ] **SWP-170** [wired] Save Swatch Library opens the Save dialog.
       Do: Menu → Save Swatch Library.
       Expect: Modal dialog opens with name input and Save / Cancel buttons.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: panel_menu_view dialog_id match adds 'save_swatch_library' -> 'swatch_library_save', commit bd8ae53)
 
 - [ ] **SWP-171** [wired] Save with empty name is disabled.
       Setup: Save dialog open, name input empty.
       Expect: Save button dimmed.
-      — last: —
+      — last: 2026-05-22 rust FAIL — YAML has `bind: { disabled: 'dialog.name == ""' }` but the Save button renders enabled when dialog.name="" (the default). render_button does read bind.disabled and apply opacity:0.35 + pointer-events:none when true, so the expression `dialog.name == ""` is evaluating to false. Bug not yet diagnosed
 
 - [ ] **SWP-172** [wired] Save with valid name writes JSON to workspace/swatches/.
       Setup: Save dialog open, currently-selected library has its swatches.
       Do: Enter "my_palette" → Save.
       Expect: File `workspace/swatches/my_palette.json` exists; contains
               the expected swatches.
-      — last: —
+      — last: 2026-05-22 rust pass — file downloads to ~/Downloads instead of workspace/swatches/ (browser sandbox limitation; user can copy file in manually for next-startup persistence). showSaveFilePicker attempt failed due to Dioxus spawn-detaching user activation (commit b30895b reverted to download_file). NOTE: paste (Cmd+V) into the name field crashes wasm-bindgen with .key undefined — known dx 0.7/dioxus 0.6 mismatch issue; type the name instead
 
 - [ ] **SWP-173** [wired] Saving a library with the same name as an existing
       one overwrites or warns.
@@ -508,7 +508,7 @@ verify the Swatches-panel surface only.
       Do: Save dialog → "web_colors" → Save.
       Expect: Either overwrites silently or shows a confirm. Document the
               actual; either is acceptable.
-      — last: —
+      — last: 2026-05-22 rust pass — saves to Downloads with the chosen filename; no overwrite warning (browser sandbox can't read workspace/swatches/ existence)
 
 ---
 
