@@ -1151,10 +1151,20 @@ pub(crate) fn build_dock_groups(
                             Some((content, eval_ctx))
                         });
                         if let Some((content, eval_ctx)) = panel_body {
+                            // Explicit dark background on the panel
+                            // body wrapper. Without this, areas without
+                            // an explicit background (e.g. the
+                            // <details>/<summary> disclosure containing
+                            // the Swatches grid) render transparent and
+                            // show the canvas through when the dock is
+                            // floating.
                             rsx! {
-                                crate::interpreter::renderer::MemoYamlElement {
-                                    el: content,
-                                    ctx: eval_ctx,
+                                div {
+                                    style: "background:{THEME_BG};",
+                                    crate::interpreter::renderer::MemoYamlElement {
+                                        el: content,
+                                        ctx: eval_ctx,
+                                    }
                                 }
                             }
                         } else {
