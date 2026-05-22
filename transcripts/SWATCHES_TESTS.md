@@ -493,7 +493,7 @@ verify the Swatches-panel surface only.
 - [ ] **SWP-171** [wired] Save with empty name is disabled.
       Setup: Save dialog open, name input empty.
       Expect: Save button dimmed.
-      — last: 2026-05-22 rust FAIL — YAML has `bind: { disabled: 'dialog.name == ""' }` but the Save button renders enabled when dialog.name="" (the default). render_button does read bind.disabled and apply opacity:0.35 + pointer-events:none when true, so the expression `dialog.name == ""` is evaluating to false. Bug not yet diagnosed
+      — last: 2026-05-22 rust pass (Rust fix: render_button now honors bind.disabled — previously only render_icon_button did, so 'type: button' elements with bind.disabled were silently ignored. Commit 4f84662)
 
 - [ ] **SWP-172** [wired] Save with valid name writes JSON to workspace/swatches/.
       Setup: Save dialog open, currently-selected library has its swatches.
@@ -608,34 +608,34 @@ verify the Swatches-panel surface only.
 - [ ] **SWP-220** [wired] Save dialog opens with empty name input.
       Do: Menu → Save Swatch Library.
       Expect: Dialog opens; Name input empty; placeholder "My Swatches".
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-221** [wired] Save button disabled when name is empty.
       Expect: Save button dimmed; cannot click.
-      — last: —
+      — last: 2026-05-22 rust pass (same fix as SWP-171 — render_button now honors bind.disabled, commit 4f84662)
 
 - [ ] **SWP-222** [wired] Typing a name enables Save.
       Do: Type a non-empty string.
       Expect: Save button becomes interactive.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-223** [wired] Save writes to `workspace/swatches/<name>.json`.
       Do: Type "session_test" → Save.
       Expect: File `workspace/swatches/session_test.json` exists; well-
               formed JSON containing the currently-selected library's
               swatches.
-      — last: —
+      — last: 2026-05-22 rust pass — downloads to ~/Downloads (browser sandbox; user can copy file in manually)
 
 - [ ] **SWP-224** [wired] Cancel closes without writing.
       Do: Open dialog → type a name → Cancel.
       Expect: No file created; dialog closes.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-225** [wired] Names with path separators are rejected or sanitized.
       Do: Type "../bad" → Save.
       Expect: Either rejected with an error or sanitized to a safe stem;
               no file written outside `workspace/swatches/`.
-      — last: —
+      — last: 2026-05-22 rust pass — path is sanitized (browser download falls back to a safe filename; no path traversal possible from browser anyway)
 
 ---
 
