@@ -20,6 +20,10 @@ pub fn PanelMenuOverlay() -> Element {
     let act = use_context::<Act>();
     let app = use_context::<AppHandle>();
     let dialog_ctx = use_context::<crate::interpreter::dialog_view::DialogCtx>();
+    // Tracks which Action command currently has its submenu showing
+    // (set by mouseenter on the parent item, cleared by mouseleave
+    // on parent + submenu).
+    let mut submenu_open_for = use_signal::<Option<&'static str>>(|| None);
 
     let Some(open) = (panel_menu.open)() else {
         return rsx! {};
@@ -36,6 +40,82 @@ pub fn PanelMenuOverlay() -> Element {
 
     let item_nodes: Vec<Result<VNode, RenderError>> = items.into_iter().map(|item| {
         match item {
+            PanelMenuItem::Action { label, command, shortcut } if command == "open_swatch_library" => {
+                // Submenu host: hovering shows a flyout listing every
+                // available library. Each flyout item single-clicks to
+                // open (no-op if already open). Already-open libraries
+                // carry a ✓.
+                let act = act.clone();
+                let cmd = command;
+                let display_label = format!("{label} \u{25B6}"); // ▶
+                // Collect available library entries (id, name)
+                let libs: Vec<(String, String)> = st.swatch_libraries
+                    .as_object()
+                    .map(|m| m.iter()
+                        .map(|(k, v)| {
+                            let name = v.get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or(k.as_str())
+                                .to_string();
+                            (k.clone(), name)
+                        })
+                        .collect())
+                    .unwrap_or_default();
+                // Already-open ids from panel.open_libraries
+                let open_ids: std::collections::HashSet<String> = st.swatches_panel.open_libraries
+                    .as_array()
+                    .map(|a| a.iter()
+                        .filter_map(|e| e.get("id").and_then(|i| i.as_str()).map(String::from))
+                        .collect())
+                    .unwrap_or_default();
+                let is_open = submenu_open_for() == Some(cmd);
+                let submenu_nodes: Vec<Result<VNode, RenderError>> = libs.into_iter().map(|(lib_id, lib_name)| {
+                    let act = act.clone();
+                    let checked = open_ids.contains(&lib_id);
+                    let prefix = if checked { "\u{2713} " } else { "    " };
+                    let display = format!("{prefix}{lib_name}");
+                    let cmd_str = format!("open_swatch_library:{lib_id}");
+                    rsx! {
+                        div {
+                            class: "jas-menu-item",
+                            style: "padding:4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                            onclick: move |evt: Event<MouseData>| {
+                                evt.stop_propagation();
+                                let cmd_clone = cmd_str.clone();
+                                (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                    super::panel_dispatch(kind, &cmd_clone, addr, st);
+                                }));
+                                submenu_open_for.set(None);
+                                panel_menu.open.set(None);
+                            },
+                            "{display}"
+                        }
+                    }
+                }).collect();
+                rsx! {
+                    div {
+                        style: "position:relative;",
+                        onmouseenter: move |_| { submenu_open_for.set(Some(cmd)); },
+                        onmouseleave: move |_| { submenu_open_for.set(None); },
+                        div {
+                            class: "jas-menu-item",
+                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                            span { "{display_label}" }
+                        }
+                        if is_open {
+                            div {
+                                style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                                onmouseenter: move |_| { submenu_open_for.set(Some(cmd)); },
+                                onmouseleave: move |_| { submenu_open_for.set(None); },
+                                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                                for node in submenu_nodes { {node} }
+                            }
+                        }
+                    }
+                }
+            }
             PanelMenuItem::Action { label, command, shortcut } => {
                 let act = act.clone();
                 let app_for_dialog = app.clone();
@@ -76,6 +156,7 @@ pub fn PanelMenuOverlay() -> Element {
                             let dialog_id = match cmd {
                                 "open_paragraph_justification" => Some("paragraph_justification"),
                                 "open_paragraph_hyphenation" => Some("paragraph_hyphenation"),
+                                "save_swatch_library" => Some("swatch_library_save"),
                                 _ => None,
                             };
                             if let Some(did) = dialog_id {

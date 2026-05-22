@@ -261,12 +261,29 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             }
             state.swatches_panel.selected_swatches = new_selection;
         }
+        // Submenu dispatches encode the chosen library id as a
+        // suffix: "open_swatch_library:<lib_id>". Toggle-add into
+        // panel.open_libraries; selecting an already-open library
+        // is a no-op (per SWP-162 — either is acceptable).
+        cmd if cmd.starts_with("open_swatch_library:") => {
+            let lib_id = cmd["open_swatch_library:".len()..].to_string();
+            let already_open = state.swatches_panel.open_libraries
+                .as_array()
+                .map(|a| a.iter().any(|e| {
+                    e.get("id").and_then(|i| i.as_str()) == Some(lib_id.as_str())
+                }))
+                .unwrap_or(false);
+            if !already_open {
+                if let Some(arr) = state.swatches_panel.open_libraries.as_array_mut() {
+                    arr.push(serde_json::json!({ "id": lib_id, "collapsed": false }));
+                }
+            }
+        }
         // Other actions are placeholders — see module doc. Logging
         // helps surface unwired commands during manual testing.
         "new_swatch"
         | "open_swatch_options"
-        | "open_swatch_library"
-        | "save_swatch_library" => {
+        | "open_swatch_library" => {
             web_sys::console::log_1(
                 &format!("[swatches] command '{cmd}' is not yet wired").into());
         }
