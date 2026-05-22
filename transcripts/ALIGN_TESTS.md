@@ -386,21 +386,21 @@ If any P0 here fails, stop and flag.
       Expect: Panel's key-object indicator updates (icon tinted or badge on
               the rect per ALIGN.md §Align To target); all operation buttons
               re-enable.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: try_designate_align_key_object inverts zoom + pan to convert canvas-element coords to document coords before hit-testing against element bounds, commit 01712cc)
 
 - [ ] **AL-091** [wired] Align Left with key object pins the key.
       Setup: 3 rects at x = 10 / 30 / 60; key designated = middle rect.
       Do: Click Align Left.
       Expect: Middle rect does not move; other two align to x = 30 (the
               key's left edge).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-092** [wired] Clicking the current key clears it.
       Setup: AL-090 state — key designated.
       Do: Click the key rect on the canvas again.
       Expect: Key is cleared; all operation buttons disable; panel key
               indicator resets.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -409,7 +409,7 @@ If any P0 here fails, stop and flag.
       Do: Click an empty area of the canvas (not on any selected element).
       Expect: Key is cleared; canvas selection remains unchanged (the intercept
               does not deselect).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-094** [wired] Clicking a non-selected element does not designate it.
       Setup: Three rectangles drawn; only two selected; Align To Key Object;
@@ -418,7 +418,7 @@ If any P0 here fails, stop and flag.
       Expect: Intercept treats this as "outside selection" — key stays None;
               the click does not change the selection either (consumed, per
               ALIGN.md §Align To target).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-095** [wired] Deselecting the key clears the key (selection-change
   sync).
@@ -426,7 +426,7 @@ If any P0 here fails, stop and flag.
       Do: Shift-click the key rect to remove it from the selection.
       Expect: Panel key indicator resets; operation buttons reflect new
               selection count.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-096** [wired] Changing Align To away from Key Object preserves the
   path but hides the indicator.
@@ -436,7 +436,7 @@ If any P0 here fails, stop and flag.
               bounds. If the user clicks Align To Key Object again with the
               same selection, the key is still designated (per ALIGN.md
               §Panel state).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -445,13 +445,13 @@ If any P0 here fails, stop and flag.
       Do: Click a selected rect on the canvas.
       Expect: The click reaches the active tool (Selection Tool behavior —
               click-through to move / reselect); Align state is untouched.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-098** [wired] Key indicator updates when panel is floating.
       Setup: Panel floating, key mode, no key.
       Do: Designate a key via canvas click.
       Expect: Floating panel indicator updates in sync with the dock behavior.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
