@@ -522,7 +522,7 @@ verify the Swatches-panel surface only.
               (disabled "Process Color"), Global toggle (disabled), Color
               Mode dropdown, color preview swatch (40px), slider group for
               the active mode, Hex input, Preview toggle, Cancel + OK.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: render_text_input min-width:0 added so the hex input fits within its col-3 column instead of overflowing the dialog edge, commit fa631d7)
 
 - [ ] **SWP-181** [known-broken: global flag not propagated] Global toggle is
       currently a no-op.
@@ -530,7 +530,7 @@ verify the Swatches-panel surface only.
       Do: Toggle Global on → OK.
       Expect: (Target) edits to this swatch later propagate to all elements
               using it. (Current) flag stored but ignored at edit time.
-      — last: —
+      — last: 2026-05-22 rust — known-broken confirmed (Global toggle is disabled in UI, matches the master list)
 
 **P1**
 
@@ -539,46 +539,46 @@ verify the Swatches-panel surface only.
       Do: Double-click → dialog opens.
       Expect: Name = "Brand Red"; preview = red; mode = HSB; H/S/B sliders
               show 0/100/100; hex = ff0000.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-191** [wired] Changing color in dialog updates the preview live.
       Setup: Dialog open.
       Do: Drag the H slider.
       Expect: Color preview updates as the slider moves; underlying swatch
               not yet updated (until OK).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-192** [wired] Mode switch within the dialog swaps the slider group.
       Setup: Dialog mode = HSB.
       Do: Color Mode dropdown → RGB.
       Expect: H/S/B sliders hide; R/G/B sliders show with current color's
               RGB values.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-193** [wired] Hex field commits on Enter / Tab.
       Setup: Dialog open.
       Do: Type `00ff00` into Hex; Enter.
       Expect: Preview becomes green; sliders update to match.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-194** [wired] OK persists name + color to the swatch.
       Setup: Dialog open, name changed to "Lime", color changed.
       Do: Click OK.
       Expect: Dialog closes; swatch's tile in the grid now reflects the
               new color; hovering shows the new name.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-195** [wired] Cancel discards all edits.
       Setup: Dialog open, name and color edited.
       Do: Click Cancel.
       Expect: Dialog closes; swatch unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-196** [wired] Create-mode dialog has empty name placeholder.
       Setup: Menu → New Swatch.
       Expect: Dialog opens with the active color in preview, but Name
               field empty (or showing a placeholder).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -586,12 +586,12 @@ verify the Swatches-panel surface only.
       Setup: Dialog open, color = `#abcdef`.
       Do: Color Mode → Web Safe RGB → OK.
       Expect: Saved swatch color snaps to nearest web-safe value.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-201** [wired] Color Type dropdown is disabled (always Process).
       Do: Try to change Color Type.
       Expect: Dropdown is non-interactive; locked to "Process Color".
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-202** [wired] Preview toggle on previews into the document live.
       Setup: Dialog open, an element selected in the document. Toggle
@@ -599,7 +599,7 @@ verify the Swatches-panel surface only.
       Do: Drag a slider.
       Expect: (Future) Selected element's color updates live as you drag.
               Currently a placeholder — document behavior.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
