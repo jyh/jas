@@ -5324,7 +5324,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             placeholder: "{placeholder}",
             initial_value: "{value}",
             autofocus: is_artboard_rename,
-            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
+            style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
             onkeydown: move |evt: Event<KeyboardData>| {
                 if !is_artboard_rename { return; }
                 let key = evt.data().key();
