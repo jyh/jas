@@ -61,6 +61,23 @@ pub fn PanelMenuOverlay() -> Element {
                         })
                         .collect())
                     .unwrap_or_default();
+                // Flip submenu to the left when the parent menu is near
+                // the right edge of the viewport — otherwise left:100%
+                // pushes the flyout off-screen. menu_width is 180 (above);
+                // assume the submenu can be up to ~200 wide.
+                #[cfg(target_arch = "wasm32")]
+                let viewport_w: f64 = web_sys::window()
+                    .and_then(|w| w.inner_width().ok())
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1280.0);
+                #[cfg(not(target_arch = "wasm32"))]
+                let viewport_w: f64 = 1280.0;
+                let flip_left = x + menu_width + 200.0 > viewport_w;
+                let submenu_pos = if flip_left {
+                    "position:absolute; right:100%; top:0;"
+                } else {
+                    "position:absolute; left:100%; top:0;"
+                };
                 // Already-open ids from panel.open_libraries
                 let open_ids: std::collections::HashSet<String> = st.swatches_panel.open_libraries
                     .as_array()
@@ -106,7 +123,7 @@ pub fn PanelMenuOverlay() -> Element {
                         }
                         if is_open {
                             div {
-                                style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                                style: "{submenu_pos} background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
                                 onmouseenter: move |_| { submenu_open_for.set(Some(cmd)); },
                                 onmouseleave: move |_| { submenu_open_for.set(None); },
                                 onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
