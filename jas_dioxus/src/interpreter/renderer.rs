@@ -4213,6 +4213,21 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let style = build_style(el, ctx);
     let panel_kind = rctx.panel_kind;
 
+    // Evaluate bind.disabled. When true, the button is rendered dimmed
+    // and pointer-events are disabled so the click handler is inert.
+    // Mirrors the render_icon_button pattern; used by dialog OK buttons
+    // gated on a non-empty input (e.g. swatch_library_save).
+    let bind_disabled = el.get("bind")
+        .and_then(|b| b.get("disabled"))
+        .and_then(|v| v.as_str())
+        .map(|expr_str| expr::eval(expr_str, ctx).to_bool())
+        .unwrap_or(false);
+    let disabled_style = if bind_disabled {
+        "opacity:0.35;pointer-events:none;"
+    } else {
+        ""
+    };
+
     // Opacity panel: op_make_mask dispatches Controller::make or release
     // based on the current selection_has_mask predicate. Direct route
     // rather than yaml-actions because the target lives on the
@@ -4331,9 +4346,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     });
 
     if let Some(handler) = on_click {
-        rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } }
+        rsx! { button { id: "{id}", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
     } else {
-        rsx! { button { id: "{id}", style: "{style}", "{label}" } }
+        rsx! { button { id: "{id}", style: "{disabled_style}{style}", "{label}" } }
     }
 }
 
