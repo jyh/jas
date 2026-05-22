@@ -3,11 +3,12 @@
 //! Menu items mirror the `menu:` block in
 //! `workspace/panels/swatches.yaml`. The dynamic submenu
 //! ("Open Swatch Library") and most data-mutating actions
-//! (new_swatch, delete_swatch, etc.) are placeholders that log
-//! and no-op until the corresponding controller / library-mutation
-//! plumbing lands. Wired: thumbnail size (st.swatches_panel.thumbnail_size),
-//! duplicate_swatch (clones selected swatches with " copy" suffix in
-//! the active library).
+//! (new_swatch, etc.) are placeholders that log and no-op until the
+//! corresponding controller / library-mutation plumbing lands.
+//!
+//! Wired: thumbnail size (st.swatches_panel.thumbnail_size),
+//! duplicate_swatch (clones selected swatches with " copy" suffix),
+//! delete_swatch (removes selected swatches; no undo, see SWP-122).
 
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
@@ -107,6 +108,26 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         "set_swatch_thumbnail_large" => {
             state.swatches_panel.thumbnail_size = "large".into();
         }
+        "delete_swatch" => {
+            // Remove each selected swatch from the active library.
+            // Iterate indices in descending order so each removal
+            // doesn't shift the remaining selected positions. Selection
+            // is cleared. No undo (SWP-122 known-broken).
+            let lib_id = state.swatches_panel.selected_library.clone();
+            let mut sorted = state.swatches_panel.selected_swatches.clone();
+            sorted.sort_unstable_by(|a, b| b.cmp(a)); // descending
+            if let Some(lib) = state.swatch_libraries.get_mut(&lib_id) {
+                if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                    for idx in sorted {
+                        let i = idx as usize;
+                        if i < swatches.len() {
+                            swatches.remove(i);
+                        }
+                    }
+                }
+            }
+            state.swatches_panel.selected_swatches.clear();
+        }
         "duplicate_swatch" => {
             // Forward-iterate selected indices in ascending order;
             // each insert shifts subsequent originals by 1, tracked
@@ -140,7 +161,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         // Other actions are placeholders — see module doc. Logging
         // helps surface unwired commands during manual testing.
         "new_swatch"
-        | "delete_swatch"
         | "select_all_unused_swatches"
         | "add_used_colors"
         | "sort_swatches_by_name"
