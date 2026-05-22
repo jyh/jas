@@ -2149,6 +2149,14 @@ impl AppState {
             return false;
         }
         let Some(tab) = self.tabs.get(self.active_tab) else { return true; };
+        // Caller passes canvas-element coordinates; bounds are in
+        // document space. Invert zoom + pan so the hit-test uses the
+        // same coordinate system as e.bounds().
+        let zoom = tab.model.zoom_level;
+        let ox = tab.model.view_offset_x;
+        let oy = tab.model.view_offset_y;
+        let doc_x = (x - ox) / zoom;
+        let doc_y = (y - oy) / zoom;
         let doc = tab.model.document();
         // Hit-test against the current selection using preview
         // bounds (matches what the user sees).
@@ -2156,7 +2164,7 @@ impl AppState {
         for es in &doc.selection {
             if let Some(e) = doc.get_element(&es.path) {
                 let (bx, by, bw, bh) = e.bounds();
-                if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
+                if doc_x >= bx && doc_x <= bx + bw && doc_y >= by && doc_y <= by + bh {
                     hit = Some(es.path.clone());
                     break;
                 }
