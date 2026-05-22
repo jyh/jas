@@ -2,17 +2,47 @@
 //!
 //! Menu items mirror the `menu:` block in
 //! `workspace/panels/swatches.yaml`. The dynamic submenu
-//! ("Open Swatch Library") and most data-mutating actions
-//! (new_swatch, etc.) are placeholders that log and no-op until the
-//! corresponding controller / library-mutation plumbing lands.
+//! ("Open Swatch Library") and a couple of data-mutating actions
+//! (open_swatch_library, save_swatch_library) are placeholders that
+//! log and no-op until the library-load / library-save plumbing lands.
 //!
 //! Wired: thumbnail size (st.swatches_panel.thumbnail_size),
-//! duplicate_swatch (clones selected swatches with " copy" suffix),
-//! delete_swatch (removes selected swatches; no undo, see SWP-122).
+//! duplicate_swatch, delete_swatch (no undo, see SWP-122),
+//! sort_swatches_by_name, select_all_unused_swatches, add_used_colors.
 
+use std::collections::HashSet;
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
+use crate::geometry::element::Element;
 use super::panel_menu::PanelMenuItem;
+
+/// Walk the document's element tree and collect every fill / stroke
+/// color as a lowercase 6-character hex string (no `#` prefix).
+/// Used by select_all_unused_swatches and add_used_colors to compare
+/// document colors against library swatches.
+fn collect_document_colors(state: &AppState) -> HashSet<String> {
+    let mut colors = HashSet::new();
+    let Some(tab) = state.tab() else { return colors; };
+    let doc = tab.model.document();
+    for layer in &doc.layers {
+        walk_element(layer, &mut colors);
+    }
+    colors
+}
+
+fn walk_element(el: &Element, colors: &mut HashSet<String>) {
+    if let Some(fill) = el.fill() {
+        colors.insert(fill.color.to_hex());
+    }
+    if let Some(stroke) = el.stroke() {
+        colors.insert(stroke.color.to_hex());
+    }
+    if let Some(children) = el.children() {
+        for child in children {
+            walk_element(child, colors);
+        }
+    }
+}
 
 /// Menu items for the Swatches panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
@@ -108,6 +138,79 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         "set_swatch_thumbnail_large" => {
             state.swatches_panel.thumbnail_size = "large".into();
         }
+        "sort_swatches_by_name" => {
+            // Alphabetical (case-sensitive ASCII) reorder of the
+            // active library. Selection is cleared because index
+            // identifiers no longer point at the same swatch.
+            let lib_id = state.swatches_panel.selected_library.clone();
+            if let Some(lib) = state.swatch_libraries.get_mut(&lib_id) {
+                if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                    swatches.sort_by(|a, b| {
+                        let na = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        let nb = b.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        na.cmp(nb)
+                    });
+                }
+            }
+            state.swatches_panel.selected_swatches.clear();
+        }
+        "select_all_unused_swatches" => {
+            // Select indices of swatches in the active library whose
+            // color is NOT used anywhere in the current document. An
+            // empty document marks every swatch as unused.
+            let used = collect_document_colors(state);
+            let lib_id = state.swatches_panel.selected_library.clone();
+            let mut unused: Vec<i64> = Vec::new();
+            if let Some(lib) = state.swatch_libraries.get(&lib_id) {
+                if let Some(swatches) = lib.get("swatches").and_then(|s| s.as_array()) {
+                    for (i, sw) in swatches.iter().enumerate() {
+                        let hex = sw.get("color")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.trim_start_matches('#').to_lowercase())
+                            .unwrap_or_default();
+                        if !used.contains(&hex) {
+                            unused.push(i as i64);
+                        }
+                    }
+                }
+            }
+            state.swatches_panel.selected_swatches = unused;
+        }
+        "add_used_colors" => {
+            // For each unique color used in the document that is not
+            // already in the active library, append a new swatch
+            // named "R={r} G={g} B={b}" (matching SWP-140's expected
+            // labels). Comparison is by lowercase hex; no near-match.
+            let used = collect_document_colors(state);
+            let lib_id = state.swatches_panel.selected_library.clone();
+            if let Some(lib) = state.swatch_libraries.get_mut(&lib_id) {
+                if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                    let existing: HashSet<String> = swatches.iter()
+                        .filter_map(|s| s.get("color")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.trim_start_matches('#').to_lowercase()))
+                        .collect();
+                    // Sort the hex set so the order is deterministic.
+                    let mut sorted_used: Vec<String> = used.into_iter().collect();
+                    sorted_used.sort();
+                    for hex in sorted_used {
+                        if existing.contains(&hex) || hex.len() != 6 {
+                            continue;
+                        }
+                        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+                        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+                        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+                        swatches.push(serde_json::json!({
+                            "name": format!("R={r} G={g} B={b}"),
+                            "color": format!("#{hex}"),
+                            "color_mode": "rgb",
+                            "color_type": "process",
+                            "global": false,
+                        }));
+                    }
+                }
+            }
+        }
         "delete_swatch" => {
             // Remove each selected swatch from the active library.
             // Iterate indices in descending order so each removal
@@ -161,9 +264,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         // Other actions are placeholders — see module doc. Logging
         // helps surface unwired commands during manual testing.
         "new_swatch"
-        | "select_all_unused_swatches"
-        | "add_used_colors"
-        | "sort_swatches_by_name"
         | "open_swatch_options"
         | "open_swatch_library"
         | "save_swatch_library" => {
