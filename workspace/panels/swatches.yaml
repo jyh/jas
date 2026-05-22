@@ -217,6 +217,12 @@ content:
               condition: "panel.recent_colors.0 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.0" }
+            - event: double_click
+              condition: "panel.recent_colors.0 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.0"
 
         - id: sp_recent_1
           type: color_swatch
@@ -229,6 +235,12 @@ content:
               condition: "panel.recent_colors.1 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.1" }
+            - event: double_click
+              condition: "panel.recent_colors.1 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.1"
 
         - id: sp_recent_2
           type: color_swatch
@@ -241,6 +253,12 @@ content:
               condition: "panel.recent_colors.2 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.2" }
+            - event: double_click
+              condition: "panel.recent_colors.2 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.2"
 
         - id: sp_recent_3
           type: color_swatch
@@ -253,6 +271,12 @@ content:
               condition: "panel.recent_colors.3 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.3" }
+            - event: double_click
+              condition: "panel.recent_colors.3 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.3"
 
         - id: sp_recent_4
           type: color_swatch
@@ -265,6 +289,12 @@ content:
               condition: "panel.recent_colors.4 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.4" }
+            - event: double_click
+              condition: "panel.recent_colors.4 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.4"
 
         - id: sp_recent_5
           type: color_swatch
@@ -277,6 +307,12 @@ content:
               condition: "panel.recent_colors.5 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.5" }
+            - event: double_click
+              condition: "panel.recent_colors.5 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.5"
 
         - id: sp_recent_6
           type: color_swatch
@@ -289,6 +325,12 @@ content:
               condition: "panel.recent_colors.6 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.6" }
+            - event: double_click
+              condition: "panel.recent_colors.6 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.6"
 
         - id: sp_recent_7
           type: color_swatch
@@ -301,6 +343,12 @@ content:
               condition: "panel.recent_colors.7 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.7" }
+            - event: double_click
+              condition: "panel.recent_colors.7 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.7"
 
         - id: sp_recent_8
           type: color_swatch
@@ -313,6 +361,12 @@ content:
               condition: "panel.recent_colors.8 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.8" }
+            - event: double_click
+              condition: "panel.recent_colors.8 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.8"
 
         - id: sp_recent_9
           type: color_swatch
@@ -325,6 +379,12 @@ content:
               condition: "panel.recent_colors.9 != null"
               action: set_active_color
               params: { color: "panel.recent_colors.9" }
+            - event: double_click
+              condition: "panel.recent_colors.9 != null"
+              action: open_swatch_options
+              params:
+                mode: create
+                color: "panel.recent_colors.9"
 
     # -- Row 4: Swatch tiles area --
     - id: sp_swatch_tiles
@@ -383,7 +443,7 @@ content:
               as: swatch
             do:
               type: color_swatch
-              style: { size: 16 }
+              size: "{{panel.thumbnail_size}}"
               bind:
                 color: "swatch.color"
                 selected_in: "panel.selected_swatches"

@@ -273,6 +273,35 @@ fn apply_dialog_confirm(
                 }
             }
         }
+        "save_swatch_library_confirm" => {
+            // Save dialog 'name' field. Serialize the active swatch
+            // library (selected_library) to JSON and trigger a
+            // browser file download. The Flask-target test plan
+            // expects a server-side write to workspace/swatches/;
+            // in the Dioxus browser app this is a download.
+            let name = dialog.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if name.is_empty() {
+                return;
+            }
+            let lib_id = st.swatches_panel.selected_library.clone();
+            if let Some(lib) = st.swatch_libraries.get(&lib_id).cloned() {
+                let mut out = lib;
+                // Overwrite the saved library's name to match the
+                // dialog input rather than the source file's name.
+                if let Some(obj) = out.as_object_mut() {
+                    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
+                }
+                let json = serde_json::to_string_pretty(&out).unwrap_or_default();
+                let filename = format!("{name}.json");
+                // showSaveFilePicker requires user activation, but the
+                // Save button's dispatch goes through Dioxus's spawn,
+                // which detaches from the click and loses the
+                // activation. Fall back to a normal browser download —
+                // matches how SVG Save and PDF Export persist files in
+                // the same app.
+                crate::workspace::clipboard::download_file(&filename, &json);
+            }
+        }
         // Phase 8: Justification dialog OK. Commit the 11 dialog
         // fields as jas:* attributes onto every paragraph wrapper
         // tspan in the selection. Mixed-selection semantics: each
@@ -4184,6 +4213,21 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let style = build_style(el, ctx);
     let panel_kind = rctx.panel_kind;
 
+    // Evaluate bind.disabled. When true, the button is rendered dimmed
+    // and pointer-events are disabled so the click handler is inert.
+    // Mirrors the render_icon_button pattern; used by dialog OK buttons
+    // gated on a non-empty input (e.g. swatch_library_save).
+    let bind_disabled = el.get("bind")
+        .and_then(|b| b.get("disabled"))
+        .and_then(|v| v.as_str())
+        .map(|expr_str| expr::eval(expr_str, ctx).to_bool())
+        .unwrap_or(false);
+    let disabled_style = if bind_disabled {
+        "opacity:0.35;pointer-events:none;"
+    } else {
+        ""
+    };
+
     // Opacity panel: op_make_mask dispatches Controller::make or release
     // based on the current selection_has_mask predicate. Direct route
     // rather than yaml-actions because the target lives on the
@@ -4302,9 +4346,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     });
 
     if let Some(handler) = on_click {
-        rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } }
+        rsx! { button { id: "{id}", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
     } else {
-        rsx! { button { id: "{id}", style: "{style}", "{label}" } }
+        rsx! { button { id: "{id}", style: "{disabled_style}{style}", "{label}" } }
     }
 }
 
@@ -5295,7 +5339,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             placeholder: "{placeholder}",
             initial_value: "{value}",
             autofocus: is_artboard_rename,
-            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
+            style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
             onkeydown: move |evt: Event<KeyboardData>| {
                 if !is_artboard_rename { return; }
                 let key = evt.data().key();
@@ -6128,10 +6172,30 @@ fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let size = el.get("style")
-        .and_then(|s| s.get("size"))
-        .and_then(|s| s.as_u64())
-        .unwrap_or(16);
+    // Size resolution: top-level `size: "<small|medium|large>"` (used by
+    // library swatches whose size follows panel.thumbnail_size) takes
+    // precedence over `style: { size: N }` (used by the fixed-size
+    // recent-colors row and other tile widgets). Element-level
+    // attributes aren't auto-interpolated, so resolve `{{...}}` templates
+    // here.
+    let size: u64 = if let Some(raw) = el.get("size").and_then(|v| v.as_str()) {
+        let resolved = if raw.contains("{{") {
+            expr::eval_text(raw, ctx)
+        } else {
+            raw.to_string()
+        };
+        match resolved.as_str() {
+            "small" => 16,
+            "medium" => 32,
+            "large" => 64,
+            _ => 16,
+        }
+    } else {
+        el.get("style")
+            .and_then(|s| s.get("size"))
+            .and_then(|s| s.as_u64())
+            .unwrap_or(16)
+    };
 
     // Returns (color_string, explicit_none). explicit_none=true marks
     // the "intentionally no fill / no stroke" case (eval returns the
@@ -6222,13 +6286,17 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or(false);
 
-    // Selected: 2px accent outline replacing the 1px border. Shifted
-    // border via box-shadow keeps the visual size consistent.
+    // Selected: 2px macOS-system-blue (#007aff) outline replacing
+    // the 1px border. Matches JasSwift's renderColorSwatch which
+    // uses SwiftUI.Color.accentColor (defaults to #007aff on macOS
+    // across light/dark mode). Cross-port parity: the same selection
+    // color appears in both ports regardless of theme appearance.
     let final_border = if selected {
-        "2px solid var(--jas-accent,#4a90d9)"
+        "2px solid #007aff"
     } else {
         border
     };
+    let selected_halo = "";
 
     // Diagonal "no fill" indicator only when the bind explicitly
     // resolved to an empty color (FillSummary::Uniform(None) etc.).
@@ -6248,7 +6316,7 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         let hollow_border = if is_none { "#fff" } else { bg.as_str() };
         format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {hollow_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
     } else {
-        format!("width:{size}px;height:{size}px;background:{none_bg};border:{final_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
+        format!("width:{size}px;height:{size}px;background:{none_bg};border:{final_border};{selected_halo}cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
     };
 
     let on_click = build_click_handler(el, ctx, rctx);

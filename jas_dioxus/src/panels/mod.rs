@@ -117,6 +117,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
 pub(crate) fn panel_is_enabled(kind: PanelKind, cmd: &str, state: &AppState) -> bool {
     match kind {
         PanelKind::Color => color_panel::is_enabled(cmd, state),
+        PanelKind::Swatches => swatches_panel::is_enabled(cmd, state),
         _ => true,
     }
 }
