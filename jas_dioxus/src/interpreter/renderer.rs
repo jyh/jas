@@ -4383,10 +4383,15 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         "#505050".to_string()
     };
+    // Always emit `background:` explicitly so a checked→unchecked
+    // transition actually clears the highlight in the DOM. With an
+    // empty fallback Dioxus's style diff left the previous
+    // background-color on the element (so e.g. all three Align-To
+    // toggles looked checked once any had ever been checked).
     let bg_style = if checked {
         format!("background:{checked_bg};")
     } else {
-        String::new()
+        "background:transparent;".to_string()
     };
 
     // Resolve the icon name. Resolution order:
