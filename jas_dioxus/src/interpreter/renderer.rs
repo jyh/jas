@@ -293,7 +293,8 @@ fn apply_dialog_confirm(
                 }
                 let json = serde_json::to_string_pretty(&out).unwrap_or_default();
                 let filename = format!("{name}.json");
-                crate::workspace::clipboard::download_file(&filename, &json);
+                crate::workspace::clipboard::save_file_via_picker(
+                    &filename, &json, "application/json");
             }
         }
         // Phase 8: Justification dialog OK. Commit the 11 dialog

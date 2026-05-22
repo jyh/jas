@@ -259,6 +259,53 @@ pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
     Some(document_to_svg(&temp_doc))
 }
 
+/// Save a string to a user-chosen file path via the File System Access
+/// API (`window.showSaveFilePicker`). The user picks the destination
+/// folder + filename; the file is written directly without going
+/// through Downloads. Falls back to `download_file`-style anchor click
+/// on browsers without `showSaveFilePicker` (Firefox, Safari).
+pub(crate) fn save_file_via_picker(filename: &str, content: &str, mime_type: &str) {
+    let fname_json = serde_json::to_string(filename).unwrap_or_else(|_| "\"download\"".into());
+    let data_json = serde_json::to_string(content).unwrap_or_else(|_| "\"\"".into());
+    let mime_json = serde_json::to_string(mime_type).unwrap_or_else(|_| "\"application/octet-stream\"".into());
+    let script = format!(r#"
+        (async () => {{
+            const fname = {fname_json};
+            const data = {data_json};
+            const mime = {mime_json};
+            if (!window.showSaveFilePicker) {{
+                // Fallback: trigger a normal download.
+                const blob = new Blob([data], {{type: mime}});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fname;
+                a.click();
+                URL.revokeObjectURL(url);
+                return;
+            }}
+            try {{
+                const dot = fname.lastIndexOf('.');
+                const ext = dot >= 0 ? fname.slice(dot) : '';
+                const handle = await window.showSaveFilePicker({{
+                    suggestedName: fname,
+                    types: ext ? [{{
+                        description: ext.slice(1).toUpperCase() + ' file',
+                        accept: {{[mime]: [ext]}}
+                    }}] : []
+                }});
+                const writable = await handle.createWritable();
+                await writable.write(data);
+                await writable.close();
+            }} catch (e) {{
+                // User cancelled or a permission error — leave silently.
+                console.log('save cancelled or failed:', e);
+            }}
+        }})();
+    "#);
+    let _ = js_sys::eval(&script);
+}
+
 /// Download a string as a file in the browser.
 pub(crate) fn download_file(filename: &str, content: &str) {
     let window = match web_sys::window() {
