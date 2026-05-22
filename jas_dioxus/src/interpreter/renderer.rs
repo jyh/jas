@@ -6131,9 +6131,21 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // Size resolution: top-level `size: "<small|medium|large>"` (used by
     // library swatches whose size follows panel.thumbnail_size) takes
     // precedence over `style: { size: N }` (used by the fixed-size
-    // recent-colors row and other tile widgets).
-    let size: u64 = if let Some(size_key) = el.get("size").and_then(|v| v.as_str()) {
-        match size_key { "small" => 16, "medium" => 32, "large" => 64, _ => 16 }
+    // recent-colors row and other tile widgets). Element-level
+    // attributes aren't auto-interpolated, so resolve `{{...}}` templates
+    // here.
+    let size: u64 = if let Some(raw) = el.get("size").and_then(|v| v.as_str()) {
+        let resolved = if raw.contains("{{") {
+            expr::eval_text(raw, ctx)
+        } else {
+            raw.to_string()
+        };
+        match resolved.as_str() {
+            "small" => 16,
+            "medium" => 32,
+            "large" => 64,
+            _ => 16,
+        }
     } else {
         el.get("style")
             .and_then(|s| s.get("size"))
