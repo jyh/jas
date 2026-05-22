@@ -6286,12 +6286,14 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or(false);
 
-    // Selected: 2px white outline replacing the 1px border. The
-    // theme accent colors (#4a90d9 / #5a9ee6 / #007aff) blend with
-    // bluish swatches and dark panel bgs; white guarantees contrast
-    // against every swatch fill across appearances.
+    // Selected: 2px theme-text-color outline replacing the 1px
+    // border. The theme accent colors are all blue and blend with
+    // bluish swatches; pure white is too harsh in Dark Gray and
+    // invisible in Light Gray. var(--jas-text) is light gray in dark
+    // appearances and dark gray in light appearances, so it always
+    // contrasts with the panel bg.
     let final_border = if selected {
-        "2px solid #ffffff"
+        "2px solid var(--jas-text,#dddddd)"
     } else {
         border
     };
