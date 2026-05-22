@@ -466,14 +466,14 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Horizontal Spacing.
       Expect: Rects move to x = 0 / 45 / 90 — leftmost and rightmost hold;
               gaps between consecutive rects become equal.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: render_panel content-id match was missing align_panel_content / boolean_panel_content / magic_wand_panel_content, so number_input writes in those panels fell through to the Stroke arm and apply_stroke_panel_to_selection clobbered the typed pt value on every commit; commit a433142)
 
 - [ ] **AL-121** [wired] Distribute Vertical Spacing in average mode equalises
   gaps.
       Setup: Three rects at y = 0 / 20 / 90.
       Do: Click Distribute Vertical Spacing.
       Expect: Rects move to y = 0 / 45 / 90.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -483,7 +483,7 @@ If any P0 here fails, stop and flag.
       Expect: Input shows 20; subsequent Distribute Horizontal Spacing applies
               a 20pt gap between consecutive bboxes (walking outward from the
               key).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-123** [wired] Explicit-gap Distribute Horizontal Spacing pins the
   key.
@@ -491,14 +491,14 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Horizontal Spacing.
       Expect: Middle rect does not move; left rect moves to x = 70 (= 100 −
               20 − 10); right rect moves to x = 130.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-124** [wired] Explicit-gap mode with no key returns no-op.
       Setup: Align To Selection; pt shown but disabled.
       Do: Attempt to use the pt input value to influence Distribute Spacing.
       Expect: Button enabled only when 3+ selected; clicking uses average
               mode, ignoring the pt value.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -506,19 +506,19 @@ If any P0 here fails, stop and flag.
       Setup: Align To Key Object + key designated.
       Do: Type 9999 into the pt input.
       Expect: Value clamps to 1296 on commit per yaml min/max.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-126** [wired] pt = 0 makes elements touch.
       Setup: Key designated; three rects.
       Do: Set pt to 0, click Distribute Horizontal Spacing.
       Expect: Non-key rects move so consecutive bboxes are flush (zero gap).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-127** [wired] pt input disables when not in key-object mode.
       Setup: Align To Selection or Artboard.
       Do: Look at the pt input.
       Expect: Input rendered dim / disabled; typing has no effect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
