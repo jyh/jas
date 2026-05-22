@@ -4,3 +4,4 @@ pytest
 absl-py
 pyyaml
 msgpack
+flask
