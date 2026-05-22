@@ -320,28 +320,28 @@ verify the Swatches-panel surface only.
 - [ ] **SWP-080** [wired] Default thumbnail size is Small.
       Setup: Fresh workspace.
       Expect: Tiles render at 16px; menu shows checkmark on Small Thumbnail.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-081** [wired] Switching to Medium re-renders at 32px.
       Do: Menu → Medium Thumbnail View.
       Expect: All swatch tiles grow to 32px; checkmark moves to Medium.
-      — last: —
+      — last: 2026-05-21 rust pass (Rust fix: render_color_swatch now interpolates {{...}} templates in top-level size attr; YAML library swatch uses size: "{{panel.thumbnail_size}}")
 
 - [ ] **SWP-082** [wired] Switching to Large re-renders at 64px.
       Do: Menu → Large Thumbnail View.
       Expect: Tiles grow to 64px.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-083** [wired] Switching back to Small returns to 16px.
       Do: Menu → Small Thumbnail View.
       Expect: Tiles shrink to 16px.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-084** [wired] View mode does not affect Recent Colors row.
       Setup: Large Thumbnail View active.
       Expect: Recent Colors row still 16px (recent row size is independent
               of view mode).
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-085** [wired] View mode is panel-local (not persisted with document).
       Setup: Medium active.
@@ -349,7 +349,7 @@ verify the Swatches-panel surface only.
       Expect: View mode either persists app-wide (preferred) or reverts to
               Small. Document either; SWATCHES.md says "panel-local, not
               per-document".
-      — last: —
+      — last: 2026-05-21 rust pass
 
 ---
 
