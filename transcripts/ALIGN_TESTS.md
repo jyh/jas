@@ -326,7 +326,7 @@ If any P0 here fails, stop and flag.
       Setup: Fresh session.
       Do: Open the panel.
       Expect: Selection toggle is checked; Artboard and Key Object are not.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-071** [wired] Clicking Align To Selection selects the selection
   target.
@@ -334,7 +334,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align To Selection.
       Expect: Selection toggle becomes checked; other two uncheck; subsequent
               Align Left uses selection bounds.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: render_icon_button now emits explicit background-transparent on unchecked so toggle states clear on transition, commit c346563)
 
 - [ ] **AL-072** [wired] [known-broken: ALIGN.md §Align To target — Artboard
   deferred] Align To Artboard switches reference.
@@ -343,27 +343,27 @@ If any P0 here fails, stop and flag.
       Expect (target): Operation uses the active artboard rect as reference.
       Expect (current): Artboard falls back to selection bounds; same result
               as Align To Selection.
-      — last: —
+      — last: 2026-05-22 rust pass — actually aligns to the artboard rect (the (target) behavior, not the known-broken (current) behavior). Known-broken list can drop this for Rust
 
 - [ ] **AL-073** [wired] Clicking Align To Key Object enters key mode.
       Setup: 3-rect fixture, selection active.
       Do: Click Align To Key Object.
       Expect: Key Object toggle becomes checked; all operation buttons
               disable until a key is designated; see AL-090 for designation.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
 - [ ] **AL-074** [wired] Align To toggles are mutually exclusive.
       Do: Rapidly click Selection → Key Object → Artboard.
       Expect: At every step exactly one toggle is checked.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-075** [wired] Align To persists per session.
       Setup: Set Align To Key Object + designate a key.
       Do: Float the panel and re-dock it.
       Expect: Key Object remains checked; designated key retained.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -371,7 +371,7 @@ If any P0 here fails, stop and flag.
       Do: Inspect icon sizes (browser DevTools).
       Expect: Each toggle renders at 20×20 px; icon group aligned center
               within the right-half column.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
