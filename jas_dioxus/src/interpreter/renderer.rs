@@ -6286,14 +6286,13 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or(false);
 
-    // Selected: 2px theme-text-color outline replacing the 1px
-    // border. The theme accent colors are all blue and blend with
-    // bluish swatches; pure white is too harsh in Dark Gray and
-    // invisible in Light Gray. var(--jas-text) is light gray in dark
-    // appearances and dark gray in light appearances, so it always
-    // contrasts with the panel bg.
+    // Selected: 2px macOS-system-blue (#007aff) outline replacing
+    // the 1px border. Matches JasSwift's renderColorSwatch which
+    // uses SwiftUI.Color.accentColor (defaults to #007aff on macOS
+    // across light/dark mode). Cross-port parity: the same selection
+    // color appears in both ports regardless of theme appearance.
     let final_border = if selected {
-        "2px solid var(--jas-text,#dddddd)"
+        "2px solid #007aff"
     } else {
         border
     };
