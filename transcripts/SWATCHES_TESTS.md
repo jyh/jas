@@ -645,28 +645,28 @@ verify the Swatches-panel surface only.
       Setup: Dark appearance active.
       Expect: Tile borders distinguishable from panel bg; light swatches
               (e.g. white) visible against panel.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-241** [wired] Medium Gray appearance mirrors Dark.
       Do: Switch appearance → Medium Gray.
       Expect: Panel re-skins; tile and label tokens read correctly.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-242** [wired] Light Gray appearance: dark swatches still visible.
       Do: Switch to Light Gray.
       Expect: Black / dark swatches don't blend into the bg; tile borders
               visible.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-243** [wired] Selected-tile accent outline visible in every appearance.
       Do: In each appearance, select a swatch.
       Expect: 2px outline distinguishable from the unselected state.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: selection border hardcoded to #007aff macOS system blue for Swift parity, commit 5247be9 — previous variants (theme accent, white, halo, theme text) had visibility tradeoffs across the three appearances)
 
 - [ ] **SWP-244** [wired] "Recent Colors" label uses `theme.colors.text_dim`.
       Do: Visually inspect the label across appearances.
       Expect: Label color follows the appearance's text-dim token.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
