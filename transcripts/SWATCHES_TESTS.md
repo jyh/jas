@@ -218,32 +218,32 @@ verify the Swatches-panel surface only.
 - [ ] **SWP-030** [wired] Disclosure triangle starts in expanded state.
       Setup: Fresh open of the panel.
       Expect: Triangle pointing down (▾); swatch grid visible.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-031** [wired] Click triangle collapses the library.
       Do: Click the disclosure triangle.
       Expect: Triangle rotates to collapsed (▸); swatch grid hides; library
               name still visible.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-032** [wired] Click again expands.
       Do: Click the collapsed triangle.
       Expect: Triangle returns to ▾; grid re-renders.
-      — last: —
+      — last: 2026-05-21 rust pass
 
 - [ ] **SWP-033** [wired] Collapse state is panel-local (persists per session).
       Setup: Library collapsed.
       Do: Close the Swatches panel; reopen via Window → Swatches.
       Expect: Library still collapsed (or returns to expanded — document
               actual; SWATCHES.md does not yet specify persistence).
-      — last: —
+      — last: 2026-05-21 rust pass — actual behavior: resets to expanded on reopen (spec undefined; documenting actual)
 
 - [ ] **SWP-034** [wired] Multiple open libraries each have independent collapse.
       Setup: Two libraries open via Open Swatch Library.
       Do: Collapse the first; leave the second.
       Expect: Each library's triangle reflects its own state; the other
               library's grid stays visible.
-      — last: —
+      — last: 2026-05-21 rust blocked — open_swatch_library action not yet wired in Rust dispatch; can't create the two-library state required for the test
 
 ---
 
