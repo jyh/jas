@@ -170,14 +170,14 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: All three rectangles snap so their left edges coincide with the
               leftmost rect; widths unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-011** [wired] Align Right moves right edges to flush.
       Setup: 3-rect fixture.
       Do: Click Align Right.
       Expect: All three rectangles snap so their right edges coincide with the
               rightmost rect; widths unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-012** [wired] Align Horizontal Center moves midpoints to the
   selection-bbox midline.
@@ -185,7 +185,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Horizontal Center.
       Expect: All three rectangles share the same horizontal center; bbox
               widths unchanged; only x shifts.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -194,21 +194,21 @@ If any P0 here fails, stop and flag.
       Do: Click Align Top.
       Expect: All three top edges coincide with the topmost rect; heights
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-014** [wired] Align Vertical Center aligns midpoints vertically.
       Setup: 3-rect fixture.
       Do: Click Align Vertical Center.
       Expect: All three rectangles share the same vertical center; heights
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-015** [wired] Align Bottom moves bottom edges to flush.
       Setup: 3-rect fixture.
       Do: Click Align Bottom.
       Expect: All three bottom edges coincide with the bottommost rect;
               heights unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-016** [wired] Align buttons are one-shot (no persistent checked
   state).
@@ -216,7 +216,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: Operation fires; the button returns to unchecked immediately —
               no filled / highlighted state sticks.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -225,7 +225,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: Nothing moves; undo stack is unchanged or adds a no-op entry per
               ALIGN.md §Undo semantics.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-018** [wired] Align operation preserves rotation / scale in
   transform.
@@ -234,14 +234,14 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: The rotated rect's bounding box left edge aligns; its rotation
               angle is unchanged (only the translate slot shifts).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-019** [wired] Mixed element types align by bbox.
       Setup: Select one Rect, one Ellipse, one Path.
       Do: Click Align Horizontal Center.
       Expect: All three bbox centers coincide horizontally; each element's
               intrinsic geometry is unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
