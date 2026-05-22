@@ -5012,6 +5012,19 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                                 st.set_active_color(color);
                             }
                         }
+                        Some(PanelKind::Align) => {
+                            // Align panel's only number_input is the
+                            // explicit-spacing pt value, used when
+                            // Align To is Key Object and a key is
+                            // designated. Field is
+                            // distribute_spacing_value in the YAML
+                            // but maps to AlignPanelState's
+                            // distribute_spacing.
+                            if f == "distribute_spacing_value"
+                                || f == "distribute_spacing" {
+                                st.align_panel.distribute_spacing = new_val;
+                            }
+                        }
                         // Artboards, Layers, Swatches, Properties:
                         // no-op for number_input writes until their per-panel state
                         // structs land. Drops the edit silently rather than
