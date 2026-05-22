@@ -3,10 +3,11 @@
 //! Menu items mirror the `menu:` block in
 //! `workspace/panels/swatches.yaml`. The dynamic submenu
 //! ("Open Swatch Library") and most data-mutating actions
-//! (new_swatch, duplicate_swatch, delete_swatch, etc.) are
-//! placeholders that log and no-op until the corresponding
-//! controller / library-mutation plumbing lands. Thumbnail size
-//! works end-to-end via st.swatches_panel.thumbnail_size.
+//! (new_swatch, delete_swatch, etc.) are placeholders that log
+//! and no-op until the corresponding controller / library-mutation
+//! plumbing lands. Wired: thumbnail size (st.swatches_panel.thumbnail_size),
+//! duplicate_swatch (clones selected swatches with " copy" suffix in
+//! the active library).
 
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
@@ -106,10 +107,39 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         "set_swatch_thumbnail_large" => {
             state.swatches_panel.thumbnail_size = "large".into();
         }
+        "duplicate_swatch" => {
+            // Forward-iterate selected indices in ascending order;
+            // each insert shifts subsequent originals by 1, tracked
+            // via `offset`. New copy keeps the original's color and
+            // metadata, with " copy" appended to the name. Selection
+            // moves to the new copies.
+            let lib_id = state.swatches_panel.selected_library.clone();
+            let mut sorted = state.swatches_panel.selected_swatches.clone();
+            sorted.sort_unstable();
+            let mut new_selection: Vec<i64> = Vec::with_capacity(sorted.len());
+            if let Some(lib) = state.swatch_libraries.get_mut(&lib_id) {
+                if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
+                    let mut offset: usize = 0;
+                    for orig_idx in sorted {
+                        let pos = orig_idx as usize + offset;
+                        if pos >= swatches.len() { continue; }
+                        let mut copy = swatches[pos].clone();
+                        let orig_name = copy.get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        copy["name"] = serde_json::Value::String(format!("{orig_name} copy"));
+                        swatches.insert(pos + 1, copy);
+                        new_selection.push((pos + 1) as i64);
+                        offset += 1;
+                    }
+                }
+            }
+            state.swatches_panel.selected_swatches = new_selection;
+        }
         // Other actions are placeholders — see module doc. Logging
         // helps surface unwired commands during manual testing.
         "new_swatch"
-        | "duplicate_swatch"
         | "delete_swatch"
         | "select_all_unused_swatches"
         | "add_used_colors"
