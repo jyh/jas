@@ -20,9 +20,11 @@ _Last reviewed: 2026-04-19_
   SWATCHES.md §Open follow-ups.
 - SWP-122 — Delete Swatch is permanent; no undo. since 2026-04-19. Same
   source.
-- SWP-301 — Native apps (Rust / Swift / OCaml / Python) currently ship
-  scaffolding only — no library load, swatch grid, or menu wiring beyond a
-  stub Close item. since 2026-04-19. Spec §Panel-to-selection wiring status.
+- SWP-301 — Native apps (Swift / OCaml / Python) currently ship scaffolding
+  only — no library load, swatch grid, or menu wiring beyond a stub Close
+  item. since 2026-04-19. Spec §Panel-to-selection wiring status.
+  Rust is now functionally complete on jas_dioxus as of 2026-05-22
+  (see Session M for per-feature pass dates).
 
 ---
 
@@ -682,7 +684,7 @@ and which apps reach it.
 - **SWP-300** [wired] Web Colors library opens by default with 216 swatches.
       Do: Fresh workspace → open Swatches.
       Expect: Disclosure shows "Web Colors" with 216 tiles.
-      - [ ] Rust       last: — (per SWP-301: scaffolding only)
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: — (same)
       - [ ] OCaml      last: — (same)
       - [ ] Python     last: — (same)
@@ -692,7 +694,7 @@ and which apps reach it.
       Setup: Selection with explicit fill.
       Do: Click a red swatch.
       Expect: Selection's fill becomes that red.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -701,7 +703,7 @@ and which apps reach it.
 - **SWP-302** [wired] Double-click on a swatch opens Swatch Options in edit mode.
       Do: Double-click a tile.
       Expect: Modal dialog opens with the swatch's name + color pre-filled.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -711,7 +713,7 @@ and which apps reach it.
       Setup: Active color = `#ff6600`.
       Do: Menu → New Swatch → name "Brand" → OK.
       Expect: Library gains a "Brand" swatch with `#ff6600`.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -720,7 +722,7 @@ and which apps reach it.
 - **SWP-304** [wired] View mode change resizes every tile in the panel.
       Do: Menu → Large Thumbnail View.
       Expect: All library tiles grow to 64px; recent row stays 16px.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -730,7 +732,7 @@ and which apps reach it.
       Setup: Library with mixed-order names, save it first.
       Do: Sort by Name → Save Swatch Library → same name → Save.
       Expect: Saved JSON contains alphabetical order.
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass (sort in-memory; persistence via browser download)
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
@@ -742,7 +744,7 @@ and which apps reach it.
       Do: Menu → Add Used Colors.
       Expect: New swatches created for unique-to-document colors only;
               compared by hex (no near-duplicates).
-      - [ ] Rust       last: —
+      - [x] Rust       last: 2026-05-22 pass
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
       - [ ] Python     last: —
