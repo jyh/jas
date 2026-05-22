@@ -6286,10 +6286,12 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         })
         .unwrap_or(false);
 
-    // Selected: 2px accent outline replacing the 1px border. Shifted
-    // border via box-shadow keeps the visual size consistent.
+    // Selected: 2px white outline replacing the 1px border. The
+    // theme accent colors (#4a90d9 / #5a9ee6 / #007aff) blend with
+    // bluish swatches and dark panel bgs; white guarantees contrast
+    // against every swatch fill across appearances.
     let final_border = if selected {
-        "2px solid var(--jas-accent,#4a90d9)"
+        "2px solid #ffffff"
     } else {
         border
     };
