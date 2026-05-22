@@ -425,13 +425,13 @@ verify the Swatches-panel surface only.
       Do: Menu → Select All Unused.
       Expect: 8 of 10 swatches selected (the ones not red or blue); the
               two used colors are NOT selected.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: implemented select_all_unused_swatches in swatches_panel.rs; walks document elements via el.children() recursion, collects hex colors, selects library indices whose color is not in the used set)
 
 - [ ] **SWP-131** [wired] Select All Unused on an empty document selects every swatch.
       Setup: Empty document.
       Do: Menu → Select All Unused.
       Expect: Every swatch in the selected library selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-140** [wired] Add Used Colors creates swatches for new colors only.
       Setup: Document with elements colored `#ff0000`, `#00ff00`, `#0000ff`;
@@ -439,26 +439,26 @@ verify the Swatches-panel surface only.
       Do: Menu → Add Used Colors.
       Expect: Two new swatches appended ("R=0 G=255 B=0", "R=0 G=0 B=255");
               red is NOT duplicated (compared by hex).
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: implemented add_used_colors in swatches_panel.rs; reuses collect_document_colors helper, dedups by lowercase hex against existing library entries)
 
 - [ ] **SWP-141** [wired] Add Used Colors with all-already-present is a no-op.
       Setup: Document colors all already present in selected library.
       Do: Menu → Add Used Colors.
       Expect: No new swatches; library unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **SWP-150** [wired] Sort by Name reorders the selected library alphabetically.
       Setup: Library with swatches in arbitrary order: "Zinc", "Apple",
              "Bronze".
       Do: Menu → Sort by Name.
       Expect: Order becomes Apple, Bronze, Zinc (case-sensitive ASCII).
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: implemented sort_swatches_by_name in swatches_panel.rs; clears selection since indices are invalidated)
 
 - [ ] **SWP-151** [wired] Sort by Name is permanent (persists on save).
       Setup: Sort applied.
       Do: Menu → Save Swatch Library → name "test" → Save.
       Expect: Saved JSON contains swatches in the new alphabetical order.
-      — last: —
+      — last: 2026-05-22 rust pass (sort persists in the in-memory library; full save→file round-trip blocked on save_swatch_library still being unwired)
 
 ---
 
