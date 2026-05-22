@@ -124,7 +124,7 @@ If any P0 here fails, stop and flag.
       Do: Select Window → Align.
       Expect: Align panel appears in the dock or as a floating panel; no
               console error; no visual glitch.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: Window menu sorted alphabetically + Align/Boolean/Opacity added; commit 740b79d)
 
 - [ ] **AL-002** [wired] All panel controls render without layout collapse.
       Do: Visually scan the open Align panel.
@@ -133,23 +133,23 @@ If any P0 here fails, stop and flag.
               Spacing:" + "Align To:" row with 2 spacing icons + pt input on
               the left and 3 toggles on the right. No overlapping controls,
               no truncated labels.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-004** [wired] Panel closes via context menu.
       Do: Right-click header → Close Align.
       Expect: Panel disappears; Window → Align now toggles it back on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; content still
               interactive; returns to dock on drag back.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-006** [wired] Defaults on empty state.
       Setup: No document, no selection.
@@ -157,7 +157,7 @@ If any P0 here fails, stop and flag.
       Expect: Align To = Selection is checked (other two unchecked);
               Distribute Spacing pt input shows 0 and is disabled; all 14
               operation buttons are disabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
