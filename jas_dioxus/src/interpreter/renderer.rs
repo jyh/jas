@@ -1020,19 +1020,39 @@ fn set_app_state_field(
         // Boolean panel fields — mirrors of BooleanPanelState per
         // BOOLEAN.md §Boolean Options dialog.
         "boolean_precision" => {
-            if let Some(n) = val.as_f64() { st.boolean_panel.precision = n; }
+            if let Some(n) = val.as_f64() {
+                st.boolean_panel.precision = n;
+                st.workspace_layout.boolean_options.precision = n;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_remove_redundant_points" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.remove_redundant_points = b; }
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.remove_redundant_points = b;
+                st.workspace_layout.boolean_options.remove_redundant_points = b;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_divide_remove_unpainted" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.divide_remove_unpainted = b;
+                st.workspace_layout.boolean_options.divide_remove_unpainted = b;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_apply_simplify_after_op" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.apply_simplify_after_op = b; }
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.apply_simplify_after_op = b;
+                st.workspace_layout.boolean_options.apply_simplify_after_op = b;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_simplify_precision" => {
-            if let Some(n) = val.as_f64() { st.boolean_panel.simplify_precision = n; }
+            if let Some(n) = val.as_f64() {
+                st.boolean_panel.simplify_precision = n;
+                st.workspace_layout.boolean_options.simplify_precision = n;
+                st.workspace_layout.bump();
+            }
         }
         "last_boolean_op" => {
             if val.is_null() {
