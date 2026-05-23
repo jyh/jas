@@ -4346,9 +4346,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     });
 
     if let Some(handler) = on_click {
-        rsx! { button { id: "{id}", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
+        rsx! { button { id: "{id}", class: "jas-focusable", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
     } else {
-        rsx! { button { id: "{id}", style: "{disabled_style}{style}", "{label}" } }
+        rsx! { button { id: "{id}", class: "jas-focusable", style: "{disabled_style}{style}", "{label}" } }
     }
 }
 
@@ -4383,10 +4383,15 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         "#505050".to_string()
     };
+    // Always emit `background:` explicitly so a checked→unchecked
+    // transition actually clears the highlight in the DOM. With an
+    // empty fallback Dioxus's style diff left the previous
+    // background-color on the element (so e.g. all three Align-To
+    // toggles looked checked once any had ever been checked).
     let bg_style = if checked {
         format!("background:{checked_bg};")
     } else {
-        String::new()
+        "background:transparent;".to_string()
     };
 
     // Resolve the icon name. Resolution order:
@@ -4493,10 +4498,14 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     // Disabled styling: grey out + block pointer events so the
     // button doesn't respond to clicks. Opacity panel's
     // LINK_INDICATOR disables itself when the selection has no mask.
+    // Both branches set the same properties so Dioxus's diff always
+    // updates the style attribute on transition (empty fallback let
+    // stale opacity:0.35 persist in the DOM when disabled flipped to
+    // false).
     let disabled_style = if disabled {
         "opacity:0.35;pointer-events:none;"
     } else {
-        ""
+        "opacity:1;pointer-events:auto;"
     };
 
     let layout_style = if !label_text.is_empty() {
@@ -4526,14 +4535,43 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         ""
     };
+    // Keyboard activation: icon-button is a <div>, which doesn't get
+    // keyboard focus or Enter/Space activation for free the way <button>
+    // does. tabindex=0 makes it focusable (-1 when disabled drops it
+    // out of the tab cycle); onkeydown re-dispatches a DOM .click() so
+    // the same onclick handler runs. preventDefault on Space stops the
+    // page from scrolling.
+    let tabindex_val: &str = if disabled { "-1" } else { "0" };
+    let id_for_keydown = id.clone();
     rsx! {
         div {
             id: "{id}",
+            class: "jas-focusable",
+            tabindex: "{tabindex_val}",
             style: "{position_style}{layout_style}cursor:pointer;{disabled_style}{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
             onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
+            onkeydown: move |evt: Event<KeyboardData>| {
+                if disabled { return; }
+                let key = evt.data().key();
+                let is_space = matches!(&key, dioxus::prelude::Key::Character(c) if c == " ");
+                if key == dioxus::prelude::Key::Enter || is_space {
+                    evt.prevent_default();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use wasm_bindgen::JsCast;
+                        if let Some(node) = web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id(&id_for_keydown))
+                            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                        {
+                            node.click();
+                        }
+                    }
+                }
+            },
             if !icon_svg.is_empty() {
                 div {
                     style: "flex-shrink:0;display:inline-flex;",
@@ -5003,6 +5041,19 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                                 st.set_active_color(color);
                             }
                         }
+                        Some(PanelKind::Align) => {
+                            // Align panel's only number_input is the
+                            // explicit-spacing pt value, used when
+                            // Align To is Key Object and a key is
+                            // designated. Field is
+                            // distribute_spacing_value in the YAML
+                            // but maps to AlignPanelState's
+                            // distribute_spacing.
+                            if f == "distribute_spacing_value"
+                                || f == "distribute_spacing" {
+                                st.align_panel.distribute_spacing = new_val;
+                            }
+                        }
                         // Artboards, Layers, Swatches, Properties:
                         // no-op for number_input writes until their per-panel state
                         // structs land. Drops the edit silently rather than
@@ -5026,6 +5077,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 // otherwise keep stuck on the typed text).
                 key: "{id}-{value}",
                 id: "{id}",
+                class: "jas-focusable",
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
@@ -5049,6 +5101,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         rsx! {
             input {
                 id: "{id}",
+                class: "jas-focusable",
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
@@ -6935,6 +6988,9 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "paragraph_panel_content"  => Some(PanelKind::Paragraph),
             "artboards_panel_content"  => Some(PanelKind::Artboards),
             "opacity_panel_content"    => Some(PanelKind::Opacity),
+            "align_panel_content"      => Some(PanelKind::Align),
+            "boolean_panel_content"    => Some(PanelKind::Boolean),
+            "magic_wand_panel_content" => Some(PanelKind::MagicWand),
             _ => None,
         });
         let mut child = rctx.clone();

@@ -473,10 +473,12 @@ pub fn App() -> Element {
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 // Align panel key-object intercept (Phase 2j, ALIGN.md
                 // §Align To target). While the panel is in key-object
-                // mode, canvas clicks designate / redesignate / clear
-                // the key object instead of going through the active
-                // tool. Other modes fall through.
-                if st.try_designate_align_key_object(cx, cy) {
+                // mode, plain canvas clicks designate / redesignate /
+                // clear the key object instead of going through the
+                // active tool. Shift / alt clicks are selection
+                // modifiers — let them through so shift-toggle and
+                // alt-drag still work in key-object mode.
+                if !shift && !alt && st.try_designate_align_key_object(cx, cy) {
                     return;
                 }
                 let kind = st.active_tool;
@@ -488,6 +490,7 @@ pub fn App() -> Element {
                         Vec::new()
                     };
                 apply_pending_panel_writes(st, pending);
+                st.sync_align_key_object_from_selection();
             }));
         }
     };
@@ -547,6 +550,7 @@ pub fn App() -> Element {
                         Vec::new()
                     };
                 apply_pending_panel_writes(st, pending);
+                st.sync_align_key_object_from_selection();
             }));
         }
     };
@@ -975,6 +979,16 @@ pub fn App() -> Element {
                selection outline is set inline by render_color_swatch
                and wins via the inline style precedence. */
             .jas-swatch-tile:hover {{ outline: 1px solid var(--jas-accent, #4a90d9); outline-offset: -1px; }}
+            /* Keyboard focus ring for icon-buttons, plain buttons,
+               number-inputs, and any other widget that opts in with
+               class="jas-focusable". focus-visible would suppress the
+               ring on mouse focus, but several panels nest the button
+               inside containers that strip focus before the heuristic
+               sees the keyboard modality — so use plain :focus.
+               outline-offset is negative so the ring renders INSIDE
+               the button's box, surviving parents with overflow:hidden
+               and not colliding with adjacent buttons in tight rows. */
+            .jas-focusable:focus {{ outline: 2px solid var(--jas-accent, #4a90d9) !important; outline-offset: -2px !important; }}
         "#  }
         div {
             tabindex: "0",

@@ -206,8 +206,8 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Toggle { label, command } => {
                 let act = act.clone();
                 let cmd = command;
-                // TODO: query checked state from AppState when toggle items are used
-                let prefix = "    ";
+                let checked = super::panel_is_checked(kind, cmd, &st);
+                let prefix = if checked { "\u{2713} " } else { "    " };
                 let display = format!("{prefix}{label}");
                 rsx! {
                     div {
