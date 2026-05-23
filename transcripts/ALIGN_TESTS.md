@@ -634,13 +634,13 @@ If any P0 here fails, stop and flag.
       Expect: Rects return to their original x positions; one undo covers all
               three translations (ALIGN.md §Undo semantics — per-op not
               per-element).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-201** [wired] Redo reapplies the alignment.
       Setup: Continue from AL-200 undo.
       Do: Ctrl/Cmd-Shift-Z (or Ctrl-Y).
       Expect: Rects return to the aligned state.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -648,13 +648,13 @@ If any P0 here fails, stop and flag.
       Setup: Five rects.
       Do: Distribute Horizontal Center, then Ctrl/Cmd-Z.
       Expect: Single undo reverses all interior translations.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-203** [wired] No-op Align emits a clean no-op entry or no entry.
       Setup: Already-aligned fixture.
       Do: Align Left, then Ctrl/Cmd-Z.
       Expect: No change, or a trivial no-op undo — not a partial revert.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
