@@ -164,7 +164,7 @@ If any P0 here fails, stop and flag.
       Do: Select Window → Boolean.
       Expect: Boolean panel appears in the dock or as a floating
               panel; no console error; no visual glitch.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-002** [wired] All panel controls render without layout
   collapse.
@@ -174,25 +174,25 @@ If any P0 here fails, stop and flag.
               icons + 1 reserved empty slot. No overlapping controls,
               no truncated icons. Reserved slot is visually empty
               but occupies the grid cell.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no
               crash.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-004** [wired] Panel closes via context menu.
       Do: Right-click header → Close Boolean.
       Expect: Panel disappears; Window → Boolean now toggles it back
               on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; content
               still interactive; returns to dock on drag back.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-006** [wired] Defaults on empty state.
       Setup: No document, no selection.
@@ -201,7 +201,7 @@ If any P0 here fails, stop and flag.
               hamburger menu's Repeat / Release / Expand Compound
               Shape entries disabled; Make Compound Shape disabled;
               Boolean Options / Reset / Close always enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-007** [wired] Panel appears in Default workspace paired
   with Align.
@@ -211,7 +211,7 @@ If any P0 here fails, stop and flag.
               Other groups match the 5-group default (Color+Swatches,
               Align+Boolean, Character+Paragraph, Stroke+Properties,
               Artboards+Layers).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
