@@ -33,23 +33,27 @@ fn event_targets_input(evt: &Event<KeyboardData>) -> bool {
     false
 }
 
-/// Check if the currently focused element is a panel widget that wants
-/// to handle Tab natively (icon buttons, plain buttons, number inputs,
-/// anything marked .jas-focusable). When true, the app-wide Tab handler
-/// must NOT call preventDefault — the browser's Tab navigation has to
-/// move focus to the next focusable widget.
+/// Check if any specific element currently holds focus (i.e. not just
+/// the document body fallback). The app-wide Tab handler uses this to
+/// decide whether to call preventDefault — if a real element has
+/// focus, let the browser walk Tab to the next focusable widget; only
+/// run our panel-cycling code when no widget is focused. The wrapper
+/// div in App::render carries tabindex=0 so it counts here too — Tab
+/// from the wrapper advances into the first dock widget naturally
+/// instead of getting trapped by the panel-cycling intercept.
 fn focus_on_widget() -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.active_element() {
                 let tag = el.tag_name().to_uppercase();
-                if matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT" | "BUTTON") {
-                    return true;
-                }
-                if el.class_list().contains("jas-focusable") {
-                    return true;
-                }
+                // Body / HTML is the default focus when nothing else
+                // has it — treat that as "no widget focused" so the
+                // panel cycle fires from a cold start. Everything else
+                // (inputs, buttons, .jas-focusable divs, the app
+                // wrapper with tabindex=0) is a focusable widget the
+                // browser should walk Tab through.
+                return !matches!(tag.as_str(), "BODY" | "HTML");
             }
         }
     }
