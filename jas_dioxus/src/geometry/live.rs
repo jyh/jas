@@ -613,6 +613,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         }));
         let ps = element_to_polygon_set(&sq, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1, "closed square path → 1 ring");
@@ -640,6 +641,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         }));
         let cs = CompoundShape {
             operation: CompoundOperation::Union,
@@ -680,6 +682,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         }));
         let ps = element_to_polygon_set(&p, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 2, "two disjoint subpaths → 2 rings");

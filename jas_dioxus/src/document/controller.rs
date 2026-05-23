@@ -1196,12 +1196,18 @@ impl Controller {
             _ => return,
         }
 
-        // Flatten (PolygonSet, paint) outputs into Polygon elements.
-        // When `options.remove_redundant_points` is on, collinear
-        // points are collapsed within `options.precision`. When
-        // `options.divide_remove_unpainted` is on and this is a
-        // DIVIDE op, fragments with no fill and no stroke are
-        // discarded.
+        // Flatten (PolygonSet, paint) outputs into elements.
+        //
+        // Per algorithms/boolean.rs's PolygonSet doc: rings are read
+        // under the even-odd fill rule. A result like XOR of two
+        // overlapping rects is one outer ring plus an inner ring that
+        // cuts out the overlap — emitting each ring as a separate
+        // PolygonElem (which fills its own area independently) leaves
+        // the overlap doubly-filled. Single-ring results stay as
+        // PolygonElems; multi-ring results emit one PathElem with all
+        // rings as subpaths and fill_rule=EvenOdd so the renderer
+        // honours the boolean semantics.
+        use crate::geometry::element::{FillRule, PathCommand, PathElem};
         let mut new_elements: Vec<Rc<Element>> = Vec::new();
         for (ps, fill, stroke, common) in outputs {
             if op_name == "divide"
@@ -1211,20 +1217,49 @@ impl Controller {
             {
                 continue;
             }
-            for ring in ps {
-                let ring = if options.remove_redundant_points {
-                    collapse_collinear_points(ring, options.precision)
-                } else {
-                    ring
-                };
-                if ring.len() >= 3 {
+            let kept: Vec<Vec<(f64, f64)>> = ps
+                .into_iter()
+                .map(|ring| {
+                    if options.remove_redundant_points {
+                        collapse_collinear_points(ring, options.precision)
+                    } else {
+                        ring
+                    }
+                })
+                .filter(|r| r.len() >= 3)
+                .collect();
+            match kept.len() {
+                0 => {}
+                1 => {
                     new_elements.push(Rc::new(Element::Polygon(PolygonElem {
-                        points: ring,
+                        points: kept.into_iter().next().unwrap(),
                         fill,
                         stroke,
                         common: common.clone(),
-                                            fill_gradient: None,
+                        fill_gradient: None,
                         stroke_gradient: None,
+                    })));
+                }
+                _ => {
+                    let mut d: Vec<PathCommand> = Vec::new();
+                    for ring in &kept {
+                        d.push(PathCommand::MoveTo { x: ring[0].0, y: ring[0].1 });
+                        for &(x, y) in &ring[1..] {
+                            d.push(PathCommand::LineTo { x, y });
+                        }
+                        d.push(PathCommand::ClosePath);
+                    }
+                    new_elements.push(Rc::new(Element::Path(PathElem {
+                        d,
+                        fill,
+                        stroke,
+                        width_points: Vec::new(),
+                        common: common.clone(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                        stroke_brush: None,
+                        stroke_brush_overrides: None,
+                        fill_rule: FillRule::EvenOdd,
                     })));
                 }
             }
@@ -2217,13 +2252,26 @@ mod tests {
     }
 
     #[test]
-    fn destructive_exclude_produces_two_polygons() {
+    fn destructive_exclude_produces_single_evenodd_path() {
+        use crate::geometry::element::FillRule;
         let mut model = two_overlapping_rects();
         Controller::apply_destructive_boolean(&mut model, "exclude", &BooleanOptions::default());
-        // Symmetric difference of two overlapping rects → 2 disjoint
-        // polygons.
-        assert_eq!(top_children_count(&model), 2);
-        assert_eq!(model.document().selection.len(), 2);
+        // Symmetric difference is encoded as one Path with multiple
+        // subpaths under the even-odd fill rule, per PolygonSet's
+        // documented contract. Splitting into separate filled polygons
+        // would double-fill the overlap region for hole topologies
+        // (BO-013 manual test bug).
+        assert_eq!(top_children_count(&model), 1);
+        assert_eq!(model.document().selection.len(), 1);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        match &**child {
+            Element::Path(p) => {
+                assert_eq!(p.fill_rule, FillRule::EvenOdd, "exclude path should be evenodd");
+                let move_count = p.d.iter().filter(|c| matches!(c, crate::geometry::element::PathCommand::MoveTo { .. })).count();
+                assert!(move_count >= 2, "expected at least 2 subpaths, got {move_count}");
+            }
+            other => panic!("expected Path, got {other:?}"),
+        }
     }
 
     #[test]
