@@ -174,6 +174,7 @@ pub fn PanelMenuOverlay() -> Element {
                                 "open_paragraph_justification" => Some("paragraph_justification"),
                                 "open_paragraph_hyphenation" => Some("paragraph_hyphenation"),
                                 "save_swatch_library" => Some("swatch_library_save"),
+                                "open_boolean_options" => Some("boolean_options"),
                                 _ => None,
                             };
                             if let Some(did) = dialog_id {
@@ -181,11 +182,26 @@ pub fn PanelMenuOverlay() -> Element {
                                 let st_borrow = app_for_dialog.borrow();
                                 let live = crate::workspace::dock_panel::
                                     build_live_state_map(&st_borrow);
-                                drop(st_borrow);
-                                let empty: serde_json::Map<String, serde_json::Value> =
+                                // Some dialogs need their params
+                                // seeded from current document state
+                                // (the YAML `init:` reads `param.*`,
+                                // not `state.*`, so the params must
+                                // arrive populated). Boolean Options
+                                // is the first such case; pattern is
+                                // ready for future dialogs.
+                                let mut params: serde_json::Map<String, serde_json::Value> =
                                     serde_json::Map::new();
+                                if did == "boolean_options" {
+                                    let bp = &st_borrow.boolean_panel;
+                                    params.insert("precision".into(), serde_json::json!(bp.precision));
+                                    params.insert("remove_redundant_points".into(), serde_json::json!(bp.remove_redundant_points));
+                                    params.insert("divide_remove_unpainted".into(), serde_json::json!(bp.divide_remove_unpainted));
+                                    params.insert("auto_refit_curves".into(), serde_json::json!(bp.auto_refit_curves));
+                                    params.insert("refit_precision".into(), serde_json::json!(bp.refit_precision));
+                                }
+                                drop(st_borrow);
                                 crate::interpreter::dialog_view::open_dialog(
-                                    &mut sig, did, &empty, &live);
+                                    &mut sig, did, &params, &live);
                             } else {
                                 (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                                     super::panel_dispatch(kind, cmd, addr, st);
