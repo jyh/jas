@@ -693,20 +693,20 @@ If any P0 here fails, stop and flag.
       Expect: Focus cycles through the 6 Align → 6 Distribute → 2 Spacing →
               pt input → 3 Align To toggles in document order, with a visible
               focus ring per theme.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust impl: panel-wide keyboard nav — render_icon_button emits tabindex 0/-1 + onkeydown that re-dispatches DOM .click() on Enter/Space; render_button + render_number_input opt in via jas-focusable class; CSS :focus rule uses var(--jas-accent) inset outline so theme tracks Dark/Medium/Light Gray; keyboard.rs Tab handler lets browser native focus walk through anything except body/html — only cycles panels when no widget is focused; web-sys HtmlElement+DomTokenList features enabled; commits f0e57d0, 65b4525, 9b42964, fbdac6a, 748a94c)
 
 - [ ] **AL-241** [wired] Enter / Space on focused button fires the op.
       Setup: 3-rect fixture; focus on Align Left via Tab.
       Do: Press Enter (or Space).
       Expect: Rects align left as if clicked; focus stays on the button.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-242** [wired] pt input accepts arrow-key increments.
       Setup: Align To Key Object + key designated; focus in pt input.
       Do: Press Up arrow 3×.
       Expect: pt value increments by 1 each press (or by the yaml-configured
               step); clamping at max still applies.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
