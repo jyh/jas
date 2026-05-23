@@ -109,15 +109,17 @@ pub struct BooleanOptions {
     pub precision: f64,
     pub remove_redundant_points: bool,
     pub divide_remove_unpainted: bool,
-    /// When true, run the Schneider curve-fit (algorithms::simplify) on
-    /// each output ring before emitting an element. Recovers smooth
-    /// Bezier arcs from the flattened polyline that the boolean
-    /// algorithm produces. Off by default — refitting is lossy and the
-    /// raw polygon output is what most callers expect.
-    pub auto_refit_curves: bool,
+    /// When true, the caller runs Controller::simplify_selection on
+    /// the boolean's output right after apply_destructive_boolean
+    /// completes. Off by default — refitting is lossy and the raw
+    /// polygon output is what most callers expect. The boolean
+    /// emitter itself does not consult this field; it's a signal to
+    /// the surrounding pipeline (see app_state::apply_boolean_operation).
+    pub apply_simplify_after_op: bool,
     /// Max-error tolerance (in document units, typically points) for
-    /// the curve fit. Only consulted when `auto_refit_curves` is on.
-    pub refit_precision: f64,
+    /// the curve fit run by Controller::simplify_selection. Consulted
+    /// by the caller, not by apply_destructive_boolean itself.
+    pub simplify_precision: f64,
 }
 
 impl Default for BooleanOptions {
@@ -126,8 +128,8 @@ impl Default for BooleanOptions {
             precision: 0.0283,
             remove_redundant_points: false,
             divide_remove_unpainted: false,
-            auto_refit_curves: false,
-            refit_precision: 0.5,
+            apply_simplify_after_op: false,
+            simplify_precision: 0.5,
         }
     }
 }
@@ -1219,11 +1221,12 @@ impl Controller {
         // rings as subpaths and fill_rule=EvenOdd so the renderer
         // honours the boolean semantics.
         //
-        // When auto_refit_curves is on, every output goes through
-        // algorithms::simplify::simplify_polyline (Schneider + corner
-        // detection) and is emitted as a PathElem regardless of ring
-        // count — this recovers Bezier arcs from boolean's flattened
-        // output.
+        // Curve recovery (Schneider refit) is NOT done here; it's a
+        // post-op step driven by boolean_panel.apply_simplify_after_op
+        // via Controller::simplify_selection. Keeping that out of the
+        // emit step means apply_destructive_boolean's output is
+        // deterministic and matches what Simplify itself would
+        // produce when run on the polygon result.
         use crate::geometry::element::{FillRule, PathCommand, PathElem};
         let mut new_elements: Vec<Rc<Element>> = Vec::new();
         for (ps, fill, stroke, common) in outputs {
@@ -1245,31 +1248,6 @@ impl Controller {
                 })
                 .filter(|r| r.len() >= 3)
                 .collect();
-            if kept.is_empty() {
-                continue;
-            }
-            if options.auto_refit_curves {
-                let mut d: Vec<PathCommand> = Vec::new();
-                for ring in &kept {
-                    let cmds = crate::algorithms::simplify::simplify_polyline(
-                        ring, options.refit_precision, true,
-                    );
-                    d.extend(cmds);
-                }
-                new_elements.push(Rc::new(Element::Path(PathElem {
-                    d,
-                    fill,
-                    stroke,
-                    width_points: Vec::new(),
-                    common: common.clone(),
-                    fill_gradient: None,
-                    stroke_gradient: None,
-                    stroke_brush: None,
-                    stroke_brush_overrides: None,
-                    fill_rule: if kept.len() == 1 { FillRule::NonZero } else { FillRule::EvenOdd },
-                })));
-                continue;
-            }
             match kept.len() {
                 0 => {}
                 1 => {
@@ -2437,12 +2415,10 @@ mod tests {
     }
 
     #[test]
-    fn destructive_auto_refit_curves_emits_path_with_curveto() {
-        use crate::geometry::element::{FillRule, PathCommand};
-        // Two overlapping circles: each gets element_to_polygon_set'd
-        // into a many-vertex polyline; UNION emits one outer ring;
-        // auto_refit_curves should turn that polyline back into Bezier
-        // arcs (PathCommand::CurveTo segments).
+    fn boolean_then_simplify_emits_path_with_curveto() {
+        use crate::geometry::element::PathCommand;
+        // Two overlapping circles → UNION → many-vertex polygon →
+        // simplify_selection recovers Bezier curves.
         use crate::geometry::element::EllipseElem;
         let r1 = Element::Ellipse(EllipseElem {
             cx: 0.0, cy: 0.0, rx: 50.0, ry: 50.0,
@@ -2472,15 +2448,14 @@ mod tests {
             ElementSelection::all(vec![0, 1]),
         ];
         let mut model = Model::new(doc, None);
-        let opts = BooleanOptions { auto_refit_curves: true, refit_precision: 0.5, ..Default::default() };
-        Controller::apply_destructive_boolean(&mut model, "union", &opts);
+        Controller::apply_destructive_boolean(&mut model, "union", &BooleanOptions::default());
+        Controller::simplify_selection(&mut model, 0.5);
         assert_eq!(top_children_count(&model), 1);
         let child = &model.document().layers[0].children().unwrap()[0];
         match &**child {
             Element::Path(p) => {
-                assert_eq!(p.fill_rule, FillRule::NonZero);
                 let curve_count = p.d.iter().filter(|c| matches!(c, PathCommand::CurveTo { .. })).count();
-                assert!(curve_count > 0, "auto-refit should emit at least one CurveTo, got {curve_count}");
+                assert!(curve_count > 0, "boolean+simplify should emit at least one CurveTo, got {curve_count}");
             }
             other => panic!("expected Path, got {other:?}"),
         }

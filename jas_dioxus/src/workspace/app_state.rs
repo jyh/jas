@@ -499,14 +499,15 @@ pub(crate) struct BooleanPanelState {
     /// When true, DIVIDE fragments with no fill and no stroke are
     /// discarded rather than kept as invisible paths.
     pub divide_remove_unpainted: bool,
-    /// When true, every boolean-op output ring is fed through the
-    /// Schneider curve-fit (algorithms::simplify) so flattened arcs
-    /// are recovered as Bezier segments. Off by default — refitting
-    /// is lossy.
-    pub auto_refit_curves: bool,
-    /// Max-error tolerance (points) for the curve fit. Consulted
-    /// only when auto_refit_curves is on. Default 0.5 pt.
-    pub refit_precision: f64,
+    /// When true, Controller::simplify_selection runs on the boolean
+    /// op's output as a post-step. Same algorithm as the standalone
+    /// Object → Simplify command, just auto-applied. Off by default
+    /// — refitting is lossy.
+    pub apply_simplify_after_op: bool,
+    /// Max-error tolerance (points) for Schneider curve fit. Used by
+    /// both the post-op auto-simplify and the standalone Object →
+    /// Simplify command. Default 0.5 pt.
+    pub simplify_precision: f64,
     /// Most-recent op (one of 13 values plus None). See BOOLEAN.md
     /// §Repeat state. Populated by every destructive op and every
     /// compound-creating variant; consumed by Repeat Boolean
@@ -521,8 +522,8 @@ impl Default for BooleanPanelState {
             precision: 0.0283,
             remove_redundant_points: false,
             divide_remove_unpainted: false,
-            auto_refit_curves: false,
-            refit_precision: 0.5,
+            apply_simplify_after_op: false,
+            simplify_precision: 0.5,
             last_op: None,
         }
     }
@@ -1950,13 +1951,24 @@ impl AppState {
             precision: self.boolean_panel.precision,
             remove_redundant_points: self.boolean_panel.remove_redundant_points,
             divide_remove_unpainted: self.boolean_panel.divide_remove_unpainted,
-            auto_refit_curves: self.boolean_panel.auto_refit_curves,
-            refit_precision: self.boolean_panel.refit_precision,
+            apply_simplify_after_op: self.boolean_panel.apply_simplify_after_op,
+            simplify_precision: self.boolean_panel.simplify_precision,
         };
+        let apply_simplify = options.apply_simplify_after_op;
+        let precision = options.simplify_precision;
         if let Some(tab) = self.tab_mut() {
             crate::document::controller::Controller::apply_destructive_boolean(
                 &mut tab.model, op, &options,
             );
+            // Post-op auto-simplify — same code path as Object → Simplify.
+            // Runs on the new selection (boolean op leaves output paths
+            // selected) so curve recovery is consistent with the menu
+            // command. No-op when the boolean op left no selection.
+            if apply_simplify {
+                crate::document::controller::Controller::simplify_selection(
+                    &mut tab.model, precision,
+                );
+            }
         }
     }
 

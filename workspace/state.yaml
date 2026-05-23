@@ -717,23 +717,22 @@ state:
       discarded rather than kept as invisible paths. Edited via the
       Boolean Options dialog.
 
-  boolean_auto_refit_curves:
+  boolean_apply_simplify_after_op:
     type: bool
     default: false
     description: >
-      When true, every boolean-op output ring is fed through the
-      Schneider curve-fit (algorithms::simplify) so flattened arcs
-      come back out as Bezier segments. Off by default — refitting
-      is lossy. Edited via the Boolean Options dialog.
+      When true, Object → Simplify is run automatically on the
+      result of every destructive boolean operation. Off by default
+      — refitting is lossy. Edited via the Boolean Options dialog.
 
-  boolean_refit_precision:
+  boolean_simplify_precision:
     type: number
     default: 0.5
     description: >
       Max-error tolerance (in points) for the Schneider curve-fit
-      consulted when boolean_auto_refit_curves is on. Smaller values
-      hug the polyline more closely but emit more segments. Edited
-      via the Boolean Options dialog.
+      consulted by both Object → Simplify and the post-op auto-
+      simplify. Smaller values hug the polyline more closely but
+      emit more segments. Edited via the Boolean Options dialog.
 
   # ── Brushes panel ─────────────────────────────────────────────
   # Mirror state for the Brushes panel. See

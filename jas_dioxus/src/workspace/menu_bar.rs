@@ -194,7 +194,7 @@ pub(crate) fn MenuBarView(
                 }
                 "simplify" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let precision = st.boolean_panel.refit_precision;
+                        let precision = st.boolean_panel.simplify_precision;
                         if let Some(tab) = st.tab_mut() {
                             Controller::simplify_selection(&mut tab.model, precision);
                         }
