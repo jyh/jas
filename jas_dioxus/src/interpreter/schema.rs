@@ -134,6 +134,15 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "align_key_object_path" => Some(SchemaEntry::new(Object, true, true)),
         "align_distribute_spacing" => Some(SchemaEntry::new(Number, false, true)),
         "align_use_preview_bounds" => Some(SchemaEntry::new(Bool, false, true)),
+        // Boolean panel state (workspace/state.yaml §Boolean panel state).
+        // Mirrored on BooleanPanelState; written from the Boolean
+        // Options dialog OK button.
+        "boolean_precision" => Some(SchemaEntry::new(Number, false, true)),
+        "boolean_remove_redundant_points" => Some(SchemaEntry::new(Bool, false, true)),
+        "boolean_divide_remove_unpainted" => Some(SchemaEntry::new(Bool, false, true)),
+        "boolean_apply_simplify_after_op" => Some(SchemaEntry::new(Bool, false, true)),
+        "boolean_simplify_precision" => Some(SchemaEntry::new(Number, false, true)),
+        "last_boolean_op" => Some(SchemaEntry::new(String, true, true)),
         // Internal — writable: false
         "_drag_pane" => Some(SchemaEntry::new(String, true, false)),
         "_drag_offset_x" => Some(SchemaEntry::new(Number, false, false)),
