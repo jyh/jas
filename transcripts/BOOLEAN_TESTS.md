@@ -226,7 +226,7 @@ If any P0 here fails, stop and flag.
       Expect: Selection collapses to a single Polygon element tracing
               the outer boundary of the two rects' union. The two
               original rects are removed. New polygon is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-011** [wired] SUBTRACT_FRONT removes the frontmost from
   back survivors.
@@ -236,14 +236,14 @@ If any P0 here fails, stop and flag.
       Expect: Frontmost rect disappears. Backmost becomes an
               L-shaped polygon (its right half removed). Only the
               survivor is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-012** [wired] INTERSECTION produces the overlap region.
       Setup: Two-overlap fixture.
       Do: Click INTERSECTION.
       Expect: One polygon remains — the 50×100 rectangle of overlap.
               Both original rects removed. New polygon is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-013** [wired] EXCLUDE produces symmetric difference.
       Setup: Two-overlap fixture.
@@ -251,7 +251,7 @@ If any P0 here fails, stop and flag.
       Expect: Two polygons remain — the left-only and right-only
               regions (overlap removed). Both original rects are
               removed. Both new polygons are selected.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: PolygonSet contract is even-odd fill; multi-ring outputs now emit one PathElem with FillRule::EvenOdd instead of separate PolygonElems so the overlap is correctly cut out; e0bb3a2)
 
 **P1**
 
@@ -261,7 +261,7 @@ If any P0 here fails, stop and flag.
       Expect: Output has two separate polygons matching the originals
               (a multi-ring polygon in algorithms that support it; or
               two Polygon elements if not).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-015** [wired] INTERSECTION on disjoint operands produces
   nothing.
@@ -269,21 +269,21 @@ If any P0 here fails, stop and flag.
       Do: Click INTERSECTION.
       Expect: Layer children count drops by 2 with zero replacements
               — intersection is empty. Selection becomes empty.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-016** [wired] UNION on nested operands equals the outer
   rect.
       Setup: Nested fixture.
       Do: Click UNION.
       Expect: One polygon whose bbox matches the outer rect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-017** [wired] INTERSECTION on nested operands equals the
   inner rect.
       Setup: Nested fixture.
       Do: Click INTERSECTION.
       Expect: One polygon whose bbox matches the inner rect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -293,7 +293,7 @@ If any P0 here fails, stop and flag.
       Do: Click UNION.
       Expect: Button returns to unpressed state immediately;
               operation fires once.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-019** [wired] Mixed-element-type UNION.
       Setup: Mixed-type fixture (Rect + Ellipse + Polygon + Path).
@@ -301,7 +301,7 @@ If any P0 here fails, stop and flag.
       Expect: One polygon element tracing the union of all four
               flattened boundaries; paint carries the frontmost
               (Path) operand's fill/stroke.
-      — last: —
+      — last: 2026-05-22 rust pass (vertex count high when curves are flattened — turn on "Apply Simplify After Each Boolean Operation" in Boolean Options to recover Beziers via the new Schneider refit; 29048a7, 25bf4f2)
 
 - [ ] **BO-020** [wired] Edge-touching operands without overlap.
       Setup: Two 100×100 rects at (0,0) and (100,0) sharing a single
@@ -309,7 +309,7 @@ If any P0 here fails, stop and flag.
       Do: Click UNION.
       Expect: One 200×100 polygon; no self-intersecting seam visible
               in the output geometry.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
