@@ -587,14 +587,14 @@ If any P0 here fails, stop and flag.
       Do: Right-click or click the panel context-menu affordance.
       Expect: Menu items — "Use Preview Bounds" (checkbox), "Reset Panel",
               "Close Align". Exactly two separators between them.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-181** [wired] Use Preview Bounds toggles panel state.
       Setup: Menu open.
       Do: Click Use Preview Bounds.
       Expect: Checkmark appears; menu closes. Re-opening the menu shows the
               toggle checked. Re-click toggles off.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: panel_menu_view Toggle arm queries panel_is_checked (was a TODO with hard-coded prefix), and align_panel.dispatch now actually flips use_preview_bounds and calls reset_align_panel (was no-op under stale assumption that yaml renderer dispatch handled them); commit 9e205ca)
 
 - [ ] **AL-182** [wired] Use Preview Bounds affects a subsequent Align Right
   with stroked elements.
@@ -604,7 +604,7 @@ If any P0 here fails, stop and flag.
       Expect: The stroked rect's x position differs between runs — with
               Preview Bounds on, the stroke's outer edge aligns; with it off,
               the geometric edge does.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -614,13 +614,13 @@ If any P0 here fails, stop and flag.
       Do: Menu → Reset Panel.
       Expect: Align To → Selection; key cleared; pt → 0; Use Preview Bounds →
               off.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-184** [wired] Close Align hides the panel.
       Do: Menu → Close Align.
       Expect: Same outcome as Session A panel-close test; Window → Align
               toggles it back on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
