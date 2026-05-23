@@ -323,7 +323,7 @@ If any P0 here fails, stop and flag.
       Do: Click DIVIDE.
       Expect: Three polygon elements: back-only region, overlap
               region, front-only region. All three selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-041** [wired] TRIM on two-overlap keeps the front and
   trims the back.
@@ -331,14 +331,14 @@ If any P0 here fails, stop and flag.
       Do: Click TRIM.
       Expect: Two polygons — back's L-shaped trimmed region +
               frontmost unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-042** [wired] MERGE on matching-fill selection reduces to
   one union.
       Setup: Matching-paint fixture (both rects `#ff0000`).
       Do: Click MERGE.
       Expect: One red polygon matching the union boundary.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-043** [wired] CROP frontmost as mask.
       Setup: Two-overlap fixture.
@@ -346,7 +346,7 @@ If any P0 here fails, stop and flag.
       Expect: One polygon — the back operand clipped to the front
               rect's interior (the overlap region, keeping back's
               paint).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-044** [wired] SUBTRACT_BACK removes backmost from front
   survivors.
@@ -355,7 +355,7 @@ If any P0 here fails, stop and flag.
       Expect: Backmost disappears; frontmost becomes an L-shape (its
               left half removed where the back rect used to overlap).
               Only survivor selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -364,7 +364,7 @@ If any P0 here fails, stop and flag.
       Do: Click DIVIDE.
       Expect: Two fragments, one per original rect; no spurious
               third fragment.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-046** [wired] DIVIDE on three-overlap partitions the
   union into distinct fragments.
@@ -374,7 +374,7 @@ If any P0 here fails, stop and flag.
               triple-overlap, mid-right overlap, right-only. Each
               inherits the paint of the frontmost operand that
               covered its area.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-047** [wired] TRIM with fully-covered back drops the back.
       Setup: Outer 200×200 back rect fully covered by a 250×250 front
@@ -382,7 +382,7 @@ If any P0 here fails, stop and flag.
       Do: Click TRIM.
       Expect: One polygon remains — the frontmost (back's trimmed
               region is empty and therefore dropped).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-048** [wired] MERGE with mismatched fills keeps them
   separate.
@@ -390,7 +390,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons — back's L-shaped trimmed region (blue) +
               front (red). No merge occurs.
-      — last: —
+      — last: 2026-05-22 rust pass (MERGE with mismatched fills runs the TRIM half only; visual confusion at first since the front sits on top of the L-notch, but moving the front aside reveals the L-shape)
 
 - [ ] **BO-049** [wired] MERGE with None fills never merges (strict
   predicate).
@@ -398,7 +398,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons remain — TRIM output kept separate because
               None / None is not a match.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -409,7 +409,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: One merged polygon (swatches resolve to hex; equal hex
               → merges).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-051** [wired] MERGE predicate: gradient fills never match.
       Setup: Two overlapping rects; both filled with the same linear
@@ -417,14 +417,14 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons — gradients never match the predicate
               even against themselves (BOOLEAN.md §MERGE predicate).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-052** [wired] MERGE predicate: near-matching hex is still
   distinct.
       Setup: Two overlapping rects, one `#ff0000` and one `#ff0001`.
       Do: Click MERGE.
       Expect: Two polygons — near-matches are strict.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-053** [wired] CROP discards survivor content outside the
   mask.
@@ -432,7 +432,7 @@ If any P0 here fails, stop and flag.
       Do: Click CROP.
       Expect: Two polygons — each non-front operand clipped to the
               frontmost (right-most) rect's interior.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
