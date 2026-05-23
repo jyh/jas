@@ -4346,9 +4346,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     });
 
     if let Some(handler) = on_click {
-        rsx! { button { id: "{id}", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
+        rsx! { button { id: "{id}", class: "jas-focusable", style: "{disabled_style}{style}", onclick: handler, "{label}" } }
     } else {
-        rsx! { button { id: "{id}", style: "{disabled_style}{style}", "{label}" } }
+        rsx! { button { id: "{id}", class: "jas-focusable", style: "{disabled_style}{style}", "{label}" } }
     }
 }
 
@@ -4535,14 +4535,43 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         ""
     };
+    // Keyboard activation: icon-button is a <div>, which doesn't get
+    // keyboard focus or Enter/Space activation for free the way <button>
+    // does. tabindex=0 makes it focusable (-1 when disabled drops it
+    // out of the tab cycle); onkeydown re-dispatches a DOM .click() so
+    // the same onclick handler runs. preventDefault on Space stops the
+    // page from scrolling.
+    let tabindex_val: &str = if disabled { "-1" } else { "0" };
+    let id_for_keydown = id.clone();
     rsx! {
         div {
             id: "{id}",
+            class: "jas-focusable",
+            tabindex: "{tabindex_val}",
             style: "{position_style}{layout_style}cursor:pointer;{disabled_style}{bg_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
             onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
+            onkeydown: move |evt: Event<KeyboardData>| {
+                if disabled { return; }
+                let key = evt.data().key();
+                let is_space = matches!(&key, dioxus::prelude::Key::Character(c) if c == " ");
+                if key == dioxus::prelude::Key::Enter || is_space {
+                    evt.prevent_default();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use wasm_bindgen::JsCast;
+                        if let Some(node) = web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id(&id_for_keydown))
+                            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                        {
+                            node.click();
+                        }
+                    }
+                }
+            },
             if !icon_svg.is_empty() {
                 div {
                     style: "flex-shrink:0;display:inline-flex;",
@@ -5048,6 +5077,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 // otherwise keep stuck on the typed text).
                 key: "{id}-{value}",
                 id: "{id}",
+                class: "jas-focusable",
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
@@ -5071,6 +5101,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         rsx! {
             input {
                 id: "{id}",
+                class: "jas-focusable",
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",

@@ -979,6 +979,12 @@ pub fn App() -> Element {
                selection outline is set inline by render_color_swatch
                and wins via the inline style precedence. */
             .jas-swatch-tile:hover {{ outline: 1px solid var(--jas-accent, #4a90d9); outline-offset: -1px; }}
+            /* Keyboard focus ring for icon-buttons, plain buttons,
+               number-inputs, and any other widget that opts in with
+               class="jas-focusable". focus-visible suppresses the ring
+               on mouse clicks but shows it on Tab navigation. */
+            .jas-focusable:focus {{ outline: none; }}
+            .jas-focusable:focus-visible {{ outline: 2px solid var(--jas-accent, #4a90d9); outline-offset: 1px; border-radius: 2px; }}
         "#  }
         div {
             tabindex: "0",
