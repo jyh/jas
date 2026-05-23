@@ -196,8 +196,8 @@ pub fn PanelMenuOverlay() -> Element {
                                     params.insert("precision".into(), serde_json::json!(bp.precision));
                                     params.insert("remove_redundant_points".into(), serde_json::json!(bp.remove_redundant_points));
                                     params.insert("divide_remove_unpainted".into(), serde_json::json!(bp.divide_remove_unpainted));
-                                    params.insert("auto_refit_curves".into(), serde_json::json!(bp.auto_refit_curves));
-                                    params.insert("refit_precision".into(), serde_json::json!(bp.refit_precision));
+                                    params.insert("apply_simplify_after_op".into(), serde_json::json!(bp.apply_simplify_after_op));
+                                    params.insert("simplify_precision".into(), serde_json::json!(bp.simplify_precision));
                                 }
                                 drop(st_borrow);
                                 crate::interpreter::dialog_view::open_dialog(

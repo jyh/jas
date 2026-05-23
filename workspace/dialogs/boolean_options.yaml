@@ -23,8 +23,8 @@ boolean_options:
     precision: { type: number }
     remove_redundant_points: { type: bool }
     divide_remove_unpainted: { type: bool }
-    auto_refit_curves: { type: bool }
-    refit_precision: { type: number }
+    apply_simplify_after_op: { type: bool }
+    simplify_precision: { type: number }
   state:
     precision:
       type: number
@@ -38,26 +38,28 @@ boolean_options:
       type: bool
       default: false
       description: "DIVIDE drops fragments with no paint when on"
-    auto_refit_curves:
+    apply_simplify_after_op:
       type: bool
       default: false
       description: >
-        Refit boolean output back to Bezier curves via the Schneider
-        algorithm. Off by default — refitting is lossy. When on, the
-        boolean output is emitted as a Path with CurveTo segments
-        approximating the original arc geometry.
-    refit_precision:
+        When on, Object → Simplify is run automatically on the result
+        of every destructive boolean operation. Recovers Bezier arcs
+        from the flattened polygon output. Off by default — refitting
+        is lossy.
+    simplify_precision:
       type: number
       default: 0.5
       description: >
-        Max-error tolerance (in points) for the curve refit. Smaller
-        values produce closer fits but more segments.
+        Max-error tolerance (in points) for the Schneider curve fit
+        used by both Object → Simplify and the post-op auto-simplify.
+        Smaller values hug the polyline more closely but emit more
+        segments.
   init:
     precision: "param.precision"
     remove_redundant_points: "param.remove_redundant_points"
     divide_remove_unpainted: "param.divide_remove_unpainted"
-    auto_refit_curves: "param.auto_refit_curves"
-    refit_precision: "param.refit_precision"
+    apply_simplify_after_op: "param.apply_simplify_after_op"
+    simplify_precision: "param.simplify_precision"
   content:
     type: container
     layout: column
@@ -110,35 +112,35 @@ boolean_options:
                 bind:
                   checked: "dialog.divide_remove_unpainted"
 
-      # Auto-refit curves
+      # Apply Simplify after each Boolean operation
       - type: row
         children:
           - type: col
             col: 12
             children:
-              - id: bo_auto_refit_curves
+              - id: bo_apply_simplify_after_op
                 type: toggle
-                label: "Refit Curves on Boolean Output"
+                label: "Apply Simplify After Each Boolean Operation"
                 bind:
-                  checked: "dialog.auto_refit_curves"
+                  checked: "dialog.apply_simplify_after_op"
 
-      # Refit precision
+      # Simplify precision (also used by Object → Simplify)
       - type: row
         children:
           - type: col
             col: 4
             children:
-              - { type: text, content: "Refit Precision:", style: { font_size: 11 } }
+              - { type: text, content: "Simplify Precision:", style: { font_size: 11 } }
           - type: col
             col: 5
             children:
-              - id: bo_refit_precision_input
+              - id: bo_simplify_precision_input
                 type: number_input
                 min: 0.01
                 max: 10
                 step: 0.01
                 bind:
-                  value: "dialog.refit_precision"
+                  value: "dialog.simplify_precision"
           - type: col
             col: 3
             children:
@@ -160,5 +162,5 @@ boolean_options:
               precision: "dialog.precision"
               remove_redundant_points: "dialog.remove_redundant_points"
               divide_remove_unpainted: "dialog.divide_remove_unpainted"
-              auto_refit_curves: "dialog.auto_refit_curves"
-              refit_precision: "dialog.refit_precision"
+              apply_simplify_after_op: "dialog.apply_simplify_after_op"
+              simplify_precision: "dialog.simplify_precision"

@@ -1028,11 +1028,11 @@ fn set_app_state_field(
         "boolean_divide_remove_unpainted" => {
             if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
         }
-        "boolean_auto_refit_curves" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.auto_refit_curves = b; }
+        "boolean_apply_simplify_after_op" => {
+            if let Some(b) = val.as_bool() { st.boolean_panel.apply_simplify_after_op = b; }
         }
-        "boolean_refit_precision" => {
-            if let Some(n) = val.as_f64() { st.boolean_panel.refit_precision = n; }
+        "boolean_simplify_precision" => {
+            if let Some(n) = val.as_f64() { st.boolean_panel.simplify_precision = n; }
         }
         "last_boolean_op" => {
             if val.is_null() {
@@ -1135,8 +1135,8 @@ fn apply_set_panel_state_with_ctx(
                 "boolean_precision": bp.precision,
                 "boolean_remove_redundant_points": bp.remove_redundant_points,
                 "boolean_divide_remove_unpainted": bp.divide_remove_unpainted,
-                "boolean_auto_refit_curves": bp.auto_refit_curves,
-                "boolean_refit_precision": bp.refit_precision,
+                "boolean_apply_simplify_after_op": bp.apply_simplify_after_op,
+                "boolean_simplify_precision": bp.simplify_precision,
                 "last_boolean_op": bp.last_op.as_ref()
                     .map(|s| serde_json::Value::String(s.clone()))
                     .unwrap_or(serde_json::Value::Null),
