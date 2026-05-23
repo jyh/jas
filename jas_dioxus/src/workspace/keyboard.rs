@@ -33,6 +33,29 @@ fn event_targets_input(evt: &Event<KeyboardData>) -> bool {
     false
 }
 
+/// Check if the currently focused element is a panel widget that wants
+/// to handle Tab natively (icon buttons, plain buttons, number inputs,
+/// anything marked .jas-focusable). When true, the app-wide Tab handler
+/// must NOT call preventDefault — the browser's Tab navigation has to
+/// move focus to the next focusable widget.
+fn focus_on_widget() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.active_element() {
+                let tag = el.tag_name().to_uppercase();
+                if matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT" | "BUTTON") {
+                    return true;
+                }
+                if el.class_list().contains("jas-focusable") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Build the `onkeydown` closure for the main application.
 pub(crate) fn make_keydown_handler(
     act: Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>,
@@ -146,7 +169,11 @@ pub(crate) fn make_keydown_handler(
                 }));
             }
             // --- Panel focus navigation ---
-            Key::Tab if !tool_captures => {
+            // Tab on a widget (input, button, .jas-focusable div) is
+            // for browser-native focus traversal — let it through. Only
+            // intercept Tab for panel-cycling when focus is on the
+            // canvas / body, where there's no widget to walk to.
+            Key::Tab if !tool_captures && !focus_on_widget() => {
                 evt.prevent_default();
                 if mods.shift() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
