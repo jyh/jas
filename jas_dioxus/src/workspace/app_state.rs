@@ -654,6 +654,21 @@ impl AppState {
     pub(crate) fn new() -> Self {
         let app_config = Self::load_app_config();
         let workspace_layout = Self::load_or_migrate_workspace(&app_config);
+        // Hydrate runtime BooleanPanelState from the persisted layout
+        // copy. The reverse direction (writes flow back into
+        // workspace_layout.boolean_options) happens in
+        // set_app_state_field below.
+        let boolean_panel = {
+            let saved = &workspace_layout.boolean_options;
+            BooleanPanelState {
+                precision: saved.precision,
+                remove_redundant_points: saved.remove_redundant_points,
+                divide_remove_unpainted: saved.divide_remove_unpainted,
+                apply_simplify_after_op: saved.apply_simplify_after_op,
+                simplify_precision: saved.simplify_precision,
+                last_op: None,
+            }
+        };
         // Restore tabs from previous session, if any.
         let (tabs, active_tab) =
             if let Some((saved_active, restored)) = super::session::load_session() {
@@ -689,7 +704,7 @@ impl AppState {
             character_panel: CharacterPanelState::default(),
             paragraph_panel: ParagraphPanelState::default(),
             align_panel: AlignPanelState::default(),
-            boolean_panel: BooleanPanelState::default(),
+            boolean_panel,
             opacity_panel: OpacityPanelState::default(),
             swatches_panel: SwatchesPanelState::default(),
             layers_renaming: None,

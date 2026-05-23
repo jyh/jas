@@ -212,6 +212,10 @@ pub struct WorkspaceLayout {
     /// Floating pane positions for toolbar/canvas/dock. `None` for legacy layouts.
     #[serde(default)]
     pub pane_layout: Option<PaneLayout>,
+    /// Boolean panel preferences (the Boolean Options dialog). Saved
+    /// here rather than on AppState so they survive across sessions.
+    #[serde(default)]
+    pub boolean_options: BooleanOptionsSaved,
     next_id: usize,
     /// Incremented on every mutation. Used to detect when a save is needed.
     #[serde(skip)]
@@ -219,6 +223,31 @@ pub struct WorkspaceLayout {
     /// The generation at which we last saved.
     #[serde(skip)]
     saved_generation: u64,
+}
+
+/// Serializable mirror of the Boolean Options dialog state. Lives on
+/// WorkspaceLayout so changes survive across sessions. Runtime state
+/// (BooleanPanelState in app_state.rs) is hydrated from this at
+/// startup and writes flow back here whenever the dialog OKs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BooleanOptionsSaved {
+    pub precision: f64,
+    pub remove_redundant_points: bool,
+    pub divide_remove_unpainted: bool,
+    pub apply_simplify_after_op: bool,
+    pub simplify_precision: f64,
+}
+
+impl Default for BooleanOptionsSaved {
+    fn default() -> Self {
+        Self {
+            precision: 0.0283,
+            remove_redundant_points: false,
+            divide_remove_unpainted: false,
+            apply_simplify_after_op: false,
+            simplify_precision: 0.5,
+        }
+    }
 }
 
 /// Application configuration, saved separately from dock layouts.
@@ -303,6 +332,7 @@ impl WorkspaceLayout {
             focused_panel: None,
             appearance: default_appearance(),
             pane_layout: None,
+            boolean_options: BooleanOptionsSaved::default(),
             next_id: 1,
             generation: 0,
             saved_generation: 0,
@@ -331,6 +361,7 @@ impl WorkspaceLayout {
             version, name, anchored, floating, hidden_panels, z_order,
             focused_panel, appearance, pane_layout, next_id,
             hidden_panel_positions: vec![],
+            boolean_options: BooleanOptionsSaved::default(),
             generation: 0, saved_generation: 0,
         }
     }
