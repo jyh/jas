@@ -444,21 +444,21 @@ If any P0 here fails, stop and flag.
       Setup: Painted fixture (front red, back blue).
       Do: Click UNION.
       Expect: One polygon with fill `#ff0000` (frontmost = red).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-081** [wired] INTERSECTION carries the frontmost operand's
   paint.
       Setup: Painted fixture.
       Do: Click INTERSECTION.
       Expect: One red polygon in the overlap region.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-082** [wired] EXCLUDE carries the frontmost operand's
   paint on every output.
       Setup: Painted fixture.
       Do: Click EXCLUDE.
       Expect: Two polygons, both filled red (frontmost paint).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-083** [wired] SUBTRACT_FRONT: each survivor keeps its own
   paint.
@@ -467,7 +467,7 @@ If any P0 here fails, stop and flag.
       Do: Click SUBTRACT_FRONT.
       Expect: Two L-shaped polygons; back polygon is blue, middle
               polygon is green. Red (cutter) is consumed.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-084** [wired] CROP: each survivor keeps its own paint.
       Setup: Three-overlap fixture (back=blue, middle=green,
@@ -476,7 +476,7 @@ If any P0 here fails, stop and flag.
       Expect: Two polygons — back clipped to front's interior (blue),
               middle clipped to front's interior (green). Front
               consumed.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-085** [wired] DIVIDE: each fragment inherits the paint of
   the frontmost covering operand.
@@ -486,7 +486,7 @@ If any P0 here fails, stop and flag.
       Expect: Five fragments with paint mapping:
               left-only → blue, mid-left → green, center → red,
               mid-right → red, right-only → red.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -495,7 +495,7 @@ If any P0 here fails, stop and flag.
              rect stroke 2pt red.
       Do: Click UNION.
       Expect: Resulting polygon has the frontmost's stroke (2pt red).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-087** [wired] MERGE uses the frontmost contributor's
   stroke on the merged output.
@@ -504,14 +504,14 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: One merged red polygon with the 6pt white stroke
               (frontmost in the merged cluster wins).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-088** [wired] Opacity inheritance on UNION.
       Setup: Two-overlap fixture; back rect opacity 0.3; front opacity
              0.8.
       Do: Click UNION.
       Expect: Result polygon opacity 0.8 (frontmost).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-089** [wired] Compound shape at creation inherits the
   frontmost's paint.
@@ -519,7 +519,7 @@ If any P0 here fails, stop and flag.
       Do: Alt/Option+click UNION.
       Expect: New compound shape has fill red (frontmost); operands
               retain their own paints within the compound tree.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
