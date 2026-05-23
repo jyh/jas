@@ -23,6 +23,8 @@ boolean_options:
     precision: { type: number }
     remove_redundant_points: { type: bool }
     divide_remove_unpainted: { type: bool }
+    auto_refit_curves: { type: bool }
+    refit_precision: { type: number }
   state:
     precision:
       type: number
@@ -36,10 +38,26 @@ boolean_options:
       type: bool
       default: false
       description: "DIVIDE drops fragments with no paint when on"
+    auto_refit_curves:
+      type: bool
+      default: false
+      description: >
+        Refit boolean output back to Bezier curves via the Schneider
+        algorithm. Off by default — refitting is lossy. When on, the
+        boolean output is emitted as a Path with CurveTo segments
+        approximating the original arc geometry.
+    refit_precision:
+      type: number
+      default: 0.5
+      description: >
+        Max-error tolerance (in points) for the curve refit. Smaller
+        values produce closer fits but more segments.
   init:
     precision: "param.precision"
     remove_redundant_points: "param.remove_redundant_points"
     divide_remove_unpainted: "param.divide_remove_unpainted"
+    auto_refit_curves: "param.auto_refit_curves"
+    refit_precision: "param.refit_precision"
   content:
     type: container
     layout: column
@@ -92,6 +110,40 @@ boolean_options:
                 bind:
                   checked: "dialog.divide_remove_unpainted"
 
+      # Auto-refit curves
+      - type: row
+        children:
+          - type: col
+            col: 12
+            children:
+              - id: bo_auto_refit_curves
+                type: toggle
+                label: "Refit Curves on Boolean Output"
+                bind:
+                  checked: "dialog.auto_refit_curves"
+
+      # Refit precision
+      - type: row
+        children:
+          - type: col
+            col: 4
+            children:
+              - { type: text, content: "Refit Precision:", style: { font_size: 11 } }
+          - type: col
+            col: 5
+            children:
+              - id: bo_refit_precision_input
+                type: number_input
+                min: 0.01
+                max: 10
+                step: 0.01
+                bind:
+                  value: "dialog.refit_precision"
+          - type: col
+            col: 3
+            children:
+              - { type: text, content: "pt", style: { font_size: 11 } }
+
       # Cancel + OK
       - type: container
         layout: row
@@ -108,3 +160,5 @@ boolean_options:
               precision: "dialog.precision"
               remove_redundant_points: "dialog.remove_redundant_points"
               divide_remove_unpainted: "dialog.divide_remove_unpainted"
+              auto_refit_curves: "dialog.auto_refit_curves"
+              refit_precision: "dialog.refit_precision"

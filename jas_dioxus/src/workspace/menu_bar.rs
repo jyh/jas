@@ -192,6 +192,14 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "simplify" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let precision = st.boolean_panel.refit_precision;
+                        if let Some(tab) = st.tab_mut() {
+                            Controller::simplify_selection(&mut tab.model, precision);
+                        }
+                    }));
+                }
                 "tile_panes" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         let dock_collapsed = st.workspace_layout.anchored_dock(super::workspace::DockEdge::Right)

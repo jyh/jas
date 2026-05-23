@@ -109,6 +109,15 @@ pub struct BooleanOptions {
     pub precision: f64,
     pub remove_redundant_points: bool,
     pub divide_remove_unpainted: bool,
+    /// When true, run the Schneider curve-fit (algorithms::simplify) on
+    /// each output ring before emitting an element. Recovers smooth
+    /// Bezier arcs from the flattened polyline that the boolean
+    /// algorithm produces. Off by default — refitting is lossy and the
+    /// raw polygon output is what most callers expect.
+    pub auto_refit_curves: bool,
+    /// Max-error tolerance (in document units, typically points) for
+    /// the curve fit. Only consulted when `auto_refit_curves` is on.
+    pub refit_precision: f64,
 }
 
 impl Default for BooleanOptions {
@@ -117,6 +126,8 @@ impl Default for BooleanOptions {
             precision: 0.0283,
             remove_redundant_points: false,
             divide_remove_unpainted: false,
+            auto_refit_curves: false,
+            refit_precision: 0.5,
         }
     }
 }
@@ -1207,6 +1218,12 @@ impl Controller {
         // PolygonElems; multi-ring results emit one PathElem with all
         // rings as subpaths and fill_rule=EvenOdd so the renderer
         // honours the boolean semantics.
+        //
+        // When auto_refit_curves is on, every output goes through
+        // algorithms::simplify::simplify_polyline (Schneider + corner
+        // detection) and is emitted as a PathElem regardless of ring
+        // count — this recovers Bezier arcs from boolean's flattened
+        // output.
         use crate::geometry::element::{FillRule, PathCommand, PathElem};
         let mut new_elements: Vec<Rc<Element>> = Vec::new();
         for (ps, fill, stroke, common) in outputs {
@@ -1228,6 +1245,31 @@ impl Controller {
                 })
                 .filter(|r| r.len() >= 3)
                 .collect();
+            if kept.is_empty() {
+                continue;
+            }
+            if options.auto_refit_curves {
+                let mut d: Vec<PathCommand> = Vec::new();
+                for ring in &kept {
+                    let cmds = crate::algorithms::simplify::simplify_polyline(
+                        ring, options.refit_precision, true,
+                    );
+                    d.extend(cmds);
+                }
+                new_elements.push(Rc::new(Element::Path(PathElem {
+                    d,
+                    fill,
+                    stroke,
+                    width_points: Vec::new(),
+                    common: common.clone(),
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                    stroke_brush: None,
+                    stroke_brush_overrides: None,
+                    fill_rule: if kept.len() == 1 { FillRule::NonZero } else { FillRule::EvenOdd },
+                })));
+                continue;
+            }
             match kept.len() {
                 0 => {}
                 1 => {
@@ -1356,6 +1398,105 @@ impl Controller {
     }
 
     /// Lock all selected elements.
+    /// Simplify the geometry of each selected Polygon / Path element
+    /// in place by running the Schneider curve fit
+    /// (algorithms::simplify::simplify_polyline) on its vertices.
+    /// Other element kinds are left alone. Used by Object → Simplify
+    /// and (in future) other refit entry points. `precision` is the
+    /// Schneider max-error tolerance in points.
+    ///
+    /// PolygonElems are replaced with PathElems that carry the
+    /// refitted CurveTo / LineTo commands; existing PathElems are
+    /// re-issued with refitted geometry. Selection is preserved.
+    pub fn simplify_selection(model: &mut Model, precision: f64) {
+        use crate::algorithms::simplify::simplify_polyline;
+        use crate::geometry::element::{PathCommand, PathElem};
+        let doc = model.document().clone();
+        if doc.selection.is_empty() {
+            return;
+        }
+        model.snapshot();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            let Some(elem) = new_doc.get_element(&es.path).cloned() else { continue; };
+            match &elem {
+                Element::Polygon(p) => {
+                    let cmds = simplify_polyline(&p.points, precision, true);
+                    if cmds.is_empty() { continue; }
+                    let new_path = Element::Path(PathElem {
+                        d: cmds,
+                        fill: p.fill,
+                        stroke: p.stroke,
+                        width_points: Vec::new(),
+                        common: p.common.clone(),
+                        fill_gradient: p.fill_gradient.clone(),
+                        stroke_gradient: p.stroke_gradient.clone(),
+                        stroke_brush: None,
+                        stroke_brush_overrides: None,
+                        fill_rule: crate::geometry::element::FillRule::NonZero,
+                    });
+                    new_doc = new_doc.replace_element(&es.path, new_path);
+                }
+                Element::Path(p) => {
+                    // Walk the path command list, splitting at every
+                    // MoveTo / ClosePath into subpaths of 2D points.
+                    // Each subpath is refit independently; other
+                    // command kinds (CurveTo, ArcTo) are passed
+                    // through as-is.
+                    let mut new_cmds: Vec<PathCommand> = Vec::new();
+                    let mut buf: Vec<(f64, f64)> = Vec::new();
+                    let mut closed = false;
+                    let flush = |new_cmds: &mut Vec<PathCommand>, buf: &mut Vec<(f64, f64)>, closed: &mut bool| {
+                        if buf.len() >= 2 {
+                            let sub = simplify_polyline(buf, precision, *closed);
+                            new_cmds.extend(sub);
+                        }
+                        buf.clear();
+                        *closed = false;
+                    };
+                    for c in &p.d {
+                        match *c {
+                            PathCommand::MoveTo { x, y } => {
+                                flush(&mut new_cmds, &mut buf, &mut closed);
+                                buf.push((x, y));
+                            }
+                            PathCommand::LineTo { x, y } => buf.push((x, y)),
+                            PathCommand::ClosePath => {
+                                closed = true;
+                                flush(&mut new_cmds, &mut buf, &mut closed);
+                            }
+                            // Already-curved commands stay verbatim;
+                            // splice the buffered run before emitting
+                            // them so refit and pre-existing curves
+                            // sit in order.
+                            other => {
+                                flush(&mut new_cmds, &mut buf, &mut closed);
+                                new_cmds.push(other);
+                            }
+                        }
+                    }
+                    flush(&mut new_cmds, &mut buf, &mut closed);
+                    if new_cmds.is_empty() { continue; }
+                    let new_path = Element::Path(PathElem {
+                        d: new_cmds,
+                        fill: p.fill,
+                        stroke: p.stroke,
+                        width_points: p.width_points.clone(),
+                        common: p.common.clone(),
+                        fill_gradient: p.fill_gradient.clone(),
+                        stroke_gradient: p.stroke_gradient.clone(),
+                        stroke_brush: p.stroke_brush.clone(),
+                        stroke_brush_overrides: p.stroke_brush_overrides.clone(),
+                        fill_rule: p.fill_rule,
+                    });
+                    new_doc = new_doc.replace_element(&es.path, new_path);
+                }
+                _ => {}
+            }
+        }
+        model.set_document(new_doc);
+    }
+
     pub fn lock_selection(model: &mut Model) {
         let doc = model.document().clone();
         if doc.selection.is_empty() {
@@ -2249,6 +2390,100 @@ mod tests {
         let mut model = two_overlapping_rects();
         Controller::apply_destructive_boolean(&mut model, "intersection", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), 1);
+    }
+
+    #[test]
+    fn simplify_selection_replaces_polygon_with_curved_path() {
+        use crate::geometry::element::{Color as ColorE, CommonProps, Fill, PolygonElem};
+        // 32-vertex regular circle polygon — simplify should
+        // collapse it to a small handful of CurveTo segments.
+        let n = 32;
+        let r = 50.0;
+        let pts: Vec<(f64, f64)> = (0..n)
+            .map(|i| {
+                let t = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+                (r * t.cos(), r * t.sin())
+            })
+            .collect();
+        let poly = Element::Polygon(PolygonElem {
+            points: pts,
+            fill: Some(Fill::new(ColorE::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(crate::geometry::element::LayerElem {
+            children: vec![Rc::new(poly)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        let mut model = Model::new(doc, None);
+        Controller::simplify_selection(&mut model, 0.5);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        match &**child {
+            Element::Path(p) => {
+                let curve_count = p.d.iter().filter(|c| matches!(c, crate::geometry::element::PathCommand::CurveTo { .. })).count();
+                let line_count = p.d.iter().filter(|c| matches!(c, crate::geometry::element::PathCommand::LineTo { .. })).count();
+                assert!(curve_count > 0, "simplify of circle polygon should emit CurveTo segments");
+                assert_eq!(line_count, 0, "circle should not contain LineTo segments");
+                assert!(p.d.len() < 32, "simplify should compact the 32-point polygon to fewer commands, got {}", p.d.len());
+            }
+            other => panic!("expected Path after simplify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn destructive_auto_refit_curves_emits_path_with_curveto() {
+        use crate::geometry::element::{FillRule, PathCommand};
+        // Two overlapping circles: each gets element_to_polygon_set'd
+        // into a many-vertex polyline; UNION emits one outer ring;
+        // auto_refit_curves should turn that polyline back into Bezier
+        // arcs (PathCommand::CurveTo segments).
+        use crate::geometry::element::EllipseElem;
+        let r1 = Element::Ellipse(EllipseElem {
+            cx: 0.0, cy: 0.0, rx: 50.0, ry: 50.0,
+            fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::BLACK)),
+            stroke: None,
+            common: crate::geometry::element::CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let r2 = Element::Ellipse(EllipseElem {
+            cx: 60.0, cy: 0.0, rx: 50.0, ry: 50.0,
+            fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::BLACK)),
+            stroke: None,
+            common: crate::geometry::element::CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(crate::geometry::element::LayerElem {
+            children: vec![Rc::new(r1), Rc::new(r2)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: crate::geometry::element::CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
+        doc.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let mut model = Model::new(doc, None);
+        let opts = BooleanOptions { auto_refit_curves: true, refit_precision: 0.5, ..Default::default() };
+        Controller::apply_destructive_boolean(&mut model, "union", &opts);
+        assert_eq!(top_children_count(&model), 1);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        match &**child {
+            Element::Path(p) => {
+                assert_eq!(p.fill_rule, FillRule::NonZero);
+                let curve_count = p.d.iter().filter(|c| matches!(c, PathCommand::CurveTo { .. })).count();
+                assert!(curve_count > 0, "auto-refit should emit at least one CurveTo, got {curve_count}");
+            }
+            other => panic!("expected Path, got {other:?}"),
+        }
     }
 
     #[test]
