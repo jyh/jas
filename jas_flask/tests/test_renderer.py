@@ -1228,7 +1228,7 @@ class TestBooleanPanel:
     def test_expand_button_present(self, panel_html):
         assert "boolean_expand_button" in panel_html
 
-    # ── Pathfinders row ──
+    # ── Paths row ──
     def test_divide_button_present(self, panel_html):
         assert "boolean_divide_button" in panel_html
 
@@ -1248,8 +1248,8 @@ class TestBooleanPanel:
     def test_shape_modes_label_present(self, panel_html):
         assert "Shape Modes:" in panel_html
 
-    def test_pathfinders_label_present(self, panel_html):
-        assert "Pathfinders:" in panel_html
+    def test_paths_label_present(self, panel_html):
+        assert "Paths:" in panel_html
 
     # ── Panel in dock — full integration ──
     def test_boolean_panel_in_dock(self, theme, state):

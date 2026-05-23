@@ -10909,7 +10909,7 @@
             "children": [
               {
                 "type": "text",
-                "content": "Pathfinders:",
+                "content": "Paths:",
                 "style": {
                   "font_size": 10
                 }
