@@ -669,17 +669,17 @@ If any P0 here fails, stop and flag.
       Expect: Disabled icons dim but recognisable; checked toggle has a
               clearly distinguishable fill; no unreadable icon-on-background
               combinations.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-221** [wired] Medium Gray appearance.
       Do: Switch appearance to Medium Gray.
       Expect: Same readability properties as Dark.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-222** [wired] Light Gray appearance.
       Do: Switch appearance to Light Gray.
       Expect: Icons invert / retint as needed; no black-on-black regressions.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
