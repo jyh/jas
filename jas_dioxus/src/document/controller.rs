@@ -1387,13 +1387,25 @@ impl Controller {
     /// refitted CurveTo / LineTo commands; existing PathElems are
     /// re-issued with refitted geometry. Selection is preserved.
     pub fn simplify_selection(model: &mut Model, precision: f64) {
+        Self::simplify_selection_with_snapshot(model, precision, true);
+    }
+
+    /// As `simplify_selection` but lets the caller skip the
+    /// `model.snapshot()` step. Used by the apply-simplify-after-op
+    /// boolean post-step (which already snapshotted) so the boolean
+    /// and the refit collapse into a single undo entry.
+    pub fn simplify_selection_with_snapshot(
+        model: &mut Model,
+        precision: f64,
+        take_snapshot: bool,
+    ) {
         use crate::algorithms::simplify::simplify_polyline;
         use crate::geometry::element::{PathCommand, PathElem};
         let doc = model.document().clone();
         if doc.selection.is_empty() {
             return;
         }
-        model.snapshot();
+        if take_snapshot { model.snapshot(); }
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             let Some(elem) = new_doc.get_element(&es.path).cloned() else { continue; };
