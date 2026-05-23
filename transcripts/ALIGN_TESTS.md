@@ -531,7 +531,7 @@ If any P0 here fails, stop and flag.
       Do: Visually scan all operation buttons.
       Expect: Every Align / Distribute / Distribute Spacing button is dim /
               unclickable.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-151** [wired] Align buttons enable with 2 selected; Distribute
   buttons stay disabled.
@@ -539,26 +539,26 @@ If any P0 here fails, stop and flag.
       Do: Inspect button states.
       Expect: Six Align buttons enabled; six Distribute and two Distribute
               Spacing buttons disabled (require ≥ 3).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-152** [wired] All 14 buttons enable with 3+ selected (selection
   mode).
       Setup: Select 3 rectangles; Align To Selection.
       Do: Inspect button states.
       Expect: All 14 operation buttons enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-153** [wired] Key Object mode without a key disables every button.
       Setup: 3 rectangles selected; Align To Key Object; no key.
       Do: Inspect button states.
       Expect: All 14 buttons disabled; Align To toggles still clickable.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-154** [wired] Key Object mode with a key enables the buttons.
       Setup: AL-153 state → designate a key.
       Do: Inspect button states.
       Expect: All 14 operation buttons enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -569,13 +569,13 @@ If any P0 here fails, stop and flag.
       Expect: Distribute and Distribute Spacing disable; 6 Align buttons
               remain enabled; key is preserved (since its rect is still
               selected) per AL-095 semantics.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: on_mousedown was calling try_designate_align_key_object unconditionally in Key Object mode, swallowing shift-clicks; now skipped when shift/alt held, and sync_align_key_object_from_selection runs after every press/release so deselecting the key clears its designation; commit e6497ed)
 
 - [ ] **AL-156** [wired] Selection count updates propagate within one frame.
       Setup: Rapid-fire shift-click to add / remove elements.
       Do: Watch button states.
       Expect: No flicker, no stale disabled state — reactive.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
