@@ -49,6 +49,8 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         SEP,
         ("Hide", "hide", "\u{2318}3"),
         ("Show All", "show_all", "\u{2325}\u{2318}3"),
+        SEP,
+        ("Simplify", "simplify", ""),
     ]),
     ("Window", &[
         ("Workspace \u{25B6}", "workspace_submenu", ""),
@@ -85,6 +87,7 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "group", "ungroup", "ungroup_all",
     "lock", "unlock_all",
     "hide", "show_all",
+    "simplify",
     "workspace_submenu",
     "appearance_submenu",
     "tile_panes",
@@ -246,9 +249,10 @@ mod tests {
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
         // 9 (File: +Document Setup +Print +Export to PDF +separator)
-        // + 10 (Edit) + 9 (Object) + 20 (Window: alphabetised panels
-        // including Align / Boolean / Magic Wand / Opacity) = 48
-        assert_eq!(total, 48);
+        // + 10 (Edit) + 11 (Object: + separator + Simplify)
+        // + 20 (Window: alphabetised panels incl. Align / Boolean /
+        // Magic Wand / Opacity) = 50
+        assert_eq!(total, 50);
     }
 
     #[test]

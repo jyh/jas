@@ -2117,22 +2117,28 @@ actions:
             precision: "state.boolean_precision"
             remove_redundant_points: "state.boolean_remove_redundant_points"
             divide_remove_unpainted: "state.boolean_divide_remove_unpainted"
+            auto_refit_curves: "state.boolean_auto_refit_curves"
+            refit_precision: "state.boolean_refit_precision"
 
   boolean_options_confirm:
     description: >
       Commit the Boolean Options dialog. Writes precision, remove-
-      redundant-points, and divide-remove-unpainted to document
-      state and closes the dialog.
+      redundant-points, divide-remove-unpainted, auto-refit-curves,
+      and refit-precision to document state and closes the dialog.
     category: boolean
     params:
       precision: { type: number }
       remove_redundant_points: { type: bool }
       divide_remove_unpainted: { type: bool }
+      auto_refit_curves: { type: bool }
+      refit_precision: { type: number }
     effects:
       - set:
           boolean_precision: "param.precision"
           boolean_remove_redundant_points: "param.remove_redundant_points"
           boolean_divide_remove_unpainted: "param.divide_remove_unpainted"
+          boolean_auto_refit_curves: "param.auto_refit_curves"
+          boolean_refit_precision: "param.refit_precision"
       - close_dialog: None
 
   make_compound_shape:
