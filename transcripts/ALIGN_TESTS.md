@@ -124,7 +124,7 @@ If any P0 here fails, stop and flag.
       Do: Select Window → Align.
       Expect: Align panel appears in the dock or as a floating panel; no
               console error; no visual glitch.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: Window menu sorted alphabetically + Align/Boolean/Opacity added; commit 740b79d)
 
 - [ ] **AL-002** [wired] All panel controls render without layout collapse.
       Do: Visually scan the open Align panel.
@@ -133,23 +133,23 @@ If any P0 here fails, stop and flag.
               Spacing:" + "Align To:" row with 2 spacing icons + pt input on
               the left and 3 toggles on the right. No overlapping controls,
               no truncated labels.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no crash.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-004** [wired] Panel closes via context menu.
       Do: Right-click header → Close Align.
       Expect: Panel disappears; Window → Align now toggles it back on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; content still
               interactive; returns to dock on drag back.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-006** [wired] Defaults on empty state.
       Setup: No document, no selection.
@@ -157,7 +157,7 @@ If any P0 here fails, stop and flag.
       Expect: Align To = Selection is checked (other two unchecked);
               Distribute Spacing pt input shows 0 and is disabled; all 14
               operation buttons are disabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -170,14 +170,14 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: All three rectangles snap so their left edges coincide with the
               leftmost rect; widths unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-011** [wired] Align Right moves right edges to flush.
       Setup: 3-rect fixture.
       Do: Click Align Right.
       Expect: All three rectangles snap so their right edges coincide with the
               rightmost rect; widths unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-012** [wired] Align Horizontal Center moves midpoints to the
   selection-bbox midline.
@@ -185,7 +185,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Horizontal Center.
       Expect: All three rectangles share the same horizontal center; bbox
               widths unchanged; only x shifts.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -194,21 +194,21 @@ If any P0 here fails, stop and flag.
       Do: Click Align Top.
       Expect: All three top edges coincide with the topmost rect; heights
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-014** [wired] Align Vertical Center aligns midpoints vertically.
       Setup: 3-rect fixture.
       Do: Click Align Vertical Center.
       Expect: All three rectangles share the same vertical center; heights
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-015** [wired] Align Bottom moves bottom edges to flush.
       Setup: 3-rect fixture.
       Do: Click Align Bottom.
       Expect: All three bottom edges coincide with the bottommost rect;
               heights unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-016** [wired] Align buttons are one-shot (no persistent checked
   state).
@@ -216,7 +216,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: Operation fires; the button returns to unchecked immediately —
               no filled / highlighted state sticks.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -225,7 +225,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: Nothing moves; undo stack is unchanged or adds a no-op entry per
               ALIGN.md §Undo semantics.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-018** [wired] Align operation preserves rotation / scale in
   transform.
@@ -234,14 +234,14 @@ If any P0 here fails, stop and flag.
       Do: Click Align Left.
       Expect: The rotated rect's bounding box left edge aligns; its rotation
               angle is unchanged (only the translate slot shifts).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-019** [wired] Mixed element types align by bbox.
       Setup: Select one Rect, one Ellipse, one Path.
       Do: Click Align Horizontal Center.
       Expect: All three bbox centers coincide horizontally; each element's
               intrinsic geometry is unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -254,21 +254,21 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Left.
       Expect: The middle rect's left edge sits exactly at the midpoint of the
               leftmost and rightmost left edges; extremal rects do not move.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix for visibility: render_icon_button now always emits explicit opacity/pointer-events in style so the diff updates DOM on disabled transitions, commit d4b29ba)
 
 - [ ] **AL-041** [wired] Distribute Horizontal Center evenly spaces centers.
       Setup: 3-rect fixture.
       Do: Click Distribute Horizontal Center.
       Expect: Middle rect's horizontal center equidistant from the other two
               centers along the horizontal axis; extremals do not move.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-042** [wired] Distribute Top evenly spaces top edges.
       Setup: 3 rects at y = 0, 40, 120.
       Do: Click Distribute Top.
       Expect: Middle rect's top edge moves to y = 60 (midpoint); others
               unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -277,20 +277,20 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Right.
       Expect: Middle rect's right edge at the midpoint of extremal right
               edges; extremals unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-044** [wired] Distribute Vertical Center evenly spaces vertical
   centers.
       Setup: 3-rect fixture vertically spread.
       Do: Click Distribute Vertical Center.
       Expect: Middle vertical center equidistant from the other two.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-045** [wired] Distribute Bottom evenly spaces bottom edges.
       Setup: 3-rect fixture vertically spread.
       Do: Click Distribute Bottom.
       Expect: Middle bottom edge at the midpoint of extremal bottoms.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -300,21 +300,21 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Left.
       Expect: Result matches AL-040 — operation sorts internally by position,
               not selection order.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-047** [wired] Distribute on already-evenly-spaced selection is a
   no-op.
       Setup: Three rects with equal left-edge spacing.
       Do: Click Distribute Left.
       Expect: No motion; no undo entry or a clean no-op entry.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-048** [wired] Distribute with 5+ elements remains monotonic.
       Setup: Five rects at random x.
       Do: Click Distribute Horizontal Center.
       Expect: Final centers equidistant — the interior three shift so the
               five centers form an arithmetic progression between extremals.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -326,7 +326,7 @@ If any P0 here fails, stop and flag.
       Setup: Fresh session.
       Do: Open the panel.
       Expect: Selection toggle is checked; Artboard and Key Object are not.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-071** [wired] Clicking Align To Selection selects the selection
   target.
@@ -334,7 +334,7 @@ If any P0 here fails, stop and flag.
       Do: Click Align To Selection.
       Expect: Selection toggle becomes checked; other two uncheck; subsequent
               Align Left uses selection bounds.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: render_icon_button now emits explicit background-transparent on unchecked so toggle states clear on transition, commit c346563)
 
 - [ ] **AL-072** [wired] [known-broken: ALIGN.md §Align To target — Artboard
   deferred] Align To Artboard switches reference.
@@ -343,27 +343,27 @@ If any P0 here fails, stop and flag.
       Expect (target): Operation uses the active artboard rect as reference.
       Expect (current): Artboard falls back to selection bounds; same result
               as Align To Selection.
-      — last: —
+      — last: 2026-05-22 rust pass — actually aligns to the artboard rect (the (target) behavior, not the known-broken (current) behavior). Known-broken list can drop this for Rust
 
 - [ ] **AL-073** [wired] Clicking Align To Key Object enters key mode.
       Setup: 3-rect fixture, selection active.
       Do: Click Align To Key Object.
       Expect: Key Object toggle becomes checked; all operation buttons
               disable until a key is designated; see AL-090 for designation.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
 - [ ] **AL-074** [wired] Align To toggles are mutually exclusive.
       Do: Rapidly click Selection → Key Object → Artboard.
       Expect: At every step exactly one toggle is checked.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-075** [wired] Align To persists per session.
       Setup: Set Align To Key Object + designate a key.
       Do: Float the panel and re-dock it.
       Expect: Key Object remains checked; designated key retained.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -371,7 +371,7 @@ If any P0 here fails, stop and flag.
       Do: Inspect icon sizes (browser DevTools).
       Expect: Each toggle renders at 20×20 px; icon group aligned center
               within the right-half column.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -386,21 +386,21 @@ If any P0 here fails, stop and flag.
       Expect: Panel's key-object indicator updates (icon tinted or badge on
               the rect per ALIGN.md §Align To target); all operation buttons
               re-enable.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: try_designate_align_key_object inverts zoom + pan to convert canvas-element coords to document coords before hit-testing against element bounds, commit 01712cc)
 
 - [ ] **AL-091** [wired] Align Left with key object pins the key.
       Setup: 3 rects at x = 10 / 30 / 60; key designated = middle rect.
       Do: Click Align Left.
       Expect: Middle rect does not move; other two align to x = 30 (the
               key's left edge).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-092** [wired] Clicking the current key clears it.
       Setup: AL-090 state — key designated.
       Do: Click the key rect on the canvas again.
       Expect: Key is cleared; all operation buttons disable; panel key
               indicator resets.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -409,7 +409,7 @@ If any P0 here fails, stop and flag.
       Do: Click an empty area of the canvas (not on any selected element).
       Expect: Key is cleared; canvas selection remains unchanged (the intercept
               does not deselect).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-094** [wired] Clicking a non-selected element does not designate it.
       Setup: Three rectangles drawn; only two selected; Align To Key Object;
@@ -418,7 +418,7 @@ If any P0 here fails, stop and flag.
       Expect: Intercept treats this as "outside selection" — key stays None;
               the click does not change the selection either (consumed, per
               ALIGN.md §Align To target).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-095** [wired] Deselecting the key clears the key (selection-change
   sync).
@@ -426,7 +426,7 @@ If any P0 here fails, stop and flag.
       Do: Shift-click the key rect to remove it from the selection.
       Expect: Panel key indicator resets; operation buttons reflect new
               selection count.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-096** [wired] Changing Align To away from Key Object preserves the
   path but hides the indicator.
@@ -436,7 +436,7 @@ If any P0 here fails, stop and flag.
               bounds. If the user clicks Align To Key Object again with the
               same selection, the key is still designated (per ALIGN.md
               §Panel state).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -445,13 +445,13 @@ If any P0 here fails, stop and flag.
       Do: Click a selected rect on the canvas.
       Expect: The click reaches the active tool (Selection Tool behavior —
               click-through to move / reselect); Align state is untouched.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-098** [wired] Key indicator updates when panel is floating.
       Setup: Panel floating, key mode, no key.
       Do: Designate a key via canvas click.
       Expect: Floating panel indicator updates in sync with the dock behavior.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -466,14 +466,14 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Horizontal Spacing.
       Expect: Rects move to x = 0 / 45 / 90 — leftmost and rightmost hold;
               gaps between consecutive rects become equal.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: render_panel content-id match was missing align_panel_content / boolean_panel_content / magic_wand_panel_content, so number_input writes in those panels fell through to the Stroke arm and apply_stroke_panel_to_selection clobbered the typed pt value on every commit; commit a433142)
 
 - [ ] **AL-121** [wired] Distribute Vertical Spacing in average mode equalises
   gaps.
       Setup: Three rects at y = 0 / 20 / 90.
       Do: Click Distribute Vertical Spacing.
       Expect: Rects move to y = 0 / 45 / 90.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -483,7 +483,7 @@ If any P0 here fails, stop and flag.
       Expect: Input shows 20; subsequent Distribute Horizontal Spacing applies
               a 20pt gap between consecutive bboxes (walking outward from the
               key).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-123** [wired] Explicit-gap Distribute Horizontal Spacing pins the
   key.
@@ -491,14 +491,14 @@ If any P0 here fails, stop and flag.
       Do: Click Distribute Horizontal Spacing.
       Expect: Middle rect does not move; left rect moves to x = 70 (= 100 −
               20 − 10); right rect moves to x = 130.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-124** [wired] Explicit-gap mode with no key returns no-op.
       Setup: Align To Selection; pt shown but disabled.
       Do: Attempt to use the pt input value to influence Distribute Spacing.
       Expect: Button enabled only when 3+ selected; clicking uses average
               mode, ignoring the pt value.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -506,19 +506,19 @@ If any P0 here fails, stop and flag.
       Setup: Align To Key Object + key designated.
       Do: Type 9999 into the pt input.
       Expect: Value clamps to 1296 on commit per yaml min/max.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-126** [wired] pt = 0 makes elements touch.
       Setup: Key designated; three rects.
       Do: Set pt to 0, click Distribute Horizontal Spacing.
       Expect: Non-key rects move so consecutive bboxes are flush (zero gap).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-127** [wired] pt input disables when not in key-object mode.
       Setup: Align To Selection or Artboard.
       Do: Look at the pt input.
       Expect: Input rendered dim / disabled; typing has no effect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -531,7 +531,7 @@ If any P0 here fails, stop and flag.
       Do: Visually scan all operation buttons.
       Expect: Every Align / Distribute / Distribute Spacing button is dim /
               unclickable.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-151** [wired] Align buttons enable with 2 selected; Distribute
   buttons stay disabled.
@@ -539,26 +539,26 @@ If any P0 here fails, stop and flag.
       Do: Inspect button states.
       Expect: Six Align buttons enabled; six Distribute and two Distribute
               Spacing buttons disabled (require ≥ 3).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-152** [wired] All 14 buttons enable with 3+ selected (selection
   mode).
       Setup: Select 3 rectangles; Align To Selection.
       Do: Inspect button states.
       Expect: All 14 operation buttons enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-153** [wired] Key Object mode without a key disables every button.
       Setup: 3 rectangles selected; Align To Key Object; no key.
       Do: Inspect button states.
       Expect: All 14 buttons disabled; Align To toggles still clickable.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-154** [wired] Key Object mode with a key enables the buttons.
       Setup: AL-153 state → designate a key.
       Do: Inspect button states.
       Expect: All 14 operation buttons enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -569,13 +569,13 @@ If any P0 here fails, stop and flag.
       Expect: Distribute and Distribute Spacing disable; 6 Align buttons
               remain enabled; key is preserved (since its rect is still
               selected) per AL-095 semantics.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: on_mousedown was calling try_designate_align_key_object unconditionally in Key Object mode, swallowing shift-clicks; now skipped when shift/alt held, and sync_align_key_object_from_selection runs after every press/release so deselecting the key clears its designation; commit e6497ed)
 
 - [ ] **AL-156** [wired] Selection count updates propagate within one frame.
       Setup: Rapid-fire shift-click to add / remove elements.
       Do: Watch button states.
       Expect: No flicker, no stale disabled state — reactive.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -587,14 +587,14 @@ If any P0 here fails, stop and flag.
       Do: Right-click or click the panel context-menu affordance.
       Expect: Menu items — "Use Preview Bounds" (checkbox), "Reset Panel",
               "Close Align". Exactly two separators between them.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-181** [wired] Use Preview Bounds toggles panel state.
       Setup: Menu open.
       Do: Click Use Preview Bounds.
       Expect: Checkmark appears; menu closes. Re-opening the menu shows the
               toggle checked. Re-click toggles off.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: panel_menu_view Toggle arm queries panel_is_checked (was a TODO with hard-coded prefix), and align_panel.dispatch now actually flips use_preview_bounds and calls reset_align_panel (was no-op under stale assumption that yaml renderer dispatch handled them); commit 9e205ca)
 
 - [ ] **AL-182** [wired] Use Preview Bounds affects a subsequent Align Right
   with stroked elements.
@@ -604,7 +604,7 @@ If any P0 here fails, stop and flag.
       Expect: The stroked rect's x position differs between runs — with
               Preview Bounds on, the stroke's outer edge aligns; with it off,
               the geometric edge does.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -614,13 +614,13 @@ If any P0 here fails, stop and flag.
       Do: Menu → Reset Panel.
       Expect: Align To → Selection; key cleared; pt → 0; Use Preview Bounds →
               off.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-184** [wired] Close Align hides the panel.
       Do: Menu → Close Align.
       Expect: Same outcome as Session A panel-close test; Window → Align
               toggles it back on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -634,13 +634,13 @@ If any P0 here fails, stop and flag.
       Expect: Rects return to their original x positions; one undo covers all
               three translations (ALIGN.md §Undo semantics — per-op not
               per-element).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-201** [wired] Redo reapplies the alignment.
       Setup: Continue from AL-200 undo.
       Do: Ctrl/Cmd-Shift-Z (or Ctrl-Y).
       Expect: Rects return to the aligned state.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -648,13 +648,13 @@ If any P0 here fails, stop and flag.
       Setup: Five rects.
       Do: Distribute Horizontal Center, then Ctrl/Cmd-Z.
       Expect: Single undo reverses all interior translations.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-203** [wired] No-op Align emits a clean no-op entry or no entry.
       Setup: Already-aligned fixture.
       Do: Align Left, then Ctrl/Cmd-Z.
       Expect: No change, or a trivial no-op undo — not a partial revert.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -669,17 +669,17 @@ If any P0 here fails, stop and flag.
       Expect: Disabled icons dim but recognisable; checked toggle has a
               clearly distinguishable fill; no unreadable icon-on-background
               combinations.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-221** [wired] Medium Gray appearance.
       Do: Switch appearance to Medium Gray.
       Expect: Same readability properties as Dark.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-222** [wired] Light Gray appearance.
       Do: Switch appearance to Light Gray.
       Expect: Icons invert / retint as needed; no black-on-black regressions.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -693,20 +693,20 @@ If any P0 here fails, stop and flag.
       Expect: Focus cycles through the 6 Align → 6 Distribute → 2 Spacing →
               pt input → 3 Align To toggles in document order, with a visible
               focus ring per theme.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust impl: panel-wide keyboard nav — render_icon_button emits tabindex 0/-1 + onkeydown that re-dispatches DOM .click() on Enter/Space; render_button + render_number_input opt in via jas-focusable class; CSS :focus rule uses var(--jas-accent) inset outline so theme tracks Dark/Medium/Light Gray; keyboard.rs Tab handler lets browser native focus walk through anything except body/html — only cycles panels when no widget is focused; web-sys HtmlElement+DomTokenList features enabled; commits f0e57d0, 65b4525, 9b42964, fbdac6a, 748a94c)
 
 - [ ] **AL-241** [wired] Enter / Space on focused button fires the op.
       Setup: 3-rect fixture; focus on Align Left via Tab.
       Do: Press Enter (or Space).
       Expect: Rects align left as if clicked; focus stays on the button.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **AL-242** [wired] pt input accepts arrow-key increments.
       Setup: Align To Key Object + key designated; focus in pt input.
       Do: Press Up arrow 3×.
       Expect: pt value increments by 1 each press (or by the yaml-configured
               step); clamping at max still applies.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 

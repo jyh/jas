@@ -29,7 +29,7 @@ default = ["web"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger"]
 
 [dependencies]
-dioxus = { version = "0.6", features = ["web"], optional = true }
+dioxus = { version = "0.7", features = ["web"], optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
@@ -41,6 +41,8 @@ web-sys = { version = "0.3", optional = true, features = [
     "Window",
     "Document",
     "Element",
+    "HtmlElement",
+    "DomTokenList",
     "Blob",
     "BlobPropertyBag",
     "Url",

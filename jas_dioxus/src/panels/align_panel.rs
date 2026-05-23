@@ -35,11 +35,10 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
         "close_panel" => state.workspace_layout.close_panel(addr),
-        // toggle_use_preview_bounds and reset_align_panel are
-        // wired through the yaml-driven renderer dispatch path;
-        // see renderer.rs. This native menu-dispatch no-ops for
-        // them so the hamburger menu routes through the shared
-        // effects pipeline.
+        "toggle_use_preview_bounds" => {
+            state.align_panel.use_preview_bounds = !state.align_panel.use_preview_bounds;
+        }
+        "reset_align_panel" => state.reset_align_panel(),
         _ => {}
     }
 }
