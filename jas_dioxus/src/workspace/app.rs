@@ -473,10 +473,12 @@ pub fn App() -> Element {
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 // Align panel key-object intercept (Phase 2j, ALIGN.md
                 // §Align To target). While the panel is in key-object
-                // mode, canvas clicks designate / redesignate / clear
-                // the key object instead of going through the active
-                // tool. Other modes fall through.
-                if st.try_designate_align_key_object(cx, cy) {
+                // mode, plain canvas clicks designate / redesignate /
+                // clear the key object instead of going through the
+                // active tool. Shift / alt clicks are selection
+                // modifiers — let them through so shift-toggle and
+                // alt-drag still work in key-object mode.
+                if !shift && !alt && st.try_designate_align_key_object(cx, cy) {
                     return;
                 }
                 let kind = st.active_tool;
@@ -488,6 +490,7 @@ pub fn App() -> Element {
                         Vec::new()
                     };
                 apply_pending_panel_writes(st, pending);
+                st.sync_align_key_object_from_selection();
             }));
         }
     };
@@ -547,6 +550,7 @@ pub fn App() -> Element {
                         Vec::new()
                     };
                 apply_pending_panel_writes(st, pending);
+                st.sync_align_key_object_from_selection();
             }));
         }
     };
