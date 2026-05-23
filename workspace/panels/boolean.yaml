@@ -193,12 +193,12 @@ content:
               effects:
                 - dispatch: expand_compound_shape
 
-    # ── Pathfinders ──────────────────────────────────────────
+    # ── Paths ────────────────────────────────────────────────
     - type: container
       layout: row
       children:
         - type: text
-          content: "Pathfinders:"
+          content: "Paths:"
           style: { font_size: 10 }
 
     - type: container

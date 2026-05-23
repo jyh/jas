@@ -80,7 +80,7 @@ pub trait LiveElement {
 
 /// Which boolean operation a compound shape evaluates to. Only the
 /// four Shape Mode operations can be compound; the destructive-only
-/// pathfinder operations never produce compound shapes.
+/// path operations never produce compound shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompoundOperation {

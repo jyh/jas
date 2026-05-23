@@ -139,7 +139,7 @@ Fixtures referenced by tests:
 |---------|--------------------------------------------------------|-------|------------|
 | A       | Smoke & lifecycle                                      | ~5m   | 001–009    |
 | B       | Shape Modes row — UNION / SUBTRACT_FRONT / ...         | ~10m  | 010–039    |
-| C       | Pathfinders row — DIVIDE / TRIM / MERGE / CROP / SB    | ~12m  | 040–079    |
+| C       | Paths row — DIVIDE / TRIM / MERGE / CROP / SB          | ~12m  | 040–079    |
 | D       | Paint inheritance rules                                | ~10m  | 080–109    |
 | E       | Alt/Option+click → compound shape                      | ~10m  | 110–139    |
 | F       | Compound shape lifecycle (Make/Release/Expand)         | ~10m  | 140–169    |
@@ -170,7 +170,7 @@ If any P0 here fails, stop and flag.
   collapse.
       Do: Visually scan the open Boolean panel.
       Expect: Three rows top-to-bottom — "Shape Modes:" label row;
-              4 Shape-Mode icons + Expand button row; 5 Pathfinder
+              4 Shape-Mode icons + Expand button row; 5 Path
               icons + 1 reserved empty slot. No overlapping controls,
               no truncated icons. Reserved slot is visually empty
               but occupies the grid cell.
@@ -313,7 +313,7 @@ If any P0 here fails, stop and flag.
 
 ---
 
-## Session C — Pathfinders (~12 min)
+## Session C — Paths (~12 min)
 
 **P0**
 
@@ -1034,7 +1034,7 @@ If any P0 here fails, stop and flag.
       Setup: Panel docked; focus on panel content.
       Do: Tab repeatedly.
       Expect: Focus cycles in document order: 4 Shape Mode buttons →
-              Expand → 5 Pathfinder buttons (plus reserved slot
+              Expand → 5 Path buttons (plus reserved slot
               skipped). Visible focus ring per theme.
       — last: —
 
