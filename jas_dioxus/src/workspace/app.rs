@@ -981,10 +981,14 @@ pub fn App() -> Element {
             .jas-swatch-tile:hover {{ outline: 1px solid var(--jas-accent, #4a90d9); outline-offset: -1px; }}
             /* Keyboard focus ring for icon-buttons, plain buttons,
                number-inputs, and any other widget that opts in with
-               class="jas-focusable". focus-visible suppresses the ring
-               on mouse clicks but shows it on Tab navigation. */
-            .jas-focusable:focus {{ outline: none; }}
-            .jas-focusable:focus-visible {{ outline: 2px solid var(--jas-accent, #4a90d9); outline-offset: 1px; border-radius: 2px; }}
+               class="jas-focusable". focus-visible would suppress the
+               ring on mouse focus, but several panels nest the button
+               inside containers that strip focus before the heuristic
+               sees the keyboard modality — so use plain :focus.
+               outline-offset is negative so the ring renders INSIDE
+               the button's box, surviving parents with overflow:hidden
+               and not colliding with adjacent buttons in tight rows. */
+            .jas-focusable:focus {{ outline: 2px solid var(--jas-accent, #4a90d9) !important; outline-offset: -2px !important; }}
         "#  }
         div {
             tabindex: "0",
