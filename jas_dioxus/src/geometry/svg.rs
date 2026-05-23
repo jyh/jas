@@ -254,11 +254,15 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             )
         }
         Element::Path(e) => {
+            let fr_attr = match e.fill_rule {
+                crate::geometry::element::FillRule::EvenOdd => " fill-rule=\"evenodd\"",
+                crate::geometry::element::FillRule::NonZero => "",
+            };
             format!(
-                "{}<path d=\"{}\"{}{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
-                fill_attrs(&e.fill), stroke_attrs(&e.stroke),
+                fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 name_attr(&e.common.name),
             )
@@ -1474,6 +1478,12 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 stroke_brush_overrides: {
                     let s = get_s(node, "jas:stroke-brush-overrides", "");
                     if s.is_empty() { None } else { Some(s.to_string()) }
+                },
+                fill_rule: {
+                    match get_s(node, "fill-rule", "") {
+                        "evenodd" => crate::geometry::element::FillRule::EvenOdd,
+                        _ => crate::geometry::element::FillRule::NonZero,
+                    }
                 },
             }))
         }

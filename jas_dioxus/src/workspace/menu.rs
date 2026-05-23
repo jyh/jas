@@ -246,8 +246,9 @@ mod tests {
     fn total_menu_item_count() {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
         // 9 (File: +Document Setup +Print +Export to PDF +separator)
-        // + 10 (Edit) + 9 (Object) + 17 (Window) = 45
-        assert_eq!(total, 45);
+        // + 10 (Edit) + 9 (Object) + 20 (Window: alphabetised panels
+        // including Align / Boolean / Magic Wand / Opacity) = 48
+        assert_eq!(total, 48);
     }
 
     #[test]

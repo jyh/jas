@@ -473,6 +473,7 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                 stroke_gradient: None,
                 stroke_brush: None,
                 stroke_brush_overrides: None,
+                fill_rule: crate::geometry::element::FillRule::NonZero,
             })
         }
     }
@@ -1834,6 +1835,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let shape = RecognizedShape::Rectangle {
             x: 10.0,
@@ -1867,6 +1869,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let shape = RecognizedShape::RoundRect {
             x: 0.0,
@@ -1896,6 +1899,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let shape = RecognizedShape::Arrow {
             tail: (0.0, 0.0),
@@ -2002,6 +2006,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let shape = RecognizedShape::Scribble {
             points: vec![(0.0, 0.0), (10.0, 20.0), (20.0, 0.0), (30.0, 20.0), (40.0, 0.0)],
@@ -2075,6 +2080,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Circle(_))) => {
@@ -2097,6 +2103,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
             Some((kind, Element::Rect(_))) => {

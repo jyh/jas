@@ -3258,7 +3258,7 @@ mod tests {
             width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3348,7 +3348,7 @@ mod tests {
             width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3467,7 +3467,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3544,7 +3544,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3629,6 +3629,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3709,7 +3710,7 @@ mod tests {
             fill: None, stroke: None, width_points: vec![],
             common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
@@ -3799,6 +3800,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         };
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Path(pe))],
