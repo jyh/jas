@@ -1964,9 +1964,12 @@ impl AppState {
             // Runs on the new selection (boolean op leaves output paths
             // selected) so curve recovery is consistent with the menu
             // command. No-op when the boolean op left no selection.
+            // take_snapshot=false because apply_destructive_boolean
+            // already snapshotted; without this the boolean + simplify
+            // pair lands two undo entries instead of one.
             if apply_simplify {
-                crate::document::controller::Controller::simplify_selection(
-                    &mut tab.model, precision,
+                crate::document::controller::Controller::simplify_selection_with_snapshot(
+                    &mut tab.model, precision, false,
                 );
             }
         }
