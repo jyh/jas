@@ -664,6 +664,9 @@ fn unpack_common(arr: &[Value]) -> CommonProps {
         mask: None,
         tool_origin: None,
         name: None,
+        // The binary codec does not yet carry stable id; its round-trip
+        // lands in a later increment (VISION.md §6.2).
+        id: None,
     }
 }
 
