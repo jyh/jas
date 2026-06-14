@@ -521,6 +521,7 @@ fn run_text_layout_paragraph(vectors: &[Value]) -> Vec<Value> {
             hyphenate_min_before: u(j.get("hyphenate_min_before"), d.hyphenate_min_before),
             hyphenate_min_after: u(j.get("hyphenate_min_after"), d.hyphenate_min_after),
             hyphenate_bias: u(j.get("hyphenate_bias"), d.hyphenate_bias as usize) as u8,
+            hyphenate_capitalized: b(j.get("hyphenate_capitalized")),
         }
     }
 

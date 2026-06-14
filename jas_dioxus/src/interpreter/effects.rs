@@ -2124,6 +2124,7 @@ fn brush_update_in_library(
 
 /// Push the current data.brush_libraries through to the canvas
 /// renderer's brush registry so the next paint sees the updates.
+#[cfg(feature = "web")]
 fn sync_canvas_brushes(store: &StateStore) {
     let libs = store.get_data_path("brush_libraries");
     let _guard = crate::canvas::render::register_brush_libraries(libs);
@@ -2132,6 +2133,13 @@ fn sync_canvas_brushes(store: &StateStore) {
     // forget the guard.
     std::mem::forget(_guard);
 }
+
+/// Without the `web` feature there is no canvas module, so the
+/// brush->canvas registry sync is a no-op. Kept as a same-signature
+/// stub so the call sites (and the algorithm_roundtrip bin, which
+/// builds with --no-default-features) compile unchanged.
+#[cfg(not(feature = "web"))]
+fn sync_canvas_brushes(_store: &StateStore) {}
 
 /// Dispatch brush_options_confirm — read dialog state, dispatch
 /// per mode (create / library_edit / instance_edit). Phase 1
