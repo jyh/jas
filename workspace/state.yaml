@@ -717,6 +717,23 @@ state:
       discarded rather than kept as invisible paths. Edited via the
       Boolean Options dialog.
 
+  boolean_apply_simplify_after_op:
+    type: bool
+    default: false
+    description: >
+      When true, Object → Simplify is run automatically on the
+      result of every destructive boolean operation. Off by default
+      — refitting is lossy. Edited via the Boolean Options dialog.
+
+  boolean_simplify_precision:
+    type: number
+    default: 0.5
+    description: >
+      Max-error tolerance (in points) for the Schneider curve-fit
+      consulted by both Object → Simplify and the post-op auto-
+      simplify. Smaller values hug the polyline more closely but
+      emit more segments. Edited via the Boolean Options dialog.
+
   # ── Brushes panel ─────────────────────────────────────────────
   # Mirror state for the Brushes panel. See
   # transcripts/BRUSHES.md §Panel state.

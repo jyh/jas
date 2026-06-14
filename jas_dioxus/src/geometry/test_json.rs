@@ -1058,6 +1058,7 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         }),
         "text" => Element::Text(TextElem {
             x: parse_f(&v["x"]),

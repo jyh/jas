@@ -2881,14 +2881,16 @@
             "params": {
               "precision": "state.boolean_precision",
               "remove_redundant_points": "state.boolean_remove_redundant_points",
-              "divide_remove_unpainted": "state.boolean_divide_remove_unpainted"
+              "divide_remove_unpainted": "state.boolean_divide_remove_unpainted",
+              "apply_simplify_after_op": "state.boolean_apply_simplify_after_op",
+              "simplify_precision": "state.boolean_simplify_precision"
             }
           }
         }
       ]
     },
     "boolean_options_confirm": {
-      "description": "Commit the Boolean Options dialog. Writes precision, remove- redundant-points, and divide-remove-unpainted to document state and closes the dialog.\n",
+      "description": "Commit the Boolean Options dialog. Writes precision, remove- redundant-points, divide-remove-unpainted, apply-simplify- after-op, and simplify-precision to document state and closes the dialog.\n",
       "category": "boolean",
       "params": {
         "precision": {
@@ -2899,6 +2901,12 @@
         },
         "divide_remove_unpainted": {
           "type": "bool"
+        },
+        "apply_simplify_after_op": {
+          "type": "bool"
+        },
+        "simplify_precision": {
+          "type": "number"
         }
       },
       "effects": [
@@ -2906,7 +2914,9 @@
           "set": {
             "boolean_precision": "param.precision",
             "boolean_remove_redundant_points": "param.remove_redundant_points",
-            "boolean_divide_remove_unpainted": "param.divide_remove_unpainted"
+            "boolean_divide_remove_unpainted": "param.divide_remove_unpainted",
+            "boolean_apply_simplify_after_op": "param.apply_simplify_after_op",
+            "boolean_simplify_precision": "param.simplify_precision"
           }
         },
         {
@@ -9248,6 +9258,16 @@
       "default": false,
       "description": "When true, DIVIDE fragments with no fill and no stroke are discarded rather than kept as invisible paths. Edited via the Boolean Options dialog.\n"
     },
+    "boolean_apply_simplify_after_op": {
+      "type": "bool",
+      "default": false,
+      "description": "When true, Object \u2192 Simplify is run automatically on the result of every destructive boolean operation. Off by default \u2014 refitting is lossy. Edited via the Boolean Options dialog.\n"
+    },
+    "boolean_simplify_precision": {
+      "type": "number",
+      "default": 0.5,
+      "description": "Max-error tolerance (in points) for the Schneider curve-fit consulted by both Object \u2192 Simplify and the post-op auto- simplify. Smaller values hug the polyline more closely but emit more segments. Edited via the Boolean Options dialog.\n"
+    },
     "brushes_selected_library": {
       "type": "string",
       "default": "default_brushes",
@@ -10889,7 +10909,7 @@
             "children": [
               {
                 "type": "text",
-                "content": "Pathfinders:",
+                "content": "Paths:",
                 "style": {
                   "font_size": 10
                 }
@@ -25374,6 +25394,12 @@
         },
         "divide_remove_unpainted": {
           "type": "bool"
+        },
+        "apply_simplify_after_op": {
+          "type": "bool"
+        },
+        "simplify_precision": {
+          "type": "number"
         }
       },
       "state": {
@@ -25391,12 +25417,24 @@
           "type": "bool",
           "default": false,
           "description": "DIVIDE drops fragments with no paint when on"
+        },
+        "apply_simplify_after_op": {
+          "type": "bool",
+          "default": false,
+          "description": "When on, Object \u2192 Simplify is run automatically on the result of every destructive boolean operation. Recovers Bezier arcs from the flattened polygon output. Off by default \u2014 refitting is lossy.\n"
+        },
+        "simplify_precision": {
+          "type": "number",
+          "default": 0.5,
+          "description": "Max-error tolerance (in points) for the Schneider curve fit used by both Object \u2192 Simplify and the post-op auto-simplify. Smaller values hug the polyline more closely but emit more segments.\n"
         }
       },
       "init": {
         "precision": "param.precision",
         "remove_redundant_points": "param.remove_redundant_points",
-        "divide_remove_unpainted": "param.divide_remove_unpainted"
+        "divide_remove_unpainted": "param.divide_remove_unpainted",
+        "apply_simplify_after_op": "param.apply_simplify_after_op",
+        "simplify_precision": "param.simplify_precision"
       },
       "content": {
         "type": "container",
@@ -25492,6 +25530,72 @@
             ]
           },
           {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 12,
+                "children": [
+                  {
+                    "id": "bo_apply_simplify_after_op",
+                    "type": "toggle",
+                    "label": "Apply Simplify After Each Boolean Operation",
+                    "bind": {
+                      "checked": "dialog.apply_simplify_after_op"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "col",
+                "col": 4,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "Simplify Precision:",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 5,
+                "children": [
+                  {
+                    "id": "bo_simplify_precision_input",
+                    "type": "number_input",
+                    "min": 0.01,
+                    "max": 10,
+                    "step": 0.01,
+                    "bind": {
+                      "value": "dialog.simplify_precision"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "col",
+                "col": 3,
+                "children": [
+                  {
+                    "type": "text",
+                    "content": "pt",
+                    "style": {
+                      "font_size": 11
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
             "type": "container",
             "layout": "row",
             "style": {
@@ -25519,7 +25623,9 @@
                 "params": {
                   "precision": "dialog.precision",
                   "remove_redundant_points": "dialog.remove_redundant_points",
-                  "divide_remove_unpainted": "dialog.divide_remove_unpainted"
+                  "divide_remove_unpainted": "dialog.divide_remove_unpainted",
+                  "apply_simplify_after_op": "dialog.apply_simplify_after_op",
+                  "simplify_precision": "dialog.simplify_precision"
                 }
               }
             ]

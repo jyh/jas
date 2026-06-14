@@ -3,6 +3,7 @@ pub mod boolean;
 pub mod calligraphic_outline;
 pub mod dash_renderer;
 pub mod fit_curve;
+pub mod simplify;
 pub mod hit_test;
 pub mod boolean_normalize;
 pub mod planar;

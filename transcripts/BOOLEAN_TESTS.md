@@ -139,7 +139,7 @@ Fixtures referenced by tests:
 |---------|--------------------------------------------------------|-------|------------|
 | A       | Smoke & lifecycle                                      | ~5m   | 001–009    |
 | B       | Shape Modes row — UNION / SUBTRACT_FRONT / ...         | ~10m  | 010–039    |
-| C       | Pathfinders row — DIVIDE / TRIM / MERGE / CROP / SB    | ~12m  | 040–079    |
+| C       | Paths row — DIVIDE / TRIM / MERGE / CROP / SB          | ~12m  | 040–079    |
 | D       | Paint inheritance rules                                | ~10m  | 080–109    |
 | E       | Alt/Option+click → compound shape                      | ~10m  | 110–139    |
 | F       | Compound shape lifecycle (Make/Release/Expand)         | ~10m  | 140–169    |
@@ -164,35 +164,35 @@ If any P0 here fails, stop and flag.
       Do: Select Window → Boolean.
       Expect: Boolean panel appears in the dock or as a floating
               panel; no console error; no visual glitch.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-002** [wired] All panel controls render without layout
   collapse.
       Do: Visually scan the open Boolean panel.
       Expect: Three rows top-to-bottom — "Shape Modes:" label row;
-              4 Shape-Mode icons + Expand button row; 5 Pathfinder
+              4 Shape-Mode icons + Expand button row; 5 Path
               icons + 1 reserved empty slot. No overlapping controls,
               no truncated icons. Reserved slot is visually empty
               but occupies the grid cell.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-003** [wired] Panel collapses and re-expands.
       Do: Click the panel header to collapse; click again to expand.
       Expect: Content hides / reveals; header stays visible; no
               crash.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-004** [wired] Panel closes via context menu.
       Do: Right-click header → Close Boolean.
       Expect: Panel disappears; Window → Boolean now toggles it back
               on.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-005** [wired] Panel floats out of the dock.
       Do: Drag the panel header out of the dock.
       Expect: Panel becomes a floating window at cursor; content
               still interactive; returns to dock on drag back.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-006** [wired] Defaults on empty state.
       Setup: No document, no selection.
@@ -201,7 +201,7 @@ If any P0 here fails, stop and flag.
               hamburger menu's Repeat / Release / Expand Compound
               Shape entries disabled; Make Compound Shape disabled;
               Boolean Options / Reset / Close always enabled.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-007** [wired] Panel appears in Default workspace paired
   with Align.
@@ -211,7 +211,7 @@ If any P0 here fails, stop and flag.
               Other groups match the 5-group default (Color+Swatches,
               Align+Boolean, Character+Paragraph, Stroke+Properties,
               Artboards+Layers).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -226,7 +226,7 @@ If any P0 here fails, stop and flag.
       Expect: Selection collapses to a single Polygon element tracing
               the outer boundary of the two rects' union. The two
               original rects are removed. New polygon is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-011** [wired] SUBTRACT_FRONT removes the frontmost from
   back survivors.
@@ -236,14 +236,14 @@ If any P0 here fails, stop and flag.
       Expect: Frontmost rect disappears. Backmost becomes an
               L-shaped polygon (its right half removed). Only the
               survivor is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-012** [wired] INTERSECTION produces the overlap region.
       Setup: Two-overlap fixture.
       Do: Click INTERSECTION.
       Expect: One polygon remains — the 50×100 rectangle of overlap.
               Both original rects removed. New polygon is selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-013** [wired] EXCLUDE produces symmetric difference.
       Setup: Two-overlap fixture.
@@ -251,7 +251,7 @@ If any P0 here fails, stop and flag.
       Expect: Two polygons remain — the left-only and right-only
               regions (overlap removed). Both original rects are
               removed. Both new polygons are selected.
-      — last: —
+      — last: 2026-05-22 rust pass (Rust fix: PolygonSet contract is even-odd fill; multi-ring outputs now emit one PathElem with FillRule::EvenOdd instead of separate PolygonElems so the overlap is correctly cut out; e0bb3a2)
 
 **P1**
 
@@ -261,7 +261,7 @@ If any P0 here fails, stop and flag.
       Expect: Output has two separate polygons matching the originals
               (a multi-ring polygon in algorithms that support it; or
               two Polygon elements if not).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-015** [wired] INTERSECTION on disjoint operands produces
   nothing.
@@ -269,21 +269,21 @@ If any P0 here fails, stop and flag.
       Do: Click INTERSECTION.
       Expect: Layer children count drops by 2 with zero replacements
               — intersection is empty. Selection becomes empty.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-016** [wired] UNION on nested operands equals the outer
   rect.
       Setup: Nested fixture.
       Do: Click UNION.
       Expect: One polygon whose bbox matches the outer rect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-017** [wired] INTERSECTION on nested operands equals the
   inner rect.
       Setup: Nested fixture.
       Do: Click INTERSECTION.
       Expect: One polygon whose bbox matches the inner rect.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -293,7 +293,7 @@ If any P0 here fails, stop and flag.
       Do: Click UNION.
       Expect: Button returns to unpressed state immediately;
               operation fires once.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-019** [wired] Mixed-element-type UNION.
       Setup: Mixed-type fixture (Rect + Ellipse + Polygon + Path).
@@ -301,7 +301,7 @@ If any P0 here fails, stop and flag.
       Expect: One polygon element tracing the union of all four
               flattened boundaries; paint carries the frontmost
               (Path) operand's fill/stroke.
-      — last: —
+      — last: 2026-05-22 rust pass (vertex count high when curves are flattened — turn on "Apply Simplify After Each Boolean Operation" in Boolean Options to recover Beziers via the new Schneider refit; 29048a7, 25bf4f2)
 
 - [ ] **BO-020** [wired] Edge-touching operands without overlap.
       Setup: Two 100×100 rects at (0,0) and (100,0) sharing a single
@@ -309,11 +309,11 @@ If any P0 here fails, stop and flag.
       Do: Click UNION.
       Expect: One 200×100 polygon; no self-intersecting seam visible
               in the output geometry.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
-## Session C — Pathfinders (~12 min)
+## Session C — Paths (~12 min)
 
 **P0**
 
@@ -323,7 +323,7 @@ If any P0 here fails, stop and flag.
       Do: Click DIVIDE.
       Expect: Three polygon elements: back-only region, overlap
               region, front-only region. All three selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-041** [wired] TRIM on two-overlap keeps the front and
   trims the back.
@@ -331,14 +331,14 @@ If any P0 here fails, stop and flag.
       Do: Click TRIM.
       Expect: Two polygons — back's L-shaped trimmed region +
               frontmost unchanged.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-042** [wired] MERGE on matching-fill selection reduces to
   one union.
       Setup: Matching-paint fixture (both rects `#ff0000`).
       Do: Click MERGE.
       Expect: One red polygon matching the union boundary.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-043** [wired] CROP frontmost as mask.
       Setup: Two-overlap fixture.
@@ -346,7 +346,7 @@ If any P0 here fails, stop and flag.
       Expect: One polygon — the back operand clipped to the front
               rect's interior (the overlap region, keeping back's
               paint).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-044** [wired] SUBTRACT_BACK removes backmost from front
   survivors.
@@ -355,7 +355,7 @@ If any P0 here fails, stop and flag.
       Expect: Backmost disappears; frontmost becomes an L-shape (its
               left half removed where the back rect used to overlap).
               Only survivor selected.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P1**
 
@@ -364,7 +364,7 @@ If any P0 here fails, stop and flag.
       Do: Click DIVIDE.
       Expect: Two fragments, one per original rect; no spurious
               third fragment.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-046** [wired] DIVIDE on three-overlap partitions the
   union into distinct fragments.
@@ -374,7 +374,7 @@ If any P0 here fails, stop and flag.
               triple-overlap, mid-right overlap, right-only. Each
               inherits the paint of the frontmost operand that
               covered its area.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-047** [wired] TRIM with fully-covered back drops the back.
       Setup: Outer 200×200 back rect fully covered by a 250×250 front
@@ -382,7 +382,7 @@ If any P0 here fails, stop and flag.
       Do: Click TRIM.
       Expect: One polygon remains — the frontmost (back's trimmed
               region is empty and therefore dropped).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-048** [wired] MERGE with mismatched fills keeps them
   separate.
@@ -390,7 +390,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons — back's L-shaped trimmed region (blue) +
               front (red). No merge occurs.
-      — last: —
+      — last: 2026-05-22 rust pass (MERGE with mismatched fills runs the TRIM half only; visual confusion at first since the front sits on top of the L-notch, but moving the front aside reveals the L-shape)
 
 - [ ] **BO-049** [wired] MERGE with None fills never merges (strict
   predicate).
@@ -398,7 +398,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons remain — TRIM output kept separate because
               None / None is not a match.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -409,7 +409,7 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: One merged polygon (swatches resolve to hex; equal hex
               → merges).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-051** [wired] MERGE predicate: gradient fills never match.
       Setup: Two overlapping rects; both filled with the same linear
@@ -417,14 +417,14 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: Two polygons — gradients never match the predicate
               even against themselves (BOOLEAN.md §MERGE predicate).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-052** [wired] MERGE predicate: near-matching hex is still
   distinct.
       Setup: Two overlapping rects, one `#ff0000` and one `#ff0001`.
       Do: Click MERGE.
       Expect: Two polygons — near-matches are strict.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-053** [wired] CROP discards survivor content outside the
   mask.
@@ -432,7 +432,7 @@ If any P0 here fails, stop and flag.
       Do: Click CROP.
       Expect: Two polygons — each non-front operand clipped to the
               frontmost (right-most) rect's interior.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -444,21 +444,21 @@ If any P0 here fails, stop and flag.
       Setup: Painted fixture (front red, back blue).
       Do: Click UNION.
       Expect: One polygon with fill `#ff0000` (frontmost = red).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-081** [wired] INTERSECTION carries the frontmost operand's
   paint.
       Setup: Painted fixture.
       Do: Click INTERSECTION.
       Expect: One red polygon in the overlap region.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-082** [wired] EXCLUDE carries the frontmost operand's
   paint on every output.
       Setup: Painted fixture.
       Do: Click EXCLUDE.
       Expect: Two polygons, both filled red (frontmost paint).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-083** [wired] SUBTRACT_FRONT: each survivor keeps its own
   paint.
@@ -467,7 +467,7 @@ If any P0 here fails, stop and flag.
       Do: Click SUBTRACT_FRONT.
       Expect: Two L-shaped polygons; back polygon is blue, middle
               polygon is green. Red (cutter) is consumed.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-084** [wired] CROP: each survivor keeps its own paint.
       Setup: Three-overlap fixture (back=blue, middle=green,
@@ -476,7 +476,7 @@ If any P0 here fails, stop and flag.
       Expect: Two polygons — back clipped to front's interior (blue),
               middle clipped to front's interior (green). Front
               consumed.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-085** [wired] DIVIDE: each fragment inherits the paint of
   the frontmost covering operand.
@@ -486,7 +486,7 @@ If any P0 here fails, stop and flag.
       Expect: Five fragments with paint mapping:
               left-only → blue, mid-left → green, center → red,
               mid-right → red, right-only → red.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 **P2**
 
@@ -495,7 +495,7 @@ If any P0 here fails, stop and flag.
              rect stroke 2pt red.
       Do: Click UNION.
       Expect: Resulting polygon has the frontmost's stroke (2pt red).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-087** [wired] MERGE uses the frontmost contributor's
   stroke on the merged output.
@@ -504,14 +504,14 @@ If any P0 here fails, stop and flag.
       Do: Click MERGE.
       Expect: One merged red polygon with the 6pt white stroke
               (frontmost in the merged cluster wins).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-088** [wired] Opacity inheritance on UNION.
       Setup: Two-overlap fixture; back rect opacity 0.3; front opacity
              0.8.
       Do: Click UNION.
       Expect: Result polygon opacity 0.8 (frontmost).
-      — last: —
+      — last: 2026-05-22 rust pass
 
 - [ ] **BO-089** [wired] Compound shape at creation inherits the
   frontmost's paint.
@@ -519,7 +519,7 @@ If any P0 here fails, stop and flag.
       Do: Alt/Option+click UNION.
       Expect: New compound shape has fill red (frontmost); operands
               retain their own paints within the compound tree.
-      — last: —
+      — last: 2026-05-22 rust pass
 
 ---
 
@@ -1034,7 +1034,7 @@ If any P0 here fails, stop and flag.
       Setup: Panel docked; focus on panel content.
       Do: Tab repeatedly.
       Expect: Focus cycles in document order: 4 Shape Mode buttons →
-              Expand → 5 Pathfinder buttons (plus reserved slot
+              Expand → 5 Path buttons (plus reserved slot
               skipped). Visible focus ring per theme.
       — last: —
 

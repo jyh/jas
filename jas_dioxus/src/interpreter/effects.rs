@@ -930,6 +930,7 @@ fn run_doc_effect(
                     stroke_gradient: None,
                     stroke_brush: None,
                     stroke_brush_overrides: None,
+                    fill_rule: crate::geometry::element::FillRule::NonZero,
                 });
                 Controller::add_element(model, elem);
             }
@@ -1063,6 +1064,7 @@ fn run_doc_effect(
                     stroke_gradient: None,
                     stroke_brush: stroke_brush_slug,
                     stroke_brush_overrides,
+                    fill_rule: crate::geometry::element::FillRule::NonZero,
                 });
                 Controller::add_element(model, elem);
             }
@@ -4221,6 +4223,7 @@ fn path_erase_at_rect(
                             stroke_gradient: None,
                             stroke_brush: path_elem.stroke_brush.clone(),
                             stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
+                            fill_rule: crate::geometry::element::FillRule::NonZero,
                         });
                         layer_children.insert(ci, Rc::new(new_path));
                     }
@@ -4465,6 +4468,7 @@ fn path_paintbrush_edit_commit(
         stroke_gradient: None,
         stroke_brush: target_path_elem.stroke_brush.clone(),
         stroke_brush_overrides: target_path_elem.stroke_brush_overrides.clone(),
+        fill_rule: crate::geometry::element::FillRule::NonZero,
     });
     let new_doc = doc.replace_element(&target_path, new_elem);
     model.set_document(new_doc);
@@ -4737,6 +4741,7 @@ fn blob_brush_commit_painting(
         stroke_gradient: None,
         stroke_brush: None,
         stroke_brush_overrides: None,
+        fill_rule: crate::geometry::element::FillRule::NonZero,
     });
 
     // Build a new document: remove matches (in reverse order so
@@ -5251,6 +5256,7 @@ fn path_smooth_at_cursor(
             stroke_gradient: None,
             stroke_brush: path_elem.stroke_brush.clone(),
             stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         new_doc = new_doc.replace_element(path, new_elem);
         changed = true;
@@ -5368,6 +5374,7 @@ fn path_insert_anchor_on_segment_near(
         stroke_gradient: pe.stroke_gradient.clone(),
         stroke_brush: pe.stroke_brush.clone(),
         stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
+        fill_rule: crate::geometry::element::FillRule::NonZero,
     };
     let doc = model.document().replace_element(
         &path, Element::Path(new_pe));
@@ -5400,6 +5407,7 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
                 stroke_gradient: pe.stroke_gradient.clone(),
                 stroke_brush: pe.stroke_brush.clone(),
                 stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
+                fill_rule: crate::geometry::element::FillRule::NonZero,
             };
             let new_elem = Element::Path(new_pe);
             let mut doc = model.document().replace_element(&path, new_elem);
@@ -6941,6 +6949,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: Some("mylib/flat_1".to_string()),
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(path_elem)],
@@ -7217,7 +7226,7 @@ mod tests {
             width_points: Vec::new(),
             common,
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(target_path)],
@@ -7272,7 +7281,7 @@ mod tests {
             width_points: Vec::new(),
             common: CommonProps::default(), // tool_origin = None
             fill_gradient: None, stroke_gradient: None,
-            stroke_brush: None, stroke_brush_overrides: None,
+            stroke_brush: None, stroke_brush_overrides: None, fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(target_path)],

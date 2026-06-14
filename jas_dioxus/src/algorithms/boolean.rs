@@ -2184,6 +2184,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn xor_bo013_spec_fixture_100x100_rects() {
+        // The BO-013 spec fixture for manual testing: 100x100 rects
+        // at (0,0) and (50,0). Overlap is the 50x100 strip from x=50
+        // to x=100. Expected XOR region is two disjoint 50x100 strips
+        // (0,0)-(50,100) ∪ (100,0)-(150,100), total area 10000.
+        let a: PolygonSet = vec![vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]];
+        let b: PolygonSet = vec![vec![(50.0, 0.0), (150.0, 0.0), (150.0, 100.0), (50.0, 100.0)]];
+        let result = boolean_exclude(&a, &b);
+        let area = polygon_set_area(&result);
+        assert!(
+            (area - 10000.0).abs() < EPS,
+            "BO-013: expected area 10000 (two disjoint 50x100 strips), got {} (rings: {:?})",
+            area,
+            result
+        );
+    }
+
     // -------------------------------------------------------------------
     // Perturbation / robustness probes
     //

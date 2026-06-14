@@ -754,6 +754,7 @@ fn unpack_element(v: &Value) -> Element {
                 stroke_gradient: None,
                 stroke_brush: None,
                 stroke_brush_overrides: None,
+                fill_rule: crate::geometry::element::FillRule::NonZero,
             })
         }
         TAG_TEXT => {
