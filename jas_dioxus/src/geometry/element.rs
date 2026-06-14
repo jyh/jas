@@ -882,6 +882,18 @@ pub struct CommonProps {
     /// Element::display_name() helper prefers this field when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Stable, opaque element identity. Additive: `None` means the
+    /// element has no id yet, so every existing document remains valid.
+    /// Where the tree-path encodes *where* an element sits, the id names
+    /// *which* element it is, surviving reorder and edit. It is the
+    /// foundation for the live relationship graph, cross-tree
+    /// references, versioning, and collaboration (see VISION.md §6.2).
+    /// A plain string so it serializes and compares identically across
+    /// all five implementations. Round-trips through test_json (emitted
+    /// only when set, so id-less elements stay byte-identical) and,
+    /// in a later increment, the SVG `id` attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 impl Default for CommonProps {
@@ -895,6 +907,7 @@ impl Default for CommonProps {
             mask: None,
             tool_origin: None,
             name: None,
+            id: None,
         }
     }
 }
@@ -3834,7 +3847,7 @@ mod tests {
                                   transform: None, locked: true,
                                   visibility: Visibility::Outline, mask: None,
                                   tool_origin: None,
-                                  name: Some("Layer 1".into()) },
+                                  name: Some("Layer 1".into()), id: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3989,6 +4002,7 @@ mod tests {
                 mask: Some(Box::new(make_square_mask())),
                 tool_origin: None,
             name: None,
+            id: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,
@@ -4034,6 +4048,7 @@ mod tests {
                 mask: None,
                 tool_origin: None,
             name: None,
+            id: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,

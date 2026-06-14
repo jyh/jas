@@ -9237,6 +9237,7 @@ mod tests {
                     mask: None,
                     tool_origin: None,
                     name: Some(name),
+                    id: None,
                 },
             })
         }).collect();

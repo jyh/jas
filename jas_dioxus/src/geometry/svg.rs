@@ -1119,6 +1119,9 @@ fn parse_common(node: &XmlNode) -> CommonProps {
                 .find(|c| c.tag == "title")
                 .map(|c| c.text.clone()))
             .filter(|s| !s.is_empty()),
+        // SVG `id` round-trip (read + write) lands in a later increment;
+        // for now stable identity is carried by the canonical test_json.
+        id: None,
     }
 }
 
