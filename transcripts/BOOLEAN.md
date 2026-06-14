@@ -130,7 +130,7 @@ CompoundShape is the first LiveElement conformer (see Live element framework abo
 As a LiveElement conformer, a CompoundShape populates Source as follows:
 
 - **`source.children`**: the operand list, in z-order (index 0 = backmost, last index = frontmost). Recursive — operands can be paths, groups, text, or nested LiveElements (including other compound shapes).
-- **`source.params`**: `{ operation: "union" | "subtract_front" | "intersection" | "exclude" }`. Only the four Shape Mode operations can be compound; the destructive-only pathfinder operations never produce compound shapes.
+- **`source.params`**: `{ operation: "union" | "subtract_front" | "intersection" | "exclude" }`. Only the four Shape Mode operations can be compound; the destructive-only Path operations never produce compound shapes.
 - **Standard paint and placement properties** (`fill`, `stroke`, `opacity`, `blend_mode`, `transform`) live on the LiveElement wrapper. At creation these inherit from the frontmost child per the Operand and paint rules; afterward they are independently editable.
 - **Internal cache**: a polygon set produced by evaluating `source.params.operation` over `source.children`, refit to a Bézier path via `algorithms/fit_curve` for rendering. Derived, not serialized. Invalidated on any child geometry or z-order change, or on an `operation` param edit.
 

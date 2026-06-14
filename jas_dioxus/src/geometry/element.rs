@@ -712,6 +712,23 @@ pub enum PathCommand {
     ClosePath,
 }
 
+/// SVG-style fill rule. Determines how a multi-subpath shape is filled.
+/// Defaults to NonZero (SVG default). Boolean operations that produce
+/// holes (e.g. XOR of overlapping rects) emit Paths with EvenOdd so the
+/// even-odd crossing count correctly cuts inner rings out of outer
+/// ones; PolygonSet's documented contract is that its rings are read
+/// under the even-odd rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum FillRule {
+    #[default]
+    #[serde(rename = "nonzero")]
+    NonZero,
+    #[serde(rename = "evenodd")]
+    EvenOdd,
+}
+
+fn fill_rule_is_default(r: &FillRule) -> bool { matches!(r, FillRule::NonZero) }
+
 // ---------------------------------------------------------------------------
 // Bounding box
 // ---------------------------------------------------------------------------
@@ -980,6 +997,11 @@ pub struct PathElem {
     pub fill_gradient: Option<Box<Gradient>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke_gradient: Option<Box<Gradient>>,
+    /// Fill rule for multi-subpath paths. Boolean operation outputs use
+    /// EvenOdd; pen-drawn paths use NonZero (the default). Stored on
+    /// the element so serialization round-trips it.
+    #[serde(default, skip_serializing_if = "fill_rule_is_default")]
+    pub fill_rule: FillRule,
     /// Active-brush reference as "<library_slug>/<brush_slug>", or
     /// None for a plain native-stroke path. Consumed by the
     /// Calligraphic outliner in the canvas renderer. See
@@ -3024,6 +3046,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         })
     }
 
@@ -3716,6 +3739,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         let blue_stroke = Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0));
         let path2 = with_stroke(&path, blue_stroke);

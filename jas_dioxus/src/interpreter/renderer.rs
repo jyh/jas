@@ -1020,13 +1020,39 @@ fn set_app_state_field(
         // Boolean panel fields — mirrors of BooleanPanelState per
         // BOOLEAN.md §Boolean Options dialog.
         "boolean_precision" => {
-            if let Some(n) = val.as_f64() { st.boolean_panel.precision = n; }
+            if let Some(n) = val.as_f64() {
+                st.boolean_panel.precision = n;
+                st.workspace_layout.boolean_options.precision = n;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_remove_redundant_points" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.remove_redundant_points = b; }
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.remove_redundant_points = b;
+                st.workspace_layout.boolean_options.remove_redundant_points = b;
+                st.workspace_layout.bump();
+            }
         }
         "boolean_divide_remove_unpainted" => {
-            if let Some(b) = val.as_bool() { st.boolean_panel.divide_remove_unpainted = b; }
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.divide_remove_unpainted = b;
+                st.workspace_layout.boolean_options.divide_remove_unpainted = b;
+                st.workspace_layout.bump();
+            }
+        }
+        "boolean_apply_simplify_after_op" => {
+            if let Some(b) = val.as_bool() {
+                st.boolean_panel.apply_simplify_after_op = b;
+                st.workspace_layout.boolean_options.apply_simplify_after_op = b;
+                st.workspace_layout.bump();
+            }
+        }
+        "boolean_simplify_precision" => {
+            if let Some(n) = val.as_f64() {
+                st.boolean_panel.simplify_precision = n;
+                st.workspace_layout.boolean_options.simplify_precision = n;
+                st.workspace_layout.bump();
+            }
         }
         "last_boolean_op" => {
             if val.is_null() {
@@ -1129,6 +1155,8 @@ fn apply_set_panel_state_with_ctx(
                 "boolean_precision": bp.precision,
                 "boolean_remove_redundant_points": bp.remove_redundant_points,
                 "boolean_divide_remove_unpainted": bp.divide_remove_unpainted,
+                "boolean_apply_simplify_after_op": bp.apply_simplify_after_op,
+                "boolean_simplify_precision": bp.simplify_precision,
                 "last_boolean_op": bp.last_op.as_ref()
                     .map(|s| serde_json::Value::String(s.clone()))
                     .unwrap_or(serde_json::Value::Null),
@@ -4944,19 +4972,26 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
 
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let min = el.get("min").and_then(|m| m.as_i64()).unwrap_or(0);
-    let max = el.get("max").and_then(|m| m.as_i64()).unwrap_or(100);
+    let min = el.get("min").and_then(|m| m.as_f64()).unwrap_or(0.0);
+    let max = el.get("max").and_then(|m| m.as_f64()).unwrap_or(100.0);
     // Declared bounds drive clamp-on-commit. Undeclared → no clamp (e.g.
     // Tracking is signed and has no yaml-declared min/max).
     let min_clamp = el.get("min").and_then(|m| m.as_f64());
     let max_clamp = el.get("max").and_then(|m| m.as_f64());
+    // HTML <input type="number"> defaults to step=1 (integers only).
+    // Read the YAML step if present; fall back to "any" so fields
+    // without an explicit step accept arbitrary decimals.
+    let step_attr: String = match el.get("step").and_then(|s| s.as_f64()) {
+        Some(n) => format!("{n}"),
+        None => "any".to_string(),
+    };
     let style = build_style(el, ctx);
 
     let bind_expr = read_bind_value(el);
-    let value = if !bind_expr.is_empty() {
+    let value: f64 = if !bind_expr.is_empty() {
         let result = expr::eval(bind_expr, ctx);
         match result {
-            Value::Number(n) => n as i64,
+            Value::Number(n) => n,
             _ => min,
         }
     } else {
@@ -5081,6 +5116,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
+                step: "{step_attr}",
                 value: "{value}",
                 // flex-shrink:0 — when the parent row sets `flex:1`
                 // on the slider, the slider's flex-grow eats remaining
@@ -5105,6 +5141,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 r#type: "number",
                 min: "{min}",
                 max: "{max}",
+                step: "{step_attr}",
                 value: "{value}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {

@@ -2117,22 +2117,29 @@ actions:
             precision: "state.boolean_precision"
             remove_redundant_points: "state.boolean_remove_redundant_points"
             divide_remove_unpainted: "state.boolean_divide_remove_unpainted"
+            apply_simplify_after_op: "state.boolean_apply_simplify_after_op"
+            simplify_precision: "state.boolean_simplify_precision"
 
   boolean_options_confirm:
     description: >
       Commit the Boolean Options dialog. Writes precision, remove-
-      redundant-points, and divide-remove-unpainted to document
-      state and closes the dialog.
+      redundant-points, divide-remove-unpainted, apply-simplify-
+      after-op, and simplify-precision to document state and closes
+      the dialog.
     category: boolean
     params:
       precision: { type: number }
       remove_redundant_points: { type: bool }
       divide_remove_unpainted: { type: bool }
+      apply_simplify_after_op: { type: bool }
+      simplify_precision: { type: number }
     effects:
       - set:
           boolean_precision: "param.precision"
           boolean_remove_redundant_points: "param.remove_redundant_points"
           boolean_divide_remove_unpainted: "param.divide_remove_unpainted"
+          boolean_apply_simplify_after_op: "param.apply_simplify_after_op"
+          boolean_simplify_precision: "param.simplify_precision"
       - close_dialog: None
 
   make_compound_shape:

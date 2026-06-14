@@ -1083,7 +1083,12 @@ fn draw_element_body(
                 ctx.begin_path();
                 build_path(ctx, &e.d);
                 ctx.set_global_alpha(base_alpha * fill_op);
-                ctx.fill();
+                match e.fill_rule {
+                    crate::geometry::element::FillRule::NonZero => ctx.fill(),
+                    crate::geometry::element::FillRule::EvenOdd => ctx.fill_with_canvas_winding_rule(
+                        web_sys::CanvasWindingRule::Evenodd,
+                    ),
+                }
             }
             // Brushed stroke — when stroke_brush resolves to a known
             // Calligraphic brush, draw its variable-width outline as a

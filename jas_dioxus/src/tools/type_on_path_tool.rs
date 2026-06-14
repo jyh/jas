@@ -819,6 +819,7 @@ mod tests {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(path));
