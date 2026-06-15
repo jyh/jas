@@ -285,6 +285,8 @@ let menu_bar = [
     ("---", "", "");
     ("Hide", "hide", "\xE2\x8C\x983");
     ("Show All", "show_all", "\xE2\x8C\xA5\xE2\x8C\x983");
+    ("---", "", "");
+    ("Simplify", "simplify", "");
   ]);
   ("Window", [
     ("Workspace \xE2\x96\xB6", "workspace_submenu", "");
@@ -295,15 +297,18 @@ let menu_bar = [
     ("Toolbar", "toggle_pane_toolbar", "");
     ("Panels", "toggle_pane_dock", "");
     ("---", "", "");
+    ("Align", "toggle_panel_align", "");
     ("Artboards", "toggle_panel_artboards", "");
-    ("Layers", "toggle_panel_layers", "");
-    ("Color", "toggle_panel_color", "");
-    ("Swatches", "toggle_panel_swatches", "");
-    ("Stroke", "toggle_panel_stroke", "");
-    ("Properties", "toggle_panel_properties", "");
+    ("Boolean", "toggle_panel_boolean", "");
     ("Character", "toggle_panel_character", "");
-    ("Paragraph", "toggle_panel_paragraph", "");
+    ("Color", "toggle_panel_color", "");
+    ("Layers", "toggle_panel_layers", "");
     ("Magic Wand", "toggle_panel_magic_wand", "");
+    ("Opacity", "toggle_panel_opacity", "");
+    ("Paragraph", "toggle_panel_paragraph", "");
+    ("Properties", "toggle_panel_properties", "");
+    ("Stroke", "toggle_panel_stroke", "");
+    ("Swatches", "toggle_panel_swatches", "");
   ]);
 ]
 
