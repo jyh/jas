@@ -116,6 +116,7 @@ private func assertJsonRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        "element_ids",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }

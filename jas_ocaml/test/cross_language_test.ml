@@ -52,6 +52,12 @@ let roundtrip_names = [
   "multi_layer"; "complex_document"
 ]
 
+(* Names for the test_json parse->serialize idempotence test only. Includes
+   the id-bearing "element_ids" fixture, which exercises the additive element
+   id field. Kept separate from [roundtrip_names] because binary id round-trip
+   is not implemented and there is no element_ids.svg fixture. *)
+let json_roundtrip_names = roundtrip_names @ ["element_ids"]
+
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
   let doc = Jas.Test_json.test_json_to_document expected in
@@ -284,7 +290,7 @@ let () =
     (* JSON round-trip idempotence *)
     "JSON round-trip", [
       Alcotest.test_case "json_roundtrip all expected" `Quick (fun () ->
-        List.iter assert_json_roundtrip roundtrip_names);
+        List.iter assert_json_roundtrip json_roundtrip_names);
     ];
 
     (* SVG parse tests *)

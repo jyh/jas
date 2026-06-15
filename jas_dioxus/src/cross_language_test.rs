@@ -88,6 +88,9 @@ mod tests {
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
+            // Stable identity: elements carrying an `id` must survive the
+            // test_json parse->serialize round-trip identically in all apps.
+            "element_ids",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
