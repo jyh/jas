@@ -397,6 +397,25 @@ let () =
           assert (Jas.Element.id_of e = Some "shape-42")
         | _ -> assert false);
 
+      Alcotest.test_case "round-trip text-family id" `Quick (fun () ->
+        (* Text/Text_path hand-inline their SVG attributes, so their id
+           needs the same guard as the shapes — this is the element kind
+           whose id the reference writer once dropped. *)
+        let text = Jas.Element.with_id (make_text 10.0 20.0 "Hi")
+            (Some "text-7") in
+        let tp = Jas.Element.with_id
+            (make_text_path [MoveTo (0.0, 0.0); LineTo (50.0, 0.0)] "Hi")
+            (Some "textpath-7") in
+        let doc = make_document [|make_layer [| text; tp |]|] in
+        let doc2 = roundtrip doc in
+        let kids = children_of doc2.Jas.Document.layers.(0) in
+        (match kids.(0) with
+         | Text _ as e -> assert (Jas.Element.id_of e = Some "text-7")
+         | _ -> assert false);
+        (match kids.(1) with
+         | Text_path _ as e -> assert (Jas.Element.id_of e = Some "textpath-7")
+         | _ -> assert false));
+
       Alcotest.test_case "round-trip layer id" `Quick (fun () ->
         let layer = Jas.Element.with_id
             (make_layer ~name:"Background" [| make_rect 0.0 0.0 72.0 72.0 |])
