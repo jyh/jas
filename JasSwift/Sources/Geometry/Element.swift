@@ -2978,7 +2978,9 @@ public struct TextPath: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil,
+                id: String? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(d: d, tspans: [t], startOffset: startOffset,
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -2992,7 +2994,8 @@ public struct TextPath: Equatable {
                   kerning: kerning,
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
-                  locked: locked, visibility: visibility)
+                  locked: locked, visibility: visibility,
+                  name: name, id: id)
     }
 
     public var content: String { concatTspanContent(tspans) }

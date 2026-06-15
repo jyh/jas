@@ -95,6 +95,17 @@ def _name_attr(name: str | None) -> str:
     return f' inkscape:label="{escape(name)}"'
 
 
+def _id_attr(eid: str | None) -> str:
+    """Stable element identity → standard SVG ``id`` attribute. Emitted
+    only when set (Some/non-empty); id-less elements serialize
+    byte-identically to before so existing fixtures stay stable.
+    Mirrors :func:`_name_attr`.
+    """
+    if not eid:
+        return ""
+    return f' id="{escape(eid)}"'
+
+
 def _tspan_svg(t) -> str:
     """Emit a single Tspan as an SVG ``<tspan ...>content</tspan>``.
     Only overridden attributes are emitted (inherited values are absent).
@@ -249,16 +260,16 @@ def _element_svg(elem: Element, indent: str) -> str:
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2,
                   stroke=stroke, opacity=opacity, transform=transform,
-                  name=name):
+                  name=name, id=eid):
             return (f'{indent}<line x1="{_fmt(_px(x1))}" y1="{_fmt(_px(y1))}"'
                     f' x2="{_fmt(_px(x2))}" y2="{_fmt(_px(y2))}"'
                     f'{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-                  name=name):
+                  name=name, id=eid):
             rxy = ""
             if rx > 0:
                 rxy += f' rx="{_fmt(_px(rx))}"'
@@ -269,48 +280,48 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{rxy}'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Circle(cx=cx, cy=cy, r=r,
                     fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-                    name=name):
+                    name=name, id=eid):
             return (f'{indent}<circle cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' r="{_fmt(_px(r))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry,
                      fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-                     name=name):
+                     name=name, id=eid):
             return (f'{indent}<ellipse cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' rx="{_fmt(_px(rx))}" ry="{_fmt(_px(ry))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Polyline(points=pts, fill=fill, stroke=stroke,
                       opacity=opacity, transform=transform,
-                      name=name):
+                      name=name, id=eid):
             ps = " ".join(f"{_fmt(_px(x))},{_fmt(_px(y))}" for x, y in pts)
             return (f'{indent}<polyline points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Polygon(points=pts, fill=fill, stroke=stroke,
                      opacity=opacity, transform=transform,
-                     name=name):
+                     name=name, id=eid):
             ps = " ".join(f"{_fmt(_px(x))},{_fmt(_px(y))}" for x, y in pts)
             return (f'{indent}<polygon points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case Path(d=cmds, fill=fill, stroke=stroke,
                   opacity=opacity, transform=transform,
                   tool_origin=tool_origin,
-                  name=name):
+                  name=name, id=eid):
             tool_origin_attr = (
                 f' jas:tool-origin="{escape(tool_origin)}"'
                 if tool_origin else ""
@@ -319,7 +330,7 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
                     f'{tool_origin_attr}'
-                    f'{_name_attr(name)}/>')
+                    f'{_id_attr(eid)}{_name_attr(name)}/>')
 
         case TextPath():
             # Destructure via attribute access to avoid an even wider
@@ -350,7 +361,8 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f' font-family="{escape(elem_tp.font_family)}"'
                     f' font-size="{_fmt(_px(elem_tp.font_size))}"'
                     f'{fw_attr}{fst_attr}{td_attr}{extra}'
-                    f'{_opacity_attr(elem_tp.opacity)}{_transform_attr(elem_tp.transform)}>'
+                    f'{_opacity_attr(elem_tp.opacity)}{_transform_attr(elem_tp.transform)}'
+                    f'{_id_attr(elem_tp.id)}>'
                     f'<textPath path="{_path_data(elem_tp.d)}"{offset_attr}{tp_space}>'
                     f'{tp_body}</textPath></text>')
 
@@ -383,20 +395,22 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{fw_attr}{fst_attr}{td_attr}{extra}'
                     f'{area_attrs}'
                     f'{_fill_attrs(elem_t.fill)}{_stroke_attrs(elem_t.stroke)}'
-                    f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}{space_attr}>'
+                    f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}'
+                    f'{_id_attr(elem_t.id)}{space_attr}>'
                     f'{body}</text>')
 
-        case Layer(children=children, name=name, opacity=opacity, transform=transform):
+        case Layer(children=children, name=name, opacity=opacity,
+                   transform=transform, id=eid):
             label = f' inkscape:label="{escape(name)}"' if name else ""
-            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}{_id_attr(eid)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
             return "\n".join(lines)
 
         case Group(children=children, opacity=opacity, transform=transform,
-                   name=name):
-            lines = [f'{indent}<g{_name_attr(name)}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+                   name=name, id=eid):
+            lines = [f'{indent}<g{_id_attr(eid)}{_name_attr(name)}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -1066,6 +1080,9 @@ def _parse_element(node: ET.Element) -> Element | None:
             if _strip_ns(child.tag) == "title" and child.text:
                 name = child.text
                 break
+    # Stable element identity from the standard SVG `id` attribute
+    # (absent -> None). Reading a foreign id is fine. Mirrors `name`.
+    eid = node.get("id") or None
 
     if tag == "line":
         return Line(
@@ -1074,7 +1091,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             x2=_pt(_safe_float(node.get("x2"))),
             y2=_pt(_safe_float(node.get("y2"))),
             stroke=stroke, opacity=opacity, transform=transform,
-            name=name)
+            name=name, id=eid)
 
     if tag == "rect":
         return Rect(
@@ -1085,7 +1102,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name)
+            name=name, id=eid)
 
     if tag == "circle":
         return Circle(
@@ -1093,7 +1110,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             cy=_pt(_safe_float(node.get("cy"))),
             r=_pt(_safe_float(node.get("r"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name)
+            name=name, id=eid)
 
     if tag == "ellipse":
         return Ellipse(
@@ -1102,19 +1119,19 @@ def _parse_element(node: ET.Element) -> Element | None:
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name)
+            name=name, id=eid)
 
     if tag == "polyline":
         pts = _parse_points(node.get("points", ""))
         return Polyline(points=pts, fill=fill, stroke=stroke,
                         opacity=opacity, transform=transform,
-                        name=name)
+                        name=name, id=eid)
 
     if tag == "polygon":
         pts = _parse_points(node.get("points", ""))
         return Polygon(points=pts, fill=fill, stroke=stroke,
                        opacity=opacity, transform=transform,
-                       name=name)
+                       name=name, id=eid)
 
     if tag == "path":
         d = _parse_path_d(node.get("d", ""))
@@ -1122,7 +1139,7 @@ def _parse_element(node: ET.Element) -> Element | None:
         return Path(d=d, fill=fill, stroke=stroke,
                     opacity=opacity, transform=transform,
                     tool_origin=tool_origin,
-                    name=name)
+                    name=name, id=eid)
 
     if tag == "text":
         ff = node.get("font-family", "sans-serif")
@@ -1171,7 +1188,8 @@ def _parse_element(node: ET.Element) -> Element | None:
                     line_height=lh, letter_spacing=ls, xml_lang=lang,
                     aa_mode=aa, rotate=rotate, horizontal_scale=hs,
                     vertical_scale=vs, kerning=kern,
-                    fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+                    fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+                    id=eid)
                 if tp_tspans:
                     # Override the seeded-from-content tspans with the
                     # parsed children so per-range overrides survive.
@@ -1207,7 +1225,8 @@ def _parse_element(node: ET.Element) -> Element | None:
             aa_mode=aa, rotate=rotate, horizontal_scale=hs,
             vertical_scale=vs, kerning=kern,
             width=tw, height=th,
-            fill=fill, stroke=stroke, opacity=opacity, transform=transform)
+            fill=fill, stroke=stroke, opacity=opacity, transform=transform,
+            id=eid)
         if tspan_children:
             t = dataclasses.replace(t, tspans=tspan_children)
         return t
@@ -1230,10 +1249,10 @@ def _parse_element(node: ET.Element) -> Element | None:
         label = node.get(f"{{{_INKSCAPE_NS}}}label") or node.get("inkscape:label")
         if group_mode == "layer":
             return Layer(children=tuple(children), name=label or "",
-                         opacity=opacity, transform=transform)
+                         opacity=opacity, transform=transform, id=eid)
         return Group(children=tuple(children),
                      opacity=opacity, transform=transform,
-                     name=name)
+                     name=name, id=eid)
 
     if tag == "title":
         return None  # parent reads as the name
@@ -1541,9 +1560,11 @@ def svg_to_document(svg: str) -> Document:
         if isinstance(elem, Layer):
             layers.append(elem)
         elif isinstance(elem, Group):
-            # Promote top-level groups to layers
+            # Promote top-level groups to layers (id carried over so a
+            # pinned group identity survives the structural promotion).
             layers.append(Layer(children=elem.children, name="",
-                                opacity=elem.opacity, transform=elem.transform))
+                                opacity=elem.opacity, transform=elem.transform,
+                                id=elem.id))
         else:
             # Wrap standalone elements in a default layer
             if not layers or layers[-1].name:
