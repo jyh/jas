@@ -495,6 +495,21 @@ class SvgImportTest(absltest.TestCase):
         self.assertIsInstance(elem, Rect)
         self.assertEqual(elem.id, "rect-42")
 
+    def test_roundtrip_text_family_id(self):
+        """The text family (Text/TextPath) hand-inlines its SVG attributes,
+        so its id needs the same round-trip guard as the shapes — this is
+        the element kind whose id the reference writer once dropped."""
+        doc = Document(layers=(
+            Layer(children=(
+                Text(x=10, y=20, content="Hi", id="text-7"),
+                TextPath(d=(MoveTo(0, 0), LineTo(50, 0)),
+                         content="Hi", id="textpath-7"),
+            )),
+        ))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(doc2.layers[0].children[0].id, "text-7")
+        self.assertEqual(doc2.layers[0].children[1].id, "textpath-7")
+
     def test_roundtrip_layer_id(self):
         """A Layer's id survives the round-trip via the <g> id attribute."""
         doc = Document(layers=(

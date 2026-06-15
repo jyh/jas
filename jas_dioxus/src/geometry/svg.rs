@@ -129,6 +129,28 @@ fn id_attr(id: &Option<String>) -> String {
     }
 }
 
+/// The opacity+transform+id attribute tail shared by the text family
+/// (Text/TextPath) and live elements. These writers hand-inline their many
+/// type-specific attributes, and historically forgot the common ones — Text
+/// dropped both `id` and `transform`, TextPath dropped `id`. Funnelling the
+/// common tail through one helper (mirroring `test_json`'s `common_fields`)
+/// means no future edit to these arms can silently drop one again. Each
+/// sub-helper emits nothing for an unset value, so id-/transform-less elements
+/// stay byte-identical to the pre-helper output and the fixtures remain green.
+///
+/// `name` is intentionally excluded: across all apps the text family and live
+/// elements never emit an `inkscape:label`. The shape writers (line/rect/…) do
+/// emit `name`, but they already inline the full id+name tail correctly and
+/// were never the omission site, so they keep their per-arm calls.
+fn common_attrs_no_name(c: &CommonProps) -> String {
+    format!(
+        "{}{}{}",
+        opacity_attr(c.opacity),
+        transform_attr(&c.transform),
+        id_attr(&c.id),
+    )
+}
+
 fn path_data(commands: &[PathCommand]) -> String {
     let mut parts = Vec::new();
     for cmd in commands {
@@ -351,7 +373,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     rotate_attr, hs_attr, vs_attr, kern_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
-                    opacity_attr(e.common.opacity),
+                    common_attrs_no_name(&e.common),
                     escape_xml(&e.content()),
                 )
             } else {
@@ -369,7 +391,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     rotate_attr, hs_attr, vs_attr, kern_attr,
                     area_attrs,
                     fill_attrs(&e.fill), stroke_attrs(&e.stroke),
-                    opacity_attr(e.common.opacity),
+                    common_attrs_no_name(&e.common),
                     tspan_xml,
                 )
             }
@@ -430,14 +452,14 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 )
             };
             format!(
-                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
+                "{}<text{}{} font-family=\"{}\" font-size=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}><textPath path=\"{}\"{}{}>{}</textPath></text>\n",
                 indent,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 escape_xml(&e.font_family), fmt(px(e.font_size)),
                 fw_attr, fst_attr, td_attr, tt_attr, fv_attr, bs_attr,
                 lh_attr, ls_attr, lang_attr, aa_attr,
                 rotate_attr, hs_attr, vs_attr, kern_attr,
-                opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                common_attrs_no_name(&e.common),
                 path_data(&e.d), offset_attr, space_attr,
                 body,
             )
@@ -476,10 +498,9 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         Element::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
                 let mut lines = vec![format!(
-                    "{}<g data-jas-live=\"compound_shape\"{}{}>",
+                    "{}<g data-jas-live=\"compound_shape\"{}>",
                     indent,
-                    opacity_attr(cs.common.opacity),
-                    transform_attr(&cs.common.transform),
+                    common_attrs_no_name(&cs.common),
                 )];
                 let child_indent = format!("{}  ", indent);
                 for child in &cs.operands {
@@ -3383,12 +3404,15 @@ mod tests {
     #[test]
     fn common_id_round_trips_through_svg() {
         // Element id (stable identity) persists through
-        // document_to_svg → svg_to_document. Tests Group + Rect to
-        // cover both the open/close container writer and the
-        // self-closing shape writer paths — mirrors
-        // common_name_round_trips_through_svg.
+        // document_to_svg → svg_to_document for every element kind whose
+        // SVG writer hand-inlines its attributes: Group + Rect (the
+        // open/close container and self-closing shape paths) AND the text
+        // family (Text/TextPath), whose writers historically omitted id.
+        // The Text case also carries a transform to pin the sibling fix —
+        // the Text writer previously dropped `transform` as well.
         use crate::geometry::element::{
-            CommonProps, GroupElem, RectElem, Color, Fill,
+            CommonProps, GroupElem, RectElem, TextElem, TextPathElem,
+            Color, Fill, Transform, PathCommand,
         };
         let mut rect = RectElem {
             x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
@@ -3403,21 +3427,44 @@ mod tests {
             common: CommonProps::default(),
         };
         group.common.id = Some("group-1".into());
+
+        let mut text = TextElem::from_string(
+            10.0, 20.0, "Hi", "sans-serif", 16.0,
+            "normal", "normal", "none", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        text.common.id = Some("text-1".into());
+        text.common.transform = Some(Transform::translate(5.0, 7.0));
+
+        let mut text_path = TextPathElem::from_string(
+            vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 50.0, y: 0.0 },
+            ],
+            "Hi", 0.0, "sans-serif", 16.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        text_path.common.id = Some("textpath-1".into());
+
         let mut doc = Document::default();
-        doc.layers[0].children_mut().unwrap()
-            .push(std::rc::Rc::new(Element::Group(group)));
+        {
+            let kids = doc.layers[0].children_mut().unwrap();
+            kids.push(std::rc::Rc::new(Element::Group(group)));
+            kids.push(std::rc::Rc::new(Element::Text(text)));
+            kids.push(std::rc::Rc::new(Element::TextPath(text_path)));
+        }
         let svg = document_to_svg(&doc);
-        assert!(
-            svg.contains(r#"id="rect-1""#),
-            "rect id not in SVG: {svg}",
-        );
-        assert!(
-            svg.contains(r#"id="group-1""#),
-            "group id not in SVG: {svg}",
-        );
+        for id in ["rect-1", "group-1", "text-1", "textpath-1"] {
+            assert!(
+                svg.contains(&format!("id=\"{id}\"")),
+                "id {id} not in SVG: {svg}",
+            );
+        }
         let parsed = svg_to_document(&svg);
-        // Layer 0 → Group → Rect.
-        let group_elem = parsed.layers[0].children().unwrap()[0].as_ref();
+        // Layer 0 → [Group → Rect, Text, TextPath].
+        let kids = parsed.layers[0].children().unwrap();
+        let group_elem = kids[0].as_ref();
         assert_eq!(
             group_elem.common().id.as_deref(),
             Some("group-1"),
@@ -3428,6 +3475,22 @@ mod tests {
             rect_elem.common().id.as_deref(),
             Some("rect-1"),
             "round-trip lost rect id",
+        );
+        let text_elem = kids[1].as_ref();
+        assert_eq!(
+            text_elem.common().id.as_deref(),
+            Some("text-1"),
+            "round-trip lost text id",
+        );
+        assert!(
+            text_elem.common().transform.is_some(),
+            "round-trip lost text transform",
+        );
+        let tp_elem = kids[2].as_ref();
+        assert_eq!(
+            tp_elem.common().id.as_deref(),
+            Some("textpath-1"),
+            "round-trip lost textPath id",
         );
     }
 

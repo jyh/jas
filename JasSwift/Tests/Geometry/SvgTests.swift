@@ -536,6 +536,21 @@ private func roundtrip(_ doc: Document) -> Document {
     }
 }
 
+@Test func svgTextFamilyIdRoundTrip() {
+    // The text family (Text/TextPath) hand-inlines its SVG attributes, so
+    // its id needs the same round-trip guard as the shapes and containers.
+    // This is precisely the element kind whose id the reference writer once
+    // dropped, so every app pins it.
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 10, y: 20, content: "Hi", id: "text-id-1")),
+        .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(50, 0)],
+                           content: "Hi", id: "textpath-id-1")),
+    ])])
+    let doc2 = roundtrip(doc)
+    #expect(doc2.layers[0].children[0].id == "text-id-1")
+    #expect(doc2.layers[0].children[1].id == "textpath-id-1")
+}
+
 @Test func svgIdlessOutputUnchanged() {
     // An element with no id must NOT emit any `id="..."` attribute on
     // its own tag, so id-less output stays byte-identical to before
