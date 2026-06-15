@@ -3595,6 +3595,13 @@ mod align_panel_state_tests {
             .collect();
         let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };
         st.tabs[st.active_tab].model.set_document(doc);
+        // These tests pass screen coordinates equal to document
+        // coordinates, so pin an identity view transform. set_document
+        // otherwise applies fit-to-artboard centering (a non-zero
+        // view_offset), which would shift the hit-test off the rects.
+        st.tabs[st.active_tab].model.zoom_level = 1.0;
+        st.tabs[st.active_tab].model.view_offset_x = 0.0;
+        st.tabs[st.active_tab].model.view_offset_y = 0.0;
         st
     }
 
