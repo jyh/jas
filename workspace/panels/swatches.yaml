@@ -164,6 +164,12 @@ menu:
   - label: "Open Swatch Library"
     type: submenu
     dynamic: true
+    # The native menu view special-cases this command to render the
+    # dynamic library flyout (one row per workspace/swatches/*.json).
+    # An explicit action lets the generic menu builder emit the same
+    # Action the renderer keys on, instead of the native code
+    # hardcoding the entry.
+    action: open_swatch_library
     description: >
       Submenu listing all available swatch libraries discovered from
       workspace/swatches/*.json files. Selecting a library adds it to
@@ -179,6 +185,13 @@ menu:
       workspace/swatches/ as a JSON file. The file contains the library
       name, description, and the full swatch array (name, color, color
       mode, color type, global flag for each swatch).
+
+  - separator
+
+  - label: "Close Swatches"
+    action: close_panel
+    params: { panel: swatches }
+    description: "Close the Swatches panel"
 
 content:
   type: container

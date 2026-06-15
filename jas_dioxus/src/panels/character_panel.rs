@@ -11,20 +11,9 @@ use super::panel_menu::PanelMenuItem;
 
 /// Menu items for the Character panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Toggle { label: "Show Snap to Glyph Options", command: "toggle_snap_to_glyph_visible" },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Toggle { label: "All Caps", command: "toggle_all_caps" },
-        PanelMenuItem::Toggle { label: "Small Caps", command: "toggle_small_caps" },
-        PanelMenuItem::Toggle { label: "Superscript", command: "toggle_superscript" },
-        PanelMenuItem::Toggle { label: "Subscript", command: "toggle_subscript" },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Close Character",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/character.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("character_panel_content")
 }
 
 /// Dispatch a menu command for the Character panel. The toggle

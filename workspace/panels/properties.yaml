@@ -7,3 +7,9 @@ description: >
   rotation angle, shear, opacity slider, and blend mode dropdown.
   When multiple objects are selected, shows shared values or blank
   for mixed values. All fields are editable and apply immediately.
+
+menu:
+  - label: "Close Object properties"
+    action: close_panel
+    params: { panel: properties }
+    description: "Close the Object properties panel"

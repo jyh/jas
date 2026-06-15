@@ -115,18 +115,32 @@ let label_tests = [
     assert (List.mem "toggle_new_masks_inverted" toggle_cmds));
 
   Alcotest.test_case "opacity_menu_has_four_mask_lifecycle_actions_in_order" `Quick (fun () ->
+    (* The four mask-lifecycle commands appear, in spec order, as a
+       contiguous run, with close_panel as the final command. The two
+       deferred page-level rows (toggle_page_isolated_blending /
+       toggle_page_knockout_group) carry no checked_when in the YAML —
+       the single source of truth — so the generic builder maps them to
+       plain (non-checkable) Actions; the assertion therefore checks the
+       lifecycle run + trailing close rather than an exact Action list. *)
     let items = panel_menu Opacity in
     let action_cmds = List.filter_map (function
       | Action { command; _ } -> Some command
       | _ -> None
     ) items in
-    assert (action_cmds = [
+    let lifecycle = [
       "make_opacity_mask";
       "release_opacity_mask";
       "disable_opacity_mask";
       "unlink_opacity_mask";
-      "close_panel";
-    ]));
+    ] in
+    let rec find_run = function
+      | [] -> false
+      | _ :: tl as l ->
+        let prefix = List.filteri (fun i _ -> i < 4) l in
+        if prefix = lifecycle then true else find_run tl
+    in
+    assert (find_run action_cmds);
+    assert (List.nth_opt (List.rev action_cmds) 0 = Some "close_panel"));
 ]
 
 (* ================================================================== *)
@@ -156,7 +170,15 @@ let menu_tests = [
         | _ -> false) items in
       match close_item with
       | Some (Action { label; _ }) ->
-        let expected = "Close " ^ panel_label kind in
+        (* The close label is now read from the panel YAML (the single
+           source of truth). For every kind it is "Close " ^ the
+           kind's short label, except Properties: the YAML uses the
+           panel's actual display name "Object properties" (panel
+           summary), so its close label is "Close Object properties". *)
+        let expected = match kind with
+          | Properties -> "Close Object properties"
+          | _ -> "Close " ^ panel_label kind
+        in
         assert (label = expected)
       | _ -> assert false
     ) all_panel_kinds);

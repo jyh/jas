@@ -420,9 +420,18 @@ public struct PanelGroupView: View {
         // (pushing the dock chevron off the edge). Build it from a
         // plain Button that pops an NSMenu programmatically; that
         // gives full control over color and width.
+        let capturedKind = activeKind
+        let capturedLabelModel = model
         return HamburgerMenuButton(
             items: items,
             color: theme.text,
+            // The YAML carries `{{if …}}` label expressions for a few
+            // rows (e.g. Layers' Hide/Show All Layers); resolve those at
+            // render time, falling back to the static YAML label.
+            displayLabel: { cmd, label in
+                panelDynamicLabel(capturedKind, cmd: cmd,
+                                  model: capturedLabelModel) ?? label
+            },
             isChecked: { cmd in
                 panelIsChecked(activeKind, cmd: cmd,
                                layout: workspaceLayout, model: model)
@@ -443,6 +452,9 @@ public struct PanelGroupView: View {
 private struct HamburgerMenuButton: View {
     let items: [PanelMenuItem]
     let color: NSColor
+    /// Resolve an item's display label from its (command, YAML label).
+    /// Lets dynamic `{{if …}}` labels render their resolved text.
+    let displayLabel: (String, String) -> String
     let isChecked: (String) -> Bool
     let isEnabled: (String) -> Bool
     let onSelect: (String) -> Void
@@ -469,14 +481,17 @@ private struct HamburgerMenuButton: View {
         for item in items {
             switch item {
             case .action(let label, let command, _):
-                menu.addItem(buildItem(label: label, command: command,
+                menu.addItem(buildItem(label: displayLabel(command, label),
+                                       command: command,
                                        checked: false, enabled: isEnabled(command)))
             case .toggle(let label, let command):
-                menu.addItem(buildItem(label: label, command: command,
+                menu.addItem(buildItem(label: displayLabel(command, label),
+                                       command: command,
                                        checked: isChecked(command),
                                        enabled: isEnabled(command)))
             case .radio(let label, let command, _):
-                menu.addItem(buildItem(label: label, command: command,
+                menu.addItem(buildItem(label: displayLabel(command, label),
+                                       command: command,
                                        checked: isChecked(command),
                                        enabled: isEnabled(command)))
             case .separator:

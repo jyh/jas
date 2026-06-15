@@ -7,17 +7,11 @@
 /// corresponding paragraph attributes from the selection.
 
 public enum ParagraphPanel {
+    /// Source of truth is workspace/panels/paragraph.yaml's `menu:`
+    /// block (review #15); the generic reader builds the items from the
+    /// bundle.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .toggle(label: "Hanging Punctuation", command: "toggle_hanging_punctuation"),
-            .separator,
-            .action(label: "Justification…", command: "open_paragraph_justification"),
-            .action(label: "Hyphenation…", command: "open_paragraph_hyphenation"),
-            .separator,
-            .action(label: "Reset Panel", command: "reset_paragraph_panel"),
-            .separator,
-            .action(label: "Close Paragraph", command: "close_panel"),
-        ]
+        menuItemsFromYaml("paragraph_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr,
