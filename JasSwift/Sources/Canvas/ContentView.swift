@@ -107,9 +107,18 @@ public class WorkspaceState: ObservableObject {
     /// the list_push handler triggers. Mirrors Python jas
     /// _setup_recent_colors_bridge.
     private static var _recentColorsBridgeInstalled = false
+    private static let _recentColorsBridgeLock = NSLock()
     package static func installRecentColorsBridge() {
-        if _recentColorsBridgeInstalled { return }
+        // Atomic check-then-set: parallel callers (e.g. concurrent
+        // tests) must not both pass the guard and register duplicate
+        // listeners. The check and the flip happen under one lock.
+        _recentColorsBridgeLock.lock()
+        if _recentColorsBridgeInstalled {
+            _recentColorsBridgeLock.unlock()
+            return
+        }
         _recentColorsBridgeInstalled = true
+        _recentColorsBridgeLock.unlock()
         ColorPanel.addRecentColorsListener { model, _ in
             for pid in ["color_panel_content", "swatches_panel_content"] {
                 if model.stateStore.getPanel(pid, "recent_colors") != nil {
