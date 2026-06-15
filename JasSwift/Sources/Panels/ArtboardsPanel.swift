@@ -8,27 +8,13 @@
 /// `dispatch` function here only handles `close_panel`.
 
 public enum ArtboardsPanel {
-    /// Menu entries match `workspace/panels/artboards.yaml §menu` and
-    /// `transcripts/ARTBOARDS.md §Menu` verbatim.
+    /// Source of truth is workspace/panels/artboards.yaml's `menu:`
+    /// block (review #15); the generic reader builds the items from the
+    /// bundle. Phase-1-deferred entries (Convert to Artboards, Artboard
+    /// Options, Rearrange) are grayed by the YAML action catalog's
+    /// `enabled_when: false`.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .action(label: "New Artboard",          command: "new_artboard"),
-            .action(label: "Duplicate Artboards",   command: "duplicate_artboards"),
-            .action(label: "Delete Artboards",      command: "delete_artboards"),
-            .action(label: "Rename",                command: "rename_artboard"),
-            .separator,
-            .action(label: "Delete Empty Artboards", command: "delete_empty_artboards"),
-            .separator,
-            // Phase-1 deferred per ARTBOARDS.md §Phase-1 deferrals —
-            // the YAML action catalog grays these with enabled_when: false.
-            .action(label: "Convert to Artboards",  command: "convert_to_artboards"),
-            .action(label: "Artboard Options...",   command: "open_artboard_options"),
-            .action(label: "Rearrange...",          command: "rearrange_artboards"),
-            .separator,
-            .action(label: "Reset Panel",           command: "reset_artboards_panel"),
-            .separator,
-            .action(label: "Close Artboards",       command: "close_panel"),
-        ]
+        menuItemsFromYaml("artboards_panel_content")
     }
 
     /// Dispatch a menu command. All artboard mutations route through

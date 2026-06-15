@@ -5,18 +5,29 @@
 open Yojson.Safe.Util
 open Jas
 
-(* Dune runs tests with CWD at the dune file's directory. Try a
-   few relative paths so the test works both in-tree and from a
-   build copy. *)
-let fixture_path =
-  let candidates = [
-    "../../test_fixtures/algorithms/align.json";       (* jas_ocaml/test/ *)
-    "../../../test_fixtures/algorithms/align.json";    (* jas_ocaml/test/algorithms/ *)
-    "../test_fixtures/algorithms/align.json";          (* jas_ocaml/ *)
-  ] in
-  match List.find_opt Sys.file_exists candidates with
-  | Some p -> p
-  | None -> "../../../test_fixtures/algorithms/align.json"
+(* Walk up from the current working directory until a [test_fixtures]
+   sibling exists. [dune exec] runs from the project root while
+   [dune runtest] runs from the test's build artefact dir
+   ([_build/default/test/algorithms]) — the exact depth differs, so
+   searching upward is the robust option. (A fixed relative path
+   breaks under [dune runtest] because the fixtures live at the
+   monorepo root, outside [_build].) *)
+let fixtures_dir =
+  let rec search dir depth =
+    if depth > 8 then None
+    else
+      let candidate = Filename.concat dir "test_fixtures" in
+      if Sys.file_exists candidate then Some candidate
+      else
+        let parent = Filename.dirname dir in
+        if parent = dir then None
+        else search parent (depth + 1)
+  in
+  match search (Sys.getcwd ()) 0 with
+  | Some d -> d
+  | None -> failwith "test_fixtures not found on path upward from cwd"
+
+let fixture_path = Filename.concat fixtures_dir "algorithms/align.json"
 
 let rect_of_json j =
   let to_f = function

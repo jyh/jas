@@ -7,14 +7,10 @@
 /// truth for what the buttons do.
 
 public enum AlignPanel {
+    /// Source of truth is workspace/panels/align.yaml's `menu:` block
+    /// (review #15); the generic reader builds the items from the bundle.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .toggle(label: "Use Preview Bounds", command: "toggle_use_preview_bounds"),
-            .separator,
-            .action(label: "Reset Panel", command: "reset_align_panel"),
-            .separator,
-            .action(label: "Close Align", command: "close_panel"),
-        ]
+        menuItemsFromYaml("align_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {

@@ -153,6 +153,13 @@ menu:
       status: pending_renderer. Enables once the renderer supports
       knockout group compositing for the document root group.
 
+  - separator
+
+  - label: "Close Opacity"
+    action: close_panel
+    params: { panel: opacity }
+    description: "Close the Opacity panel"
+
 content:
   type: container
   id: op_content

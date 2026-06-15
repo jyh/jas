@@ -329,19 +329,23 @@ import Testing
 
 @Test func setPanelStateFiresNotifyHook() {
     let store = StateStore()
-    store.initPanel("character_panel", defaults: ["font_family": "sans-serif"])
+    store.initPanel("character_panel_content", defaults: ["font_family": "sans-serif"])
     var notified: [String] = []
     let hook: PlatformEffect = { panelIdAny, _, _ in
         if let pid = panelIdAny as? String { notified.append(pid) }
         return nil
     }
+    // set_panel_state names the panel by its short kind ("character");
+    // runEffects resolves it to the content id "character_panel_content"
+    // (the bucket panel.<key> reads from), matching how real YAML
+    // actions in workspace.json name panels (swatches, stroke, ...).
     runEffects(
-        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character_panel"]]],
+        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character"]]],
         ctx: [:], store: store,
         platformEffects: ["notify_panel_state_changed": hook]
     )
-    #expect(store.getPanel("character_panel", "font_family") as? String == "Arial")
-    #expect(notified == ["character_panel"])
+    #expect(store.getPanel("character_panel_content", "font_family") as? String == "Arial")
+    #expect(notified == ["character_panel_content"])
 }
 
 @Test func setPanelXFiresNotifyHookForActivePanel() {
@@ -365,13 +369,14 @@ import Testing
 
 @Test func notifyHookSilentWhenUnregistered() {
     let store = StateStore()
-    store.initPanel("character_panel", defaults: ["font_family": "sans-serif"])
-    // Should not crash or error when no hook is registered.
+    store.initPanel("character_panel_content", defaults: ["font_family": "sans-serif"])
+    // Should not crash or error when no hook is registered. Panel named
+    // by short kind ("character") → content id "character_panel_content".
     runEffects(
-        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character_panel"]]],
+        [["set_panel_state": ["key": "font_family", "value": "\"Arial\"", "panel": "character"]]],
         ctx: [:], store: store
     )
-    #expect(store.getPanel("character_panel", "font_family") as? String == "Arial")
+    #expect(store.getPanel("character_panel_content", "font_family") as? String == "Arial")
 }
 
 // MARK: - Scope-routed set targets (Phase 1 of Swift YAML tool runtime)
