@@ -6,13 +6,9 @@ use super::panel_menu::PanelMenuItem;
 
 /// Menu items for the Properties panel.
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Action {
-            label: "Close Object properties",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/properties.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("properties_panel_content")
 }
 
 /// Dispatch a menu command for the Properties panel.

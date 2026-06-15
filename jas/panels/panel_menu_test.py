@@ -5,10 +5,91 @@ from workspace.workspace_layout import (
 )
 from panels.panel_menu import (
     panel_label, panel_menu, panel_dispatch, panel_is_checked,
-    PanelMenuItemKind,
+    PanelMenuItemKind, menu_items_from_yaml,
     push_recent_color, add_recent_colors_listener,
     _recent_colors_listeners,
 )
+
+
+# ---------------------------------------------------------------------------
+# Generic YAML-driven menu builder (review #15)
+# ---------------------------------------------------------------------------
+# These mirror the Rust reference tests in jas_dioxus panel_menu.rs: the
+# builder reads each panel's `menu:` array from the compiled bundle and
+# maps separator / checked->toggle / shared-action->radio / else->action,
+# with the dynamic library submenu surfaced as a command-keyed action.
+
+
+def test_menu_items_from_yaml_reads_boolean_panel():
+    # Reads workspace/panels/boolean.yaml's menu (7 actions + 3 separators).
+    items = menu_items_from_yaml("boolean_panel_content")
+    cmds = [i.command for i in items if i.kind == PanelMenuItemKind.ACTION]
+    assert "make_compound_shape" in cmds
+    assert "close_panel" in cmds
+    seps = sum(1 for i in items if i.kind == PanelMenuItemKind.SEPARATOR)
+    assert seps == 3
+    assert len(items) == 10
+
+
+def test_color_radio_members_fold_params_into_command():
+    # The Color panel's five mode rows all share action
+    # `set_color_panel_mode`, so the builder treats them as a radio group
+    # and folds each params.mode value into the command, keeping them
+    # distinguishable for the no-params menu dispatch.
+    items = menu_items_from_yaml("color_panel_content")
+    radios = [(i.command, i.group) for i in items
+              if i.kind == PanelMenuItemKind.RADIO]
+    assert ("set_color_panel_mode:grayscale", "set_color_panel_mode") in radios
+    assert ("set_color_panel_mode:rgb", "set_color_panel_mode") in radios
+    assert ("set_color_panel_mode:web_safe_rgb", "set_color_panel_mode") in radios
+    # Plain actions keep their action verbatim (no param folding).
+    action_cmds = [i.command for i in items if i.kind == PanelMenuItemKind.ACTION]
+    assert "invert_active_color" in action_cmds
+    # close_panel keeps its action even though the YAML carries
+    # params: { panel: color }.
+    assert "close_panel" in action_cmds
+
+
+def test_swatches_submenu_becomes_open_library_action():
+    # The dynamic "Open Swatch Library" submenu entry carries an explicit
+    # action: open_swatch_library in the YAML so the menu view's submenu
+    # host (keyed on that command) still fires — no native literal.
+    items = menu_items_from_yaml("swatches_panel_content")
+    action_cmds = [i.command for i in items if i.kind == PanelMenuItemKind.ACTION]
+    assert "open_swatch_library" in action_cmds
+    # Thumbnail-size rows are a radio group with folded params.
+    radio_cmds = [i.command for i in items if i.kind == PanelMenuItemKind.RADIO]
+    assert "set_swatch_thumbnail_size:small" in radio_cmds
+    assert "set_swatch_thumbnail_size:large" in radio_cmds
+
+
+def test_standalone_checkbox_is_toggle_not_radio():
+    # The Align panel has a single toggle_use_preview_bounds checkbox; its
+    # action does not recur, so it is a Toggle, not a Radio.
+    items = menu_items_from_yaml("align_panel_content")
+    toggles = [i.command for i in items if i.kind == PanelMenuItemKind.TOGGLE]
+    assert "toggle_use_preview_bounds" in toggles
+    radios = [i.command for i in items if i.kind == PanelMenuItemKind.RADIO]
+    assert "toggle_use_preview_bounds" not in radios
+
+
+def test_character_checked_entries_are_toggles():
+    # The Character panel uses the `checked:` form (not `checked_when:`);
+    # each action is one-off so the builder maps them to standalone toggles.
+    items = menu_items_from_yaml("character_panel_content")
+    toggles = [i.command for i in items if i.kind == PanelMenuItemKind.TOGGLE]
+    for cmd in ("toggle_snap_to_glyph_visible", "toggle_all_caps",
+                "toggle_small_caps", "toggle_superscript", "toggle_subscript"):
+        assert cmd in toggles
+
+
+def test_disabled_placeholder_is_action():
+    # The Color panel's "Create New Swatch..." row has no action and is
+    # gated off (disabled: true); the builder surfaces it as an Action with
+    # an empty command (a disabled placeholder).
+    items = menu_items_from_yaml("color_panel_content")
+    labels = [i.label for i in items if i.kind == PanelMenuItemKind.ACTION]
+    assert "Create New Swatch..." in labels
 
 
 def test_push_recent_color_basic():
@@ -131,6 +212,12 @@ def test_opacity_menu_has_four_panel_local_toggles():
 
 
 def test_opacity_menu_mask_lifecycle_actions_in_order():
+    # Menu data is now read from workspace/panels/opacity.yaml (the source
+    # of truth). The YAML carries two page-level rows
+    # (toggle_page_isolated_blending / toggle_page_knockout_group) that the
+    # old hand-written native copy dropped; they have no checked_when, so
+    # the builder maps them to plain actions. They sit between the four
+    # mask-lifecycle actions and the closing Close Opacity action.
     items = panel_menu(PanelKind.OPACITY)
     action_cmds = [it.command for it in items if it.kind == PanelMenuItemKind.ACTION]
     assert action_cmds == [
@@ -138,6 +225,8 @@ def test_opacity_menu_mask_lifecycle_actions_in_order():
         "release_opacity_mask",
         "disable_opacity_mask",
         "unlink_opacity_mask",
+        "toggle_page_isolated_blending",
+        "toggle_page_knockout_group",
         "close_panel",
     ]
 
@@ -177,6 +266,12 @@ def test_every_panel_has_close_action():
 
 
 def test_close_label_matches_panel_name():
+    # Close labels now come from each panel YAML's menu (the source of
+    # truth). Most read "Close <PanelName>", but the labels are owned by
+    # the YAML — e.g. the Properties panel's summary is "Object properties"
+    # so its close row reads "Close Object properties". Assert the generic
+    # invariant the menu actually guarantees: every panel exposes a
+    # close_panel action whose label starts with "Close".
     for kind in ALL_PANEL_KINDS:
         items = panel_menu(kind)
         close_item = next(
@@ -184,7 +279,9 @@ def test_close_label_matches_panel_name():
             None,
         )
         assert close_item is not None
-        assert close_item.label == f"Close {panel_label(kind)}"
+        assert close_item.label.startswith("Close "), (
+            f"{kind} close label {close_item.label!r} should start with 'Close '"
+        )
 
 
 def test_dispatch_close_removes_panel():

@@ -18,17 +18,12 @@
 ///   `applyCharacterPanelToSelection`.
 
 public enum CharacterPanel {
+    /// Source of truth is workspace/panels/character.yaml's `menu:`
+    /// block (review #15); the generic reader builds the items from the
+    /// bundle. Each `checked:` toggle maps to a panel-state bool the
+    /// dispatcher flips (and `isCheckedWithModel` reads back).
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .toggle(label: "Show Snap to Glyph Options", command: "toggle_snap_to_glyph_visible"),
-            .separator,
-            .toggle(label: "All Caps", command: "toggle_all_caps"),
-            .toggle(label: "Small Caps", command: "toggle_small_caps"),
-            .toggle(label: "Superscript", command: "toggle_superscript"),
-            .toggle(label: "Subscript", command: "toggle_subscript"),
-            .separator,
-            .action(label: "Close Character", command: "close_panel"),
-        ]
+        menuItemsFromYaml("character_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr,

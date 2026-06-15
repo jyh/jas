@@ -12,19 +12,9 @@ use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Action {
-            label: "Reset",
-            command: "reset_magic_wand_panel",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Close Magic Wand",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/magic_wand.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("magic_wand_panel_content")
 }
 
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {

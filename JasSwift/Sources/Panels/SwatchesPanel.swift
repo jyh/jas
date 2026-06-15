@@ -11,46 +11,44 @@ import Foundation
 /// the wiring contained until that refactor lands.
 
 public enum SwatchesPanel {
+    /// Source of truth is workspace/panels/swatches.yaml's `menu:` block
+    /// (review #15); the generic reader builds the items from the bundle.
+    ///
+    /// The three thumbnail-size rows share `action:
+    /// set_swatch_thumbnail_size`, so the builder folds each `params.size`
+    /// into the command (`set_swatch_thumbnail_size:small`, …) — `dispatch`
+    /// / `isCheckedWithModel` split that suffix back off. The "Open Swatch
+    /// Library" dynamic submenu carries an explicit `action:
+    /// open_swatch_library` in the YAML; the menu view renders it as a
+    /// plain item whose dispatch is the placeholder below until the
+    /// library-load plumbing lands.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .action(label: "New Swatch", command: "new_swatch"),
-            .action(label: "Duplicate Swatch", command: "duplicate_swatch"),
-            .action(label: "Delete Swatch", command: "delete_swatch"),
-            .separator,
-            .action(label: "Select All Unused", command: "select_all_unused_swatches"),
-            .action(label: "Add Used Colors", command: "add_used_colors"),
-            .separator,
-            .action(label: "Sort by Name", command: "sort_swatches_by_name"),
-            .separator,
-            .radio(label: "Small Thumbnail View", command: "thumb_size_small", group: "thumbnail_size"),
-            .radio(label: "Medium Thumbnail View", command: "thumb_size_medium", group: "thumbnail_size"),
-            .radio(label: "Large Thumbnail View", command: "thumb_size_large", group: "thumbnail_size"),
-            .separator,
-            .action(label: "Swatch Options...", command: "open_swatch_options_menu"),
-            .separator,
-            .action(label: "Save Swatch Library", command: "save_swatch_library"),
-            .separator,
-            .action(label: "Close Swatches", command: "close_panel"),
-        ]
+        menuItemsFromYaml("swatches_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         if cmd == "close_panel" { layout.closePanel(addr); return }
         guard let model = model else { return }
+        // Thumbnail-size radio arrives param-folded from the generic menu
+        // builder (`set_swatch_thumbnail_size:small`); split the value
+        // back off and run the underlying YAML action.
+        if let size = strip(cmd, prefix: "set_swatch_thumbnail_size:") {
+            runYamlActionByName("set_swatch_thumbnail_size", params: ["size": size], model: model)
+            return
+        }
         switch cmd {
-        case "thumb_size_small":
-            runYamlActionByName("set_swatch_thumbnail_size", params: ["size": "small"], model: model)
-        case "thumb_size_medium":
-            runYamlActionByName("set_swatch_thumbnail_size", params: ["size": "medium"], model: model)
-        case "thumb_size_large":
-            runYamlActionByName("set_swatch_thumbnail_size", params: ["size": "large"], model: model)
-        case "open_swatch_options_menu":
-            // The menu variant edits the first selected swatch.
-            // Without a selection it would be a no-op in the YAML
-            // (`enabled_when: panel.selected_swatches.length > 0`),
-            // so we just pass mode=edit and let the dialog read the
-            // selection from panel state.
+        case "open_swatch_options":
+            // The menu variant edits the first selected swatch. Without a
+            // selection it is a no-op in the YAML
+            // (`enabled_when: panel.selected_swatches.length > 0`), so we
+            // pass mode=edit and let the dialog read the selection from
+            // panel state.
             runYamlActionByName("open_swatch_options", params: ["mode": "edit"], model: model)
+        case "open_swatch_library":
+            // Dynamic library submenu host — placeholder until the
+            // library-load plumbing lands (mirrors the Rust reference's
+            // open_swatch_library no-op).
+            break
         default:
             runYamlActionByName(cmd, params: [:], model: model)
         }
@@ -66,14 +64,16 @@ public enum SwatchesPanel {
     /// model-less ``isChecked`` is kept for legacy call sites.
     public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
         guard let model = model else { return false }
-        let store = model.stateStore
-        let size = (store.getPanel("swatches_panel_content", "thumbnail_size") as? String) ?? "small"
-        switch cmd {
-        case "thumb_size_small": return size == "small"
-        case "thumb_size_medium": return size == "medium"
-        case "thumb_size_large": return size == "large"
-        default: return false
+        guard let size = strip(cmd, prefix: "set_swatch_thumbnail_size:") else {
+            return false
         }
+        let store = model.stateStore
+        let current = (store.getPanel("swatches_panel_content", "thumbnail_size") as? String) ?? "small"
+        return current == size
+    }
+
+    private static func strip(_ s: String, prefix: String) -> String? {
+        s.hasPrefix(prefix) ? String(s.dropFirst(prefix.count)) : nil
     }
 }
 

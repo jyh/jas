@@ -12,24 +12,9 @@ use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Toggle {
-            label: "Use Preview Bounds",
-            command: "toggle_use_preview_bounds",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Reset Panel",
-            command: "reset_align_panel",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Close Align",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/align.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("align_panel_content")
 }
 
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {

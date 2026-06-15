@@ -63,23 +63,36 @@ public enum ColorPanelMode: String {
         }
     }
 
+    /// The menu command for this mode, in the YAML param-folded form
+    /// the generic menu builder produces: the shared `set_color_panel_mode`
+    /// action with the mode value appended (`set_color_panel_mode:rgb`).
+    /// The five mode rows share one YAML action, so the value suffix is
+    /// what distinguishes them. Value spelling is snake_case to match the
+    /// YAML `params.mode` enum (`web_safe_rgb`).
     public var command: String {
+        let value: String
         switch self {
-        case .grayscale: return "mode_grayscale"
-        case .hsb: return "mode_hsb"
-        case .rgb: return "mode_rgb"
-        case .cmyk: return "mode_cmyk"
-        case .webSafeRgb: return "mode_web_safe_rgb"
+        case .grayscale: value = "grayscale"
+        case .hsb: value = "hsb"
+        case .rgb: value = "rgb"
+        case .cmyk: value = "cmyk"
+        case .webSafeRgb: value = "web_safe_rgb"
         }
+        return "set_color_panel_mode:" + value
     }
 
+    /// Recover the mode a menu command targets. Mode rows arrive
+    /// param-folded from the generic builder as
+    /// `set_color_panel_mode:<value>`; split the value back off.
     public static func fromCommand(_ cmd: String) -> ColorPanelMode? {
-        switch cmd {
-        case "mode_grayscale": return .grayscale
-        case "mode_hsb": return .hsb
-        case "mode_rgb": return .rgb
-        case "mode_cmyk": return .cmyk
-        case "mode_web_safe_rgb": return .webSafeRgb
+        let prefix = "set_color_panel_mode:"
+        guard cmd.hasPrefix(prefix) else { return nil }
+        switch String(cmd.dropFirst(prefix.count)) {
+        case "grayscale": return .grayscale
+        case "hsb": return .hsb
+        case "rgb": return .rgb
+        case "cmyk": return .cmyk
+        case "web_safe_rgb": return .webSafeRgb
         default: return nil
         }
     }
