@@ -220,9 +220,9 @@ import Testing
     model.document = Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])])
-    model.stateStore.initPanel("character_panel",
+    model.stateStore.initPanel("character_panel_content",
                                defaults: ["font_family": "Arial", "font_size": 12.0])
-    notifyPanelStateChanged("character_panel", store: model.stateStore, model: model)
+    notifyPanelStateChanged("character_panel_content", store: model.stateStore, model: model)
     if case .text(let t) = model.document.getElement([0, 0]) {
         #expect(t.fontFamily == "Arial")
     } else {
@@ -261,7 +261,7 @@ import Testing
                               selection: [ElementSelection(path: [0, 0])])
     // Auto / "" / "0" all produce an empty element attribute.
     for mode in ["Auto", "", "0"] {
-        model.stateStore.initPanel("character_panel", defaults: ["kerning": mode])
+        model.stateStore.initPanel("character_panel_content", defaults: ["kerning": mode])
         applyCharacterPanelToSelection(store: model.stateStore,
                                         controller: Controller(model: model))
         if case .text(let t) = model.document.getElement([0, 0]) {
@@ -269,14 +269,14 @@ import Testing
         }
     }
     // Named mode passes through verbatim.
-    model.stateStore.initPanel("character_panel", defaults: ["kerning": "Optical"])
+    model.stateStore.initPanel("character_panel_content", defaults: ["kerning": "Optical"])
     applyCharacterPanelToSelection(store: model.stateStore,
                                     controller: Controller(model: model))
     if case .text(let t) = model.document.getElement([0, 0]) {
         #expect(t.kerning == "Optical")
     }
     // Numeric string converts to "{N}em".
-    model.stateStore.initPanel("character_panel", defaults: ["kerning": "25"])
+    model.stateStore.initPanel("character_panel_content", defaults: ["kerning": "25"])
     applyCharacterPanelToSelection(store: model.stateStore,
                                     controller: Controller(model: model))
     if case .text(let t) = model.document.getElement([0, 0]) {
@@ -332,7 +332,7 @@ import Testing
     model.document = Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])])
-    model.stateStore.initPanel("character_panel", defaults: [
+    model.stateStore.initPanel("character_panel_content", defaults: [
         "font_family": "Arial",
         "font_size": 18.0,
         "all_caps": true,
@@ -431,7 +431,7 @@ import Testing
                                    content: "hello", insertion: 3)
     model.currentEditSession = session
 
-    model.stateStore.initPanel("character_panel", defaults: [
+    model.stateStore.initPanel("character_panel_content", defaults: [
         "font_family": "sans-serif",
         "font_size": 16.0,
         "style_name": "Bold",
@@ -467,7 +467,7 @@ import Testing
     session.setInsertion(4, extend: true)  // selection [1, 4) → "ell"
     model.currentEditSession = session
 
-    model.stateStore.initPanel("character_panel", defaults: [
+    model.stateStore.initPanel("character_panel_content", defaults: [
         "font_family": "sans-serif",
         "font_size": 16.0,
         "style_name": "Bold",

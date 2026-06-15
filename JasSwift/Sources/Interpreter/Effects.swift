@@ -1075,11 +1075,15 @@ func buildPanelFullOverrides(_ panel: [String: Any]) -> Tspan {
     // to the right direction. Numeric baseline_shift uses the same
     // convention (positive = up at the element level, mapped through
     // the same path).
+    // Full overrides always carry a concrete baseline_shift when
+    // super/sub is off (mirrors Rust build_panel_full_overrides, which
+    // writes Some(cp.baseline_shift) unconditionally in that case);
+    // a 0.0 value is meaningful — it explicitly clears any prior shift
+    // on the range rather than leaving it untouched.
     let baselineShift: Double? = {
         if superOn { return -fontSize * 0.35 }
         if subOn { return fontSize * 0.20 }
-        if bsNum != 0.0 { return -bsNum }
-        return nil
+        return -bsNum
     }()
     // Anti-aliasing → jas_aa_mode. "Sharp" / empty are the defaults.
     let aaRaw = (panel["anti_aliasing"] as? String) ?? "Sharp"
@@ -1389,12 +1393,13 @@ private func _parseEmValue(_ s: String) -> Double? {
 }
 
 func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
-    // Caret-only edit session: prime the pending override so the
-    // next typed character picks up the new attrs, then fall through
-    // to the element-level apply so the existing text in the element
-    // updates immediately. Without the fall-through, a panel toggle
-    // (All Caps, font-family, etc.) appeared to do nothing until the
-    // user typed another character.
+    // Caret-only edit session: prime the session's pending override so
+    // the next-typed character picks up the new attrs, then return
+    // WITHOUT rewriting the element. A bare caret has no character range
+    // to restyle, so the panel click is purely "set the next-typed
+    // style"; the existing text in the element is left untouched.
+    // Mirrors Rust apply_character_panel_to_selection's caret route,
+    // which returns early after priming the pending override.
     if let session = controller.model.currentEditSession,
        !session.hasSelection {
         let p = store.getPanelState("character_panel_content")
@@ -1406,6 +1411,7 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
             if let tpl = template {
                 session.setPendingOverride(tpl)
             }
+            return
         }
     }
 
@@ -2344,20 +2350,21 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
             store.set("align_key_object_path", marker)
             store.setPanel(pid, "key_object_path", marker)
         }
-        // Bump panelStateVersion so SwiftUI re-evaluates the align
-        // button bind.disabled expressions — without this they
-        // remained "disabled" until the next unrelated re-render.
-        model.panelStateVersion &+= 1
-        return true
+    } else {
+        // Click missed every currently-selected element: clear the
+        // designation. Mirrors the Rust try_designate_align_key_object
+        // `None` arm, which sets key_object_path = None and consumes
+        // the click while in key-object mode.
+        store.set("align_key_object_path", NSNull())
+        store.setPanel(pid, "key_object_path", NSNull())
     }
-    // Click missed every currently-selected element: don't consume —
-    // let the canvas tool handle it (marquee, click-to-select, etc).
-    // syncAlignKeyObjectFromSelection runs after the resulting
-    // selection change and clears the key if it's no longer in the
-    // selection, which gives the user the same spec-required "key
-    // gets cleared when no longer selected" guarantee without
-    // freezing the selection arrow in key-object mode.
-    return false
+    // Bump panelStateVersion so SwiftUI re-evaluates the align
+    // button bind.disabled expressions — without this they
+    // remained "disabled" until the next unrelated re-render.
+    model.panelStateVersion &+= 1
+    // While in key-object mode the intercept always consumes the click
+    // (matches Rust: returns true once align_to == key_object).
+    return true
 }
 
 /// Clear the key-object path if the previously-designated key is

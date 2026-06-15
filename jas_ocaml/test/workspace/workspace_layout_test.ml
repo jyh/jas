@@ -535,11 +535,26 @@ let close_show_panels = [
     let l = test_layout () in
     assert (l.hidden_panels = []));
 
-  Alcotest.test_case "panel_menu_items_all_visible" `Quick (fun () ->
+  Alcotest.test_case "panel_menu_items_one_per_kind_visibility_follows_layout" `Quick (fun () ->
+    (* The Window menu lists every panel kind exactly once, and each
+       item's checkmark must follow whether that kind is currently on
+       screen. The minimal [test_layout ()] holds five of the kinds;
+       the rest are simply absent (not in [hidden_panels], just not
+       loaded). Asserting "all visible" against a layout that doesn't
+       contain all kinds is wrong — verify the real contract instead. *)
     let l = test_layout () in
     let items = panel_menu_items l in
     assert (List.length items = List.length all_panel_kinds);
-    List.iter (fun (_, v) -> assert v) items);
+    (* one entry per kind, no duplicates / omissions *)
+    List.iter (fun k -> assert (List.mem_assoc k items)) all_panel_kinds;
+    (* each item's visibility flag agrees with is_panel_visible *)
+    List.iter (fun (k, v) -> assert (v = is_panel_visible l k)) items;
+    (* kinds present in test_layout are visible; absent ones are not *)
+    assert (snd (List.find (fun (k, _) -> k = Color) items));
+    assert (snd (List.find (fun (k, _) -> k = Layers) items));
+    assert (not (snd (List.find (fun (k, _) -> k = Align) items)));
+    assert (not (snd (List.find (fun (k, _) -> k = Boolean) items)));
+    assert (not (snd (List.find (fun (k, _) -> k = Opacity) items))));
 
   Alcotest.test_case "panel_menu_items_with_hidden" `Quick (fun () ->
     let l = test_layout () in

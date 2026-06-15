@@ -1,5 +1,7 @@
 /// Color panel menu definition.
 
+import Foundation
+
 public enum ColorPanel {
     public static func menuItems() -> [PanelMenuItem] {
         [
@@ -143,11 +145,20 @@ public enum ColorPanel {
     /// Swatches panels register here so a native push (slider/hex/
     /// recent click) flows into their YAML panel.recent_colors state
     /// stores. Each listener receives (model, hex).
+    ///
+    /// Guarded by `_recentColorsLock`: registration (append) and
+    /// firing (iterate) can run concurrently — e.g. parallel tests
+    /// that install the bridge while pushing recent colors — and an
+    /// unsynchronised Array append racing an iteration is undefined
+    /// behaviour (buffer reallocation under a live reader → SIGSEGV).
     private static var _recentColorsListeners: [(Model, String) -> Void] = []
+    private static let _recentColorsLock = NSLock()
 
     public static func addRecentColorsListener(
         _ cb: @escaping (Model, String) -> Void
     ) {
+        _recentColorsLock.lock()
+        defer { _recentColorsLock.unlock() }
         _recentColorsListeners.append(cb)
     }
 
@@ -253,7 +264,13 @@ public enum ColorPanel {
         if model.recentColors.count > 10 {
             model.recentColors = Array(model.recentColors.prefix(10))
         }
-        for cb in _recentColorsListeners {
+        // Snapshot under the lock, then fire outside it so a listener
+        // can re-enter (e.g. register another listener) without a
+        // deadlock and so the array buffer can't be mutated mid-iterate.
+        _recentColorsLock.lock()
+        let listeners = _recentColorsListeners
+        _recentColorsLock.unlock()
+        for cb in listeners {
             cb(model, hex)
         }
     }
