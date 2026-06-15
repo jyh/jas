@@ -731,6 +731,14 @@ class Line(Element):
     mask: "Mask | None" = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. Additive: None means the element
+    # has no id yet, so every existing document remains valid. Where the
+    # tree-path encodes *where* an element sits, the id names *which*
+    # element it is, surviving reorder and edit. A plain string so it
+    # serializes and compares identically across all five implementations.
+    # Round-trips through test_json (emitted only when set, so id-less
+    # elements stay byte-identical). See VISION.md §6.2.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         min_x = min(self.x1, self.x2)
@@ -765,6 +773,8 @@ class Rect(Element):
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds((self.x, self.y, self.width, self.height), self.stroke)
@@ -790,6 +800,8 @@ class Circle(Element):
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -818,6 +830,8 @@ class Ellipse(Element):
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(
@@ -843,6 +857,8 @@ class Polyline(Element):
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -877,6 +893,8 @@ class Polygon(Element):
     fill_gradient: Gradient | None = None
     stroke_gradient: Gradient | None = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.points:
@@ -924,6 +942,8 @@ class Path(Element):
     # Preserved by mutations; optional on export. See
     # BLOB_BRUSH_TOOL.md §Fill and stroke.
     tool_origin: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
@@ -1095,6 +1115,8 @@ class Text(Element):
     blend_mode: BlendMode = BlendMode.NORMAL
     mask: "Mask | None" = None
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
     # Sentinel default: an empty tuple means "derive from content in
     # __post_init__". Late-import avoids the geometry.element <->
     # geometry.tspan circular dep.
@@ -1172,6 +1194,8 @@ class TextPath(Element):
     d: tuple[MoveTo | LineTo | CurveTo | QuadTo | SmoothCurveTo
              | SmoothQuadTo | ArcTo | ClosePath, ...] = ()
     name: str | None = None
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    id: str | None = None
     content: str = "Lorem Ipsum"
     start_offset: float = 0.0
     font_family: str = "sans-serif"
@@ -1230,6 +1254,9 @@ class Group(Element):
     # Opacity panel "Page Knockout Group" flag. Storage-only in Phase 2;
     # renderer support is deferred. Inherited by Layer.
     knockout_group: bool = False
+    # Stable, opaque element identity. See Line.id. Additive: None = no id.
+    # Inherited by Layer.
+    id: str | None = None
 
     def bounds(self) -> tuple[float, float, float, float]:
         if not self.children:
