@@ -166,6 +166,11 @@ def _common_fields(o: _JsonObj, elem: Element):
         o.null("name")
     else:
         o.str("name", n)
+    # Stable id is additive: emit only when set, so id-less elements
+    # serialize byte-identically to before (keys are sorted on output).
+    eid = getattr(elem, "id", None)
+    if eid is not None:
+        o.str("id", eid)
     o.num("opacity", elem.opacity)
     o.raw("transform", _transform_json(elem.transform))
     o.str("visibility", _visibility_str(elem.visibility))
@@ -718,6 +723,7 @@ def _parse_common(d: dict) -> dict:
         transform=_parse_transform(d["transform"]),
         visibility=_VISIBILITY_MAP[d["visibility"]],
         name=d.get("name"),
+        id=d.get("id"),
     )
 
 

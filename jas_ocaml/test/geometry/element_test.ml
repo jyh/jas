@@ -3,8 +3,43 @@ open Jas.Element
 let eps = 1e-6
 let straight = [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)]
 
+(* Substring search: does [hay] contain [needle]? Used to assert that
+   the canonical JSON for an id-less element carries no "id" key. *)
+let contains_substring hay needle =
+  let hn = String.length needle and hh = String.length hay in
+  let rec go i =
+    if i + hn > hh then false
+    else if String.sub hay i hn = needle then true
+    else go (i + 1)
+  in
+  go 0
+
 let () =
   Alcotest.run "Element" [
+    (* The stable, opaque element id is additive: it round-trips through
+       test_json, and an id-less element emits no "id" key (so existing
+       id-less fixtures stay byte-identical). Mirrors the Rust reference
+       tests in geometry/element.rs. *)
+    "id round-trip", [
+      Alcotest.test_case "element id round-trips through test_json" `Quick (fun () ->
+        let elem = with_id (make_rect 10.0 20.0 30.0 40.0) (Some "el-42") in
+        assert (id_of elem = Some "el-42");
+        let json = Jas.Test_json.element_json elem in
+        assert (contains_substring json "\"id\":\"el-42\"");
+        let parsed = Jas.Test_json.parse_element (Yojson.Safe.from_string json) in
+        assert (id_of parsed = Some "el-42"));
+
+      Alcotest.test_case "id-less element emits no id key" `Quick (fun () ->
+        let elem = make_rect 10.0 20.0 30.0 40.0 in
+        assert (id_of elem = None);
+        let json = Jas.Test_json.element_json elem in
+        (* Must NOT contain an "id" key at all (not even "id":null), so
+           the cross-language test_json comparison stays byte-identical. *)
+        assert (not (contains_substring json "\"id\""));
+        let parsed = Jas.Test_json.parse_element (Yojson.Safe.from_string json) in
+        assert (id_of parsed = None));
+    ];
+
     "element", [
       Alcotest.test_case "color construction" `Quick (fun () ->
         let c = make_color 1.0 0.0 0.0 in

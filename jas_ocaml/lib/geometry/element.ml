@@ -568,6 +568,7 @@ type element =
   | Line of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
@@ -583,6 +584,7 @@ type element =
   | Rect of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       x : float; y : float;
       width : float; height : float;
       rx : float; ry : float;
@@ -600,6 +602,7 @@ type element =
   | Circle of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       cx : float; cy : float; r : float;
       fill : fill option;
       stroke : stroke option;
@@ -615,6 +618,7 @@ type element =
   | Ellipse of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       cx : float; cy : float;
       rx : float; ry : float;
       fill : fill option;
@@ -631,6 +635,7 @@ type element =
   | Polyline of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -646,6 +651,7 @@ type element =
   | Polygon of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -661,6 +667,7 @@ type element =
   | Path of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
@@ -689,6 +696,7 @@ type element =
   | Text of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       x : float; y : float;
       content : string;
       font_family : string;
@@ -726,6 +734,7 @@ type element =
   | Text_path of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       d : path_command list;
       content : string;
       start_offset : float;
@@ -758,6 +767,7 @@ type element =
   | Group of {
       (* User-visible name. None means unnamed — tree row shows <Type> fallback. *)
       name : string option;
+      id : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -773,6 +783,7 @@ type element =
          optional like every other element's name. None means unnamed
          (display-time fallback to "Layer N" in the layers panel). *)
       name : string option;
+      id : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -796,6 +807,7 @@ and compound_operation =
 
 and compound_shape = {
   operation : compound_operation;
+  id : string option;
   operands : element array;
   fill : fill option;
   stroke : stroke option;
@@ -1132,25 +1144,25 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
-  Line { name = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
+  Line { name = None; id = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
 
 let make_rect ?(rx = 0.0) ?(ry = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y width height =
-  Rect { name = None; x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Rect { name = None; id = None; x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_circle ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy r =
-  Circle { name = None; cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Circle { name = None; id = None; cx; cy; r; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_ellipse ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) cx cy rx ry =
-  Ellipse { name = None; cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Ellipse { name = None; id = None; cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polyline ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polyline { name = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Polyline { name = None; id = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_polygon ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) points =
-  Polygon { name = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Polygon { name = None; id = None; points; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 let make_path ?(fill = None) ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) ?(stroke_brush = None) ?(stroke_brush_overrides = None) ?(tool_origin = None) d =
-  Path { name = None; d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides; tool_origin }
+  Path { name = None; id = None; d; fill; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; fill_gradient = None; stroke_gradient = None; stroke_brush; stroke_brush_overrides; tool_origin }
 
 (** Build a one-element tspan array that mirrors [content] with no
     overrides. Seeds the [tspans] field on newly-constructed Text /
@@ -1200,7 +1212,7 @@ let make_text ?(font_family = "sans-serif") ?(font_size = 16.0) ?(font_weight = 
     ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
     ?(vertical_scale = "") ?(kerning = "")
     ?(text_width = 0.0) ?(text_height = 0.0) ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x y content =
-  Text { name = None; x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
+  Text { name = None; id = None; x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
          text_transform; font_variant; baseline_shift; line_height; letter_spacing;
          xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
          text_width; text_height; fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
@@ -1213,7 +1225,7 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
     ?(aa_mode = "") ?(rotate = "") ?(horizontal_scale = "")
     ?(vertical_scale = "") ?(kerning = "")
     ?(fill = None) ?(stroke = None) ?(opacity = 1.0) ?(transform = None) ?(locked = false) d content =
-  Text_path { name = None; d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
+  Text_path { name = None; id = None; d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
               text_transform; font_variant; baseline_shift; line_height; letter_spacing;
               xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
               fill; stroke; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
@@ -1221,7 +1233,7 @@ let make_text_path ?(start_offset = 0.0) ?(font_family = "sans-serif") ?(font_si
               tspans = tspans_from_content content }
 
 let make_group ?(opacity = 1.0) ?(transform = None) ?(locked = false) children =
-  Group { name = None; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+  Group { name = None; id = None; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
           mask = None;
           isolated_blending = false; knockout_group = false }
 
@@ -1231,7 +1243,7 @@ let make_layer ?name ?(opacity = 1.0) ?(transform = None) ?(locked = false) chil
     | Some s when s = "" -> None
     | Some s -> Some s
   in
-  Layer { name; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
+  Layer { name; id = None; children; opacity; transform; locked; visibility = Preview; blend_mode = Normal;
           mask = None;
           isolated_blending = false; knockout_group = false }
 
@@ -1451,6 +1463,52 @@ let with_name elem (n : string option) =
   | Group r      -> Group { r with name = n }
   | Layer r      -> Layer { r with name = n }
   | Live _       -> elem
+
+(* Read the stable, opaque element id. [None] for an element that has
+   no id yet. See the doc on [type element] in element.mli. *)
+let id_of = function
+  | Line r       -> r.id
+  | Rect r       -> r.id
+  | Circle r     -> r.id
+  | Ellipse r    -> r.id
+  | Polyline r   -> r.id
+  | Polygon r    -> r.id
+  | Path r       -> r.id
+  | Text r       -> r.id
+  | Text_path r  -> r.id
+  | Group r      -> r.id
+  | Layer r      -> r.id
+  | Live (Compound_shape cs) -> cs.id
+
+(* Return a copy of [elem] with its id set (additive identity). *)
+let with_id elem (i : string option) =
+  match elem with
+  | Line r       -> Line { r with id = i }
+  | Rect r       -> Rect { r with id = i }
+  | Circle r     -> Circle { r with id = i }
+  | Ellipse r    -> Ellipse { r with id = i }
+  | Polyline r   -> Polyline { r with id = i }
+  | Polygon r    -> Polygon { r with id = i }
+  | Path r       -> Path { r with id = i }
+  | Text r       -> Text { r with id = i }
+  | Text_path r  -> Text_path { r with id = i }
+  | Group r      -> Group { r with id = i }
+  | Layer r      -> Layer { r with id = i }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with id = i })
+
+(* Recursively clear the stable id on [elem] and all of its descendants,
+   returning a fresh element. A DUPLICATED element must not inherit the
+   source identity — two elements cannot share an id — so a copy is born
+   id-less (lazy) and mints a fresh id only if and when it later becomes a
+   reference target. Used by every duplication path (copy, paste,
+   duplicate). Mirrors the Rust clear_ids: recurse into Group and Layer
+   children only. See the stable-identity initiative (VISION section 6.2). *)
+let rec clear_ids elem =
+  let elem = with_id elem None in
+  match elem with
+  | Group r -> Group { r with children = Array.map clear_ids r.children }
+  | Layer r -> Layer { r with children = Array.map clear_ids r.children }
+  | _ -> elem
 
 let color_to_hex c =
   let (r, g, b, _) = color_to_rgba c in
@@ -1776,7 +1834,7 @@ let move_control_points ?(is_all = false) elem indices dx dy =
           let (px, py) = pts.(i) in
           pts.(i) <- (px +. dx, py +. dy)
       done;
-      Polygon { name = None; points = Array.to_list pts;
+      Polygon { name = None; id = None; points = Array.to_list pts;
                 fill = r.fill; stroke = r.stroke;
                 opacity = r.opacity; transform = r.transform;
                 locked = r.locked; visibility = r.visibility;

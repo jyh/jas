@@ -52,6 +52,14 @@ let roundtrip_names = [
   "multi_layer"; "complex_document"
 ]
 
+(* Names that additionally include the id-bearing "element_ids" fixture, which
+   exercises the per-element name and id fields. The binary v2 format and the
+   test_json codec both round-trip those fields, so element_ids participates in
+   the binary and JSON idempotence tests. It is kept out of [roundtrip_names]
+   only because there is no element_ids.svg fixture for the SVG tests. *)
+let json_roundtrip_names = roundtrip_names @ ["element_ids"]
+let binary_names = roundtrip_names @ ["element_ids"]
+
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
   let doc = Jas.Test_json.test_json_to_document expected in
@@ -266,13 +274,13 @@ let () =
     (* Binary round-trip *)
     "Binary round-trip", [
       Alcotest.test_case "binary_roundtrip all expected" `Quick (fun () ->
-        List.iter assert_binary_roundtrip roundtrip_names);
+        List.iter assert_binary_roundtrip binary_names);
     ];
 
     (* Binary read Python fixtures *)
     "Binary read Python", [
       Alcotest.test_case "binary_read_python all fixtures" `Quick (fun () ->
-        List.iter assert_binary_read_python roundtrip_names);
+        List.iter assert_binary_read_python binary_names);
     ];
 
     (* SVG round-trip idempotence *)
@@ -284,7 +292,7 @@ let () =
     (* JSON round-trip idempotence *)
     "JSON round-trip", [
       Alcotest.test_case "json_roundtrip all expected" `Quick (fun () ->
-        List.iter assert_json_roundtrip roundtrip_names);
+        List.iter assert_json_roundtrip json_roundtrip_names);
     ];
 
     (* SVG parse tests *)

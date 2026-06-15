@@ -1025,7 +1025,7 @@ public enum Element: Equatable {
                 opacity: v.opacity, transform: v.transform,
                 locked: v.locked,
                 visibility: v.visibility, blendMode: v.blendMode,
-                mask: v.mask, name: v.name))
+                mask: v.mask, name: v.name, id: v.id))
         default:
             return self
         }
@@ -1173,7 +1173,7 @@ public enum Element: Equatable {
         case .layer(let v):
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: v.transform, locked: locked,
-                                visibility: v.visibility))
+                                visibility: v.visibility, id: v.id))
         case .live(let v):
             return .live(v.withLocked(locked))
         }
@@ -1254,6 +1254,65 @@ public enum Element: Equatable {
         }
     }
 
+    /// The element's stable, opaque id, if any. None until assigned.
+    /// Mirrors `CommonProps.id` in the reference implementation: the id
+    /// names *which* element this is (surviving reorder and edit), where
+    /// the tree-path names *where* it sits. Live elements have no flat
+    /// id slot yet, so they report nil.
+    public var id: String? {
+        switch self {
+        case .line(let v): return v.id
+        case .rect(let v): return v.id
+        case .circle(let v): return v.id
+        case .ellipse(let v): return v.id
+        case .polyline(let v): return v.id
+        case .polygon(let v): return v.id
+        case .path(let v): return v.id
+        case .text(let v): return v.id
+        case .textPath(let v): return v.id
+        case .group(let v): return v.id
+        case .layer(let v): return v.id
+        case .live: return nil
+        }
+    }
+
+    /// Return a copy of this element with its stable `id` cleared (set to
+    /// nil) on the element itself AND, for groups/layers, recursively on
+    /// every descendant.
+    ///
+    /// A DUPLICATED element must not inherit the source's identity — two
+    /// elements cannot share an id — so a copy is born id-less (lazy) and
+    /// mints a fresh id only if/when it later becomes a reference target.
+    /// Used by every duplication path (copy/paste/duplicate). Mirrors the
+    /// reference implementation's `clear_ids`. See the stable-identity
+    /// initiative (VISION.md §6.2).
+    ///
+    /// Leaf elements (and `.live`, which has no flat id slot) only clear
+    /// their own id; only `.group`/`.layer` carry children to recurse into,
+    /// matching the reference's `children_mut` (None for every other kind).
+    public func clearingIds() -> Element {
+        switch self {
+        case .line(let v): return .line(v.withId(nil))
+        case .rect(let v): return .rect(v.withId(nil))
+        case .circle(let v): return .circle(v.withId(nil))
+        case .ellipse(let v): return .ellipse(v.withId(nil))
+        case .polyline(let v): return .polyline(v.withId(nil))
+        case .polygon(let v): return .polygon(v.withId(nil))
+        case .path(let v): return .path(v.withId(nil))
+        case .text(let v): return .text(v.withId(nil))
+        case .textPath(let v): return .textPath(v.withId(nil))
+        case .group(let v):
+            return .group(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
+        case .layer(let v):
+            return .layer(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
+        case .live:
+            // Live elements have no flat id slot (see `id`) and expose no
+            // uniform children mutator here, mirroring the reference's
+            // `children_mut` returning None for Live. Nothing to clear.
+            return self
+        }
+    }
+
     /// Return a copy of this element with its `visibility` replaced.
     public func withVisibility(_ visibility: Visibility) -> Element {
         switch self {
@@ -1315,7 +1374,7 @@ public enum Element: Equatable {
         case .layer(let v):
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: v.transform, locked: v.locked,
-                                visibility: visibility))
+                                visibility: visibility, id: v.id))
         case .live(let v):
             return .live(v.withVisibility(visibility))
         }
@@ -1379,7 +1438,7 @@ public enum Element: Equatable {
                 opacity: v.opacity, transform: v.transform,
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
-                strokeGradient: v.strokeGradient, name: v.name))
+                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
         case .rect(let v):
             return .rect(Rect(
                 x: v.x + dx, y: v.y + dy,
@@ -1390,7 +1449,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .circle(let v):
             return .circle(Circle(
                 cx: v.cx + dx, cy: v.cy + dy, r: v.r,
@@ -1399,7 +1458,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .ellipse(let v):
             return .ellipse(Ellipse(
                 cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
@@ -1408,7 +1467,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .polyline(let v):
             let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
             return .polyline(Polyline(
@@ -1417,7 +1476,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .polygon(let v):
             let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
             return .polygon(Polygon(
@@ -1426,7 +1485,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .path(let v):
             return .path(Path(
                 d: translatePathCommands(v.d, dx: dx, dy: dy),
@@ -1436,7 +1495,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name))
+                name: v.name, id: v.id))
         case .text(let v):
             return .text(Text(
                 x: v.x + dx, y: v.y + dy, tspans: v.tspans,
@@ -1448,7 +1507,7 @@ public enum Element: Equatable {
                 opacity: v.opacity, transform: v.transform,
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
-                name: v.name))
+                name: v.name, id: v.id))
         case .textPath(let v):
             return .textPath(TextPath(
                 d: translatePathCommands(v.d, dx: dx, dy: dy),
@@ -1460,7 +1519,7 @@ public enum Element: Equatable {
                 opacity: v.opacity, transform: v.transform,
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
-                name: v.name))
+                name: v.name, id: v.id))
         case .group(let v):
             let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
             return .group(Group(
@@ -1469,7 +1528,7 @@ public enum Element: Equatable {
                 blendMode: v.blendMode,
                 isolatedBlending: v.isolatedBlending,
                 knockoutGroup: v.knockoutGroup,
-                mask: v.mask, name: v.name))
+                mask: v.mask, name: v.name, id: v.id))
         case .layer(let v):
             let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
             return .layer(Layer(
@@ -1479,7 +1538,7 @@ public enum Element: Equatable {
                 blendMode: v.blendMode,
                 isolatedBlending: v.isolatedBlending,
                 knockoutGroup: v.knockoutGroup,
-                mask: v.mask))
+                mask: v.mask, id: v.id))
         case .live:
             // Live elements don't support raw-coord translation;
             // fall back to the transform-bake path. Align operates on
@@ -1563,7 +1622,7 @@ public enum Element: Equatable {
         case .layer(let v):
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: t, locked: v.locked,
-                                visibility: v.visibility))
+                                visibility: v.visibility, id: v.id))
         case .live(let v):
             return .live(v.withTransform(t))
         }
@@ -1916,7 +1975,7 @@ public func withMask(_ element: Element, mask: Mask?) -> Element {
                             blendMode: v.blendMode,
                             isolatedBlending: v.isolatedBlending,
                             knockoutGroup: v.knockoutGroup,
-                            mask: mask))
+                            mask: mask, id: v.id))
     case .live(let v):
         return .live(v.withMask(mask))
     }
@@ -2189,6 +2248,13 @@ public struct Line: Equatable {
     public let x1: Double, y1: Double, x2: Double, y2: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None means the element
+    /// has no id yet, so every existing document remains valid. Where the
+    /// tree-path encodes *where* an element sits, the id names *which*
+    /// element it is, surviving reorder and edit. Round-trips through
+    /// test_json (emitted only when set, so id-less elements stay
+    /// byte-identical) and, in a later increment, the SVG `id` attribute.
+    public let id: String?
     public let stroke: Stroke?
     public let widthPoints: [StrokeWidthPoint]
     public let opacity: Double
@@ -2210,8 +2276,10 @@ public struct Line: Equatable {
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
         self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2233,6 +2301,9 @@ public struct Rect: Equatable {
     public let x: Double, y: Double, width: Double, height: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let rx: Double, ry: Double
     public let fill: Fill?
     public let stroke: Stroke?
@@ -2255,8 +2326,10 @@ public struct Rect: Equatable {
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.x = x; self.y = y; self.width = width; self.height = height
         self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
@@ -2276,6 +2349,9 @@ public struct Circle: Equatable {
     public let cx: Double, cy: Double, r: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2296,8 +2372,10 @@ public struct Circle: Equatable {
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.cx = cx; self.cy = cy; self.r = r
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2316,6 +2394,9 @@ public struct Ellipse: Equatable {
     public let cx: Double, cy: Double, rx: Double, ry: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2336,8 +2417,10 @@ public struct Ellipse: Equatable {
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2356,6 +2439,9 @@ public struct Polyline: Equatable {
     public let points: [(Double, Double)]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2376,8 +2462,10 @@ public struct Polyline: Equatable {
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2409,6 +2497,9 @@ public struct Polygon: Equatable {
     public let points: [(Double, Double)]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let opacity: Double
@@ -2429,8 +2520,10 @@ public struct Polygon: Equatable {
                 mask: Mask? = nil,
                 fillGradient: Gradient? = nil,
                 strokeGradient: Gradient? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.points = points
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -2546,6 +2639,9 @@ public struct Path: Equatable {
     public let d: [PathCommand]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let fill: Fill?
     public let stroke: Stroke?
     public let widthPoints: [StrokeWidthPoint]
@@ -2586,8 +2682,10 @@ public struct Path: Equatable {
                 strokeBrush: String? = nil,
                 strokeBrushOverrides: String? = nil,
                 toolOrigin: String? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.d = d
         self.fill = fill; self.stroke = stroke; self.widthPoints = widthPoints
         self.opacity = opacity; self.transform = transform
@@ -2625,6 +2723,9 @@ public struct Text: Equatable {
     public let x: Double, y: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let tspans: [Tspan]
     public let fontFamily: String
     public let fontSize: Double
@@ -2672,8 +2773,10 @@ public struct Text: Equatable {
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.x = x; self.y = y; self.tspans = tspans
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -2710,7 +2813,8 @@ public struct Text: Equatable {
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(x: x, y: y, tspans: [t],
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -2726,7 +2830,7 @@ public struct Text: Equatable {
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
                   locked: locked, visibility: visibility,
-                  name: name)
+                  name: name, id: id)
     }
 
     /// Derived content: concatenation of every tspan's content.
@@ -2825,6 +2929,9 @@ public struct TextPath: Equatable {
     public let d: [PathCommand]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let tspans: [Tspan]
     public let startOffset: Double
     public let fontFamily: String
@@ -2870,8 +2977,10 @@ public struct TextPath: Equatable {
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
                 mask: Mask? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.d = d; self.tspans = tspans; self.startOffset = startOffset
         self.fontFamily = fontFamily; self.fontSize = fontSize
         self.fontWeight = fontWeight; self.fontStyle = fontStyle; self.textDecoration = textDecoration
@@ -2906,7 +3015,9 @@ public struct TextPath: Equatable {
                 locked: Bool = false,
                 visibility: Visibility = .preview,
                 blendMode: BlendMode = .normal,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                name: String? = nil,
+                id: String? = nil) {
         let t = Tspan(id: 0, content: content)
         self.init(d: d, tspans: [t], startOffset: startOffset,
                   fontFamily: fontFamily, fontSize: fontSize,
@@ -2920,7 +3031,8 @@ public struct TextPath: Equatable {
                   kerning: kerning,
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
-                  locked: locked, visibility: visibility)
+                  locked: locked, visibility: visibility,
+                  name: name, id: id)
     }
 
     public var content: String { concatTspanContent(tspans) }
@@ -2967,6 +3079,9 @@ public struct Group: Equatable {
     public let children: [Element]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let opacity: Double
     public let transform: Transform?
     public let locked: Bool
@@ -2987,8 +3102,10 @@ public struct Group: Equatable {
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil,
-                name: String? = nil) {
+                name: String? = nil,
+                id: String? = nil) {
         self.name = name
+        self.id = id
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -3014,6 +3131,9 @@ public struct Group: Equatable {
 /// fall back to a "Layer N" display label in the layers panel.
 public struct Layer: Equatable {
     public let name: String?
+    /// Stable, opaque element identity. Additive: None = no id yet, so
+    /// every existing document remains valid. See `Line.id`.
+    public let id: String?
     public let children: [Element]
     public let opacity: Double
     public let transform: Transform?
@@ -3039,8 +3159,10 @@ public struct Layer: Equatable {
                 blendMode: BlendMode = .normal,
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
-                mask: Mask? = nil) {
+                mask: Mask? = nil,
+                id: String? = nil) {
         self.name = (name?.isEmpty == true) ? nil : name
+        self.id = id
         self.children = children
         self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -3058,6 +3180,154 @@ public struct Layer: Equatable {
         let maxX = all.map { $0.x + $0.width }.max()!
         let maxY = all.map { $0.y + $0.height }.max()!
         return (minX, minY, maxX - minX, maxY - minY)
+    }
+}
+
+// MARK: - Stable-identity helpers
+
+// Per-struct `withId(_:)` reconstructs the value through its full
+// memberwise initializer, preserving EVERY field (name, blendMode, mask,
+// gradients, brush, …) while replacing only `id`. Used by
+// `Element.clearingIds()` so a duplicated element is born id-less without
+// dropping any other attribute. See the stable-identity initiative.
+
+extension Line {
+    public func withId(_ id: String?) -> Line {
+        Line(x1: x1, y1: y1, x2: x2, y2: y2,
+             stroke: stroke, widthPoints: widthPoints,
+             opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility,
+             blendMode: blendMode, mask: mask,
+             strokeGradient: strokeGradient, name: name, id: id)
+    }
+}
+
+extension Rect {
+    public func withId(_ id: String?) -> Rect {
+        Rect(x: x, y: y, width: width, height: height, rx: rx, ry: ry,
+             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+             name: name, id: id)
+    }
+}
+
+extension Circle {
+    public func withId(_ id: String?) -> Circle {
+        Circle(cx: cx, cy: cy, r: r,
+               fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+               locked: locked, visibility: visibility, blendMode: blendMode,
+               mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+               name: name, id: id)
+    }
+}
+
+extension Ellipse {
+    public func withId(_ id: String?) -> Ellipse {
+        Ellipse(cx: cx, cy: cy, rx: rx, ry: ry,
+                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                locked: locked, visibility: visibility, blendMode: blendMode,
+                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                name: name, id: id)
+    }
+}
+
+extension Polyline {
+    public func withId(_ id: String?) -> Polyline {
+        Polyline(points: points,
+                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                 locked: locked, visibility: visibility, blendMode: blendMode,
+                 mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                 name: name, id: id)
+    }
+}
+
+extension Polygon {
+    public func withId(_ id: String?) -> Polygon {
+        Polygon(points: points,
+                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                locked: locked, visibility: visibility, blendMode: blendMode,
+                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                name: name, id: id)
+    }
+}
+
+extension Path {
+    public func withId(_ id: String?) -> Path {
+        Path(d: d, fill: fill, stroke: stroke, widthPoints: widthPoints,
+             opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+             strokeBrush: strokeBrush, strokeBrushOverrides: strokeBrushOverrides,
+             toolOrigin: toolOrigin, name: name, id: id)
+    }
+}
+
+extension Text {
+    public func withId(_ id: String?) -> Text {
+        Text(x: x, y: y, tspans: tspans,
+             fontFamily: fontFamily, fontSize: fontSize,
+             fontWeight: fontWeight, fontStyle: fontStyle,
+             textDecoration: textDecoration,
+             textTransform: textTransform, fontVariant: fontVariant,
+             baselineShift: baselineShift, lineHeight: lineHeight,
+             letterSpacing: letterSpacing, xmlLang: xmlLang,
+             aaMode: aaMode, rotate: rotate,
+             horizontalScale: horizontalScale, verticalScale: verticalScale,
+             kerning: kerning, width: width, height: height,
+             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, name: name, id: id)
+    }
+}
+
+extension TextPath {
+    public func withId(_ id: String?) -> TextPath {
+        TextPath(d: d, tspans: tspans, startOffset: startOffset,
+                 fontFamily: fontFamily, fontSize: fontSize,
+                 fontWeight: fontWeight, fontStyle: fontStyle,
+                 textDecoration: textDecoration,
+                 textTransform: textTransform, fontVariant: fontVariant,
+                 baselineShift: baselineShift, lineHeight: lineHeight,
+                 letterSpacing: letterSpacing, xmlLang: xmlLang,
+                 aaMode: aaMode, rotate: rotate,
+                 horizontalScale: horizontalScale, verticalScale: verticalScale,
+                 kerning: kerning,
+                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                 locked: locked, visibility: visibility, blendMode: blendMode,
+                 mask: mask, name: name, id: id)
+    }
+}
+
+extension Group {
+    public func withId(_ id: String?) -> Group {
+        Group(children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, name: name, id: id)
+    }
+
+    public func withChildren(_ children: [Element]) -> Group {
+        Group(children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, name: name, id: id)
+    }
+}
+
+extension Layer {
+    public func withId(_ id: String?) -> Layer {
+        Layer(name: name, children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, id: id)
+    }
+
+    public func withChildren(_ children: [Element]) -> Layer {
+        Layer(name: name, children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, id: id)
     }
 }
 

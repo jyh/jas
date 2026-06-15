@@ -172,7 +172,7 @@ private func visibilityStr(_ v: Visibility) -> String {
 
 private func commonFields(_ o: JsonObj, _ opacity: Double, _ transform: Transform?,
                            _ locked: Bool, _ visibility: Visibility,
-                           _ name: String? = nil) {
+                           _ name: String? = nil, _ id: String? = nil) {
     o.bool("locked", locked)
     // User-visible name. Layer uses commonFieldsNoName since Layer.name
     // is its own required field (predates common.name).
@@ -180,6 +180,11 @@ private func commonFields(_ o: JsonObj, _ opacity: Double, _ transform: Transfor
         o.str("name", n)
     } else {
         o.null("name")
+    }
+    // Stable id is additive: emit only when set, so id-less elements
+    // serialize byte-identically to before (keys are sorted on output).
+    if let id = id, !id.isEmpty {
+        o.str("id", id)
     }
     o.num("opacity", opacity)
     o.raw("transform", transformJson(transform))
@@ -306,12 +311,12 @@ private func tspanJson(_ t: Tspan) -> String {
     return o.build()
 }
 
-private func elementJson(_ elem: Element) -> String {
+package func elementJson(_ elem: Element) -> String {
     let o = JsonObj()
     switch elem {
     case .line(let e):
         o.str("type", "line")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.raw("stroke", strokeJson(e.stroke))
         o.num("x1", e.x1)
         o.num("x2", e.x2)
@@ -319,7 +324,7 @@ private func elementJson(_ elem: Element) -> String {
         o.num("y2", e.y2)
     case .rect(let e):
         o.str("type", "rect")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.raw("fill", fillJson(e.fill))
         o.num("height", e.height)
         o.num("rx", e.rx)
@@ -330,7 +335,7 @@ private func elementJson(_ elem: Element) -> String {
         o.num("y", e.y)
     case .circle(let e):
         o.str("type", "circle")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.num("cx", e.cx)
         o.num("cy", e.cy)
         o.raw("fill", fillJson(e.fill))
@@ -338,7 +343,7 @@ private func elementJson(_ elem: Element) -> String {
         o.raw("stroke", strokeJson(e.stroke))
     case .ellipse(let e):
         o.str("type", "ellipse")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.num("cx", e.cx)
         o.num("cy", e.cy)
         o.raw("fill", fillJson(e.fill))
@@ -347,26 +352,26 @@ private func elementJson(_ elem: Element) -> String {
         o.raw("stroke", strokeJson(e.stroke))
     case .polyline(let e):
         o.str("type", "polyline")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.raw("fill", fillJson(e.fill))
         o.raw("points", pointsJson(e.points))
         o.raw("stroke", strokeJson(e.stroke))
     case .polygon(let e):
         o.str("type", "polygon")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.raw("fill", fillJson(e.fill))
         o.raw("points", pointsJson(e.points))
         o.raw("stroke", strokeJson(e.stroke))
     case .path(let e):
         o.str("type", "path")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         let cmds = e.d.map { pathCommandJson($0) }
         o.raw("d", jsonArray(cmds))
         o.raw("fill", fillJson(e.fill))
         o.raw("stroke", strokeJson(e.stroke))
     case .text(let e):
         o.str("type", "text")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         // Extended element-wide attribute slots. Still-null slots are
         // placeholders until Text grows per-element override fields
         // (see TSPAN.md Attribute Home).
@@ -402,7 +407,7 @@ private func elementJson(_ elem: Element) -> String {
         o.num("y", e.y)
     case .textPath(let e):
         o.str("type", "text_path")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         o.emptyAsNull("baseline_shift", e.baselineShift)
         let cmds = e.d.map { pathCommandJson($0) }
         o.raw("d", jsonArray(cmds))
@@ -433,14 +438,14 @@ private func elementJson(_ elem: Element) -> String {
         o.emptyAsNull("xml_lang", e.xmlLang)
     case .group(let e):
         o.str("type", "group")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         let children = e.children.map { elementJson($0) }
         o.raw("children", jsonArray(children))
     case .layer(let e):
         o.str("type", "layer")
         // After Layer.name → common-name merge, Layer uses the same
         // nullable name path as every other element.
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name)
+        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
         let children = e.children.map { elementJson($0) }
         o.raw("children", jsonArray(children))
     case .live(let v):
@@ -728,12 +733,13 @@ private func parseVisibility(_ v: Any?) -> Visibility {
     }
 }
 
-private func parseCommon(_ d: [String: Any]) -> (Double, Transform?, Bool, Visibility, String?) {
+private func parseCommon(_ d: [String: Any]) -> (Double, Transform?, Bool, Visibility, String?, String?) {
     (parseF(d["opacity"]),
      parseTransform(d["transform"]),
      d["locked"] as? Bool ?? false,
      parseVisibility(d["visibility"]),
-     d["name"] as? String)
+     d["name"] as? String,
+     d["id"] as? String)
 }
 
 private func parsePathCommands(_ v: Any?) -> [PathCommand] {
@@ -855,7 +861,7 @@ private func parseTextDecorationField(_ v: Any?) -> String {
 package func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
     let typ = d["type"] as? String ?? ""
-    let (opacity, transform, locked, visibility, name) = parseCommon(d)
+    let (opacity, transform, locked, visibility, name, id) = parseCommon(d)
 
     switch typ {
     case "line":
@@ -863,40 +869,40 @@ package func parseElement(_ v: Any?) -> Element {
                           x2: parseF(d["x2"]), y2: parseF(d["y2"]),
                           stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name))
+                          visibility: visibility, name: name, id: id))
     case "rect":
         return .rect(Rect(x: parseF(d["x"]), y: parseF(d["y"]),
                           width: parseF(d["width"]), height: parseF(d["height"]),
                           rx: parseF(d["rx"]), ry: parseF(d["ry"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name))
+                          visibility: visibility, name: name, id: id))
     case "circle":
         return .circle(Circle(cx: parseF(d["cx"]), cy: parseF(d["cy"]), r: parseF(d["r"]),
                               fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                               opacity: opacity, transform: transform, locked: locked,
-                              visibility: visibility, name: name))
+                              visibility: visibility, name: name, id: id))
     case "ellipse":
         return .ellipse(Ellipse(cx: parseF(d["cx"]), cy: parseF(d["cy"]),
                                 rx: parseF(d["rx"]), ry: parseF(d["ry"]),
                                 fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                                 opacity: opacity, transform: transform, locked: locked,
-                                visibility: visibility, name: name))
+                                visibility: visibility, name: name, id: id))
     case "polyline":
         return .polyline(Polyline(points: parsePoints(d["points"]),
                                   fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                                   opacity: opacity, transform: transform, locked: locked,
-                                  visibility: visibility, name: name))
+                                  visibility: visibility, name: name, id: id))
     case "polygon":
         return .polygon(Polygon(points: parsePoints(d["points"]),
                                 fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                                 opacity: opacity, transform: transform, locked: locked,
-                                visibility: visibility, name: name))
+                                visibility: visibility, name: name, id: id))
     case "path":
         return .path(Path(d: parsePathCommands(d["d"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name))
+                          visibility: visibility, name: name, id: id))
     case "text":
         let tspans = parseTspansOrLegacy(d)
         return .text(Text(x: parseF(d["x"]), y: parseF(d["y"]),
@@ -920,7 +926,7 @@ package func parseElement(_ v: Any?) -> Element {
                           width: parseF(d["width"]), height: parseF(d["height"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name))
+                          visibility: visibility, name: name, id: id))
     case "text_path":
         let tspans = parseTspansOrLegacy(d)
         return .textPath(TextPath(d: parsePathCommands(d["d"]),
@@ -944,18 +950,18 @@ package func parseElement(_ v: Any?) -> Element {
                                   kerning: d["jas_kerning_mode"] as? String ?? "",
                                   fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                                   opacity: opacity, transform: transform, locked: locked,
-                                  visibility: visibility, name: name))
+                                  visibility: visibility, name: name, id: id))
     case "group":
         let children = (d["children"] as? [Any] ?? []).map { parseElement($0) }
         return .group(Group(children: children, opacity: opacity, transform: transform,
-                            locked: locked, visibility: visibility, name: name))
+                            locked: locked, visibility: visibility, name: name, id: id))
     case "layer":
         let children = (d["children"] as? [Any] ?? []).map { parseElement($0) }
         // After Layer.name → common-name merge, Layer reads its name from
         // the same `name` JSON field as every other element (parsed into
         // the local `name` binding by parseCommon).
         return .layer(Layer(name: name, children: children, opacity: opacity, transform: transform,
-                            locked: locked, visibility: visibility))
+                            locked: locked, visibility: visibility, id: id))
     default:
         fatalError("Unknown element type: \(typ)")
     }

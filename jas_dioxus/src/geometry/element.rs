@@ -882,6 +882,18 @@ pub struct CommonProps {
     /// Element::display_name() helper prefers this field when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Stable, opaque element identity. Additive: `None` means the
+    /// element has no id yet, so every existing document remains valid.
+    /// Where the tree-path encodes *where* an element sits, the id names
+    /// *which* element it is, surviving reorder and edit. It is the
+    /// foundation for the live relationship graph, cross-tree
+    /// references, versioning, and collaboration (see VISION.md §6.2).
+    /// A plain string so it serializes and compares identically across
+    /// all five implementations. Round-trips through test_json (emitted
+    /// only when set, so id-less elements stay byte-identical) and,
+    /// in a later increment, the SVG `id` attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 impl Default for CommonProps {
@@ -895,6 +907,7 @@ impl Default for CommonProps {
             mask: None,
             tool_origin: None,
             name: None,
+            id: None,
         }
     }
 }
@@ -2078,6 +2091,21 @@ use crate::document::document::SelectionKind;
 /// Rect/Circle/Ellipse branches would fall through to their polygon-
 /// conversion path (since `is_all(n)` is false for an empty set) and
 /// silently change the primitive type without any visible movement.
+/// Recursively clears the stable `id` on `elem` and all of its descendants.
+/// A DUPLICATED element must not inherit the source's identity — two elements
+/// cannot share an id — so a copy is born id-less (lazy) and mints a fresh id
+/// only if/when it later becomes a reference target. Used by every duplication
+/// path (copy, paste, duplicate). See the stable-identity initiative
+/// (VISION.md §6.2).
+pub fn clear_ids(elem: &mut Element) {
+    elem.common_mut().id = None;
+    if let Some(children) = elem.children_mut() {
+        for child in children.iter_mut() {
+            clear_ids(Rc::make_mut(child));
+        }
+    }
+}
+
 pub fn move_control_points(
     elem: &Element,
     kind: &SelectionKind,
@@ -3834,7 +3862,7 @@ mod tests {
                                   transform: None, locked: true,
                                   visibility: Visibility::Outline, mask: None,
                                   tool_origin: None,
-                                  name: Some("Layer 1".into()) },
+                                  name: Some("Layer 1".into()), id: None },
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();
@@ -3989,6 +4017,7 @@ mod tests {
                 mask: Some(Box::new(make_square_mask())),
                 tool_origin: None,
             name: None,
+            id: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,
@@ -4034,6 +4063,7 @@ mod tests {
                 mask: None,
                 tool_origin: None,
             name: None,
+            id: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,

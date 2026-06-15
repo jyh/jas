@@ -287,10 +287,22 @@ type path_command =
   | ArcTo of float * float * float * bool * bool * float * float
   | ClosePath
 
-(** SVG element types. All elements are immutable. *)
+(** SVG element types. All elements are immutable.
+
+    Every variant carries an additive [id : string option]. [None] means
+    the element has no id yet, so every existing document remains valid.
+    Where the tree-path encodes {e where} an element sits, the id names
+    {e which} element it is, surviving reorder and edit. It is the stable,
+    opaque foundation for the live relationship graph, cross-tree
+    references, versioning, and collaboration. A plain string so it
+    serializes and compares identically across all five implementations.
+    Round-trips through test_json (emitted only when set, so id-less
+    elements stay byte-identical) and, in a later increment, the SVG
+    [id] attribute. *)
 type element =
   | Line of {
       name : string option;
+      id : string option;
       x1 : float; y1 : float;
       x2 : float; y2 : float;
       stroke : stroke option;
@@ -305,6 +317,7 @@ type element =
     }
   | Rect of {
       name : string option;
+      id : string option;
       x : float; y : float;
       width : float; height : float;
       rx : float; ry : float;
@@ -321,6 +334,7 @@ type element =
     }
   | Circle of {
       name : string option;
+      id : string option;
       cx : float; cy : float; r : float;
       fill : fill option;
       stroke : stroke option;
@@ -335,6 +349,7 @@ type element =
     }
   | Ellipse of {
       name : string option;
+      id : string option;
       cx : float; cy : float;
       rx : float; ry : float;
       fill : fill option;
@@ -350,6 +365,7 @@ type element =
     }
   | Polyline of {
       name : string option;
+      id : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -364,6 +380,7 @@ type element =
     }
   | Polygon of {
       name : string option;
+      id : string option;
       points : (float * float) list;
       fill : fill option;
       stroke : stroke option;
@@ -378,6 +395,7 @@ type element =
     }
   | Path of {
       name : string option;
+      id : string option;
       d : path_command list;
       fill : fill option;
       stroke : stroke option;
@@ -401,6 +419,7 @@ type element =
     }
   | Text of {
       name : string option;
+      id : string option;
       x : float; y : float;
       content : string;
       font_family : string;
@@ -440,6 +459,7 @@ type element =
     }
   | Text_path of {
       name : string option;
+      id : string option;
       d : path_command list;
       content : string;
       start_offset : float;
@@ -472,6 +492,7 @@ type element =
     }
   | Group of {
       name : string option;
+      id : string option;
       children : element array;
       opacity : float;
       transform : transform option;
@@ -488,6 +509,7 @@ type element =
     }
   | Layer of {
       name : string option;
+      id : string option;
       (** Optional after the Layer.name → common-name merge: None means
           an unnamed layer; the layers panel substitutes "Layer N". *)
       children : element array;
@@ -526,6 +548,7 @@ and compound_operation =
     and its operand tree. See BOOLEAN.md §Compound shape data model. *)
 and compound_shape = {
   operation : compound_operation;
+  id : string option;
   operands : element array;
   fill : fill option;
   stroke : stroke option;
@@ -664,6 +687,21 @@ val with_width_points : element -> stroke_width_point list -> element
     (Layer treats this as the empty string since its name field is
     required). *)
 val with_name : element -> string option -> element
+
+(** Read the stable, opaque element id. [None] for an element that has
+    no id yet. See the doc on {!type:element}. *)
+val id_of : element -> string option
+
+(** Return a copy of [elem] with its id set (additive identity).
+    [None] clears the id. See the doc on {!type:element}. *)
+val with_id : element -> string option -> element
+
+(** Return a copy of [elem] with its id and the ids of all descendants
+    cleared. A duplicated element must not inherit the source identity —
+    two elements cannot share an id — so duplication paths (copy, paste,
+    duplicate) pass each copy through this. Recurses into Group and Layer
+    children. See the stable-identity initiative. *)
+val clear_ids : element -> element
 
 val color_to_hex : color -> string
 val color_from_hex : string -> color option

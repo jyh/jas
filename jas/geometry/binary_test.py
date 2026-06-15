@@ -53,7 +53,7 @@ class BinaryHeaderTest(absltest.TestCase):
         doc = Document()
         data = document_to_binary(doc)
         version = struct.unpack_from("<H", data, 4)[0]
-        self.assertEqual(version, 1)
+        self.assertEqual(version, 2)  # v2: CommonProps id+name in common block
 
     def test_header_flags_deflate(self):
         doc = Document()
@@ -78,6 +78,15 @@ class BinaryHeaderTest(absltest.TestCase):
         doc = Document()
         data = bytearray(document_to_binary(doc))
         struct.pack_into("<H", data, 4, 99)
+        with self.assertRaises(ValueError):
+            binary_to_document(bytes(data))
+
+    def test_legacy_v1_rejected(self):
+        # v1 used a different positional layout (no generic name/id slots),
+        # so v2 readers must reject it rather than silently mis-parse.
+        doc = Document()
+        data = bytearray(document_to_binary(doc))
+        struct.pack_into("<H", data, 4, 1)
         with self.assertRaises(ValueError):
             binary_to_document(bytes(data))
 
