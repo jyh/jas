@@ -6,19 +6,10 @@
 /// button grid and its action dispatch land in phase 9b+.
 
 public enum BooleanPanel {
+    /// Source of truth is workspace/panels/boolean.yaml's `menu:` block
+    /// (review #15); the generic reader builds the items from the bundle.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .action(label: "Repeat Boolean Operation", command: "repeat_boolean_operation"),
-            .action(label: "Boolean Options\u{2026}", command: "open_boolean_options"),
-            .separator,
-            .action(label: "Make Compound Shape", command: "make_compound_shape"),
-            .action(label: "Release Compound Shape", command: "release_compound_shape"),
-            .action(label: "Expand Compound Shape", command: "expand_compound_shape"),
-            .separator,
-            .action(label: "Reset Panel", command: "reset_boolean_panel"),
-            .separator,
-            .action(label: "Close Boolean", command: "close_panel"),
-        ]
+        menuItemsFromYaml("boolean_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {

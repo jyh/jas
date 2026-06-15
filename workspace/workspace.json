@@ -10280,6 +10280,15 @@
           "label": "Reset Panel",
           "action": "reset_artboards_panel",
           "description": "Reset panel UI state (scroll, reference-point preference). Does not modify document data."
+        },
+        "separator",
+        {
+          "label": "Close Artboards",
+          "action": "close_panel",
+          "params": {
+            "panel": "artboards"
+          },
+          "description": "Close the Artboards panel"
         }
       ],
       "content": {
@@ -16071,6 +16080,15 @@
           "action": "toggle_page_knockout_group",
           "enabled_when": "false",
           "description": "status: pending_renderer. Enables once the renderer supports knockout group compositing for the document root group.\n"
+        },
+        "separator",
+        {
+          "label": "Close Opacity",
+          "action": "close_panel",
+          "params": {
+            "panel": "opacity"
+          },
+          "description": "Close the Opacity panel"
         }
       ],
       "content": {
@@ -16869,7 +16887,17 @@
       "id": "properties_panel_content",
       "type": "placeholder",
       "summary": "Object properties",
-      "description": "Transform and appearance properties for the selected object(s): position (X, Y), size (W, H) with constrain-proportions lock, rotation angle, shear, opacity slider, and blend mode dropdown. When multiple objects are selected, shows shared values or blank for mixed values. All fields are editable and apply immediately.\n"
+      "description": "Transform and appearance properties for the selected object(s): position (X, Y), size (W, H) with constrain-proportions lock, rotation angle, shear, opacity slider, and blend mode dropdown. When multiple objects are selected, shows shared values or blank for mixed values. All fields are editable and apply immediately.\n",
+      "menu": [
+        {
+          "label": "Close Object properties",
+          "action": "close_panel",
+          "params": {
+            "panel": "properties"
+          },
+          "description": "Close the Object properties panel"
+        }
+      ]
     },
     "stroke_panel_content": {
       "id": "stroke_panel_content",
@@ -18517,12 +18545,22 @@
           "label": "Open Swatch Library",
           "type": "submenu",
           "dynamic": true,
+          "action": "open_swatch_library",
           "description": "Submenu listing all available swatch libraries discovered from workspace/swatches/*.json files. Selecting a library adds it to the panel's open_libraries list, displaying it as a new collapsible section in the swatch tiles area. Libraries that are already open are shown with a checkmark. Each library appears as a disclosure section with a triangle toggle and the library name.\n"
         },
         {
           "label": "Save Swatch Library",
           "action": "save_swatch_library",
           "description": "Open the Save Swatch Library dialog, which prompts for a library name. The selected library's swatches are saved to workspace/swatches/ as a JSON file. The file contains the library name, description, and the full swatch array (name, color, color mode, color type, global flag for each swatch).\n"
+        },
+        "separator",
+        {
+          "label": "Close Swatches",
+          "action": "close_panel",
+          "params": {
+            "panel": "swatches"
+          },
+          "description": "Close the Swatches panel"
         }
       ],
       "content": {
