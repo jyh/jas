@@ -14,46 +14,9 @@ use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Action {
-            label: "Repeat Boolean Operation",
-            command: "repeat_boolean_operation",
-            shortcut: "",
-        },
-        PanelMenuItem::Action {
-            label: "Boolean Options…",
-            command: "open_boolean_options",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Make Compound Shape",
-            command: "make_compound_shape",
-            shortcut: "",
-        },
-        PanelMenuItem::Action {
-            label: "Release Compound Shape",
-            command: "release_compound_shape",
-            shortcut: "",
-        },
-        PanelMenuItem::Action {
-            label: "Expand Compound Shape",
-            command: "expand_compound_shape",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Reset Panel",
-            command: "reset_boolean_panel",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Close Boolean",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/boolean.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("boolean_panel_content")
 }
 
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
