@@ -225,7 +225,22 @@ pub fn layout(
     font_size: f64,
     measure: &Measurer<'_>,
 ) -> TextLayout {
-    layout_inner(content, max_width, font_size, None, measure)
+    layout_inner(content, max_width, font_size, None, measure, 0.0)
+}
+
+/// Variant of [`layout`] that narrows the wrap width of line 0 by
+/// `first_line_extra` (a positive first-line indent). The first line
+/// breaks earlier so it does not overflow the right margin; the caller
+/// is responsible for shifting line 0 right by the same amount. Mirrors
+/// Python `text_layout._line_max`.
+pub fn layout_first_line_indent(
+    content: &str,
+    max_width: f64,
+    font_size: f64,
+    measure: &Measurer<'_>,
+    first_line_extra: f64,
+) -> TextLayout {
+    layout_inner(content, max_width, font_size, None, measure, first_line_extra)
 }
 
 /// Hyphenation options for greedy (non-justify) layout. When `Some`,
@@ -251,8 +266,9 @@ pub fn layout_with_hyphen(
     font_size: f64,
     opts: HyphenOpts,
     measure: &Measurer<'_>,
+    first_line_extra: f64,
 ) -> TextLayout {
-    layout_inner(content, max_width, font_size, Some(opts), measure)
+    layout_inner(content, max_width, font_size, Some(opts), measure, first_line_extra)
 }
 
 fn layout_inner(
@@ -261,6 +277,7 @@ fn layout_inner(
     font_size: f64,
     hyph_opts: Option<HyphenOpts>,
     measure: &Measurer<'_>,
+    first_line_extra: f64,
 ) -> TextLayout {
     let line_height = font_size;
     let ascent = font_size * 0.8;
@@ -274,6 +291,21 @@ fn layout_inner(
     let mut line_no = 0usize;
     let mut line_start_char = 0usize;
     let mut x = 0.0f64;
+
+    // The first line is shifted right by `first_line_extra` (a positive
+    // first-line indent) by the segment caller. To keep that line from
+    // running past the right edge we narrow its wrap width here so the
+    // break decision happens earlier. All other lines wrap at the full
+    // `max_width`. Mirrors Python `text_layout._line_max`.
+    let line_max = |ln: usize| -> f64 {
+        if max_width <= 0.0 {
+            max_width
+        } else if ln == 0 && first_line_extra > 0.0 {
+            (max_width - first_line_extra).max(0.0)
+        } else {
+            max_width
+        }
+    };
 
     // `glyph_start`/`glyph_end` are filled in below as a single pass
     // after layout — easier than threading the running glyph count
@@ -343,7 +375,7 @@ fn layout_inner(
         }
 
         // Non-whitespace token: try to fit on current line.
-        if max_width > 0.0 && x + token_w > max_width && x > 0.0 {
+        if max_width > 0.0 && x + token_w > line_max(line_no) && x > 0.0 {
             // Hyphenation: try to split the token at a hyphenation
             // breakpoint that fits on the current line. Picks the
             // *largest* prefix that still leaves room for the hyphen,
@@ -364,7 +396,7 @@ fn layout_inner(
                         opts.min_after,
                     );
                     let hyphen_w = measure("-");
-                    let avail = max_width - x;
+                    let avail = line_max(line_no) - x;
                     // Try the largest valid break point first.
                     for bi in (1..token_chars.len()).rev() {
                         if !*breaks.get(bi).unwrap_or(&false) { continue; }
@@ -442,11 +474,11 @@ fn layout_inner(
                 // Even the tail might overflow; reuse the long-word
                 // char-by-char path or just place it (max_width > tail_w
                 // is the common case).
-                if max_width > 0.0 && tail_w > max_width {
+                if max_width > 0.0 && tail_w > line_max(line_no) {
                     // Char-by-char break.
                     for (k, ch) in tail_chars.iter().enumerate() {
                         let cw = measure(&ch.to_string());
-                        if x + cw > max_width && x > 0.0 {
+                        if x + cw > line_max(line_no) && x > 0.0 {
                             push_line(&mut lines, line_no, line_start_char,
                                       idx + k, false, x);
                             line_no += 1;
@@ -500,11 +532,11 @@ fn layout_inner(
             x = 0.0;
         }
 
-        if max_width > 0.0 && token_w > max_width && x == 0.0 {
+        if max_width > 0.0 && token_w > line_max(line_no) && x == 0.0 {
             // Word longer than the box: break at character boundaries.
             for (k, ch) in token.chars().enumerate() {
                 let cw = measure(&ch.to_string());
-                if x + cw > max_width && x > 0.0 {
+                if x + cw > line_max(line_no) && x > 0.0 {
                     push_line(&mut lines, line_no, line_start_char, idx + k, false, x);
                     line_no += 1;
                     line_start_char = idx + k;
@@ -660,6 +692,15 @@ pub fn layout_with_paragraphs(
         } else {
             0.0
         };
+        // Indent shift: each line's start x is pushed right by
+        // `left_indent` (+ list marker gap when active); the first
+        // line gets the additional `first_line_indent` only when no
+        // list is present. A positive `first_line_extra` also narrows
+        // the wrap width of line 0 (passed into the greedy layout
+        // helpers) so the first line breaks earlier and does not run
+        // past the right margin. Mirrors Python `_layout_inner` /
+        // `_line_max`.
+        let first_line_extra = if has_list { 0.0 } else { seg.first_line_indent.max(0.0) };
         // Phase 10: justify segments go through the every-line
         // composer instead of greedy first-fit. Falls back to the
         // greedy path when the composer can't find a feasible
@@ -668,7 +709,11 @@ pub fn layout_with_paragraphs(
             && effective_max_w > 0.0
         {
             justify_layout(&slice, effective_max_w, font_size, seg, measure)
-                .unwrap_or_else(|| layout(&slice, effective_max_w, font_size, measure))
+                .unwrap_or_else(|| {
+                    layout_first_line_indent(
+                        &slice, effective_max_w, font_size, measure, first_line_extra,
+                    )
+                })
         } else if seg.hyphenate && effective_max_w > 0.0 {
             let opts = HyphenOpts {
                 min_word: seg.hyphenate_min_word,
@@ -676,15 +721,14 @@ pub fn layout_with_paragraphs(
                 min_after: seg.hyphenate_min_after,
                 allow_capitalized: seg.hyphenate_capitalized,
             };
-            layout_with_hyphen(&slice, effective_max_w, font_size, opts, measure)
+            layout_with_hyphen(
+                &slice, effective_max_w, font_size, opts, measure, first_line_extra,
+            )
         } else {
-            layout(&slice, effective_max_w, font_size, measure)
+            layout_first_line_indent(
+                &slice, effective_max_w, font_size, measure, first_line_extra,
+            )
         };
-        // Indent shift: each line's start x is pushed right by
-        // `left_indent` (+ list marker gap when active); the first
-        // line gets the additional `first_line_indent` only when no
-        // list is present.
-        let first_line_extra = if has_list { 0.0 } else { seg.first_line_indent.max(0.0) };
         let lines_n = para_layout.lines.len();
         let first_line_no_in_combined = all_lines.len();
         // A segment may span multiple sub-paragraphs (the user typed
@@ -1781,7 +1825,7 @@ mod tests {
     }
 
     #[test]
-    fn first_line_indent_only_shifts_first_line() {
+    fn first_line_indent_shifts_and_narrows_first_line() {
         let m = fixed(10.0);
         let segs = vec![ParagraphSegment {
             char_start: 0, char_end: 11,
@@ -1789,13 +1833,28 @@ mod tests {
             ..Default::default()
         }];
         let l = layout_with_paragraphs("hello world", 60.0, 16.0, &segs, m.as_ref());
-        // Line 0 starts shifted by 25; line 1 starts at 0.
+        // Line 0 is shifted right by 25 AND its wrap width is narrowed
+        // by 25 (effective 35 px), so the first line breaks early
+        // instead of overflowing the right margin. This matches the
+        // Python reference exactly: "hel" sits on line 0 (x=25,35,45),
+        // "lo " moves to line 1, and "world" to line 2.
         let first_line_first_glyph = l.glyphs.iter()
             .find(|g| g.line == 0).unwrap();
         let second_line_first_glyph = l.glyphs.iter()
             .find(|g| g.line == 1).unwrap();
         assert_eq!(first_line_first_glyph.x, 25.0);
         assert_eq!(second_line_first_glyph.x, 0.0);
+        // Narrowing pushes the third char run past the first line: with
+        // the +25 indent the visible right edge of line 0 stays within
+        // the 60 px box (last glyph right <= 60).
+        let line0_right = l.glyphs.iter()
+            .filter(|g| g.line == 0)
+            .map(|g| g.right)
+            .fold(0.0_f64, f64::max);
+        assert!(line0_right <= 60.0,
+            "first line must not overflow the box; right={line0_right}");
+        // Three lines result from the narrowed first line.
+        assert_eq!(l.lines.len(), 3);
     }
 
     #[test]
@@ -1880,7 +1939,7 @@ mod tests {
         // fits and "information" (88) wraps. With hyphenation we can
         // try "in-" / "infor-" / "informa-" etc. as line endings.
         let l = layout_with_hyphen(
-            "go information", 80.0, 16.0, opts, m.as_ref());
+            "go information", 80.0, 16.0, opts, m.as_ref(), 0.0);
         assert!(l.lines.len() >= 2, "should wrap");
         // The first line should end at a hyphenation break (trailing_hyphen).
         let line0 = &l.lines[0];
@@ -1904,7 +1963,7 @@ mod tests {
         // protection "T-rump" would split. With protection, the whole
         // word "Trump" wraps to next line and the line ends ragged.
         let l = layout_with_hyphen(
-            "stuff Trump", 60.0, 16.0, opts, m.as_ref());
+            "stuff Trump", 60.0, 16.0, opts, m.as_ref(), 0.0);
         assert!(l.lines.len() >= 2);
         // No line may end with trailing_hyphen — the only candidate
         // would be inside "Trump", and that's blocked.
@@ -1921,7 +1980,7 @@ mod tests {
             allow_capitalized: true,
         };
         let l = layout_with_hyphen(
-            "stuff Trump", 60.0, 16.0, opts, m.as_ref());
+            "stuff Trump", 60.0, 16.0, opts, m.as_ref(), 0.0);
         // With protection off, hyphenation may apply (depends on the
         // sample patterns matching). We only assert the call doesn't
         // panic and produces ≥1 line.
