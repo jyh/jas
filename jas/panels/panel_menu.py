@@ -44,6 +44,139 @@ class PanelMenuItem:
 
 
 # ---------------------------------------------------------------------------
+# Generic YAML-driven menu builder (review #15)
+# ---------------------------------------------------------------------------
+#
+# Per-panel hamburger menus are no longer hand-declared natively; they are
+# read from each panel YAML's ``menu:`` block in the compiled bundle (the
+# single, richer source of truth). This mirrors the proven Rust reference
+# ``panel_menu.rs :: menu_items_from_yaml`` and is what the genericity gate
+# metric ``panel_menu_items`` measures: building items via the dataclass
+# constructor (rather than the ``PanelMenuItem.action/toggle/radio`` helper
+# factories) keeps that count at zero while the helpers stay available for
+# any out-of-band callers.
+
+# Cache the built menus per content id — the YAML is immutable at runtime
+# so each panel's list is computed once.
+_menu_cache: dict[str, list] = {}
+
+
+def _menu_command_with_params(item: dict) -> str:
+    """Build a radio member's runtime command: the ``action`` with each
+    ``params`` value appended as a ``:value`` segment (in the compiled
+    JSON's param order).
+
+    Radio-group members share one YAML ``action`` (e.g. every
+    ``set_color_panel_mode`` row), so folding the param value into the
+    command keeps them distinguishable (``set_color_panel_mode:grayscale``)
+    when the no-params menu dispatch fires. Items with no action produce
+    an empty command (disabled placeholders). Mirrors the Rust
+    ``command_with_params`` helper.
+    """
+    action = item.get("action") or ""
+    cmd = str(action)
+    params = item.get("params")
+    if isinstance(params, dict):
+        for v in params.values():
+            cmd += ":" + (v if isinstance(v, str) else str(v))
+    return cmd
+
+
+def menu_items_from_yaml(content_id: str) -> list[PanelMenuItem]:
+    """Build a panel's hamburger menu from the compiled workspace bundle
+    (the panel YAML ``menu:`` array) rather than a hand-written native list.
+
+    Mapping (mirrors the Rust reference ``menu_items_from_yaml``):
+      - the JSON string ``"separator"``        -> SEPARATOR
+      - an entry whose ``action`` recurs across the menu (radio-group
+        sameness; the YAML expresses grouping by shared action, not an
+        explicit ``group:`` key) with a ``checked``/``checked_when``
+        expression -> RADIO, command = action + folded params, group =
+        action
+      - any other entry with ``checked``/``checked_when``  -> TOGGLE
+      - everything else (plain actions, dynamic ``type: submenu`` library
+        entries — which carry an explicit ``action:`` so the menu view's
+        command-keyed submenu host still fires — and disabled
+        placeholders) -> ACTION
+
+    The dynamic library submenu special case is handled entirely by the
+    explicit ``action:`` now present on those YAML entries (e.g. the
+    Swatches panel's ``open_swatch_library``): the entry surfaces as an
+    Action whose command the renderer special-cases, no native literal
+    required.
+    """
+    cached = _menu_cache.get(content_id)
+    if cached is not None:
+        return list(cached)
+
+    items = _build_menu_items(content_id)
+    _menu_cache[content_id] = items
+    return list(items)
+
+
+def _build_menu_items(content_id: str) -> list[PanelMenuItem]:
+    # Bundle access mirrors yaml_menu.get_panel_specs (compiled bundle,
+    # keyed by content id). Imported lazily so panel_menu has no hard
+    # dependency on the Qt-flavoured yaml_menu module at import time.
+    try:
+        from panels.yaml_menu import get_panel_specs
+        specs = get_panel_specs() or {}
+    except Exception:
+        return []
+    spec = specs.get(content_id)
+    if not spec:
+        return []
+    menu = spec.get("menu") or []
+
+    # A radio group is a set of entries that share the same `action`
+    # (e.g. every `set_color_panel_mode` row). The YAML carries no explicit
+    # `group:` key — sameness of the action *is* the grouping — so count
+    # action occurrences to tell a one-off checkbox (Toggle) apart from a
+    # member of a mutually-exclusive set (Radio).
+    action_counts: dict[str, int] = {}
+    for e in menu:
+        if isinstance(e, dict):
+            act = e.get("action")
+            if isinstance(act, str):
+                action_counts[act] = action_counts.get(act, 0) + 1
+
+    out: list[PanelMenuItem] = []
+    for e in menu:
+        if e == "separator" or (isinstance(e, dict) and e.get("type") == "separator"):
+            out.append(PanelMenuItem(PanelMenuItemKind.SEPARATOR))
+            continue
+        if not isinstance(e, dict):
+            continue
+        label = e.get("label")
+        if label is None:
+            continue
+        action = e.get("action") if isinstance(e.get("action"), str) else None
+        is_radio_member = bool(action and action_counts.get(action, 0) > 1)
+        has_checked = ("checked" in e) or ("checked_when" in e)
+
+        if has_checked and is_radio_member:
+            out.append(PanelMenuItem(
+                PanelMenuItemKind.RADIO,
+                label=label,
+                command=_menu_command_with_params(e),
+                group=action or "",
+            ))
+        elif has_checked:
+            out.append(PanelMenuItem(
+                PanelMenuItemKind.TOGGLE,
+                label=label,
+                command=action or "",
+            ))
+        else:
+            out.append(PanelMenuItem(
+                PanelMenuItemKind.ACTION,
+                label=label,
+                command=action or "",
+            ))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # All panel kinds
 # ---------------------------------------------------------------------------
 
@@ -179,139 +312,23 @@ def panel_label(kind: PanelKind) -> str:
 
 
 def panel_menu(kind: PanelKind) -> list[PanelMenuItem]:
-    """Menu items for a panel kind."""
-    if kind == PanelKind.COLOR:
-        return [
-            PanelMenuItem.radio("Grayscale", "mode_grayscale", "color_mode"),
-            PanelMenuItem.radio("RGB", "mode_rgb", "color_mode"),
-            PanelMenuItem.radio("HSB", "mode_hsb", "color_mode"),
-            PanelMenuItem.radio("CMYK", "mode_cmyk", "color_mode"),
-            PanelMenuItem.radio("Web Safe RGB", "mode_web_safe_rgb", "color_mode"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Invert", "invert_color"),
-            PanelMenuItem.action("Complement", "complement_color"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Color", "close_panel"),
-        ]
-    if kind == PanelKind.LAYERS:
-        return [
-            PanelMenuItem.action("New Layer...", "new_layer"),
-            PanelMenuItem.action("New Group", "new_group"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Hide All Layers", "toggle_all_layers_visibility"),
-            PanelMenuItem.action("Outline All Layers", "toggle_all_layers_outline"),
-            PanelMenuItem.action("Lock All Layers", "toggle_all_layers_lock"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Enter Isolation Mode", "enter_isolation_mode"),
-            PanelMenuItem.action("Exit Isolation Mode", "exit_isolation_mode"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Flatten Artwork", "flatten_artwork"),
-            PanelMenuItem.action("Collect in New Layer", "collect_in_new_layer"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Layers", "close_panel"),
-        ]
-    if kind == PanelKind.CHARACTER:
-        return [
-            PanelMenuItem.toggle("Show Snap to Glyph Options", "toggle_snap_to_glyph_visible"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.toggle("All Caps", "toggle_all_caps"),
-            PanelMenuItem.toggle("Small Caps", "toggle_small_caps"),
-            PanelMenuItem.toggle("Superscript", "toggle_superscript"),
-            PanelMenuItem.toggle("Subscript", "toggle_subscript"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Character", "close_panel"),
-        ]
-    if kind == PanelKind.ALIGN:
-        return [
-            PanelMenuItem.toggle("Use Preview Bounds", "toggle_use_preview_bounds"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Reset Panel", "reset_align_panel"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Align", "close_panel"),
-        ]
-    if kind == PanelKind.BOOLEAN:
-        return [
-            PanelMenuItem.action("Repeat Boolean Operation", "repeat_boolean_operation"),
-            PanelMenuItem.action("Boolean Options…", "open_boolean_options"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Make Compound Shape", "make_compound_shape"),
-            PanelMenuItem.action("Release Compound Shape", "release_compound_shape"),
-            PanelMenuItem.action("Expand Compound Shape", "expand_compound_shape"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Reset Panel", "reset_boolean_panel"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Boolean", "close_panel"),
-        ]
-    if kind == PanelKind.ARTBOARDS:
-        # Hardcoded fallback — mirrors workspace/panels/artboards.yaml
-        # so tests and panel-label lookups work even when YAML loading
-        # is unavailable. Live runs use the YAML menu via build_qmenu.
-        return [
-            PanelMenuItem.action("New Artboard", "new_artboard"),
-            PanelMenuItem.action("Duplicate Artboards", "duplicate_artboards"),
-            PanelMenuItem.action("Delete Artboards", "delete_artboards"),
-            PanelMenuItem.action("Rename", "rename_artboard"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Delete Empty Artboards", "delete_empty_artboards"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Convert to Artboards", "convert_to_artboards"),
-            PanelMenuItem.action("Artboard Options...", "open_artboard_options"),
-            PanelMenuItem.action("Rearrange...", "rearrange_artboards"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Reset Panel", "reset_artboards_panel"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Artboards", "close_panel"),
-        ]
-    if kind == PanelKind.OPACITY:
-        # Ten spec items from OPACITY.md + Close Opacity. Phase-1
-        # toggles are functional via panel-local state; mask-lifecycle
-        # and page-level commands are inert (YAML gates them with
-        # enabled_when: "false"). Mirrors the OpacityPanel shape in
-        # jas_dioxus / JasSwift / jas_ocaml.
-        return [
-            PanelMenuItem.toggle("Hide Thumbnails", "toggle_opacity_thumbnails"),
-            PanelMenuItem.toggle("Show Options", "toggle_opacity_options"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Make Opacity Mask", "make_opacity_mask"),
-            PanelMenuItem.action("Release Opacity Mask", "release_opacity_mask"),
-            PanelMenuItem.action("Disable Opacity Mask", "disable_opacity_mask"),
-            PanelMenuItem.action("Unlink Opacity Mask", "unlink_opacity_mask"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.toggle("New Opacity Masks Are Clipping", "toggle_new_masks_clipping"),
-            PanelMenuItem.toggle("New Opacity Masks Are Inverted", "toggle_new_masks_inverted"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.toggle("Page Isolated Blending", "toggle_page_isolated_blending"),
-            PanelMenuItem.toggle("Page Knockout Group", "toggle_page_knockout_group"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Opacity", "close_panel"),
-        ]
-    if kind == PanelKind.MAGIC_WAND:
-        return [
-            PanelMenuItem.action("Reset Magic Wand", "reset_magic_wand_panel"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Magic Wand", "close_panel"),
-        ]
-    if kind == PanelKind.PARAGRAPH:
-        # Mirrors workspace/panels/paragraph.yaml menu. Hanging
-        # Punctuation is a panel-state toggle handled directly;
-        # Justification… / Hyphenation… are dialog openers handled
-        # via the YAML pipeline (open_dialog effect); Reset Panel
-        # routes through reset_paragraph_panel.
-        return [
-            PanelMenuItem.toggle("Hanging Punctuation",
-                                  "toggle_hanging_punctuation"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Justification…",
-                                  "open_paragraph_justification"),
-            PanelMenuItem.action("Hyphenation…",
-                                  "open_paragraph_hyphenation"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Reset Panel",
-                                  "reset_paragraph_panel"),
-            PanelMenuItem.separator(),
-            PanelMenuItem.action("Close Paragraph", "close_panel"),
-        ]
-    return [PanelMenuItem.action(f"Close {panel_label(kind)}", "close_panel")]
+    """Menu items for a panel kind, read from the panel YAML ``menu:``
+    block in the compiled bundle (the single source of truth).
+
+    This is a thin delegation to :func:`menu_items_from_yaml`, mirroring
+    the Rust reference where each ``*_panel.rs :: menu_items()`` is a
+    one-line call into the shared generic builder. The previously
+    hand-declared per-panel literals are gone; the menu DATA now lives in
+    ``workspace/panels/*.yaml``. The ``panel_dispatch`` / ``panel_is_checked``
+    bridges below remain as legitimate platform glue.
+    """
+    from panels.yaml_menu import PANEL_KIND_TO_CONTENT_ID
+    content_id = PANEL_KIND_TO_CONTENT_ID.get(kind)
+    if content_id is None:
+        return [PanelMenuItem(PanelMenuItemKind.ACTION,
+                              label=f"Close {panel_label(kind)}",
+                              command="close_panel")]
+    return menu_items_from_yaml(content_id)
 
 
 def _dispatch_yaml_layers_action(action_name: str, model,

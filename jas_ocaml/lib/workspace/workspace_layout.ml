@@ -41,19 +41,17 @@ let color_panel_mode_label = function
   | Cmyk_mode -> "CMYK"
   | Web_safe_rgb -> "Web Safe RGB"
 
-let color_panel_mode_command = function
-  | Grayscale -> "mode_grayscale"
-  | Hsb_mode -> "mode_hsb"
-  | Rgb_mode -> "mode_rgb"
-  | Cmyk_mode -> "mode_cmyk"
-  | Web_safe_rgb -> "mode_web_safe_rgb"
-
+(* The Color panel's five mode rows now arrive from the YAML-driven
+   menu builder as the radio group [set_color_panel_mode] with each
+   [params.mode] folded into the command, i.e. the dispatch sees
+   ["set_color_panel_mode:grayscale"]. Recover the [color_panel_mode]
+   from that folded form. *)
 let color_panel_mode_of_command = function
-  | "mode_grayscale" -> Some Grayscale
-  | "mode_hsb" -> Some Hsb_mode
-  | "mode_rgb" -> Some Rgb_mode
-  | "mode_cmyk" -> Some Cmyk_mode
-  | "mode_web_safe_rgb" -> Some Web_safe_rgb
+  | "set_color_panel_mode:grayscale" -> Some Grayscale
+  | "set_color_panel_mode:hsb" -> Some Hsb_mode
+  | "set_color_panel_mode:rgb" -> Some Rgb_mode
+  | "set_color_panel_mode:cmyk" -> Some Cmyk_mode
+  | "set_color_panel_mode:web_safe_rgb" -> Some Web_safe_rgb
   | _ -> None
 
 let all_color_panel_modes = [| Grayscale; Hsb_mode; Rgb_mode; Cmyk_mode; Web_safe_rgb |]

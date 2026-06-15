@@ -3,19 +3,14 @@
 import Foundation
 
 public enum ColorPanel {
+    /// Source of truth is workspace/panels/color.yaml's `menu:` block
+    /// (review #15); the generic reader builds the items from the bundle.
+    /// The five mode rows share `action: set_color_panel_mode`, so the
+    /// builder folds each `params.mode` into the command
+    /// (`set_color_panel_mode:grayscale`, …) — `ColorPanelMode.fromCommand`
+    /// splits that suffix back off.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .radio(label: "Grayscale", command: "mode_grayscale", group: "color_mode"),
-            .radio(label: "RGB", command: "mode_rgb", group: "color_mode"),
-            .radio(label: "HSB", command: "mode_hsb", group: "color_mode"),
-            .radio(label: "CMYK", command: "mode_cmyk", group: "color_mode"),
-            .radio(label: "Web Safe RGB", command: "mode_web_safe_rgb", group: "color_mode"),
-            .separator,
-            .action(label: "Invert", command: "invert_color"),
-            .action(label: "Complement", command: "complement_color"),
-            .separator,
-            .action(label: "Close Color", command: "close_panel"),
-        ]
+        menuItemsFromYaml("color_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
@@ -54,14 +49,14 @@ public enum ColorPanel {
         switch cmd {
         case "close_panel":
             layout.closePanel(addr)
-        case "invert_color":
+        case "invert_active_color":
             guard let model = model else { return }
             if let color = model.fillOnTop ? model.defaultFill?.color : model.defaultStroke?.color {
                 let (r, g, b, _) = color.toRgba()
                 let inverted = Color.rgb(r: 1.0 - r, g: 1.0 - g, b: 1.0 - b, a: 1.0)
                 setActiveColor(inverted, model: model)
             }
-        case "complement_color":
+        case "complement_active_color":
             guard let model = model else { return }
             if let color = model.fillOnTop ? model.defaultFill?.color : model.defaultStroke?.color {
                 let (h, s, br, _) = color.toHsba()
@@ -87,7 +82,7 @@ public enum ColorPanel {
     /// operate on; gray them out when the active attribute is none.
     public static func isEnabled(_ cmd: String, model: Model?) -> Bool {
         switch cmd {
-        case "invert_color", "complement_color":
+        case "invert_active_color", "complement_active_color":
             guard let m = model else { return true }
             let c: Color? = m.fillOnTop ? m.defaultFill?.color : m.defaultStroke?.color
             return c != nil

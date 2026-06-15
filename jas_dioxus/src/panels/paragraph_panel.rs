@@ -11,35 +11,9 @@ use crate::workspace::workspace::PanelAddr;
 use super::panel_menu::PanelMenuItem;
 
 pub fn menu_items() -> Vec<PanelMenuItem> {
-    vec![
-        PanelMenuItem::Toggle {
-            label: "Hanging Punctuation",
-            command: "toggle_hanging_punctuation",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Justification\u{2026}",
-            command: "open_paragraph_justification",
-            shortcut: "",
-        },
-        PanelMenuItem::Action {
-            label: "Hyphenation\u{2026}",
-            command: "open_paragraph_hyphenation",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Reset Panel",
-            command: "reset_paragraph_panel",
-            shortcut: "",
-        },
-        PanelMenuItem::Separator,
-        PanelMenuItem::Action {
-            label: "Close Paragraph",
-            command: "close_panel",
-            shortcut: "",
-        },
-    ]
+    // Source of truth is workspace/panels/paragraph.yaml's `menu:` block
+    // (review #15); the generic reader builds the items from the bundle.
+    super::panel_menu::menu_items_from_yaml("paragraph_panel_content")
 }
 
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {

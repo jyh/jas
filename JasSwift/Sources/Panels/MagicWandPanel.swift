@@ -7,12 +7,11 @@
 /// nine `magic_wand_*` keys back to their state defaults.
 
 public enum MagicWandPanel {
+    /// Source of truth is workspace/panels/magic_wand.yaml's `menu:`
+    /// block (review #15); the generic reader builds the items from the
+    /// bundle.
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .action(label: "Reset Magic Wand", command: "reset_magic_wand_panel"),
-            .separator,
-            .action(label: "Close Magic Wand", command: "close_panel"),
-        ]
+        menuItemsFromYaml("magic_wand_panel_content")
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {

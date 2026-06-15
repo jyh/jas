@@ -2,6 +2,85 @@ import Foundation
 import Testing
 @testable import JasLib
 
+// ── Generic YAML menu builder ────────────────────────────────────
+//
+// These probe `menuItemsFromYaml` directly: the builder reads each
+// panel's `menu:` block from the compiled bundle and maps it to
+// PanelMenuItem (separator / checked->toggle / recurring-action->radio
+// with folded params / else action). They mirror the Rust reference's
+// panel_menu unit tests.
+
+private func commands(_ items: [PanelMenuItem]) -> [String] {
+    items.compactMap { item in
+        switch item {
+        case .action(_, let c, _), .toggle(_, let c), .radio(_, let c, _): return c
+        case .separator: return nil
+        }
+    }
+}
+
+@Test func builderReadsBooleanPanel() {
+    let items = menuItemsFromYaml("boolean_panel_content")
+    let cmds = commands(items)
+    #expect(cmds.contains("make_compound_shape"))
+    #expect(cmds.contains("close_panel"))
+    let seps = items.filter { if case .separator = $0 { return true }; return false }.count
+    #expect(seps == 3)
+    #expect(items.count == 10)
+}
+
+@Test func builderFoldsColorRadioParamsIntoCommand() {
+    // The Color panel's five mode rows share `action: set_color_panel_mode`,
+    // so the builder treats them as a radio group and folds each
+    // `params.mode` value into the command.
+    let items = menuItemsFromYaml("color_panel_content")
+    var radios: [(String, String)] = []
+    for item in items {
+        if case .radio(_, let cmd, let group) = item { radios.append((cmd, group)) }
+    }
+    #expect(radios.contains { $0 == ("set_color_panel_mode:grayscale", "set_color_panel_mode") })
+    #expect(radios.contains { $0 == ("set_color_panel_mode:rgb", "set_color_panel_mode") })
+    #expect(radios.contains { $0 == ("set_color_panel_mode:web_safe_rgb", "set_color_panel_mode") })
+    // Plain actions keep their action verbatim (no param folding).
+    #expect(commands(items).contains("invert_active_color"))
+    // close_panel keeps its action even though the YAML carries
+    // `params: { panel: color }`.
+    #expect(commands(items).contains("close_panel"))
+}
+
+@Test func builderSwatchesSubmenuBecomesOpenLibraryAction() {
+    // The dynamic "Open Swatch Library" submenu entry has an explicit
+    // `action: open_swatch_library` in the YAML so the menu view's
+    // submenu host fires.
+    let items = menuItemsFromYaml("swatches_panel_content")
+    let hasHost = items.contains { if case .action(_, "open_swatch_library", _) = $0 { return true }; return false }
+    #expect(hasHost, "swatches menu should expose open_swatch_library host")
+    // Thumbnail-size rows are a radio group with folded params.
+    var radios: [String] = []
+    for item in items { if case .radio(_, let cmd, _) = item { radios.append(cmd) } }
+    #expect(radios.contains("set_swatch_thumbnail_size:small"))
+    #expect(radios.contains("set_swatch_thumbnail_size:large"))
+}
+
+@Test func builderStandaloneCheckboxIsToggleNotRadio() {
+    // The Align panel has a single `toggle_use_preview_bounds` checkbox;
+    // its action does not recur, so it is a toggle, not a radio.
+    let items = menuItemsFromYaml("align_panel_content")
+    let isToggle = items.contains { if case .toggle(_, "toggle_use_preview_bounds") = $0 { return true }; return false }
+    #expect(isToggle)
+}
+
+@Test func builderStrokeCapJoinAreRadioGroups() {
+    let items = menuItemsFromYaml("stroke_panel_content")
+    var radios: [String] = []
+    for item in items { if case .radio(_, let cmd, _) = item { radios.append(cmd) } }
+    #expect(radios.contains("set_stroke_cap:butt"))
+    #expect(radios.contains("set_stroke_cap:round"))
+    #expect(radios.contains("set_stroke_join:miter"))
+    #expect(radios.contains("set_stroke_join:bevel"))
+    #expect(commands(items).contains("close_panel"))
+}
+
 @Test func panelLabelMatchesAllKinds() {
     #expect(panelLabel(.layers) == "Layers")
     #expect(panelLabel(.color) == "Color")
