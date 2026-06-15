@@ -304,6 +304,25 @@ public struct Document: Equatable {
         return node
     }
 
+    /// Bounds-checked element lookup. Returns `nil` for an empty path
+    /// or any index that falls outside its level (a stale selection /
+    /// dangling path), instead of trapping like `getElement`. Mirrors
+    /// the Rust `Document::get_element -> Option<&Element>` contract so
+    /// callers that may hold paths into a since-mutated document (e.g.
+    /// the active-document view derived from a stale selection) degrade
+    /// gracefully rather than crash.
+    public func tryGetElement(_ path: ElementPath) -> Element? {
+        guard let first = path.first else { return nil }
+        guard first >= 0, first < layers.count else { return nil }
+        var node: Element = .layer(layers[first])
+        for idx in path.dropFirst() {
+            let children = childrenOf(node)
+            guard idx >= 0, idx < children.count else { return nil }
+            node = children[idx]
+        }
+        return node
+    }
+
     /// Effective visibility of the element at `path`, computed as the
     /// minimum of the visibilities of every element along the path
     /// from the root layer down to the target. A parent Group/Layer
