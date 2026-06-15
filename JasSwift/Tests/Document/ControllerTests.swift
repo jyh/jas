@@ -664,6 +664,42 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(!paths.contains([0, 0]))
 }
 
+@Test func copySelectionClearsId() {
+    // A duplicated element must not inherit the source's stable id —
+    // two elements cannot share an identity. The copy is born id-less
+    // (lazy); the original keeps its id.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "rect-1"))
+    let layer = Layer(name: "L0", children: [rect])
+    let baseDoc = Document(layers: [layer])
+    let doc = Document(layers: baseDoc.layers,
+                          selection: selAllCPs(baseDoc, [0, 0]))
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.copySelection(dx: 20, dy: 0)
+    // The original keeps its id.
+    #expect(ctrl.document.getElement([0, 0]).id == "rect-1")
+    // The copy must NOT inherit it.
+    #expect(ctrl.document.getElement([0, 1]).id == nil)
+}
+
+@Test func copySelectionClearsIdRecursivelyInGroup() {
+    // Duplicating a group clears ids on the group AND its descendants,
+    // so no copied element shares identity with its source.
+    let inner = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "inner-1"))
+    let group = Element.group(Group(children: [inner], id: "group-1"))
+    let layer = Layer(name: "L0", children: [group])
+    let baseDoc = Document(layers: [layer])
+    let doc = Document(layers: baseDoc.layers,
+                          selection: selAllCPs(baseDoc, [0, 0]))
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.copySelection(dx: 20, dy: 0)
+    // Copy of the group at [0,1]; its child at [0,1,0].
+    #expect(ctrl.document.getElement([0, 1]).id == nil)
+    #expect(ctrl.document.getElement([0, 1, 0]).id == nil)
+    // Originals untouched.
+    #expect(ctrl.document.getElement([0, 0]).id == "group-1")
+    #expect(ctrl.document.getElement([0, 0, 0]).id == "inner-1")
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {

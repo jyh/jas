@@ -696,6 +696,13 @@ val id_of : element -> string option
     [None] clears the id. See the doc on {!type:element}. *)
 val with_id : element -> string option -> element
 
+(** Return a copy of [elem] with its id and the ids of all descendants
+    cleared. A duplicated element must not inherit the source identity —
+    two elements cannot share an id — so duplication paths (copy, paste,
+    duplicate) pass each copy through this. Recurses into Group and Layer
+    children. See the stable-identity initiative. *)
+val clear_ids : element -> element
+
 val color_to_hex : color -> string
 val color_from_hex : string -> color option
 

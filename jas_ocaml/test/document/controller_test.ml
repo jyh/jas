@@ -526,6 +526,44 @@ let () =
         let cp_paths = sel_paths cp_ctrl3#document.Jas.Document.selection in
         assert (Jas.Document.PathSet.mem [0; 1] cp_paths);
         assert (not (Jas.Document.PathSet.mem [0; 0] cp_paths)));
+
+      Alcotest.test_case "copy_selection clears id on the copy" `Quick (fun () ->
+        (* A duplicated element must not inherit the source stable id —
+           two elements cannot share an identity. The original keeps its
+           id; the copy is born id-less. *)
+        let id_rect = with_id (make_rect 0.0 0.0 10.0 10.0) (Some "rect-1") in
+        let id_layer = make_layer ~name:"L0" [|id_rect|] in
+        let id_sel = Jas.Document.PathMap.singleton [0; 0]
+          (Jas.Document.element_selection_all [0; 0]) in
+        let id_doc = Jas.Document.make_document ~selection:id_sel [|id_layer|] in
+        let id_ctrl = Jas.Controller.create
+          ~model:(Jas.Model.create ~document:id_doc ()) () in
+        id_ctrl#copy_selection 20.0 0.0;
+        let doc = id_ctrl#document in
+        (* Original keeps its id. *)
+        assert (id_of (Jas.Document.get_element doc [0; 0]) = Some "rect-1");
+        (* Copy must not inherit it. *)
+        assert (id_of (Jas.Document.get_element doc [0; 1]) = None));
+
+      Alcotest.test_case "copy_selection clears id recursively in a group" `Quick (fun () ->
+        (* Duplicating a group clears ids on the group AND its descendants,
+           so no copied element shares identity with its source. *)
+        let inner = with_id (make_rect 0.0 0.0 10.0 10.0) (Some "inner-1") in
+        let grp = with_id (make_group [|inner|]) (Some "group-1") in
+        let g_layer = make_layer ~name:"L0" [|grp|] in
+        let g_sel = Jas.Document.PathMap.singleton [0; 0]
+          (Jas.Document.element_selection_all [0; 0]) in
+        let g_doc = Jas.Document.make_document ~selection:g_sel [|g_layer|] in
+        let g_ctrl = Jas.Controller.create
+          ~model:(Jas.Model.create ~document:g_doc ()) () in
+        g_ctrl#copy_selection 20.0 0.0;
+        let doc = g_ctrl#document in
+        (* Copy of the group at [0,1]; its child at [0,1,0] — both id-less. *)
+        assert (id_of (Jas.Document.get_element doc [0; 1]) = None);
+        assert (id_of (Jas.Document.get_element doc [0; 1; 0]) = None);
+        (* Originals untouched. *)
+        assert (id_of (Jas.Document.get_element doc [0; 0]) = Some "group-1");
+        assert (id_of (Jas.Document.get_element doc [0; 0; 0]) = Some "inner-1"));
     ];
 
     "delete selection", [

@@ -1205,7 +1205,9 @@ public class Controller {
         let sortedSels = doc.selection.sorted { $0.path.lexicographicallyPrecedes($1.path) }.reversed()
         for es in sortedSels {
             let elem = doc.getElement(es.path)
-            let copied = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
+            // A copy must not inherit the source's stable id (no two
+            // elements may share an identity); it is born id-less.
+            let copied = elem.moveControlPoints(es.kind, dx: dx, dy: dy).clearingIds()
             doc = doc.insertElementAfter(es.path, element: copied)
             var copyPath = es.path
             copyPath[copyPath.count - 1] += 1

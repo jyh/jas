@@ -1276,6 +1276,43 @@ public enum Element: Equatable {
         }
     }
 
+    /// Return a copy of this element with its stable `id` cleared (set to
+    /// nil) on the element itself AND, for groups/layers, recursively on
+    /// every descendant.
+    ///
+    /// A DUPLICATED element must not inherit the source's identity — two
+    /// elements cannot share an id — so a copy is born id-less (lazy) and
+    /// mints a fresh id only if/when it later becomes a reference target.
+    /// Used by every duplication path (copy/paste/duplicate). Mirrors the
+    /// reference implementation's `clear_ids`. See the stable-identity
+    /// initiative (VISION.md §6.2).
+    ///
+    /// Leaf elements (and `.live`, which has no flat id slot) only clear
+    /// their own id; only `.group`/`.layer` carry children to recurse into,
+    /// matching the reference's `children_mut` (None for every other kind).
+    public func clearingIds() -> Element {
+        switch self {
+        case .line(let v): return .line(v.withId(nil))
+        case .rect(let v): return .rect(v.withId(nil))
+        case .circle(let v): return .circle(v.withId(nil))
+        case .ellipse(let v): return .ellipse(v.withId(nil))
+        case .polyline(let v): return .polyline(v.withId(nil))
+        case .polygon(let v): return .polygon(v.withId(nil))
+        case .path(let v): return .path(v.withId(nil))
+        case .text(let v): return .text(v.withId(nil))
+        case .textPath(let v): return .textPath(v.withId(nil))
+        case .group(let v):
+            return .group(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
+        case .layer(let v):
+            return .layer(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
+        case .live:
+            // Live elements have no flat id slot (see `id`) and expose no
+            // uniform children mutator here, mirroring the reference's
+            // `children_mut` returning None for Live. Nothing to clear.
+            return self
+        }
+    }
+
     /// Return a copy of this element with its `visibility` replaced.
     public func withVisibility(_ visibility: Visibility) -> Element {
         switch self {
@@ -3143,6 +3180,154 @@ public struct Layer: Equatable {
         let maxX = all.map { $0.x + $0.width }.max()!
         let maxY = all.map { $0.y + $0.height }.max()!
         return (minX, minY, maxX - minX, maxY - minY)
+    }
+}
+
+// MARK: - Stable-identity helpers
+
+// Per-struct `withId(_:)` reconstructs the value through its full
+// memberwise initializer, preserving EVERY field (name, blendMode, mask,
+// gradients, brush, …) while replacing only `id`. Used by
+// `Element.clearingIds()` so a duplicated element is born id-less without
+// dropping any other attribute. See the stable-identity initiative.
+
+extension Line {
+    public func withId(_ id: String?) -> Line {
+        Line(x1: x1, y1: y1, x2: x2, y2: y2,
+             stroke: stroke, widthPoints: widthPoints,
+             opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility,
+             blendMode: blendMode, mask: mask,
+             strokeGradient: strokeGradient, name: name, id: id)
+    }
+}
+
+extension Rect {
+    public func withId(_ id: String?) -> Rect {
+        Rect(x: x, y: y, width: width, height: height, rx: rx, ry: ry,
+             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+             name: name, id: id)
+    }
+}
+
+extension Circle {
+    public func withId(_ id: String?) -> Circle {
+        Circle(cx: cx, cy: cy, r: r,
+               fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+               locked: locked, visibility: visibility, blendMode: blendMode,
+               mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+               name: name, id: id)
+    }
+}
+
+extension Ellipse {
+    public func withId(_ id: String?) -> Ellipse {
+        Ellipse(cx: cx, cy: cy, rx: rx, ry: ry,
+                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                locked: locked, visibility: visibility, blendMode: blendMode,
+                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                name: name, id: id)
+    }
+}
+
+extension Polyline {
+    public func withId(_ id: String?) -> Polyline {
+        Polyline(points: points,
+                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                 locked: locked, visibility: visibility, blendMode: blendMode,
+                 mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                 name: name, id: id)
+    }
+}
+
+extension Polygon {
+    public func withId(_ id: String?) -> Polygon {
+        Polygon(points: points,
+                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                locked: locked, visibility: visibility, blendMode: blendMode,
+                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+                name: name, id: id)
+    }
+}
+
+extension Path {
+    public func withId(_ id: String?) -> Path {
+        Path(d: d, fill: fill, stroke: stroke, widthPoints: widthPoints,
+             opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
+             strokeBrush: strokeBrush, strokeBrushOverrides: strokeBrushOverrides,
+             toolOrigin: toolOrigin, name: name, id: id)
+    }
+}
+
+extension Text {
+    public func withId(_ id: String?) -> Text {
+        Text(x: x, y: y, tspans: tspans,
+             fontFamily: fontFamily, fontSize: fontSize,
+             fontWeight: fontWeight, fontStyle: fontStyle,
+             textDecoration: textDecoration,
+             textTransform: textTransform, fontVariant: fontVariant,
+             baselineShift: baselineShift, lineHeight: lineHeight,
+             letterSpacing: letterSpacing, xmlLang: xmlLang,
+             aaMode: aaMode, rotate: rotate,
+             horizontalScale: horizontalScale, verticalScale: verticalScale,
+             kerning: kerning, width: width, height: height,
+             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+             locked: locked, visibility: visibility, blendMode: blendMode,
+             mask: mask, name: name, id: id)
+    }
+}
+
+extension TextPath {
+    public func withId(_ id: String?) -> TextPath {
+        TextPath(d: d, tspans: tspans, startOffset: startOffset,
+                 fontFamily: fontFamily, fontSize: fontSize,
+                 fontWeight: fontWeight, fontStyle: fontStyle,
+                 textDecoration: textDecoration,
+                 textTransform: textTransform, fontVariant: fontVariant,
+                 baselineShift: baselineShift, lineHeight: lineHeight,
+                 letterSpacing: letterSpacing, xmlLang: xmlLang,
+                 aaMode: aaMode, rotate: rotate,
+                 horizontalScale: horizontalScale, verticalScale: verticalScale,
+                 kerning: kerning,
+                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                 locked: locked, visibility: visibility, blendMode: blendMode,
+                 mask: mask, name: name, id: id)
+    }
+}
+
+extension Group {
+    public func withId(_ id: String?) -> Group {
+        Group(children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, name: name, id: id)
+    }
+
+    public func withChildren(_ children: [Element]) -> Group {
+        Group(children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, name: name, id: id)
+    }
+}
+
+extension Layer {
+    public func withId(_ id: String?) -> Layer {
+        Layer(name: name, children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, id: id)
+    }
+
+    public func withChildren(_ children: [Element]) -> Layer {
+        Layer(name: name, children: children, opacity: opacity, transform: transform,
+              locked: locked, visibility: visibility, blendMode: blendMode,
+              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
+              mask: mask, id: id)
     }
 }
 

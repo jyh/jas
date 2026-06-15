@@ -1496,6 +1496,20 @@ let with_id elem (i : string option) =
   | Layer r      -> Layer { r with id = i }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with id = i })
 
+(* Recursively clear the stable id on [elem] and all of its descendants,
+   returning a fresh element. A DUPLICATED element must not inherit the
+   source identity — two elements cannot share an id — so a copy is born
+   id-less (lazy) and mints a fresh id only if and when it later becomes a
+   reference target. Used by every duplication path (copy, paste,
+   duplicate). Mirrors the Rust clear_ids: recurse into Group and Layer
+   children only. See the stable-identity initiative (VISION section 6.2). *)
+let rec clear_ids elem =
+  let elem = with_id elem None in
+  match elem with
+  | Group r -> Group { r with children = Array.map clear_ids r.children }
+  | Layer r -> Layer { r with children = Array.map clear_ids r.children }
+  | _ -> elem
+
 let color_to_hex c =
   let (r, g, b, _) = color_to_rgba c in
   let ri = int_of_float (Float.round (r *. 255.0)) in

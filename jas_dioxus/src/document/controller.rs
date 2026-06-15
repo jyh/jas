@@ -638,7 +638,10 @@ impl Controller {
         sorted_sels.sort_by(|a, b| b.path.cmp(&a.path));
         for es in &sorted_sels {
             if let Some(elem) = doc.get_element(&es.path) {
-                let copied = move_control_points(elem, &es.kind, dx, dy);
+                let mut copied = move_control_points(elem, &es.kind, dx, dy);
+                // A copy must not inherit the source's stable id (no two
+                // elements may share an identity); it is born id-less.
+                crate::geometry::element::clear_ids(&mut copied);
                 new_doc = new_doc.insert_element_after(&es.path, copied.clone());
                 let mut copy_path = es.path.clone();
                 *copy_path.last_mut().unwrap() += 1;
@@ -3155,6 +3158,60 @@ mod tests {
         // Original was at index 0; copy is appended at index 1.
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 1]));
+    }
+
+    #[test]
+    fn copy_selection_clears_id() {
+        // A duplicated element must not inherit the source's stable id —
+        // two elements cannot share an identity. The copy is born id-less
+        // (lazy); it mints a fresh id only if/when it later becomes a
+        // reference target. See the stable-identity initiative.
+        let mut model = Model::default();
+        let mut rect = make_rect(0.0, 0.0, 10.0, 10.0);
+        rect.common_mut().id = Some("rect-1".into());
+        Controller::add_element(&mut model, rect);
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::copy_selection(&mut model, 20.0, 0.0);
+        let doc = model.document();
+        // The original keeps its id.
+        assert_eq!(
+            doc.get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("rect-1"),
+        );
+        // The copy must NOT inherit it.
+        assert_eq!(doc.get_element(&vec![0, 1]).unwrap().common().id, None);
+    }
+
+    #[test]
+    fn copy_selection_clears_id_recursively_in_group() {
+        // Duplicating a group clears ids on the group AND its descendants,
+        // so no copied element shares identity with its source.
+        let mut model = Model::default();
+        let mut inner = make_rect(0.0, 0.0, 10.0, 10.0);
+        inner.common_mut().id = Some("inner-1".into());
+        let mut group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(inner)],
+            common: crate::geometry::element::CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        group.common_mut().id = Some("group-1".into());
+        Controller::add_element(&mut model, group);
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::copy_selection(&mut model, 20.0, 0.0);
+        let doc = model.document();
+        // Copy of the group at [0,1]; its child at [0,1,0].
+        assert_eq!(doc.get_element(&vec![0, 1]).unwrap().common().id, None);
+        assert_eq!(doc.get_element(&vec![0, 1, 0]).unwrap().common().id, None);
+        // Originals untouched.
+        assert_eq!(
+            doc.get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("group-1"),
+        );
+        assert_eq!(
+            doc.get_element(&vec![0, 0, 0]).unwrap().common().id.as_deref(),
+            Some("inner-1"),
+        );
     }
 
     #[test]
