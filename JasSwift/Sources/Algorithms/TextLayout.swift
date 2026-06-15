@@ -67,12 +67,26 @@ public func layoutText(_ content: String,
                        maxWidth: Double,
                        fontSize: Double,
                        measure: (String) -> Double,
-                       perCharWidths: [Double]? = nil) -> TextLayout {
+                       perCharWidths: [Double]? = nil,
+                       firstLineExtra: Double = 0.0) -> TextLayout {
     let lineHeight = fontSize
     let ascent = fontSize * 0.8
 
     let chars = Array(content)
     let n = chars.count
+
+    // First line is shifted right by `firstLineExtra` (positive for
+    // indent; the negative-hanging case is handled by the segment
+    // caller). To keep the first line from running past the right edge
+    // we narrow the wrap width for line 0 only. Mirrors python's
+    // `_line_max` in text_layout.py.
+    func lineMax(_ ln: Int) -> Double {
+        if maxWidth <= 0.0 { return maxWidth }
+        if ln == 0 && firstLineExtra > 0.0 {
+            return max(0.0, maxWidth - firstLineExtra)
+        }
+        return maxWidth
+    }
 
     // Resolve per-character widths up front so the layout below can
     // index into a flat array regardless of which path the caller
@@ -136,7 +150,7 @@ public func layoutText(_ content: String,
             }
             idx = end
         } else {
-            if maxWidth > 0.0 && x + tokenW > maxWidth && x > 0.0 {
+            if maxWidth > 0.0 && x + tokenW > lineMax(lineNo) && x > 0.0 {
                 // Mark trailing whitespace glyphs on the current line.
                 for gi in 0..<glyphs.count {
                     if glyphs[gi].line == lineNo && isSpaceChar(chars[glyphs[gi].idx]) {
@@ -148,11 +162,11 @@ public func layoutText(_ content: String,
                 lineStart = idx
                 x = 0.0
             }
-            if maxWidth > 0.0 && tokenW > maxWidth && x == 0.0 {
+            if maxWidth > 0.0 && tokenW > lineMax(lineNo) && x == 0.0 {
                 // Char-by-char break for an over-long token.
                 for k in 0..<(end - idx) {
                     let cw = widths[idx + k]
-                    if x + cw > maxWidth && x > 0.0 {
+                    if x + cw > lineMax(lineNo) && x > 0.0 {
                         pushLine(lineStart, idx + k, false, x)
                         lineNo += 1
                         lineStart = idx + k
@@ -226,7 +240,8 @@ public func layoutTextWithHyphen(_ content: String,
                                  maxWidth: Double,
                                  fontSize: Double,
                                  opts: HyphenOpts,
-                                 measure: (String) -> Double) -> TextLayout {
+                                 measure: (String) -> Double,
+                                 firstLineExtra: Double = 0.0) -> TextLayout {
     let lineHeight = fontSize
     let ascent = fontSize * 0.8
     let chars = Array(content)
@@ -237,6 +252,17 @@ public func layoutTextWithHyphen(_ content: String,
     var lineNo = 0
     var lineStart = 0
     var x: Double = 0
+
+    // Narrow line 0's wrap width when the first line is indented, so the
+    // first line breaks earlier instead of overflowing the right edge.
+    // Mirrors python's `_line_max` in text_layout.py.
+    func lineMax(_ ln: Int) -> Double {
+        if maxWidth <= 0.0 { return maxWidth }
+        if ln == 0 && firstLineExtra > 0.0 {
+            return max(0.0, maxWidth - firstLineExtra)
+        }
+        return maxWidth
+    }
 
     func pushLine(_ start: Int, _ end: Int, _ hardBreak: Bool, _ width: Double,
                   _ trailingHyphen: Bool) {
@@ -280,7 +306,7 @@ public func layoutTextWithHyphen(_ content: String,
         }
         let token = String(chars[idx..<end])
         let tokenW = measure(token)
-        if maxWidth > 0 && x + tokenW > maxWidth && x > 0 {
+        if maxWidth > 0 && x + tokenW > lineMax(lineNo) && x > 0 {
             // Hyphenation: try to split the token at a hyphenation
             // breakpoint that fits on the current line. Picks the
             // *largest* prefix that still leaves room for the hyphen,
@@ -296,7 +322,7 @@ public func layoutTextWithHyphen(_ content: String,
                                        minBefore: opts.minBefore,
                                        minAfter: opts.minAfter)
                 let hyphenW = measure("-")
-                let avail = maxWidth - x
+                let avail = lineMax(lineNo) - x
                 // Try the largest valid break point first.
                 for bi in stride(from: tokenChars.count - 1, through: 1, by: -1) {
                     if bi >= breaks.count || !breaks[bi] { continue }
@@ -331,10 +357,10 @@ public func layoutTextWithHyphen(_ content: String,
                 // Place the tail at x=0 (or char-by-char if it overflows).
                 let tailChars = Array(tokenChars[splitAt...])
                 let tailW = tailChars.reduce(0.0) { $0 + measure(String($1)) }
-                if maxWidth > 0 && tailW > maxWidth {
+                if maxWidth > 0 && tailW > lineMax(lineNo) {
                     for (k, ch) in tailChars.enumerated() {
                         let cw = measure(String(ch))
-                        if x + cw > maxWidth && x > 0 {
+                        if x + cw > lineMax(lineNo) && x > 0 {
                             pushLine(lineStart, idx + k, false, x, false)
                             lineNo += 1
                             lineStart = idx + k
@@ -367,11 +393,11 @@ public func layoutTextWithHyphen(_ content: String,
             lineStart = idx
             x = 0
         }
-        if maxWidth > 0 && tokenW > maxWidth && x == 0 {
+        if maxWidth > 0 && tokenW > lineMax(lineNo) && x == 0 {
             // Char-by-char break for an over-long token.
             for k in 0..<(end - idx) {
                 let cw = measure(String(chars[idx + k]))
-                if x + cw > maxWidth && x > 0 {
+                if x + cw > lineMax(lineNo) && x > 0 {
                     pushLine(lineStart, idx + k, false, x, false)
                     lineNo += 1
                     lineStart = idx + k
@@ -720,6 +746,13 @@ public func layoutTextWithParagraphs(_ content: String,
         let listIndent: Double = hasList ? seg.markerGap : 0
         let effectiveMax: Double = maxWidth > 0
             ? max(0, maxWidth - seg.leftIndent - listIndent - seg.rightIndent) : 0
+        // Negative firstLineIndent (hanging indent) shifts the first
+        // line LEFT of the left-indent edge — keep the sign so the
+        // per-line offset can hang. `lineMax` inside the inner layout
+        // only narrows when this is positive, so hanging indents do
+        // not change the wrap decision. Mirrors python's
+        // `first_line_extra` in layout_with_paragraphs.
+        let firstLineExtra: Double = hasList ? 0 : seg.firstLineIndent
         // Phase 10: justify segments go through the every-line
         // composer instead of greedy first-fit. Falls back to greedy
         // when the composer can't find a feasible composition.
@@ -728,11 +761,26 @@ public func layoutTextWithParagraphs(_ content: String,
         let segWidths: [Double]? = perCharWidths.map {
             Array($0[seg.charStart..<seg.charEnd])
         }
-        if seg.textAlign == .justify && effectiveMax > 0,
-           let kp = justifyLayoutSegment(slice, maxWidth: effectiveMax,
-                                          fontSize: fontSize, seg: seg,
-                                          measure: measure) {
-            para = kp
+        if seg.textAlign == .justify && effectiveMax > 0 {
+            // Justify dispatch is nested (not folded into one `if`)
+            // so that a nil composer result falls back to PLAIN
+            // layout — never to the hyphenating greedy path. Folding
+            // the optional binding into the justify `if` would let a
+            // nil result drop through to `else if seg.hyphenate` and
+            // wrongly hyphenate a justify segment. Mirrors python's
+            // nested justify-then-plain fallback in
+            // layout_with_paragraphs.
+            if let kp = justifyLayoutSegment(slice, maxWidth: effectiveMax,
+                                              fontSize: fontSize, seg: seg,
+                                              measure: measure,
+                                              firstLineExtra: firstLineExtra) {
+                para = kp
+            } else {
+                para = layoutText(slice, maxWidth: effectiveMax,
+                                  fontSize: fontSize, measure: measure,
+                                  perCharWidths: segWidths,
+                                  firstLineExtra: firstLineExtra)
+            }
         } else if seg.hyphenate && effectiveMax > 0 {
             // Plain (non-justify) layout supports hyphenation via a
             // greedy break-at-largest-fitting-prefix path. Without
@@ -744,13 +792,14 @@ public func layoutTextWithParagraphs(_ content: String,
                                   allowCapitalized: seg.hyphenateCapitalized)
             para = layoutTextWithHyphen(slice, maxWidth: effectiveMax,
                                         fontSize: fontSize, opts: opts,
-                                        measure: measure)
+                                        measure: measure,
+                                        firstLineExtra: firstLineExtra)
         } else {
             para = layoutText(slice, maxWidth: effectiveMax,
                               fontSize: fontSize, measure: measure,
-                              perCharWidths: segWidths)
+                              perCharWidths: segWidths,
+                              firstLineExtra: firstLineExtra)
         }
-        let firstLineExtra: Double = hasList ? 0 : max(0, seg.firstLineIndent)
         let firstLineNoInCombined = allLines.count
         let linesN = para.lines.count
         // A segment may span multiple sub-paragraphs (the user typed
@@ -881,7 +930,8 @@ private func hyphenPenaltyFromBias(_ bias: Int) -> Double {
 /// first-fit). Mirrors `justify_layout` in jas_dioxus.
 func justifyLayoutSegment(_ content: String, maxWidth: Double,
                           fontSize: Double, seg: ParagraphSegment,
-                          measure: (String) -> Double) -> TextLayout? {
+                          measure: (String) -> Double,
+                          firstLineExtra: Double = 0.0) -> TextLayout? {
     let lineHeight = fontSize
     let ascent = fontSize * 0.8
     let chars = Array(content)
@@ -969,6 +1019,17 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
                                flagged: false,
                                charIdx: paraStart + sliceChars.count))
 
+        // Only the very first line of the very first sub-paragraph
+        // carries the indent — subsequent sub-paragraphs (split on
+        // '\n') start a fresh line at the normal left edge. Narrowing
+        // line 0 makes the indented first line break earlier instead
+        // of overflowing. Mirrors python's `line_widths` in
+        // `_justify_layout_segment`. `kpCompose` reuses the last entry
+        // for all later lines, so [narrowed, full] applies the narrow
+        // width to line 0 and the full width to every line after.
+        let lineWidths: [Double] = (k == 0 && firstLineExtra > 0.0)
+            ? [max(0.0, maxWidth - firstLineExtra), maxWidth]
+            : [maxWidth]
         // Try the strict cap first (Knuth's default 10 = "loose" but
         // typographically acceptable). If no feasible composition
         // exists at that cap, retry with a much looser cap so the
@@ -977,8 +1038,8 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
         // line. Mirrors Illustrator / InDesign behavior of allowing
         // looser spacing rather than abandoning justify entirely.
         let breaksOrNil: [KPBreak]? =
-            kpCompose(items: items, lineWidths: [maxWidth])
-                ?? kpCompose(items: items, lineWidths: [maxWidth],
+            kpCompose(items: items, lineWidths: lineWidths)
+                ?? kpCompose(items: items, lineWidths: lineWidths,
                               opts: KPOpts(maxRatio: 100))
         guard let breaks = breaksOrNil, !breaks.isEmpty else {
             return nil
