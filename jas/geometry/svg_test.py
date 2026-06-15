@@ -479,6 +479,80 @@ class SvgImportTest(absltest.TestCase):
         self.assertEqual(doc2.layers[0].name, "L1")
         self.assertEqual(doc2.layers[1].name, "L2")
 
+    def test_roundtrip_element_id(self):
+        """A Rect with a set id survives document -> SVG -> document,
+        mirroring the name round-trip. The standard SVG ``id`` attribute
+        carries the value."""
+        doc = Document(layers=(
+            Layer(children=(
+                Rect(x=0, y=0, width=72, height=72, id="rect-42"),
+            )),
+        ))
+        svg = document_to_svg(doc)
+        self.assertIn(' id="rect-42"', svg)
+        doc2 = svg_to_document(svg)
+        elem = doc2.layers[0].children[0]
+        self.assertIsInstance(elem, Rect)
+        self.assertEqual(elem.id, "rect-42")
+
+    def test_roundtrip_text_family_id(self):
+        """The text family (Text/TextPath) hand-inlines its SVG attributes,
+        so its id needs the same round-trip guard as the shapes — this is
+        the element kind whose id the reference writer once dropped."""
+        doc = Document(layers=(
+            Layer(children=(
+                Text(x=10, y=20, content="Hi", id="text-7"),
+                TextPath(d=(MoveTo(0, 0), LineTo(50, 0)),
+                         content="Hi", id="textpath-7"),
+            )),
+        ))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(doc2.layers[0].children[0].id, "text-7")
+        self.assertEqual(doc2.layers[0].children[1].id, "textpath-7")
+
+    def test_roundtrip_layer_id(self):
+        """A Layer's id survives the round-trip via the <g> id attribute."""
+        doc = Document(layers=(
+            Layer(name="Background", id="layer-1", children=(
+                Rect(x=0, y=0, width=72, height=72),
+            )),
+        ))
+        doc2 = self._roundtrip(doc)
+        self.assertEqual(doc2.layers[0].id, "layer-1")
+
+    def test_idless_output_byte_identical(self):
+        """An element with no id must serialize byte-for-byte the same as
+        before the id feature — guards the existing fixtures / cross-
+        language comparison."""
+        doc = Document(layers=(
+            Layer(name="L", children=(
+                Rect(x=0, y=0, width=72, height=72,
+                     fill=Fill(color=RgbColor(1, 0, 0)),
+                     stroke=Stroke(color=RgbColor(0, 0, 0))),
+                Circle(cx=36, cy=36, r=18),
+                Line(x1=0, y1=0, x2=72, y2=72,
+                     stroke=Stroke(color=RgbColor(0, 0, 0))),
+            )),
+        ))
+        svg = document_to_svg(doc)
+        # No id-less element may emit an id attribute.
+        self.assertNotIn(' id="', svg)
+
+    def test_element_id_escaped(self):
+        """An id with XML-special characters is escaped on write and
+        recovered on read. Mirrors the name attribute's escaping (the
+        shared ``escape`` helper handles & < >)."""
+        doc = Document(layers=(
+            Layer(children=(
+                Rect(x=0, y=0, width=72, height=72, id='a&b<c>d'),
+            )),
+        ))
+        svg = document_to_svg(doc)
+        self.assertNotIn('a&b<c>d', svg)
+        self.assertIn('id="a&amp;b&lt;c&gt;d"', svg)
+        doc2 = svg_to_document(svg)
+        self.assertEqual(doc2.layers[0].children[0].id, 'a&b<c>d')
+
     def test_roundtrip_color_alpha(self):
         layer = Layer(children=(
             Rect(x=0, y=0, width=72, height=72,

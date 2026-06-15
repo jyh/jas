@@ -85,6 +85,7 @@ let apply_make_compound_shape_with_op (model : Model.model)
         in
         let cs = {
           operation;
+          id = None;
           operands;
           fill;
           stroke;
@@ -253,7 +254,7 @@ let paint_of (elem : element) =
 
 let polygon_from_ring ring (fill, stroke, opacity, transform, locked, visibility) =
   let points = Array.to_list ring in
-  Polygon { name = None; points; fill; stroke; opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None; fill_gradient = None; stroke_gradient = None }
+  Polygon { name = None; id = None; points; fill; stroke; opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None; fill_gradient = None; stroke_gradient = None }
 
 (* Return (outputs) as a list of (polygon_set, paint) pairs for the
    given op. Returns None for unknown ops. *)

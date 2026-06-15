@@ -91,7 +91,7 @@ class CrossLanguageTest(absltest.TestCase):
             "polyline_basic", "polygon_basic", "path_all_commands",
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
-            "multi_layer", "complex_document",
+            "multi_layer", "complex_document", "element_ids",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -113,6 +113,8 @@ class CrossLanguageTest(absltest.TestCase):
             "text_with_tspans", "text_path_with_tspans",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
+            # Stable identity (binary v2): id+name now round-trip generically.
+            "element_ids",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")

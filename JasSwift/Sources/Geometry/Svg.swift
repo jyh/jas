@@ -86,6 +86,16 @@ private func nameAttr(_ name: String?) -> String {
     return " inkscape:label=\"\(escapeXml(n))\""
 }
 
+/// Standard SVG `id` attribute for an element's stable identity.
+/// Emitted ONLY when the id is set (Some/non-empty) so id-less
+/// elements serialize byte-identically to before — keeping the SVG
+/// fixtures and the cross-language test_json comparison green. Mirrors
+/// `nameAttr` (the inkscape:label writer) right next to it.
+private func idAttr(_ id: String?) -> String {
+    guard let s = id, !s.isEmpty else { return "" }
+    return " id=\"\(escapeXml(s))\""
+}
+
 private func pathData(_ commands: [PathCommand]) -> String {
     commands.map { cmd in
         switch cmd {
@@ -258,7 +268,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
     case .line(let v):
         return "\(indent)<line x1=\"\(fmt(px(v.x1)))\" y1=\"\(fmt(px(v.y1)))\"" +
             " x2=\"\(fmt(px(v.x2)))\" y2=\"\(fmt(px(v.y2)))\"" +
-            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .rect(let v):
         var rxy = ""
@@ -267,31 +277,31 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<rect x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
             " width=\"\(fmt(px(v.width)))\" height=\"\(fmt(px(v.height)))\"" +
             "\(rxy)\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .circle(let v):
         return "\(indent)<circle cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
             " r=\"\(fmt(px(v.r)))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .ellipse(let v):
         return "\(indent)<ellipse cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
             " rx=\"\(fmt(px(v.rx)))\" ry=\"\(fmt(px(v.ry)))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .polyline(let v):
         let ps = v.points.map { "\(fmt(px($0.0))),\(fmt(px($0.1)))" }.joined(separator: " ")
         return "\(indent)<polyline points=\"\(ps)\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .polygon(let v):
         let ps = v.points.map { "\(fmt(px($0.0))),\(fmt(px($0.1)))" }.joined(separator: " ")
         return "\(indent)<polygon points=\"\(ps)\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .path(let v):
         let toolOriginAttr = v.toolOrigin.map {
@@ -300,7 +310,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
-            "\(toolOriginAttr)\(nameAttr(v.name))/>"
+            "\(toolOriginAttr)\(idAttr(v.id))\(nameAttr(v.name))/>"
 
     case .text(let v):
         let areaAttrs = v.isAreaText
@@ -341,7 +351,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(spaceAttr)>" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(spaceAttr)>" +
             "\(body)</text>"
 
     case .textPath(let v):
@@ -370,13 +380,13 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))>" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))>" +
             "<textPath path=\"\(d)\"" +
             (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
             "\(tpSpaceAttr)>\(tpBody)</textPath></text>"
 
     case .group(let v):
-        var lines = ["\(indent)<g\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g\(idAttr(v.id))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -386,7 +396,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
     case .layer(let v):
         // inkscape:groupmode="layer" lets the parser distinguish a
         // Layer from a named Group (both carry inkscape:label).
-        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idAttr(v.id))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -1138,6 +1148,16 @@ private func parseName(_ elem: XMLElement) -> String? {
     return nil
 }
 
+/// Stable element identity from the standard SVG `id` attribute.
+/// Absent or empty → nil (the element has no id). Mirrors `parseName`:
+/// reading a foreign `id` is fine, it just becomes our stable id.
+private func parseId(_ elem: XMLElement) -> String? {
+    guard let s = elem.attribute(forName: "id")?.stringValue, !s.isEmpty else {
+        return nil
+    }
+    return s
+}
+
 private func parseElement(_ node: XMLNode) -> Element? {
     guard let elem = node as? XMLElement, let tag = elem.localName else { return nil }
 
@@ -1146,6 +1166,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
     let opacity = parseOpacity(elem)
     let transform = parseTransform(elem)
     let name = parseName(elem)
+    let id = parseId(elem)
 
     switch tag {
     case "line":
@@ -1153,7 +1174,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
             x1: toPt(attrF(elem, "x1")), y1: toPt(attrF(elem, "y1")),
             x2: toPt(attrF(elem, "x2")), y2: toPt(attrF(elem, "y2")),
             stroke: stroke, opacity: opacity, transform: transform,
-            name: name))
+            name: name, id: id))
 
     case "rect":
         return .rect(Rect(
@@ -1161,33 +1182,33 @@ private func parseElement(_ node: XMLNode) -> Element? {
             width: toPt(attrF(elem, "width")), height: toPt(attrF(elem, "height")),
             rx: toPt(attrF(elem, "rx")), ry: toPt(attrF(elem, "ry")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-            name: name))
+            name: name, id: id))
 
     case "circle":
         return .circle(Circle(
             cx: toPt(attrF(elem, "cx")), cy: toPt(attrF(elem, "cy")),
             r: toPt(attrF(elem, "r")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-            name: name))
+            name: name, id: id))
 
     case "ellipse":
         return .ellipse(Ellipse(
             cx: toPt(attrF(elem, "cx")), cy: toPt(attrF(elem, "cy")),
             rx: toPt(attrF(elem, "rx")), ry: toPt(attrF(elem, "ry")),
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-            name: name))
+            name: name, id: id))
 
     case "polyline":
         let pts = parsePoints(elem.attribute(forName: "points")?.stringValue ?? "")
         return .polyline(Polyline(points: pts, fill: fill, stroke: stroke,
                                       opacity: opacity, transform: transform,
-                                      name: name))
+                                      name: name, id: id))
 
     case "polygon":
         let pts = parsePoints(elem.attribute(forName: "points")?.stringValue ?? "")
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke,
                                     opacity: opacity, transform: transform,
-                                    name: name))
+                                    name: name, id: id))
 
     case "path":
         let d = parsePathD(elem.attribute(forName: "d")?.stringValue ?? "")
@@ -1195,7 +1216,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
         return .path(Path(d: d, fill: fill, stroke: stroke,
                               opacity: opacity, transform: transform,
                               toolOrigin: toolOrigin,
-                              name: name))
+                              name: name, id: id))
 
     case "title":
         // <title> children of an element are name-bearers (handled
@@ -1248,7 +1269,8 @@ private func parseElement(_ node: XMLNode) -> Element? {
                         baselineShift: bs, lineHeight: lh, letterSpacing: ls,
                         xmlLang: lang, aaMode: aa, rotate: rotate,
                         horizontalScale: hScale, verticalScale: vScale, kerning: kern,
-                        fill: fill, stroke: stroke, opacity: opacity, transform: transform))
+                        fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                        name: name, id: id))
                 }
                 let tpContent = tpElem.stringValue ?? ""
                 return .textPath(TextPath(
@@ -1259,7 +1281,8 @@ private func parseElement(_ node: XMLNode) -> Element? {
                     baselineShift: bs, lineHeight: lh, letterSpacing: ls,
                     xmlLang: lang, aaMode: aa, rotate: rotate,
                     horizontalScale: hScale, verticalScale: vScale, kerning: kern,
-                    fill: fill, stroke: stroke, opacity: opacity, transform: transform))
+                    fill: fill, stroke: stroke, opacity: opacity, transform: transform,
+                    name: name, id: id))
             }
         }
         let tspanChildren = collectTspanChildren(elem)
@@ -1295,7 +1318,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
                 horizontalScale: hScale, verticalScale: vScale, kerning: kern,
                 width: tw, height: th,
                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-                name: name))
+                name: name, id: id))
         }
         return .text(Text(
             x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
@@ -1307,7 +1330,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
             horizontalScale: hScale, verticalScale: vScale, kerning: kern,
             width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-            name: name))
+            name: name, id: id))
 
     case "g":
         var children: [Element] = []
@@ -1325,11 +1348,12 @@ private func parseElement(_ node: XMLNode) -> Element? {
                       ?? elem.attribute(forName: "inkscape:groupmode")?.stringValue
         if groupMode == "layer" {
             return .layer(Layer(name: name ?? "", children: children,
-                                    opacity: opacity, transform: transform))
+                                    opacity: opacity, transform: transform,
+                                    id: id))
         }
         return .group(Group(children: children,
                                 opacity: opacity, transform: transform,
-                                name: name))
+                                name: name, id: id))
 
     default:
         return nil
@@ -1374,7 +1398,8 @@ public func svgToDocument(_ svg: String) -> Document {
                 layers.append(l)
             case .group(let g):
                 layers.append(Layer(name: g.name, children: g.children,
-                                        opacity: g.opacity, transform: g.transform))
+                                        opacity: g.opacity, transform: g.transform,
+                                        id: g.id))
             default:
                 // If the last layer is a nameless wrapper (created by
                 // this same loop on a previous bare element), append

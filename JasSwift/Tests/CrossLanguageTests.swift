@@ -116,6 +116,7 @@ private func assertJsonRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        "element_ids",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -138,7 +139,7 @@ private func readFixtureData(_ path: String) -> Data {
         "polyline_basic", "polygon_basic", "path_all_commands",
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
-        "multi_layer", "complex_document",
+        "multi_layer", "complex_document", "element_ids",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -157,7 +158,7 @@ private func readFixtureData(_ path: String) -> Data {
         "polyline_basic", "polygon_basic", "path_all_commands",
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
-        "multi_layer", "complex_document",
+        "multi_layer", "complex_document", "element_ids",
     ]
     for name in names {
         let binData = readFixtureData("expected/\(name).bin")
@@ -165,6 +166,20 @@ private func readFixtureData(_ path: String) -> Data {
         let actual = documentToTestJson(doc)
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(actual == expected, "Python binary fixture '\(name)' did not produce expected JSON")
+    }
+}
+
+/// v1 used a different positional layout (no generic name/id slots), so a
+/// v2 reader must reject it rather than silently mis-parse. Mirrors
+/// Python's `test_legacy_v1_rejected`: take a valid v2 blob, stamp its
+/// version field back to 1, and assert the decode throws.
+@Test func binaryLegacyV1Rejected() {
+    var bytes = [UInt8](readFixtureData("expected/rect_basic.bin"))
+    // Header layout: [magic 4B][version u16 LE][flags u16 LE]; version is bytes 4..5.
+    bytes[4] = 1
+    bytes[5] = 0
+    #expect(throws: (any Error).self) {
+        _ = try binaryToDocument(Data(bytes))
     }
 }
 

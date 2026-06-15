@@ -5,7 +5,7 @@ open Jas.Element
 module Live = Jas.Live
 
 let rect_at x y =
-  Rect { name = None; x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+  Rect { name = None; id = None; x; y; width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
          fill = None; stroke = None; opacity = 1.0; transform = None;
          locked = false; visibility = Preview; blend_mode = Normal; mask = None;
            fill_gradient = None;
@@ -35,6 +35,7 @@ let test_element_to_polygon_set_rect () =
 let test_union_of_two_rects () =
   let cs = {
     operation = Op_union;
+    id = None;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -50,6 +51,7 @@ let test_union_of_two_rects () =
 let test_intersection_of_two_rects () =
   let cs = {
     operation = Op_intersection;
+    id = None;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -65,6 +67,7 @@ let test_intersection_of_two_rects () =
 let test_exclude_is_symmetric_difference () =
   let cs = {
     operation = Op_exclude;
+    id = None;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -76,6 +79,7 @@ let test_exclude_is_symmetric_difference () =
 let test_subtract_front () =
   let cs = {
     operation = Op_subtract_front;
+    id = None;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -91,6 +95,7 @@ let test_subtract_front () =
 let test_bounds_reflect_evaluation () =
   let cs = {
     operation = Op_union;
+    id = None;
     operands = [| rect_at 0.0 0.0; rect_at 5.0 0.0 |];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -105,6 +110,7 @@ let test_bounds_reflect_evaluation () =
 let test_empty_compound_has_empty_bounds () =
   let cs = {
     operation = Op_union;
+    id = None;
     operands = [||];
     fill = None; stroke = None; opacity = 1.0;
     transform = None; locked = false; visibility = Preview; blend_mode = Normal;
@@ -117,7 +123,7 @@ let test_empty_compound_has_empty_bounds () =
   Alcotest.(check bool) "bh = 0" true (approx_equal bh 0.0)
 
 let test_path_flattens_into_polygon_set () =
-  let path = Path { name = None;
+  let path = Path { name = None; id = None;
     d = [
       MoveTo (0.0, 0.0);
       LineTo (10.0, 0.0);

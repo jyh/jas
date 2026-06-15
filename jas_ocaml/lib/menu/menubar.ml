@@ -181,15 +181,15 @@ let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
   else
     match elem with
-    | Element.Group { children; opacity; transform; locked; visibility; blend_mode;
+    | Element.Group { id; children; opacity; transform; locked; visibility; blend_mode;
                       isolated_blending; knockout_group; _ } ->
-      Element.Group { name = None; children = Array.map (fun c -> translate_element c dx dy) children;
+      Element.Group { name = None; id; children = Array.map (fun c -> translate_element c dx dy) children;
                       opacity; transform; locked; visibility; blend_mode;
                       mask = None;
                       isolated_blending; knockout_group }
-    | Element.Layer { name; children; opacity; transform; locked; visibility; blend_mode;
+    | Element.Layer { name; id; children; opacity; transform; locked; visibility; blend_mode;
                       isolated_blending; knockout_group; _ } ->
-      Element.Layer { name; children = Array.map (fun c -> translate_element c dx dy) children;
+      Element.Layer { name; id; children = Array.map (fun c -> translate_element c dx dy) children;
                       opacity; transform; locked; visibility; blend_mode;
                       mask = None;
                       isolated_blending; knockout_group }
@@ -259,9 +259,9 @@ let paste_clipboard (model : Model.model) offset () =
                 !new_sel
             ) children;
             match new_layers.(idx) with
-            | Element.Layer { name = n; children = ec; opacity; transform; locked; visibility; blend_mode;
+            | Element.Layer { name = n; id; children = ec; opacity; transform; locked; visibility; blend_mode;
                               isolated_blending; knockout_group; _ } ->
-              new_layers.(idx) <- Element.Layer { name = n; children = Array.append ec children; opacity; transform; locked; visibility; blend_mode;
+              new_layers.(idx) <- Element.Layer { name = n; id; children = Array.append ec children; opacity; transform; locked; visibility; blend_mode;
                                                    mask = None;
                                                    isolated_blending; knockout_group }
             | _ -> ()

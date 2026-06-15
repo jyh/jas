@@ -741,6 +741,39 @@ class CopySelectionTest(absltest.TestCase):
         ctrl.copy_selection(2.0, 2.0)
         self.assertEqual(len(ctrl.document.layers[0].children), 4)
 
+    def test_copy_selection_clears_id(self):
+        """A duplicated element must not inherit the source's stable id —
+        two elements cannot share an identity. The copy is born id-less
+        (lazy); it mints a fresh id only if/when it later becomes a
+        reference target. See the stable-identity initiative."""
+        rect = Rect(x=0, y=0, width=10, height=10, id="rect-1")
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 0)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(20.0, 0.0)
+        # The original keeps its id.
+        self.assertEqual(ctrl.document.get_element((0, 0)).id, "rect-1")
+        # The copy must NOT inherit it.
+        self.assertIsNone(ctrl.document.get_element((0, 1)).id)
+
+    def test_copy_selection_clears_id_recursively_in_group(self):
+        """Duplicating a group clears ids on the group AND its descendants,
+        so no copied element shares identity with its source."""
+        inner = Rect(x=0, y=0, width=10, height=10, id="inner-1")
+        group = Group(children=(inner,), id="group-1")
+        layer = Layer(children=(group,), name="L0")
+        doc = Document(layers=(layer,))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 0)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(20.0, 0.0)
+        # Copy of the group at (0,1); its child at (0,1,0).
+        self.assertIsNone(ctrl.document.get_element((0, 1)).id)
+        self.assertIsNone(ctrl.document.get_element((0, 1, 0)).id)
+        # Originals untouched.
+        self.assertEqual(ctrl.document.get_element((0, 0)).id, "group-1")
+        self.assertEqual(ctrl.document.get_element((0, 0, 0)).id, "inner-1")
+
 
 class DeleteSelectionNestedTest(absltest.TestCase):
 

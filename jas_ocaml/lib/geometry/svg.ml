@@ -82,6 +82,14 @@ let name_attr = function
   | None | Some "" -> ""
   | Some n -> Printf.sprintf " inkscape:label=\"%s\"" (escape_xml n)
 
+(* Stable, opaque element id → standard SVG [id] attribute. Mirrors
+   [name_attr]: emitted ONLY when the id is set and non-empty, so an
+   id-less element serializes byte-identically to before (the existing
+   SVG fixtures and the cross-language comparison stay green). *)
+let id_attr = function
+  | None | Some "" -> ""
+  | Some i -> Printf.sprintf " id=\"%s\"" (escape_xml i)
+
 let path_data cmds =
   let parts = List.map (fun cmd ->
     let open Element in
@@ -225,53 +233,53 @@ let tspan_svg (t : Element.tspan) : string =
 let rec element_svg indent (elem : Element.element) =
   let open Element in
   match elem with
-  | Line { x1; y1; x2; y2; stroke; opacity; transform; name; _ } ->
-    Printf.sprintf "%s<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"%s%s%s%s/>"
+  | Line { x1; y1; x2; y2; stroke; opacity; transform; name; id; _ } ->
+    Printf.sprintf "%s<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"%s%s%s%s%s/>"
       indent (fmt (px x1)) (fmt (px y1)) (fmt (px x2)) (fmt (px y2))
       (stroke_attrs stroke) (opacity_attr opacity) (transform_attr transform)
-      (name_attr name)
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; name; _ } ->
+      (name_attr name) (id_attr id)
+  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; name; id; _ } ->
     let rxy = (if rx > 0.0 then Printf.sprintf " rx=\"%s\"" (fmt (px rx)) else "")
             ^ (if ry > 0.0 then Printf.sprintf " ry=\"%s\"" (fmt (px ry)) else "") in
-    Printf.sprintf "%s<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"%s%s%s%s%s%s/>"
+    Printf.sprintf "%s<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"%s%s%s%s%s%s%s/>"
       indent (fmt (px x)) (fmt (px y)) (fmt (px width)) (fmt (px height))
       rxy (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform) (name_attr name)
-  | Circle { cx; cy; r; fill; stroke; opacity; transform; name; _ } ->
-    Printf.sprintf "%s<circle cx=\"%s\" cy=\"%s\" r=\"%s\"%s%s%s%s%s/>"
+      (transform_attr transform) (name_attr name) (id_attr id)
+  | Circle { cx; cy; r; fill; stroke; opacity; transform; name; id; _ } ->
+    Printf.sprintf "%s<circle cx=\"%s\" cy=\"%s\" r=\"%s\"%s%s%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px r))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform) (name_attr name)
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; name; _ } ->
-    Printf.sprintf "%s<ellipse cx=\"%s\" cy=\"%s\" rx=\"%s\" ry=\"%s\"%s%s%s%s%s/>"
+      (transform_attr transform) (name_attr name) (id_attr id)
+  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; name; id; _ } ->
+    Printf.sprintf "%s<ellipse cx=\"%s\" cy=\"%s\" rx=\"%s\" ry=\"%s\"%s%s%s%s%s%s/>"
       indent (fmt (px cx)) (fmt (px cy)) (fmt (px rx)) (fmt (px ry))
       (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform) (name_attr name)
-  | Polyline { points; fill; stroke; opacity; transform; name; _ } ->
+      (transform_attr transform) (name_attr name) (id_attr id)
+  | Polyline { points; fill; stroke; opacity; transform; name; id; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
-    Printf.sprintf "%s<polyline points=\"%s\"%s%s%s%s%s/>"
+    Printf.sprintf "%s<polyline points=\"%s\"%s%s%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
-      (opacity_attr opacity) (transform_attr transform) (name_attr name)
-  | Polygon { points; fill; stroke; opacity; transform; name; _ } ->
+      (opacity_attr opacity) (transform_attr transform) (name_attr name) (id_attr id)
+  | Polygon { points; fill; stroke; opacity; transform; name; id; _ } ->
     let ps = String.concat " "
       (List.map (fun (x, y) -> Printf.sprintf "%s,%s" (fmt (px x)) (fmt (px y))) points) in
-    Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s%s/>"
+    Printf.sprintf "%s<polygon points=\"%s\"%s%s%s%s%s%s/>"
       indent ps (fill_attrs fill) (stroke_attrs stroke)
-      (opacity_attr opacity) (transform_attr transform) (name_attr name)
-  | Path { d; fill; stroke; opacity; transform; tool_origin; name; _ } ->
+      (opacity_attr opacity) (transform_attr transform) (name_attr name) (id_attr id)
+  | Path { d; fill; stroke; opacity; transform; tool_origin; name; id; _ } ->
     let tool_origin_attr = match tool_origin with
       | Some s -> Printf.sprintf " jas:tool-origin=\"%s\"" (escape_xml s)
       | None -> "" in
-    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s%s%s/>"
+    Printf.sprintf "%s<path d=\"%s\"%s%s%s%s%s%s%s/>"
       indent (path_data d) (fill_attrs fill) (stroke_attrs stroke)
       (opacity_attr opacity) (transform_attr transform) tool_origin_attr
-      (name_attr name)
+      (name_attr name) (id_attr id)
   | Text { x; y; content; font_family; font_size; font_weight; font_style; text_decoration;
            text_transform; font_variant; baseline_shift; line_height; letter_spacing;
            xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
            text_width; text_height = _; fill; stroke; opacity; transform;
-           tspans; _ } ->
+           tspans; id; _ } ->
     let area_attrs = if text_width > 0.0 then
       Printf.sprintf " style=\"inline-size: %spx; white-space: pre-wrap;\"" (fmt (px text_width))
     else "" in
@@ -291,15 +299,15 @@ let rec element_svg indent (elem : Element.element) =
     let body = if is_flat then escape_xml content
                else String.concat "" (Array.to_list (Array.map tspan_svg tspans)) in
     let space_attr = if is_flat then "" else " xml:space=\"preserve\"" in
-    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s%s%s>%s</text>"
+    Printf.sprintf "%s<text x=\"%s\" y=\"%s\" font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s%s%s%s%s>%s</text>"
       indent (fmt (px x)) (fmt (px svg_y)) (escape_xml font_family) (fmt (px font_size))
       fw_attr fs_attr td_attr extra
       area_attrs (fill_attrs fill) (stroke_attrs stroke) (opacity_attr opacity)
-      (transform_attr transform) space_attr body
+      (transform_attr transform) (id_attr id) space_attr body
   | Text_path { d; content; start_offset; font_family; font_size; font_weight; font_style; text_decoration;
                 text_transform; font_variant; baseline_shift; line_height; letter_spacing;
                 xml_lang; aa_mode; rotate; horizontal_scale; vertical_scale; kerning;
-                fill; stroke; opacity; transform; tspans; _ } ->
+                fill; stroke; opacity; transform; tspans; id; _ } ->
     let offset_attr = if start_offset > 0.0 then
       Printf.sprintf " startOffset=\"%s%%\"" (fmt (start_offset *. 100.0))
     else "" in
@@ -311,31 +319,31 @@ let rec element_svg indent (elem : Element.element) =
     let body = if is_flat then escape_xml content
                else String.concat "" (Array.to_list (Array.map tspan_svg tspans)) in
     let space_attr = if is_flat then "" else " xml:space=\"preserve\"" in
-    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s><textPath path=\"%s\"%s%s>%s</textPath></text>"
+    Printf.sprintf "%s<text%s%s font-family=\"%s\" font-size=\"%s\"%s%s%s%s%s%s%s><textPath path=\"%s\"%s%s>%s</textPath></text>"
       indent (fill_attrs fill) (stroke_attrs stroke)
       (escape_xml font_family) (fmt (px font_size))
       fw_attr fs_attr td_attr extra
-      (opacity_attr opacity) (transform_attr transform)
+      (opacity_attr opacity) (transform_attr transform) (id_attr id)
       (path_data d) offset_attr space_attr body
-  | Group { children; opacity; transform; name; _ } ->
-    let header = Printf.sprintf "%s<g%s%s%s>"
-      indent (name_attr name) (opacity_attr opacity) (transform_attr transform) in
+  | Group { children; opacity; transform; name; id; _ } ->
+    let header = Printf.sprintf "%s<g%s%s%s%s>"
+      indent (name_attr name) (id_attr id) (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
-  | Layer { name; children; opacity; transform; _ } ->
+  | Layer { name; id; children; opacity; transform; _ } ->
     (* inkscape:groupmode="layer" is the discriminator that re-parses
        this <g> as a Layer rather than a named Group. *)
-    let header = Printf.sprintf "%s<g inkscape:groupmode=\"layer\"%s%s%s>"
-      indent (name_attr name) (opacity_attr opacity) (transform_attr transform) in
+    let header = Printf.sprintf "%s<g inkscape:groupmode=\"layer\"%s%s%s%s>"
+      indent (name_attr name) (id_attr id) (opacity_attr opacity) (transform_attr transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) children) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Live (Compound_shape cs) ->
     (* Phase 1: emit as a group of operands so SVG export remains
        round-trippable. Phase 2 replaces with the evaluated geometry. *)
-    let header = Printf.sprintf "%s<g data-jas-live=\"compound_shape\"%s%s>"
-      indent (opacity_attr cs.opacity) (transform_attr cs.transform) in
+    let header = Printf.sprintf "%s<g data-jas-live=\"compound_shape\"%s%s%s>"
+      indent (id_attr cs.id) (opacity_attr cs.opacity) (transform_attr cs.transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) cs.operands) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
@@ -807,6 +815,10 @@ let rec parse_element i =
        The <title> child fallback is captured later inside the element
        body parse if needed. *)
     let parsed_name = get_attr attrs "label" in
+    (* Stable element id from the standard SVG [id] attribute. Reading a
+       foreign id is fine; absent -> None. Applied below via [with_id],
+       mirroring how [parsed_name] is applied via [with_name]. *)
+    let parsed_id = get_attr attrs "id" in
     let elem = match tag with
       | "line" ->
         Some (Element.make_line
@@ -937,8 +949,16 @@ let rec parse_element i =
        skipped here (Layer.name is its own required field, distinct
        from the optional common name carried by other elements). *)
     let is_layer = match elem with Some (Element.Layer _) -> true | _ -> false in
-    (match elem, parsed_name with
-     | Some e, Some n when not is_layer -> Some (Element.with_name e (Some n))
+    let elem =
+      match elem, parsed_name with
+      | Some e, Some n when not is_layer -> Some (Element.with_name e (Some n))
+      | _, _ -> elem
+    in
+    (* Apply the parsed SVG [id] (if any) to the constructed element.
+       Unlike name, the id is uniform across all variants (including
+       Layer), so it is applied here for every element type. *)
+    (match elem, parsed_id with
+     | Some e, Some i when i <> "" -> Some (Element.with_id e (Some i))
      | _, _ -> elem)
   | _ -> None
 

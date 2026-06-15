@@ -30,7 +30,14 @@ from geometry.element import (
 # -- Constants ---------------------------------------------------------------
 
 MAGIC = b"JAS\x00"
-VERSION = 1
+# v2 (CommonProps id+name): every element array now carries name and id in
+# the shared common block at fixed indices 5 and 6, with the type-specific
+# payload shifted to index 7. v1 (name was Layer-only at index 5, no id) is a
+# different positional layout and is NOT forward-readable — binary persistence
+# is a deferred secondary format with no real-world v1 data, so the fixtures
+# were regenerated to v2 rather than carrying a dual parse path.
+VERSION = 2
+MIN_VERSION = 2
 HEADER_SIZE = 8  # 4 magic + 2 version + 2 flags
 
 COMPRESS_NONE = 0
@@ -298,51 +305,64 @@ def _unpack_tspan(v):
     )
 
 
+def _pack_common(elem: Element) -> list:
+    """The shared common block written for EVERY element (v2):
+    [locked, opacity, visibility, transform, name, id] at array indices
+    1..6. name and id are stored as msgpack value-or-nil (None -> nil), so
+    every element type round-trips them uniformly — mirroring test_json's
+    ``_common_fields``. The type-specific payload follows at index 7."""
+    return [
+        elem.locked,
+        elem.opacity,
+        _VISIBILITY_TO_INT[elem.visibility],
+        _pack_transform(elem.transform),
+        elem.name,
+        elem.id,
+    ]
+
+
 def _pack_element(elem: Element) -> list:
-    locked = elem.locked
-    opacity = elem.opacity
-    vis = _VISIBILITY_TO_INT[elem.visibility]
-    xform = _pack_transform(elem.transform)
+    common = _pack_common(elem)
 
     # Layer must be checked before Group since Layer extends Group.
     if isinstance(elem, Layer):
         children = [_pack_element(c) for c in elem.children]
-        return [_TAG_LAYER, locked, opacity, vis, xform, elem.name, children]
+        return [_TAG_LAYER, *common, children]
     elif isinstance(elem, Group):
         children = [_pack_element(c) for c in elem.children]
-        return [_TAG_GROUP, locked, opacity, vis, xform, children]
+        return [_TAG_GROUP, *common, children]
     elif isinstance(elem, Line):
-        return [_TAG_LINE, locked, opacity, vis, xform,
+        return [_TAG_LINE, *common,
                 elem.x1, elem.y1, elem.x2, elem.y2,
                 _pack_stroke(elem.stroke), _pack_width_points(elem.width_points)]
     elif isinstance(elem, Rect):
-        return [_TAG_RECT, locked, opacity, vis, xform,
+        return [_TAG_RECT, *common,
                 elem.x, elem.y, elem.width, elem.height, elem.rx, elem.ry,
                 _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
     elif isinstance(elem, Circle):
-        return [_TAG_CIRCLE, locked, opacity, vis, xform,
+        return [_TAG_CIRCLE, *common,
                 elem.cx, elem.cy, elem.r,
                 _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
     elif isinstance(elem, Ellipse):
-        return [_TAG_ELLIPSE, locked, opacity, vis, xform,
+        return [_TAG_ELLIPSE, *common,
                 elem.cx, elem.cy, elem.rx, elem.ry,
                 _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
     elif isinstance(elem, Polyline):
         points = [[x, y] for x, y in elem.points]
-        return [_TAG_POLYLINE, locked, opacity, vis, xform,
+        return [_TAG_POLYLINE, *common,
                 points, _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
     elif isinstance(elem, Polygon):
         points = [[x, y] for x, y in elem.points]
-        return [_TAG_POLYGON, locked, opacity, vis, xform,
+        return [_TAG_POLYGON, *common,
                 points, _pack_fill(elem.fill), _pack_stroke(elem.stroke)]
     elif isinstance(elem, Path):
         cmds = [_pack_path_command(c) for c in elem.d]
-        return [_TAG_PATH, locked, opacity, vis, xform,
+        return [_TAG_PATH, *common,
                 cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke),
                 _pack_width_points(elem.width_points)]
     elif isinstance(elem, Text):
         tspans = [_pack_tspan(t) for t in elem.tspans]
-        return [_TAG_TEXT, locked, opacity, vis, xform,
+        return [_TAG_TEXT, *common,
                 elem.x, elem.y, elem.content,
                 elem.font_family, elem.font_size,
                 elem.font_weight, elem.font_style, elem.text_decoration,
@@ -352,7 +372,7 @@ def _pack_element(elem: Element) -> list:
     elif isinstance(elem, TextPath):
         cmds = [_pack_path_command(c) for c in elem.d]
         tspans = [_pack_tspan(t) for t in elem.tspans]
-        return [_TAG_TEXT_PATH, locked, opacity, vis, xform,
+        return [_TAG_TEXT_PATH, *common,
                 cmds, elem.content, elem.start_offset,
                 elem.font_family, elem.font_size,
                 elem.font_weight, elem.font_style, elem.text_decoration,
@@ -466,84 +486,93 @@ def _unpack_path_command(arr: list):
     raise ValueError(f"Unknown path command tag: {tag}")
 
 
+def _unpack_common(arr: list) -> dict:
+    """Inverse of ``_pack_common``: reads the shared common block at
+    indices 1..6 (locked, opacity, visibility, transform, name, id).
+    Returned as kwargs spread into every element constructor."""
+    return dict(
+        locked=arr[1],
+        opacity=float(arr[2]),
+        visibility=_INT_TO_VISIBILITY[arr[3]],
+        transform=_unpack_transform(arr[4]),
+        name=arr[5],
+        id=arr[6],
+    )
+
+
 def _unpack_element(arr: list) -> Element:
     tag = arr[0]
-    locked = arr[1]
-    opacity = float(arr[2])
-    visibility = _INT_TO_VISIBILITY[arr[3]]
-    transform = _unpack_transform(arr[4])
-    common = dict(locked=locked, opacity=opacity,
-                  visibility=visibility, transform=transform)
+    common = _unpack_common(arr)
+    # Type-specific payload begins at index 7 (after the common block).
 
     if tag == _TAG_LAYER:
-        name = arr[5]
-        children = tuple(_unpack_element(c) for c in arr[6])
-        return Layer(name=name, children=children, **common)
+        children = tuple(_unpack_element(c) for c in arr[7])
+        return Layer(children=children, **common)
     elif tag == _TAG_GROUP:
-        children = tuple(_unpack_element(c) for c in arr[5])
+        children = tuple(_unpack_element(c) for c in arr[7])
         return Group(children=children, **common)
     elif tag == _TAG_LINE:
-        wp = _unpack_width_points(arr[10]) if len(arr) > 10 else ()
-        return Line(x1=arr[5], y1=arr[6], x2=arr[7], y2=arr[8],
-                    stroke=_unpack_stroke(arr[9]), width_points=wp, **common)
+        wp = _unpack_width_points(arr[12]) if len(arr) > 12 else ()
+        return Line(x1=arr[7], y1=arr[8], x2=arr[9], y2=arr[10],
+                    stroke=_unpack_stroke(arr[11]), width_points=wp, **common)
     elif tag == _TAG_RECT:
-        return Rect(x=arr[5], y=arr[6], width=arr[7], height=arr[8],
-                    rx=arr[9], ry=arr[10],
-                    fill=_unpack_fill(arr[11]),
-                    stroke=_unpack_stroke(arr[12]), **common)
+        return Rect(x=arr[7], y=arr[8], width=arr[9], height=arr[10],
+                    rx=arr[11], ry=arr[12],
+                    fill=_unpack_fill(arr[13]),
+                    stroke=_unpack_stroke(arr[14]), **common)
     elif tag == _TAG_CIRCLE:
-        return Circle(cx=arr[5], cy=arr[6], r=arr[7],
-                      fill=_unpack_fill(arr[8]),
-                      stroke=_unpack_stroke(arr[9]), **common)
+        return Circle(cx=arr[7], cy=arr[8], r=arr[9],
+                      fill=_unpack_fill(arr[10]),
+                      stroke=_unpack_stroke(arr[11]), **common)
     elif tag == _TAG_ELLIPSE:
-        return Ellipse(cx=arr[5], cy=arr[6], rx=arr[7], ry=arr[8],
-                       fill=_unpack_fill(arr[9]),
-                       stroke=_unpack_stroke(arr[10]), **common)
+        return Ellipse(cx=arr[7], cy=arr[8], rx=arr[9], ry=arr[10],
+                       fill=_unpack_fill(arr[11]),
+                       stroke=_unpack_stroke(arr[12]), **common)
     elif tag == _TAG_POLYLINE:
-        points = tuple((p[0], p[1]) for p in arr[5])
+        points = tuple((p[0], p[1]) for p in arr[7])
         return Polyline(points=points,
-                        fill=_unpack_fill(arr[6]),
-                        stroke=_unpack_stroke(arr[7]), **common)
+                        fill=_unpack_fill(arr[8]),
+                        stroke=_unpack_stroke(arr[9]), **common)
     elif tag == _TAG_POLYGON:
-        points = tuple((p[0], p[1]) for p in arr[5])
+        points = tuple((p[0], p[1]) for p in arr[7])
         return Polygon(points=points,
-                       fill=_unpack_fill(arr[6]),
-                       stroke=_unpack_stroke(arr[7]), **common)
+                       fill=_unpack_fill(arr[8]),
+                       stroke=_unpack_stroke(arr[9]), **common)
     elif tag == _TAG_PATH:
-        cmds = tuple(_unpack_path_command(c) for c in arr[5])
-        wp = _unpack_width_points(arr[8]) if len(arr) > 8 else ()
+        cmds = tuple(_unpack_path_command(c) for c in arr[7])
+        wp = _unpack_width_points(arr[10]) if len(arr) > 10 else ()
         return Path(d=cmds,
-                    fill=_unpack_fill(arr[6]),
-                    stroke=_unpack_stroke(arr[7]),
+                    fill=_unpack_fill(arr[8]),
+                    stroke=_unpack_stroke(arr[9]),
                     width_points=wp, **common)
     elif tag == _TAG_TEXT:
         # Prefer the trailing tspans field when present; otherwise
         # fall back to the single-default-tspan derived from content
         # in __post_init__ (blobs predating the tspan codec extension).
+        tspans_raw = arr[19] if len(arr) > 19 else None
+        tspans_kw = {}
+        if isinstance(tspans_raw, list) and tspans_raw:
+            tspans_kw["tspans"] = tuple(_unpack_tspan(t) for t in tspans_raw)
+        return Text(x=arr[7], y=arr[8], content=arr[9],
+                    font_family=arr[10], font_size=arr[11],
+                    font_weight=arr[12], font_style=arr[13],
+                    text_decoration=arr[14],
+                    width=arr[15], height=arr[16],
+                    fill=_unpack_fill(arr[17]),
+                    stroke=_unpack_stroke(arr[18]),
+                    **tspans_kw, **common)
+    elif tag == _TAG_TEXT_PATH:
+        cmds = tuple(_unpack_path_command(c) for c in arr[7])
         tspans_raw = arr[17] if len(arr) > 17 else None
         tspans_kw = {}
         if isinstance(tspans_raw, list) and tspans_raw:
             tspans_kw["tspans"] = tuple(_unpack_tspan(t) for t in tspans_raw)
-        return Text(x=arr[5], y=arr[6], content=arr[7],
-                    font_family=arr[8], font_size=arr[9],
-                    font_weight=arr[10], font_style=arr[11],
-                    text_decoration=arr[12],
-                    width=arr[13], height=arr[14],
-                    fill=_unpack_fill(arr[15]),
-                    stroke=_unpack_stroke(arr[16]),
-                    **tspans_kw, **common)
-    elif tag == _TAG_TEXT_PATH:
-        cmds = tuple(_unpack_path_command(c) for c in arr[5])
-        tspans_raw = arr[15] if len(arr) > 15 else None
-        tspans_kw = {}
-        if isinstance(tspans_raw, list) and tspans_raw:
-            tspans_kw["tspans"] = tuple(_unpack_tspan(t) for t in tspans_raw)
-        return TextPath(d=cmds, content=arr[6], start_offset=arr[7],
-                        font_family=arr[8], font_size=arr[9],
-                        font_weight=arr[10], font_style=arr[11],
-                        text_decoration=arr[12],
-                        fill=_unpack_fill(arr[13]),
-                        stroke=_unpack_stroke(arr[14]),
+        return TextPath(d=cmds, content=arr[8], start_offset=arr[9],
+                        font_family=arr[10], font_size=arr[11],
+                        font_weight=arr[12], font_style=arr[13],
+                        text_decoration=arr[14],
+                        fill=_unpack_fill(arr[15]),
+                        stroke=_unpack_stroke(arr[16]),
                         **tspans_kw, **common)
     raise ValueError(f"Unknown element tag: {tag}")
 
@@ -610,6 +639,11 @@ def binary_to_document(data: bytes) -> Document:
     version = struct.unpack_from("<H", data, 4)[0]
     if version > VERSION:
         raise ValueError(f"Unsupported version: {version}, max supported is {VERSION}")
+    if version < MIN_VERSION:
+        # v1 used a different positional layout (no generic name/id slots);
+        # it is a clean break, not forward-readable. See VERSION comment.
+        raise ValueError(
+            f"Unsupported legacy version: {version}, min supported is {MIN_VERSION}")
 
     flags = struct.unpack_from("<H", data, 6)[0]
     compression = flags & 0x03

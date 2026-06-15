@@ -2511,6 +2511,7 @@ mod tests {
                 mask: None,
                 tool_origin: None,
             name: None,
+            id: None,
             },
                     fill_gradient: None,
             stroke_gradient: None,

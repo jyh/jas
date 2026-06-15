@@ -301,6 +301,11 @@ fn common_fields(o: &mut JsonObj, c: &CommonProps) {
         None => o.null("name"),
         Some(n) => o.str_val("name", n),
     }
+    // Stable id is additive: emit only when set, so id-less elements
+    // serialize byte-identically to before (keys are sorted on output).
+    if let Some(id) = c.id.as_deref() {
+        o.str_val("id", id);
+    }
     o.num("opacity", c.opacity);
     o.raw("transform", transform_json(&c.transform));
     o.str_val("visibility", visibility_str(c.visibility));
@@ -311,6 +316,9 @@ fn common_fields(o: &mut JsonObj, c: &CommonProps) {
 /// would produce a duplicate JSON key.
 fn common_fields_no_name(o: &mut JsonObj, c: &CommonProps) {
     o.bool_val("locked", c.locked);
+    if let Some(id) = c.id.as_deref() {
+        o.str_val("id", id);
+    }
     o.num("opacity", c.opacity);
     o.raw("transform", transform_json(&c.transform));
     o.str_val("visibility", visibility_str(c.visibility));
@@ -958,6 +966,7 @@ fn parse_common(v: &serde_json::Value) -> CommonProps {
         mask: None,
         tool_origin: v.get("tool_origin").and_then(|t| t.as_str()).map(String::from),
         name: v.get("name").and_then(|t| t.as_str()).map(String::from),
+        id: v.get("id").and_then(|t| t.as_str()).map(String::from),
     }
 }
 
@@ -1441,6 +1450,39 @@ mod tests {
         assert!(json.contains("\"type\":\"rect\""));
         assert!(json.contains("\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0}"));
         assert!(json.contains("\"stroke\":null"));
+    }
+
+    #[test]
+    fn common_id_round_trips() {
+        // Stable identity (VISION.md §6.2): an element's id survives the
+        // canonical test_json round-trip in the lead implementation.
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("e1".to_string()), ..Default::default() },
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let json = element_json(&elem);
+        assert!(json.contains("\"id\":\"e1\""), "id should serialize: {json}");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let parsed = parse_element(&v);
+        assert_eq!(parsed.common().id.as_deref(), Some("e1"));
+    }
+
+    #[test]
+    fn id_absent_is_byte_identical() {
+        // Additive invariant: an id-less element emits no "id" key, so
+        // every existing document serializes exactly as before.
+        let elem = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let json = element_json(&elem);
+        assert!(!json.contains("\"id\""), "id-less element must not emit id key: {json}");
     }
 
     #[test]

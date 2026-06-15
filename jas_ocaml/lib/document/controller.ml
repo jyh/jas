@@ -423,6 +423,9 @@ class controller ?(model = Model.create ()) () =
       let (new_doc, new_sel) = List.fold_left (fun (acc_doc, acc_sel) (_path, es) ->
         let elem = Document.get_element acc_doc es.Document.es_path in
         let copied = move_kind elem es.Document.es_kind dx dy in
+        (* A copy must not inherit the source stable id (no two elements
+           may share an identity); it is born id-less. *)
+        let copied = Element.clear_ids copied in
         let doc' = Document.insert_element_after acc_doc es.Document.es_path copied in
         let copy_path = match List.rev es.Document.es_path with
           | last :: rest -> List.rev ((last + 1) :: rest)
@@ -511,7 +514,7 @@ class controller ?(model = Model.create ()) () =
     method make_mask_on_selection ~clip ~invert =
       let doc = model#document in
       let empty_group =
-        Element.Group { name = None; children = [||]; opacity = 1.0; transform = None;
+        Element.Group { name = None; id = None; children = [||]; opacity = 1.0; transform = None;
                         locked = false; visibility = Element.Preview;
                         blend_mode = Element.Normal; mask = None;
                         isolated_blending = false; knockout_group = false }
