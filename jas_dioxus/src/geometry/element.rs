@@ -2091,6 +2091,21 @@ use crate::document::document::SelectionKind;
 /// Rect/Circle/Ellipse branches would fall through to their polygon-
 /// conversion path (since `is_all(n)` is false for an empty set) and
 /// silently change the primitive type without any visible movement.
+/// Recursively clears the stable `id` on `elem` and all of its descendants.
+/// A DUPLICATED element must not inherit the source's identity — two elements
+/// cannot share an id — so a copy is born id-less (lazy) and mints a fresh id
+/// only if/when it later becomes a reference target. Used by every duplication
+/// path (copy, paste, duplicate). See the stable-identity initiative
+/// (VISION.md §6.2).
+pub fn clear_ids(elem: &mut Element) {
+    elem.common_mut().id = None;
+    if let Some(children) = elem.children_mut() {
+        for child in children.iter_mut() {
+            clear_ids(Rc::make_mut(child));
+        }
+    }
+}
+
 pub fn move_control_points(
     elem: &Element,
     kind: &SelectionKind,

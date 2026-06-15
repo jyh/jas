@@ -16,7 +16,7 @@ from document.document import (
 )
 from geometry.element import (
     Element, Fill, Gradient, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Visibility,
-    control_point_count, control_points, move_control_points,
+    clear_ids, control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
@@ -413,6 +413,9 @@ class Controller:
         for es in sorted_sels:
             elem = doc.get_element(es.path)
             copied = move_control_points(elem, es.kind, dx, dy)
+            # A copy must not inherit the source's stable id (no two elements
+            # may share an identity); it is born id-less.
+            copied = clear_ids(copied)
             new_doc = new_doc.insert_element_after(es.path, copied)
             # The copy is at path with last index incremented by 1
             copy_path = es.path[:-1] + (es.path[-1] + 1,)

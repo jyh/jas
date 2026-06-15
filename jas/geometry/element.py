@@ -1470,6 +1470,29 @@ def element_stroke(element: Element) -> Stroke | None:
     return getattr(element, 'stroke', None)
 
 
+def clear_ids(elem: Element) -> Element:
+    """Return a copy of ``elem`` with its stable ``id`` cleared on the element
+    and recursively on all of its descendants.
+
+    A DUPLICATED element must not inherit the source's identity — two elements
+    cannot share an id — so a copy is born id-less (lazy) and mints a fresh id
+    only if/when it later becomes a reference target. Used by every duplication
+    path (copy, paste, duplicate). See the stable-identity initiative
+    (VISION.md §6.2).
+
+    Elements are frozen dataclasses, so this rebuilds via ``dataclasses.replace``.
+    Only Group/Layer carry children to recurse into, mirroring the Rust
+    ``clear_ids`` which descends only into Group/Layer ``children``.
+    """
+    if isinstance(elem, Group):  # also matches Layer (a Group subclass)
+        cleared_children = tuple(clear_ids(c) for c in elem.children)
+        return dataclasses.replace(elem, id=None, children=cleared_children)
+    if hasattr(elem, "id"):
+        return dataclasses.replace(elem, id=None)
+    # Elements without an id field (e.g. CompoundShape) are returned unchanged.
+    return elem
+
+
 def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
     """Return a new element with the specified control points moved by (dx, dy).
 

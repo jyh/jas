@@ -15,6 +15,7 @@ from geometry.element import (
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
+    clear_ids,
     with_fill, with_stroke,
     Gradient, GradientStop, GradientNode, GradientType, GradientMethod, StrokeSubMode,
 )
@@ -979,6 +980,42 @@ class TextRenderIsFlatTest(absltest.TestCase):
                  font_family="sans-serif", font_size=16,
                  width=300, height=200)
         self.assertTrue(t.render_is_flat())
+
+
+class ClearIdsTest(absltest.TestCase):
+    """clear_ids strips the stable id from an element and its descendants
+    so a duplicated element never shares identity with its source."""
+
+    def test_clears_leaf_id(self):
+        rect = Rect(x=0, y=0, width=10, height=10, id="rect-1")
+        cleared = clear_ids(rect)
+        self.assertIsNone(cleared.id)
+        # Source is untouched (frozen dataclass returns a copy).
+        self.assertEqual(rect.id, "rect-1")
+
+    def test_leaf_without_id_is_unchanged(self):
+        rect = Rect(x=0, y=0, width=10, height=10)
+        self.assertIsNone(clear_ids(rect).id)
+
+    def test_clears_recursively_in_group(self):
+        inner = Rect(x=0, y=0, width=10, height=10, id="inner-1")
+        group = Group(children=(inner,), id="group-1")
+        cleared = clear_ids(group)
+        self.assertIsNone(cleared.id)
+        self.assertIsNone(cleared.children[0].id)
+        # Originals untouched.
+        self.assertEqual(group.id, "group-1")
+        self.assertEqual(group.children[0].id, "inner-1")
+
+    def test_clears_recursively_in_layer(self):
+        inner = Rect(x=0, y=0, width=10, height=10, id="inner-1")
+        layer = Layer(children=(inner,), id="layer-1", name="L0")
+        cleared = clear_ids(layer)
+        self.assertIsInstance(cleared, Layer)
+        self.assertIsNone(cleared.id)
+        self.assertIsNone(cleared.children[0].id)
+        # Other fields preserved.
+        self.assertEqual(cleared.name, "L0")
 
 
 if __name__ == "__main__":
