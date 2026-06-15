@@ -18,7 +18,7 @@ trips through all of them, the same in-canvas text editor reacts to
 the same key events, the same selection tool picks the same elements
 from the same marquee. New features land in one port first (usually
 Rust), get tuned, and are then propagated to the other three with
-matching tests.
+matching tests. Because of this, *Rust is the most complete application*.
 
 ## Why four copies?
 

@@ -282,7 +282,7 @@ let menu_tests = [
     let addr = pa did 2 0 in
     let m = Jas.Model.create () in
     let layer0 = Jas.Element.Layer {
-      name = Some "A"; children = [||];
+      name = Some "A"; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -304,7 +304,7 @@ let menu_tests = [
     let addr = pa did 2 0 in
     let m = Jas.Model.create () in
     let layer0 = Jas.Element.Layer {
-      name = Some "A"; children = [||];
+      name = Some "A"; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -321,7 +321,7 @@ let menu_tests = [
   Alcotest.test_case "new_layer_via_yaml_no_selection" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -339,7 +339,7 @@ let menu_tests = [
   Alcotest.test_case "new_layer_via_yaml_inserts_above_selection" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -361,7 +361,7 @@ let menu_tests = [
   Alcotest.test_case "delete_layer_selection_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -380,7 +380,7 @@ let menu_tests = [
   Alcotest.test_case "duplicate_layer_selection_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -401,7 +401,7 @@ let menu_tests = [
   Alcotest.test_case "new_group_via_yaml_top_level" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -426,7 +426,7 @@ let menu_tests = [
   Alcotest.test_case "collect_in_new_layer_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -452,7 +452,7 @@ let menu_tests = [
   Alcotest.test_case "flatten_artwork_via_yaml" `Quick (fun () ->
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;
@@ -462,7 +462,7 @@ let menu_tests = [
     let doc = m#document in
     let child1 = layer "c1" in
     let child2 = layer "c2" in
-    let group = Jas.Element.Group { name = None;
+    let group = Jas.Element.Group { name = None; id = None;
       children = [|child1; child2|];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
@@ -486,7 +486,7 @@ let menu_tests = [
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = Some "Old"; children = [||];
+        name = Some "Old"; id = None; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -515,7 +515,7 @@ let menu_tests = [
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = Some "Existing"; children = [||];
+        name = Some "Existing"; id = None; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -545,7 +545,7 @@ let menu_tests = [
     let doc = m#document in
     m#set_document { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
-        name = Some "A"; children = [||];
+        name = Some "A"; id = None; children = [||];
         opacity = 1.0; transform = None;
         locked = false; visibility = Jas.Element.Preview;
         blend_mode = Jas.Element.Normal;
@@ -570,7 +570,7 @@ let menu_tests = [
     Jas.Layers_panel_state.clear_isolation_stack ();
     let m = Jas.Model.create () in
     let layer a = Jas.Element.Layer {
-      name = Some a; children = [||];
+      name = Some a; id = None; children = [||];
       opacity = 1.0; transform = None;
       locked = false; visibility = Jas.Element.Preview;
       blend_mode = Jas.Element.Normal;

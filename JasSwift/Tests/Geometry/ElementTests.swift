@@ -797,3 +797,26 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     #expect(c.strokeGradient == g)
     #expect(c.fillGradient == nil)
 }
+
+// MARK: - Stable element identity (id)
+
+/// Stable identity: an element's id survives the canonical test_json
+/// round-trip. Mirrors `common_id_round_trips` in the reference
+/// implementation.
+@Test func commonIdRoundTrips() {
+    let elem = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "e1"))
+    let json = elementJson(elem)
+    #expect(json.contains("\"id\":\"e1\""), "id should serialize: \(json)")
+    let parsedAny = try! JSONSerialization.jsonObject(with: Data(json.utf8))
+    let parsed = parseElement(parsedAny)
+    #expect(parsed.id == "e1")
+}
+
+/// Additive invariant: an id-less element emits no "id" key, so every
+/// existing document serializes exactly as before. Mirrors
+/// `id_absent_is_byte_identical` in the reference implementation.
+@Test func idAbsentIsByteIdentical() {
+    let elem = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let json = elementJson(elem)
+    #expect(!json.contains("\"id\""), "id-less element must not emit id key: \(json)")
+}
