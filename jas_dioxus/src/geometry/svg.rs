@@ -116,6 +116,19 @@ fn name_attr(name: &Option<String>) -> String {
     }
 }
 
+/// Standard SVG `id` attribute for an element's stable identity.
+/// Emitted ONLY when the id is set (Some/non-empty) so id-less
+/// elements serialize byte-identically to before — keeping the SVG
+/// fixtures and cross-language test_json comparison green. Mirrors
+/// `name_attr` (the inkscape:label writer) right next to it.
+fn id_attr(id: &Option<String>) -> String {
+    match id {
+        None => String::new(),
+        Some(s) if s.is_empty() => String::new(),
+        Some(s) => format!(" id=\"{}\"", escape_xml(s)),
+    }
+}
+
 fn path_data(commands: &[PathCommand]) -> String {
     let mut parts = Vec::new();
     for cmd in commands {
@@ -180,12 +193,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             format!(
-                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}/>\n",
+                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x1)), fmt(px(e.y1)), fmt(px(e.x2)), fmt(px(e.y2)),
                 stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
                 transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
@@ -198,32 +212,35 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 rxy.push_str(&format!(" ry=\"{}\"", fmt(px(e.ry))));
             }
             format!(
-                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}{}/>\n",
+                "{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x)), fmt(px(e.y)), fmt(px(e.width)), fmt(px(e.height)),
                 rxy,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
         Element::Circle(e) => {
             format!(
-                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}{}/>\n",
+                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
         Element::Ellipse(e) => {
             format!(
-                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}{}/>\n",
+                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
@@ -233,10 +250,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polyline points=\"{}\"{}{}{}{}{}/>\n",
+                "{}<polyline points=\"{}\"{}{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
@@ -246,10 +264,11 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{}<polygon points=\"{}\"{}{}{}{}{}/>\n",
+                "{}<polygon points=\"{}\"{}{}{}{}{}{}/>\n",
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
@@ -259,11 +278,12 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 crate::geometry::element::FillRule::NonZero => "",
             };
             format!(
-                "{}<path d=\"{}\"{}{}{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
         }
@@ -426,8 +446,8 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // inkscape:groupmode="layer" lets the parser distinguish
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g inkscape:groupmode=\"layer\"{}{}{}>",
-                indent, name_attr(&e.common.name),
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}>",
+                indent, id_attr(&e.common.id), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -439,8 +459,8 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         }
         Element::Group(e) => {
             let mut lines = vec![format!(
-                "{}<g{}{}{}>",
-                indent, name_attr(&e.common.name),
+                "{}<g{}{}{}{}>",
+                indent, id_attr(&e.common.id), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -1119,9 +1139,10 @@ fn parse_common(node: &XmlNode) -> CommonProps {
                 .find(|c| c.tag == "title")
                 .map(|c| c.text.clone()))
             .filter(|s| !s.is_empty()),
-        // SVG `id` round-trip (read + write) lands in a later increment;
-        // for now stable identity is carried by the canonical test_json.
-        id: None,
+        // Stable identity. Read the standard SVG `id` attribute (what
+        // our writer emits via id_attr); absent -> None. Reading a
+        // foreign id is fine. Mirrors the inkscape:label name read above.
+        id: node.attrs.get("id").cloned().filter(|s| !s.is_empty()),
     }
 }
 
@@ -3356,6 +3377,84 @@ mod tests {
             rect_elem.common().name.as_deref(),
             Some("My Rect"),
             "round-trip lost rect name",
+        );
+    }
+
+    #[test]
+    fn common_id_round_trips_through_svg() {
+        // Element id (stable identity) persists through
+        // document_to_svg → svg_to_document. Tests Group + Rect to
+        // cover both the open/close container writer and the
+        // self-closing shape writer paths — mirrors
+        // common_name_round_trips_through_svg.
+        use crate::geometry::element::{
+            CommonProps, GroupElem, RectElem, Color, Fill,
+        };
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.id = Some("rect-1".into());
+        let mut group = GroupElem {
+            children: vec![std::rc::Rc::new(Element::Rect(rect))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        };
+        group.common.id = Some("group-1".into());
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Group(group)));
+        let svg = document_to_svg(&doc);
+        assert!(
+            svg.contains(r#"id="rect-1""#),
+            "rect id not in SVG: {svg}",
+        );
+        assert!(
+            svg.contains(r#"id="group-1""#),
+            "group id not in SVG: {svg}",
+        );
+        let parsed = svg_to_document(&svg);
+        // Layer 0 → Group → Rect.
+        let group_elem = parsed.layers[0].children().unwrap()[0].as_ref();
+        assert_eq!(
+            group_elem.common().id.as_deref(),
+            Some("group-1"),
+            "round-trip lost group id",
+        );
+        let rect_elem = group_elem.children().unwrap()[0].as_ref();
+        assert_eq!(
+            rect_elem.common().id.as_deref(),
+            Some("rect-1"),
+            "round-trip lost rect id",
+        );
+    }
+
+    #[test]
+    fn idless_element_emits_no_id_attr() {
+        // An element with no id (the default) must not emit an `id`
+        // attribute — this is what keeps id-less SVG byte-identical to
+        // the pre-id output and the existing fixtures green.
+        use crate::geometry::element::{CommonProps, RectElem, Color, Fill};
+        let rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        assert!(rect.common.id.is_none());
+        let mut doc = Document::default();
+        // Clear artboards so no <sodipodi:namedview>/<inkscape:page> is
+        // emitted — those carry their own (page) `id` attributes that
+        // are unrelated to element identity and must not be touched.
+        doc.artboards.clear();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Rect(rect)));
+        let svg = document_to_svg(&doc);
+        assert!(
+            !svg.contains(" id=\""),
+            "id-less document must not emit an id attribute: {svg}",
         );
     }
 

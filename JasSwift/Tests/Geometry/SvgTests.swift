@@ -494,6 +494,67 @@ private func roundtrip(_ doc: Document) -> Document {
     #expect(doc2.layers[1].name == "L2")
 }
 
+// MARK: - Stable element id SVG round-trip (increment 2b)
+
+@Test func svgElementIdWritten() {
+    // A leaf element with an id emits a standard SVG `id` attribute,
+    // mirroring how the name emits inkscape:label.
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72, id: "shape-7"))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("id=\"shape-7\""))
+}
+
+@Test func svgElementIdRoundTrip() {
+    // An element's id survives a full document -> SVG -> document
+    // round-trip, mirroring the existing name round-trip test.
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72, id: "rect-id-1")),
+        .circle(Circle(cx: 36, cy: 36, r: 18, id: "circ-id-2")),
+    ])])
+    let doc2 = roundtrip(doc)
+    #expect(doc2.layers[0].children[0].id == "rect-id-1")
+    #expect(doc2.layers[0].children[1].id == "circ-id-2")
+}
+
+@Test func svgGroupAndLayerIdRoundTrip() {
+    // Container ids (Layer + nested Group) survive the round-trip too.
+    let doc = Document(layers: [
+        Layer(name: "L1", children: [
+            .group(Group(children: [
+                .rect(Rect(x: 0, y: 0, width: 10, height: 10))
+            ], name: "G1", id: "group-id-9"))
+        ], id: "layer-id-3")
+    ])
+    let doc2 = roundtrip(doc)
+    #expect(doc2.layers[0].id == "layer-id-3")
+    if case .group(let g) = doc2.layers[0].children[0] {
+        #expect(g.id == "group-id-9")
+    } else {
+        Issue.record("Expected nested group")
+    }
+}
+
+@Test func svgIdlessOutputUnchanged() {
+    // An element with no id must NOT emit any `id="..."` attribute on
+    // its own tag, so id-less output stays byte-identical to before
+    // this feature. The surviving inkscape:label name attribute proves
+    // the writer ran. (We scope the check to the <rect> line so the
+    // header's sodipodi:namedview id, if present, doesn't interfere.)
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 72, height: 72, name: "Box"))
+    ])])
+    let svg = documentToSvg(doc)
+    let rectLine = svg.split(separator: "\n").first { $0.contains("<rect") }
+    #expect(rectLine != nil)
+    #expect(!(rectLine?.contains(" id=\"") ?? true))
+    #expect(rectLine?.contains("inkscape:label=\"Box\"") ?? false)
+    // Round-trip: an id-less element loads back with no id.
+    let doc2 = roundtrip(doc)
+    #expect(doc2.layers[0].children[0].id == nil)
+}
+
 @Test func svgImportColorAlpha() {
     let doc = Document(layers: [Layer(children: [
         .rect(Rect(x: 0, y: 0, width: 72, height: 72,

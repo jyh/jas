@@ -380,6 +380,53 @@ let () =
         | Layer { name = Some n; _ } -> assert (n = "Background")
         | _ -> assert false);
 
+      (* Stable-identity increment 2b: the additive element [id] must
+         survive a full SVG round-trip, mirroring the layer-name test.
+         Emitted only when set, so id-less elements stay byte-identical. *)
+      Alcotest.test_case "round-trip element id" `Quick (fun () ->
+        let rect = Jas.Element.with_id
+            (make_rect 0.0 0.0 72.0 72.0) (Some "shape-42") in
+        let doc = make_document [|make_layer [| rect |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (try let _ : int =
+                  Str.search_forward (Str.regexp_string {|id="shape-42"|}) svg 0
+                in true with Not_found -> false);
+        let doc2 = roundtrip doc in
+        match (children_of doc2.Jas.Document.layers.(0)).(0) with
+        | Rect _ as e ->
+          assert (Jas.Element.id_of e = Some "shape-42")
+        | _ -> assert false);
+
+      Alcotest.test_case "round-trip layer id" `Quick (fun () ->
+        let layer = Jas.Element.with_id
+            (make_layer ~name:"Background" [| make_rect 0.0 0.0 72.0 72.0 |])
+            (Some "layer-7") in
+        let doc = { (Jas.Document.default_document ()) with
+                    layers = [| layer |] } in
+        let doc2 = roundtrip doc in
+        match doc2.Jas.Document.layers.(0) with
+        | Layer { name = Some n; _ } as e ->
+          assert (n = "Background");
+          assert (Jas.Element.id_of e = Some "layer-7")
+        | _ -> assert false);
+
+      Alcotest.test_case "id-less element emits no id attribute" `Quick (fun () ->
+        (* CRITICAL byte-identity guard: an element with no id must not
+           emit any [ id="..."] attribute, so existing fixtures and the
+           cross-language comparison stay green. *)
+        let doc = make_document [|make_layer [|
+          make_rect 0.0 0.0 72.0 72.0
+        |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        assert (not (try let _ : int =
+                       Str.search_forward (Str.regexp_string {| id="|}) svg 0
+                     in true with Not_found -> false));
+        (* And an id-less element parses back to id = None. *)
+        let doc2 = roundtrip doc in
+        match (children_of doc2.Jas.Document.layers.(0)).(0) with
+        | Rect _ as e -> assert (Jas.Element.id_of e = None)
+        | _ -> assert false);
+
       Alcotest.test_case "round-trip multiple layers" `Quick (fun () ->
         let doc = make_document [|
           make_layer ~name:"L1" [|
