@@ -19,7 +19,14 @@ import zlib
 // MARK: - Constants
 
 private let magic: [UInt8] = [0x4A, 0x41, 0x53, 0x00] // "JAS\0"
-private let version: UInt16 = 1
+// v2 (CommonProps id+name): every element array now carries name and id in the
+// shared common block at fixed indices 5 and 6, with the type-specific payload
+// shifted to index 7. v1 (name was Layer-only at index 5, no id) is a different
+// positional layout and is NOT forward-readable — binary persistence is a
+// deferred secondary format with no real-world v1 data, so the fixtures were
+// regenerated to v2 rather than carrying a dual parse path.
+private let version: UInt16 = 2
+private let minVersion: UInt16 = 2
 private let headerSize = 8
 
 private let compressNone: UInt16 = 0
@@ -544,72 +551,96 @@ private func packVis(_ v: Visibility) -> MsgValue {
     switch v { case .invisible: vint(0); case .outline: vint(1); case .preview: vint(2) }
 }
 
+/// The shared common block written for EVERY element (v2): the six
+/// values [locked, opacity, visibility, transform, name, id] that land
+/// at array indices 1..6, with the type-specific payload following at
+/// index 7. Mirrors Rust's `pack_common` / Python's `_pack_common`.
+/// name and id are emitted as value-or-nil so every element type
+/// round-trips them uniformly. (`Element` doesn't expose locked/opacity/
+/// name at the enum level, so the per-case fields are passed in.)
+private func packCommon(locked: Bool, opacity: Double, visibility: Visibility,
+                        transform: Transform?, name: String?, id: String?) -> [MsgValue] {
+    [vbool(locked), vf64(opacity), packVis(visibility),
+     packTransform(transform), optStr(name), optStr(id)]
+}
+
 private func packElement(_ elem: Element) -> MsgValue {
     switch elem {
     case .layer(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let children: [MsgValue] = e.children.map { packElement($0) }
-        return .array([vint(tagLayer), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform), vstr(e.name ?? ""), .array(children)])
+        return .array([vint(tagLayer)] + common + [.array(children)])
     case .group(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let children: [MsgValue] = e.children.map { packElement($0) }
-        return .array([vint(tagGroup), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform), .array(children)])
+        return .array([vint(tagGroup)] + common + [.array(children)])
     case .line(let e):
-        return .array([vint(tagLine), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
+        return .array([vint(tagLine)] + common +
+                      [vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
                        packStroke(e.stroke), packWidthPoints(e.widthPoints)])
     case .rect(let e):
-        return .array([vint(tagRect), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       vf64(e.x), vf64(e.y), vf64(e.width), vf64(e.height),
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
+        return .array([vint(tagRect)] + common +
+                      [vf64(e.x), vf64(e.y), vf64(e.width), vf64(e.height),
                        vf64(e.rx), vf64(e.ry),
                        packFill(e.fill), packStroke(e.stroke)])
     case .circle(let e):
-        return .array([vint(tagCircle), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       vf64(e.cx), vf64(e.cy), vf64(e.r),
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
+        return .array([vint(tagCircle)] + common +
+                      [vf64(e.cx), vf64(e.cy), vf64(e.r),
                        packFill(e.fill), packStroke(e.stroke)])
     case .ellipse(let e):
-        return .array([vint(tagEllipse), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       vf64(e.cx), vf64(e.cy), vf64(e.rx), vf64(e.ry),
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
+        return .array([vint(tagEllipse)] + common +
+                      [vf64(e.cx), vf64(e.cy), vf64(e.rx), vf64(e.ry),
                        packFill(e.fill), packStroke(e.stroke)])
     case .polyline(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let points: [MsgValue] = e.points.map { .array([vf64($0.0), vf64($0.1)]) }
-        return .array([vint(tagPolyline), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       .array(points), packFill(e.fill), packStroke(e.stroke)])
+        return .array([vint(tagPolyline)] + common +
+                      [.array(points), packFill(e.fill), packStroke(e.stroke)])
     case .polygon(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let points: [MsgValue] = e.points.map { .array([vf64($0.0), vf64($0.1)]) }
-        return .array([vint(tagPolygon), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       .array(points), packFill(e.fill), packStroke(e.stroke)])
+        return .array([vint(tagPolygon)] + common +
+                      [.array(points), packFill(e.fill), packStroke(e.stroke)])
     case .path(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
-        return .array([vint(tagPath), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       .array(cmds), packFill(e.fill), packStroke(e.stroke),
+        return .array([vint(tagPath)] + common +
+                      [.array(cmds), packFill(e.fill), packStroke(e.stroke),
                        packWidthPoints(e.widthPoints)])
     case .text(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         // Trailing tspans array — multi-tspan / override-bearing
         // documents round-trip through binary. Old blobs without
         // this field decode via the backward-compat path below.
         let tspans: [MsgValue] = e.tspans.map { packTspan($0) }
-        return .array([vint(tagText), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       vf64(e.x), vf64(e.y), vstr(e.content),
+        return .array([vint(tagText)] + common +
+                      [vf64(e.x), vf64(e.y), vstr(e.content),
                        vstr(e.fontFamily), vf64(e.fontSize),
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
                        vf64(e.width), vf64(e.height),
                        packFill(e.fill), packStroke(e.stroke),
                        .array(tspans)])
     case .textPath(let e):
+        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
+                                transform: e.transform, name: e.name, id: e.id)
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
         let tspans: [MsgValue] = e.tspans.map { packTspan($0) }
-        return .array([vint(tagTextPath), vbool(e.locked), vf64(e.opacity), packVis(e.visibility),
-                       packTransform(e.transform),
-                       .array(cmds), vstr(e.content), vf64(e.startOffset),
+        return .array([vint(tagTextPath)] + common +
+                      [.array(cmds), vstr(e.content), vf64(e.startOffset),
                        vstr(e.fontFamily), vf64(e.fontSize),
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
                        packFill(e.fill), packStroke(e.stroke),
@@ -728,88 +759,117 @@ private func unpackPathCommand(_ v: MsgValue) -> PathCommand {
     }
 }
 
-private func unpackCommon(_ arr: [MsgValue]) -> (Bool, Double, Visibility, Transform?) {
+/// Inverse of `packCommon`: reads the shared common block at indices
+/// 1..6 (locked, opacity, visibility, transform, name, id). The
+/// type-specific payload begins at index 7. Mirrors Rust's
+/// `unpack_common` / Python's `_unpack_common`.
+private func unpackCommon(_ arr: [MsgValue]) -> (Bool, Double, Visibility, Transform?, String?, String?) {
     let vis: Visibility = switch asInt(arr[3]) { case 0: .invisible; case 1: .outline; default: .preview }
-    return (asBool(arr[1]), asF64(arr[2]), vis, unpackTransform(arr[4]))
+    return (asBool(arr[1]), asF64(arr[2]), vis, unpackTransform(arr[4]),
+            asOptStr(arr[5]), asOptStr(arr[6]))
 }
 
 private func unpackElement(_ v: MsgValue) -> Element {
     let arr = asArray(v)
     let tag = asInt(arr[0])
-    let (locked, opacity, vis, xform) = unpackCommon(arr)
+    let (locked, opacity, vis, xform, name, id) = unpackCommon(arr)
+    // Type-specific payload begins at index 7 (after the common block).
 
     switch tag {
     case tagLayer:
-        let name = asStr(arr[5])
-        let children = asArray(arr[6]).map { unpackElement($0) }
+        let children = asArray(arr[7]).map { unpackElement($0) }
         return .layer(Layer(name: name, children: children, opacity: opacity,
-                            transform: xform, locked: locked, visibility: vis))
+                            transform: xform, locked: locked, visibility: vis, id: id))
     case tagGroup:
-        let children = asArray(arr[5]).map { unpackElement($0) }
+        let children = asArray(arr[7]).map { unpackElement($0) }
         return .group(Group(children: children, opacity: opacity,
-                            transform: xform, locked: locked, visibility: vis))
+                            transform: xform, locked: locked, visibility: vis, name: name, id: id))
     case tagLine:
-        let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
-        return .line(Line(x1: asF64(arr[5]), y1: asF64(arr[6]),
-                          x2: asF64(arr[7]), y2: asF64(arr[8]),
-                          stroke: unpackStroke(arr[9]), widthPoints: wp,
-                          opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        let wp = arr.count > 12 ? unpackWidthPoints(arr[12]) : []
+        return .line(Line(x1: asF64(arr[7]), y1: asF64(arr[8]),
+                          x2: asF64(arr[9]), y2: asF64(arr[10]),
+                          stroke: unpackStroke(arr[11]), widthPoints: wp,
+                          opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          name: name, id: id))
     case tagRect:
-        return .rect(Rect(x: asF64(arr[5]), y: asF64(arr[6]),
-                          width: asF64(arr[7]), height: asF64(arr[8]),
-                          rx: asF64(arr[9]), ry: asF64(arr[10]),
-                          fill: unpackFill(arr[11]), stroke: unpackStroke(arr[12]),
-                          opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        return .rect(Rect(x: asF64(arr[7]), y: asF64(arr[8]),
+                          width: asF64(arr[9]), height: asF64(arr[10]),
+                          rx: asF64(arr[11]), ry: asF64(arr[12]),
+                          fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
+                          opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          name: name, id: id))
     case tagCircle:
-        return .circle(Circle(cx: asF64(arr[5]), cy: asF64(arr[6]), r: asF64(arr[7]),
-                              fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
-                              opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        return .circle(Circle(cx: asF64(arr[7]), cy: asF64(arr[8]), r: asF64(arr[9]),
+                              fill: unpackFill(arr[10]), stroke: unpackStroke(arr[11]),
+                              opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                              name: name, id: id))
     case tagEllipse:
-        return .ellipse(Ellipse(cx: asF64(arr[5]), cy: asF64(arr[6]),
-                                rx: asF64(arr[7]), ry: asF64(arr[8]),
-                                fill: unpackFill(arr[9]), stroke: unpackStroke(arr[10]),
-                                opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        return .ellipse(Ellipse(cx: asF64(arr[7]), cy: asF64(arr[8]),
+                                rx: asF64(arr[9]), ry: asF64(arr[10]),
+                                fill: unpackFill(arr[11]), stroke: unpackStroke(arr[12]),
+                                opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                name: name, id: id))
     case tagPolyline:
-        let points = asArray(arr[5]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
-        return .polyline(Polyline(points: points, fill: unpackFill(arr[6]), stroke: unpackStroke(arr[7]),
-                                  opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
+        return .polyline(Polyline(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
+                                  opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                  name: name, id: id))
     case tagPolygon:
-        let points = asArray(arr[5]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
-        return .polygon(Polygon(points: points, fill: unpackFill(arr[6]), stroke: unpackStroke(arr[7]),
-                                opacity: opacity, transform: xform, locked: locked, visibility: vis))
+        let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
+        return .polygon(Polygon(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
+                                opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                name: name, id: id))
     case tagPath:
-        let cmds = asArray(arr[5]).map { unpackPathCommand($0) }
-        let wp = arr.count > 8 ? unpackWidthPoints(arr[8]) : []
-        return .path(Path(d: cmds, fill: unpackFill(arr[6]), stroke: unpackStroke(arr[7]),
+        let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
+        let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
+        return .path(Path(d: cmds, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                           widthPoints: wp,
-                          opacity: opacity, transform: xform, locked: locked, visibility: vis))
+                          opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          name: name, id: id))
     case tagText:
         // Prefer the trailing tspans field when present; otherwise
         // fall back to the single-default-tspan seeded from content
-        // (pre-tspan-codec blobs).
-        let baseT = Text(x: asF64(arr[5]), y: asF64(arr[6]), content: asStr(arr[7]),
-                         fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
-                         fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
-                         textDecoration: asStr(arr[12]),
-                         width: asF64(arr[13]), height: asF64(arr[14]),
-                         fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
-                         opacity: opacity, transform: xform, locked: locked, visibility: vis)
-        if arr.count > 17, case .array(let ts) = arr[17], !ts.isEmpty {
-            return .text(baseT.withTspans(ts.map { unpackTspan($0) }))
+        // (pre-tspan-codec blobs). Constructed via the tspans-bearing
+        // init so the common block (name/id/visibility/transform)
+        // survives — `withTspans` does not carry those through.
+        if arr.count > 19, case .array(let ts) = arr[19], !ts.isEmpty {
+            return .text(Text(x: asF64(arr[7]), y: asF64(arr[8]),
+                              tspans: ts.map { unpackTspan($0) },
+                              fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
+                              fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
+                              textDecoration: asStr(arr[14]),
+                              width: asF64(arr[15]), height: asF64(arr[16]),
+                              fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
+                              opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                              name: name, id: id))
         }
-        return .text(baseT)
+        return .text(Text(x: asF64(arr[7]), y: asF64(arr[8]), content: asStr(arr[9]),
+                          fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
+                          fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
+                          textDecoration: asStr(arr[14]),
+                          width: asF64(arr[15]), height: asF64(arr[16]),
+                          fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
+                          opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          name: name, id: id))
     case tagTextPath:
-        let cmds = asArray(arr[5]).map { unpackPathCommand($0) }
-        let baseTp = TextPath(d: cmds, content: asStr(arr[6]), startOffset: asF64(arr[7]),
-                              fontFamily: asStr(arr[8]), fontSize: asF64(arr[9]),
-                              fontWeight: asStr(arr[10]), fontStyle: asStr(arr[11]),
-                              textDecoration: asStr(arr[12]),
-                              fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
-                              opacity: opacity, transform: xform, locked: locked, visibility: vis)
-        if arr.count > 15, case .array(let ts) = arr[15], !ts.isEmpty {
-            return .textPath(baseTp.withTspans(ts.map { unpackTspan($0) }))
+        let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
+        if arr.count > 17, case .array(let ts) = arr[17], !ts.isEmpty {
+            return .textPath(TextPath(d: cmds, tspans: ts.map { unpackTspan($0) },
+                                      startOffset: asF64(arr[9]),
+                                      fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
+                                      fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
+                                      textDecoration: asStr(arr[14]),
+                                      fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
+                                      opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                      name: name, id: id))
         }
-        return .textPath(baseTp)
+        return .textPath(TextPath(d: cmds, content: asStr(arr[8]), startOffset: asF64(arr[9]),
+                                  fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
+                                  fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
+                                  textDecoration: asStr(arr[14]),
+                                  fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
+                                  opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                  name: name, id: id))
     default: fatalError("unknown element tag: \(tag)")
     }
 }
@@ -895,6 +955,11 @@ package func binaryToDocument(_ data: Data) throws -> Document {
 
     let ver = UInt16(bytes[4]) | (UInt16(bytes[5]) << 8)
     guard ver <= version else {
+        throw BinaryError.unsupportedVersion(ver)
+    }
+    // v1 used a different positional layout (no generic name/id slots);
+    // it is a clean break, not forward-readable. See the version comment.
+    guard ver >= minVersion else {
         throw BinaryError.unsupportedVersion(ver)
     }
 

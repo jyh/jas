@@ -12,7 +12,14 @@ open Document
 (* -- Constants ----------------------------------------------------------- *)
 
 let magic = "JAS\000"
-let version = 1
+(* v2 (CommonProps id+name): every element array carries name and id in the
+   shared common block at indices 5 and 6; the type-specific payload shifts to
+   index 7. v1 (Layer-only name at index 5, no id) is a different positional
+   layout and is NOT forward-readable. Binary is a deferred secondary format
+   with no real-world v1 data, so fixtures were regenerated to v2 rather than
+   carrying a dual parse path. *)
+let version = 2
+let min_version = 2
 let header_size = 8
 
 let compress_none = 0
@@ -286,75 +293,85 @@ let pack_path_command = function
            vbool la; vbool sw; vf64 x; vf64 y]
   | ClosePath -> vlist [vint cmd_close_path]
 
+(* The shared common block written for EVERY element (v2):
+   [locked; opacity; visibility; transform; name; id] at array indices 1..6.
+   name and id are stored as msgpack value-or-nil (None packs as nil), so every
+   element type round-trips them uniformly. The type-specific payload follows at
+   index 7. Returned as a list so call sites splice it after the tag. *)
+let pack_common ~locked ~opacity ~visibility ~transform ~name ~id =
+  [vbool locked; vf64 opacity; pack_vis visibility; pack_transform transform;
+   opt_str name; opt_str id]
+
 let rec pack_element = function
-  | Layer { name; children; opacity; transform; locked; visibility; _ } ->
+  | Layer { name; id; children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
-    let name_str = match name with Some s -> s | None -> "" in
-    vlist [vint tag_layer; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform; vstr name_str; vlist ch]
-  | Group { children; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_layer ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist ch])
+  | Group { name; id; children; opacity; transform; locked; visibility; _ } ->
     let ch = Array.to_list (Array.map pack_element children) in
-    vlist [vint tag_group; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform; vlist ch]
-  | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility; _ } ->
-    vlist [vint tag_line; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vf64 x1; vf64 y1; vf64 x2; vf64 y2; pack_stroke stroke;
-           pack_width_points width_points]
-  | Rect { x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
-    vlist [vint tag_rect; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vf64 x; vf64 y; vf64 width; vf64 height; vf64 rx; vf64 ry;
-           pack_fill fill; pack_stroke stroke]
-  | Circle { cx; cy; r; fill; stroke; opacity; transform; locked; visibility; _ } ->
-    vlist [vint tag_circle; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vf64 cx; vf64 cy; vf64 r; pack_fill fill; pack_stroke stroke]
-  | Ellipse { cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
-    vlist [vint tag_ellipse; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vf64 cx; vf64 cy; vf64 rx; vf64 ry;
-           pack_fill fill; pack_stroke stroke]
-  | Polyline { points; fill; stroke; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_group ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist ch])
+  | Line { name; id; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_line ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vf64 x1; vf64 y1; vf64 x2; vf64 y2; pack_stroke stroke;
+            pack_width_points width_points])
+  | Rect { name; id; x; y; width; height; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_rect ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vf64 x; vf64 y; vf64 width; vf64 height; vf64 rx; vf64 ry;
+            pack_fill fill; pack_stroke stroke])
+  | Circle { name; id; cx; cy; r; fill; stroke; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_circle ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vf64 cx; vf64 cy; vf64 r; pack_fill fill; pack_stroke stroke])
+  | Ellipse { name; id; cx; cy; rx; ry; fill; stroke; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_ellipse ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vf64 cx; vf64 cy; vf64 rx; vf64 ry;
+            pack_fill fill; pack_stroke stroke])
+  | Polyline { name; id; points; fill; stroke; opacity; transform; locked; visibility; _ } ->
     let pts = List.map (fun (x, y) -> vlist [vf64 x; vf64 y]) points in
-    vlist [vint tag_polyline; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vlist pts; pack_fill fill; pack_stroke stroke]
-  | Polygon { points; fill; stroke; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_polyline ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist pts; pack_fill fill; pack_stroke stroke])
+  | Polygon { name; id; points; fill; stroke; opacity; transform; locked; visibility; _ } ->
     let pts = List.map (fun (x, y) -> vlist [vf64 x; vf64 y]) points in
-    vlist [vint tag_polygon; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vlist pts; pack_fill fill; pack_stroke stroke]
-  | Path { d; fill; stroke; width_points; opacity; transform; locked; visibility; _ } ->
+    vlist (vint tag_polygon ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist pts; pack_fill fill; pack_stroke stroke])
+  | Path { name; id; d; fill; stroke; width_points; opacity; transform; locked; visibility; _ } ->
     let cmds = List.map pack_path_command d in
-    vlist [vint tag_path; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vlist cmds; pack_fill fill; pack_stroke stroke;
-           pack_width_points width_points]
-  | Text { x; y; content; font_family; font_size; font_weight; font_style;
+    vlist (vint tag_path ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist cmds; pack_fill fill; pack_stroke stroke;
+            pack_width_points width_points])
+  | Text { name; id; x; y; content; font_family; font_size; font_weight; font_style;
            text_decoration; text_width; text_height; fill; stroke;
            opacity; transform; locked; visibility; tspans; _ } ->
     let tspans_list = Array.to_list (Array.map pack_tspan tspans) in
-    vlist [vint tag_text; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vf64 x; vf64 y; vstr content;
-           vstr font_family; vf64 font_size;
-           vstr font_weight; vstr font_style; vstr text_decoration;
-           vf64 text_width; vf64 text_height;
-           pack_fill fill; pack_stroke stroke;
-           vlist tspans_list]
-  | Text_path { d; content; start_offset; font_family; font_size; font_weight;
+    vlist (vint tag_text ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vf64 x; vf64 y; vstr content;
+            vstr font_family; vf64 font_size;
+            vstr font_weight; vstr font_style; vstr text_decoration;
+            vf64 text_width; vf64 text_height;
+            pack_fill fill; pack_stroke stroke;
+            vlist tspans_list])
+  | Text_path { name; id; d; content; start_offset; font_family; font_size; font_weight;
                 font_style; text_decoration; fill; stroke;
                 opacity; transform; locked; visibility; tspans; _ } ->
     let cmds = List.map pack_path_command d in
     let tspans_list = Array.to_list (Array.map pack_tspan tspans) in
-    vlist [vint tag_text_path; vbool locked; vf64 opacity; pack_vis visibility;
-           pack_transform transform;
-           vlist cmds; vstr content; vf64 start_offset;
-           vstr font_family; vf64 font_size;
-           vstr font_weight; vstr font_style; vstr text_decoration;
-           pack_fill fill; pack_stroke stroke;
-           vlist tspans_list]
+    vlist (vint tag_text_path ::
+           pack_common ~locked ~opacity ~visibility ~transform ~name ~id @
+           [vlist cmds; vstr content; vf64 start_offset;
+            vstr font_family; vf64 font_size;
+            vstr font_weight; vstr font_style; vstr text_decoration;
+            pack_fill fill; pack_stroke stroke;
+            vlist tspans_list])
   | Live _ ->
     (* Phase 1: binary serialization of Live elements is deferred to
        the phase that implements compound-shape document I/O. *)
@@ -488,63 +505,68 @@ let unpack_path_command v =
   else if tag = cmd_close_path then ClosePath
   else failwith (Printf.sprintf "unknown path command tag: %d" tag)
 
+(* Inverse of [pack_common]: reads the shared common block at indices 1..6
+   (locked, opacity, visibility, transform, name, id). name and id are read as
+   value-or-nil. Returns a 6-tuple spread into every element constructor. *)
 let unpack_common arr =
   let locked = as_bool (List.nth arr 1) in
   let opacity = as_f64 (List.nth arr 2) in
   let visibility = match as_int (List.nth arr 3) with
     | 0 -> Invisible | 1 -> Outline | _ -> Preview in
   let transform = unpack_transform (List.nth arr 4) in
-  (locked, opacity, visibility, transform)
+  let name = as_opt_str (List.nth arr 5) in
+  let id = as_opt_str (List.nth arr 6) in
+  (locked, opacity, visibility, transform, name, id)
 
 let rec unpack_element v =
   let arr = as_list v in
   let tag = as_int (List.nth arr 0) in
-  let (locked, opacity, visibility, transform) = unpack_common arr in
+  let (locked, opacity, visibility, transform, name, id) = unpack_common arr in
+  (* v2: name and id ride in the shared common block (indices 5 and 6); the
+     type-specific payload begins at index 7. *)
   if tag = tag_layer then
-    let name_str = as_str (List.nth arr 5) in
-    let name = if name_str = "" then None else Some name_str in
-    let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 6))) in
-    Layer { name; id = None; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+    let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 7))) in
+    Layer { name; id; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
   else if tag = tag_group then
-    let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 5))) in
-    Group { name = None; id = None; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
+    let children = Array.of_list (List.map unpack_element (as_list (List.nth arr 7))) in
+    Group { name; id; children; opacity; transform; locked; visibility; blend_mode = Element.Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
   else if tag = tag_line then
-    let wp = if List.length arr > 10 then unpack_width_points (List.nth arr 10) else [] in
-    Line { name = None; id = None; x1 = as_f64 (List.nth arr 5); y1 = as_f64 (List.nth arr 6);
-           x2 = as_f64 (List.nth arr 7); y2 = as_f64 (List.nth arr 8);
-           stroke = unpack_stroke (List.nth arr 9);
+    let wp = if List.length arr > 12 then unpack_width_points (List.nth arr 12) else [] in
+    Line { name; id; x1 = as_f64 (List.nth arr 7); y1 = as_f64 (List.nth arr 8);
+           x2 = as_f64 (List.nth arr 9); y2 = as_f64 (List.nth arr 10);
+           stroke = unpack_stroke (List.nth arr 11);
            width_points = wp;
            opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
              stroke_gradient = None;
            }
   else if tag = tag_rect then
-    Rect { name = None; id = None; x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
-           width = as_f64 (List.nth arr 7); height = as_f64 (List.nth arr 8);
-           rx = as_f64 (List.nth arr 9); ry = as_f64 (List.nth arr 10);
-           fill = unpack_fill (List.nth arr 11);
-           stroke = unpack_stroke (List.nth arr 12);
+    Rect { name; id; x = as_f64 (List.nth arr 7); y = as_f64 (List.nth arr 8);
+           width = as_f64 (List.nth arr 9); height = as_f64 (List.nth arr 10);
+           rx = as_f64 (List.nth arr 11); ry = as_f64 (List.nth arr 12);
+           fill = unpack_fill (List.nth arr 13);
+           stroke = unpack_stroke (List.nth arr 14);
            opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
              fill_gradient = None;
              stroke_gradient = None;
            }
   else if tag = tag_circle then
-    Circle { name = None; id = None; cx = as_f64 (List.nth arr 5); cy = as_f64 (List.nth arr 6);
-             r = as_f64 (List.nth arr 7);
-             fill = unpack_fill (List.nth arr 8);
-             stroke = unpack_stroke (List.nth arr 9);
+    Circle { name; id; cx = as_f64 (List.nth arr 7); cy = as_f64 (List.nth arr 8);
+             r = as_f64 (List.nth arr 9);
+             fill = unpack_fill (List.nth arr 10);
+             stroke = unpack_stroke (List.nth arr 11);
              opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
                fill_gradient = None;
                stroke_gradient = None;
              }
   else if tag = tag_ellipse then
-    Ellipse { name = None; id = None; cx = as_f64 (List.nth arr 5); cy = as_f64 (List.nth arr 6);
-              rx = as_f64 (List.nth arr 7); ry = as_f64 (List.nth arr 8);
-              fill = unpack_fill (List.nth arr 9);
-              stroke = unpack_stroke (List.nth arr 10);
+    Ellipse { name; id; cx = as_f64 (List.nth arr 7); cy = as_f64 (List.nth arr 8);
+              rx = as_f64 (List.nth arr 9); ry = as_f64 (List.nth arr 10);
+              fill = unpack_fill (List.nth arr 11);
+              stroke = unpack_stroke (List.nth arr 12);
               opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
                 fill_gradient = None;
                 stroke_gradient = None;
@@ -552,9 +574,9 @@ let rec unpack_element v =
   else if tag = tag_polyline then
     let points = List.map (fun p ->
       let a = as_list p in (as_f64 (List.nth a 0), as_f64 (List.nth a 1))
-    ) (as_list (List.nth arr 5)) in
-    Polyline { name = None; id = None; points; fill = unpack_fill (List.nth arr 6);
-               stroke = unpack_stroke (List.nth arr 7);
+    ) (as_list (List.nth arr 7)) in
+    Polyline { name; id; points; fill = unpack_fill (List.nth arr 8);
+               stroke = unpack_stroke (List.nth arr 9);
                opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
                  fill_gradient = None;
                  stroke_gradient = None;
@@ -562,18 +584,18 @@ let rec unpack_element v =
   else if tag = tag_polygon then
     let points = List.map (fun p ->
       let a = as_list p in (as_f64 (List.nth a 0), as_f64 (List.nth a 1))
-    ) (as_list (List.nth arr 5)) in
-    Polygon { name = None; id = None; points; fill = unpack_fill (List.nth arr 6);
-              stroke = unpack_stroke (List.nth arr 7);
+    ) (as_list (List.nth arr 7)) in
+    Polygon { name; id; points; fill = unpack_fill (List.nth arr 8);
+              stroke = unpack_stroke (List.nth arr 9);
               opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
                 fill_gradient = None;
                 stroke_gradient = None;
               }
   else if tag = tag_path then
-    let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
-    let wp = if List.length arr > 8 then unpack_width_points (List.nth arr 8) else [] in
-    Path { name = None; id = None; d = cmds; fill = unpack_fill (List.nth arr 6);
-           stroke = unpack_stroke (List.nth arr 7);
+    let cmds = List.map unpack_path_command (as_list (List.nth arr 7)) in
+    let wp = if List.length arr > 10 then unpack_width_points (List.nth arr 10) else [] in
+    Path { name; id; d = cmds; fill = unpack_fill (List.nth arr 8);
+           stroke = unpack_stroke (List.nth arr 9);
            width_points = wp;
            opacity; transform; locked; visibility; blend_mode = Element.Normal; mask = None;
              fill_gradient = None;
@@ -583,24 +605,24 @@ let rec unpack_element v =
              tool_origin = None;
            }
   else if tag = tag_text then
-    let content = as_str (List.nth arr 7) in
+    let content = as_str (List.nth arr 9) in
     (* Prefer the trailing tspans field when present; otherwise fall
        back to the single-default-tspan seeded from content (blobs
        predating the tspan codec extension). *)
-    let tspans = if List.length arr > 17 then
-      (match List.nth arr 17 with
+    let tspans = if List.length arr > 19 then
+      (match List.nth arr 19 with
        | Msgpck.List xs when xs <> [] ->
          Array.of_list (List.map unpack_tspan xs)
        | _ -> tspans_from_content content)
     else tspans_from_content content
     in
-    Text { name = None; id = None; x = as_f64 (List.nth arr 5); y = as_f64 (List.nth arr 6);
+    Text { name; id; x = as_f64 (List.nth arr 7); y = as_f64 (List.nth arr 8);
            content;
-           font_family = as_str (List.nth arr 8);
-           font_size = as_f64 (List.nth arr 9);
-           font_weight = as_str (List.nth arr 10);
-           font_style = as_str (List.nth arr 11);
-           text_decoration = as_str (List.nth arr 12);
+           font_family = as_str (List.nth arr 10);
+           font_size = as_f64 (List.nth arr 11);
+           font_weight = as_str (List.nth arr 12);
+           font_style = as_str (List.nth arr 13);
+           text_decoration = as_str (List.nth arr 14);
            (* Character-panel attributes not yet persisted in the binary
               codec — default to empty on decode (a follow-up extends
               the format when partial-tspan editing lands). *)
@@ -608,34 +630,34 @@ let rec unpack_element v =
            line_height = ""; letter_spacing = ""; xml_lang = "";
            aa_mode = ""; rotate = ""; horizontal_scale = "";
            vertical_scale = ""; kerning = "";
-           text_width = as_f64 (List.nth arr 13);
-           text_height = as_f64 (List.nth arr 14);
-           fill = unpack_fill (List.nth arr 15);
-           stroke = unpack_stroke (List.nth arr 16);
+           text_width = as_f64 (List.nth arr 15);
+           text_height = as_f64 (List.nth arr 16);
+           fill = unpack_fill (List.nth arr 17);
+           stroke = unpack_stroke (List.nth arr 18);
            opacity; transform; locked; visibility; tspans; blend_mode = Element.Normal; mask = None }
   else if tag = tag_text_path then
-    let cmds = List.map unpack_path_command (as_list (List.nth arr 5)) in
-    let content = as_str (List.nth arr 6) in
-    let tspans = if List.length arr > 15 then
-      (match List.nth arr 15 with
+    let cmds = List.map unpack_path_command (as_list (List.nth arr 7)) in
+    let content = as_str (List.nth arr 8) in
+    let tspans = if List.length arr > 17 then
+      (match List.nth arr 17 with
        | Msgpck.List xs when xs <> [] ->
          Array.of_list (List.map unpack_tspan xs)
        | _ -> tspans_from_content content)
     else tspans_from_content content
     in
-    Text_path { name = None; id = None; d = cmds; content;
-                start_offset = as_f64 (List.nth arr 7);
-                font_family = as_str (List.nth arr 8);
-                font_size = as_f64 (List.nth arr 9);
-                font_weight = as_str (List.nth arr 10);
-                font_style = as_str (List.nth arr 11);
-                text_decoration = as_str (List.nth arr 12);
+    Text_path { name; id; d = cmds; content;
+                start_offset = as_f64 (List.nth arr 9);
+                font_family = as_str (List.nth arr 10);
+                font_size = as_f64 (List.nth arr 11);
+                font_weight = as_str (List.nth arr 12);
+                font_style = as_str (List.nth arr 13);
+                text_decoration = as_str (List.nth arr 14);
                 text_transform = ""; font_variant = ""; baseline_shift = "";
                 line_height = ""; letter_spacing = ""; xml_lang = "";
                 aa_mode = ""; rotate = ""; horizontal_scale = "";
                 vertical_scale = ""; kerning = "";
-                fill = unpack_fill (List.nth arr 13);
-                stroke = unpack_stroke (List.nth arr 14);
+                fill = unpack_fill (List.nth arr 15);
+                stroke = unpack_stroke (List.nth arr 16);
                 opacity; transform; locked; visibility; tspans; blend_mode = Element.Normal; mask = None }
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 
@@ -727,6 +749,10 @@ let binary_to_document data =
   let ver = Char.code data.[4] lor (Char.code data.[5] lsl 8) in
   if ver > version then
     failwith (Printf.sprintf "unsupported version: %d, max supported is %d" ver version);
+  if ver < min_version then
+    (* v1 used a different positional layout (no generic name and id slots);
+       a clean break, not forward-readable. See the version comment. *)
+    failwith (Printf.sprintf "unsupported legacy version: %d, min supported is %d" ver min_version);
   let flags = Char.code data.[6] lor (Char.code data.[7] lsl 8) in
   let compression = flags land 0x03 in
   let payload_str = String.sub data header_size (len - header_size) in
