@@ -16,10 +16,13 @@ import Foundation
 /// Workspace YAML has a finite set of expression strings (~hundreds);
 /// the cache reaches steady state after the first render and never
 /// grows unboundedly in practice. SwiftUI view-body evaluation runs
-/// on the main thread so a plain dictionary is sufficient — if
-/// off-main concurrent access ever becomes a vector, gate this with
-/// a serial DispatchQueue.
+/// on the main thread, but the parallel test runner calls `evaluate`
+/// from many threads at once, so the dictionary is guarded by
+/// `_astCacheLock` — a concurrent read racing a write mutates the
+/// dictionary's backing storage mid-lookup and crashes in
+/// Dictionary._Variant.lookup.
 private var _astCache: [String: Expr?] = [:]
+private let _astCacheLock = NSLock()
 
 /// Set JAS_DEBUG_EXPR=1 in the environment to log non-empty
 /// expressions that evaluate to `.null`. Parse failures are always
@@ -33,7 +36,10 @@ private func _debugNullExpr() -> Bool {
 func evaluate(_ expr: String, context: [String: Any]) -> Value {
     if expr.isEmpty { return .null }
     let ast: Expr?
-    if let cached = _astCache[expr] {
+    _astCacheLock.lock()
+    let cachedEntry = _astCache[expr]
+    _astCacheLock.unlock()
+    if let cached = cachedEntry {
         ast = cached
     } else {
         ast = parseExpr(expr)
@@ -41,7 +47,9 @@ func evaluate(_ expr: String, context: [String: Any]) -> Value {
             FileHandle.standardError.write(
                 Data("expr parse failed: \(expr)\n".utf8))
         }
+        _astCacheLock.lock()
         _astCache[expr] = ast
+        _astCacheLock.unlock()
     }
     guard let ast else { return .null }
     let result = evalNode(ast, context)

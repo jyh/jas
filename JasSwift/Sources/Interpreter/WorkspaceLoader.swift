@@ -70,6 +70,19 @@ class WorkspaceData {
         return menu
     }
 
+    /// Get the panel menu entries for a content id, preserving every
+    /// entry type. Unlike ``panelMenu`` (which casts to
+    /// `[[String: Any]]` and so silently drops the bare `"separator"`
+    /// string entries), this returns the raw heterogeneous array so the
+    /// generic menu builder sees separators as well as object entries.
+    func panelMenuRaw(_ contentId: String) -> [Any] {
+        guard let panel = panel(contentId),
+              let menu = panel["menu"] as? [Any] else {
+            return []
+        }
+        return menu
+    }
+
     /// Get the panel content element tree for a content id.
     func panelContent(_ contentId: String) -> [String: Any]? {
         panel(contentId)?["content"] as? [String: Any]

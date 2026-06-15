@@ -201,6 +201,13 @@ menu:
     action: reset_artboards_panel
     description: "Reset panel UI state (scroll, reference-point preference). Does not modify document data."
 
+  - separator
+
+  - label: "Close Artboards"
+    action: close_panel
+    params: { panel: artboards }
+    description: "Close the Artboards panel"
+
 content:
   type: container
   id: ap_root

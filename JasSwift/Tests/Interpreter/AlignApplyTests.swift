@@ -26,6 +26,18 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
     model.document.getElement(path).transform ?? .identity
 }
 
+/// Read a rect's baked x coordinate. applyAlignOperation bakes the
+/// align offset into the element's own coordinates (so bounds /
+/// hit-test / overlay stay consistent) and leaves the transform
+/// identity — mirroring the Rust apply_align_operation. Tests that
+/// verify the move therefore inspect the coordinate, not the transform.
+private func rectXAt(_ model: Model, path: ElementPath) -> Double {
+    guard case .rect(let r) = model.document.getElement(path) else {
+        Issue.record("expected rect at \(path)"); return .nan
+    }
+    return r.x
+}
+
 @Test func applyAlignLeftTranslatesNonExtremalRects() {
     let rects = [
         makeRect(10, 0, 10, 10),
@@ -34,15 +46,16 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
     ]
     let model = modelWithRects(rects, selected: [[0, 0], [0, 1], [0, 2]])
     applyAlignOperation(model: model, store: model.stateStore, op: "align_left")
-    // Defaults: align_to = selection (from store is nil here, falls
-    // back to "selection"). First rect already at x=10 → identity.
+    // Defaults: align_to = selection (store is nil here, falls back to
+    // "selection"). Selection bbox min-x = 10, so every rect's left
+    // edge ends at x = 10. The offset is baked into coords; transforms
+    // stay identity (keeps bounds / hit-test / overlay consistent).
+    #expect(rectXAt(model, path: [0, 0]) == 10)
+    #expect(rectXAt(model, path: [0, 1]) == 10)
+    #expect(rectXAt(model, path: [0, 2]) == 10)
     #expect(transformAt(model, path: [0, 0]) == .identity)
-    let t1 = transformAt(model, path: [0, 1])
-    #expect(t1.e == -20)
-    #expect(t1.f == 0)
-    let t2 = transformAt(model, path: [0, 2])
-    #expect(t2.e == -50)
-    #expect(t2.f == 0)
+    #expect(transformAt(model, path: [0, 1]) == .identity)
+    #expect(transformAt(model, path: [0, 2]) == .identity)
 }
 
 @Test func applyAlignOperationNoOpWhenFewerThanTwoSelected() {
@@ -87,6 +100,11 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
     let effects = alignPlatformEffects(model: model)
     let expected: Set<String> = [
         "snapshot", "reset_align_panel",
+        // Cross-cutting active-color propagation hook: fires when a YAML
+        // set: writes fill_color / stroke_color (e.g. Swatches Panel's
+        // set_active_color) so the change reaches the canvas selection,
+        // matching the direct ColorPanel.setActiveColor path.
+        "apply_active_color",
         "align_left", "align_horizontal_center", "align_right",
         "align_top", "align_vertical_center", "align_bottom",
         "distribute_left", "distribute_horizontal_center", "distribute_right",
@@ -119,13 +137,14 @@ private func transformAt(_ model: Model, path: ElementPath) -> Transform {
     s.set("align_to", "key_object")
     s.set("align_key_object_path", ["__path__": [0, 1]])
     applyAlignOperation(model: model, store: s, op: "align_left")
-    // Key (rs[1]) never moves.
+    // Everything aligns to the key's left edge (x=30). The offset is
+    // baked into coords; transforms stay identity for all three.
+    #expect(rectXAt(model, path: [0, 0]) == 30)   // moved +20
+    #expect(rectXAt(model, path: [0, 1]) == 30)   // key, unmoved
+    #expect(rectXAt(model, path: [0, 2]) == 30)   // moved -30
+    #expect(transformAt(model, path: [0, 0]) == .identity)
     #expect(transformAt(model, path: [0, 1]) == .identity)
-    // Others align to key's left edge (x=30).
-    let t0 = transformAt(model, path: [0, 0])
-    #expect(t0.e == 20)
-    let t2 = transformAt(model, path: [0, 2])
-    #expect(t2.e == -30)
+    #expect(transformAt(model, path: [0, 2]) == .identity)
 }
 
 // MARK: - Canvas click intercept for key-object designation

@@ -48,27 +48,17 @@ public struct OpacityPanelState: Equatable {
 
 public enum OpacityPanel {
 
-    /// Menu items for the Opacity panel. Ten spec items (from OPACITY.md)
-    /// plus a trailing "Close Opacity" action. Three separators divide
-    /// the spec groups; a fourth precedes Close.
+    /// Menu items for the Opacity panel.
+    ///
+    /// Source of truth is workspace/panels/opacity.yaml's `menu:` block
+    /// (review #15); the generic reader builds the items from the bundle.
+    /// The four panel-local toggles carry `checked_when` and so surface
+    /// as toggles; the page-level rows
+    /// (`toggle_page_isolated_blending` / `toggle_page_knockout_group`)
+    /// carry no `checked` and so surface as actions (they are inert in
+    /// Phase 1 — the dispatcher's default branch).
     public static func menuItems() -> [PanelMenuItem] {
-        [
-            .toggle(label: "Hide Thumbnails", command: "toggle_opacity_thumbnails"),
-            .toggle(label: "Show Options", command: "toggle_opacity_options"),
-            .separator,
-            .action(label: "Make Opacity Mask", command: "make_opacity_mask"),
-            .action(label: "Release Opacity Mask", command: "release_opacity_mask"),
-            .action(label: "Disable Opacity Mask", command: "disable_opacity_mask"),
-            .action(label: "Unlink Opacity Mask", command: "unlink_opacity_mask"),
-            .separator,
-            .toggle(label: "New Opacity Masks Are Clipping", command: "toggle_new_masks_clipping"),
-            .toggle(label: "New Opacity Masks Are Inverted", command: "toggle_new_masks_inverted"),
-            .separator,
-            .toggle(label: "Page Isolated Blending", command: "toggle_page_isolated_blending"),
-            .toggle(label: "Page Knockout Group", command: "toggle_page_knockout_group"),
-            .separator,
-            .action(label: "Close Opacity", command: "close_panel"),
-        ]
+        menuItemsFromYaml("opacity_panel_content")
     }
 
     /// Dispatch a menu command. Phase-1 toggles flip panel-local state;

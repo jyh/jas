@@ -5,3 +5,4 @@ absl-py
 pyyaml
 msgpack
 flask
+reportlab

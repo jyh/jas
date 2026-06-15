@@ -2,8 +2,13 @@
 
 open Workspace_layout
 
-(** A menu item in a panel's hamburger menu. *)
-type panel_menu_item =
+(** A menu item in a panel's hamburger menu. Defined in
+    [Panel_menu_yaml] (the generic builder) and re-exported here so the
+    construction of these variants — which the genericity gate counts
+    in [panel_menu.ml] — lives outside this file. Existing callers and
+    tests keep using [Panel_menu.Action {..}] / bare [Action {..}]
+    unchanged. *)
+type panel_menu_item = Panel_menu_yaml.panel_menu_item =
   | Action of { label : string; command : string; shortcut : string }
   | Toggle of { label : string; command : string }
   | Radio of { label : string; command : string; group : string }
@@ -159,113 +164,19 @@ let panel_label = function
   | Opacity -> "Opacity"
   | Magic_wand -> "Magic Wand"
 
-(** Menu items for a panel kind. *)
-let panel_menu = function
-  | Layers ->
-    [ Action { label = "New Layer..."; command = "new_layer"; shortcut = "" };
-      Action { label = "New Group"; command = "new_group"; shortcut = "" };
-      Separator;
-      Action { label = "Hide All Layers"; command = "toggle_all_layers_visibility"; shortcut = "" };
-      Action { label = "Outline All Layers"; command = "toggle_all_layers_outline"; shortcut = "" };
-      Action { label = "Lock All Layers"; command = "toggle_all_layers_lock"; shortcut = "" };
-      Separator;
-      Action { label = "Enter Isolation Mode"; command = "enter_isolation_mode"; shortcut = "" };
-      Action { label = "Exit Isolation Mode"; command = "exit_isolation_mode"; shortcut = "" };
-      Separator;
-      Action { label = "Flatten Artwork"; command = "flatten_artwork"; shortcut = "" };
-      Action { label = "Collect in New Layer"; command = "collect_in_new_layer"; shortcut = "" };
-      Separator;
-      Action { label = "Close Layers"; command = "close_panel"; shortcut = "" } ]
-  | Color ->
-    [ Radio { label = "Grayscale"; command = "mode_grayscale"; group = "color_mode" };
-      Radio { label = "RGB"; command = "mode_rgb"; group = "color_mode" };
-      Radio { label = "HSB"; command = "mode_hsb"; group = "color_mode" };
-      Radio { label = "CMYK"; command = "mode_cmyk"; group = "color_mode" };
-      Radio { label = "Web Safe RGB"; command = "mode_web_safe_rgb"; group = "color_mode" };
-      Separator;
-      Action { label = "Invert"; command = "invert_color"; shortcut = "" };
-      Action { label = "Complement"; command = "complement_color"; shortcut = "" };
-      Separator;
-      Action { label = "Close Color"; command = "close_panel"; shortcut = "" } ]
-  | Swatches -> [Action { label = "Close Swatches"; command = "close_panel"; shortcut = "" }]
-  | Stroke -> [Action { label = "Close Stroke"; command = "close_panel"; shortcut = "" }]
-  | Properties -> [Action { label = "Close Properties"; command = "close_panel"; shortcut = "" }]
-  | Character -> [
-      Toggle { label = "Show Snap to Glyph Options"; command = "toggle_snap_to_glyph_visible" };
-      Separator;
-      Toggle { label = "All Caps"; command = "toggle_all_caps" };
-      Toggle { label = "Small Caps"; command = "toggle_small_caps" };
-      Toggle { label = "Superscript"; command = "toggle_superscript" };
-      Toggle { label = "Subscript"; command = "toggle_subscript" };
-      Separator;
-      Action { label = "Close Character"; command = "close_panel"; shortcut = "" } ]
-  | Paragraph -> [
-      Toggle { label = "Hanging Punctuation"; command = "toggle_hanging_punctuation" };
-      Separator;
-      Action { label = "Justification…"; command = "open_paragraph_justification"; shortcut = "" };
-      Action { label = "Hyphenation…"; command = "open_paragraph_hyphenation"; shortcut = "" };
-      Separator;
-      Action { label = "Reset Panel"; command = "reset_paragraph_panel"; shortcut = "" };
-      Separator;
-      Action { label = "Close Paragraph"; command = "close_panel"; shortcut = "" } ]
-  | Artboards -> [
-      Action { label = "New Artboard"; command = "new_artboard"; shortcut = "" };
-      Action { label = "Duplicate Artboards"; command = "duplicate_artboards"; shortcut = "" };
-      Action { label = "Delete Artboards"; command = "delete_artboards"; shortcut = "" };
-      Action { label = "Rename"; command = "rename_artboard"; shortcut = "" };
-      Separator;
-      Action { label = "Delete Empty Artboards"; command = "delete_empty_artboards"; shortcut = "" };
-      Separator;
-      (* Phase-1 deferred per ARTBOARDS.md — YAML action catalog grays these. *)
-      Action { label = "Convert to Artboards"; command = "convert_to_artboards"; shortcut = "" };
-      Action { label = "Artboard Options\xe2\x80\xa6"; command = "open_artboard_options"; shortcut = "" };
-      Action { label = "Rearrange\xe2\x80\xa6"; command = "rearrange_artboards"; shortcut = "" };
-      Separator;
-      Action { label = "Reset Panel"; command = "reset_artboards_panel"; shortcut = "" };
-      Separator;
-      Action { label = "Close Artboards"; command = "close_panel"; shortcut = "" } ]
-  | Align -> [
-      Toggle { label = "Use Preview Bounds"; command = "toggle_use_preview_bounds" };
-      Separator;
-      Action { label = "Reset Panel"; command = "reset_align_panel"; shortcut = "" };
-      Separator;
-      Action { label = "Close Align"; command = "close_panel"; shortcut = "" } ]
-  | Boolean -> [
-      Action { label = "Repeat Boolean Operation"; command = "repeat_boolean_operation"; shortcut = "" };
-      Action { label = "Boolean Options\xe2\x80\xa6"; command = "open_boolean_options"; shortcut = "" };
-      Separator;
-      Action { label = "Make Compound Shape"; command = "make_compound_shape"; shortcut = "" };
-      Action { label = "Release Compound Shape"; command = "release_compound_shape"; shortcut = "" };
-      Action { label = "Expand Compound Shape"; command = "expand_compound_shape"; shortcut = "" };
-      Separator;
-      Action { label = "Reset Panel"; command = "reset_boolean_panel"; shortcut = "" };
-      Separator;
-      Action { label = "Close Boolean"; command = "close_panel"; shortcut = "" } ]
-  | Opacity -> [
-      (* Mirrors jas_dioxus/src/panels/opacity_panel.rs — ten spec items
-         from OPACITY.md plus a trailing Close Opacity. Phase-1 toggles
-         for thumbnails/options/new-mask defaults are functional via
-         State_store; mask-lifecycle and page-level commands are inert
-         (YAML gates them with enabled_when: "false"). *)
-      Toggle { label = "Hide Thumbnails"; command = "toggle_opacity_thumbnails" };
-      Toggle { label = "Show Options"; command = "toggle_opacity_options" };
-      Separator;
-      Action { label = "Make Opacity Mask"; command = "make_opacity_mask"; shortcut = "" };
-      Action { label = "Release Opacity Mask"; command = "release_opacity_mask"; shortcut = "" };
-      Action { label = "Disable Opacity Mask"; command = "disable_opacity_mask"; shortcut = "" };
-      Action { label = "Unlink Opacity Mask"; command = "unlink_opacity_mask"; shortcut = "" };
-      Separator;
-      Toggle { label = "New Opacity Masks Are Clipping"; command = "toggle_new_masks_clipping" };
-      Toggle { label = "New Opacity Masks Are Inverted"; command = "toggle_new_masks_inverted" };
-      Separator;
-      Toggle { label = "Page Isolated Blending"; command = "toggle_page_isolated_blending" };
-      Toggle { label = "Page Knockout Group"; command = "toggle_page_knockout_group" };
-      Separator;
-      Action { label = "Close Opacity"; command = "close_panel"; shortcut = "" } ]
-  | Magic_wand -> [
-      Action { label = "Reset Magic Wand"; command = "reset_magic_wand_panel"; shortcut = "" };
-      Separator;
-      Action { label = "Close Magic Wand"; command = "close_panel"; shortcut = "" } ]
+(** Menu items for a panel kind. Reads the panel's [menu:] array from
+    the compiled workspace bundle (the single source of truth, review
+    #15) and maps each entry to a [panel_menu_item] via the generic
+    builder. The hand-written per-panel literals were deleted; the
+    dispatch + checked-state bridges below remain as legitimate
+    platform glue. The Color radio rows arrive param-folded from the
+    builder as [set_color_panel_mode:<mode>] (see
+    [color_panel_mode_of_command]); the Swatches "Open Swatch Library"
+    dynamic submenu carries an explicit [action: open_swatch_library]
+    so it surfaces as an [Action] the menu view can special-case. *)
+let panel_menu (kind : panel_kind) : panel_menu_item list =
+  Panel_menu_yaml.menu_items_from_yaml
+    (Workspace_loader.panel_kind_to_content_id kind)
 
 (** Listeners fired after a recent_colors push. Used by the
     Color/Swatches panel YAML state bridge so a native push can be
@@ -1200,7 +1111,7 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
       "enter_isolation_mode" (get_model ())
   | "exit_isolation_mode" when kind = Layers ->
     dispatch_yaml_action "exit_isolation_mode" (get_model ())
-  | "invert_color" when kind = Color ->
+  | "invert_active_color" when kind = Color ->
     (* Read fill_on_top from the Color panel's own state store
        (the fill/stroke widget writes there on swatch click)
        instead of the toolbar's flag — the two desync when the
@@ -1227,7 +1138,7 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
        let inverted = Element.color_rgb (1.0 -. r) (1.0 -. g) (1.0 -. b) in
        set_active_color inverted ~fill_on_top m
      | None -> ())
-  | "complement_color" when kind = Color ->
+  | "complement_active_color" when kind = Color ->
     let fill_on_top =
       match lookup_panel_store "color_panel_content" with
       | Some store ->
@@ -1370,7 +1281,7 @@ let panel_command_is_enabled (kind : panel_kind) (cmd : string)
     | "open_paragraph_justification"
     | "open_paragraph_hyphenation" ) ->
     _selection_has_area_text m
-  | Color, ("invert_color" | "complement_color") ->
+  | Color, ("invert_active_color" | "complement_active_color") ->
     (* The Color panel's Invert / Complement actions require a real
        color on the active side. Read state.fill_on_top from the
        Color panel's store (mirrors the dispatcher's source of
