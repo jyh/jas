@@ -133,7 +133,11 @@ public func buildActiveDocumentView(
         // Expand Compound Shape menu items: enabled only when at
         // least one selected element is a compound shape.
         "selection_has_compound_shape": m.document.selection.contains {
-            if case .live = m.document.getElement($0.path) { return true }
+            // Use the bounds-checked lookup: a selection may carry a
+            // stale path into a since-mutated document. Mirrors Rust's
+            // matches!(get_element(...), Some(Element::Live(_))) which
+            // is false for a missing element rather than a crash.
+            if case .live = m.document.tryGetElement($0.path) { return true }
             return false
         },
         "artboards": artboardsView,

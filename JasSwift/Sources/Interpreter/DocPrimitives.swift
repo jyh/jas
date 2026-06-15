@@ -4,8 +4,14 @@
 // Tools written in YAML call `hit_test(x, y)`, `selection_contains(path)`,
 // etc. The pure expression evaluator has no way to see a Document through
 // its signature, so we stash the current Document here while a tool
-// dispatch is running. Rust uses a thread_local; Swift's AppKit tool
-// dispatch is single-threaded so a module-level var is sufficient.
+// dispatch is running. Rust uses a thread_local, and so do we: the
+// registration is per-thread, so a tool dispatch on the main thread is
+// unaffected by anything on another thread. (A plain module-level var
+// looks fine for the single-threaded app, but the parallel test runner
+// dispatches many tools concurrently — concurrent writes to one global
+// Document? corrupt it and reads see another test's document. The
+// thread-local keeps each thread's registration isolated, exactly like
+// the Rust port.)
 //
 // Nesting: `registerDocument` returns an ARC-managed handle whose
 // deinit restores the prior registration. Callers keep the handle
@@ -14,11 +20,31 @@
 
 import Foundation
 
-private var _currentDocument: Document? = nil
+private let _currentDocumentTLSKey = "JasLib._currentDocument"
+
+/// Box so a value-type `Document` can live in the thread dictionary
+/// (which stores reference types only).
+private final class DocumentBox {
+    let doc: Document?
+    init(_ doc: Document?) { self.doc = doc }
+}
+
+private var _currentDocument: Document? {
+    get {
+        (Thread.current.threadDictionary[_currentDocumentTLSKey]
+            as? DocumentBox)?.doc
+    }
+    set {
+        Thread.current.threadDictionary[_currentDocumentTLSKey] =
+            DocumentBox(newValue)
+    }
+}
 
 /// ARC-managed registration. Save the handle to a `let` local — when
 /// it goes out of scope, `deinit` restores the previously-registered
 /// document. Matches the DocGuard RAII pattern from the Rust port.
+/// Registration is thread-local: the prior value captured on `init`
+/// and restored on `deinit` is this thread's prior document.
 final class DocRegistration {
     private let prior: Document?
 
