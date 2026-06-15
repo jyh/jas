@@ -22,7 +22,14 @@ use crate::geometry::element::*;
 // -- Constants ---------------------------------------------------------------
 
 pub const MAGIC: &[u8; 4] = b"JAS\0";
-pub const VERSION: u16 = 1;
+// v2 (CommonProps id+name): every element array carries name and id in the
+// shared common block at indices 5 and 6; type-specific payload shifts to
+// index 7. v1 (Layer-only name at index 5, no id) is a different positional
+// layout and is NOT forward-readable — binary is a deferred secondary format
+// with no real-world v1 data, so fixtures were regenerated to v2 rather than
+// carrying a dual parse path.
+pub const VERSION: u16 = 2;
+pub const MIN_VERSION: u16 = 2;
 const HEADER_SIZE: usize = 8; // 4 magic + 2 version + 2 flags
 
 const COMPRESS_NONE: u16 = 0;
@@ -336,84 +343,87 @@ fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
     }
 }
 
-fn pack_common(c: &CommonProps) -> (Value, Value, Value, Value) {
+fn pack_common(c: &CommonProps) -> (Value, Value, Value, Value, Value, Value) {
     let vis = match c.visibility {
         Visibility::Invisible => 0,
         Visibility::Outline => 1,
         Visibility::Preview => 2,
     };
-    (vbool(c.locked), vf64(c.opacity), vint(vis), pack_transform(&c.transform))
+    // v2: name and id ride in the shared common block (indices 5 and 6),
+    // emitted as value-or-nil so every element type round-trips them.
+    (vbool(c.locked), vf64(c.opacity), vint(vis), pack_transform(&c.transform),
+     opt_str(c.name.as_ref()), opt_str(c.id.as_ref()))
 }
 
 fn pack_element(elem: &Element) -> Value {
     match elem {
         Element::Layer(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let children: Vec<Value> = e.children.iter().map(|c| pack_element(c)).collect();
-            Value::Array(vec![vint(TAG_LAYER), locked, opacity, vis, xform,
-                              vstr(e.name()), Value::Array(children)])
+            Value::Array(vec![vint(TAG_LAYER), locked, opacity, vis, xform, name, id,
+                              Value::Array(children)])
         }
         Element::Group(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let children: Vec<Value> = e.children.iter().map(|c| pack_element(c)).collect();
-            Value::Array(vec![vint(TAG_GROUP), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_GROUP), locked, opacity, vis, xform, name, id,
                               Value::Array(children)])
         }
         Element::Line(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_LINE), locked, opacity, vis, xform,
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
+            Value::Array(vec![vint(TAG_LINE), locked, opacity, vis, xform, name, id,
                               vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
                               pack_stroke(&e.stroke), pack_width_points(&e.width_points)])
         }
         Element::Rect(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_RECT), locked, opacity, vis, xform,
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
+            Value::Array(vec![vint(TAG_RECT), locked, opacity, vis, xform, name, id,
                               vf64(e.x), vf64(e.y), vf64(e.width), vf64(e.height),
                               vf64(e.rx), vf64(e.ry),
                               pack_fill(&e.fill), pack_stroke(&e.stroke)])
         }
         Element::Circle(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_CIRCLE), locked, opacity, vis, xform,
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
+            Value::Array(vec![vint(TAG_CIRCLE), locked, opacity, vis, xform, name, id,
                               vf64(e.cx), vf64(e.cy), vf64(e.r),
                               pack_fill(&e.fill), pack_stroke(&e.stroke)])
         }
         Element::Ellipse(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_ELLIPSE), locked, opacity, vis, xform,
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
+            Value::Array(vec![vint(TAG_ELLIPSE), locked, opacity, vis, xform, name, id,
                               vf64(e.cx), vf64(e.cy), vf64(e.rx), vf64(e.ry),
                               pack_fill(&e.fill), pack_stroke(&e.stroke)])
         }
         Element::Polyline(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let points: Vec<Value> = e.points.iter()
                 .map(|(x, y)| Value::Array(vec![vf64(*x), vf64(*y)])).collect();
-            Value::Array(vec![vint(TAG_POLYLINE), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_POLYLINE), locked, opacity, vis, xform, name, id,
                               Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)])
         }
         Element::Polygon(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let points: Vec<Value> = e.points.iter()
                 .map(|(x, y)| Value::Array(vec![vf64(*x), vf64(*y)])).collect();
-            Value::Array(vec![vint(TAG_POLYGON), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_POLYGON), locked, opacity, vis, xform, name, id,
                               Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)])
         }
         Element::Path(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
-            Value::Array(vec![vint(TAG_PATH), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_PATH), locked, opacity, vis, xform, name, id,
                               Value::Array(cmds), pack_fill(&e.fill), pack_stroke(&e.stroke),
                               pack_width_points(&e.width_points)])
         }
         Element::Text(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             // The tspans field goes at the end so pre-tspan-codec
             // readers can still decode the first N fields. Writers
             // always emit tspans — round-trip of a multi-tspan Text
             // depends on it. Single no-override tspan blobs are still
             // decodable by old readers via the derived `content`.
             let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
-            Value::Array(vec![vint(TAG_TEXT), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_TEXT), locked, opacity, vis, xform, name, id,
                               vf64(e.x), vf64(e.y), vstr(&e.content()),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
@@ -423,10 +433,10 @@ fn pack_element(elem: &Element) -> Value {
                               Value::Array(tspans)])
         }
         Element::TextPath(e) => {
-            let (locked, opacity, vis, xform) = pack_common(&e.common);
+            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
             let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
-            Value::Array(vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform,
+            Value::Array(vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform, name, id,
                               Value::Array(cmds), vstr(&e.content()), vf64(e.start_offset),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
@@ -663,10 +673,9 @@ fn unpack_common(arr: &[Value]) -> CommonProps {
         transform: unpack_transform(&arr[4]),
         mask: None,
         tool_origin: None,
-        name: None,
-        // The binary codec does not yet carry stable id; its round-trip
-        // lands in a later increment (VISION.md §6.2).
-        id: None,
+        // v2: name and id ride in the shared common block at indices 5 and 6.
+        name: as_opt_str(&arr[5]),
+        id: as_opt_str(&arr[6]),
     }
 }
 
@@ -677,81 +686,76 @@ fn unpack_element(v: &Value) -> Element {
 
     match tag {
         TAG_LAYER => {
-            let name = as_str(&arr[5]).to_string();
-            let children: Vec<Rc<Element>> = as_array(&arr[6]).iter()
+            let children: Vec<Rc<Element>> = as_array(&arr[7]).iter()
                 .map(|c| Rc::new(unpack_element(c))).collect();
-            let mut common = common;
-            if !name.is_empty() {
-                common.name = Some(name);
-            }
             Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_GROUP => {
-            let children: Vec<Rc<Element>> = as_array(&arr[5]).iter()
+            let children: Vec<Rc<Element>> = as_array(&arr[7]).iter()
                 .map(|c| Rc::new(unpack_element(c))).collect();
             Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_LINE => Element::Line(LineElem {
-            x1: as_f64(&arr[5]), y1: as_f64(&arr[6]),
-            x2: as_f64(&arr[7]), y2: as_f64(&arr[8]),
-            stroke: unpack_stroke(&arr[9]),
-            width_points: if arr.len() > 10 { unpack_width_points(&arr[10]) } else { vec![] },
+            x1: as_f64(&arr[7]), y1: as_f64(&arr[8]),
+            x2: as_f64(&arr[9]), y2: as_f64(&arr[10]),
+            stroke: unpack_stroke(&arr[11]),
+            width_points: if arr.len() > 12 { unpack_width_points(&arr[12]) } else { vec![] },
             common,
                     stroke_gradient: None,
         }),
         TAG_RECT => Element::Rect(RectElem {
-            x: as_f64(&arr[5]), y: as_f64(&arr[6]),
-            width: as_f64(&arr[7]), height: as_f64(&arr[8]),
+            x: as_f64(&arr[7]), y: as_f64(&arr[8]),
+            width: as_f64(&arr[9]), height: as_f64(&arr[10]),
+            rx: as_f64(&arr[11]), ry: as_f64(&arr[12]),
+            fill: unpack_fill(&arr[13]), stroke: unpack_stroke(&arr[14]),
+            common,
+                    fill_gradient: None,
+            stroke_gradient: None,
+        }),
+        TAG_CIRCLE => Element::Circle(CircleElem {
+            cx: as_f64(&arr[7]), cy: as_f64(&arr[8]), r: as_f64(&arr[9]),
+            fill: unpack_fill(&arr[10]), stroke: unpack_stroke(&arr[11]),
+            common,
+                    fill_gradient: None,
+            stroke_gradient: None,
+        }),
+        TAG_ELLIPSE => Element::Ellipse(EllipseElem {
+            cx: as_f64(&arr[7]), cy: as_f64(&arr[8]),
             rx: as_f64(&arr[9]), ry: as_f64(&arr[10]),
             fill: unpack_fill(&arr[11]), stroke: unpack_stroke(&arr[12]),
             common,
                     fill_gradient: None,
             stroke_gradient: None,
         }),
-        TAG_CIRCLE => Element::Circle(CircleElem {
-            cx: as_f64(&arr[5]), cy: as_f64(&arr[6]), r: as_f64(&arr[7]),
-            fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
-            common,
-                    fill_gradient: None,
-            stroke_gradient: None,
-        }),
-        TAG_ELLIPSE => Element::Ellipse(EllipseElem {
-            cx: as_f64(&arr[5]), cy: as_f64(&arr[6]),
-            rx: as_f64(&arr[7]), ry: as_f64(&arr[8]),
-            fill: unpack_fill(&arr[9]), stroke: unpack_stroke(&arr[10]),
-            common,
-                    fill_gradient: None,
-            stroke_gradient: None,
-        }),
         TAG_POLYLINE => {
-            let points: Vec<(f64, f64)> = as_array(&arr[5]).iter()
+            let points: Vec<(f64, f64)> = as_array(&arr[7]).iter()
                 .map(|p| { let a = as_array(p); (as_f64(&a[0]), as_f64(&a[1])) }).collect();
             Element::Polyline(PolylineElem {
                 points,
-                fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
+                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
             })
         }
         TAG_POLYGON => {
-            let points: Vec<(f64, f64)> = as_array(&arr[5]).iter()
+            let points: Vec<(f64, f64)> = as_array(&arr[7]).iter()
                 .map(|p| { let a = as_array(p); (as_f64(&a[0]), as_f64(&a[1])) }).collect();
             Element::Polygon(PolygonElem {
                 points,
-                fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
+                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
             })
         }
         TAG_PATH => {
-            let cmds: Vec<PathCommand> = as_array(&arr[5]).iter()
+            let cmds: Vec<PathCommand> = as_array(&arr[7]).iter()
                 .map(unpack_path_command).collect();
             Element::Path(PathElem {
                 d: cmds,
-                fill: unpack_fill(&arr[6]), stroke: unpack_stroke(&arr[7]),
-                width_points: if arr.len() > 8 { unpack_width_points(&arr[8]) } else { vec![] },
+                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
+                width_points: if arr.len() > 10 { unpack_width_points(&arr[10]) } else { vec![] },
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
@@ -762,21 +766,21 @@ fn unpack_element(v: &Value) -> Element {
         }
         TAG_TEXT => {
             let mut t = TextElem::from_string(
-                as_f64(&arr[5]), as_f64(&arr[6]),
-                as_str(&arr[7]),
-                as_str(&arr[8]),
-                as_f64(&arr[9]),
+                as_f64(&arr[7]), as_f64(&arr[8]),
+                as_str(&arr[9]),
                 as_str(&arr[10]),
-                as_str(&arr[11]),
+                as_f64(&arr[11]),
                 as_str(&arr[12]),
-                as_f64(&arr[13]), as_f64(&arr[14]),
-                unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
+                as_str(&arr[13]),
+                as_str(&arr[14]),
+                as_f64(&arr[15]), as_f64(&arr[16]),
+                unpack_fill(&arr[17]), unpack_stroke(&arr[18]),
                 common,
             );
             // Trailing tspans field overrides the single-default-tspan
             // seeded by from_string. Absent when the blob predates the
             // tspan codec extension (backward compatibility).
-            if let Some(tspans_val) = arr.get(17) {
+            if let Some(tspans_val) = arr.get(19) {
                 if let Value::Array(xs) = tspans_val {
                     if !xs.is_empty() {
                         t.tspans = xs.iter().map(unpack_tspan).collect();
@@ -786,21 +790,21 @@ fn unpack_element(v: &Value) -> Element {
             Element::Text(t)
         }
         TAG_TEXT_PATH => {
-            let cmds: Vec<PathCommand> = as_array(&arr[5]).iter()
+            let cmds: Vec<PathCommand> = as_array(&arr[7]).iter()
                 .map(unpack_path_command).collect();
             let mut tp = TextPathElem::from_string(
                 cmds,
-                as_str(&arr[6]),
-                as_f64(&arr[7]),
                 as_str(&arr[8]),
                 as_f64(&arr[9]),
                 as_str(&arr[10]),
-                as_str(&arr[11]),
+                as_f64(&arr[11]),
                 as_str(&arr[12]),
-                unpack_fill(&arr[13]), unpack_stroke(&arr[14]),
+                as_str(&arr[13]),
+                as_str(&arr[14]),
+                unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
                 common,
             );
-            if let Some(tspans_val) = arr.get(15) {
+            if let Some(tspans_val) = arr.get(17) {
                 if let Value::Array(xs) = tspans_val {
                     if !xs.is_empty() {
                         tp.tspans = xs.iter().map(unpack_tspan).collect();
@@ -902,6 +906,11 @@ pub fn binary_to_document(data: &[u8]) -> Result<Document, String> {
     let version = u16::from_le_bytes([data[4], data[5]]);
     if version > VERSION {
         return Err(format!("unsupported version: {}, max supported is {}", version, VERSION));
+    }
+    if version < MIN_VERSION {
+        // v1 used a different positional layout (no generic name/id slots);
+        // a clean break, not forward-readable. See the VERSION comment.
+        return Err(format!("unsupported legacy version: {}, min supported is {}", version, MIN_VERSION));
     }
 
     let flags = u16::from_le_bytes([data[6], data[7]]);
