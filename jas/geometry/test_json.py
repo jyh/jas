@@ -947,10 +947,10 @@ def _parse_element(d: dict) -> Element:
     elif typ == "live":
         kind = d.get("kind", "")
         if kind == "compound_shape":
-            # CompoundShape carries no name / id field, so strip those
-            # from the common kwargs (it doesn't accept them).
+            # CompoundShape carries a stable id but no name field, so
+            # strip name (it doesn't accept it) and pass id through.
             live_common = {k: v for k, v in common.items()
-                           if k not in ("name", "id")}
+                           if k != "name"}
             op = CompoundOperation(d.get("operation", "union"))
             operands = tuple(_parse_element(c) for c in d.get("children", []))
             return CompoundShape(operation=op, operands=operands,

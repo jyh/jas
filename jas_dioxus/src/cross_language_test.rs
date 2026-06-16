@@ -94,6 +94,8 @@ mod tests {
             // Live elements: reference + compound round-trip through test_json
             // (REFERENCE_GRAPH.md Phase 1a). Compound now carries `operation`.
             "live_reference_roundtrip", "live_compound_roundtrip",
+            // A compound shape carrying its own stable id.
+            "live_compound_id",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -124,6 +126,8 @@ mod tests {
             // Live elements round-trip through binary (Phase 2b): reference +
             // compound (TAG_LIVE, kind-discriminated).
             "live_reference_roundtrip", "live_compound_roundtrip",
+            // A compound shape carrying its own stable id.
+            "live_compound_id",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -153,6 +157,8 @@ mod tests {
             // Live elements (Phase 2b): decode the Python-generated TAG_LIVE
             // bytes for reference + compound (cross-app byte pin).
             "live_reference_roundtrip", "live_compound_roundtrip",
+            // A compound shape carrying its own stable id.
+            "live_compound_id",
         ];
         for name in &names {
             let bin_path = format!("{}/expected/{}.bin", FIXTURES, name);
@@ -186,6 +192,10 @@ mod tests {
             "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
             // Import normalization: duplicate ids collapse to first-pre-order-wins.
             "dup_id_import",
+            // A compound shape carrying its own stable id (round-trips through
+            // all three codecs; id is the only common field SVG preserves for
+            // live elements — name is intentionally excluded).
+            "live_compound_id",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -211,6 +221,9 @@ mod tests {
             // Live elements round-trip through SVG (Phase 2a): reference as
             // <use href>, compound as <g data-jas-live ...data-jas-operation>.
             "live_reference", "live_compound",
+            // A compound shape carrying its own stable id (SVG preserves the
+            // compound's id attribute through the round-trip).
+            "live_compound_id",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -320,6 +333,13 @@ mod tests {
         // <use href="#id"> imports as a live reference (Phase 2a / F-svg-use);
         // all apps parse it to the identical canonical JSON.
         assert_svg_parse("live_reference");
+    }
+
+    #[test]
+    fn svg_parse_live_compound_id() {
+        // A compound shape with id="c1" imports as a CompoundShape whose
+        // common.id is set — the compound is now a valid reference target.
+        assert_svg_parse("live_compound_id");
     }
 
     #[test]

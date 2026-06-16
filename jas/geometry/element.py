@@ -1378,6 +1378,11 @@ class CompoundShape(LiveElement):
     """
     operation: CompoundOperation = CompoundOperation.UNION
     operands: tuple[Element, ...] = ()
+    # Stable id, mirroring the Rust CompoundShape's ``common`` id. A
+    # compound is a first-class element that can be a reference target
+    # (REFERENCE_GRAPH.md §4) and must be stampable by assign_id, so it
+    # needs its own id. None by default; no name field is intended.
+    id: str | None = None
     fill: Fill | None = None
     stroke: Stroke | None = None
     opacity: float = 1.0
@@ -1619,7 +1624,8 @@ def clear_ids(elem: Element) -> Element:
         return dataclasses.replace(elem, id=None, children=cleared_children)
     if hasattr(elem, "id"):
         return dataclasses.replace(elem, id=None)
-    # Elements without an id field (e.g. CompoundShape) are returned unchanged.
+    # Elements without an id field are returned unchanged (none remain today —
+    # CompoundShape carries an id and is handled by the hasattr branch above).
     return elem
 
 

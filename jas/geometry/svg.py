@@ -423,8 +423,11 @@ def _element_svg(elem: Element, indent: str) -> str:
         # <use href="#target">. Both carry their own id/opacity/transform.
         # Mirrors the Rust ``element_svg`` Live arm.
         case CompoundShape(operation=operation, operands=operands,
-                           opacity=opacity, transform=transform):
-            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}')
+                           opacity=opacity, transform=transform, id=eid):
+            # Mirror Rust's common_attrs_no_name: opacity + transform + id,
+            # but NOT name (live elements never emit inkscape:label).
+            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                     f'{_id_attr(eid)}')
             lines = [f'{indent}<g data-jas-live="compound_shape"'
                      f' data-jas-operation="{operation.value}"{attrs}>']
             for child in operands:
@@ -1280,7 +1283,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             return CompoundShape(
                 operation=operation, operands=tuple(children),
                 fill=None, stroke=None,
-                opacity=opacity, transform=transform)
+                opacity=opacity, transform=transform, id=eid)
         # Layer detection: only inkscape:groupmode="layer" promotes a
         # <g> to a Layer. inkscape:label alone is a Group name now
         # (was historically Layer-only, but with non-Layer naming
