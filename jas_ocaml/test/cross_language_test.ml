@@ -68,12 +68,20 @@ let svg_roundtrip_names =
    only because there is no element_ids.svg fixture for the SVG tests. *)
 (* Live elements (REFERENCE_GRAPH.md Phase 1a): reference + compound
    round-trip through the test_json codec. Compound now carries
-   [operation]. Kept out of [binary_names] because binary serialization
-   of Live elements is deferred (mirrors the Rust fixture lists). *)
+   [operation]. *)
 let json_roundtrip_names =
   roundtrip_names @ ["element_ids";
                      "live_reference_roundtrip"; "live_compound_roundtrip"]
-let binary_names = roundtrip_names @ ["element_ids"]
+(* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
+   element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
+   serialize through binary (TAG_LIVE, kind-discriminated), so both the
+   JSON→binary→JSON round-trip and the Python-generated .bin read cases cover
+   them. Mirrors the Rust binary fixture lists. Note these are the
+   [_roundtrip] variants (which have matching expected/*.json and *.bin), not
+   the bare live_reference / live_compound SVG-parse fixtures. *)
+let binary_names =
+  roundtrip_names @ ["element_ids";
+                     "live_reference_roundtrip"; "live_compound_roundtrip"]
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
