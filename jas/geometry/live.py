@@ -24,7 +24,11 @@ from algorithms.boolean import (
 )
 
 if TYPE_CHECKING:
-    from geometry.element import CompoundOperation, Element
+    from geometry.element import (
+        CompoundOperation,
+        Element,
+        ElementResolver,
+    )
 
 
 # Default geometric tolerance in points. Matches the Precision default
@@ -37,13 +41,35 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
     """Flatten a document element into a polygon set suitable for the
     boolean algorithm.
 
+    Convenience wrapper that resolves no references (a NullResolver):
+    existing call sites stay behavior-identical. See
+    ``element_to_polygon_set_with`` for the resolver-aware form used
+    when an element subtree may contain by-id references.
+
     - Rect / Polygon / Polyline / Circle / Ellipse: direct conversion.
       Polyline is implicitly closed for even-odd fill.
     - Group / Layer: recursively concatenate children's rings.
     - CompoundShape: recursively evaluate.
+    - Reference: resolve target (through the resolver) and evaluate.
     - Path / TextPath: flatten Bezier commands to rings per subpath.
     - Line / Text: empty (zero area or glyph-outline flattening
       deferred to a font-outline pipeline).
+    """
+    from geometry.element import NullResolver
+
+    return element_to_polygon_set_with(elem, precision, NullResolver(), set())
+
+
+def element_to_polygon_set_with(
+    elem: "Element",
+    precision: float,
+    resolver: "ElementResolver",
+    visiting: set,
+) -> PolygonSet:
+    """Resolver-aware flattening. Identical to ``element_to_polygon_set``
+    except by-id references resolve through ``resolver``, with
+    ``visiting`` breaking cycles. Mirrors the Rust
+    ``element_to_polygon_set_with``.
     """
     from geometry.element import (
         Circle,
@@ -56,6 +82,7 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
         Polygon,
         Polyline,
         Rect,
+        ReferenceElem,
         Text,
         TextPath,
     )
@@ -78,10 +105,18 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
     if isinstance(elem, (Group, Layer)):
         out: PolygonSet = []
         for child in elem.children:
-            out.extend(element_to_polygon_set(child, precision))
+            out.extend(
+                element_to_polygon_set_with(child, precision, resolver, visiting)
+            )
         return out
+    # ReferenceElem must precede CompoundShape: both are LiveElement, but
+    # only CompoundShape carries operands. (They are unrelated leaf kinds,
+    # so order is not strictly required, but the explicit case keeps the
+    # dispatch parallel to the Rust LiveVariant match.)
+    if isinstance(elem, ReferenceElem):
+        return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, CompoundShape):
-        return elem.evaluate(precision)
+        return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, (Path, TextPath)):
         return flatten_path_to_rings(elem.d)
     # Line has zero area; Text glyph flattening deferred.

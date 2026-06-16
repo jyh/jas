@@ -13,9 +13,9 @@ from document.document import Document
 from geometry.normalize import dedupe_element_ids, normalize_document
 from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
-    ArcTo, Circle, ClosePath, Color, RgbColor, CurveTo, Element, Ellipse, Fill,
-    Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
-    PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
+    ArcTo, Circle, ClosePath, Color, RgbColor, CompoundShape, CurveTo, Element,
+    Ellipse, Fill, Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
+    PathCommand, Polygon, Polyline, QuadTo, Rect, ReferenceElem, SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
 
@@ -415,6 +415,23 @@ def _element_svg(elem: Element, indent: str) -> str:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
             return "\n".join(lines)
+
+        # Live elements (Phase 1): emit as a marker group so SVG export
+        # stays valid. CompoundShape wraps its operands; a reference is
+        # a placeholder marker (<use href="#id"> is Phase 2). Mirrors the
+        # Rust ``element_svg`` Live arm.
+        case CompoundShape(operands=operands, opacity=opacity,
+                           transform=transform):
+            attrs = f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+            lines = [f'{indent}<g data-jas-live="compound_shape"{attrs}>']
+            for child in operands:
+                lines.append(_element_svg(child, indent + "  "))
+            lines.append(f'{indent}</g>')
+            return "\n".join(lines)
+
+        case ReferenceElem(opacity=opacity, transform=transform):
+            attrs = f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+            return f'{indent}<g data-jas-live="reference"{attrs}></g>'
 
     return ""
 

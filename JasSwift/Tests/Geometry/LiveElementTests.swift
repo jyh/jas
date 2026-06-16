@@ -119,3 +119,70 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
     let ps = elementToPolygonSet(path, precision: DEFAULT_PRECISION)
     #expect(ps.count == 1)
 }
+
+// MARK: - ReferenceElem (REFERENCE_GRAPH.md Phase 1a)
+
+/// A test resolver backed by an id→element map. Mirrors Rust `MapResolver`.
+private struct MapResolver: ElementResolver {
+    let map: [String: Element]
+    func resolve(_ id: ElementRef) -> Element? { map[id.id] }
+}
+
+/// A resolver where id "a" resolves to a reference back to "a" — a
+/// self-cycle. Mirrors Rust `CycleResolver`.
+private struct CycleResolver: ElementResolver {
+    func resolve(_ id: ElementRef) -> Element? {
+        id.id == "a"
+            ? .live(.reference(ReferenceElem(target: ElementRef("a"))))
+            : nil
+    }
+}
+
+@Test func referenceEvaluatesToTargetGeometry() {
+    let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
+    let reference = ReferenceElem(target: ElementRef("r1"))
+    var visiting = VisitSet()
+    let ps = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)  // resolves to the target rect's ring
+    let (minX, _, maxX, _) = bboxOfRing(ps[0])
+    #expect(abs(minX - 0) < 1e-6)
+    #expect(abs(maxX - 10) < 1e-6)
+    // The cycle-guard set is left clean after a successful resolve.
+    #expect(visiting.isEmpty)
+}
+
+@Test func danglingReferenceEvaluatesEmpty() {
+    let reference = ReferenceElem(target: ElementRef("missing"))
+    var visiting = VisitSet()
+    let ps = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: NullResolver(), visiting: &visiting)
+    #expect(ps.isEmpty)  // dangling reference evaluates to empty, never traps
+}
+
+@Test func referenceCycleBreaksToEmpty() {
+    let reference = ReferenceElem(target: ElementRef("a"))
+    var visiting = VisitSet()
+    let ps = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: CycleResolver(), visiting: &visiting)
+    #expect(ps.isEmpty)  // cycle breaks to empty, no infinite recursion
+    #expect(visiting.isEmpty)  // cycle-guard set is restored after evaluation
+}
+
+@Test func referenceReportsItsTargetAsDependency() {
+    let reference = ReferenceElem(target: ElementRef("t"))
+    #expect(reference.dependencies == [ElementRef("t")])
+    let lv = LiveVariant.reference(reference)
+    #expect(lv.dependencies == [ElementRef("t")])
+    #expect(lv.operands.isEmpty)
+}
+
+@Test func referenceRoundTripsThroughElementToPolygonSet() {
+    // elementToPolygonSetWith resolves a reference nested in a layer.
+    let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
+    let reference = Element.live(.reference(ReferenceElem(target: ElementRef("r1"))))
+    var visiting = VisitSet()
+    let ps = elementToPolygonSetWith(
+        reference, precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)
+}

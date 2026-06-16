@@ -16,6 +16,43 @@ import Foundation
 /// default in the Boolean Options dialog (BOOLEAN.md). Equals 0.01 mm.
 public let DEFAULT_PRECISION: Double = 0.0283
 
+// MARK: - Reference resolution seam (REFERENCE_GRAPH.md §2.1)
+
+/// A by-id reference to another element's stable id. Stable across
+/// insert/delete (unlike a tree path); resolved through an
+/// `ElementResolver`, never stored as a strong reference. `Comparable` is
+/// load-bearing: deterministic recompute order derives from sorted ids,
+/// never dictionary iteration order. Mirrors Rust `ElementRef`.
+public struct ElementRef: Hashable, Comparable {
+    public let id: String
+    public init(_ id: String) { self.id = id }
+    public static func < (lhs: ElementRef, rhs: ElementRef) -> Bool {
+        lhs.id < rhs.id
+    }
+}
+
+/// Resolves a stable element id to the element it currently names. Lets the
+/// geometry layer evaluate by-id references without depending on
+/// Model/Document. Phase 1 backs this with a rebuild-on-demand resolver; the
+/// persistent-incremental index is Phase 4 (REFERENCE_GRAPH.md §2.4).
+public protocol ElementResolver {
+    func resolve(_ id: ElementRef) -> Element?
+}
+
+/// A resolver that resolves nothing. Used on the resolver-unaware call paths
+/// (and wherever no live references are present) so existing geometry
+/// behavior is unchanged: a reference resolved through it is treated as
+/// dangling. Mirrors Rust `NullResolver`.
+public struct NullResolver: ElementResolver {
+    public init() {}
+    public func resolve(_ id: ElementRef) -> Element? { nil }
+}
+
+/// The cycle-guard set threaded through evaluation. Carried as an explicit
+/// parameter (never instance state) so all five apps break reference cycles
+/// identically (REFERENCE_GRAPH.md §3). Mirrors Rust `VisitSet`.
+public typealias VisitSet = Set<ElementRef>
+
 // MARK: - BooleanOptions
 
 /// Document-scoped boolean op settings. Mirrors Rust BooleanOptions
@@ -121,8 +158,26 @@ public struct CompoundShape: Equatable {
 
     /// Evaluate the compound shape: flatten operands to polygon sets,
     /// apply the boolean operation, return the result.
+    ///
+    /// Convenience wrapper that resolves no references (a compound's
+    /// operands are owned, not referenced); see ``evaluateWith`` for the
+    /// resolver-aware form used when an operand subtree may contain by-id
+    /// references.
     public func evaluate(precision: Double) -> BoolPolygonSet {
-        let operandSets = operands.map { elementToPolygonSet($0, precision: precision) }
+        var visiting = VisitSet()
+        return evaluateWith(precision: precision, resolver: NullResolver(), visiting: &visiting)
+    }
+
+    /// Resolver-aware evaluation: flattens each operand (threading the
+    /// resolver + cycle-guard set so a referenced operand resolves through
+    /// `resolver`), then applies the boolean operation. Mirrors Rust
+    /// `CompoundShape::evaluate_with`.
+    public func evaluateWith(
+        precision: Double, resolver: ElementResolver, visiting: inout VisitSet
+    ) -> BoolPolygonSet {
+        let operandSets = operands.map {
+            elementToPolygonSetWith($0, precision: precision, resolver: resolver, visiting: &visiting)
+        }
         return applyOperation(operation, operandSets)
     }
 
@@ -157,11 +212,96 @@ public struct CompoundShape: Equatable {
     public func release() -> [Element] { operands }
 }
 
+// MARK: - ReferenceElem — by-id reference (REFERENCE_GRAPH.md §1.1)
+
+/// A live element that evaluates to another element's geometry, resolved by
+/// stable id at evaluate time — the "instance of" primitive (mirrored eyes,
+/// connector-follows-block). Its target is named by id, not embedded, so it
+/// is a `dependencies()` edge rather than a `children()`/operands input.
+/// Mirrors Rust `ReferenceElem`.
+public struct ReferenceElem: Equatable {
+    /// Stable id of the referenced element.
+    public var target: ElementRef
+    /// Optional instance transform applied to the resolved geometry.
+    /// Declared now (Fork F2) but always `nil` until Phase 3 wires it.
+    public var transform: Transform?
+    /// Own paint; `nil` inherits the resolved target's paint (Fork F3).
+    public var fill: Fill?
+    public var stroke: Stroke?
+    // Common props carried inline, mirroring CompoundShape's layout.
+    public var opacity: Double
+    public var locked: Bool
+    public var visibility: Visibility
+    public var blendMode: BlendMode
+    public var mask: Mask?
+
+    public init(
+        target: ElementRef,
+        transform: Transform? = nil,
+        fill: Fill? = nil,
+        stroke: Stroke? = nil,
+        opacity: Double = 1.0,
+        locked: Bool = false,
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal,
+        mask: Mask? = nil
+    ) {
+        self.target = target
+        self.transform = transform
+        self.fill = fill
+        self.stroke = stroke
+        self.opacity = opacity
+        self.locked = locked
+        self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
+    }
+
+    /// Stable-id inputs reached by reference rather than containment. A
+    /// reference's only dependency is its target. Mirrors Rust
+    /// `dependencies()`.
+    public var dependencies: [ElementRef] { [target] }
+
+    /// Resolver-aware evaluation: resolve the target and return its
+    /// geometry. A cycle (target already being visited) or a dangling
+    /// reference (unresolved) yields an empty set — never a trap
+    /// (REFERENCE_GRAPH.md §3). Mirrors Rust `ReferenceElem::evaluate_with`.
+    public func evaluateWith(
+        precision: Double, resolver: ElementResolver, visiting: inout VisitSet
+    ) -> BoolPolygonSet {
+        if visiting.contains(target) {
+            return []  // cycle: break at the re-entry edge
+        }
+        guard let resolved = resolver.resolve(target) else {
+            return []  // dangling: target not found
+        }
+        visiting.insert(target)
+        let ps = elementToPolygonSetWith(
+            resolved, precision: precision, resolver: resolver, visiting: &visiting)
+        visiting.remove(target)
+        return ps
+    }
+}
+
 // MARK: - Geometry helpers
 
 /// Flatten a document element into a polygon set suitable for the
 /// boolean algorithm. See BOOLEAN.md § Geometry and precision.
+///
+/// Convenience wrapper that resolves no references; see
+/// ``elementToPolygonSetWith`` for the resolver-aware form. Existing call
+/// sites that pass no resolver are behavior-identical.
 public func elementToPolygonSet(_ elem: Element, precision: Double) -> BoolPolygonSet {
+    var visiting = VisitSet()
+    return elementToPolygonSetWith(elem, precision: precision, resolver: NullResolver(), visiting: &visiting)
+}
+
+/// Resolver-aware flattening. Identical to ``elementToPolygonSet`` except
+/// that by-id references resolve through `resolver`, with `visiting`
+/// breaking cycles. Mirrors Rust `element_to_polygon_set_with`.
+public func elementToPolygonSetWith(
+    _ elem: Element, precision: Double, resolver: ElementResolver, visiting: inout VisitSet
+) -> BoolPolygonSet {
     switch elem {
     case .rect(let r):
         return [[
@@ -180,12 +320,19 @@ public func elementToPolygonSet(_ elem: Element, precision: Double) -> BoolPolyg
     case .ellipse(let e):
         return [ellipseToRing(cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry, precision: precision)]
     case .group(let g):
-        return g.children.flatMap { elementToPolygonSet($0, precision: precision) }
+        return g.children.flatMap {
+            elementToPolygonSetWith($0, precision: precision, resolver: resolver, visiting: &visiting)
+        }
     case .layer(let l):
-        return l.children.flatMap { elementToPolygonSet($0, precision: precision) }
+        return l.children.flatMap {
+            elementToPolygonSetWith($0, precision: precision, resolver: resolver, visiting: &visiting)
+        }
     case .live(let v):
         switch v {
-        case .compoundShape(let cs): return cs.evaluate(precision: precision)
+        case .compoundShape(let cs):
+            return cs.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
+        case .reference(let r):
+            return r.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
     case .path(let p):
         return flattenPathToRings(p.d)
@@ -327,76 +474,103 @@ public func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
 /// `.live(LiveVariant)` case.
 public enum LiveVariant: Equatable {
     case compoundShape(CompoundShape)
+    case reference(ReferenceElem)
 
     public var kind: String {
         switch self {
         case .compoundShape: return "compound_shape"
+        case .reference: return "reference"
         }
     }
 
     public var kindSchemaVersion: Int {
         switch self {
         case .compoundShape: return 1
+        case .reference: return 1
         }
     }
 
     public var fill: Fill? {
         switch self {
         case .compoundShape(let cs): return cs.fill
+        case .reference(let r): return r.fill
         }
     }
 
     public var stroke: Stroke? {
         switch self {
         case .compoundShape(let cs): return cs.stroke
+        case .reference(let r): return r.stroke
         }
     }
 
     public var opacity: Double {
         switch self {
         case .compoundShape(let cs): return cs.opacity
+        case .reference(let r): return r.opacity
         }
     }
 
     public var transform: Transform? {
         switch self {
         case .compoundShape(let cs): return cs.transform
+        case .reference(let r): return r.transform
         }
     }
 
     public var locked: Bool {
         switch self {
         case .compoundShape(let cs): return cs.locked
+        case .reference(let r): return r.locked
         }
     }
 
     public var visibility: Visibility {
         switch self {
         case .compoundShape(let cs): return cs.visibility
+        case .reference(let r): return r.visibility
         }
     }
 
     public var blendMode: BlendMode {
         switch self {
         case .compoundShape(let cs): return cs.blendMode
+        case .reference(let r): return r.blendMode
         }
     }
 
     public var mask: Mask? {
         switch self {
         case .compoundShape(let cs): return cs.mask
+        case .reference(let r): return r.mask
         }
     }
 
     public var operands: [Element] {
         switch self {
         case .compoundShape(let cs): return cs.operands
+        // A reference owns no children; its target is a dependency edge.
+        case .reference: return []
+        }
+    }
+
+    /// Stable-id inputs reached by reference rather than containment, in
+    /// deterministic order. Default empty for containment kinds (compound
+    /// shape owns its operands); the reference reports its target. Mirrors
+    /// Rust `LiveElement::dependencies`.
+    public var dependencies: [ElementRef] {
+        switch self {
+        case .compoundShape: return []
+        case .reference(let r): return r.dependencies
         }
     }
 
     public var bounds: BBox {
         switch self {
         case .compoundShape(let cs): return cs.bounds
+        // Resolver-free bounds are degenerate for a reference (its geometry
+        // lives elsewhere); resolver-aware bounds land with render wiring (1b).
+        case .reference: return (0, 0, 0, 0)
         }
     }
 
@@ -408,6 +582,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.locked = locked
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.locked = locked
+            return .reference(updated)
         }
     }
 
@@ -417,6 +595,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.visibility = visibility
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.visibility = visibility
+            return .reference(updated)
         }
     }
 
@@ -426,6 +608,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.transform = transform
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.transform = transform
+            return .reference(updated)
         }
     }
 
@@ -435,6 +621,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.fill = fill
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.fill = fill
+            return .reference(updated)
         }
     }
 
@@ -444,6 +634,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.stroke = stroke
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.stroke = stroke
+            return .reference(updated)
         }
     }
 
@@ -453,6 +647,10 @@ public enum LiveVariant: Equatable {
             var updated = cs
             updated.mask = mask
             return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.mask = mask
+            return .reference(updated)
         }
     }
 }

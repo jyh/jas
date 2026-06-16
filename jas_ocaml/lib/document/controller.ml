@@ -635,6 +635,7 @@ let element_fill = function
   | Element.Polygon { fill; _ } | Element.Path { fill; _ }
   | Element.Text { fill; _ } | Element.Text_path { fill; _ } -> Some fill
   | Element.Live (Element.Compound_shape cs) -> Some cs.fill
+  | Element.Live (Element.Reference r) -> Some r.Element.ref_fill
   | Element.Line _ | Element.Group _ | Element.Layer _ -> None
 
 let element_stroke = function
@@ -644,6 +645,7 @@ let element_stroke = function
   | Element.Path { stroke; _ } | Element.Text { stroke; _ }
   | Element.Text_path { stroke; _ } -> Some stroke
   | Element.Live (Element.Compound_shape cs) -> Some cs.stroke
+  | Element.Live (Element.Reference r) -> Some r.Element.ref_stroke
   | Element.Group _ | Element.Layer _ -> None
 
 let selection_fill_summary (doc : Document.document) =

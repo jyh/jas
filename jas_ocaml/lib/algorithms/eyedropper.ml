@@ -151,6 +151,7 @@ let opacity_of (e : Element.element) : float =
   | Element.Group { opacity; _ }
   | Element.Layer { opacity; _ } -> opacity
   | Element.Live (Compound_shape cs) -> cs.opacity
+  | Element.Live (Reference r) -> r.Element.ref_opacity
 
 let stroke_brush_of (e : Element.element) : string option =
   match e with
@@ -187,6 +188,8 @@ let with_opacity (e : Element.element) (op : float) : Element.element =
   | Layer r -> Layer { r with opacity = op }
   | Live (Compound_shape cs) ->
     Live (Compound_shape { cs with opacity = op })
+  | Live (Reference r) ->
+    Live (Reference { r with ref_opacity = op })
 
 let with_blend_mode (e : Element.element) (bm : Element.blend_mode)
   : Element.element =
@@ -204,6 +207,8 @@ let with_blend_mode (e : Element.element) (bm : Element.blend_mode)
   | Layer r -> Layer { r with blend_mode = bm }
   | Live (Compound_shape cs) ->
     Live (Compound_shape { cs with blend_mode = bm })
+  | Live (Reference r) ->
+    Live (Reference { r with ref_blend_mode = bm })
 
 (* ───────────────────────────────────────────────────────────────── *)
 (* Extract                                                              *)

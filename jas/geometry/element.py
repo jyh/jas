@@ -1292,6 +1292,50 @@ class Layer(Group):
     pass
 
 
+# ─── Reference resolution seam ─────────────────────────────────
+# REFERENCE_GRAPH.md §2.1. A by-id reference to another element's
+# stable id, resolved through an ElementResolver at evaluate time
+# (never stored as a hard pointer), so a reference survives
+# insert / delete / reorder of its target.
+
+# An ElementRef is just the target element's stable id. A plain `str`
+# alias keeps it serialization- and comparison-identical across all
+# five implementations (Rust wraps it in a transparent newtype;
+# Python uses the bare string and relies on sorted-id determinism).
+ElementRef = str
+
+
+class ElementResolver:
+    """Resolves a stable element id to the element it currently names.
+
+    Lets the geometry layer evaluate by-id references without depending
+    on Model / Document. Phase 1 backs this with a rebuild-on-demand
+    resolver; the persistent-incremental index is Phase 4
+    (REFERENCE_GRAPH.md §2.4). Mirrors the Rust ``ElementResolver``
+    trait — a single ``resolve`` method.
+    """
+
+    def resolve(self, ref: "ElementRef") -> "Element | None":
+        raise NotImplementedError
+
+
+class NullResolver(ElementResolver):
+    """A resolver that resolves nothing. Used on the resolver-unaware
+    call paths (and wherever no live references are present) so existing
+    geometry behavior is unchanged: a reference resolved through it is
+    treated as dangling. Mirrors the Rust ``NullResolver``."""
+
+    def resolve(self, ref: "ElementRef") -> "Element | None":
+        return None
+
+
+# The cycle-guard set threaded through evaluation. Carried as an
+# explicit parameter (never instance / thread state) so all five apps
+# break reference cycles identically (REFERENCE_GRAPH.md §3). A plain
+# ``set[str]`` here; the Rust port uses a BTreeSet for the same role.
+VisitSet = set
+
+
 # ─── LiveElement framework ─────────────────────────────────────
 # See transcripts/BOOLEAN.md § Live element framework. CompoundShape
 # is the first conformer (non-destructive boolean over an operand
@@ -1314,7 +1358,16 @@ class LiveElement(Element):
 
     See BOOLEAN.md § Live element framework.
     """
-    pass
+
+    def dependencies(self) -> list["ElementRef"]:
+        """Stable-id inputs reached by reference rather than containment,
+        in deterministic order. Default empty: containment kinds (e.g.
+        ``CompoundShape``) own their inputs and expose them as operands.
+        The reference-graph index reads this; it is the only by-id edge
+        source. Mirrors the Rust ``LiveElement::dependencies`` default.
+        See REFERENCE_GRAPH.md §1.1.
+        """
+        return []
 
 
 @dataclass(frozen=True)
@@ -1337,10 +1390,25 @@ class CompoundShape(LiveElement):
     def evaluate(self, precision: float):
         """Flatten operands to polygon sets, apply the boolean
         operation, return the result. Pure — no cache today.
+
+        Convenience wrapper that resolves no references (a compound's
+        operands are owned, not referenced); see ``evaluate_with`` for
+        the resolver-aware form used when an operand subtree may contain
+        by-id references.
         """
-        from geometry.live import apply_operation, element_to_polygon_set
+        return self.evaluate_with(precision, NullResolver(), set())
+
+    def evaluate_with(self, precision: float, resolver: ElementResolver,
+                      visiting: set):
+        """Resolver-aware evaluation: flattens each operand (threading
+        the resolver + cycle-guard set so a referenced operand resolves
+        through ``resolver``), then applies the boolean operation.
+        Mirrors the Rust ``CompoundShape::evaluate_with``.
+        """
+        from geometry.live import apply_operation, element_to_polygon_set_with
         operand_sets = [
-            element_to_polygon_set(op, precision) for op in self.operands
+            element_to_polygon_set_with(op, precision, resolver, visiting)
+            for op in self.operands
         ]
         return apply_operation(self.operation, operand_sets)
 
@@ -1377,6 +1445,62 @@ class CompoundShape(LiveElement):
         shape's paint is discarded.
         """
         return self.operands
+
+
+@dataclass(frozen=True)
+class ReferenceElem(LiveElement):
+    """A live element that evaluates to another element's geometry,
+    resolved by stable id at evaluate time — the "instance of"
+    primitive (mirrored eyes, connector-follows-block). Its target is
+    named by id, not embedded, so it is a ``dependencies()`` edge
+    rather than a contained operand. See REFERENCE_GRAPH.md §1.1.
+
+    ``transform`` / ``fill`` / ``stroke`` are declared now but always
+    None until Phase 3 (instance transform, Fork F2) and the paint-
+    inheritance forks (Fork F3) wire them. Mirrors the Rust
+    ``ReferenceElem``.
+    """
+    target: ElementRef = ""
+    # Optional instance transform applied to the resolved geometry.
+    # Declared now (Fork F2) but always None until Phase 3 wires it.
+    transform: Transform | None = None
+    # Own paint; None inherits the resolved target's paint (Fork F3).
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    opacity: float = 1.0
+    locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
+
+    def evaluate_with(self, precision: float, resolver: ElementResolver,
+                      visiting: set):
+        """Resolver-aware evaluation: resolve the target and return its
+        geometry. A cycle (target already being visited) or a dangling
+        reference (unresolved) yields an empty set — never an error
+        (REFERENCE_GRAPH.md §3). Mirrors the Rust
+        ``ReferenceElem::evaluate_with``.
+        """
+        from geometry.live import element_to_polygon_set_with
+        if self.target in visiting:
+            return []  # cycle: break at the re-entry edge
+        target = resolver.resolve(self.target)
+        if target is None:
+            return []  # dangling: target not found
+        visiting.add(self.target)
+        ps = element_to_polygon_set_with(target, precision, resolver, visiting)
+        visiting.discard(self.target)
+        return ps
+
+    def dependencies(self) -> list[ElementRef]:
+        """A reference's single by-id input is its target."""
+        return [self.target]
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Resolver-free bounds are degenerate for a reference (its
+        geometry lives elsewhere); the resolver-aware bounds lands with
+        the render wiring (Phase 1b). Mirrors the Rust placeholder."""
+        return (0.0, 0.0, 0.0, 0.0)
 
 
 def sync_tspans_from_content(element: Element) -> Element:

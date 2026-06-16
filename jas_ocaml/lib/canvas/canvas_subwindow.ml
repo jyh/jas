@@ -1197,6 +1197,11 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) cs.operands;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:cs.opacity
+  | Live (Reference _) ->
+    (* Phase 1a: the canvas renderer has no resolver wired, so a
+       reference draws nothing. Resolver-aware rendering lands in
+       Phase 1b. *)
+    ()
   end;
   Cairo.restore cr
 
@@ -1824,7 +1829,8 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Path { transform; _ } | Element.Text { transform; _ }
         | Element.Text_path { transform; _ }
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
-        | Element.Live (Element.Compound_shape cs) -> cs.transform);
+        | Element.Live (Element.Compound_shape cs) -> cs.transform
+        | Element.Live (Element.Reference r) -> r.Element.ref_transform);
       let n = Element.control_point_count !node in
       let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
       let is_partial = match es.es_kind with

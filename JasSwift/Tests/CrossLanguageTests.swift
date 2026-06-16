@@ -120,6 +120,9 @@ private func assertJsonRoundtrip(_ name: String) {
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
         "element_ids",
+        // REFERENCE_GRAPH.md Phase 1a: live element codec (compound now
+        // emits `operation`; reference emits kind+target).
+        "live_reference_roundtrip", "live_compound_roundtrip",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }

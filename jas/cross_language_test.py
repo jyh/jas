@@ -92,6 +92,10 @@ class CrossLanguageTest(absltest.TestCase):
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document", "element_ids",
+            # Live element framework (REFERENCE_GRAPH.md Phase 1a):
+            # compound shape (operation + operands) and by-id reference
+            # (kind + target) round-trip through the test_json live codec.
+            "live_compound_roundtrip", "live_reference_roundtrip",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")

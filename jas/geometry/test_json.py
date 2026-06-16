@@ -21,6 +21,7 @@ from geometry.element import (
     LineCap, LineJoin,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
+    CompoundOperation, CompoundShape, ReferenceElem,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -454,6 +455,24 @@ def _element_json(elem: Element) -> str:
         o.raw("tspans", _json_array([_tspan_json(t) for t in elem.tspans]))
         o.empty_as_null("vertical_scale", elem.vertical_scale)
         o.empty_as_null("xml_lang", elem.xml_lang)
+    elif isinstance(elem, ReferenceElem):
+        o.str("type", "live")
+        o.str("kind", "reference")
+        o.str("target", elem.target)
+        _common_fields(o, elem)
+        # fill / stroke / transform are emitted only when set; in Phase 1
+        # references carry none (paint inheritance default / Fork F2),
+        # matching how compound omits its own paint here.
+    elif isinstance(elem, CompoundShape):
+        o.str("type", "live")
+        o.str("kind", "compound_shape")
+        # `operation` was previously omitted (a round-trip bug, since the
+        # reader had no live arm at all); now emitted so compound shapes
+        # round-trip through test_json.
+        o.str("operation", elem.operation.value)
+        _common_fields(o, elem)
+        children = [_element_json(c) for c in elem.operands]
+        o.raw("children", _json_array(children))
     return o.build()
 
 
@@ -925,6 +944,20 @@ def _parse_element(d: dict) -> Element:
                         fill=_parse_fill(d["fill"]),
                         stroke=_parse_stroke(d["stroke"]),
                         **tspans_kw, **common)
+    elif typ == "live":
+        # Live elements carry no name / id field, so strip those from the
+        # common kwargs (CompoundShape / ReferenceElem don't accept them).
+        live_common = {k: v for k, v in common.items()
+                       if k not in ("name", "id")}
+        kind = d.get("kind", "")
+        if kind == "compound_shape":
+            op = CompoundOperation(d.get("operation", "union"))
+            operands = tuple(_parse_element(c) for c in d.get("children", []))
+            return CompoundShape(operation=op, operands=operands,
+                                 fill=None, stroke=None, **live_common)
+        elif kind == "reference":
+            return ReferenceElem(target=d.get("target", ""), **live_common)
+        raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 
 

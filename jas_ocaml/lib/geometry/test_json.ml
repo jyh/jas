@@ -444,10 +444,29 @@ let rec element_json = function
     let o = json_obj () in
     json_str o "type" "live";
     json_str o "kind" "compound_shape";
+    (* [operation] was previously omitted (a round-trip bug, since the
+       reader had no live arm at all); now emitted so compound shapes
+       round-trip through test_json. *)
+    json_str o "operation" (match cs.operation with
+      | Op_union -> "union"
+      | Op_subtract_front -> "subtract_front"
+      | Op_intersection -> "intersection"
+      | Op_exclude -> "exclude");
     common_fields o ~opacity:cs.opacity ~transform:cs.transform
       ~locked:cs.locked ~visibility:cs.visibility ~name:None ~id:cs.id ();
     let children = Array.to_list cs.operands |> List.map element_json in
     json_raw o "children" (json_array children);
+    json_build o
+  | Live (Reference r) ->
+    let o = json_obj () in
+    json_str o "type" "live";
+    json_str o "kind" "reference";
+    json_str o "target" r.ref_target;
+    common_fields o ~opacity:r.ref_opacity ~transform:r.ref_transform
+      ~locked:r.ref_locked ~visibility:r.ref_visibility ~name:None ~id:r.ref_id ();
+    (* fill / stroke / instance transform are emitted only when set; in
+       Phase 1 references carry none (paint inheritance default / Fork F2),
+       matching how compound omits its own paint here. *)
     json_build o
 
 (* ------------------------------------------------------------------ *)
@@ -973,6 +992,38 @@ let rec parse_element j =
     Layer { name; id; children; opacity; transform; locked; visibility; blend_mode = Normal;
             mask = None;
             isolated_blending = false; knockout_group = false }
+  | "live" ->
+    let kind = j |> member "kind" |> to_string in
+    (match kind with
+     | "compound_shape" ->
+       let operation = match j |> member "operation" |> to_string with
+         | "subtract_front" -> Op_subtract_front
+         | "intersection" -> Op_intersection
+         | "exclude" -> Op_exclude
+         | _ -> Op_union
+       in
+       let operands = j |> member "children" |> to_list
+         |> List.map parse_element |> Array.of_list in
+       Live (Compound_shape {
+         operation; id; operands; fill = None; stroke = None;
+         opacity; transform; locked; visibility; blend_mode = Normal; mask = None;
+       })
+     | "reference" ->
+       let target = j |> member "target" |> to_string in
+       Live (Reference {
+         ref_target = target;
+         ref_id = id;
+         ref_instance_transform = None;
+         ref_fill = None;
+         ref_stroke = None;
+         ref_opacity = opacity;
+         ref_transform = transform;
+         ref_locked = locked;
+         ref_visibility = visibility;
+         ref_blend_mode = Normal;
+         ref_mask = None;
+       })
+     | other -> failwith (Printf.sprintf "Unknown live kind: %s" other))
   | _ -> failwith (Printf.sprintf "Unknown element type: %s" typ)
 
 let parse_selection j =
