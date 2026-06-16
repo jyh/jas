@@ -2272,6 +2272,18 @@ pub fn move_control_points(
             new.height = e.height * scale;
             Element::Text(new)
         }
+        // A reference has no geometry of its own, so a whole-element move
+        // (kind=All) rides on common.transform — the only thing to move.
+        // The render seams already apply common.transform to a reference,
+        // so this makes the move visible without any render change. (A
+        // partial / control-point move is meaningless for a reference, so
+        // it falls through to clone like Group/Layer/CompoundShape.)
+        Element::Live(super::live::LiveVariant::Reference(r)) if kind.is_all(0) => {
+            let mut new_r = r.clone();
+            let existing = new_r.common.transform.unwrap_or_default();
+            new_r.common.transform = Some(existing.translated(dx, dy));
+            Element::Live(super::live::LiveVariant::Reference(new_r))
+        }
         _ => elem.clone(),
     }
 }
@@ -2758,10 +2770,14 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
                 }),
             ),
             // A reference has no geometry of its own to translate; its
-            // instance transform (and thus move) is wired in Phase 3.
-            super::live::LiveVariant::Reference(r) => Element::Live(
-                super::live::LiveVariant::Reference(r.clone()),
-            ),
+            // move rides on common.transform (the live render seam applies
+            // it). Mirrors the Reference arm in move_control_points.
+            super::live::LiveVariant::Reference(r) => {
+                let mut new_r = r.clone();
+                let existing = new_r.common.transform.unwrap_or_default();
+                new_r.common.transform = Some(existing.translated(dx, dy));
+                Element::Live(super::live::LiveVariant::Reference(new_r))
+            }
         },
     }
 }
@@ -3382,6 +3398,63 @@ mod tests {
             assert_eq!((l.x1, l.y1, l.x2, l.y2), (5.0, 5.0, 15.0, 15.0));
         } else {
             panic!("expected Line");
+        }
+    }
+
+    /// Build a bare reference to ``target`` with no common.transform.
+    fn make_reference(target: &str) -> Element {
+        Element::Live(super::super::live::LiveVariant::Reference(
+            super::super::live::ReferenceElem::new(
+                super::super::live::ElementRef(target.to_string()),
+                CommonProps::default(),
+            ),
+        ))
+    }
+
+    /// A reference has no geometry of its own; a whole-element move rides
+    /// on common.transform (the live render seam applies it). Moving an
+    /// id-less-transform reference yields a translate(dx, dy).
+    #[test]
+    fn move_reference_all_sets_common_transform() {
+        let r = make_reference("tgt");
+        let moved = move_control_points(&r, &SelectionKind::All, 24.0, 24.0);
+        if let Element::Live(super::super::live::LiveVariant::Reference(re)) = moved {
+            let t = re.common.transform.expect("common.transform should be set");
+            assert_eq!((t.a, t.b, t.c, t.d, t.e, t.f), (1.0, 0.0, 0.0, 1.0, 24.0, 24.0));
+            // The dead instance-transform field stays untouched (None).
+            assert!(re.transform.is_none());
+        } else {
+            panic!("expected a Reference");
+        }
+    }
+
+    /// A second move composes onto the existing common.transform: the two
+    /// translations sum (translated() only touches e/f).
+    #[test]
+    fn move_reference_composes_onto_existing_transform() {
+        let r = make_reference("tgt");
+        let once = move_control_points(&r, &SelectionKind::All, 10.0, 5.0);
+        let twice = move_control_points(&once, &SelectionKind::All, 4.0, 7.0);
+        if let Element::Live(super::super::live::LiveVariant::Reference(re)) = twice {
+            let t = re.common.transform.expect("common.transform should be set");
+            assert_eq!((t.e, t.f), (14.0, 12.0));
+        } else {
+            panic!("expected a Reference");
+        }
+    }
+
+    /// translate_element mirrors move_control_points for references: it
+    /// rides on common.transform too (used by paste / copy / group paths).
+    #[test]
+    fn translate_reference_sets_common_transform() {
+        let r = make_reference("tgt");
+        let moved = translate_element(&r, 24.0, 24.0);
+        if let Element::Live(super::super::live::LiveVariant::Reference(re)) = moved {
+            let t = re.common.transform.expect("common.transform should be set");
+            assert_eq!((t.e, t.f), (24.0, 24.0));
+            assert!(re.transform.is_none());
+        } else {
+            panic!("expected a Reference");
         }
     }
 

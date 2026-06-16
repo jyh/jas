@@ -160,6 +160,37 @@ multimap, no promote-on-delete) → incremental maintenance is trivial → the
 ill-formed dup-id import is normalized (later duplicates come back id-less), pinned
 by a dup-id import fixture.
 
+### 2.6 The dependency index (Phase 3)
+
+A derived structure, a **pure function of the document** (`dependency_index(doc)`),
+exposing the by-id reference graph:
+
+- `deps`: `id → sorted target ids it references` (from `dependencies()`).
+- `rdeps`: reverse of `deps` (`target id → sorted referencing ids`).
+- `dangling`: sorted referencing ids whose target is not in the **targetable set**.
+- `cycles`: sorted ids on a cycle (DFS over `deps`, sorted neighbours; self-target counts).
+
+**Operands are opaque to the by-id graph (Fork F-operand-opaque).** The walk (and
+the resolver's `id→element` index) recurses into **Group/Layer children only, never
+a CompoundShape's operands** — a compound's operands are *owned* (`children()`),
+`CompoundShape.dependencies() == []`, "zero blast radius". So the targetable set =
+ids reachable via layers + group/layer children; an id that exists *only* inside a
+compound operand is **not targetable**, and a reference to it is `dangling`. This was
+a 3-vs-1 divergence (Rust/Swift/Python already stop at compounds; OCaml recursed into
+operands) — resolved by making OCaml stop too, so render targetability and the index
+agree in all apps. Pinned by the index's `dangling` field on a reference-to-operand-id.
+
+Like the `id→element` index (§2.3) it is **never serialized** in the document codecs;
+it has its **own canonical JSON serializer** (sorted keys, sorted arrays — mirroring
+the test-json / menu-structure serializers) used only for cross-language fixtures.
+Rebuild-on-demand in Phase 3 (no Model storage; no consumer caches it yet).
+
+**Deferred:** `topo_order` (Phase-4 recompute ordering; the highest cross-language
+iteration-order desync risk) and **write-time cycle rejection** (Fork F4 nicety: no
+authoring op can *form* a cycle — `create_reference` only makes brand-new references
+with no incoming edges — so eval-time cycle-break + the `cycles` report suffice).
+First consumer of `rdeps`/`dangling` will be reference-aware delete (its own UX fork).
+
 ---
 
 ## 3. Resolution semantics
@@ -195,6 +226,30 @@ seam generalizes to `generate_element_id`.
   `None` (the lazy-mint trigger named in the `clear_ids` doc-comment); the target
   stays in the tree (shared, not moved); a new `ReferenceElem` with `common.id =
   ref_id` and `target = <resolved target id>` is inserted.
+- **Make Instance** (Phase 3 — the first user-facing trigger). Object-menu command
+  "Make Instance", enabled only when **exactly one** whole element (`SelectionKind::All`)
+  is selected. It is *not* a new operation — it is native UI glue that composes two
+  existing, already-pinned ops under **one** snapshot: `create_reference` (the UI mints
+  `target_id`/`ref_id` via `generate_element_id`, value-in-op, with a collision-retry
+  loop over existing ids — never minted in a Controller), then a move of the now-selected
+  reference by `(PASTE_OFFSET, PASTE_OFFSET)` = `(24, 24)`.
+  - **The offset rides on the new reference's `common.transform`, not the instance
+    `transform` field.** Decided after an investigation: `common.transform` is already
+    applied to a reference at both render seams (the element-level `apply_transform`
+    above the per-kind match) — zero new render wiring — and the move tool mutates the
+    same field, so "create offset, then drag to reposition" is split-brain-free. Eval
+    stays transform-free for *all* element kinds (a transformed rect ignores its
+    transform as a boolean operand too), so references remain consistent — no new
+    divergence. The instance `transform` field (Fork F2) stays reserved for the genuine
+    parametric role (mirror/scale instance overrides); when wired, the two compose
+    `common.transform ∘ instance.transform ∘ (target local geometry)`.
+  - **Moving a reference** required teaching `move_control_points` and `translate_element`
+    a `Reference` arm (whole-element move only) that composes the translate onto
+    `common.transform` — references have no geometry of their own. Pinned by the
+    `move_reference` operation fixture across all 4 apps. `generate_element_id` mirrors
+    `generate_artboard_id` exactly (8-char base36, injected-rng seam, UI-layer only,
+    never in a Controller); pinned per-app by determinism tests, not a shared fixture
+    (minting is non-deterministic).
 
 ---
 

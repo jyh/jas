@@ -337,6 +337,40 @@ class CrossLanguageTest(absltest.TestCase):
         self.assertEqual(stamped.id, "c1")
 
     # ---------------------------------------------------------------
+    # Dependency index (REFERENCE_GRAPH.md §3)
+    # ---------------------------------------------------------------
+
+    def test_dependency_index_cross_language(self):
+        # Cross-language pin: read the shared input document fixture, build
+        # the derived dependency index, serialize it, and assert byte-equality
+        # with the shared index fixture. All five apps run this same pair of
+        # fixtures; passing means Python agrees on the canonical index shape.
+        from document.dependency_index import (
+            dependency_index, dependency_index_to_test_json,
+        )
+        # Parse the shared input document.
+        input_json = _read_fixture("expected/dependency_index_input.json")
+        doc = test_json_to_document(input_json)
+        # Sanity: the parsed input must re-serialize to itself (the fixture is
+        # canonical), so the index is computed over the same doc all apps see.
+        self.assertEqual(
+            document_to_test_json(doc), input_json,
+            "dependency_index_input.json is not canonical: "
+            "parse->serialize changed it")
+        # Build + serialize the index, compare with the expected fixture.
+        actual = dependency_index_to_test_json(dependency_index(doc))
+        expected = _read_fixture("expected/dependency_index.json")
+        if actual != expected:
+            print("=== EXPECTED (dependency_index) ===")
+            print(expected)
+            print("=== ACTUAL (dependency_index) ===")
+            print(actual)
+        self.assertEqual(
+            actual, expected,
+            "dependency_index cross-language test failed: "
+            "canonical JSON mismatch")
+
+    # ---------------------------------------------------------------
     # Workspace layout equivalence tests
     # ---------------------------------------------------------------
 

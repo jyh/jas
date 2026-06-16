@@ -700,4 +700,68 @@ let () =
         ])).gstops |> List.hd in
         assert (parsed.stop_midpoint_to_next = 50.0));
     ];
+
+    (* The UI-layer stable-element id minter. Mirrors the Artboard
+       generate_id determinism tests and the Rust generate_element_id
+       tests in geometry/element.rs: the id is 8 chars from the base36
+       alphabet, and the same seeded rng yields the same id. *)
+    "stable-element id", [
+      Alcotest.test_case "id is 8 chars base36 (seeded)" `Quick (fun () ->
+        let seq = ref 0 in
+        let rng () = incr seq; !seq in
+        let id = generate_id ~rng () in
+        assert (String.length id = 8);
+        String.iter (fun c ->
+          assert (String.contains "0123456789abcdefghijklmnopqrstuvwxyz" c)
+        ) id);
+
+      Alcotest.test_case "id deterministic with same seed" `Quick (fun () ->
+        (* A linear-congruential rng seeded identically must produce the
+           identical id across two independent calls. *)
+        let make_rng () =
+          let s = ref 42 in
+          fun () -> s := (!s * 1103515245 + 12345) land 0x3FFFFFFF; !s
+        in
+        let id_a = generate_id ~rng:(make_rng ()) () in
+        let id_b = generate_id ~rng:(make_rng ()) () in
+        assert (id_a = id_b));
+    ];
+
+    (* A reference has no geometry of its own; a whole-element move rides
+       on common.transform (ref_transform). Mirrors the Rust Reference
+       arm tests for move_control_points. A partial move (no is_all) is a
+       no-op for a reference. *)
+    "reference move", [
+      Alcotest.test_case "whole-element move sets ref_transform" `Quick (fun () ->
+        let r = make_reference "tgt" in
+        let moved = move_control_points ~is_all:true r [] 24.0 24.0 in
+        (match moved with
+         | Live (Reference re) ->
+           (match re.ref_transform with
+            | Some t ->
+              assert (t.a = 1.0 && t.b = 0.0 && t.c = 0.0 && t.d = 1.0);
+              assert (t.e = 24.0 && t.f = 24.0);
+              (* The dead instance-transform field stays untouched. *)
+              assert (re.ref_instance_transform = None)
+            | None -> assert false)
+         | _ -> assert false));
+
+      Alcotest.test_case "whole-element move composes onto existing transform" `Quick (fun () ->
+        let r = make_reference "tgt" in
+        let once = move_control_points ~is_all:true r [] 10.0 5.0 in
+        let twice = move_control_points ~is_all:true once [] 4.0 7.0 in
+        (match twice with
+         | Live (Reference re) ->
+           (match re.ref_transform with
+            | Some t -> assert (t.e = 14.0 && t.f = 12.0)
+            | None -> assert false)
+         | _ -> assert false));
+
+      Alcotest.test_case "partial move is a no-op for a reference" `Quick (fun () ->
+        let r = make_reference "tgt" in
+        let moved = move_control_points r [0] 24.0 24.0 in
+        (match moved with
+         | Live (Reference re) -> assert (re.ref_transform = None)
+         | _ -> assert false));
+    ];
   ]

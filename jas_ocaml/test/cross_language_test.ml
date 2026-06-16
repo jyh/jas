@@ -307,6 +307,44 @@ let assert_binary_read_python name =
     assert false
   end
 
+(* ------------------------------------------------------------------ *)
+(* Dependency index (REFERENCE_GRAPH.md section 3)                     *)
+(* ------------------------------------------------------------------ *)
+
+(* Build a single-layer document whose children are [kids], so unit
+   tests mirror the Rust [doc_with_layer] helper. *)
+let dep_doc_with_layer (kids : Jas.Element.element list) : Jas.Document.document =
+  Jas.Document.make_document [| Jas.Element.make_layer ~name:"Layer" (Array.of_list kids) |]
+
+(* A rect carrying an optional stable id. *)
+let dep_rect ?id () : Jas.Element.element =
+  Jas.Element.with_id (Jas.Element.make_rect 0.0 0.0 10.0 10.0) id
+
+(* A by-id reference [id -> target]. *)
+let dep_reference ~id ~target : Jas.Element.element =
+  Jas.Element.make_reference ~id:(Some id) target
+
+let dependency_index_cross_language () =
+  (* Parse the shared input document. *)
+  let input = read_fixture "expected/dependency_index_input.json" in
+  let doc = Jas.Test_json.test_json_to_document input in
+  (* Sanity: the parsed input must re-serialize to itself (the fixture is
+     canonical), so the index is computed over the same doc all apps see. *)
+  let reser = Jas.Test_json.document_to_test_json doc in
+  if reser <> input then begin
+    Printf.eprintf "=== dependency_index_input.json not canonical ===\n";
+    Printf.eprintf "EXPECTED: %s\nACTUAL:   %s\n" input reser;
+    assert false
+  end;
+  (* Build + serialize the index, compare with the expected fixture. *)
+  let actual = Jas.Dependency_index.to_test_json (Jas.Dependency_index.build doc) in
+  let expected = read_fixture "expected/dependency_index.json" in
+  if actual <> expected then begin
+    Printf.eprintf "=== EXPECTED (dependency_index) ===\n%s\n" expected;
+    Printf.eprintf "=== ACTUAL (dependency_index) ===\n%s\n" actual;
+    assert false
+  end
+
 let () =
   Alcotest.run "Cross_language" [
     (* Binary round-trip *)
@@ -445,6 +483,176 @@ let () =
          | other ->
            failwith (Printf.sprintf "compound id lost through binary: %s"
              (match other with Some s -> s | None -> "<none>"))));
+    ];
+
+    (* Dependency index (REFERENCE_GRAPH.md section 3): the derived by-id
+       reference graph. The cross-language case pins byte-equality with
+       the shared fixture; the unit cases mirror the Rust unit tests. *)
+    "Dependency index", [
+      Alcotest.test_case "cross_language fixture" `Quick
+        dependency_index_cross_language;
+
+      Alcotest.test_case "empty document has empty index" `Quick (fun () ->
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer []) in
+        Alcotest.(check bool) "deps empty" true (idx.deps = []);
+        Alcotest.(check bool) "rdeps empty" true (idx.rdeps = []);
+        Alcotest.(check bool) "dangling empty" true (idx.dangling = []);
+        Alcotest.(check bool) "cycles empty" true (idx.cycles = []));
+
+      Alcotest.test_case "deps and rdeps for two refs to one target" `Quick
+        (fun () ->
+          (* a <- r1, a <- r2. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+            dep_reference ~id:"r2" ~target:"a";
+          ]) in
+          Alcotest.(check (option (list string))) "deps r1"
+            (Some ["a"]) (List.assoc_opt "r1" idx.deps);
+          Alcotest.(check (option (list string))) "deps r2"
+            (Some ["a"]) (List.assoc_opt "r2" idx.deps);
+          Alcotest.(check (option (list string))) "rdeps a"
+            (Some ["r1"; "r2"]) (List.assoc_opt "a" idx.rdeps);
+          Alcotest.(check bool) "no dangling" true (idx.dangling = []);
+          Alcotest.(check bool) "no cycles" true (idx.cycles = []));
+
+      Alcotest.test_case "id-less element is not a node" `Quick (fun () ->
+        (* The rect has no id; only the reference is a node, and its target
+           is absent -> dangling. *)
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_rect ();
+          dep_reference ~id:"r" ~target:"ghost";
+        ]) in
+        Alcotest.(check int) "one dep" 1 (List.length idx.deps);
+        Alcotest.(check (option (list string))) "deps r"
+          (Some ["ghost"]) (List.assoc_opt "r" idx.deps);
+        Alcotest.(check bool) "no rdeps (ghost not targetable)" true
+          (idx.rdeps = []);
+        Alcotest.(check (list string)) "dangling" ["r"] idx.dangling);
+
+      Alcotest.test_case "dangling when target absent" `Quick (fun () ->
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_reference ~id:"r3" ~target:"ghost";
+        ]) in
+        Alcotest.(check (list string)) "dangling" ["r3"] idx.dangling;
+        Alcotest.(check bool) "no rdeps" true (idx.rdeps = []);
+        Alcotest.(check bool) "no cycles" true (idx.cycles = []));
+
+      Alcotest.test_case "two-cycle is detected" `Quick (fun () ->
+        (* c1 -> c2 -> c1. *)
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_reference ~id:"c1" ~target:"c2";
+          dep_reference ~id:"c2" ~target:"c1";
+        ]) in
+        Alcotest.(check (list string)) "cycles" ["c1"; "c2"] idx.cycles;
+        Alcotest.(check (option (list string))) "rdeps c1"
+          (Some ["c2"]) (List.assoc_opt "c1" idx.rdeps);
+        Alcotest.(check (option (list string))) "rdeps c2"
+          (Some ["c1"]) (List.assoc_opt "c2" idx.rdeps);
+        Alcotest.(check bool) "no dangling" true (idx.dangling = []));
+
+      Alcotest.test_case "self-target is a cycle" `Quick (fun () ->
+        (* R -> R counts as a cycle. *)
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_reference ~id:"self" ~target:"self";
+        ]) in
+        Alcotest.(check (list string)) "cycles" ["self"] idx.cycles;
+        Alcotest.(check (option (list string))) "rdeps self"
+          (Some ["self"]) (List.assoc_opt "self" idx.rdeps);
+        Alcotest.(check bool) "no dangling" true (idx.dangling = []));
+
+      Alcotest.test_case "three-cycle collects all members" `Quick (fun () ->
+        (* x -> y -> z -> x. *)
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_reference ~id:"x" ~target:"y";
+          dep_reference ~id:"y" ~target:"z";
+          dep_reference ~id:"z" ~target:"x";
+        ]) in
+        Alcotest.(check (list string)) "cycles" ["x"; "y"; "z"] idx.cycles);
+
+      Alcotest.test_case "node off a cycle is not reported" `Quick (fun () ->
+        (* tail -> c1, and c1 <-> c2 is a 2-cycle. tail reaches the cycle
+           but is not on it. *)
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          dep_reference ~id:"tail" ~target:"c1";
+          dep_reference ~id:"c1" ~target:"c2";
+          dep_reference ~id:"c2" ~target:"c1";
+        ]) in
+        Alcotest.(check (list string)) "cycles" ["c1"; "c2"] idx.cycles;
+        Alcotest.(check bool) "tail not on cycle" false
+          (List.mem "tail" idx.cycles));
+
+      Alcotest.test_case "compound operand id is opaque" `Quick (fun () ->
+        (* A CompoundShape whose first operand carries id "op1". The walk
+           does NOT recurse into operands, so op1 is NOT targetable. A
+           reference r4 -> op1 must come out DANGLING, and op1 gets NO
+           rdeps entry. This pins the operands-opaque decision. *)
+        let compound = Jas.Element.Live (Jas.Element.Compound_shape {
+          operation = Jas.Element.Op_subtract_front;
+          id = Some "cs";
+          operands = [| dep_rect ~id:"op1" (); dep_rect () |];
+          fill = None; stroke = None; opacity = 1.0;
+          transform = None; locked = false;
+          visibility = Jas.Element.Preview; blend_mode = Jas.Element.Normal;
+          mask = None;
+        }) in
+        let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+          compound;
+          dep_reference ~id:"r4" ~target:"op1";
+        ]) in
+        Alcotest.(check bool) "cs not in deps" false
+          (List.mem_assoc "cs" idx.deps);
+        Alcotest.(check bool) "op1 not in deps" false
+          (List.mem_assoc "op1" idx.deps);
+        Alcotest.(check (option (list string))) "deps r4"
+          (Some ["op1"]) (List.assoc_opt "r4" idx.deps);
+        Alcotest.(check (list string)) "dangling" ["r4"] idx.dangling;
+        Alcotest.(check bool) "op1 has no rdeps" false
+          (List.mem_assoc "op1" idx.rdeps);
+        Alcotest.(check bool) "cs has no rdeps" false
+          (List.mem_assoc "cs" idx.rdeps));
+
+      Alcotest.test_case "group children are walked but operands are not"
+        `Quick (fun () ->
+          (* A group nesting a reference proves the walk recurses into
+             Group/Layer. *)
+          let group = Jas.Element.make_group
+            [| dep_reference ~id:"g_ref" ~target:"a" |] in
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            group;
+          ]) in
+          Alcotest.(check (option (list string))) "deps g_ref"
+            (Some ["a"]) (List.assoc_opt "g_ref" idx.deps);
+          Alcotest.(check (option (list string))) "rdeps a"
+            (Some ["g_ref"]) (List.assoc_opt "a" idx.rdeps));
+
+      Alcotest.test_case "canonical json has sorted keys and arrays" `Quick
+        (fun () ->
+          (* c1<->c2 cycle plus two refs to a and a dangling ref. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r2" ~target:"a";
+            dep_reference ~id:"r1" ~target:"a";
+            dep_reference ~id:"r3" ~target:"ghost";
+            dep_reference ~id:"c1" ~target:"c2";
+            dep_reference ~id:"c2" ~target:"c1";
+          ]) in
+          let json = Jas.Dependency_index.to_test_json idx in
+          let prefix = "{\"cycles\":[\"c1\",\"c2\"],\"dangling\":[\"r3\"]," in
+          let starts =
+            String.length json >= String.length prefix
+            && String.sub json 0 (String.length prefix) = prefix in
+          Alcotest.(check bool) "sorted top-level keys/arrays" true starts;
+          let contains sub =
+            let nlen = String.length sub and hlen = String.length json in
+            let rec go i =
+              if i + nlen > hlen then false
+              else if String.sub json i nlen = sub then true
+              else go (i + 1)
+            in go 0 in
+          Alcotest.(check bool) "rdeps a sorted" true (contains "\"a\":[\"r1\",\"r2\"]");
+          Alcotest.(check bool) "deps r1" true (contains "\"r1\":[\"a\"]"));
     ];
 
     (* Operation equivalence tests *)

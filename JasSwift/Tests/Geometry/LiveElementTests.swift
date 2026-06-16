@@ -208,3 +208,53 @@ private struct CycleResolver: ElementResolver {
     // An unindexed id resolves to nil (dangling).
     #expect(resolver.resolve(ElementRef("missing")) == nil)
 }
+
+// MARK: - Moving a reference (Make Instance; mirrors Rust element.rs
+// move_reference_* / translate_reference_* tests).
+//
+// A reference has no geometry of its own; a whole-element move rides on
+// its transform (the live render seam applies it). Swift's ReferenceElem
+// carries a single `transform` field that plays the role of Rust's
+// `common.transform`.
+
+/// Build a bare reference to `target` with no transform.
+private func bareReference(_ target: String) -> Element {
+    .live(.reference(ReferenceElem(target: ElementRef(target))))
+}
+
+@Test func moveReferenceAllSetsTransform() {
+    let r = bareReference("tgt")
+    let moved = r.moveControlPoints(.all, dx: 24, dy: 24)
+    guard case .live(.reference(let re)) = moved else {
+        Issue.record("expected a Reference")
+        return
+    }
+    let t = re.transform
+    #expect(t != nil)
+    #expect((t!.a, t!.b, t!.c, t!.d, t!.e, t!.f) == (1, 0, 0, 1, 24, 24))
+}
+
+@Test func moveReferenceComposesOntoExistingTransform() {
+    // A second move composes onto the existing transform: the two
+    // translations sum (translated() only touches e/f).
+    let r = bareReference("tgt")
+    let once = r.moveControlPoints(.all, dx: 10, dy: 5)
+    let twice = once.moveControlPoints(.all, dx: 4, dy: 7)
+    guard case .live(.reference(let re)) = twice else {
+        Issue.record("expected a Reference")
+        return
+    }
+    #expect((re.transform!.e, re.transform!.f) == (14, 12))
+}
+
+@Test func translateReferenceSetsTransform() {
+    // translated() mirrors moveControlPoints for references: it rides on
+    // the reference's transform too (used by paste / copy / group paths).
+    let r = bareReference("tgt")
+    let moved = r.translated(dx: 24, dy: 24)
+    guard case .live(.reference(let re)) = moved else {
+        Issue.record("expected a Reference")
+        return
+    }
+    #expect((re.transform!.e, re.transform!.f) == (24, 24))
+}

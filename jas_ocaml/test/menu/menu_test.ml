@@ -38,6 +38,98 @@ let tests = [
     let layer_children = Jas.Document.children_of doc.Jas.Document.layers.(0) in
     assert (Array.length layer_children = 1));
 
+  (* === make_instance tests === *)
+
+  Alcotest.test_case "make_instance creates an offset selected reference" `Quick (fun () ->
+    (* Make Instance = create_reference + move_selection(24, 24) under a
+       single snapshot. After it: a reference targeting the source's id
+       exists, is offset by (24, 24) via its common transform, and is the
+       selection. The source keeps its position. Mirrors the Rust
+       make_instance_creates_offset_selected_reference test. *)
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let sel = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+    let doc = { doc with Jas.Document.selection = sel } in
+    let model = Jas.Model.create ~document:doc () in
+    Jas.Menubar.make_instance model ();
+    let doc = model#document in
+    (* Source rect untouched at the origin. *)
+    (match Jas.Document.get_element doc [0; 0] with
+     | Rect { x; y; _ } -> assert (x = 0.0 && y = 0.0)
+     | _ -> assert false);
+    (* New reference at [0; 1], targeting the source, offset by (24, 24)
+       on its common transform; the dead instance transform stays None. *)
+    (match Jas.Document.get_element doc [0; 1] with
+     | Live (Reference re) ->
+       (* The target id is the (minted) source id, not empty. *)
+       assert (String.length re.ref_target > 0);
+       assert (re.ref_id <> None);
+       (match re.ref_transform with
+        | Some t -> assert (t.e = 24.0 && t.f = 24.0)
+        | None -> assert false);
+       assert (re.ref_instance_transform = None)
+     | _ -> assert false);
+    (* The source now carries the minted target id, and the reference
+       points at exactly that id. *)
+    (match Jas.Document.get_element doc [0; 0],
+           Jas.Document.get_element doc [0; 1] with
+     | src, Live (Reference re) ->
+       assert (id_of src = Some re.ref_target)
+     | _ -> assert false);
+    (* The reference is the whole-element selection. *)
+    let bindings = Jas.Document.PathMap.bindings doc.Jas.Document.selection in
+    (match bindings with
+     | [ (path, es) ] ->
+       assert (path = [0; 1]);
+       assert (es.Jas.Document.es_kind = Jas.Document.SelKindAll)
+     | _ -> assert false);
+    (* Single snapshot => one undo restores the pre-Make-Instance state
+       (just the source rect, no reference). *)
+    model#undo;
+    let doc = model#document in
+    let children = Jas.Document.children_of doc.Jas.Document.layers.(0) in
+    assert (Array.length children = 1);
+    (match children.(0) with Rect _ -> () | _ -> assert false));
+
+  Alcotest.test_case "make_instance is a no-op with no selection" `Quick (fun () ->
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let model = Jas.Model.create ~document:doc () in
+    Jas.Menubar.make_instance model ();
+    let children = Jas.Document.children_of model#document.Jas.Document.layers.(0) in
+    assert (Array.length children = 1));
+
+  Alcotest.test_case "make_instance is a no-op with two elements selected" `Quick (fun () ->
+    let r1 = make_rect 0.0 0.0 10.0 10.0 in
+    let r2 = make_rect 20.0 20.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r1; r2|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let sel = Jas.Document.PathMap.empty
+      |> Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+      |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
+    let doc = { doc with Jas.Document.selection = sel } in
+    let model = Jas.Model.create ~document:doc () in
+    Jas.Menubar.make_instance model ();
+    let children = Jas.Document.children_of model#document.Jas.Document.layers.(0) in
+    assert (Array.length children = 2));
+
+  Alcotest.test_case "make_instance is a no-op for a control-point sub-selection" `Quick (fun () ->
+    (* Only a partial (control-point) selection: not a whole element, so
+       no reference is created. *)
+    let r = make_rect 0.0 0.0 10.0 10.0 in
+    let layer = make_layer ~name:"L0" [|r|] in
+    let doc = Jas.Document.make_document [|layer|] in
+    let sel = Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_partial [0; 0] [0]) in
+    let doc = { doc with Jas.Document.selection = sel } in
+    let model = Jas.Model.create ~document:doc () in
+    Jas.Menubar.make_instance model ();
+    let children = Jas.Document.children_of model#document.Jas.Document.layers.(0) in
+    assert (Array.length children = 1));
+
   (* === ungroup_selection tests === *)
 
   Alcotest.test_case "ungroup_selection ungroups a selected group" `Quick (fun () ->

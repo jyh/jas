@@ -55,6 +55,9 @@ menubar:
           enabled_when: "active_document.has_selection" }
       - { id: menu_show_all,    label: "&Show All",    action: show_all,        shortcut: "Ctrl+Alt+3",
           enabled_when: "state.tab_count > 0" }
+      - separator
+      - { id: menu_make_instance, label: "&Make Instance", action: make_instance,
+          enabled_when: "active_document.selection_count == 1" }
 
   - id: view_menu
     label: "&View"

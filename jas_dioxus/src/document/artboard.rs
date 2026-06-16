@@ -157,6 +157,32 @@ pub fn generate_artboard_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
     String::from_utf8(bytes.to_vec()).expect("base36 alphabet is ASCII")
 }
 
+/// Mint a fresh 8-char base36 stable-element id. Identical in shape to
+/// [`generate_artboard_id`] (same alphabet, same length, same rng seam:
+/// `None` taps platform entropy, `Some` is deterministic for tests) but
+/// minted for element identity rather than artboard identity. This is a
+/// UI-layer minter and must never be called inside a Controller method
+/// (controllers take ids as parameters so they stay deterministic).
+pub fn generate_element_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
+    let mut bytes = [0u8; ARTBOARD_ID_LENGTH];
+    match rng {
+        Some(source) => {
+            for slot in bytes.iter_mut() {
+                let idx = (source() as usize) % ARTBOARD_ID_ALPHABET.len();
+                *slot = ARTBOARD_ID_ALPHABET[idx];
+            }
+        }
+        None => {
+            for slot in bytes.iter_mut() {
+                let idx = (platform_entropy() as usize) % ARTBOARD_ID_ALPHABET.len();
+                *slot = ARTBOARD_ID_ALPHABET[idx];
+            }
+        }
+    }
+    // Safe: the alphabet contains only ASCII characters.
+    String::from_utf8(bytes.to_vec()).expect("base36 alphabet is ASCII")
+}
+
 /// Match a name against the default `Artboard N` pattern and return
 /// N on success. Case-sensitive, exactly one space between `Artboard`
 /// and the digits (ARTBOARDS.md §Numbering and naming).
@@ -276,6 +302,37 @@ mod tests {
             seq_b
         };
         let id_b = generate_artboard_id(Some(&mut id_gen_b));
+
+        assert_eq!(id_a, id_b);
+    }
+
+    #[test]
+    fn element_id_is_8_chars_base36_seeded() {
+        let mut seq: u32 = 0;
+        let mut id_gen = || {
+            seq += 1;
+            seq
+        };
+        let id = generate_element_id(Some(&mut id_gen));
+        assert_eq!(id.len(), ARTBOARD_ID_LENGTH);
+        assert!(id.chars().all(|c| ARTBOARD_ID_ALPHABET.contains(&(c as u8))));
+    }
+
+    #[test]
+    fn element_id_deterministic_with_same_seed() {
+        let mut seq_a = 42u32;
+        let mut id_gen_a = || {
+            seq_a = seq_a.wrapping_mul(1103515245).wrapping_add(12345);
+            seq_a
+        };
+        let id_a = generate_element_id(Some(&mut id_gen_a));
+
+        let mut seq_b = 42u32;
+        let mut id_gen_b = || {
+            seq_b = seq_b.wrapping_mul(1103515245).wrapping_add(12345);
+            seq_b
+        };
+        let id_b = generate_element_id(Some(&mut id_gen_b));
 
         assert_eq!(id_a, id_b);
     }

@@ -118,6 +118,34 @@ import Testing
     #expect(abs[0].id == "seedfeed")
 }
 
+// MARK: - generateElementId determinism (mirrors Rust artboard.rs
+// element_id_* tests). Minting is non-deterministic by default, so this
+// is pinned per-app by a seeded-RNG test rather than a shared fixture.
+
+/// Deterministic RNG seam for the id minter (seeded LCG, no system
+/// entropy). Same seed ⇒ same sequence ⇒ same id.
+private struct SeededRNG: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
+    }
+}
+
+@Test func elementIdIs8CharsBase36Seeded() {
+    var rng = SeededRNG(state: 1)
+    let id = generateElementId(using: &rng)
+    #expect(id.count == 8)
+    let alphabet = Set("0123456789abcdefghijklmnopqrstuvwxyz")
+    #expect(id.allSatisfy { alphabet.contains($0) })
+}
+
+@Test func elementIdDeterministicWithSameSeed() {
+    var a = SeededRNG(state: 42)
+    var b = SeededRNG(state: 42)
+    #expect(generateElementId(using: &a) == generateElementId(using: &b))
+}
+
 @Test func artboardFillCanonicalRoundTrip() {
     #expect(ArtboardFill.transparent.asCanonical == "transparent")
     #expect(ArtboardFill.color("#ff0000").asCanonical == "#ff0000")
