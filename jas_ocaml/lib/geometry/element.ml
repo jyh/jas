@@ -798,6 +798,7 @@ type element =
 
 and live_variant =
   | Compound_shape of compound_shape
+  | Reference of reference_elem
 
 and compound_operation =
   | Op_union
@@ -818,6 +819,37 @@ and compound_shape = {
   blend_mode : blend_mode;
   mask : mask option;
 }
+
+(* A by-id reference to another element, resolved at evaluate time
+   (REFERENCE_GRAPH.md section 1.1). The target is named by [ref_target]
+   (a stable id), not embedded, so it is a dependency edge rather than an
+   operand. Common props are flattened in-line, matching [compound_shape].
+   [ref_transform] / [ref_fill] / [ref_stroke] are declared now (Forks F2 /
+   F3) but always None until later phases wire them. *)
+and reference_elem = {
+  ref_target : element_ref;
+  ref_id : string option;
+  (* Optional instance transform applied to the resolved geometry
+     (Rust ReferenceElem.transform, Fork F2). Always None until Phase 3
+     wires it; serialized only when set. *)
+  ref_instance_transform : transform option;
+  ref_fill : fill option;
+  ref_stroke : stroke option;
+  ref_opacity : float;
+  (* Common-props transform — the one [get_transform] / [transform_of]
+     read, and the one [common_fields] serializes. *)
+  ref_transform : transform option;
+  ref_locked : bool;
+  ref_visibility : visibility;
+  ref_blend_mode : blend_mode;
+  ref_mask : mask option;
+}
+
+(* A by-id reference to the stable id of another element. Stable across
+   insert / delete, unlike a tree path; resolved through an
+   [element_resolver] (see live.ml), never stored as a direct pointer.
+   See REFERENCE_GRAPH.md section 2.1. *)
+and element_ref = string
 
 and mask = {
   subtree : element;
@@ -1142,6 +1174,7 @@ let transform_of elem =
   | Path r -> r.transform | Text r -> r.transform | Text_path r -> r.transform
   | Group r -> r.transform | Layer r -> r.transform
   | Live (Compound_shape cs) -> cs.transform
+  | Live (Reference r) -> r.ref_transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
   Line { name = None; id = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
@@ -1247,12 +1280,31 @@ let make_layer ?name ?(opacity = 1.0) ?(transform = None) ?(locked = false) chil
           mask = None;
           isolated_blending = false; knockout_group = false }
 
+(* Build a by-id reference to [target] with no paint or transform
+   overrides. Mirrors Rust ReferenceElem::new. *)
+let make_reference ?(id = None) ?(opacity = 1.0) ?(transform = None)
+    ?(locked = false) target =
+  Live (Reference {
+    ref_target = target;
+    ref_id = id;
+    ref_instance_transform = None;
+    ref_fill = None;
+    ref_stroke = None;
+    ref_opacity = opacity;
+    ref_transform = transform;
+    ref_locked = locked;
+    ref_visibility = Preview;
+    ref_blend_mode = Normal;
+    ref_mask = None;
+  })
+
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
   | Ellipse { locked; _ } | Polyline { locked; _ } | Polygon { locked; _ }
   | Path { locked; _ } | Text { locked; _ } | Text_path { locked; _ }
   | Group { locked; _ } | Layer { locked; _ } -> locked
   | Live (Compound_shape cs) -> cs.locked
+  | Live (Reference r) -> r.ref_locked
 
 let set_locked v = function
   | Line r -> Line { r with locked = v }
@@ -1267,6 +1319,7 @@ let set_locked v = function
   | Group r -> Group { r with locked = v }
   | Layer r -> Layer { r with locked = v }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with locked = v })
+  | Live (Reference r) -> Live (Reference { r with ref_locked = v })
 
 let get_visibility = function
   | Line { visibility; _ } | Rect { visibility; _ } | Circle { visibility; _ }
@@ -1275,6 +1328,7 @@ let get_visibility = function
   | Text_path { visibility; _ } | Group { visibility; _ }
   | Layer { visibility; _ } -> visibility
   | Live (Compound_shape cs) -> cs.visibility
+  | Live (Reference r) -> r.ref_visibility
 
 let get_blend_mode = function
   | Line { blend_mode; _ } | Rect { blend_mode; _ } | Circle { blend_mode; _ }
@@ -1283,6 +1337,7 @@ let get_blend_mode = function
   | Text_path { blend_mode; _ } | Group { blend_mode; _ }
   | Layer { blend_mode; _ } -> blend_mode
   | Live (Compound_shape cs) -> cs.blend_mode
+  | Live (Reference r) -> r.ref_blend_mode
 
 let set_visibility v = function
   | Line r -> Line { r with visibility = v }
@@ -1297,6 +1352,7 @@ let set_visibility v = function
   | Group r -> Group { r with visibility = v }
   | Layer r -> Layer { r with visibility = v }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with visibility = v })
+  | Live (Reference r) -> Live (Reference { r with ref_visibility = v })
 
 let get_transform = function
   | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
@@ -1305,6 +1361,7 @@ let get_transform = function
   | Text_path { transform; _ } | Group { transform; _ }
   | Layer { transform; _ } -> transform
   | Live (Compound_shape cs) -> cs.transform
+  | Live (Reference r) -> r.ref_transform
 
 let set_transform t = function
   | Line r -> Line { r with transform = t }
@@ -1319,6 +1376,7 @@ let set_transform t = function
   | Group r -> Group { r with transform = t }
   | Layer r -> Layer { r with transform = t }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with transform = t })
+  | Live (Reference r) -> Live (Reference { r with ref_transform = t })
 
 (** Pre-pend a world-space [translate(dx, dy)] to an existing
     transform matrix. If the element has no current transform,
@@ -1357,6 +1415,7 @@ let with_fill elem f =
   | Text r -> Text { r with fill = f }
   | Text_path r -> Text_path { r with fill = f }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with fill = f })
+  | Live (Reference r) -> Live (Reference { r with ref_fill = f })
   | Line _ | Group _ | Layer _ -> elem
 
 let with_stroke elem s =
@@ -1371,6 +1430,7 @@ let with_stroke elem s =
   | Text r -> Text { r with stroke = s }
   | Text_path r -> Text_path { r with stroke = s }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
+  | Live (Reference r) -> Live (Reference { r with ref_stroke = s })
   | Group _ | Layer _ -> elem
 
 (* Path-only — Phase 1 brush model lives on PathElem alone. Other
@@ -1429,6 +1489,7 @@ let with_mask elem (m : mask option) =
   | Group r -> Group { r with mask = m }
   | Layer r -> Layer { r with mask = m }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with mask = m })
+  | Live (Reference r) -> Live (Reference { r with ref_mask = m })
 
 (** Return the opacity mask attached to [elem], if any. *)
 let get_mask elem : mask option =
@@ -1438,6 +1499,7 @@ let get_mask elem : mask option =
   | Path { mask; _ } | Text { mask; _ } | Text_path { mask; _ }
   | Group { mask; _ } | Layer { mask; _ } -> mask
   | Live (Compound_shape cs) -> cs.mask
+  | Live (Reference r) -> r.ref_mask
 
 let with_width_points elem wp =
   match elem with
@@ -1479,6 +1541,7 @@ let id_of = function
   | Group r      -> r.id
   | Layer r      -> r.id
   | Live (Compound_shape cs) -> cs.id
+  | Live (Reference r) -> r.ref_id
 
 (* Return a copy of [elem] with its id set (additive identity). *)
 let with_id elem (i : string option) =
@@ -1495,6 +1558,7 @@ let with_id elem (i : string option) =
   | Group r      -> Group { r with id = i }
   | Layer r      -> Layer { r with id = i }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with id = i })
+  | Live (Reference r) -> Live (Reference { r with ref_id = i })
 
 (* Recursively clear the stable id on [elem] and all of its descendants,
    returning a fresh element. A DUPLICATED element must not inherit the

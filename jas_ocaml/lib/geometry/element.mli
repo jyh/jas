@@ -535,6 +535,9 @@ type element =
     ever has one [Live] arm. *)
 and live_variant =
   | Compound_shape of compound_shape
+  (** A by-id reference to another element, resolved at evaluate time.
+      See [reference_elem] and REFERENCE_GRAPH.md section 1.1. *)
+  | Reference of reference_elem
 
 (** Which boolean operation a compound shape evaluates to. Only the
     four Shape Mode operations can be compound. *)
@@ -559,6 +562,35 @@ and compound_shape = {
   blend_mode : blend_mode;
   mask : mask option;
 }
+
+(** A live element that evaluates to the geometry of another element,
+    resolved by stable id at evaluate time — the instance-of primitive
+    (mirrored eyes, connector-follows-block). Its target is named by
+    [ref_target] (a stable id), not embedded, so it is a dependency
+    edge rather than an operand. Common props are flattened in-line,
+    matching [compound_shape]. See REFERENCE_GRAPH.md section 1.1. *)
+and reference_elem = {
+  ref_target : element_ref;
+  ref_id : string option;
+  (** Optional instance transform applied to the resolved geometry
+      (Fork F2). Always None until Phase 3 wires it. *)
+  ref_instance_transform : transform option;
+  ref_fill : fill option;
+  ref_stroke : stroke option;
+  ref_opacity : float;
+  (** Common-props transform — the one [get_transform] reads and the
+      one [common_fields] serializes. *)
+  ref_transform : transform option;
+  ref_locked : bool;
+  ref_visibility : visibility;
+  ref_blend_mode : blend_mode;
+  ref_mask : mask option;
+}
+
+(** A by-id reference to the stable id of another element. Stable across
+    insert / delete, unlike a tree path. Resolved through an
+    [Live.element_resolver]. See REFERENCE_GRAPH.md section 2.1. *)
+and element_ref = string
 
 (** Opacity mask attached to an element. See OPACITY.md §Document model.
     Storage-only in Phase 3a; renderer and UI wiring land in Phase 3b.
@@ -641,6 +673,13 @@ val make_text : ?font_family:string -> ?font_size:float -> ?font_weight:string -
 val make_text_path : ?start_offset:float -> ?font_family:string -> ?font_size:float -> ?font_weight:string -> ?font_style:string -> ?text_decoration:string -> ?text_transform:string -> ?font_variant:string -> ?baseline_shift:string -> ?line_height:string -> ?letter_spacing:string -> ?xml_lang:string -> ?aa_mode:string -> ?rotate:string -> ?horizontal_scale:string -> ?vertical_scale:string -> ?kerning:string -> ?fill:fill option -> ?stroke:stroke option -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> path_command list -> string -> element
 val make_group : ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
 val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -> ?locked:bool -> element array -> element
+
+(** Build a by-id reference to the element with the given stable id,
+    with no paint or transform overrides. Mirrors Rust
+    [ReferenceElem::new]. See REFERENCE_GRAPH.md section 1.1. *)
+val make_reference :
+  ?id:string option -> ?opacity:float -> ?transform:transform option ->
+  ?locked:bool -> element_ref -> element
 
 (** {2 Lock state} *)
 

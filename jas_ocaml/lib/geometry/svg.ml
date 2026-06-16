@@ -347,6 +347,13 @@ let rec element_svg indent (elem : Element.element) =
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) cs.operands) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
+  | Live (Reference r) ->
+    (* Phase 1 placeholder: SVG round-trip of references (as
+       <use href="#id">) lands in Phase 2. Emit an empty marker group
+       so export stays valid until then. *)
+    Printf.sprintf "%s<g data-jas-live=\"reference\"%s%s%s></g>"
+      indent (id_attr r.ref_id) (opacity_attr r.ref_opacity)
+      (transform_attr r.ref_transform)
 
 (* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
    Stored as <jas:document-setup> and <jas:print-preferences> children

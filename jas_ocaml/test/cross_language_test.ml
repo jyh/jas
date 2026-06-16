@@ -57,7 +57,13 @@ let roundtrip_names = [
    test_json codec both round-trip those fields, so element_ids participates in
    the binary and JSON idempotence tests. It is kept out of [roundtrip_names]
    only because there is no element_ids.svg fixture for the SVG tests. *)
-let json_roundtrip_names = roundtrip_names @ ["element_ids"]
+(* Live elements (REFERENCE_GRAPH.md Phase 1a): reference + compound
+   round-trip through the test_json codec. Compound now carries
+   [operation]. Kept out of [binary_names] because binary serialization
+   of Live elements is deferred (mirrors the Rust fixture lists). *)
+let json_roundtrip_names =
+  roundtrip_names @ ["element_ids";
+                     "live_reference_roundtrip"; "live_compound_roundtrip"]
 let binary_names = roundtrip_names @ ["element_ids"]
 
 let assert_json_roundtrip name =
