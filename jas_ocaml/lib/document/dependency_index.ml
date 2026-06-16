@@ -145,6 +145,79 @@ let build (doc : Document.document) : t =
   }
 
 (* ------------------------------------------------------------------ *)
+(* Reference-aware delete: orphaned-references predicate              *)
+(* ------------------------------------------------------------------ *)
+(*
+   REFERENCE_GRAPH.md — the equivalence-critical core of reference-aware
+   delete (the confirm dialog is a later step). A pure graph query over
+   the same by-id reference graph the index exposes, so it lives here
+   next to [rdeps]. *)
+
+(* Collect every id-bearing element id within [elem]'s subtree,
+   recursing into Group / Layer children ONLY — the SAME walk discipline
+   as [walk]: a [Compound_shape]'s operands are opaque, so an id that
+   exists only inside an operand is not a node and is not collected. The
+   set de-dups inherently. *)
+let rec collect_ids elem (ids : SSet.t ref) : unit =
+  (match Element.id_of elem with
+   | Some id -> ids := SSet.add id !ids
+   | None -> ());
+  match elem with
+  | Group { children; _ } | Layer { children; _ } ->
+    Array.iter (fun child -> collect_ids child ids) children
+  | _ -> ()
+
+(* Answer "if I delete these elements, which live references (instances)
+   elsewhere would be orphaned — left pointing at a now-deleted target?".
+
+   Returns the SORTED, de-duplicated ids of references that point at an
+   id which is being deleted but are not themselves in the deletion set.
+
+   Algorithm (REFERENCE_GRAPH.md, locked semantics):
+   1. [deleted_ids] — the id-bearing ids within every deletion subtree.
+      Each path is resolved via [Document.get_element] (invalid paths
+      skipped), then walked with the operands-opaque discipline
+      ([collect_ids]); an id only inside a [Compound_shape] operand is
+      therefore NOT a deleted target.
+   2. Build [idx = build doc]. For each deleted target [t], its referrers
+      are [rdeps[t]] (only targetable ids ever get an rdeps entry, so an
+      operand-nested target contributes none).
+   3. [orphaned = { r in rdeps[t] for all deleted t : r not in deleted_ids }]
+      — references whose target is being deleted but which survive the
+      delete.
+
+   Consequences: deleting an element with no external referrers returns
+   []; deleting a target together with its only referrer returns [] for
+   that pair; deleting an instance returns [] (an instance has no rdeps);
+   deleting a group orphans the external referrers of any referenced
+   element it contains. *)
+let orphaned_references (doc : Document.document) (deletion_paths : int list list)
+    : string list =
+  (* Step 1: gather the id-bearing ids inside every deletion subtree. *)
+  let deleted_ids = ref SSet.empty in
+  List.iter (fun path ->
+    (* [get_element] raises on an out-of-range / malformed path; an
+       invalid path resolves to no element and is skipped. *)
+    match (try Some (Document.get_element doc path) with _ -> None) with
+    | Some elem -> collect_ids elem deleted_ids
+    | None -> ()
+  ) deletion_paths;
+
+  (* Step 2/3: for each deleted target, collect its referrers that are
+     NOT themselves being deleted. *)
+  let idx = build doc in
+  let orphaned = ref [] in
+  SSet.iter (fun t ->
+    match List.assoc_opt t idx.rdeps with
+    | Some referrers ->
+      List.iter (fun r ->
+        if not (SSet.mem r !deleted_ids) then orphaned := r :: !orphaned
+      ) referrers
+    | None -> ()
+  ) !deleted_ids;
+  List.sort_uniq String.compare !orphaned
+
+(* ------------------------------------------------------------------ *)
 (* Canonical JSON serializer                                          *)
 (* ------------------------------------------------------------------ *)
 (*

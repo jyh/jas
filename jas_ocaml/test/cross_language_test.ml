@@ -345,6 +345,33 @@ let dependency_index_cross_language () =
     assert false
   end
 
+(* Cross-language pin (REFERENCE_GRAPH.md): parse the shared input
+   document, read the shared orphaned-references fixture, and for each
+   case assert that [orphaned_references doc delete_paths] equals the
+   expected ids. All apps run this same pair of fixtures. *)
+let orphaned_references_cross_language () =
+  let input = read_fixture "expected/dependency_index_input.json" in
+  let doc = Jas.Test_json.test_json_to_document input in
+  let cases_json = read_fixture "expected/orphaned_references.json" in
+  let cases = Yojson.Safe.from_string cases_json |> Yojson.Safe.Util.to_list in
+  List.iteri (fun i case ->
+    let open Yojson.Safe.Util in
+    let delete_paths =
+      case |> member "delete_paths" |> to_list
+      |> List.map (fun p -> p |> to_list |> List.map to_int)
+    in
+    let expected =
+      case |> member "orphaned" |> to_list |> List.map to_string
+    in
+    let actual = Jas.Dependency_index.orphaned_references doc delete_paths in
+    if actual <> expected then begin
+      Printf.eprintf "=== orphaned_references case %d mismatch ===\n" i;
+      Printf.eprintf "EXPECTED: [%s]\nACTUAL:   [%s]\n"
+        (String.concat ";" expected) (String.concat ";" actual);
+      assert false
+    end
+  ) cases
+
 let () =
   Alcotest.run "Cross_language" [
     (* Binary round-trip *)
@@ -491,6 +518,93 @@ let () =
     "Dependency index", [
       Alcotest.test_case "cross_language fixture" `Quick
         dependency_index_cross_language;
+
+      (* orphaned_references predicate (reference-aware delete core).
+         The cross-language case pins the shared fixture; the unit cases
+         mirror the Rust unit tests (target-two-refs, delete target+ref,
+         delete instance, group-with-referenced-descendant). *)
+      Alcotest.test_case "orphaned_references cross_language" `Quick
+        orphaned_references_cross_language;
+
+      Alcotest.test_case "orphaned target with two refs returns both" `Quick
+        (fun () ->
+          (* a <- r1, r2. Deleting [a] (at [0;0]) orphans both r1 and r2. *)
+          let doc = dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+            dep_reference ~id:"r2" ~target:"a";
+          ] in
+          Alcotest.(check (list string)) "orphaned" ["r1"; "r2"]
+            (Jas.Dependency_index.orphaned_references doc [[0; 0]]));
+
+      Alcotest.test_case "orphaned target plus one ref returns the other"
+        `Quick (fun () ->
+          (* Deleting [a] AND r1 ([0;0]+[0;1]) leaves only r2 orphaned;
+             r1 is itself deleted, so it is not orphaned. *)
+          let doc = dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+            dep_reference ~id:"r2" ~target:"a";
+          ] in
+          Alcotest.(check (list string)) "orphaned" ["r2"]
+            (Jas.Dependency_index.orphaned_references doc [[0; 0]; [0; 1]]));
+
+      Alcotest.test_case "orphaned deleting an instance returns empty" `Quick
+        (fun () ->
+          (* Deleting a reference (an instance) orphans nothing: an
+             instance has no rdeps (nothing points AT it). *)
+          let doc = dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+          ] in
+          Alcotest.(check (list string)) "orphaned" []
+            (Jas.Dependency_index.orphaned_references doc [[0; 1]]));
+
+      Alcotest.test_case "orphaned group containing referenced element"
+        `Quick (fun () ->
+          (* A group at [0;1] contains the referenced rect [a]; an
+             external reference r1 -> a sits outside the group. Deleting
+             the group orphans r1 (its target [a] vanishes with it). *)
+          let group = Jas.Element.make_group [| dep_rect ~id:"a" () |] in
+          let doc = dep_doc_with_layer [
+            dep_reference ~id:"r1" ~target:"a";
+            group;
+          ] in
+          Alcotest.(check (list string)) "orphaned" ["r1"]
+            (Jas.Dependency_index.orphaned_references doc [[0; 1]]));
+
+      Alcotest.test_case "orphaned compound operand target is opaque" `Quick
+        (fun () ->
+          (* op1 lives only inside a CompoundShape operand
+             (operand-opaque), so it is never a targetable node and
+             r4 -> op1 is already dangling, not orphaned-by-this-delete.
+             Deleting the compound [cs] (no rdeps of its own) therefore
+             orphans nothing. *)
+          let compound = Jas.Element.Live (Jas.Element.Compound_shape {
+            operation = Jas.Element.Op_subtract_front;
+            id = Some "cs";
+            operands = [| dep_rect ~id:"op1" (); dep_rect () |];
+            fill = None; stroke = None; opacity = 1.0;
+            transform = None; locked = false;
+            visibility = Jas.Element.Preview; blend_mode = Jas.Element.Normal;
+            mask = None;
+          }) in
+          let doc = dep_doc_with_layer [
+            compound;
+            dep_reference ~id:"r4" ~target:"op1";
+          ] in
+          Alcotest.(check (list string)) "orphaned" []
+            (Jas.Dependency_index.orphaned_references doc [[0; 0]]));
+
+      Alcotest.test_case "orphaned invalid path is skipped" `Quick (fun () ->
+          (* An out-of-range path resolves to no element and is skipped;
+             the valid path still produces its orphans. *)
+          let doc = dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+          ] in
+          Alcotest.(check (list string)) "orphaned" ["r1"]
+            (Jas.Dependency_index.orphaned_references doc [[0; 99]; [0; 0]]));
 
       Alcotest.test_case "empty document has empty index" `Quick (fun () ->
         let idx = Jas.Dependency_index.build (dep_doc_with_layer []) in

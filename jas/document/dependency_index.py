@@ -232,6 +232,83 @@ def _dfs_cycles(
 
 
 # --------------------------------------------------------------------------- #
+# Reference-aware delete: orphaned-references predicate                         #
+# --------------------------------------------------------------------------- #
+#
+# REFERENCE_GRAPH.md -- the equivalence-critical core of reference-aware delete
+# (the confirm dialog is a later step). A pure graph query over the same by-id
+# reference graph the index exposes, so it lives here next to ``rdeps``.
+
+
+def _collect_ids(elem: "Element", ids: set[str]) -> None:
+    """Collect every id-bearing element id within ``elem``'s subtree, recursing
+    into **Group/Layer children only** -- the SAME walk discipline as
+    :func:`_walk`: a ``CompoundShape``'s operands are opaque (only Group/Layer
+    expose a ``children`` attribute; operands live under ``operands`` and are
+    never entered), so an id that exists only inside an operand is not a node and
+    is not collected. The set de-dups inherently (first occurrence still
+    inserts it)."""
+    eid = getattr(elem, "id", None)
+    if eid is not None:
+        ids.add(eid)
+    children = getattr(elem, "children", None)
+    if children is not None:
+        for child in children:
+            _collect_ids(child, ids)
+
+
+def orphaned_references(
+    doc: "Document", deletion_paths: list[list[int]]
+) -> list[str]:
+    """Answer "if I delete these elements, which live references (instances)
+    elsewhere would be orphaned -- left pointing at a now-deleted target?".
+
+    Returns the **sorted, de-duplicated** ids of references that point at an id
+    which is being deleted but are not themselves in the deletion set.
+
+    Algorithm (REFERENCE_GRAPH.md, locked semantics):
+
+    1. ``deleted_ids`` -- the id-bearing ids within every deletion subtree.
+       Each path is resolved via ``doc.get_element`` (invalid paths skipped --
+       ``get_element`` raises on an out-of-range / non-Group path), then walked
+       with the operands-opaque discipline (:func:`_collect_ids`); an id only
+       inside a ``CompoundShape`` operand is therefore NOT a deleted target.
+    2. Build ``idx = dependency_index(doc)``. For each deleted target ``t``, its
+       referrers are ``idx.rdeps[t]`` (only *targetable* ids ever get an rdeps
+       entry, so an operand-nested target contributes none).
+    3. ``orphaned = { r in rdeps[t] for all deleted t : r not in deleted_ids }``
+       -- references whose target is being deleted but which survive the delete.
+
+    Consequences: deleting an element with no external referrers returns ``[]``;
+    deleting a target together with its only referrer returns ``[]`` for that
+    pair (the referrer is itself deleted); deleting an instance returns ``[]``
+    (an instance has no ``rdeps``); deleting a group orphans the external
+    referrers of any referenced element it contains. Mirrors the Rust
+    ``orphaned_references``."""
+    # Step 1: gather the id-bearing ids inside every deletion subtree.
+    deleted_ids: set[str] = set()
+    for path in deletion_paths:
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            # Invalid paths are skipped (no element resolves).
+            continue
+        _collect_ids(elem, deleted_ids)
+
+    # Step 2/3: for each deleted target, collect its referrers that are NOT
+    # themselves being deleted.
+    idx = dependency_index(doc)
+    orphaned: set[str] = set()
+    for t in deleted_ids:
+        referrers = idx.rdeps.get(t)
+        if referrers is not None:
+            for r in referrers:
+                if r not in deleted_ids:
+                    orphaned.add(r)
+    return sorted(orphaned)
+
+
+# --------------------------------------------------------------------------- #
 # Canonical JSON serializer                                                    #
 # --------------------------------------------------------------------------- #
 #

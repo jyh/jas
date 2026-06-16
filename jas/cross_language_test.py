@@ -370,6 +370,27 @@ class CrossLanguageTest(absltest.TestCase):
             "dependency_index cross-language test failed: "
             "canonical JSON mismatch")
 
+    def test_orphaned_references_cross_language(self):
+        # Cross-language pin (REFERENCE_GRAPH.md): parse the shared input
+        # document, read the shared orphaned-references fixture, and for each
+        # case assert that orphaned_references(doc, delete_paths) equals the
+        # expected ids. All apps run this same pair of fixtures.
+        from document.dependency_index import orphaned_references
+        doc = test_json_to_document(
+            _read_fixture("expected/dependency_index_input.json"))
+        cases = json.loads(
+            _read_fixture("expected/orphaned_references.json"))
+        self.assertIsInstance(cases, list)
+        for i, case in enumerate(cases):
+            delete_paths = [list(p) for p in case["delete_paths"]]
+            expected = list(case["orphaned"])
+            actual = orphaned_references(doc, delete_paths)
+            self.assertEqual(
+                actual, expected,
+                f"orphaned_references cross-language case {i} "
+                f"({delete_paths}) mismatch: expected {expected}, "
+                f"got {actual}")
+
     # ---------------------------------------------------------------
     # Workspace layout equivalence tests
     # ---------------------------------------------------------------
