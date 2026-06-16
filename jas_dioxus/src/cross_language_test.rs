@@ -377,6 +377,15 @@ mod tests {
                     op["dy"].as_f64().unwrap(),
                 );
             }
+            "assign_id" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::assign_id(model, &path, op["id"].as_str().unwrap());
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);

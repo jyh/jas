@@ -96,6 +96,21 @@ class controller ?(model = Model.create ()) () =
          model#set_document { doc with Document.layers = new_layers;
                                        Document.selection = sel })
 
+    (** Stamp a stable [id] onto the element at [path] — the lazy
+        assign-on-create primitive (REFERENCE_GRAPH.md \1674). The id is
+        minted by the initiator and carried in the operation payload,
+        never minted here, so every app applies the identical value. A
+        no-op when the path is invalid. The caller owns identity: this
+        overwrites any existing id (re-identification is the initiator
+        responsibility; reference remapping arrives with the graph). *)
+    method assign_id (path : Document.element_path) (id : string) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some elem ->
+        let new_elem = Element.with_id elem (Some id) in
+        model#set_document (Document.replace_element doc path new_elem)
+
     (** Append [elem] to the mask subtree of the element at [path].
         Returns [true] on success, [false] when the target has no
         mask or the subtree root isn't a [Group] — the caller then
