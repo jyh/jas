@@ -9,6 +9,7 @@ from document.artboard import (
     fill_from_canonical,
     fill_is_transparent,
     generate_artboard_id,
+    generate_element_id,
     next_artboard_name,
     parse_default_name,
 )
@@ -76,6 +77,31 @@ def test_id_deterministic_with_same_seed():
         return rng
     a = generate_artboard_id(rng=make_rng())
     b = generate_artboard_id(rng=make_rng())
+    assert a == b
+
+
+# ── Element id generation (UI-layer minter, REFERENCE_GRAPH.md §4) ──
+
+
+def test_element_id_is_8_chars_base36_seeded():
+    counter = [0]
+    def rng():
+        counter[0] += 1
+        return counter[0]
+    eid = generate_element_id(rng=rng)
+    assert len(eid) == 8
+    assert all(c in "0123456789abcdefghijklmnopqrstuvwxyz" for c in eid)
+
+
+def test_element_id_deterministic_with_same_seed():
+    def make_rng():
+        counter = [42]
+        def rng():
+            counter[0] = (counter[0] * 1103515245 + 12345) & 0x7FFFFFFF
+            return counter[0]
+        return rng
+    a = generate_element_id(rng=make_rng())
+    b = generate_element_id(rng=make_rng())
     assert a == b
 
 

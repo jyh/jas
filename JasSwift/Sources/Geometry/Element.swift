@@ -1026,6 +1026,21 @@ public enum Element: Equatable {
                 locked: v.locked,
                 visibility: v.visibility, blendMode: v.blendMode,
                 mask: v.mask, name: v.name, id: v.id))
+        case .live(.reference(let r)) where kind.isAll(total: 0):
+            // A reference has no geometry of its own, so a whole-element
+            // move (kind=.all) rides on its transform — the only thing
+            // to move. The render seam already applies this transform to
+            // a reference, so the move is visible without any render
+            // change. (A partial / control-point move is meaningless for
+            // a reference, so it falls through to the no-op default like
+            // Group/Layer/CompoundShape.) Mirrors the Reference arm in
+            // Rust `move_control_points`. Note: Swift's ReferenceElem
+            // carries a single `transform` field (serialized as
+            // `transform`, applied at the render seam), which plays the
+            // role of Rust's `common.transform` here.
+            var updated = r
+            updated.transform = (r.transform ?? .identity).translated(dx, dy)
+            return .live(.reference(updated))
         default:
             return self
         }
@@ -1568,12 +1583,22 @@ public enum Element: Equatable {
                 isolatedBlending: v.isolatedBlending,
                 knockoutGroup: v.knockoutGroup,
                 mask: v.mask, id: v.id))
+        case .live(.reference(let r)):
+            // A reference has no geometry of its own to translate; its
+            // move rides on its transform (the live render seam applies
+            // it). Mirrors the Reference arm in `moveControlPoints` and
+            // Rust `translate_element`. (Used by paste / copy / group
+            // paths.) Swift's ReferenceElem carries a single `transform`
+            // field that plays the role of Rust's `common.transform`.
+            var updated = r
+            updated.transform = (r.transform ?? .identity).translated(dx, dy)
+            return .live(.reference(updated))
         case .live:
-            // Live elements don't support raw-coord translation;
-            // fall back to the transform-bake path. Align operates on
-            // resolved selections so this branch is unreachable in
-            // practice (compound shapes resolve to their boolean
-            // result before alignment math runs).
+            // Other live elements (compound shapes) don't support
+            // raw-coord translation; fall back to the transform-bake
+            // path. Align operates on resolved selections so this branch
+            // is unreachable in practice (compound shapes resolve to
+            // their boolean result before alignment math runs).
             return self.withTransformTranslated(dx: dx, dy: dy)
         }
     }

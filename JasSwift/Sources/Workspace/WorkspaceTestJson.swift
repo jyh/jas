@@ -310,6 +310,7 @@ private let menuBar: [(String, [MenuItem])] = [
         ("Hide", "hide", "\u{2318}3"),
         ("Show All", "show_all", "\u{2325}\u{2318}3"),
         ("---", "", ""),
+        ("Make Instance", "make_instance", ""),
         ("Simplify", "simplify", ""),
     ]),
     ("Window", [
