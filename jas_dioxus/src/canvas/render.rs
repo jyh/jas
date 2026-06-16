@@ -3,6 +3,8 @@
 //! Draws the document onto an HTML <canvas> via web_sys::CanvasRenderingContext2d.
 
 use std::cell::RefCell;
+// In scope so RenderResolver's `resolve` (paint inheritance lookup) is callable.
+use crate::geometry::live::ElementResolver;
 
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -46,6 +48,72 @@ impl Drop for BrushLibsGuard {
 pub fn register_brush_libraries(libs: serde_json::Value) -> BrushLibsGuard {
     let prior = CURRENT_BRUSH_LIBS.with(|c| c.replace(libs));
     BrushLibsGuard { prior }
+}
+
+// Reference resolution (REFERENCE_GRAPH.md Phase 1b): a render-scoped
+// id->element index, rebuilt each paint (the rebuild strategy; the
+// persistent-incremental index is Phase 4). Installed via a thread-local
+// guard mirroring the brush registry above, so the live render arms resolve
+// by-id references without threading a resolver through every draw_element
+// signature. The cycle-guard VisitSet stays a fresh local per top-level
+// evaluate (passed to evaluate_with) — never thread state.
+thread_local! {
+    static CURRENT_REF_INDEX: RefCell<std::collections::HashMap<String, std::rc::Rc<Element>>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// Restores the prior index on drop, so nested renders nest safely.
+pub struct RefIndexGuard {
+    prior: std::collections::HashMap<String, std::rc::Rc<Element>>,
+}
+impl Drop for RefIndexGuard {
+    fn drop(&mut self) {
+        CURRENT_REF_INDEX.with(|c| *c.borrow_mut() = std::mem::take(&mut self.prior));
+    }
+}
+
+fn collect_ref_ids(
+    elem: &std::rc::Rc<Element>,
+    out: &mut std::collections::HashMap<String, std::rc::Rc<Element>>,
+) {
+    if let Some(id) = &elem.common().id {
+        // first-occurrence wins (the unique-id invariant means there are no
+        // collisions in practice; this just makes the build deterministic).
+        out.entry(id.clone()).or_insert_with(|| elem.clone());
+    }
+    if let Some(children) = elem.children() {
+        for child in children {
+            collect_ref_ids(child, out);
+        }
+    }
+}
+
+/// Build the id->element index from `doc` and install it for this render.
+/// Indexes id-bearing descendants (which are `Rc`-held); top-level layer ids
+/// are not resolution targets in Phase 1 (references target shapes).
+pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
+    let mut index = std::collections::HashMap::new();
+    for layer in &doc.layers {
+        if let Some(children) = layer.children() {
+            for child in children {
+                collect_ref_ids(child, &mut index);
+            }
+        }
+    }
+    let prior = CURRENT_REF_INDEX.with(|c| c.replace(index));
+    RefIndexGuard { prior }
+}
+
+/// Zero-sized resolver reading the render-scoped index; passed to
+/// `evaluate_with` so the live render arms resolve references.
+struct RenderResolver;
+impl crate::geometry::live::ElementResolver for RenderResolver {
+    fn resolve(
+        &self,
+        id: &crate::geometry::live::ElementRef,
+    ) -> Option<std::rc::Rc<Element>> {
+        CURRENT_REF_INDEX.with(|c| c.borrow().get(&id.0).cloned())
+    }
 }
 
 /// Look up a brush by its "<library>/<brush>" slug in the current
@@ -1545,41 +1613,53 @@ fn draw_element_body(
             }
         }
         Element::Live(v) => {
-            match v {
-                crate::geometry::live::LiveVariant::CompoundShape(cs) => {
-                    let ps = cs.evaluate(precision);
-                    let (mut fill_op, mut stroke_op, mut stroke_align) =
-                        (1.0, 1.0, StrokeAlign::Center);
-                    if outline {
-                        apply_outline_style(ctx);
-                    } else {
-                        fill_op = apply_fill(ctx, cs.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
-                        (stroke_op, stroke_align) =
-                            apply_stroke(ctx, cs.stroke.as_ref());
-                    }
-                    if ps.iter().any(|r| r.len() >= 2) {
-                        ctx.begin_path();
-                        for ring in &ps {
-                            if ring.len() < 2 { continue; }
-                            ctx.move_to(ring[0].0, ring[0].1);
-                            for &(x, y) in &ring[1..] {
-                                ctx.line_to(x, y);
-                            }
-                            ctx.close_path();
-                        }
-                        if !outline && cs.fill.is_some() {
-                            ctx.set_global_alpha(base_alpha * fill_op);
-                            ctx.fill();
-                        }
-                        if outline || cs.stroke.is_some() {
-                            ctx.set_global_alpha(base_alpha * stroke_op);
-                            stroke_aligned(ctx, stroke_align);
-                        }
-                    }
+            // Evaluate the live element, resolving references against the
+            // render-scoped index. The cycle guard is a fresh local per
+            // top-level evaluate. Per variant we also pick the paint: a
+            // reference inherits the resolved target's paint when its own is
+            // unset (Fork F3).
+            let mut visiting = crate::geometry::live::VisitSet::new();
+            let (ps, live_fill, live_stroke) = match v {
+                crate::geometry::live::LiveVariant::CompoundShape(cs) => (
+                    cs.evaluate_with(precision, &RenderResolver, &mut visiting),
+                    cs.fill.clone(),
+                    cs.stroke.clone(),
+                ),
+                crate::geometry::live::LiveVariant::Reference(r) => {
+                    let ps = r.evaluate_with(precision, &RenderResolver, &mut visiting);
+                    let target = RenderResolver.resolve(&r.target);
+                    let fill = r.fill.clone()
+                        .or_else(|| target.as_ref().and_then(|t| t.fill().cloned()));
+                    let stroke = r.stroke.clone()
+                        .or_else(|| target.as_ref().and_then(|t| t.stroke().cloned()));
+                    (ps, fill, stroke)
                 }
-                crate::geometry::live::LiveVariant::Reference(_) => {
-                    // Reference render wiring is Phase 1b (resolver into
-                    // render); a reference draws nothing until then.
+            };
+            let (mut fill_op, mut stroke_op, mut stroke_align) =
+                (1.0, 1.0, StrokeAlign::Center);
+            if outline {
+                apply_outline_style(ctx);
+            } else {
+                fill_op = apply_fill(ctx, live_fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
+                (stroke_op, stroke_align) = apply_stroke(ctx, live_stroke.as_ref());
+            }
+            if ps.iter().any(|r| r.len() >= 2) {
+                ctx.begin_path();
+                for ring in &ps {
+                    if ring.len() < 2 { continue; }
+                    ctx.move_to(ring[0].0, ring[0].1);
+                    for &(x, y) in &ring[1..] {
+                        ctx.line_to(x, y);
+                    }
+                    ctx.close_path();
+                }
+                if !outline && live_fill.is_some() {
+                    ctx.set_global_alpha(base_alpha * fill_op);
+                    ctx.fill();
+                }
+                if outline || live_stroke.is_some() {
+                    ctx.set_global_alpha(base_alpha * stroke_op);
+                    stroke_aligned(ctx, stroke_align);
                 }
             }
         }
@@ -1810,22 +1890,23 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
             // Handled separately via bounding-box overlays or
             // descendant highlights.
         }
-        Element::Live(v) => match v {
-            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
-                let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
-                for ring in &ps {
-                    if ring.len() < 2 { continue; }
-                    ctx.move_to(ring[0].0, ring[0].1);
-                    for &(x, y) in &ring[1..] {
-                        ctx.line_to(x, y);
-                    }
-                    ctx.close_path();
+        Element::Live(v) => {
+            let mut visiting = crate::geometry::live::VisitSet::new();
+            let ps = match v {
+                crate::geometry::live::LiveVariant::CompoundShape(cs) => cs.evaluate_with(
+                    crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
+                crate::geometry::live::LiveVariant::Reference(r) => r.evaluate_with(
+                    crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
+            };
+            for ring in &ps {
+                if ring.len() < 2 { continue; }
+                ctx.move_to(ring[0].0, ring[0].1);
+                for &(x, y) in &ring[1..] {
+                    ctx.line_to(x, y);
                 }
+                ctx.close_path();
             }
-            crate::geometry::live::LiveVariant::Reference(_) => {
-                // See draw_element: reference geometry tracing is Phase 1b.
-            }
-        },
+        }
     }
 }
 
@@ -2181,6 +2262,9 @@ pub fn render(
     // Install the brush registry for this render. Dropped on exit
     // (guard restores the prior value), so nested renders nest safely.
     let _brush_guard = register_brush_libraries(brush_libraries.clone());
+    // Install the render-scoped id->element index so live references resolve
+    // and display (REFERENCE_GRAPH.md Phase 1b).
+    let _ref_index_guard = register_ref_index(doc);
 
     // Layer 1 (canvas background) is now painted by the caller
     // (workspace::app_state::repaint) BEFORE applying the
@@ -2257,6 +2341,37 @@ mod tests {
     fn css_color_opaque_black() {
         let c = Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(0,0,0)");
+    }
+
+    #[test]
+    fn render_ref_index_resolves_reference_to_target() {
+        // register_ref_index builds the per-paint id->element index from the
+        // document; RenderResolver reads it, so a reference resolves and
+        // evaluates to its target's geometry (Phase 1b render wiring).
+        use crate::geometry::element::{RectElem, CommonProps};
+        use crate::geometry::live::{ReferenceElem, ElementRef, VisitSet, DEFAULT_PRECISION};
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.id = Some("r1".into());
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Rect(rect)));
+        let _guard = register_ref_index(&doc);
+        assert!(
+            RenderResolver.resolve(&ElementRef("r1".into())).is_some(),
+            "register_ref_index should index the rect by its id",
+        );
+        let reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = reference.evaluate_with(DEFAULT_PRECISION, &RenderResolver, &mut visiting);
+        assert_eq!(ps.len(), 1, "reference resolves to the rect's single ring");
+        assert!(
+            RenderResolver.resolve(&ElementRef("missing".into())).is_none(),
+            "an unindexed id resolves to None (dangling)",
+        );
     }
 
     // ── bleed rect (PRINT.md §1A) ──────────────────────────
