@@ -249,6 +249,79 @@ fn dfs_cycles(
 }
 
 // ---------------------------------------------------------------------------
+// Reference-aware delete: orphaned-references predicate
+// ---------------------------------------------------------------------------
+//
+// REFERENCE_GRAPH.md — the equivalence-critical core of reference-aware delete
+// (the confirm dialog is a later step). A pure graph query over the same by-id
+// reference graph the index exposes, so it lives here next to `rdeps`.
+
+/// Collect every id-bearing element id within `elem`'s subtree, recursing into
+/// **Group/Layer children only** — the SAME walk discipline as [`walk`]: a
+/// `CompoundShape`'s operands are opaque (`Element::children()` is `None` for
+/// `Element::Live`), so an id that exists only inside an operand is not a node
+/// and is not collected. First occurrence of a duplicate id still inserts it
+/// (the set de-dups inherently).
+fn collect_ids(elem: &Element, ids: &mut BTreeSet<String>) {
+    if let Some(id) = &elem.common().id {
+        ids.insert(id.clone());
+    }
+    if let Some(children) = elem.children() {
+        for child in children {
+            collect_ids(child, ids);
+        }
+    }
+}
+
+/// Answer "if I delete these elements, which live references (instances)
+/// elsewhere would be orphaned — left pointing at a now-deleted target?".
+///
+/// Returns the **sorted, de-duplicated** ids of references that point at an
+/// id which is being deleted but are not themselves in the deletion set.
+///
+/// Algorithm (REFERENCE_GRAPH.md, locked semantics):
+/// 1. `deleted_ids` — the id-bearing ids within every deletion subtree.
+///    Each path is resolved via `doc.get_element` (invalid paths skipped),
+///    then walked with the operands-opaque discipline ([`collect_ids`]); an id
+///    only inside a `CompoundShape` operand is therefore NOT a deleted target.
+/// 2. Build `idx = dependency_index(doc)`. For each deleted target `t`, its
+///    referrers are `idx.rdeps[t]` (only **targetable** ids ever get an rdeps
+///    entry, so an operand-nested target contributes none).
+/// 3. `orphaned = { r in rdeps[t] for all deleted t : r not in deleted_ids }` —
+///    references whose target is being deleted but which survive the delete.
+///
+/// Consequences: deleting an element with no external referrers returns `[]`;
+/// deleting a target together with its only referrer returns `[]` for that pair
+/// (the referrer is itself deleted); deleting an instance returns `[]` (an
+/// instance has no `rdeps`); deleting a group orphans the external referrers of
+/// any referenced element it contains.
+pub fn orphaned_references(doc: &Document, deletion_paths: &[Vec<usize>]) -> Vec<String> {
+    // Step 1: gather the id-bearing ids inside every deletion subtree.
+    let mut deleted_ids: BTreeSet<String> = BTreeSet::new();
+    for path in deletion_paths {
+        if let Some(elem) = doc.get_element(path) {
+            collect_ids(elem, &mut deleted_ids);
+        }
+        // Invalid paths are skipped (no element resolves).
+    }
+
+    // Step 2/3: for each deleted target, collect its referrers that are NOT
+    // themselves being deleted.
+    let idx = dependency_index(doc);
+    let mut orphaned: BTreeSet<String> = BTreeSet::new();
+    for t in &deleted_ids {
+        if let Some(referrers) = idx.rdeps.get(t) {
+            for r in referrers {
+                if !deleted_ids.contains(r) {
+                    orphaned.insert(r.clone());
+                }
+            }
+        }
+    }
+    orphaned.into_iter().collect()
+}
+
+// ---------------------------------------------------------------------------
 // Canonical JSON serializer
 // ---------------------------------------------------------------------------
 //
@@ -300,6 +373,38 @@ pub fn dependency_index_to_test_json(idx: &DependencyIndex) -> String {
         map_json(&idx.deps),
         map_json(&idx.rdeps),
     )
+}
+
+/// Serialize one orphaned-references fixture case to canonical JSON:
+/// `{"delete_paths":[[..],..],"orphaned":[sorted ids]}`. Object keys are in
+/// sorted (alphabetical) order — `delete_paths` then `orphaned` — matching the
+/// `JsonObj` sorted-key convention; `orphaned` is already sorted. `delete_paths`
+/// preserves the caller's path/index order (it is the case's input, not output).
+/// Reuses the same string escaping as [`dependency_index_to_test_json`].
+fn orphaned_case_json(delete_paths: &[Vec<usize>], orphaned: &[String]) -> String {
+    let paths: Vec<String> = delete_paths
+        .iter()
+        .map(|p| {
+            let items: Vec<String> = p.iter().map(|i| i.to_string()).collect();
+            format!("[{}]", items.join(","))
+        })
+        .collect();
+    format!(
+        "{{\"delete_paths\":[{}],\"orphaned\":{}}}",
+        paths.join(","),
+        array_json(orphaned),
+    )
+}
+
+/// Serialize a list of orphaned-references fixture cases to a canonical JSON
+/// array. The case array order is the file's order (NOT sorted) and is shared
+/// verbatim with the sibling apps.
+pub fn orphaned_references_cases_to_test_json(cases: &[(Vec<Vec<usize>>, Vec<String>)]) -> String {
+    let entries: Vec<String> = cases
+        .iter()
+        .map(|(paths, orphaned)| orphaned_case_json(paths, orphaned))
+        .collect();
+    format!("[{}]", entries.join(","))
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +628,162 @@ mod tests {
         // The reference nested inside the group is discovered.
         assert_eq!(idx.deps.get("g_ref"), Some(&vec!["a".to_string()]));
         assert_eq!(idx.rdeps.get("a"), Some(&vec!["g_ref".to_string()]));
+    }
+
+    // -----------------------------------------------------------------------
+    // orphaned_references predicate (reference-aware delete core)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn orphaned_target_with_two_refs_returns_both() {
+        // a <- r1, r2. Deleting `a` (at [0,0]) orphans both r1 and r2.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        assert_eq!(
+            orphaned_references(&doc, &[vec![0, 0]]),
+            vec!["r1".to_string(), "r2".to_string()]
+        );
+    }
+
+    #[test]
+    fn orphaned_target_plus_one_ref_returns_the_other() {
+        // Deleting `a` AND r1 ([0,0]+[0,1]) leaves only r2 orphaned; r1 is
+        // itself deleted, so it is not orphaned.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        assert_eq!(
+            orphaned_references(&doc, &[vec![0, 0], vec![0, 1]]),
+            vec!["r2".to_string()]
+        );
+    }
+
+    #[test]
+    fn orphaned_non_referenced_element_returns_empty() {
+        // `lonely` has no referrers; deleting it orphans nothing.
+        let doc = doc_with_layer(vec![rect_with_id(Some("lonely")), rect_with_id(Some("other"))]);
+        assert!(orphaned_references(&doc, &[vec![0, 0]]).is_empty());
+    }
+
+    #[test]
+    fn orphaned_deleting_an_instance_returns_empty() {
+        // Deleting a reference (an instance) orphans nothing: an instance has
+        // no rdeps (nothing points AT it).
+        let doc = doc_with_layer(vec![rect_with_id(Some("a")), reference("r1", "a")]);
+        assert!(orphaned_references(&doc, &[vec![0, 1]]).is_empty());
+    }
+
+    #[test]
+    fn orphaned_group_containing_referenced_element() {
+        use crate::geometry::element::GroupElem;
+        // A group at [0,1] contains the referenced rect `a`; an external
+        // reference r1 -> a sits outside the group. Deleting the group orphans
+        // r1 (its target `a` vanishes with the group).
+        let group = Rc::new(Element::Group(GroupElem {
+            children: vec![rect_with_id(Some("a"))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        }));
+        let doc = doc_with_layer(vec![reference("r1", "a"), group]);
+        assert_eq!(
+            orphaned_references(&doc, &[vec![0, 1]]),
+            vec!["r1".to_string()]
+        );
+    }
+
+    #[test]
+    fn orphaned_compound_operand_target_is_not_orphaned_by_delete() {
+        // op1 lives only inside a CompoundShape operand (operand-opaque), so it
+        // is never a targetable node and r4 -> op1 is already dangling, not
+        // orphaned-by-this-delete. Deleting the compound `cs` (no rdeps of its
+        // own) therefore orphans nothing.
+        let op1 = rect_with_id(Some("op1"));
+        let op2 = rect_with_id(None);
+        let compound = Rc::new(Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![op1, op2],
+            fill: None,
+            stroke: None,
+            common: CommonProps {
+                id: Some("cs".to_string()),
+                ..Default::default()
+            },
+        })));
+        let doc = doc_with_layer(vec![compound, reference("r4", "op1")]);
+        assert!(orphaned_references(&doc, &[vec![0, 0]]).is_empty());
+    }
+
+    #[test]
+    fn orphaned_invalid_path_is_skipped() {
+        // An out-of-range path resolves to no element and is skipped; the valid
+        // path still produces its orphans.
+        let doc = doc_with_layer(vec![rect_with_id(Some("a")), reference("r1", "a")]);
+        assert_eq!(
+            orphaned_references(&doc, &[vec![0, 99], vec![0, 0]]),
+            vec!["r1".to_string()]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Reference-aware delete CONFIRM gate (warn-then-orphan)
+    //
+    // The delete handlers (menu_bar.rs "delete" arm; keyboard.rs
+    // Delete/Backspace) branch on `orphaned_references(...).is_empty()`:
+    //   empty     -> delete inline, no dialog
+    //   non-empty -> open the confirm dialog with N = orphaned.len()
+    // The dialog UI is not unit-testable, but the gate predicate and the
+    // count N that drives the dialog param ARE. These two tests pin that
+    // decision so a regression in the gate is caught here.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delete_gate_empty_orphans_means_delete_inline() {
+        // `lonely` has no referrers -> deleting it orphans nothing -> the
+        // handler takes the inline-delete branch (no dialog).
+        let doc = doc_with_layer(vec![rect_with_id(Some("lonely"))]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            orphaned.is_empty(),
+            "no orphans -> handler deletes inline, no confirm dialog"
+        );
+    }
+
+    #[test]
+    fn delete_gate_nonempty_orphans_means_confirm_with_count() {
+        // a <- r1, r2. Deleting `a` would orphan both -> the handler takes
+        // the confirm-dialog branch. N (the dialog `count` param) is the
+        // orphan count, here 2.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            !orphaned.is_empty(),
+            "orphans exist -> handler opens the confirm dialog"
+        );
+        assert_eq!(
+            orphaned.len(),
+            2,
+            "N passed as the dialog count param equals the orphan count"
+        );
+    }
+
+    #[test]
+    fn delete_gate_single_orphan_count_is_one() {
+        // a <- r1 only. Deleting `a` orphans exactly one referrer; N == 1
+        // drives the dialog's singular wording ("instance", not
+        // "instances").
+        let doc = doc_with_layer(vec![rect_with_id(Some("a")), reference("r1", "a")]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert_eq!(orphaned.len(), 1, "single orphan -> N == 1 (singular wording)");
     }
 
     #[test]

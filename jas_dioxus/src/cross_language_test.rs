@@ -750,6 +750,107 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------
+    // orphaned_references predicate (reference-aware delete core)
+    // ---------------------------------------------------------------
+
+    /// The shared orphaned-references fixture cases, computed by the Rust
+    /// implementation over `dependency_index_input.json` and hand-verified
+    /// (REFERENCE_GRAPH.md, locked semantics). The case array ORDER is part of
+    /// the contract — it is the file's order, identical across all apps.
+    ///
+    /// Layer 0 z-order: a=[0,0], r1->a=[0,1], r2->a=[0,2], r3->ghost=[0,3],
+    /// c1->c2=[0,4], c2->c1=[0,5], cs=[0,6] (operand id op1), r4->op1=[0,7].
+    fn orphaned_references_cases() -> Vec<(Vec<Vec<usize>>, Vec<String>)> {
+        vec![
+            // delete `a` -> both refs to it are orphaned.
+            (vec![vec![0, 0]], vec!["r1".to_string(), "r2".to_string()]),
+            // delete `a` + r1 -> only r2 orphaned (r1 is itself deleted).
+            (vec![vec![0, 0], vec![0, 1]], vec!["r2".to_string()]),
+            // delete r1 (an instance) -> nothing orphaned (instances have no rdeps).
+            (vec![vec![0, 1]], vec![]),
+            // delete c1 -> c2 (which references c1) is orphaned.
+            (vec![vec![0, 4]], vec!["c2".to_string()]),
+            // delete the compound `cs` -> nothing orphaned (op1 is operand-opaque,
+            // so r4 was already dangling, not orphaned-by-this-delete; cs has no rdeps).
+            (vec![vec![0, 6]], vec![]),
+        ]
+    }
+
+    /// Bootstrap: generate the shared orphaned-references fixture. Run with:
+    ///   cargo test generate_orphaned_references_fixture -- --ignored --nocapture
+    /// Emits `expected/orphaned_references.json` — a canonical JSON array of
+    /// `{"delete_paths":[..],"orphaned":[sorted ids]}` cases, computed by the
+    /// Rust implementation (the source of truth for the canonical shape).
+    #[test]
+    #[ignore]
+    fn generate_orphaned_references_fixture() {
+        use crate::document::dependency_index::{
+            orphaned_references, orphaned_references_cases_to_test_json,
+        };
+        let doc = dependency_index_test_document();
+        // Compute each case's `orphaned` from the implementation (not the
+        // hand-written expectation) so the fixture is the function's own output.
+        let cases: Vec<(Vec<Vec<usize>>, Vec<String>)> = orphaned_references_cases()
+            .into_iter()
+            .map(|(paths, _)| {
+                let orphaned = orphaned_references(&doc, &paths);
+                (paths, orphaned)
+            })
+            .collect();
+        std::fs::write(
+            format!("{}/expected/orphaned_references.json", FIXTURES),
+            orphaned_references_cases_to_test_json(&cases),
+        )
+        .unwrap();
+        eprintln!("Generated expected/orphaned_references.json");
+    }
+
+    /// Cross-language pin (REFERENCE_GRAPH.md): parse the shared input document,
+    /// read the shared orphaned-references fixture, and for each case assert that
+    /// `orphaned_references(doc, &delete_paths)` equals the expected ids. All
+    /// apps run this same pair of fixtures.
+    #[test]
+    fn orphaned_references_cross_language() {
+        use crate::document::dependency_index::orphaned_references;
+
+        let input = read_fixture("expected/dependency_index_input.json");
+        let doc = test_json_to_document(input.trim());
+
+        let cases_json = read_fixture("expected/orphaned_references.json");
+        let cases: serde_json::Value = serde_json::from_str(cases_json.trim())
+            .expect("orphaned_references.json is valid JSON");
+        let cases = cases.as_array().expect("orphaned_references.json is an array");
+
+        for (i, case) in cases.iter().enumerate() {
+            let delete_paths: Vec<Vec<usize>> = case["delete_paths"]
+                .as_array()
+                .expect("delete_paths is an array")
+                .iter()
+                .map(|p| {
+                    p.as_array()
+                        .expect("a path is an array")
+                        .iter()
+                        .map(|n| n.as_u64().expect("path index is a number") as usize)
+                        .collect()
+                })
+                .collect();
+            let expected: Vec<String> = case["orphaned"]
+                .as_array()
+                .expect("orphaned is an array")
+                .iter()
+                .map(|s| s.as_str().expect("an orphaned id is a string").to_string())
+                .collect();
+
+            let actual = orphaned_references(&doc, &delete_paths);
+            assert_eq!(
+                actual, expected,
+                "orphaned_references cross-language case {} ({:?}) mismatch: expected {:?}, got {:?}",
+                i, delete_paths, expected, actual
+            );
+        }
+    }
+
     fn run_operation_fixture(fixture: &str) {
         let json_str = read_fixture(fixture);
         let tests: serde_json::Value = serde_json::from_str(&json_str)

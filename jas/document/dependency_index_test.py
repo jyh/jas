@@ -11,6 +11,7 @@ from absl.testing import absltest
 from document.dependency_index import (
     dependency_index,
     dependency_index_to_test_json,
+    orphaned_references,
 )
 from document.document import Document
 from geometry.element import (
@@ -158,6 +159,45 @@ class DependencyIndexTest(absltest.TestCase):
         # The reference nested inside the group is discovered.
         self.assertEqual(idx.deps.get("g_ref"), ["a"])
         self.assertEqual(idx.rdeps.get("a"), ["g_ref"])
+
+    # -----------------------------------------------------------------------
+    # orphaned_references predicate (reference-aware delete core)
+    # -----------------------------------------------------------------------
+
+    def test_orphaned_target_with_two_refs_returns_both(self):
+        # a <- r1, r2. Deleting `a` (at [0,0]) orphans both r1 and r2.
+        doc = _doc_with_layer([
+            _rect_with_id("a"),
+            _reference("r1", "a"),
+            _reference("r2", "a"),
+        ])
+        self.assertEqual(
+            orphaned_references(doc, [[0, 0]]), ["r1", "r2"])
+
+    def test_orphaned_target_plus_one_ref_returns_the_other(self):
+        # Deleting `a` AND r1 ([0,0]+[0,1]) leaves only r2 orphaned; r1 is
+        # itself deleted, so it is not orphaned.
+        doc = _doc_with_layer([
+            _rect_with_id("a"),
+            _reference("r1", "a"),
+            _reference("r2", "a"),
+        ])
+        self.assertEqual(
+            orphaned_references(doc, [[0, 0], [0, 1]]), ["r2"])
+
+    def test_orphaned_deleting_an_instance_returns_empty(self):
+        # Deleting a reference (an instance) orphans nothing: an instance has
+        # no rdeps (nothing points AT it).
+        doc = _doc_with_layer([_rect_with_id("a"), _reference("r1", "a")])
+        self.assertEqual(orphaned_references(doc, [[0, 1]]), [])
+
+    def test_orphaned_group_containing_referenced_element(self):
+        # A group at [0,1] contains the referenced rect `a`; an external
+        # reference r1 -> a sits outside the group. Deleting the group orphans
+        # r1 (its target `a` vanishes with the group).
+        group = Group(children=(_rect_with_id("a"),))
+        doc = _doc_with_layer([_reference("r1", "a"), group])
+        self.assertEqual(orphaned_references(doc, [[0, 1]]), ["r1"])
 
     def test_canonical_json_has_sorted_keys_and_arrays(self):
         # c1<->c2 cycle plus two refs to `a` and a dangling ref.

@@ -156,6 +156,35 @@ private func assertSvgRoundtrip(_ name: String) {
         "dependency_index cross-language test failed: canonical JSON mismatch")
 }
 
+// MARK: - orphaned_references cross-language pin (REFERENCE_GRAPH.md)
+
+/// Parse the shared input document, read the shared orphaned-references
+/// fixture, and for each case assert that
+/// `DependencyIndex.orphanedReferences(doc, delete_paths)` equals the expected
+/// ids. All apps run this same pair of fixtures. The case array ORDER is part
+/// of the contract — it is the file's order, identical across all apps.
+@Test func orphanedReferencesCrossLanguage() throws {
+    let input = readFixture("expected/dependency_index_input.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let doc = testJsonToDocument(input)
+
+    let casesJson = readFixture("expected/orphaned_references.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = casesJson.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    for (i, tc) in cases.enumerated() {
+        let deletePaths: [ElementPath] = (tc["delete_paths"] as! [[Any]]).map { path in
+            path.map { ($0 as! NSNumber).intValue }
+        }
+        let expected = (tc["orphaned"] as! [Any]).map { $0 as! String }
+
+        let actual = DependencyIndex.orphanedReferences(doc, deletePaths)
+        #expect(actual == expected,
+            "orphaned_references cross-language case \(i) (\(deletePaths)) mismatch: expected \(expected), got \(actual)")
+    }
+}
+
 // MARK: - JSON round-trip (parse → serialize)
 
 private func assertJsonRoundtrip(_ name: String) {

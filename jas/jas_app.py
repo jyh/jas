@@ -1026,9 +1026,16 @@ class MainWindow(QMainWindow):
         if not m:
             return
         doc = m.document
-        if doc.selection:
-            m.snapshot()
-            m.document = doc.delete_selection()
+        if not doc.selection:
+            return
+        # Reference-aware delete: a delete that would orphan a live
+        # reference asks for confirmation first (shared with Edit>Delete
+        # so both entry points warn identically). Cancel aborts.
+        from menu.menu import _confirm_delete_if_orphans
+        if not _confirm_delete_if_orphans(m, self):
+            return
+        m.snapshot()
+        m.document = doc.delete_selection()
 
     def _zoom_in(self):
         """Zoom in by zoom_step centered at viewport center.

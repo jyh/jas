@@ -644,8 +644,15 @@ pub fn App() -> Element {
         }
     };
 
+    // --- YAML dialog signal (created here so the keyboard handler can
+    // open the reference-aware delete confirm dialog; the context
+    // provider is registered below alongside the other menu-bar
+    // signals). ---
+    let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
+
     // --- Keyboard events ---
-    let on_keydown = make_keydown_handler(act.clone(), app.clone(), revision);
+    let on_keydown =
+        make_keydown_handler(act.clone(), app.clone(), revision, yaml_dialog);
     let on_keyup = make_keyup_handler(act.clone());
 
     // --- Tool buttons with shared slots ---
@@ -802,7 +809,7 @@ pub fn App() -> Element {
     let workspace_submenu_open = use_signal(|| false);
     let appearance_submenu_open = use_signal(|| false);
     // color_picker_state removed — color picker now uses YAML dialog system
-    let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
+    // (yaml_dialog signal is created earlier, before the keyboard handler).
     use_context_provider(|| crate::interpreter::dialog_view::DialogCtx(yaml_dialog));
     use_context_provider(|| crate::interpreter::timer::TimerCtx(
         std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()))
