@@ -749,6 +749,51 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+@Test func makeInstanceCreatesOffsetSelectedReference() {
+    // "Make Instance" = createReference + moveSelection(24, 24) under a
+    // single snapshot. After it: a reference targeting the source's id
+    // exists, is offset by (24, 24) via its transform, and is the
+    // selection. Source keeps its position. One undo restores the
+    // pre-Make-Instance state. This pins the op composition the
+    // Object-menu handler performs. Mirrors Rust
+    // make_instance_creates_offset_selected_reference.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    // The just-added element is selected at [0,0] (kind=.all).
+    model.snapshot()
+    ctrl.createReference([0, 0], targetId: "tgt-1", refId: "ref-1")
+    ctrl.moveSelection(dx: pasteOffset, dy: pasteOffset)
+    var doc = model.document
+    // Source rect untouched.
+    if case .rect(let r) = doc.getElement([0, 0]) {
+        #expect((r.x, r.y) == (0, 0))
+    } else {
+        Issue.record("expected source Rect at [0,0]")
+    }
+    // New reference at [0,1], targeting the source, offset by (24, 24).
+    if case .live(.reference(let re)) = doc.getElement([0, 1]) {
+        #expect(re.target.id == "tgt-1")
+        #expect(re.id == "ref-1")
+        let t = re.transform
+        #expect(t != nil)
+        #expect((t!.e, t!.f) == (pasteOffset, pasteOffset))
+    } else {
+        Issue.record("expected a Reference at [0,1]")
+    }
+    // The reference is the selection (whole-element).
+    #expect(doc.selection.count == 1)
+    let es = doc.selection.first
+    #expect(es?.path == [0, 1])
+    #expect(es?.kind == .all)
+    // Single snapshot => one undo restores the pre-Make-Instance state
+    // (just the source rect, no reference).
+    model.undo()
+    doc = model.document
+    #expect(doc.tryGetElement([0, 1]) == nil)
+    #expect(doc.tryGetElement([0, 0]) != nil)
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {

@@ -319,6 +319,7 @@ MENU_BAR = [
         ("Hide", "hide", "\u23183"),
         ("Show All", "show_all", "\u2325\u23183"),
         ("---", "", ""),
+        ("Make Instance", "make_instance", ""),
         ("Simplify", "simplify", ""),
     ]),
     ("Window", [

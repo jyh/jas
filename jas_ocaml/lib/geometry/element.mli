@@ -742,6 +742,14 @@ val with_id : element -> string option -> element
     children. See the stable-identity initiative. *)
 val clear_ids : element -> element
 
+(** Mint a fresh 8-char base36 stable-element id. Identical in shape to
+    [Artboard.generate_id] (same alphabet, same length, same rng seam).
+    Pass an [rng] returning a non-negative int per call for deterministic
+    tests; the default taps platform entropy. UI-layer minter only —
+    never called inside a Controller, whose ids are carried in-op so every
+    app applies identical values. *)
+val generate_id : ?rng:(unit -> int) -> unit -> string
+
 val color_to_hex : color -> string
 val color_from_hex : string -> color option
 

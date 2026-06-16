@@ -169,6 +169,29 @@ public func generateArtboardId() -> String {
     return generateArtboardId(using: &rng)
 }
 
+/// Mint a fresh 8-char base36 stable-element id. Identical in shape to
+/// `generateArtboardId` (same alphabet, same length, same rng seam) but
+/// minted for element identity rather than artboard identity. This is a
+/// UI-layer minter and must never be called inside a Controller method
+/// (controllers take ids as parameters so they stay deterministic).
+/// Mirrors Rust `generate_element_id`.
+public func generateElementId<RNG: RandomNumberGenerator>(
+    using rng: inout RNG
+) -> String {
+    var chars = ""
+    for _ in 0..<artboardIdLength {
+        let idx = Int.random(in: 0..<artboardIdAlphabet.count, using: &rng)
+        chars.append(artboardIdAlphabet[idx])
+    }
+    return chars
+}
+
+/// Non-generic wrapper that taps a system RNG each call.
+public func generateElementId() -> String {
+    var rng = SystemRandomNumberGenerator()
+    return generateElementId(using: &rng)
+}
+
 // MARK: - Default-name rule
 
 /// Match a name against the default `Artboard N` pattern and return

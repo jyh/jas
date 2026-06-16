@@ -3250,6 +3250,51 @@ mod tests {
     }
 
     #[test]
+    fn make_instance_creates_offset_selected_reference() {
+        // "Make Instance" = create_reference + move_selection(24, 24) under
+        // a single snapshot. After it: a reference targeting the source's
+        // id exists, is offset by (24, 24) via its common.transform, and
+        // is the selection. Source keeps its position. This pins the op
+        // composition the Object-menu handler performs.
+        use crate::tools::tool::PASTE_OFFSET;
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        // The just-added element is selected at [0,0] (kind=All).
+        model.snapshot();
+        Controller::create_reference(&mut model, &vec![0, 0], "tgt-1", "ref-1");
+        Controller::move_selection(&mut model, PASTE_OFFSET, PASTE_OFFSET);
+        let doc = model.document();
+        // Source rect untouched.
+        if let Element::Rect(r) = doc.get_element(&vec![0, 0]).unwrap() {
+            assert_eq!((r.x, r.y), (0.0, 0.0));
+        } else {
+            panic!("expected source Rect at [0,0]");
+        }
+        // New reference at [0,1], targeting the source, offset by (24, 24).
+        match doc.get_element(&vec![0, 1]).unwrap() {
+            Element::Live(crate::geometry::live::LiveVariant::Reference(re)) => {
+                assert_eq!(re.target.0, "tgt-1");
+                assert_eq!(re.common.id.as_deref(), Some("ref-1"));
+                let t = re.common.transform.expect("offset rides on common.transform");
+                assert_eq!((t.e, t.f), (PASTE_OFFSET, PASTE_OFFSET));
+                // The dead instance-transform field stays None.
+                assert!(re.transform.is_none());
+            }
+            other => panic!("expected a Reference at [0,1], got {other:?}"),
+        }
+        // The reference is the selection (whole-element).
+        assert_eq!(doc.selection.len(), 1);
+        assert_eq!(doc.selection[0].path, vec![0, 1]);
+        assert_eq!(doc.selection[0].kind, SelectionKind::All);
+        // Single snapshot ⇒ one undo restores the pre-Make-Instance state
+        // (just the source rect, no reference).
+        model.undo();
+        let doc = model.document();
+        assert!(doc.get_element(&vec![0, 1]).is_none());
+        assert!(doc.get_element(&vec![0, 0]).is_some());
+    }
+
+    #[test]
     fn create_reference_keeps_existing_target_id() {
         // Target already has an id → it is NOT re-stamped; the reference
         // targets the existing id and target_id is ignored.

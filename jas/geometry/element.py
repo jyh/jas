@@ -1737,6 +1737,20 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
                             pass
                 anchor_idx += 1
             return replace(elem, d=tuple(new_cmds))
+        case ReferenceElem() if _is_all(kind, 0):
+            # A reference has no geometry of its own, so a whole-element
+            # move (kind=all) rides on its ``transform`` — the only thing
+            # to move. Render already applies ``transform`` to a reference
+            # (canvas applies elem.transform above the per-kind match), so
+            # this makes the move visible without any render change. The
+            # offset accumulates onto any existing translation (so "create
+            # offset, then drag to reposition" mutates one field). A
+            # partial / control-point move is meaningless for a reference,
+            # so it falls through to the no-op clone below. Mirrors the
+            # Rust Reference arm in move_control_points / translate_element.
+            existing = elem.transform if elem.transform is not None else Transform()
+            return replace(elem, transform=replace(
+                existing, e=existing.e + dx, f=existing.f + dy))
         case _:
             return elem
 

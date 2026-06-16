@@ -1574,6 +1574,27 @@ let rec clear_ids elem =
   | Layer r -> Layer { r with children = Array.map clear_ids r.children }
   | _ -> elem
 
+(* -------------------- stable-element id minting -------------------- *)
+
+let id_alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+let id_length = 8
+
+(* Mint a fresh 8-char base36 stable-element id. Identical in shape to
+   [Artboard.generate_id] (same alphabet, same length, same rng seam:
+   default taps platform entropy via [Random.int], an explicit [rng] is
+   deterministic for tests) but minted for element identity rather than
+   artboard identity. This is a UI-layer minter and must never be called
+   inside a Controller method (controllers take ids as parameters so they
+   stay deterministic). Mirrors Rust generate_element_id. *)
+let generate_id ?(rng = fun () -> Random.int 1_000_000_007) () =
+  let buf = Bytes.create id_length in
+  for i = 0 to id_length - 1 do
+    let n = rng () in
+    let idx = (n mod String.length id_alphabet + String.length id_alphabet) mod String.length id_alphabet in
+    Bytes.set buf i id_alphabet.[idx]
+  done;
+  Bytes.to_string buf
+
 let color_to_hex c =
   let (r, g, b, _) = color_to_rgba c in
   let ri = int_of_float (Float.round (r *. 255.0)) in
@@ -2004,6 +2025,17 @@ let move_control_points ?(is_all = false) elem indices dx dy =
         incr anchor_idx
     done;
     Text_path { r with d = Array.to_list cmds }
+  (* A reference has no geometry of its own, so a whole-element move
+     ([is_all]) rides on common.transform ([ref_transform]) — the only
+     thing to move. The render seam already applies [ref_transform] to a
+     reference, so this makes the move visible without any render change.
+     A partial / control-point move is meaningless for a reference, so it
+     falls through to the catch-all (returns the element unchanged) like
+     Group/Layer/Compound_shape. Mirrors the Rust Reference arm in
+     move_control_points. *)
+  | Live (Reference r) when is_all ->
+    let cur = match r.ref_transform with Some t -> t | None -> identity_transform in
+    Live (Reference { r with ref_transform = Some { cur with e = cur.e +. dx; f = cur.f +. dy } })
   | _ -> elem
 
 

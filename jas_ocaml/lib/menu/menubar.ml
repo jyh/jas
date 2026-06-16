@@ -62,6 +62,62 @@ let group_selection (model : Model.model) () =
     end
   end
 
+(* "Make Instance" = the first user-facing way to create a live
+   reference. Native UI glue (not a Controller op) composing two
+   already-pinned ops under ONE snapshot: [create_reference] (the UI
+   mints [target_id] / [ref_id], value-in-op, never inside a Controller)
+   then a move of the now-selected reference by [paste_offset]. Enabled
+   only when EXACTLY ONE whole element is selected (SelKindAll; not a
+   control-point sub-selection); a no-op otherwise, like group's guard.
+   The offset rides on the new reference's common transform via
+   move_selection, so create-offset and move-to-reposition mutate the
+   same field. Mirrors the Rust make_instance command. *)
+let make_instance (model : Model.model) () =
+  let doc = model#document in
+  let sel = doc.Document.selection in
+  (* Require exactly one whole-element selection. *)
+  match Document.PathMap.bindings sel with
+  | [ (target_path, es) ] when es.Document.es_kind = Document.SelKindAll ->
+    (* Gather every existing element id so the freshly minted target_id /
+       ref_id can avoid collisions. *)
+    let existing = Hashtbl.create 16 in
+    let rec gather elem =
+      (match Element.id_of elem with
+       | Some id -> Hashtbl.replace existing id ()
+       | None -> ());
+      match elem with
+      | Element.Group { children; _ } | Element.Layer { children; _ } ->
+        Array.iter gather children
+      | _ -> ()
+    in
+    Array.iter gather doc.Document.layers;
+    (* Mint two distinct, collision-free ids (mirrors the artboard mint
+       loop). [None] when 100 attempts all collide. *)
+    let mint () =
+      let rec loop n =
+        if n <= 0 then None
+        else
+          let c = Element.generate_id () in
+          if Hashtbl.mem existing c then loop (n - 1)
+          else Some c
+      in
+      loop 100
+    in
+    (match mint () with
+     | None -> ()
+     | Some target_id ->
+       Hashtbl.replace existing target_id ();
+       (match mint () with
+        | None -> ()
+        | Some ref_id ->
+          (* create_reference + offset-move under ONE snapshot = a single
+             undo step. *)
+          model#snapshot;
+          let ctrl = new Controller.controller ~model () in
+          ctrl#create_reference target_path target_id ref_id;
+          ctrl#move_selection Canvas_tool.paste_offset Canvas_tool.paste_offset))
+  | _ -> ()
+
 let ungroup_selection (model : Model.model) () =
   let doc = model#document in
   let sel = doc.Document.selection in
@@ -193,6 +249,11 @@ let rec translate_element elem dx dy =
                       opacity; transform; locked; visibility; blend_mode;
                       mask = None;
                       isolated_blending; knockout_group }
+    | Element.Live (Element.Reference _) ->
+      (* A reference has no geometry of its own; a whole-element move
+         rides on common.transform via the [is_all] Reference arm in
+         move_control_points. Mirrors the Rust translate_element. *)
+      Element.move_control_points ~is_all:true elem [] dx dy
     | _ ->
       let n = Element.control_point_count elem in
       let indices = List.init n Fun.id in
@@ -543,6 +604,9 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     let model = m () in model#snapshot; (new Controller.controller ~model ())#hide_selection));
   ignore (object_factory#add_item "Show All" ~callback:(fun () ->
     let model = m () in model#snapshot; (new Controller.controller ~model ())#show_all));
+  ignore (object_factory#add_separator ());
+  ignore (object_factory#add_item "Make Instance" ~callback:(fun () ->
+    make_instance (m ()) ()));
 
   (* View menu *)
   let _view_menu = factory#add_submenu "View" in

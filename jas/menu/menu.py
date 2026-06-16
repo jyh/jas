@@ -155,6 +155,13 @@ def create_menus(window: QMainWindow) -> None:
     show_all_action.setShortcut(QKeySequence("Ctrl+Alt+3"))
     show_all_action.triggered.connect(lambda: _with_model(lambda m: _show_all(m)))
 
+    object_menu.addSeparator()
+
+    make_instance_action = object_menu.addAction("&Make Instance")
+    # No keyboard shortcut (matches the Rust Make Instance command).
+    make_instance_action.triggered.connect(
+        lambda: _with_model(lambda m: _link_to_selection(m)))
+
     # View menu
     view_menu = menubar.addMenu("&View")
 
@@ -659,6 +666,77 @@ def _select_all(model: Model) -> None:
     from document.controller import Controller
     controller = Controller(model=model)
     controller.select_all()
+
+
+def _link_to_selection(model: Model) -> None:
+    """Make Instance: create a live by-id reference to the single
+    selected element, offset by (PASTE_OFFSET, PASTE_OFFSET) and
+    selected (REFERENCE_GRAPH.md §4).
+
+    Native UI glue (not a Controller op): enabled only when exactly one
+    whole element is selected (kind=all; not a control-point sub-
+    selection). It mints ``target_id`` / ``ref_id`` via
+    ``generate_element_id`` with a collision-retry loop over the existing
+    element ids — never minting inside a Controller — then composes two
+    already-pinned ops under ONE snapshot: ``create_reference`` (which
+    stamps the target and appends the reference, selecting it) followed
+    by a ``move_selection`` by the paste offset (the offset rides on the
+    new reference's ``transform``, the field render applies). One
+    snapshot => one undo. Mirrors the Rust make_instance handler.
+    """
+    from document.controller import Controller
+    from document.artboard import generate_element_id
+    from document.document import _SelectionAll
+
+    doc = model.document
+    # Enabled only for a single whole-element selection.
+    if len(doc.selection) != 1:
+        return
+    es = next(iter(doc.selection))
+    if not isinstance(es.kind, _SelectionAll):
+        return
+    target_path = es.path
+
+    # Gather every existing element id so the freshly minted ids avoid
+    # collisions.
+    existing: set[str] = set()
+
+    def _gather_ids(elem) -> None:
+        eid = getattr(elem, "id", None)
+        if eid is not None:
+            existing.add(eid)
+        children = getattr(elem, "children", None)
+        if children is not None:
+            for c in children:
+                _gather_ids(c)
+
+    for layer in doc.layers:
+        _gather_ids(layer)
+
+    # Mint two distinct, collision-free ids (mirrors the artboard mint
+    # loop): generate_element_id is a UI-layer minter, never a Controller.
+    def _mint() -> str | None:
+        for _ in range(100):
+            candidate = generate_element_id()
+            if candidate not in existing:
+                return candidate
+        return None
+
+    target_id = _mint()
+    if target_id is None:
+        return
+    existing.add(target_id)
+    ref_id = _mint()
+    if ref_id is None:
+        return
+
+    # create_reference + offset-move under ONE snapshot = a single undo
+    # step (the offset rides on the new reference's transform via
+    # move_selection).
+    model.snapshot()
+    controller = Controller(model=model)
+    controller.create_reference(target_path, target_id, ref_id)
+    controller.move_selection(PASTE_OFFSET, PASTE_OFFSET)
 
 
 def _group_selection(model: Model) -> None:
