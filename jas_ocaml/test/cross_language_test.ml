@@ -59,7 +59,7 @@ let roundtrip_names = [
    separate from [roundtrip_names] because the latter also seeds
    [binary_names], where Live binary serialization is deferred. *)
 let svg_roundtrip_names =
-  roundtrip_names @ ["live_reference"; "live_compound"]
+  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id"]
 
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
@@ -81,7 +81,12 @@ let json_roundtrip_names =
    the bare live_reference / live_compound SVG-parse fixtures. *)
 let binary_names =
   roundtrip_names @ ["element_ids";
-                     "live_reference_roundtrip"; "live_compound_roundtrip"]
+                     "live_reference_roundtrip"; "live_compound_roundtrip";
+                     (* The compound id is the cross-app byte pin: its
+                        Python-generated 108-byte .bin must decode here, and
+                        the JSON to binary to JSON round-trip must preserve the
+                        id (REFERENCE_GRAPH.md compound-id round-trip). *)
+                     "live_compound_id"]
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
@@ -351,6 +356,9 @@ let () =
          data-jas-operation=...> parses to a compound. *)
       Alcotest.test_case "svg_parse live_reference" `Quick (fun () -> assert_svg_parse "live_reference");
       Alcotest.test_case "svg_parse live_compound" `Quick (fun () -> assert_svg_parse "live_compound");
+      (* Compound id round-trips through SVG (id="..." on the <g>), unlike
+         name which live elements never emit. *)
+      Alcotest.test_case "svg_parse live_compound_id" `Quick (fun () -> assert_svg_parse "live_compound_id");
     ];
 
     (* Algorithm test vectors *)
@@ -404,6 +412,39 @@ let () =
             assert false
           end
         ) tests);
+    ];
+
+    (* Compound id assignment (regression pin for the cross-language
+       compound-id round-trip bug): assign_id must stamp a compound's id,
+       and the assigned id must survive a binary round-trip. *)
+    "Compound id", [
+      Alcotest.test_case "assign_id stamps a compound" `Quick (fun () ->
+        let svg = read_fixture "svg/live_compound.svg" in
+        let doc = Jas.Svg.svg_to_document svg in
+        let model = Jas.Model.create ~document:doc () in
+        let ctrl = Jas.Controller.create ~model () in
+        (* The compound is the first child of the first layer. *)
+        let path = [0; 0] in
+        (match (try Some (Jas.Document.get_element model#document path)
+                with _ -> None) with
+         | Some (Jas.Element.Live (Jas.Element.Compound_shape _)) -> ()
+         | _ -> failwith "expected a compound at path [0; 0]");
+        ctrl#assign_id path "c-assigned";
+        let stamped = Jas.Document.get_element model#document path in
+        (match Jas.Element.id_of stamped with
+         | Some "c-assigned" -> ()
+         | other ->
+           failwith (Printf.sprintf "compound id not stamped: %s"
+             (match other with Some s -> s | None -> "<none>")));
+        (* And it survives the binary codec. *)
+        let binary = Jas.Binary.document_to_binary model#document in
+        let doc2 = Jas.Binary.binary_to_document binary in
+        let round = Jas.Document.get_element doc2 path in
+        (match Jas.Element.id_of round with
+         | Some "c-assigned" -> ()
+         | other ->
+           failwith (Printf.sprintf "compound id lost through binary: %s"
+             (match other with Some s -> s | None -> "<none>"))));
     ];
 
     (* Operation equivalence tests *)

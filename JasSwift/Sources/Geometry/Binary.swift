@@ -655,11 +655,13 @@ private func packElement(_ elem: Element) -> MsgValue {
         // compound carries none here), mirroring the test_json live codec.
         switch v {
         case .compoundShape(let cs):
-            // CompoundShape carries no name / id field, so both pack as nil
-            // (matching Python's getattr-based _pack_common).
+            // CompoundShape carries a stable id but no name field, so name
+            // packs as nil while id packs through (matching Python's
+            // getattr-based _pack_common). An id-less compound is byte-
+            // identical to before.
             let common = packCommon(locked: cs.locked, opacity: cs.opacity,
                                     visibility: cs.visibility, transform: cs.transform,
-                                    name: nil, id: nil)
+                                    name: nil, id: cs.id)
             // [tag, common(1..6), kind(7), operation(8), operands(9)]
             let operands: [MsgValue] = cs.operands.map { packElement($0) }
             return .array([vint(tagLive)] + common +
@@ -902,12 +904,13 @@ private func unpackElement(_ v: MsgValue) -> Element {
         switch kind {
         case "compound_shape":
             // Unknown operation strings default to union, matching the
-            // Rust / Python readers. CompoundShape has no name / id slot,
-            // so those common fields are dropped (paint is nil in Phase 1).
+            // Rust / Python readers. CompoundShape carries a stable id but
+            // no name slot, so id passes through while name is dropped
+            // (paint is nil in Phase 1).
             let operation = CompoundOperation(rawValue: asStr(arr[8])) ?? .union
             let operands = asArray(arr[9]).map { unpackElement($0) }
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: operands,
+                operation: operation, operands: operands, id: id,
                 opacity: opacity, transform: xform,
                 locked: locked, visibility: vis)))
         case "reference":

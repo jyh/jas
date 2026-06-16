@@ -411,9 +411,11 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // with its operands as children. The operation attribute lets
             // the reader rebuild a CompoundShape instead of demoting to a
             // plain Group (and losing the operation).
+            // Mirror Rust's common_attrs_no_name: opacity + transform + id,
+            // but NOT name (live elements never emit inkscape:label).
             var lines = ["\(indent)<g data-jas-live=\"compound_shape\"" +
                 " data-jas-operation=\"\(cs.operation.rawValue)\"" +
-                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))>"]
+                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idAttr(cs.id))>"]
             for child in cs.operands {
                 lines.append(elementSvg(child, indent: indent + "  "))
             }
@@ -1365,7 +1367,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
             let opStr = elem.attribute(forName: "data-jas-operation")?.stringValue ?? ""
             let operation = CompoundOperation(rawValue: opStr) ?? .union
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: children,
+                operation: operation, operands: children, id: id,
                 opacity: opacity, transform: transform)))
         }
         // Layer detection: only explicit inkscape:groupmode="layer"

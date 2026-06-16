@@ -457,7 +457,10 @@ package func elementJson(_ elem: Element) -> String {
             // the reader had no live arm at all and trapped); now emitted
             // so compound shapes round-trip through test_json.
             o.str("operation", cs.operation.rawValue)
-            commonFields(o, cs.opacity, cs.transform, cs.locked, cs.visibility, nil)
+            // CompoundShape carries a stable id but no name field, so emit
+            // id (only when set) while name stays nil — matching the
+            // reference writer and Rust's common_attrs_no_name.
+            commonFields(o, cs.opacity, cs.transform, cs.locked, cs.visibility, nil, cs.id)
             let children = cs.operands.map { elementJson($0) }
             o.raw("children", jsonArray(children))
         case .reference(let r):
@@ -983,7 +986,7 @@ package func parseElement(_ v: Any?) -> Element {
             let operation = CompoundOperation(rawValue: d["operation"] as? String ?? "union") ?? .union
             let operands = (d["children"] as? [Any] ?? []).map { parseElement($0) }
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: operands,
+                operation: operation, operands: operands, id: id,
                 opacity: opacity, transform: transform,
                 locked: locked, visibility: visibility)))
         case "reference":
