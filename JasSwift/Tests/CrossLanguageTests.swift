@@ -70,6 +70,10 @@ private func assertSvgRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // REFERENCE_GRAPH.md Phase 2a: live element SVG codec. A reference
+        // round-trips as <use href="#id">; a compound as
+        // <g data-jas-live="compound_shape" data-jas-operation="...">.
+        "live_reference", "live_compound",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -94,6 +98,12 @@ private func assertSvgRoundtrip(_ name: String) {
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
+/// REFERENCE_GRAPH.md Phase 2a: a <use href="#id"> imports as a live
+/// reference (F-svg-use); the href minus '#' becomes the target.
+@Test func svgParseLiveReference() { assertSvgParse("live_reference") }
+/// REFERENCE_GRAPH.md Phase 2a: a <g data-jas-live="compound_shape"
+/// data-jas-operation="..."> imports as a CompoundShape, not a Group.
+@Test func svgParseLiveCompound() { assertSvgParse("live_compound") }
 
 // MARK: - JSON round-trip (parse → serialize)
 

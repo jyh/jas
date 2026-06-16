@@ -52,6 +52,15 @@ let roundtrip_names = [
   "multi_layer"; "complex_document"
 ]
 
+(* SVG round-trip fixtures. Extends [roundtrip_names] with the Live
+   element fixtures (REFERENCE_GRAPH.md Phase 2a): a reference writes as
+   <use href> and reads back; a compound writes as
+   <g data-jas-live=... data-jas-operation=...> and reads back. Kept
+   separate from [roundtrip_names] because the latter also seeds
+   [binary_names], where Live binary serialization is deferred. *)
+let svg_roundtrip_names =
+  roundtrip_names @ ["live_reference"; "live_compound"]
+
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
    test_json codec both round-trip those fields, so element_ids participates in
@@ -302,7 +311,7 @@ let () =
     (* SVG round-trip idempotence *)
     "SVG round-trip", [
       Alcotest.test_case "svg_roundtrip all fixtures" `Quick (fun () ->
-        List.iter assert_svg_roundtrip roundtrip_names);
+        List.iter assert_svg_roundtrip svg_roundtrip_names);
     ];
 
     (* JSON round-trip idempotence *)
@@ -329,6 +338,11 @@ let () =
       Alcotest.test_case "svg_parse multi_layer" `Quick (fun () -> assert_svg_parse "multi_layer");
       Alcotest.test_case "svg_parse complex_document" `Quick (fun () -> assert_svg_parse "complex_document");
       Alcotest.test_case "svg_parse dup_id_import" `Quick (fun () -> assert_svg_parse "dup_id_import");
+      (* Live elements (REFERENCE_GRAPH.md Phase 2a): <use href> parses
+         to a reference; <g data-jas-live="compound_shape"
+         data-jas-operation=...> parses to a compound. *)
+      Alcotest.test_case "svg_parse live_reference" `Quick (fun () -> assert_svg_parse "live_reference");
+      Alcotest.test_case "svg_parse live_compound" `Quick (fun () -> assert_svg_parse "live_compound");
     ];
 
     (* Algorithm test vectors *)

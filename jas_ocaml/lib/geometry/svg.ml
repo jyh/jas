@@ -340,20 +340,30 @@ let rec element_svg indent (elem : Element.element) =
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Live (Compound_shape cs) ->
-    (* Phase 1: emit as a group of operands so SVG export remains
-       round-trippable. Phase 2 replaces with the evaluated geometry. *)
-    let header = Printf.sprintf "%s<g data-jas-live=\"compound_shape\"%s%s%s>"
-      indent (id_attr cs.id) (opacity_attr cs.opacity) (transform_attr cs.transform) in
+    (* A compound shape emits as a group of operands tagged with
+       data-jas-live + data-jas-operation so the reader can rebuild it
+       as a live compound rather than a plain Group
+       (REFERENCE_GRAPH.md Phase 2a). *)
+    let op = match cs.operation with
+      | Op_union -> "union"
+      | Op_subtract_front -> "subtract_front"
+      | Op_intersection -> "intersection"
+      | Op_exclude -> "exclude" in
+    let header = Printf.sprintf
+      "%s<g data-jas-live=\"compound_shape\" data-jas-operation=\"%s\"%s%s%s>"
+      indent op (id_attr cs.id) (opacity_attr cs.opacity)
+      (transform_attr cs.transform) in
     let child_lines = Array.to_list (Array.map (element_svg (indent ^ "  ")) cs.operands) in
     let footer = Printf.sprintf "%s</g>" indent in
     String.concat "\n" (header :: child_lines @ [footer])
   | Live (Reference r) ->
-    (* Phase 1 placeholder: SVG round-trip of references (as
-       <use href="#id">) lands in Phase 2. Emit an empty marker group
-       so export stays valid until then. *)
-    Printf.sprintf "%s<g data-jas-live=\"reference\"%s%s%s></g>"
-      indent (id_attr r.ref_id) (opacity_attr r.ref_opacity)
-      (transform_attr r.ref_transform)
+    (* A reference is native SVG <use href="#id"> (REFERENCE_GRAPH.md
+       Phase 2a). Its own id/opacity/transform ride the common attrs; the
+       target is the href. Any <use> imports back as a live reference
+       (decision F-svg-use). *)
+    Printf.sprintf "%s<use href=\"#%s\"%s%s%s/>"
+      indent (escape_xml r.ref_target) (id_attr r.ref_id)
+      (opacity_attr r.ref_opacity) (transform_attr r.ref_transform)
 
 (* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
    Stored as <jas:document-setup> and <jas:print-preferences> children
@@ -933,16 +943,57 @@ let rec parse_element i =
             | _ -> Some base))
       | "g" ->
         let children = parse_children i in
-        (* Layer detection: only explicit inkscape:groupmode="layer"
-           (Inkscape convention) marks a Layer. Plain inkscape:label
-           on a <g> means a named Group, not a Layer. *)
-        let group_mode = get_attr attrs "groupmode" in
-        (match group_mode with
-         | Some "layer" ->
-           let name = match parsed_name with Some n -> n | None -> "" in
-           Some (Element.make_layer ~name ~opacity ~transform children)
+        (* A live compound shape is <g data-jas-live="compound_shape">
+           (REFERENCE_GRAPH.md Phase 2a): rebuild it as a live compound
+           rather than demoting to a plain Group. The operation comes
+           from data-jas-operation (default union). The id, if any, is
+           applied below via [with_id], mirroring the other elements. *)
+        (match get_attr attrs "data-jas-live" with
+         | Some "compound_shape" ->
+           let operation = match get_attr attrs "data-jas-operation" with
+             | Some "subtract_front" -> Element.Op_subtract_front
+             | Some "intersection" -> Element.Op_intersection
+             | Some "exclude" -> Element.Op_exclude
+             | _ -> Element.Op_union in
+           Some (Element.Live (Element.Compound_shape {
+             operation;
+             id = None;
+             operands = children;
+             fill = None;
+             stroke = None;
+             opacity;
+             transform;
+             locked = false;
+             visibility = Element.Preview;
+             blend_mode = Element.Normal;
+             mask = None;
+           }))
          | _ ->
-           Some (Element.make_group ~opacity ~transform children))
+           (* Layer detection: only explicit inkscape:groupmode="layer"
+              (Inkscape convention) marks a Layer. Plain inkscape:label
+              on a <g> means a named Group, not a Layer. *)
+           let group_mode = get_attr attrs "groupmode" in
+           (match group_mode with
+            | Some "layer" ->
+              let name = match parsed_name with Some n -> n | None -> "" in
+              Some (Element.make_layer ~name ~opacity ~transform children)
+            | _ ->
+              Some (Element.make_group ~opacity ~transform children)))
+      | "use" ->
+        (* Native SVG <use href="#id"> imports as a live reference
+           (decision F-svg-use: any <use> becomes a reference). The
+           reference's own id/opacity/transform ride the common attrs
+           (id applied below via [with_id]); href is the target. xmlm
+           strips the namespace, so both href and xlink:href surface as
+           the local name "href". *)
+        let target = match get_attr attrs "href" with
+          | Some h -> h
+          | None -> "" in
+        let target =
+          if String.length target > 0 && target.[0] = '#'
+          then String.sub target 1 (String.length target - 1)
+          else target in
+        Some (Element.make_reference ~opacity ~transform target)
       | _ ->
         skip_element i;
         None

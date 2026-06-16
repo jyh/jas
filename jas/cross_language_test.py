@@ -69,6 +69,10 @@ class CrossLanguageTest(absltest.TestCase):
             "polyline_basic", "polygon_basic", "path_all_commands",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer",
+            # Live element SVG codec (REFERENCE_GRAPH.md Phase 2a):
+            # a reference round-trips as <use href="#id">; a compound
+            # as <g data-jas-live="compound_shape" data-jas-operation=...>.
+            "live_reference", "live_compound",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -183,6 +187,17 @@ class CrossLanguageTest(absltest.TestCase):
         # (dedupe_element_ids) keeps the id on the first element in
         # pre-order and clears it on the later duplicate.
         _assert_svg_parse(self, "dup_id_import")
+
+    def test_svg_parse_live_reference(self):
+        # <use href="#r1"> imports as a live ReferenceElem whose target
+        # is the href minus '#' (F-svg-use). REFERENCE_GRAPH.md Phase 2a.
+        _assert_svg_parse(self, "live_reference")
+
+    def test_svg_parse_live_compound(self):
+        # <g data-jas-live="compound_shape" data-jas-operation=...>
+        # imports as a CompoundShape (operands from children, operation
+        # from data-jas-operation) rather than a plain Group.
+        _assert_svg_parse(self, "live_compound")
 
     # ---------------------------------------------------------------
     # Algorithm test vectors
