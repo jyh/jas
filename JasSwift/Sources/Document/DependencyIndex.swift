@@ -138,6 +138,81 @@ public struct DependencyIndex: Equatable {
     }
 }
 
+// MARK: - Reference-aware delete: orphaned-references predicate
+//
+// REFERENCE_GRAPH.md — the equivalence-critical core of reference-aware delete
+// (the confirm dialog is a later step). A pure graph query over the same by-id
+// reference graph the index exposes, so it lives here next to `rdeps`. Mirrors
+// Rust `orphaned_references` in `document/dependency_index.rs`.
+
+extension DependencyIndex {
+    /// Collect every id-bearing element id within `elem`'s subtree, recursing
+    /// into **Group/Layer children only** — the SAME walk discipline as
+    /// ``walk(_:_:_:)``: a `CompoundShape`'s operands are opaque (the node walk
+    /// never enters them), so an id that exists only inside an operand is not a
+    /// node and is not collected. The set de-dups inherently.
+    private static func collectIds(_ elem: Element, _ ids: inout Set<String>) {
+        if let id = elem.id {
+            ids.insert(id)
+        }
+        switch elem {
+        case .group(let g):
+            for child in g.children { collectIds(child, &ids) }
+        case .layer(let l):
+            for child in l.children { collectIds(child, &ids) }
+        default:
+            break
+        }
+    }
+
+    /// Answer "if I delete these elements, which live references (instances)
+    /// elsewhere would be orphaned — left pointing at a now-deleted target?".
+    ///
+    /// Returns the **sorted, de-duplicated** ids of references that point at an
+    /// id which is being deleted but are not themselves in the deletion set.
+    ///
+    /// Algorithm (REFERENCE_GRAPH.md, locked semantics):
+    /// 1. `deletedIds` — the id-bearing ids within every deletion subtree.
+    ///    Each path is resolved via ``Document/tryGetElement(_:)`` (invalid
+    ///    paths skipped), then walked with the operands-opaque discipline
+    ///    (``collectIds(_:_:)``); an id only inside a `CompoundShape` operand is
+    ///    therefore NOT a deleted target.
+    /// 2. Build `idx = DependencyIndex.build(doc)`. For each deleted target `t`,
+    ///    its referrers are `idx.rdeps[t]` (only **targetable** ids ever get an
+    ///    rdeps entry, so an operand-nested target contributes none).
+    /// 3. `orphaned = { r in rdeps[t] for all deleted t : r not in deletedIds }`
+    ///    — references whose target is being deleted but which survive the delete.
+    ///
+    /// Consequences: deleting an element with no external referrers returns
+    /// `[]`; deleting a target together with its only referrer returns `[]` for
+    /// that pair (the referrer is itself deleted); deleting an instance returns
+    /// `[]` (an instance has no `rdeps`); deleting a group orphans the external
+    /// referrers of any referenced element it contains.
+    public static func orphanedReferences(_ doc: Document, _ deletionPaths: [ElementPath]) -> [String] {
+        // Step 1: gather the id-bearing ids inside every deletion subtree.
+        var deletedIds = Set<String>()
+        for path in deletionPaths {
+            if let elem = doc.tryGetElement(path) {
+                collectIds(elem, &deletedIds)
+            }
+            // Invalid paths are skipped (no element resolves).
+        }
+
+        // Step 2/3: for each deleted target, collect its referrers that are NOT
+        // themselves being deleted.
+        let idx = DependencyIndex.build(doc)
+        var orphaned = Set<String>()
+        for t in deletedIds {
+            if let referrers = idx.rdeps[t] {
+                for r in referrers where !deletedIds.contains(r) {
+                    orphaned.insert(r)
+                }
+            }
+        }
+        return orphaned.sorted()
+    }
+}
+
 // MARK: - Node walk
 
 /// Out-edges of a single element: a `Reference`'s target, or empty for every

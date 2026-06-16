@@ -78,3 +78,28 @@ val build : Document.document -> t
     arrays. Byte-identical to what the sibling apps hand-roll (and the
     [dependency_index.json] fixture). *)
 val to_test_json : t -> string
+
+(** Reference-aware delete: answer "if I delete the elements at these
+    paths, which live references elsewhere would be orphaned — left
+    pointing at a now-deleted target?".
+
+    Returns the {b sorted, de-duplicated} ids of references that point at
+    an id which is being deleted but are not themselves in the deletion
+    set. A pure graph query over the same by-id reference graph {!build}
+    exposes (REFERENCE_GRAPH.md, locked semantics):
+
+    + Collect the id-bearing ids within every deletion subtree, recursing
+      into Group / Layer children {b only} (a [Compound_shape]'s operands
+      are opaque, the SAME discipline as the index walk), so an id only
+      inside an operand is NOT a deleted target. Each path is resolved via
+      {!Document.get_element}; an invalid / not-found path is skipped.
+    + Build the index. For each deleted target [t], its referrers are
+      [rdeps[t]] (only targetable ids get an [rdeps] entry).
+    + Keep the referrers that are not themselves being deleted.
+
+    Consequences: deleting an element with no external referrers returns
+    [[]]; deleting a target together with its only referrer returns [[]]
+    for that pair; deleting an instance returns [[]] (an instance has no
+    [rdeps]); deleting a group orphans the external referrers of any
+    referenced element it contains. *)
+val orphaned_references : Document.document -> int list list -> string list
