@@ -941,4 +941,10 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   (* Also expose via the Yaml_panel_view hook so dock_panel (which
      can't depend on Menubar without a module cycle) can fire the
      sync after panel-menu Close. *)
-  Yaml_panel_view.panel_check_sync_hook := sync_panel_checks
+  Yaml_panel_view.panel_check_sync_hook := sync_panel_checks;
+  (* Wire the Layers-panel delete confirm to the SAME modal the main
+     Delete/Cut use, closing over the main window. Yaml_panel_view can't
+     name Menubar directly (Menubar already depends on it), so its panel
+     delete consults this hook only when the orphan set is non-empty. *)
+  Yaml_panel_view.confirm_delete_orphans_hook :=
+    (fun n -> confirm_delete_orphans n parent)

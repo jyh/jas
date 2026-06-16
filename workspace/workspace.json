@@ -1697,6 +1697,31 @@
         }
       ]
     },
+    "delete_layer_orphan_confirm_ok": {
+      "description": "Confirm the reference-aware Layers-panel delete (warn-then-orphan) from the delete_layer_orphan_confirm dialog. The panel delete entry points open this dialog only when deleting the panel selection would orphan one or more live instances; clicking Delete here commits that delete.\nThis is a DISTINCT action id from delete_layer_selection so the native orphan intercept (which gates delete_layer_selection) does NOT re-fire on this confirm action \u2014 no recursion. The effects are identical to delete_layer_selection (snapshot, then delete each panel-selected path in reverse order, then clear the panel selection) PLUS close the dialog. The panel selection is preserved across opening the dialog (opening it does not clear layers_panel_selection), so this operates on exactly the elements the user was about to delete. Cancel uses dismiss_dialog (no snapshot, no delete).\n",
+      "category": "dialog",
+      "effects": [
+        "snapshot",
+        {
+          "foreach": {
+            "source": "reverse(panel.layers_panel_selection)",
+            "as": "p"
+          },
+          "do": [
+            {
+              "doc.delete_at": "p"
+            }
+          ]
+        },
+        {
+          "set_panel_state": {
+            "key": "layers_panel_selection",
+            "value": "[]"
+          }
+        },
+        "close_dialog"
+      ]
+    },
     "duplicate_layer_selection": {
       "description": "Duplicate the panel-selected elements in place. Each duplicate is inserted immediately after its original in the same parent container. Iterates in reverse path order so each insert's indices stay valid for remaining iterations.\n",
       "category": "layers",
@@ -27122,6 +27147,51 @@
                 "label": "Cut",
                 "variant": "primary",
                 "action": "cut_orphan_confirm_ok"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "delete_layer_orphan_confirm": {
+      "summary": "Delete",
+      "description": "Reference-aware delete confirmation (warn-then-orphan) for the Layers panel delete. Deleting elements from the Layers panel can orphan live instances exactly like the primary delete, so the panel delete is gated by the same pure predicate orphaned_references(document, deletion_paths) \u2014 here deletion_paths is the panel selection (the panel-selected paths), NOT the canvas selection. Opened by the panel delete entry points (the panel context-menu \"Delete Selection\" item and the in-panel Delete / Backspace key) ONLY when deleting the panel selection would orphan one or more live instances. When the predicate is empty the panel delete proceeds inline with no dialog (unchanged behavior).\nThe count of would-be-orphaned referrers is passed in as the `count` param and surfaced verbatim in the body text: \"Deleting will leave N live instance(s) empty.\" \u2014 identical wording to the primary delete confirm \u2014 with proper singular (\"instance\") / plural (\"instances\") agreement via the expression-language ternary.\nDelete (the destructive, confirming button): snapshot the document then delete the panel selection (the same delete the inline path runs), then close. The panel selection is preserved across opening the dialog, so the OK action operates on exactly the elements the user was about to delete. Cancel (the safe default): dismiss the dialog and do nothing \u2014 no snapshot, no delete.\n",
+      "modal": true,
+      "params": {
+        "count": {
+          "type": "number"
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Deleting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "delete_layer_orphan_ok_btn",
+                "type": "button",
+                "label": "Delete",
+                "variant": "primary",
+                "action": "delete_layer_orphan_confirm_ok"
               }
             ]
           }

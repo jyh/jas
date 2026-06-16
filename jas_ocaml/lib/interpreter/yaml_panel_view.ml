@@ -61,6 +61,19 @@ let panel_rerender_hook : (unit -> unit) ref = ref (fun () -> ())
     menu Close action so the Window menu reflects the change. *)
 let panel_check_sync_hook : (unit -> unit) ref = ref (fun () -> ())
 
+(** Hook for the reference-aware Layers-panel delete confirm. Given the
+    count [n] (> 0) of live references a pending panel delete would
+    orphan, returns [true] to proceed and [false] to abort. Set by
+    [Menubar.create], which closes over the main window and forwards to
+    [Menubar.confirm_delete_orphans] — the SAME modal confirm the main
+    Delete/Cut use. Wired through a hook because Menubar depends on
+    Yaml_panel_view (so this module cannot name Menubar directly without
+    a cycle). The default proceeds unconditionally: it is overridden in
+    headless runs (tests) and only ever consulted when the orphan set is
+    non-empty, so the panel delete is never silently blocked before the
+    real confirm is installed. *)
+let confirm_delete_orphans_hook : (int -> bool) ref = ref (fun _ -> true)
+
 (** Per-panel-body re-renderers, registered by dock_panel each time
     it builds a panel. The function tears down the body's existing
     children and re-runs create_panel_body inside the same body
@@ -3403,7 +3416,19 @@ and handle_eye_click path evt =
 
 (** Delete currently panel-selected elements via YAML dispatch (Phase 3).
     The workspace/actions.yaml definition of delete_layer_selection is
-    authoritative; this function just supplies the current selection. *)
+    authoritative; this function just supplies the current selection.
+
+    Reference-aware (warn-then-orphan), mirroring the main Delete/Cut:
+    the deletion paths are the PANEL selection (NOT [doc.selection]); feed
+    them to the shared, cross-language-pinned [orphaned_references]
+    predicate. Empty -> delete exactly as before (no dialog, no
+    regression). Non-empty -> consult [confirm_delete_orphans_hook] (the
+    same modal the main delete shows, wired by [Menubar.create]); proceed
+    only on OK, abort on Cancel. The YAML [delete_layer_selection] action
+    snapshots internally, so the gate must NOT add its own snapshot — one
+    undo step is preserved either way. Covers both panel delete
+    sub-paths (context-menu "Delete Selection" and in-panel
+    Delete/Backspace) because both route through here. *)
 and do_delete_panel_selection () =
   match !_get_model_ref () with
   | None -> ()
@@ -3417,12 +3442,20 @@ and do_delete_panel_selection () =
       let layer_count = Array.length d.Document.layers in
       let top_deletes = List.length (List.filter (fun p -> List.length p = 1) paths) in
       if top_deletes >= layer_count then ()
-      else
-        Panel_menu.dispatch_yaml_action
-          ~panel_selection:paths
-          ~on_selection_changed:(Some (fun _ ->
-            Layers_panel_state.panel_selection := Layers_panel_state.PathSet.empty))
-          "delete_layer_selection" m
+      else begin
+        let orphaned = Dependency_index.orphaned_references d paths in
+        let proceed =
+          match orphaned with
+          | [] -> true  (* No live reference orphaned: delete as today. *)
+          | _ -> !confirm_delete_orphans_hook (List.length orphaned)
+        in
+        if proceed then
+          Panel_menu.dispatch_yaml_action
+            ~panel_selection:paths
+            ~on_selection_changed:(Some (fun _ ->
+              Layers_panel_state.panel_selection := Layers_panel_state.PathSet.empty))
+            "delete_layer_selection" m
+      end
     end
 
 (** Duplicate each panel-selected element in place via YAML dispatch. *)

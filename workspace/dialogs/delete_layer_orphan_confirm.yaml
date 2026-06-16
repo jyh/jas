@@ -1,0 +1,45 @@
+delete_layer_orphan_confirm:
+  summary: "Delete"
+  description: >
+    Reference-aware delete confirmation (warn-then-orphan) for the Layers
+    panel delete. Deleting elements from the Layers panel can orphan live
+    instances exactly like the primary delete, so the panel delete is gated
+    by the same pure predicate orphaned_references(document, deletion_paths)
+    — here deletion_paths is the panel selection (the panel-selected paths),
+    NOT the canvas selection. Opened by the panel delete entry points (the
+    panel context-menu "Delete Selection" item and the in-panel
+    Delete / Backspace key) ONLY when deleting the panel selection would
+    orphan one or more live instances. When the predicate is empty the panel
+    delete proceeds inline with no dialog (unchanged behavior).
+
+    The count of would-be-orphaned referrers is passed in as the `count`
+    param and surfaced verbatim in the body text:
+    "Deleting will leave N live instance(s) empty." — identical wording to
+    the primary delete confirm — with proper singular ("instance") / plural
+    ("instances") agreement via the expression-language ternary.
+
+    Delete (the destructive, confirming button): snapshot the document then
+    delete the panel selection (the same delete the inline path runs), then
+    close. The panel selection is preserved across opening the dialog, so the
+    OK action operates on exactly the elements the user was about to delete.
+    Cancel (the safe default): dismiss the dialog and do nothing — no
+    snapshot, no delete.
+  modal: true
+  params:
+    count: { type: number }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - type: text
+        content: 'Deleting will leave {{param.count}} live {{ param.count == 1 ? "instance" : "instances" }} empty.'
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: delete_layer_orphan_ok_btn
+            type: button
+            label: "Delete"
+            variant: primary
+            action: delete_layer_orphan_confirm_ok
