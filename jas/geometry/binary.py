@@ -317,8 +317,9 @@ def _pack_common(elem: Element) -> list:
     every element type round-trips them uniformly — mirroring test_json's
     ``_common_fields``. The type-specific payload follows at index 7."""
     # name / id are read via getattr because not every element carries
-    # them: CompoundShape (REFERENCE_GRAPH.md Phase 2b) has no name / id
-    # field, so both pack as nil — mirroring test_json's _common_fields.
+    # both: CompoundShape (REFERENCE_GRAPH.md Phase 2b) has a stable id but
+    # no name field, so name packs as nil while id packs through —
+    # mirroring test_json's _common_fields.
     return [
         elem.locked,
         elem.opacity,
@@ -603,11 +604,11 @@ def _unpack_element(arr: list) -> Element:
             # name, so it takes the full common kwargs.
             return ReferenceElem(target=arr[8], **common)
         elif kind == "compound_shape":
-            # CompoundShape carries no name / id field, so strip those
-            # from the common kwargs (it doesn't accept them). Unknown
+            # CompoundShape carries a stable id but no name field, so strip
+            # name (it doesn't accept it) and pass id through. Unknown
             # operation strings default to union, matching the Rust reader.
             live_common = {k: v for k, v in common.items()
-                           if k not in ("name", "id")}
+                           if k != "name"}
             try:
                 op = CompoundOperation(arr[8])
             except ValueError:

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:jas="urn:jas:1" viewBox="0 0 26.6667 48" width="26.6667" height="48">
+  <g inkscape:groupmode="layer" inkscape:label="Layer">
+    <g data-jas-live="compound_shape" data-jas-operation="subtract_front" id="c1">
+      <rect x="0" y="0" width="48" height="48" fill="rgb(0,0,0)" stroke="none"/>
+
+      <rect x="26.6667" y="0" width="48" height="48" fill="rgb(0,0,0)" stroke="none"/>
+
+    </g>
+  </g>
+</svg>
