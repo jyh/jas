@@ -73,3 +73,32 @@ and normalize_element = function
     (* Phase 1: pass through unchanged. Phase 2 will recursively
        normalize operands + fill / stroke. *)
     Element.Live v
+
+(* Enforce the unique-id invariant after import (REFERENCE_GRAPH.md section 2.5):
+   walk the document in canonical pre-order; the FIRST element to use a given
+   id keeps it, and every later element carrying the same id has its id cleared
+   to None (first-pre-order-wins). Element ids are then unique within the
+   document, so the live-reference index never collides. A no-op on a document
+   whose ids are already unique (the normal case) — well-formed documents
+   round-trip unchanged; only ill-formed (e.g. foreign-SVG) duplicates are
+   normalized. Recurse into Group and Layer children only, mirroring clear_ids.
+   Called by every document reader. *)
+let dedupe_element_ids (doc : Document.document) =
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  let rec walk elem =
+    let elem =
+      match Element.id_of elem with
+      | Some id when Hashtbl.mem seen id ->
+        (* Already seen — this is a later duplicate, so clear its id. *)
+        Element.with_id elem None
+      | Some id ->
+        Hashtbl.replace seen id ();
+        elem
+      | None -> elem
+    in
+    match elem with
+    | Element.Group r -> Element.Group { r with children = Array.map walk r.children }
+    | Element.Layer r -> Element.Layer { r with children = Array.map walk r.children }
+    | _ -> elem
+  in
+  { doc with Document.layers = Array.map walk doc.Document.layers }

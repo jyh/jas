@@ -1382,7 +1382,7 @@ pub fn test_json_to_document(json: &str) -> Document {
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
     let document_setup = parse_document_setup(&v["document_setup"]);
     let print_preferences = parse_print_preferences(&v["print_preferences"]);
-    Document {
+    let doc = Document {
         layers,
         selected_layer,
         selection,
@@ -1390,7 +1390,10 @@ pub fn test_json_to_document(json: &str) -> Document {
         artboard_options,
         document_setup,
         print_preferences,
-    }
+    };
+    // Enforce the unique-id invariant on import (first-pre-order-wins);
+    // a no-op for well-formed (unique-id) documents. See REFERENCE_GRAPH.md §2.5.
+    crate::geometry::normalize::dedupe_element_ids(&doc)
 }
 
 // ---------------------------------------------------------------------------

@@ -91,6 +91,9 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
+/// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
+/// id="dup"; after dedupe the first keeps it and the second has no id.
+@Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
 
 // MARK: - JSON round-trip (parse → serialize)
 

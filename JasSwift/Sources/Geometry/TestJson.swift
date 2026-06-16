@@ -1183,7 +1183,7 @@ package func testJsonToDocument(_ json: String) -> Document {
     let artboardOptions = parseArtboardOptions(v["artboard_options"])
     let documentSetup = parseDocumentSetup(v["document_setup"])
     let printPreferences = parsePrintPreferences(v["print_preferences"])
-    return Document(
+    return dedupeElementIds(Document(
         rawLayers: layers,
         rawSelectedLayer: selectedLayer,
         rawSelection: selection,
@@ -1191,5 +1191,5 @@ package func testJsonToDocument(_ json: String) -> Document {
         rawArtboardOptions: artboardOptions,
         rawDocumentSetup: documentSetup,
         rawPrintPreferences: printPreferences
-    )
+    ))
 }

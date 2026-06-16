@@ -762,4 +762,4 @@ let binary_to_document data =
     else failwith (Printf.sprintf "unsupported compression method: %d" compression)
   in
   let (_pos, value) = Msgpck.StringBuf.read raw in
-  unpack_document value
+  Normalize.dedupe_element_ids (unpack_document value)

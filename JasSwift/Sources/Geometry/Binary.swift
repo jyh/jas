@@ -904,12 +904,12 @@ private func unpackDocument(_ v: MsgValue) -> Document {
     // Binary format predates the artboards feature — parsed docs have
     // empty artboards; the app's load-time repair adds a default at
     // load.
-    return Document(
+    return dedupeElementIds(Document(
         layers: layers,
         selectedLayer: selectedLayer,
         selection: selection,
         artboards: []
-    )
+    ))
 }
 
 // MARK: - Public API

@@ -1415,10 +1415,10 @@ public func svgToDocument(_ svg: String) -> Document {
         }
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
-    return normalizeDocument(Document(
+    return dedupeElementIds(normalizeDocument(Document(
         layers: layers, artboards: [],
         documentSetup: parsedSetup,
-        printPreferences: parsedPrefs))
+        printPreferences: parsedPrefs)))
 }
 
 // MARK: - Jas-namespaced print metadata parsing (PRINT.md §Phase 2)
