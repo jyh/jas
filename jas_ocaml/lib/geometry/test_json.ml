@@ -1332,5 +1332,6 @@ let test_json_to_document json_str =
     | `Null -> Print_preferences.default
     | v -> parse_print_preferences v
   in
-  make_document ~selected_layer ~selection ~artboards ~artboard_options
-    ~document_setup ~print_preferences layers
+  Normalize.dedupe_element_ids
+    (make_document ~selected_layer ~selection ~artboards ~artboard_options
+       ~document_setup ~print_preferences layers)

@@ -175,6 +175,8 @@ mod tests {
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
+            // Import normalization: duplicate ids collapse to first-pre-order-wins.
+            "dup_id_import",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -291,6 +293,14 @@ mod tests {
     #[test]
     fn svg_parse_complex_document() {
         assert_svg_parse("complex_document");
+    }
+
+    #[test]
+    fn svg_parse_dup_id_import() {
+        // Import normalizes duplicate ids to the unique-id invariant:
+        // first pre-order occurrence keeps the id, later ones are cleared
+        // (REFERENCE_GRAPH.md §2.5). All apps normalize identically.
+        assert_svg_parse("dup_id_import");
     }
 
     // ---------------------------------------------------------------

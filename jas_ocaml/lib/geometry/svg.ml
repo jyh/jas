@@ -1520,11 +1520,12 @@ let svg_to_document svg =
         Element.make_layer ~name:"" [|elem|]
     ) children) in
     let layers = if layers = [] then [Element.make_layer [||]] else layers in
-    Normalize.normalize_document
-      (Document.make_document
-         ~document_setup:parsed_setup
-         ~print_preferences:parsed_prefs
-         (Array.of_list layers))
+    Normalize.dedupe_element_ids
+      (Normalize.normalize_document
+         (Document.make_document
+            ~document_setup:parsed_setup
+            ~print_preferences:parsed_prefs
+            (Array.of_list layers)))
   with e ->
     Printf.eprintf "Warning: SVG parse error: %s\n" (Printexc.to_string e);
     Document.make_document [|Element.make_layer [||]|]

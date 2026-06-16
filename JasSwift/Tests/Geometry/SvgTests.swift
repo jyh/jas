@@ -33,6 +33,28 @@ import Testing
     #expect(svg.contains("width=\"96\""))
 }
 
+/// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects both
+/// carry id="dup" in the source SVG. After dedupe the first (pre-order)
+/// rect keeps the id and the second has its id cleared to nil.
+@Test func svgDedupeImportIds() {
+    let svg = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" \
+    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" \
+    viewBox="0 0 192 96" width="192" height="96">
+      <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+        <rect x="0" y="0" width="96" height="96" fill="rgb(255,0,0)" stroke="none" id="dup"/>
+        <rect x="96" y="0" width="96" height="96" fill="rgb(0,0,255)" stroke="none" id="dup"/>
+      </g>
+    </svg>
+    """
+    let doc = svgToDocument(svg)
+    let children = doc.layers[0].children
+    #expect(children.count == 2)
+    #expect(children[0].id == "dup")
+    #expect(children[1].id == nil)
+}
+
 @Test func svgRectRounded() {
     let doc = Document(layers: [Layer(children: [
         .rect(Rect(x: 0, y: 0, width: 72, height: 72, rx: 6, ry: 6))

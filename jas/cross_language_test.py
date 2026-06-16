@@ -174,6 +174,12 @@ class CrossLanguageTest(absltest.TestCase):
     def test_svg_parse_complex_document(self):
         _assert_svg_parse(self, "complex_document")
 
+    def test_svg_parse_dup_id_import(self):
+        # Two rects share id="dup". The unique-id invariant on import
+        # (dedupe_element_ids) keeps the id on the first element in
+        # pre-order and clears it on the later duplicate.
+        _assert_svg_parse(self, "dup_id_import")
+
     # ---------------------------------------------------------------
     # Algorithm test vectors
     # ---------------------------------------------------------------

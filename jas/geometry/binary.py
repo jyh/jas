@@ -26,6 +26,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
 )
+from geometry.normalize import dedupe_element_ids
 
 # -- Constants ---------------------------------------------------------------
 
@@ -662,4 +663,4 @@ def binary_to_document(data: bytes) -> Document:
     except Exception as e:
         raise ValueError(f"Failed to decode MessagePack payload: {e}") from e
 
-    return _unpack_document(obj)
+    return dedupe_element_ids(_unpack_document(obj))

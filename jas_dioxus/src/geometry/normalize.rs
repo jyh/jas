@@ -24,6 +24,46 @@ pub fn normalize_document(doc: &Document) -> Document {
     }
 }
 
+/// Enforce the unique-id invariant after import (REFERENCE_GRAPH.md §2.5):
+/// walk the document in canonical pre-order; the FIRST element to use a given
+/// id keeps it, and every later element carrying the same id has its id
+/// cleared to None (first-pre-order-wins). Element ids are then unique within
+/// the document, so the live-reference index never collides. A no-op on a
+/// document whose ids are already unique (the normal case) — well-formed
+/// documents round-trip unchanged; only ill-formed (e.g. foreign-SVG)
+/// duplicates are normalized. Called by every document reader.
+pub fn dedupe_element_ids(doc: &Document) -> Document {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut layers: Vec<Element> = doc.layers.clone();
+    for l in layers.iter_mut() {
+        dedupe_ids_walk(l, &mut seen);
+    }
+    Document {
+        layers,
+        selected_layer: doc.selected_layer,
+        selection: doc.selection.clone(),
+        artboards: doc.artboards.clone(),
+        artboard_options: doc.artboard_options.clone(),
+        document_setup: doc.document_setup.clone(),
+        print_preferences: doc.print_preferences.clone(),
+    }
+}
+
+fn dedupe_ids_walk(elem: &mut Element, seen: &mut std::collections::HashSet<String>) {
+    if let Some(id) = elem.common().id.clone() {
+        // `insert` returns false when the id was already present — that
+        // marks this as a later duplicate, so clear it.
+        if !seen.insert(id) {
+            elem.common_mut().id = None;
+        }
+    }
+    if let Some(children) = elem.children_mut() {
+        for child in children.iter_mut() {
+            dedupe_ids_walk(Rc::make_mut(child), seen);
+        }
+    }
+}
+
 fn normalize_fill(fill: &Fill) -> Fill {
     let alpha = fill.color.alpha();
     Fill {

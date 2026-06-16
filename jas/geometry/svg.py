@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from document.document import Document
-from geometry.normalize import normalize_document
+from geometry.normalize import dedupe_element_ids, normalize_document
 from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
     ArcTo, Circle, ClosePath, Color, RgbColor, CurveTo, Element, Ellipse, Fill,
@@ -1576,7 +1576,7 @@ def svg_to_document(svg: str) -> Document:
                     transform=layers[-1].transform)
     if not layers:
         layers = [Layer(children=())]
-    return normalize_document(Document(
+    return dedupe_element_ids(normalize_document(Document(
         layers=tuple(layers),
         document_setup=parsed_setup,
-        print_preferences=parsed_prefs))
+        print_preferences=parsed_prefs)))

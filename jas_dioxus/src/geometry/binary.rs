@@ -932,5 +932,7 @@ pub fn binary_to_document(data: &[u8]) -> Result<Document, String> {
     let value = rmpv::decode::read_value(&mut &raw[..])
         .map_err(|e| format!("msgpack decode failed: {}", e))?;
 
-    Ok(unpack_document(&value))
+    // Enforce the unique-id invariant on import (first-pre-order-wins);
+    // a no-op for well-formed (unique-id) documents. See REFERENCE_GRAPH.md §2.5.
+    Ok(crate::geometry::normalize::dedupe_element_ids(&unpack_document(&value)))
 }

@@ -22,6 +22,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
 )
+from geometry.normalize import dedupe_element_ids
 
 # ------------------------------------------------------------------ #
 # Float formatting                                                    #
@@ -1196,12 +1197,13 @@ def test_json_to_document(json_str: str) -> Document:
     artboard_options = _parse_artboard_options(d.get("artboard_options", None))
     document_setup = _parse_document_setup(d.get("document_setup", None))
     print_preferences = _parse_print_preferences(d.get("print_preferences", None))
-    return Document(layers=layers, selected_layer=selected_layer,
+    return dedupe_element_ids(Document(
+                    layers=layers, selected_layer=selected_layer,
                     selection=selection,
                     artboards=artboards,
                     artboard_options=artboard_options,
                     document_setup=document_setup,
-                    print_preferences=print_preferences)
+                    print_preferences=print_preferences))
 
 # Prevent pytest from collecting this function as a test (the file name
 # test_json.py matches pytest's test_*.py pattern).

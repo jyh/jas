@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crate::document::document::Document;
 use crate::geometry::element::*;
-use crate::geometry::normalize::normalize_document;
+use crate::geometry::normalize::{normalize_document, dedupe_element_ids};
 
 const PT_TO_PX: f64 = 96.0 / 72.0;
 const PX_TO_PT: f64 = 72.0 / 96.0;
@@ -1787,7 +1787,9 @@ pub fn svg_to_document(svg: &str) -> Document {
         document_setup,
         print_preferences,
     };
-    normalize_document(&doc)
+    // Opacity normalization, then enforce the unique-id invariant
+    // (first-pre-order-wins) so the live-reference index never collides.
+    dedupe_element_ids(&normalize_document(&doc))
 }
 
 /// Parse <inkscape:page> children of any top-level
@@ -3491,6 +3493,27 @@ mod tests {
             tp_elem.common().id.as_deref(),
             Some("textpath-1"),
             "round-trip lost textPath id",
+        );
+    }
+
+    #[test]
+    fn import_dedupes_duplicate_ids() {
+        // Foreign input can carry duplicate ids (SVG requires unique ids
+        // but the world doesn't enforce it). Import normalizes to the
+        // unique-id invariant: first occurrence in pre-order keeps the id,
+        // later duplicates are cleared. See REFERENCE_GRAPH.md §2.5.
+        let svg = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 192 96"><g inkscape:groupmode="layer" inkscape:label="Layer 1"><rect x="0" y="0" width="96" height="96" fill="rgb(255,0,0)" stroke="none" id="dup"/><rect x="96" y="0" width="96" height="96" fill="rgb(0,0,255)" stroke="none" id="dup"/></g></svg>"#;
+        let doc = svg_to_document(svg);
+        let kids = doc.layers[0].children().unwrap();
+        assert_eq!(
+            kids[0].common().id.as_deref(),
+            Some("dup"),
+            "first pre-order occurrence keeps its id",
+        );
+        assert_eq!(
+            kids[1].common().id,
+            None,
+            "later duplicate id is cleared",
         );
     }
 
