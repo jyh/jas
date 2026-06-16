@@ -195,6 +195,30 @@ seam generalizes to `generate_element_id`.
   `None` (the lazy-mint trigger named in the `clear_ids` doc-comment); the target
   stays in the tree (shared, not moved); a new `ReferenceElem` with `common.id =
   ref_id` and `target = <resolved target id>` is inserted.
+- **Make Instance** (Phase 3 — the first user-facing trigger). Object-menu command
+  "Make Instance", enabled only when **exactly one** whole element (`SelectionKind::All`)
+  is selected. It is *not* a new operation — it is native UI glue that composes two
+  existing, already-pinned ops under **one** snapshot: `create_reference` (the UI mints
+  `target_id`/`ref_id` via `generate_element_id`, value-in-op, with a collision-retry
+  loop over existing ids — never minted in a Controller), then a move of the now-selected
+  reference by `(PASTE_OFFSET, PASTE_OFFSET)` = `(24, 24)`.
+  - **The offset rides on the new reference's `common.transform`, not the instance
+    `transform` field.** Decided after an investigation: `common.transform` is already
+    applied to a reference at both render seams (the element-level `apply_transform`
+    above the per-kind match) — zero new render wiring — and the move tool mutates the
+    same field, so "create offset, then drag to reposition" is split-brain-free. Eval
+    stays transform-free for *all* element kinds (a transformed rect ignores its
+    transform as a boolean operand too), so references remain consistent — no new
+    divergence. The instance `transform` field (Fork F2) stays reserved for the genuine
+    parametric role (mirror/scale instance overrides); when wired, the two compose
+    `common.transform ∘ instance.transform ∘ (target local geometry)`.
+  - **Moving a reference** required teaching `move_control_points` and `translate_element`
+    a `Reference` arm (whole-element move only) that composes the translate onto
+    `common.transform` — references have no geometry of their own. Pinned by the
+    `move_reference` operation fixture across all 4 apps. `generate_element_id` mirrors
+    `generate_artboard_id` exactly (8-char base36, injected-rng seam, UI-layer only,
+    never in a Controller); pinned per-app by determinism tests, not a shared fixture
+    (minting is non-deterministic).
 
 ---
 
