@@ -844,6 +844,82 @@ mod tests {
         assert_eq!(orphaned.len(), 1, "single orphan -> N == 1 (singular wording)");
     }
 
+    // -----------------------------------------------------------------------
+    // Reference-aware LAYERS-PANEL delete gate (warn-then-orphan). Deleting
+    // elements from the Layers panel can orphan live instances exactly like
+    // the primary delete, so the panel delete (context-menu "Delete Selection"
+    // item AND the in-panel Delete/Backspace key) is gated by the native
+    // intercept in dispatch_action with the SAME orphaned_references(...)
+    // predicate — but over the PANEL selection paths (st.layers_panel_selection)
+    // rather than doc.selection:
+    //   empty     -> run delete_layer_selection inline, no dialog
+    //   non-empty -> open delete_layer_orphan_confirm with N = orphaned.len()
+    // The intercept/dialog UI is not unit-testable, but the gate predicate and
+    // the count N over a panel-style selection ARE. These pin that the panel
+    // delete gate behaves identically to the main delete gate over the same
+    // set of paths (the predicate is selection-source-agnostic — it operates
+    // on whatever deletion_paths it is given).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn layer_panel_delete_gate_empty_orphans_means_delete_inline() {
+        // `lonely` has no referrers -> deleting it from the panel orphans
+        // nothing -> the intercept falls through to delete_layer_selection
+        // (no dialog). deletion_paths here is the panel selection.
+        let doc = doc_with_layer(vec![rect_with_id(Some("lonely"))]);
+        let panel_selection = vec![vec![0, 0]];
+        let orphaned = orphaned_references(&doc, &panel_selection);
+        assert!(
+            orphaned.is_empty(),
+            "no orphans -> panel delete runs inline, no confirm dialog"
+        );
+    }
+
+    #[test]
+    fn layer_panel_delete_gate_nonempty_orphans_means_confirm_with_count() {
+        // a <- r1, r2. Deleting `a` from the panel would orphan both -> the
+        // intercept opens delete_layer_orphan_confirm. N (the dialog `count`
+        // param) is the orphan count, here 2. Identical to the main delete
+        // gate over the same paths, since both use the same predicate.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        let panel_selection = vec![vec![0, 0]];
+        let orphaned = orphaned_references(&doc, &panel_selection);
+        assert!(
+            !orphaned.is_empty(),
+            "orphans exist -> panel delete opens the confirm dialog"
+        );
+        assert_eq!(
+            orphaned.len(),
+            2,
+            "N passed as the panel-delete dialog count param equals the orphan count"
+        );
+    }
+
+    #[test]
+    fn layer_panel_delete_gate_multi_path_selection() {
+        // Panel selections are multi-path (Vec<Vec<usize>>), unlike the single
+        // path the other gate tests use. a <- r1; b <- r2. A panel selection of
+        // both targets [a, b] would orphan both referrers; neither r1 nor r2 is
+        // itself in the selection, so both are counted. N == 2.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            rect_with_id(Some("b")),
+            reference("r1", "a"),
+            reference("r2", "b"),
+        ]);
+        let panel_selection = vec![vec![0, 0], vec![0, 1]];
+        let orphaned = orphaned_references(&doc, &panel_selection);
+        assert_eq!(
+            orphaned.len(),
+            2,
+            "multi-path panel selection orphans both referrers -> N == 2"
+        );
+    }
+
     #[test]
     fn canonical_json_has_sorted_keys_and_arrays() {
         // c1<->c2 cycle plus two refs to `a` and a dangling ref.

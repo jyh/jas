@@ -1167,6 +1167,34 @@ actions:
           - doc.delete_at: p
       - set_panel_state: { key: "layers_panel_selection", value: "[]" }
 
+  delete_layer_orphan_confirm_ok:
+    description: >
+      Confirm the reference-aware Layers-panel delete (warn-then-orphan)
+      from the delete_layer_orphan_confirm dialog. The panel delete entry
+      points open this dialog only when deleting the panel selection would
+      orphan one or more live instances; clicking Delete here commits that
+      delete.
+
+      This is a DISTINCT action id from delete_layer_selection so the native
+      orphan intercept (which gates delete_layer_selection) does NOT re-fire
+      on this confirm action — no recursion. The effects are identical to
+      delete_layer_selection (snapshot, then delete each panel-selected path
+      in reverse order, then clear the panel selection) PLUS close the
+      dialog. The panel selection is preserved across opening the dialog
+      (opening it does not clear layers_panel_selection), so this operates on
+      exactly the elements the user was about to delete. Cancel uses
+      dismiss_dialog (no snapshot, no delete).
+    category: dialog
+    effects:
+      - snapshot
+      - foreach:
+          source: "reverse(panel.layers_panel_selection)"
+          as: p
+        do:
+          - doc.delete_at: p
+      - set_panel_state: { key: "layers_panel_selection", value: "[]" }
+      - close_dialog
+
   duplicate_layer_selection:
     description: >
       Duplicate the panel-selected elements in place. Each duplicate is

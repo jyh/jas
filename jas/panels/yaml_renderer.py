@@ -19,6 +19,39 @@ from workspace_interpreter.state_store import StateStore
 from panels import widget_registry
 
 
+def _confirm_panel_delete_if_orphans(model, panel_selection_paths, parent=None) -> bool:
+    """Decide whether a Layers-panel delete should proceed (REFERENCE_GRAPH.md
+    warn-then-orphan), mirroring ``menu._confirm_delete_if_orphans`` but on the
+    PANEL selection rather than ``doc.selection``.
+
+    Deleting elements from the Layers panel can orphan live references
+    (instances) exactly like the main Edit>Delete, but the panel delete used to
+    bypass the confirm. This computes the SAME pinned predicate
+    ``orphaned_references(doc, deletion_paths)`` over the panel-selected paths.
+    Empty -> proceed silently (unchanged behavior, no dialog). Non-empty -> show
+    the modal confirm whose default is the safe Cancel; returns True only if the
+    user confirms (Ok).
+
+    Shared by the panel context-menu "Delete Selection" item and the in-panel
+    keyboard Delete/Backspace path so both warn identically. Verb is "Deleting",
+    reusing the existing delete wording via ``menu._orphan_warning_body``."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from document.dependency_index import orphaned_references
+    from menu.menu import _orphan_warning_body
+    doc = model.document
+    deletion_paths = [list(p) for p in panel_selection_paths]
+    orphaned = orphaned_references(doc, deletion_paths)
+    if not orphaned:
+        return True
+    if parent is None:
+        parent = QApplication.activeWindow()
+    body = _orphan_warning_body(len(orphaned), "Deleting")
+    reply = QMessageBox.question(
+        parent, "Delete", body,
+        QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
+    return reply == QMessageBox.Ok
+
+
 def render_element(el: dict, store: StateStore, ctx: dict,
                    dispatch_fn=None) -> QWidget | None:
     """Recursively render a YAML element spec into a QWidget tree.
@@ -2400,6 +2433,11 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         top_deletes = sum(1 for pp in panel_selection if len(pp) == 1)
         if top_deletes >= len(m.document.layers):
             return
+        # Reference-aware confirm (mirrors the main delete): warn before
+        # orphaning live instances; Cancel aborts (no dialog when nothing
+        # would orphan).
+        if not _confirm_panel_delete_if_orphans(m, panel_selection, widget):
+            return
         _dispatch_with_selection("delete_layer_selection")
 
     def _do_duplicate():
@@ -2507,6 +2545,11 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                 # Prevent deleting the last layer
                 top_deletes = sum(1 for p in paths if len(p) == 1)
                 if top_deletes < len(doc.layers):
+                    # Reference-aware confirm (mirrors the main delete): warn
+                    # before orphaning live instances; Cancel aborts (no dialog
+                    # when nothing would orphan).
+                    if not _confirm_panel_delete_if_orphans(m, paths, widget):
+                        return
                     m.snapshot()
                     paths.sort(reverse=True)
                     new_doc = doc

@@ -3165,10 +3165,20 @@ struct TreeViewContent: View {
         guard !panelSelection.isEmpty else { return }
         let topDeletes = panelSelection.filter { $0.count == 1 }.count
         if topDeletes >= model.document.layers.count { return }
+        // Reference-aware delete (warn-then-orphan): if deleting these tree
+        // rows via the in-panel keyboard Delete/Backspace would leave live
+        // instances pointing at a now-gone target, confirm first. Mirrors the
+        // context-menu `deleteSelection()` guard. Empty orphan set -> delete as
+        // today (no dialog). Uses the PANEL selection paths, not doc.selection.
+        let paths = panelSelection.map { Array($0) }
+        let orphaned = DependencyIndex.orphanedReferences(model.document, paths)
+        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
+            return
+        }
         LayersPanel.dispatchYamlAction(
             "delete_layer_selection",
             model: model,
-            panelSelection: panelSelection.map { Array($0) }
+            panelSelection: paths
         )
         panelSelection.removeAll()
     }
