@@ -128,13 +128,58 @@ pub(crate) fn MenuBarView(
                     }));
                 }
                 "delete" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            let new_doc = tab.model.document().delete_selection();
-                            tab.model.set_document(new_doc);
+                    // Reference-aware delete (warn-then-orphan). Phase A:
+                    // compute the pure orphaned_references predicate over the
+                    // current selection. Empty -> delete inline exactly as
+                    // before (no dialog). Non-empty -> open the confirm
+                    // dialog with the orphan count and return WITHOUT
+                    // mutating; the dialog's Delete button runs the snapshot
+                    // + delete_selection. Selection is left intact so the OK
+                    // action deletes the same elements.
+                    let orphan_count: usize = {
+                        let st = app_for_menu.borrow();
+                        match st.tab() {
+                            Some(tab) => {
+                                let doc = tab.model.document();
+                                let paths: Vec<Vec<usize>> = doc
+                                    .selection
+                                    .iter()
+                                    .map(|es| es.path.clone())
+                                    .collect();
+                                crate::document::dependency_index::orphaned_references(
+                                    doc, &paths,
+                                )
+                                .len()
+                            }
+                            None => 0,
                         }
-                    }));
+                    };
+                    if orphan_count == 0 {
+                        (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                            if let Some(tab) = st.tab_mut() {
+                                tab.model.snapshot();
+                                let new_doc = tab.model.document().delete_selection();
+                                tab.model.set_document(new_doc);
+                            }
+                        }));
+                    } else {
+                        let st = app_for_menu.borrow();
+                        let live_state =
+                            crate::workspace::dock_panel::build_live_state_map(&st);
+                        drop(st);
+                        let mut params = serde_json::Map::new();
+                        params.insert(
+                            "count".to_string(),
+                            serde_json::json!(orphan_count),
+                        );
+                        let mut sig = yaml_dialog_sig;
+                        crate::interpreter::dialog_view::open_dialog(
+                            &mut sig,
+                            "delete_orphan_confirm",
+                            &params,
+                            &live_state,
+                        );
+                    }
                 }
                 "group" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
