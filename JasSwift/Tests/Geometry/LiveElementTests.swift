@@ -186,3 +186,25 @@ private struct CycleResolver: ElementResolver {
         reference, precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
     #expect(ps.count == 1)
 }
+
+// MARK: - RebuildResolver (REFERENCE_GRAPH.md Phase 1b render wiring)
+
+@Test func renderRefIndexResolvesReferenceToTarget() {
+    // RebuildResolver builds the per-paint id→element index from the
+    // document; the canvas reads it, so a reference resolves and evaluates
+    // to its target's geometry (Phase 1b render wiring). Mirrors Rust
+    // `render_ref_index_resolves_reference_to_target`.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "r1"))
+    let doc = Document(layers: [Layer(name: "Layer", children: [rect])])
+    let resolver = RebuildResolver(document: doc)
+    // The index has the rect by its id.
+    #expect(resolver.resolve(ElementRef("r1")) != nil)
+    // A reference targeting "r1" evaluates to the rect's single ring.
+    let reference = ReferenceElem(target: ElementRef("r1"))
+    var visiting = VisitSet()
+    let ps = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)
+    // An unindexed id resolves to nil (dangling).
+    #expect(resolver.resolve(ElementRef("missing")) == nil)
+}

@@ -29,6 +29,15 @@ module VisitSet : Set.S with type elt = string
     owned operands); the referenced target for [Reference]. *)
 val dependencies : Element.live_variant -> Element.element_ref list
 
+(** Build an [element_resolver] from a document's top-level layers.
+    Indexes the id-bearing descendants of each layer (top-level layer
+    ids are not Phase-1 resolution targets, so the walk starts at each
+    layer's children). First-occurrence wins per id. Intended to be
+    rebuilt on demand by the canvas render each paint, so by-id
+    references resolve while drawing. Mirrors Rust [register_ref_index].
+    See REFERENCE_GRAPH.md Phase 1b. *)
+val resolver_of_document : Element.element array -> element_resolver
+
 (** Ring-aware path flattening. MoveTo starts a new ring; ClosePath
     finalizes. Open subpaths finalize at the next MoveTo or end.
     Rings with fewer than 3 points are dropped. Bezier / quad use

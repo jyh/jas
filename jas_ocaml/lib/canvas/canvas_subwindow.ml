@@ -33,6 +33,40 @@ let set_brush_libraries (libs : Yojson.Safe.t) : unit =
    that flows through Brush_registry too via the symmetry below. *)
 let () = Brush_registry.on_change (fun libs -> _brush_libraries := libs)
 
+(* ── Reference resolver registry (REFERENCE_GRAPH.md Phase 1b) ──
+   The live render arm resolves by-id references through an
+   [element_resolver]. Threading a resolver through every drawing
+   helper signature would be invasive, so — like the brush registry
+   above — a module-local mutable ref holds the resolver for the
+   duration of one paint. The draw callback rebuilds it from the
+   current document each frame (the rebuild strategy; the
+   persistent-incremental index is Phase 4) and the cycle-guard set
+   stays a fresh local per top-level evaluate. *)
+
+let _ref_resolver : Live.element_resolver ref = ref Live.null_resolver
+
+(* Extract an element's fill, used so a reference can inherit the
+   resolved target's fill when its own is None (REFERENCE_GRAPH.md
+   Fork F3). None for kinds with no fill (Line / Group / Layer). *)
+let _element_fill (elem : Element.element) : Element.fill option =
+  match elem with
+  | Rect { fill; _ } | Circle { fill; _ } | Ellipse { fill; _ }
+  | Polyline { fill; _ } | Polygon { fill; _ } | Path { fill; _ }
+  | Text { fill; _ } | Text_path { fill; _ } -> fill
+  | Live (Compound_shape cs) -> cs.fill
+  | Live (Reference r) -> r.ref_fill
+  | Line _ | Group _ | Layer _ -> None
+
+(* Extract an element's stroke; companion to [_element_fill]. *)
+let _element_stroke (elem : Element.element) : Element.stroke option =
+  match elem with
+  | Rect { stroke; _ } | Circle { stroke; _ } | Ellipse { stroke; _ }
+  | Line { stroke; _ } | Polyline { stroke; _ } | Polygon { stroke; _ }
+  | Path { stroke; _ } | Text { stroke; _ } | Text_path { stroke; _ } -> stroke
+  | Live (Compound_shape cs) -> cs.stroke
+  | Live (Reference r) -> r.ref_stroke
+  | Group _ | Layer _ -> None
+
 (* Look up a brush by "<library>/<brush>" slug. Returns None for
    missing slug, malformed input, or unknown library/brush. *)
 let lookup_brush (slug : string) : Yojson.Safe.t option =
@@ -1188,20 +1222,55 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
-  | Live (Compound_shape cs) ->
-    (* Phase 1 stub: render operands individually so the user can
-       still see the source artwork. Phase 2 evaluates the boolean
-       op and renders the result. *)
+  | Live v ->
+    (* Evaluate the live element, resolving references against the
+       render-scoped resolver ([_ref_resolver], rebuilt each paint).
+       The cycle guard is a fresh local per top-level evaluate. Per
+       variant we also pick the paint: a reference inherits the
+       resolved target's paint when its own is None (Fork F3).
+       REFERENCE_GRAPH.md Phase 1b. *)
+    let resolver = !_ref_resolver in
+    let visiting = ref Live.VisitSet.empty in
+    let (ps, live_fill, live_stroke, live_opacity, live_transform) =
+      match v with
+      | Compound_shape cs ->
+        (Live.evaluate_with cs Live.default_precision resolver visiting,
+         cs.fill, cs.stroke, cs.opacity, cs.transform)
+      | Reference r ->
+        let ps = Live.reference_evaluate r Live.default_precision resolver visiting in
+        let target = resolver r.ref_target in
+        let fill = match r.ref_fill with
+          | Some _ as f -> f
+          | None -> (match target with Some t -> _element_fill t | None -> None) in
+        let stroke = match r.ref_stroke with
+          | Some _ as s -> s
+          | None -> (match target with Some t -> _element_stroke t | None -> None) in
+        (ps, fill, stroke, r.ref_opacity, r.ref_transform)
+    in
     Cairo.Group.push cr;
-    apply_transform cr cs.transform;
-    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) cs.operands;
+    apply_transform cr live_transform;
+    (* Trace one closed sub-path per ring of the evaluated geometry. *)
+    let has_geometry = List.exists (fun ring -> Array.length ring >= 2) ps in
+    if has_geometry then begin
+      List.iter (fun ring ->
+        if Array.length ring >= 2 then begin
+          let (x0, y0) = ring.(0) in
+          Cairo.move_to cr x0 y0;
+          for i = 1 to Array.length ring - 1 do
+            let (x, y) = ring.(i) in
+            Cairo.line_to cr x y
+          done;
+          Cairo.Path.close cr
+        end
+      ) ps;
+      if outline then begin
+        apply_outline_style cr;
+        Cairo.stroke cr
+      end else
+        fill_and_stroke cr live_fill live_stroke
+    end;
     Cairo.Group.pop_to_source cr;
-    Cairo.paint cr ~alpha:cs.opacity
-  | Live (Reference _) ->
-    (* Phase 1a: the canvas renderer has no resolver wired, so a
-       reference draws nothing. Resolver-aware rendering lands in
-       Phase 1b. *)
-    ()
+    Cairo.paint cr ~alpha:live_opacity
   end;
   Cairo.restore cr
 
@@ -2299,6 +2368,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.scale cr model#zoom_level model#zoom_level;
         (* Layer 2: artboard fills *)
         draw_artboard_fills cr current_doc;
+        (* Rebuild the render-scoped reference resolver from the
+           current document so the live render arm resolves by-id
+           references this paint (REFERENCE_GRAPH.md Phase 1b). The
+           rebuild strategy; the persistent-incremental index is
+           Phase 4. *)
+        _ref_resolver := Live.resolver_of_document current_doc.Document.layers;
         (* Layer 3: document element tree. In mask-isolation mode
            (OPACITY.md Preview interactions), render only the
            mask subtree of the isolated element — everything else
