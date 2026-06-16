@@ -76,24 +76,71 @@ pub(crate) fn MenuBarView(
                     }));
                 }
                 "cut" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.tab().is_none() { return; }
-                        if let Some(svg) = selection_to_svg(st) {
-                            clipboard_write(svg);
+                    // Reference-aware cut (warn-then-orphan). Cut is
+                    // copy-to-clipboard + delete, so it can orphan live
+                    // instances exactly like delete; gate it identically.
+                    // Empty -> cut inline exactly as before (copy + snapshot
+                    // + delete, no dialog). Non-empty -> open the confirm
+                    // dialog with the orphan count and return WITHOUT
+                    // mutating the clipboard or document; the dialog's Cut
+                    // button runs copy + snapshot + delete_selection, so
+                    // Cancel is a true no-op. Selection is left intact so the
+                    // OK action cuts the same elements.
+                    let orphan_count: usize = {
+                        let st = app_for_menu.borrow();
+                        match st.tab() {
+                            Some(tab) => {
+                                let doc = tab.model.document();
+                                let paths: Vec<Vec<usize>> = doc
+                                    .selection
+                                    .iter()
+                                    .map(|es| es.path.clone())
+                                    .collect();
+                                crate::document::dependency_index::orphaned_references(
+                                    doc, &paths,
+                                )
+                                .len()
+                            }
+                            None => 0,
                         }
-                        let elements: Vec<GeoElement> = {
-                            let Some(tab) = st.tab() else { return; };
-                            let doc = tab.model.document();
-                            doc.selection.iter()
-                                .filter_map(|es| doc.get_element(&es.path).cloned())
-                                .collect()
-                        };
-                        let Some(tab) = st.tab_mut() else { return; };
-                        tab.clipboard = elements;
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
-                    }));
+                    };
+                    if orphan_count == 0 {
+                        (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                            if st.tab().is_none() { return; }
+                            if let Some(svg) = selection_to_svg(st) {
+                                clipboard_write(svg);
+                            }
+                            let elements: Vec<GeoElement> = {
+                                let Some(tab) = st.tab() else { return; };
+                                let doc = tab.model.document();
+                                doc.selection.iter()
+                                    .filter_map(|es| doc.get_element(&es.path).cloned())
+                                    .collect()
+                            };
+                            let Some(tab) = st.tab_mut() else { return; };
+                            tab.clipboard = elements;
+                            tab.model.snapshot();
+                            let new_doc = tab.model.document().delete_selection();
+                            tab.model.set_document(new_doc);
+                        }));
+                    } else {
+                        let st = app_for_menu.borrow();
+                        let live_state =
+                            crate::workspace::dock_panel::build_live_state_map(&st);
+                        drop(st);
+                        let mut params = serde_json::Map::new();
+                        params.insert(
+                            "count".to_string(),
+                            serde_json::json!(orphan_count),
+                        );
+                        let mut sig = yaml_dialog_sig;
+                        crate::interpreter::dialog_view::open_dialog(
+                            &mut sig,
+                            "cut_orphan_confirm",
+                            &params,
+                            &live_state,
+                        );
+                    }
                 }
                 "copy" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {

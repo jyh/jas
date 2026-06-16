@@ -190,12 +190,20 @@ private func docWithLayer(_ children: [Element]) -> Document {
 
 @Test func orphanWarningBodySingularVsPlural() {
     // Verbatim, cross-language-pinned wording. Singular at n == 1.
-    #expect(DependencyIndex.orphanWarningBody(1)
+    #expect(DependencyIndex.orphanWarningBody(1, verb: "Deleting")
         == "Deleting will leave 1 live instance empty.")
-    #expect(DependencyIndex.orphanWarningBody(2)
+    #expect(DependencyIndex.orphanWarningBody(2, verb: "Deleting")
         == "Deleting will leave 2 live instances empty.")
-    #expect(DependencyIndex.orphanWarningBody(0)
+    #expect(DependencyIndex.orphanWarningBody(0, verb: "Deleting")
         == "Deleting will leave 0 live instances empty.")
+}
+
+@Test func orphanWarningBodyVerbParameterizesAction() {
+    // Cut reuses the same body helper, only the gerund verb differs.
+    #expect(DependencyIndex.orphanWarningBody(1, verb: "Cutting")
+        == "Cutting will leave 1 live instance empty.")
+    #expect(DependencyIndex.orphanWarningBody(2, verb: "Cutting")
+        == "Cutting will leave 2 live instances empty.")
 }
 
 @Test func orphanWarningPathTriggersOnlyWhenNonEmpty() {
@@ -207,7 +215,7 @@ private func docWithLayer(_ children: [Element]) -> Document {
     ])
     let orphaned = DependencyIndex.orphanedReferences(doc, [[0, 0]])
     #expect(orphaned.count == 2)
-    #expect(DependencyIndex.orphanWarningBody(orphaned.count)
+    #expect(DependencyIndex.orphanWarningBody(orphaned.count, verb: "Deleting")
         == "Deleting will leave 2 live instances empty.")
 
     // Deleting a plain rect with no referrers -> no warn (empty).
