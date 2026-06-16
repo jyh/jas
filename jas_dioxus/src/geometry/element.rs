@@ -2757,6 +2757,11 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
                     ..cs.clone()
                 }),
             ),
+            // A reference has no geometry of its own to translate; its
+            // instance transform (and thus move) is wired in Phase 3.
+            super::live::LiveVariant::Reference(r) => Element::Live(
+                super::live::LiveVariant::Reference(r.clone()),
+            ),
         },
     }
 }
@@ -2812,6 +2817,12 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
                     ..cs.clone()
                 }),
             ),
+            super::live::LiveVariant::Reference(r) => Element::Live(
+                super::live::LiveVariant::Reference(super::live::ReferenceElem {
+                    fill,
+                    ..r.clone()
+                }),
+            ),
         },
     }
 }
@@ -2854,6 +2865,12 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
                 super::live::LiveVariant::CompoundShape(super::live::CompoundShape {
                     stroke,
                     ..cs.clone()
+                }),
+            ),
+            super::live::LiveVariant::Reference(r) => Element::Live(
+                super::live::LiveVariant::Reference(super::live::ReferenceElem {
+                    stroke,
+                    ..r.clone()
                 }),
             ),
         },

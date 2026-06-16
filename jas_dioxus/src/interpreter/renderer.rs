@@ -7103,6 +7103,7 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
         GeoElement::Layer(_) => "Layer",
         GeoElement::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
+            crate::geometry::live::LiveVariant::Reference(_) => "Reference",
         },
     }
 }

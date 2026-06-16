@@ -509,6 +509,16 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 lines.push(format!("{}</g>", indent));
                 lines.join("\n")
             }
+            crate::geometry::live::LiveVariant::Reference(r) => {
+                // Phase 1 placeholder: SVG round-trip of references (as
+                // <use href="#id">) lands in Phase 2. Emit an empty marker
+                // group so export stays valid until then.
+                format!(
+                    "{}<g data-jas-live=\"reference\"{}></g>",
+                    indent,
+                    common_attrs_no_name(&r.common),
+                )
+            }
         },
     }
 }

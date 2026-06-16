@@ -90,7 +90,10 @@ pub trait LiveElement {
     /// index ordering (compound shape: operands in z-order; blend:
     /// `[a, b, spine?]`; drop shadow: `[source]`).
     fn children(&self) -> &[Rc<Element>];
-    fn children_mut(&mut self) -> &mut Vec<Rc<Element>>;
+    /// Mutable access to element-valued inputs, or `None` for kinds with no
+    /// owned children (e.g. a reference, whose input is a `dependencies()`
+    /// edge, not an operand).
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>>;
 
     /// Stable-id inputs reached by reference rather than containment, in
     /// deterministic order. Default empty: containment kinds (e.g.
@@ -187,7 +190,7 @@ impl LiveElement for CompoundShape {
     fn fill(&self) -> Option<&Fill> { self.fill.as_ref() }
     fn stroke(&self) -> Option<&Stroke> { self.stroke.as_ref() }
     fn children(&self) -> &[Rc<Element>] { &self.operands }
-    fn children_mut(&mut self) -> &mut Vec<Rc<Element>> { &mut self.operands }
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> { Some(&mut self.operands) }
 
     fn bounds(&self) -> Bounds {
         bounds_of_polygon_set(&self.evaluate(DEFAULT_PRECISION))
@@ -222,6 +225,87 @@ impl LiveElement for CompoundShape {
 }
 
 // ---------------------------------------------------------------------------
+// ReferenceElem — by-id reference to another element (REFERENCE_GRAPH.md §1.1)
+// ---------------------------------------------------------------------------
+
+/// A live element that evaluates to another element's geometry, resolved by
+/// stable id at evaluate time — the "instance of" primitive (mirrored eyes,
+/// connector-follows-block). Its target is named by id, not embedded, so it
+/// is a `dependencies()` edge rather than a `children()` operand.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReferenceElem {
+    /// Stable id of the referenced element.
+    pub target: ElementRef,
+    /// Optional instance transform applied to the resolved geometry. Declared
+    /// now (Fork F2) but always `None` until Phase 3 wires it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<crate::geometry::element::Transform>,
+    /// Own paint; `None` inherits the resolved target's paint (Fork F3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Fill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Stroke>,
+    pub common: CommonProps,
+}
+
+impl ReferenceElem {
+    /// Construct a reference to `target` with no overrides.
+    pub fn new(target: ElementRef, common: CommonProps) -> Self {
+        Self {
+            target,
+            transform: None,
+            fill: None,
+            stroke: None,
+            common,
+        }
+    }
+
+    /// Resolver-aware evaluation: resolve the target and return its geometry.
+    /// A cycle (target already being visited) or a dangling reference
+    /// (unresolved) yields an empty set — never a panic (REFERENCE_GRAPH.md §3).
+    pub fn evaluate_with(
+        &self,
+        precision: f64,
+        resolver: &dyn ElementResolver,
+        visiting: &mut VisitSet,
+    ) -> PolygonSet {
+        if visiting.contains(&self.target) {
+            return PolygonSet::new(); // cycle: break at the re-entry edge
+        }
+        match resolver.resolve(&self.target) {
+            Some(target) => {
+                visiting.insert(self.target.clone());
+                let ps = element_to_polygon_set_with(&target, precision, resolver, visiting);
+                visiting.remove(&self.target);
+                ps
+            }
+            None => PolygonSet::new(), // dangling: target not found
+        }
+    }
+}
+
+impl LiveElement for ReferenceElem {
+    fn kind(&self) -> &'static str { "reference" }
+    fn kind_schema_version(&self) -> u32 { 1 }
+    fn common(&self) -> &CommonProps { &self.common }
+    fn common_mut(&mut self) -> &mut CommonProps { &mut self.common }
+    fn fill(&self) -> Option<&Fill> { self.fill.as_ref() }
+    fn stroke(&self) -> Option<&Stroke> { self.stroke.as_ref() }
+    fn children(&self) -> &[Rc<Element>] { &[] }
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> { None }
+    fn dependencies(&self) -> Vec<ElementRef> { vec![self.target.clone()] }
+
+    /// Resolver-free bounds are degenerate for a reference (its geometry lives
+    /// elsewhere); the resolver-aware bounds lands with the render wiring (1b).
+    fn bounds(&self) -> Bounds { (0.0, 0.0, 0.0, 0.0) }
+
+    /// A reference owns no source to expand or release; both are no-ops until
+    /// the resolver-aware expand path lands.
+    fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
+    fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
+}
+
+// ---------------------------------------------------------------------------
 // LiveVariant — closed-world enum over the known LiveKinds
 // ---------------------------------------------------------------------------
 
@@ -232,44 +316,87 @@ impl LiveElement for CompoundShape {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LiveVariant {
     CompoundShape(CompoundShape),
+    Reference(ReferenceElem),
 }
 
 impl LiveElement for LiveVariant {
     fn kind(&self) -> &'static str {
-        match self { LiveVariant::CompoundShape(cs) => cs.kind() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.kind(),
+            LiveVariant::Reference(r) => r.kind(),
+        }
     }
     fn kind_schema_version(&self) -> u32 {
-        match self { LiveVariant::CompoundShape(cs) => cs.kind_schema_version() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.kind_schema_version(),
+            LiveVariant::Reference(r) => r.kind_schema_version(),
+        }
     }
     fn common(&self) -> &CommonProps {
-        match self { LiveVariant::CompoundShape(cs) => cs.common() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.common(),
+            LiveVariant::Reference(r) => r.common(),
+        }
     }
     fn common_mut(&mut self) -> &mut CommonProps {
-        match self { LiveVariant::CompoundShape(cs) => cs.common_mut() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.common_mut(),
+            LiveVariant::Reference(r) => r.common_mut(),
+        }
     }
     fn fill(&self) -> Option<&Fill> {
-        match self { LiveVariant::CompoundShape(cs) => cs.fill() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.fill(),
+            LiveVariant::Reference(r) => r.fill(),
+        }
     }
     fn stroke(&self) -> Option<&Stroke> {
-        match self { LiveVariant::CompoundShape(cs) => cs.stroke() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.stroke(),
+            LiveVariant::Reference(r) => r.stroke(),
+        }
     }
     fn children(&self) -> &[Rc<Element>] {
-        match self { LiveVariant::CompoundShape(cs) => cs.children() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.children(),
+            LiveVariant::Reference(r) => r.children(),
+        }
     }
-    fn children_mut(&mut self) -> &mut Vec<Rc<Element>> {
-        match self { LiveVariant::CompoundShape(cs) => cs.children_mut() }
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> {
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.children_mut(),
+            LiveVariant::Reference(r) => r.children_mut(),
+        }
+    }
+    fn dependencies(&self) -> Vec<ElementRef> {
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.dependencies(),
+            LiveVariant::Reference(r) => r.dependencies(),
+        }
     }
     fn bounds(&self) -> Bounds {
-        match self { LiveVariant::CompoundShape(cs) => cs.bounds() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.bounds(),
+            LiveVariant::Reference(r) => r.bounds(),
+        }
     }
     fn invalidate(&mut self) {
-        match self { LiveVariant::CompoundShape(cs) => cs.invalidate() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.invalidate(),
+            LiveVariant::Reference(r) => r.invalidate(),
+        }
     }
     fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
-        match self { LiveVariant::CompoundShape(cs) => cs.expand(precision) }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.expand(precision),
+            LiveVariant::Reference(r) => r.expand(precision),
+        }
     }
     fn release(&self) -> Vec<Rc<Element>> {
-        match self { LiveVariant::CompoundShape(cs) => cs.release() }
+        match self {
+            LiveVariant::CompoundShape(cs) => cs.release(),
+            LiveVariant::Reference(r) => r.release(),
+        }
     }
 }
 
@@ -333,6 +460,7 @@ pub(crate) fn element_to_polygon_set_with(
         }
         Element::Live(v) => match v {
             LiveVariant::CompoundShape(cs) => cs.evaluate_with(precision, resolver, visiting),
+            LiveVariant::Reference(r) => r.evaluate_with(precision, resolver, visiting),
         },
         Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
         Element::TextPath(tp) => {
@@ -776,5 +904,69 @@ mod tests {
         let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
         assert!((min_x - 0.0).abs() < 1e-6);
         assert!((max_x - 15.0).abs() < 1e-6);
+    }
+
+    // --- ReferenceElem (REFERENCE_GRAPH.md Phase 1a) -------------------------
+
+    /// A test resolver backed by an id→element map.
+    struct MapResolver(std::collections::HashMap<String, Rc<Element>>);
+    impl ElementResolver for MapResolver {
+        fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>> {
+            self.0.get(&id.0).cloned()
+        }
+    }
+
+    #[test]
+    fn reference_evaluates_to_target_geometry() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("r1".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let resolver = MapResolver(map);
+        let reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+        assert_eq!(ps.len(), 1, "reference resolves to the target rect's ring");
+        let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 0.0).abs() < 1e-6);
+        assert!((max_x - 10.0).abs() < 1e-6);
+        // The cycle-guard set is left clean after a successful resolve.
+        assert!(visiting.is_empty());
+    }
+
+    #[test]
+    fn dangling_reference_evaluates_empty() {
+        let reference = ReferenceElem::new(ElementRef("missing".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = reference.evaluate_with(DEFAULT_PRECISION, &NullResolver, &mut visiting);
+        assert!(ps.is_empty(), "dangling reference evaluates to empty, never panics");
+    }
+
+    #[test]
+    fn reference_cycle_breaks_to_empty() {
+        // Resolver where id "a" resolves to a reference back to "a" — a
+        // self-cycle. The threaded visited-set must break it.
+        struct CycleResolver;
+        impl ElementResolver for CycleResolver {
+            fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>> {
+                if id.0 == "a" {
+                    Some(Rc::new(Element::Live(LiveVariant::Reference(
+                        ReferenceElem::new(ElementRef("a".into()), CommonProps::default()),
+                    ))))
+                } else {
+                    None
+                }
+            }
+        }
+        let reference = ReferenceElem::new(ElementRef("a".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = reference.evaluate_with(DEFAULT_PRECISION, &CycleResolver, &mut visiting);
+        assert!(ps.is_empty(), "reference cycle breaks to empty, no infinite recursion");
+        assert!(visiting.is_empty(), "cycle-guard set is restored after evaluation");
+    }
+
+    #[test]
+    fn reference_reports_its_target_as_dependency() {
+        let reference = ReferenceElem::new(ElementRef("t".into()), CommonProps::default());
+        assert_eq!(reference.dependencies(), vec![ElementRef("t".into())]);
+        assert!(reference.children().is_empty());
     }
 }

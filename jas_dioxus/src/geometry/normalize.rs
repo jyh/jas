@@ -146,6 +146,13 @@ fn normalize_element(elem: &Element) -> Element {
                     ..cs.clone()
                 }),
             ),
+            crate::geometry::live::LiveVariant::Reference(r) => Element::Live(
+                crate::geometry::live::LiveVariant::Reference(crate::geometry::live::ReferenceElem {
+                    fill: r.fill.as_ref().map(normalize_fill),
+                    stroke: r.stroke.as_ref().map(normalize_stroke),
+                    ..r.clone()
+                }),
+            ),
         },
     }
 }

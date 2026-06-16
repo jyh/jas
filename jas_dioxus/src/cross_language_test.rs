@@ -91,6 +91,9 @@ mod tests {
             // Stable identity: elements carrying an `id` must survive the
             // test_json parse->serialize round-trip identically in all apps.
             "element_ids",
+            // Live elements: reference + compound round-trip through test_json
+            // (REFERENCE_GRAPH.md Phase 1a). Compound now carries `operation`.
+            "live_reference_roundtrip", "live_compound_roundtrip",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -490,6 +493,64 @@ mod tests {
                 eprintln!("Generated: {} -> {}", name, expected_file);
             }
         }
+    }
+
+    /// Bootstrap: generate the live-element round-trip fixtures
+    /// (live_compound_roundtrip / live_reference_roundtrip). Run with:
+    ///   cargo test generate_live_fixtures -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn generate_live_fixtures() {
+        use crate::geometry::element::{Element, RectElem, CommonProps, Color, Fill};
+        use crate::document::document::Document;
+        use crate::geometry::live::{
+            CompoundShape, CompoundOperation, ReferenceElem, ElementRef, LiveVariant,
+        };
+        use std::rc::Rc;
+        let mk_rect = |x: f64| Rc::new(Element::Rect(RectElem {
+            x, y: 0.0, width: 36.0, height: 36.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        }));
+        // Compound: subtract-front over two rects (exercises `operation`).
+        let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![mk_rect(0.0), mk_rect(20.0)],
+            fill: None, stroke: None, common: CommonProps::default(),
+        }));
+        let mut doc_c = Document::default();
+        // Document::default() seeds a random layer id and a random-id default
+        // artboard; clear both so the fixture is deterministic and
+        // regeneration-stable (matching the SVG-derived fixtures' shape).
+        doc_c.layers[0].common_mut().id = None;
+        doc_c.artboards.clear();
+        doc_c.layers[0].children_mut().unwrap().push(Rc::new(compound));
+        std::fs::write(
+            format!("{}/expected/live_compound_roundtrip.json", FIXTURES),
+            document_to_test_json(&doc_c),
+        ).unwrap();
+        // Reference: a rect with id "r1" plus a reference targeting it.
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 36.0, height: 36.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.id = Some("r1".into());
+        let reference = Element::Live(LiveVariant::Reference(
+            ReferenceElem::new(ElementRef("r1".into()), CommonProps::default())));
+        let mut doc_r = Document::default();
+        doc_r.layers[0].common_mut().id = None;
+        doc_r.artboards.clear();
+        {
+            let kids = doc_r.layers[0].children_mut().unwrap();
+            kids.push(Rc::new(Element::Rect(rect)));
+            kids.push(Rc::new(reference));
+        }
+        std::fs::write(
+            format!("{}/expected/live_reference_roundtrip.json", FIXTURES),
+            document_to_test_json(&doc_r),
+        ).unwrap();
+        eprintln!("Generated live_compound_roundtrip.json + live_reference_roundtrip.json");
     }
 
     fn run_operation_fixture(fixture: &str) {
