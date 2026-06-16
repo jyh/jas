@@ -28,6 +28,43 @@ use super::element::{Bounds, CommonProps, Element, Fill, Stroke};
 pub(crate) const DEFAULT_PRECISION: f64 = 0.0283;
 
 // ---------------------------------------------------------------------------
+// Reference resolution seam (REFERENCE_GRAPH.md §2.1)
+// ---------------------------------------------------------------------------
+
+/// A by-id reference to another element's `common.id`. Stable across
+/// insert/delete (unlike a tree path); resolved through an `ElementResolver`,
+/// never stored as an `Rc`. `Ord` is load-bearing: deterministic recompute
+/// order derives from sorted ids, never hashmap iteration order.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord,
+         serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ElementRef(pub String);
+
+/// Resolves a stable element id to the element it currently names. Lets the
+/// geometry layer evaluate by-id references without depending on
+/// Model/Document. Phase 1 backs this with a rebuild-on-demand resolver; the
+/// persistent-incremental index is Phase 4 (REFERENCE_GRAPH.md §2.4).
+pub trait ElementResolver {
+    fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>>;
+}
+
+/// A resolver that resolves nothing. Used on the resolver-unaware call paths
+/// (and wherever no live references are present) so existing geometry behavior
+/// is unchanged: a reference resolved through it is treated as dangling.
+pub struct NullResolver;
+
+impl ElementResolver for NullResolver {
+    fn resolve(&self, _id: &ElementRef) -> Option<Rc<Element>> {
+        None
+    }
+}
+
+/// The cycle-guard set threaded through evaluation. Carried as an explicit
+/// parameter (never instance/thread state) so all five apps break reference
+/// cycles identically (REFERENCE_GRAPH.md §3).
+pub(crate) type VisitSet = std::collections::BTreeSet<ElementRef>;
+
+// ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
 
@@ -54,6 +91,14 @@ pub trait LiveElement {
     /// `[a, b, spine?]`; drop shadow: `[source]`).
     fn children(&self) -> &[Rc<Element>];
     fn children_mut(&mut self) -> &mut Vec<Rc<Element>>;
+
+    /// Stable-id inputs reached by reference rather than containment, in
+    /// deterministic order. Default empty: containment kinds (e.g.
+    /// CompoundShape) own their inputs and expose them via `children()`. The
+    /// reference-graph index reads this; it is the only by-id edge source.
+    fn dependencies(&self) -> Vec<ElementRef> {
+        Vec::new()
+    }
 
     /// Stroke-inclusive bounding box of the evaluated output.
     fn bounds(&self) -> Bounds;
@@ -109,9 +154,26 @@ impl CompoundShape {
     ///
     /// Pure function — no cache today. A cache lives in a future
     /// phase once render performance demands it.
+    ///
+    /// Convenience wrapper that resolves no references (a compound's operands
+    /// are owned, not referenced); see `evaluate_with` for the resolver-aware
+    /// form used when an operand subtree may contain by-id references.
     pub fn evaluate(&self, precision: f64) -> PolygonSet {
+        let mut visiting = VisitSet::new();
+        self.evaluate_with(precision, &NullResolver, &mut visiting)
+    }
+
+    /// Resolver-aware evaluation: flattens each operand (threading the
+    /// resolver + cycle-guard set so a referenced operand resolves through
+    /// `resolver`), then applies the boolean operation.
+    pub fn evaluate_with(
+        &self,
+        precision: f64,
+        resolver: &dyn ElementResolver,
+        visiting: &mut VisitSet,
+    ) -> PolygonSet {
         let operands: Vec<PolygonSet> = self.operands.iter()
-            .map(|e| element_to_polygon_set(e, precision))
+            .map(|e| element_to_polygon_set_with(e, precision, resolver, visiting))
             .collect();
         apply_operation(self.operation, &operands)
     }
@@ -226,6 +288,20 @@ impl LiveElement for LiveVariant {
 ///   (Bézier → polyline) lands in a follow-up phase; Text glyph
 ///   flattening is deferred; Line has zero area.
 pub(crate) fn element_to_polygon_set(elem: &Element, precision: f64) -> PolygonSet {
+    let mut visiting = VisitSet::new();
+    element_to_polygon_set_with(elem, precision, &NullResolver, &mut visiting)
+}
+
+/// Resolver-aware flattening. Identical to [`element_to_polygon_set`] except
+/// that by-id references (added in a follow-up) resolve through `resolver`,
+/// with `visiting` breaking cycles. The 2-arg wrapper above passes a
+/// [`NullResolver`], so existing call sites are behavior-identical.
+pub(crate) fn element_to_polygon_set_with(
+    elem: &Element,
+    precision: f64,
+    resolver: &dyn ElementResolver,
+    visiting: &mut VisitSet,
+) -> PolygonSet {
     match elem {
         Element::Rect(r) => vec![vec![
             (r.x, r.y),
@@ -244,19 +320,19 @@ pub(crate) fn element_to_polygon_set(elem: &Element, precision: f64) -> PolygonS
         Element::Group(g) => {
             let mut out = PolygonSet::new();
             for child in &g.children {
-                out.extend(element_to_polygon_set(child, precision));
+                out.extend(element_to_polygon_set_with(child, precision, resolver, visiting));
             }
             out
         }
         Element::Layer(l) => {
             let mut out = PolygonSet::new();
             for child in &l.children {
-                out.extend(element_to_polygon_set(child, precision));
+                out.extend(element_to_polygon_set_with(child, precision, resolver, visiting));
             }
             out
         }
         Element::Live(v) => match v {
-            LiveVariant::CompoundShape(cs) => cs.evaluate(precision),
+            LiveVariant::CompoundShape(cs) => cs.evaluate_with(precision, resolver, visiting),
         },
         Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
         Element::TextPath(tp) => {
