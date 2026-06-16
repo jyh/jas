@@ -410,6 +410,48 @@ public struct Document: Equatable {
     }
 }
 
+// MARK: - RebuildResolver (REFERENCE_GRAPH.md §2.4 — Phase 1 rebuild strategy)
+
+/// An `ElementResolver` backed by an id→element index rebuilt from a
+/// `Document`. Phase 1's "rebuild on demand" resolver: the canvas builds a
+/// fresh `RebuildResolver` each paint so by-id references resolve to (and
+/// display) their current target geometry; the persistent-incremental index
+/// is Phase 4. Mirrors Rust's `register_ref_index` + `RenderResolver`, but as
+/// a plain value resolver (Swift `Element` is a value type, so the index holds
+/// element copies rather than a shared handle, and no thread-local is needed).
+public struct RebuildResolver: ElementResolver {
+    /// id → the element it currently names. First-occurrence wins (the
+    /// unique-id invariant means no collisions in practice; this just makes
+    /// the build deterministic).
+    private let index: [String: Element]
+
+    /// Build the index from `doc`. Indexes id-bearing descendants of every
+    /// layer — top-level layer ids are not resolution targets in Phase 1
+    /// (references target shapes), matching the Rust reference.
+    public init(document doc: Document) {
+        var index: [String: Element] = [:]
+        for layer in doc.layers {
+            for child in layer.children {
+                RebuildResolver.collect(child, into: &index)
+            }
+        }
+        self.index = index
+    }
+
+    private static func collect(_ elem: Element, into index: inout [String: Element]) {
+        if let id = elem.id, index[id] == nil {
+            index[id] = elem
+        }
+        switch elem {
+        case .group(let g): for c in g.children { collect(c, into: &index) }
+        case .layer(let l): for c in l.children { collect(c, into: &index) }
+        default: break
+        }
+    }
+
+    public func resolve(_ id: ElementRef) -> Element? { index[id.id] }
+}
+
 // MARK: - Private helpers
 
 private func childrenOf(_ elem: Element) -> [Element] {

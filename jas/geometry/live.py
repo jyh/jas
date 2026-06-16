@@ -24,9 +24,11 @@ from algorithms.boolean import (
 )
 
 if TYPE_CHECKING:
+    from document.document import Document
     from geometry.element import (
         CompoundOperation,
         Element,
+        ElementRef,
         ElementResolver,
     )
 
@@ -187,6 +189,62 @@ def bounds_of_polygon_set(
     if not math.isfinite(min_x):
         return (0.0, 0.0, 0.0, 0.0)
     return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+# ── Reference resolution (REFERENCE_GRAPH.md Phase 1b) ─────────────
+
+
+class DictResolver:
+    """An ``ElementResolver`` backed by a flat id→element dict.
+
+    Mirrors the Rust render-scoped ``RenderResolver`` reading a
+    per-paint id→element index: a missing id resolves to ``None``
+    (dangling, never an error). Built by ``resolver_from_document``;
+    the canvas render builds one per paint and threads it through
+    ``evaluate_with`` so by-id references resolve and draw.
+    """
+
+    def __init__(self, index: dict[str, "Element"]):
+        self._index = index
+
+    def resolve(self, ref: "ElementRef") -> "Element | None":
+        return self._index.get(ref)
+
+
+def _collect_ref_ids(elem: "Element", out: dict[str, "Element"]) -> None:
+    """Index ``elem`` (and its descendants) by stable id into ``out``.
+
+    First-occurrence wins (the unique-id invariant means there are no
+    collisions in practice; this just makes the build deterministic).
+    Recurses through Group / Layer ``children``. Mirrors the Rust
+    ``collect_ref_ids``.
+    """
+    eid = getattr(elem, "id", None)
+    if eid is not None and eid not in out:
+        out[eid] = elem
+    children = getattr(elem, "children", None)
+    if children is not None:
+        for child in children:
+            _collect_ref_ids(child, out)
+
+
+def resolver_from_document(doc: "Document") -> DictResolver:
+    """Build an ``ElementResolver`` (id→element) from ``doc``.
+
+    Indexes id-bearing descendants of every layer (which are the
+    Phase-1 reference targets). Top-level layer ids are intentionally
+    excluded — references target shapes, not layers — matching the
+    Rust ``register_ref_index``. The canvas render rebuilds this each
+    paint (the rebuild strategy; the persistent-incremental index is
+    Phase 4, REFERENCE_GRAPH.md §2.4).
+    """
+    index: dict[str, "Element"] = {}
+    for layer in doc.layers:
+        children = getattr(layer, "children", None)
+        if children is not None:
+            for child in children:
+                _collect_ref_ids(child, index)
+    return DictResolver(index)
 
 
 # ── Internal helpers ──────────────────────────────────────────────

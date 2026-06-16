@@ -27,6 +27,27 @@ public func setCanvasBrushLibraries(_ libs: [String: Any]) {
     _currentBrushLibraries = libs
 }
 
+// MARK: - Reference resolution (REFERENCE_GRAPH.md Phase 1b)
+//
+// The live element draw arm resolves by-id references against a
+// render-scoped id→element index, rebuilt each paint from the document
+// (the rebuild strategy; the persistent-incremental index is Phase 4).
+// As with the brush registry above, threading a resolver through every
+// drawing helper signature would be invasive; the canvas is
+// single-threaded UI, so a file-local resolver `var`, installed for the
+// duration of `draw(_:)`, suffices. This mirrors Rust's render-scoped
+// thread-local `CURRENT_REF_INDEX` / `RenderResolver`. The cycle-guard
+// `VisitSet` is never held here — it stays a fresh local per top-level
+// `evaluateWith`, matching the reference.
+
+private var _currentRefResolver: ElementResolver = NullResolver()
+
+/// Install `resolver` as the current render's reference resolver. The
+/// caller restores the prior value after the paint (see `draw(_:)`).
+private func setCanvasRefResolver(_ resolver: ElementResolver) {
+    _currentRefResolver = resolver
+}
+
 private func lookupBrush(_ slug: String) -> [String: Any]? {
     guard let sep = slug.firstIndex(of: "/") else { return nil }
     let libId = String(slug[..<sep])
@@ -1582,12 +1603,70 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
 
     case .live(let v):
-        // Phase 1 stub: render each operand so the user can still see
-        // the source artwork. Phase 2 replaces with the evaluated
-        // polygon_set (boolean op result).
+        // Evaluate the live element, resolving references against the
+        // render-scoped resolver. The cycle guard is a fresh local per
+        // top-level evaluate. Per variant we also pick the paint: a
+        // reference inherits the resolved target's paint when its own is
+        // nil (Fork F3). Mirrors the Rust render arm.
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        for child in v.operands { drawElement(ctx, child, ancestorVis: effective) }
+        var visiting = VisitSet()
+        let ps: BoolPolygonSet
+        let liveFill: Fill?
+        let liveStroke: Stroke?
+        switch v {
+        case .compoundShape(let cs):
+            ps = cs.evaluateWith(precision: DEFAULT_PRECISION,
+                                 resolver: _currentRefResolver, visiting: &visiting)
+            liveFill = cs.fill
+            liveStroke = cs.stroke
+        case .reference(let r):
+            ps = r.evaluateWith(precision: DEFAULT_PRECISION,
+                                resolver: _currentRefResolver, visiting: &visiting)
+            let target = _currentRefResolver.resolve(r.target)
+            liveFill = r.fill ?? target?.fill
+            liveStroke = r.stroke ?? target?.stroke
+        }
+        var fillOp = 1.0
+        var strokeOp = 1.0
+        var strokeAlign = StrokeAlign.center
+        if outline {
+            applyOutlineStyle(ctx)
+        } else {
+            setFill(ctx, liveFill)
+            fillOp = liveFill?.opacity ?? 1.0
+            (strokeOp, strokeAlign) = setStroke(ctx, liveStroke)
+        }
+        if ps.contains(where: { $0.count >= 2 }) {
+            ctx.beginPath()
+            for ring in ps where ring.count >= 2 {
+                ctx.move(to: CGPoint(x: ring[0].0, y: ring[0].1))
+                for i in 1..<ring.count {
+                    ctx.addLine(to: CGPoint(x: ring[i].0, y: ring[i].1))
+                }
+                ctx.closePath()
+            }
+            if !outline && liveFill != nil {
+                ctx.setAlpha(CGFloat(v.opacity * fillOp))
+                ctx.fillPath()
+            }
+            if outline || liveStroke != nil {
+                ctx.setAlpha(CGFloat(v.opacity * strokeOp))
+                // strokeAligned consumes the current path (clip/stroke);
+                // the path must be re-traced if both fill and stroke run.
+                if !outline && liveFill != nil {
+                    ctx.beginPath()
+                    for ring in ps where ring.count >= 2 {
+                        ctx.move(to: CGPoint(x: ring[0].0, y: ring[0].1))
+                        for i in 1..<ring.count {
+                            ctx.addLine(to: CGPoint(x: ring[i].0, y: ring[i].1))
+                        }
+                        ctx.closePath()
+                    }
+                }
+                if outline { ctx.strokePath() } else { strokeAligned(ctx, strokeAlign) }
+            }
+        }
     }
     ctx.restoreGState()
 }
@@ -1687,6 +1766,28 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         }
     case .path(let v):
         buildPath(ctx, v.d)
+        ctx.strokePath()
+    case .live(let v):
+        // Trace the evaluated geometry (resolving references against the
+        // render-scoped resolver) so a selected reference / compound is
+        // outlined. Mirrors the Rust selection-geometry trace arm.
+        var visiting = VisitSet()
+        let ps: BoolPolygonSet
+        switch v {
+        case .compoundShape(let cs):
+            ps = cs.evaluateWith(precision: DEFAULT_PRECISION,
+                                 resolver: _currentRefResolver, visiting: &visiting)
+        case .reference(let r):
+            ps = r.evaluateWith(precision: DEFAULT_PRECISION,
+                                resolver: _currentRefResolver, visiting: &visiting)
+        }
+        for ring in ps where ring.count >= 2 {
+            ctx.move(to: CGPoint(x: ring[0].0, y: ring[0].1))
+            for i in 1..<ring.count {
+                ctx.addLine(to: CGPoint(x: ring[i].0, y: ring[i].1))
+            }
+            ctx.closePath()
+        }
         ctx.strokePath()
     default:
         break
@@ -2409,6 +2510,13 @@ class CanvasNSView: NSView {
             ctx.scaleBy(x: CGFloat(model.zoomLevel),
                         y: CGFloat(model.zoomLevel))
         }
+        // Install the render-scoped reference resolver so live by-id
+        // references resolve and display (REFERENCE_GRAPH.md Phase 1b).
+        // Rebuilt each paint from the current document (the rebuild
+        // strategy; persistent-incremental index is Phase 4). Restored
+        // after the selection overlays, which also evaluate live geometry.
+        let priorRefResolver = _currentRefResolver
+        setCanvasRefResolver(RebuildResolver(document: document))
         // Layer 2: artboard fills (list order, later wins overlaps).
         drawArtboardFills(ctx, document)
         // Layer 3: document element tree. In mask-isolation mode
@@ -2445,6 +2553,8 @@ class CanvasNSView: NSView {
             return arr
         }()
         drawSelectionOverlays(ctx, document, keyObjectPath)
+        // Restore the prior resolver now the live-evaluating passes are done.
+        setCanvasRefResolver(priorRefResolver)
         ctx.restoreGState()
         // Active tool overlay (screen-space, post-transform).
         // YamlTool's marquee rect is stored in screen coords so it

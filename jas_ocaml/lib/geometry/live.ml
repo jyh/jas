@@ -35,6 +35,54 @@ let dependencies (lv : live_variant) : element_ref list =
   | Compound_shape _ -> []
   | Reference r -> [ r.ref_target ]
 
+(* ------------------------------------------------------------------ *)
+(* Render-scoped resolver (REFERENCE_GRAPH.md Phase 1b)               *)
+(* ------------------------------------------------------------------ *)
+
+(* The id-bearing-descendant children of an element, in document order.
+   Containment kinds (Group / Layer / Compound_shape) expose their
+   children; a reference does not own the element it names, so it has
+   none. Mirrors Rust [Element::children] as used by [collect_ref_ids]. *)
+let resolver_children (elem : element) : element list =
+  match elem with
+  | Group { children; _ } | Layer { children; _ } -> Array.to_list children
+  | Live (Compound_shape cs) -> Array.to_list cs.operands
+  | _ -> []
+
+(* The stable id carried on an element, if any. *)
+let resolver_id (elem : element) : element_ref option =
+  match elem with
+  | Rect { id; _ } | Circle { id; _ } | Ellipse { id; _ }
+  | Line { id; _ } | Polyline { id; _ } | Polygon { id; _ }
+  | Path { id; _ } | Text { id; _ } | Text_path { id; _ }
+  | Group { id; _ } | Layer { id; _ } -> id
+  | Live (Compound_shape cs) -> cs.id
+  | Live (Reference r) -> r.ref_id
+
+(* Walk [elem] and its id-bearing descendants, recording the first
+   element seen for each id (first-occurrence wins, matching Rust
+   [collect_ref_ids]; the unique-id invariant means there are no
+   collisions in practice, this just makes the build deterministic). *)
+let rec collect_ref_ids (elem : element) (tbl : (element_ref, element) Hashtbl.t) : unit =
+  (match resolver_id elem with
+   | Some id -> if not (Hashtbl.mem tbl id) then Hashtbl.replace tbl id elem
+   | None -> ());
+  List.iter (fun child -> collect_ref_ids child tbl) (resolver_children elem)
+
+(* Build an [element_resolver] from a document's [layers]. Indexes the
+   id-bearing descendants of each top-level layer; top-level layer ids
+   are not resolution targets in Phase 1 (references target shapes), so
+   the walk starts at each layer's children. Rebuilt on demand by the
+   render each paint (the rebuild strategy; the persistent-incremental
+   index is Phase 4). Mirrors Rust [register_ref_index]. *)
+let resolver_of_document (layers : element array) : element_resolver =
+  let tbl : (element_ref, element) Hashtbl.t = Hashtbl.create 16 in
+  Array.iter (fun layer ->
+    List.iter (fun child -> collect_ref_ids child tbl)
+      (resolver_children layer)
+  ) layers;
+  fun id -> Hashtbl.find_opt tbl id
+
 (** Compute the number of segments required to approximate a circle
     of the given radius so the max perpendicular distance between
     the polyline and the arc is at most [precision]. *)

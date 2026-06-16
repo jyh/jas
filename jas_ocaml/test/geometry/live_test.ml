@@ -203,6 +203,34 @@ let test_reference_reports_dependency () =
   Alcotest.(check (list string)) "dependency is target" ["t"]
     (Live.dependencies (Reference r))
 
+(* A rect carrying a stable id (the [rect_at] helper leaves id = None). *)
+let rect_with_id id x y =
+  Rect { name = None; id = Some id; x; y; width = 10.0; height = 10.0;
+         rx = 0.0; ry = 0.0;
+         fill = None; stroke = None; opacity = 1.0; transform = None;
+         locked = false; visibility = Preview; blend_mode = Normal; mask = None;
+         fill_gradient = None; stroke_gradient = None;
+       }
+
+(* Mirror of Rust render_ref_index_resolves_reference_to_target:
+   resolver_of_document builds the per-paint id->element index from the
+   document layers; the resolver reads it, so a reference resolves and
+   evaluates to its target's geometry (Phase 1b render wiring). A
+   missing id resolves to None (dangling). *)
+let test_resolver_of_document_resolves_reference () =
+  let layer = make_layer [| rect_with_id "r1" 0.0 0.0 |] in
+  let resolver = Live.resolver_of_document [| layer |] in
+  Alcotest.(check bool) "resolves r1" true (resolver "r1" <> None);
+  Alcotest.(check bool) "missing id is None" true (resolver "missing" = None);
+  let r = reference_elem "r1" in
+  let visiting = ref Live.VisitSet.empty in
+  let ps = Live.reference_evaluate r Live.default_precision resolver visiting in
+  Alcotest.(check int) "reference resolves to the rect single ring"
+    1 (List.length ps);
+  let (min_x, _, max_x, _) = bbox_of_ring (List.hd ps) in
+  Alcotest.(check bool) "min_x = 0" true (approx_equal min_x 0.0);
+  Alcotest.(check bool) "max_x = 10" true (approx_equal max_x 10.0)
+
 let test_compound_has_no_dependencies () =
   let cs = {
     operation = Op_union;
@@ -244,6 +272,8 @@ let () =
           test_reference_cycle_breaks_to_empty;
         Alcotest.test_case "reference reports its target as dependency" `Quick
           test_reference_reports_dependency;
+        Alcotest.test_case "resolver_of_document resolves reference" `Quick
+          test_resolver_of_document_resolves_reference;
         Alcotest.test_case "compound shape has no dependencies" `Quick
           test_compound_has_no_dependencies;
       ]
