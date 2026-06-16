@@ -121,6 +121,9 @@ mod tests {
             "multi_layer", "complex_document",
             // Stable identity (binary v2): id+name round-trip generically.
             "element_ids",
+            // Live elements round-trip through binary (Phase 2b): reference +
+            // compound (TAG_LIVE, kind-discriminated).
+            "live_reference_roundtrip", "live_compound_roundtrip",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
