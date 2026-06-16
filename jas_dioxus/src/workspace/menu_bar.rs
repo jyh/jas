@@ -192,6 +192,60 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "make_instance" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        use crate::document::artboard::generate_element_id;
+                        use crate::document::document::SelectionKind;
+                        let Some(tab) = st.tab_mut() else { return; };
+                        // Enabled only when exactly ONE whole element is
+                        // selected (kind = All; not a control-point sub-
+                        // selection). Otherwise no-op, like group's guard.
+                        let sel = &tab.model.document().selection;
+                        let [es] = sel.as_slice() else { return; };
+                        if es.kind != SelectionKind::All { return; }
+                        let target_path = es.path.clone();
+                        // Gather every existing element id so the freshly
+                        // minted target_id / ref_id can avoid collisions.
+                        let mut existing: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
+                        fn gather_ids(
+                            elem: &crate::geometry::element::Element,
+                            out: &mut std::collections::HashSet<String>,
+                        ) {
+                            if let Some(id) = elem.common().id.as_deref() {
+                                out.insert(id.to_string());
+                            }
+                            if let Some(children) = elem.children() {
+                                for c in children { gather_ids(c, out); }
+                            }
+                        }
+                        for layer in &tab.model.document().layers {
+                            gather_ids(layer, &mut existing);
+                        }
+                        // Mint two distinct, collision-free ids (mirrors the
+                        // artboard mint loop in effects.rs).
+                        let mut mint = |existing: &std::collections::HashSet<String>| -> Option<String> {
+                            for _ in 0..100 {
+                                let c = generate_element_id(None);
+                                if !existing.contains(&c) { return Some(c); }
+                            }
+                            None
+                        };
+                        let Some(target_id) = mint(&existing) else { return; };
+                        existing.insert(target_id.clone());
+                        let Some(ref_id) = mint(&existing) else { return; };
+                        // create_reference + offset-move under ONE snapshot
+                        // = a single undo step (offset rides on the new
+                        // reference's common.transform via move_selection).
+                        tab.model.snapshot();
+                        Controller::create_reference(
+                            &mut tab.model, &target_path, &target_id, &ref_id,
+                        );
+                        Controller::move_selection(
+                            &mut tab.model, PASTE_OFFSET, PASTE_OFFSET,
+                        );
+                    }));
+                }
                 "simplify" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         let precision = st.boolean_panel.simplify_precision;
