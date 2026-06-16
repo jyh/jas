@@ -626,6 +626,130 @@ mod tests {
         eprintln!("Generated live_*_roundtrip.json + svg/live_*.svg + expected/live_*.json");
     }
 
+    /// Build the shared DEPENDENCY INDEX test document programmatically
+    /// (REFERENCE_GRAPH.md §3). One layer containing, in z-order:
+    ///   - a plain rect A with id "a" (a targetable reference target);
+    ///   - two references r1, r2 both targeting "a";
+    ///   - a dangling reference r3 targeting "ghost" (absent);
+    ///   - a 2-cycle: c1 -> c2 and c2 -> c1;
+    ///   - a CompoundShape (subtract_front, two rect operands) whose FIRST
+    ///     operand carries id "op1", and a reference r4 targeting "op1".
+    /// r4 must come out DANGLING because op1 is operand-nested/opaque (the walk
+    /// does not recurse into operands) — this pins the operands-opaque decision.
+    ///
+    /// Construct it here (not as a parsed string) so the document is
+    /// unambiguous; the two generated fixtures then let the sibling apps parse
+    /// the SAME doc and compare the SAME canonical index.
+    fn dependency_index_test_document() -> crate::document::document::Document {
+        use crate::geometry::element::{Element, RectElem, CommonProps, Color, Fill};
+        use crate::document::document::Document;
+        use crate::geometry::live::{
+            CompoundShape, CompoundOperation, ReferenceElem, ElementRef, LiveVariant,
+        };
+        use std::rc::Rc;
+
+        let rect = |id: Option<&str>, x: f64| {
+            Rc::new(Element::Rect(RectElem {
+                x, y: 0.0, width: 36.0, height: 36.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                common: CommonProps { id: id.map(String::from), ..Default::default() },
+                fill_gradient: None, stroke_gradient: None,
+            }))
+        };
+        let reference = |id: &str, target: &str| {
+            Rc::new(Element::Live(LiveVariant::Reference(ReferenceElem::new(
+                ElementRef(target.to_string()),
+                CommonProps { id: Some(id.to_string()), ..Default::default() },
+            ))))
+        };
+        // Compound whose first operand carries id "op1" (operand-nested ->
+        // opaque to the by-id graph); the compound itself carries id "cs".
+        let compound = Rc::new(Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![rect(Some("op1"), 0.0), rect(None, 20.0)],
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("cs".into()), ..Default::default() },
+        })));
+
+        let mut doc = Document::default();
+        // Clear the random layer id + default artboard so the input fixture is
+        // deterministic and regeneration-stable (matching the live fixtures).
+        doc.layers[0].common_mut().id = None;
+        doc.artboards.clear();
+        {
+            let kids = doc.layers[0].children_mut().unwrap();
+            kids.push(rect(Some("a"), 0.0));
+            kids.push(reference("r1", "a"));
+            kids.push(reference("r2", "a"));
+            kids.push(reference("r3", "ghost"));
+            kids.push(reference("c1", "c2"));
+            kids.push(reference("c2", "c1"));
+            kids.push(compound);
+            kids.push(reference("r4", "op1"));
+        }
+        doc
+    }
+
+    /// Bootstrap: generate the shared dependency-index fixtures. Run with:
+    ///   cargo test generate_dependency_index_fixtures -- --ignored --nocapture
+    /// Emits two fixtures (Rust is the source of truth for the canonical shape):
+    ///   - expected/dependency_index_input.json — the input Document in
+    ///     canonical test_json, so the sibling apps parse the identical doc;
+    ///   - expected/dependency_index.json — the canonical serialized index.
+    #[test]
+    #[ignore]
+    fn generate_dependency_index_fixtures() {
+        use crate::document::dependency_index::{
+            dependency_index, dependency_index_to_test_json,
+        };
+        let doc = dependency_index_test_document();
+        std::fs::write(
+            format!("{}/expected/dependency_index_input.json", FIXTURES),
+            document_to_test_json(&doc),
+        ).unwrap();
+        let idx = dependency_index(&doc);
+        std::fs::write(
+            format!("{}/expected/dependency_index.json", FIXTURES),
+            dependency_index_to_test_json(&idx),
+        ).unwrap();
+        eprintln!("Generated expected/dependency_index_input.json + dependency_index.json");
+    }
+
+    /// Cross-language pin (REFERENCE_GRAPH.md §3): read the shared input
+    /// document fixture, build the dependency index, serialize it, and assert
+    /// byte-equality with the shared index fixture. All five apps run this same
+    /// pair of fixtures; passing means Rust agrees on the canonical index shape.
+    #[test]
+    fn dependency_index_cross_language() {
+        use crate::document::dependency_index::{
+            dependency_index, dependency_index_to_test_json,
+        };
+        // Parse the shared input document.
+        let input = read_fixture("expected/dependency_index_input.json");
+        let input = input.trim();
+        let doc = test_json_to_document(input);
+
+        // Sanity: the parsed input must re-serialize to itself (the fixture is
+        // canonical), so the index is computed over the same doc all apps see.
+        assert_eq!(
+            document_to_test_json(&doc),
+            input,
+            "dependency_index_input.json is not canonical: parse->serialize changed it"
+        );
+
+        // Build + serialize the index, compare with the expected fixture.
+        let actual = dependency_index_to_test_json(&dependency_index(&doc));
+        let expected = read_fixture("expected/dependency_index.json");
+        let expected = expected.trim();
+        if actual != expected {
+            eprintln!("=== EXPECTED (dependency_index) ===");
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL (dependency_index) ===");
+            eprintln!("{}", actual);
+            panic!("dependency_index cross-language test failed: canonical JSON mismatch");
+        }
+    }
+
     fn run_operation_fixture(fixture: &str) {
         let json_str = read_fixture(fixture);
         let tests: serde_json::Value = serde_json::from_str(&json_str)
