@@ -712,6 +712,43 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.getElement([0, 0]).id == "elem-1")
 }
 
+// MARK: - Create reference (REFERENCE_GRAPH.md Phase 1b)
+
+@Test func createReferenceStampsTargetAndInsertsReference() {
+    // Target has no id -> createReference stamps targetId onto it and
+    // appends a ReferenceElem (id refId, target = the stamped id).
+    // Mirrors Rust create_reference_stamps_target_and_inserts_reference.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.createReference([0, 0], targetId: "tgt-1", refId: "ref-1")
+    let doc = ctrl.document
+    #expect(doc.getElement([0, 0]).id == "tgt-1")
+    if case .live(.reference(let re)) = doc.getElement([0, 1]) {
+        #expect(re.id == "ref-1")
+        #expect(re.target.id == "tgt-1")
+    } else {
+        Issue.record("expected a Reference at [0,1]")
+    }
+}
+
+@Test func createReferenceKeepsExistingTargetId() {
+    // Target already has an id -> it is NOT re-stamped; the reference
+    // targets the existing id and targetId is ignored. Mirrors Rust
+    // create_reference_keeps_existing_target_id.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "existing"))
+    let layer = Layer(name: "L0", children: [rect])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    ctrl.createReference([0, 0], targetId: "tgt-ignored", refId: "ref-1")
+    let doc = ctrl.document
+    #expect(doc.getElement([0, 0]).id == "existing")
+    if case .live(.reference(let re)) = doc.getElement([0, 1]) {
+        #expect(re.target.id == "existing")
+    } else {
+        Issue.record("expected a Reference at [0,1]")
+    }
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {

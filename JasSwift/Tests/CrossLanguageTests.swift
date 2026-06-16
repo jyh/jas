@@ -287,6 +287,12 @@ private func runOperationFixture(_ fixture: String) throws {
             case "assign_id":
                 let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
                 controller.assignId(path, id: op["id"] as! String)
+            case "create_reference":
+                let targetPath = (op["target_path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.createReference(
+                    targetPath,
+                    targetId: op["target_id"] as! String,
+                    refId: op["ref_id"] as! String)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
             case "lock_selection":

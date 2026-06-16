@@ -111,6 +111,33 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_id elem (Some id) in
         model#set_document (Document.replace_element doc path new_elem)
 
+    (** Create a by-id reference to the element at [target_path]
+        (REFERENCE_GRAPH.md \1674). Assign-on-create: stamp [target_id] onto the
+        target iff it has no id yet (the lazy-mint trigger); if it already has
+        one, that id names the edge and [target_id] is ignored. A new reference
+        element (its own id = [ref_id]) is then appended via [add_element]. Both
+        ids are minted by the initiator and carried in the op payload — never
+        minted here — so every app applies identical values. No-op on an
+        invalid path. *)
+    method create_reference (target_path : Document.element_path)
+        (target_id : string) (ref_id : string) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc target_path) with _ -> None) with
+      | None -> ()
+      | Some target ->
+        let resolved_id =
+          match Element.id_of target with
+          | Some existing -> existing
+          | None ->
+            (* Assign-on-create: stamp the carried id and use it. *)
+            let stamped = Element.with_id target (Some target_id) in
+            model#set_document
+              (Document.replace_element doc target_path stamped);
+            target_id
+        in
+        let reference = Element.make_reference ~id:(Some ref_id) resolved_id in
+        self#add_element reference
+
     (** Append [elem] to the mask subtree of the element at [path].
         Returns [true] on success, [false] when the target has no
         mask or the subtree root isn't a [Group] — the caller then

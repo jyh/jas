@@ -399,6 +399,20 @@ mod tests {
                     .collect();
                 Controller::assign_id(model, &path, op["id"].as_str().unwrap());
             }
+            "create_reference" => {
+                let target_path: ElementPath = op["target_path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::create_reference(
+                    model,
+                    &target_path,
+                    op["target_id"].as_str().unwrap(),
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);

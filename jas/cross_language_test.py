@@ -251,6 +251,10 @@ class CrossLanguageTest(absltest.TestCase):
                     ctrl.copy_selection(op["dx"], op["dy"])
                 elif op_name == "assign_id":
                     ctrl.assign_id(tuple(op["path"]), op["id"])
+                elif op_name == "create_reference":
+                    ctrl.create_reference(
+                        tuple(op["target_path"]),
+                        op["target_id"], op["ref_id"])
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":

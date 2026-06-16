@@ -114,6 +114,12 @@ let run_operation_fixture fixture_name =
         let path = op |> member "path" |> to_list |> List.map to_int in
         let id = op |> member "id" |> to_string in
         ctrl#assign_id path id
+      | "create_reference" ->
+        let target_path =
+          op |> member "target_path" |> to_list |> List.map to_int in
+        let target_id = op |> member "target_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#create_reference target_path target_id ref_id
       | "delete_selection" ->
         let new_doc = Jas.Document.delete_selection model#document in
         model#set_document new_doc
