@@ -186,6 +186,35 @@ private func docWithLayer(_ children: [Element]) -> Document {
     #expect(DependencyIndex.orphanedReferences(doc, [[0, 1]]) == ["r1"])
 }
 
+// MARK: - warn-then-orphan confirm message (reference-aware delete UI)
+
+@Test func orphanWarningBodySingularVsPlural() {
+    // Verbatim, cross-language-pinned wording. Singular at n == 1.
+    #expect(DependencyIndex.orphanWarningBody(1)
+        == "Deleting will leave 1 live instance empty.")
+    #expect(DependencyIndex.orphanWarningBody(2)
+        == "Deleting will leave 2 live instances empty.")
+    #expect(DependencyIndex.orphanWarningBody(0)
+        == "Deleting will leave 0 live instances empty.")
+}
+
+@Test func orphanWarningPathTriggersOnlyWhenNonEmpty() {
+    // Two refs to `a`: deleting `a` orphans both -> warn (n == 2).
+    let doc = docWithLayer([
+        rectWithId("a"),
+        reference("r1", "a"),
+        reference("r2", "a"),
+    ])
+    let orphaned = DependencyIndex.orphanedReferences(doc, [[0, 0]])
+    #expect(orphaned.count == 2)
+    #expect(DependencyIndex.orphanWarningBody(orphaned.count)
+        == "Deleting will leave 2 live instances empty.")
+
+    // Deleting a plain rect with no referrers -> no warn (empty).
+    let plain = docWithLayer([rectWithId("a")])
+    #expect(DependencyIndex.orphanedReferences(plain, [[0, 0]]).isEmpty)
+}
+
 @Test func canonicalJsonHasSortedKeysAndArrays() {
     // c1<->c2 cycle plus two refs to `a` and a dangling ref.
     let idx = DependencyIndex.build(docWithLayer([

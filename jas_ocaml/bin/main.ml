@@ -344,8 +344,31 @@ let () =
       let m = !active_model in
       let doc = m#document in
       if not (Jas.Document.PathMap.is_empty doc.Jas.Document.selection) then begin
-        m#snapshot;
-        m#set_document (Jas.Document.delete_selection doc)
+        (* Reference-aware delete (warn-then-orphan). The paths the
+           delete will remove are exactly the [es_path] of each
+           selection entry — the same set [delete_selection] folds over.
+           [orphaned_references] is the shared, cross-language-pinned
+           predicate (operand-opaque; excludes referrers being deleted);
+           feed it those paths. *)
+        let selection_paths =
+          Jas.Document.PathMap.fold
+            (fun _ (es : Jas.Document.element_selection) acc ->
+              es.Jas.Document.es_path :: acc)
+            doc.Jas.Document.selection [] in
+        let orphaned =
+          Jas.Dependency_index.orphaned_references doc selection_paths in
+        let proceed =
+          match orphaned with
+          | [] -> true  (* No live reference orphaned: delete as today. *)
+          | _ ->
+            (* Some live references would be left empty: confirm first.
+               Cancel aborts entirely (no snapshot, no delete). *)
+            Jas.Menubar.confirm_delete_orphans (List.length orphaned) main_window
+        in
+        if proceed then begin
+          m#snapshot;
+          m#set_document (Jas.Document.delete_selection doc)
+        end
       end;
       true
     end else begin

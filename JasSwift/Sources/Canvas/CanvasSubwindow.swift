@@ -2719,8 +2719,15 @@ class CanvasNSView: NSView {
         switch chars {
         case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
             if let model = controller?.model, !model.document.selection.isEmpty {
+                // Reference-aware delete (warn-then-orphan): same guard as the
+                // Edit-menu Delete. Empty orphan set -> delete as today.
+                let doc = model.document
+                let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
+                if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
+                    return
+                }
                 model.snapshot()
-                model.document = model.document.deleteSelection()
+                model.document = doc.deleteSelection()
             }
         case "\u{1B}":  // Escape
             // OPACITY.md §Preview interactions: Escape exits

@@ -2762,6 +2762,21 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // doc.delete_selection — delete every currently-selected element
+    // (reference-aware delete OK path). Mirrors the inline delete the
+    // menu/keyboard run when no orphan would result: snapshot is a
+    // separate effect (the YAML action lists `snapshot` before this),
+    // then delete_selection produces the new document and set_document
+    // commits it. The selection is preserved across opening the confirm
+    // dialog, so this deletes exactly what the user was about to delete.
+    if eff.get("doc.delete_selection").is_some() {
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            let new_doc = tab.model.document().delete_selection();
+            tab.model.set_document(new_doc);
+        }
+        return deferred;
+    }
+
     // doc.clone_at: path_expr — PHASE3 §5.5
     // Deep-clones the element at path (without mutating the doc) and
     // binds it as JSON in ctx under `as:` name.

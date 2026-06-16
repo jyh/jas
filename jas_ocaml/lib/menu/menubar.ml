@@ -513,6 +513,32 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
+(* Reference-aware delete (warn-then-orphan), the CONFIRM half.
+   [n] is the count of live references that the pending delete would
+   orphan (the length of [Dependency_index.orphaned_references ...]).
+   Verbatim wording is cross-language pinned: it must be byte-identical
+   in every app, so it lives in one named helper. *)
+let delete_orphan_warning_body (n : int) =
+  Printf.sprintf "Deleting will leave %d live %s empty."
+    n (if n = 1 then "instance" else "instances")
+
+(* Modal confirm shown when a delete would orphan [n] (> 0) live
+   references. Mirrors the [revert] confirm above (synchronous
+   [#run] / [#destroy]) but uses custom button labels so they read
+   "Cancel" / "Delete" verbatim; [Cancel] is the focused default so
+   the safe choice wins a stray Enter. Returns [true] only when the
+   user picks the destructive [Delete]. *)
+let confirm_delete_orphans (n : int) (parent : GWindow.window) =
+  let dialog = GWindow.dialog ~title:"Delete" ~modal:true ~parent () in
+  ignore (GMisc.label ~text:(delete_orphan_warning_body n)
+            ~xpad:12 ~ypad:12 ~packing:dialog#vbox#add ());
+  dialog#add_button "Cancel" `CANCEL;
+  dialog#add_button "Delete" `DELETE;
+  dialog#set_default_response `CANCEL;
+  let response = dialog#run () in
+  dialog#destroy ();
+  match response with `DELETE -> true | _ -> false
+
 let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)

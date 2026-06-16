@@ -1,0 +1,46 @@
+delete_orphan_confirm:
+  summary: "Delete"
+  description: >
+    Reference-aware delete confirmation (warn-then-orphan). Opened by
+    the primary delete entry points (Edit > Delete menu item and the
+    Delete / Backspace key) ONLY when deleting the current selection
+    would orphan one or more live instances — that is, when the pure
+    predicate orphaned_references(document, selection_paths) returns a
+    non-empty set. When the predicate is empty the delete proceeds
+    inline with no dialog (unchanged behavior).
+
+    The count of would-be-orphaned referrers is passed in as the `count`
+    param and surfaced verbatim in the body text:
+    "Deleting will leave N live instance(s) empty." with proper
+    singular ("instance") / plural ("instances") agreement via the
+    expression-language ternary.
+
+    Delete (the destructive, confirming button): snapshot the document
+    then delete the current selection (the same delete_selection the
+    inline path runs), then close. The selection is preserved across
+    opening the dialog, so the OK action operates on exactly the
+    elements the user was about to delete.
+    Cancel (the safe default): dismiss the dialog and do nothing — no
+    snapshot, no delete.
+
+    Cut is intentionally NOT routed through this dialog yet; cut may
+    orphan silently for now (follow-on work).
+  modal: true
+  params:
+    count: { type: number }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - type: text
+        content: 'Deleting will leave {{param.count}} live {{ param.count == 1 ? "instance" : "instances" }} empty.'
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: delete_orphan_ok_btn
+            type: button
+            label: "Delete"
+            variant: primary
+            action: delete_orphan_confirm_ok
