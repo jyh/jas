@@ -497,9 +497,16 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         // the evaluated geometry once the boolean pipeline is wired.
         Element::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                let op = match cs.operation {
+                    crate::geometry::live::CompoundOperation::Union => "union",
+                    crate::geometry::live::CompoundOperation::SubtractFront => "subtract_front",
+                    crate::geometry::live::CompoundOperation::Intersection => "intersection",
+                    crate::geometry::live::CompoundOperation::Exclude => "exclude",
+                };
                 let mut lines = vec![format!(
-                    "{}<g data-jas-live=\"compound_shape\"{}>",
+                    "{}<g data-jas-live=\"compound_shape\" data-jas-operation=\"{}\"{}>",
                     indent,
+                    op,
                     common_attrs_no_name(&cs.common),
                 )];
                 let child_indent = format!("{}  ", indent);
@@ -510,12 +517,13 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 lines.join("\n")
             }
             crate::geometry::live::LiveVariant::Reference(r) => {
-                // Phase 1 placeholder: SVG round-trip of references (as
-                // <use href="#id">) lands in Phase 2. Emit an empty marker
-                // group so export stays valid until then.
+                // A reference is native SVG <use href="#id"> (Phase 2). Its own
+                // id/opacity/transform ride the common attrs; the target is the
+                // href. Any <use> imports back as a live reference (F-svg-use).
                 format!(
-                    "{}<g data-jas-live=\"reference\"{}></g>",
+                    "{}<use href=\"#{}\"{}/>",
                     indent,
+                    escape_xml(&r.target.0),
                     common_attrs_no_name(&r.common),
                 )
             }
@@ -1706,6 +1714,22 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     children.push(Rc::new(elem));
                 }
             }
+            // A live compound shape is <g data-jas-live="compound_shape">
+            // (REFERENCE_GRAPH.md Phase 2): rebuild it instead of demoting to
+            // a plain Group. Operation comes from data-jas-operation.
+            if node.attrs.get("data-jas-live").map(|s| s.as_str()) == Some("compound_shape") {
+                let operation = match node.attrs.get("data-jas-operation").map(|s| s.as_str()) {
+                    Some("subtract_front") => crate::geometry::live::CompoundOperation::SubtractFront,
+                    Some("intersection") => crate::geometry::live::CompoundOperation::Intersection,
+                    Some("exclude") => crate::geometry::live::CompoundOperation::Exclude,
+                    _ => crate::geometry::live::CompoundOperation::Union,
+                };
+                return Some(Element::Live(crate::geometry::live::LiveVariant::CompoundShape(
+                    crate::geometry::live::CompoundShape {
+                        operation, operands: children, fill: None, stroke: None, common,
+                    },
+                )));
+            }
             // Layer detection: only inkscape:groupmode="layer"
             // promotes a <g> to a Layer. inkscape:label alone is a
             // Group name (the new common.name path); the parser
@@ -1719,6 +1743,21 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             } else {
                 Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
             }
+        }
+        "use" => {
+            // Native SVG <use href="#id"> imports as a live reference
+            // (F-svg-use: any <use> becomes a reference). The reference's own
+            // id/opacity/transform came from `common`; href is the target.
+            let target = node.attrs.get("href")
+                .or_else(|| node.attrs.get("xlink:href"))
+                .map(|h| h.trim_start_matches('#').to_string())
+                .unwrap_or_default();
+            Some(Element::Live(crate::geometry::live::LiveVariant::Reference(
+                crate::geometry::live::ReferenceElem::new(
+                    crate::geometry::live::ElementRef(target),
+                    common,
+                ),
+            )))
         }
         _ => None,
     }
@@ -3525,6 +3564,63 @@ mod tests {
             None,
             "later duplicate id is cleared",
         );
+    }
+
+    #[test]
+    fn live_reference_and_compound_round_trip_through_svg() {
+        // Phase 2 SVG codec: a reference emits/parses as <use href="#id"> and
+        // a compound emits/parses as <g data-jas-live="compound_shape"
+        // data-jas-operation=...> — both round-trip (the compound previously
+        // demoted to a plain Group and lost its operation).
+        use crate::geometry::live::{
+            LiveVariant, CompoundShape, CompoundOperation, ReferenceElem, ElementRef,
+        };
+        use crate::geometry::element::{RectElem, CommonProps, Color, Fill};
+        let rect_at = |x: f64| RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        };
+        let mut target = rect_at(0.0);
+        target.common.id = Some("r1".into());
+        let mut reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        reference.common.id = Some("ref1".into());
+        let compound = CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![
+                std::rc::Rc::new(Element::Rect(rect_at(0.0))),
+                std::rc::Rc::new(Element::Rect(rect_at(5.0))),
+            ],
+            fill: None, stroke: None, common: CommonProps::default(),
+        };
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        {
+            let kids = doc.layers[0].children_mut().unwrap();
+            kids.push(std::rc::Rc::new(Element::Rect(target)));
+            kids.push(std::rc::Rc::new(Element::Live(LiveVariant::Reference(reference))));
+            kids.push(std::rc::Rc::new(Element::Live(LiveVariant::CompoundShape(compound))));
+        }
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("<use href=\"#r1\""), "reference -> <use href: {svg}");
+        assert!(svg.contains("data-jas-operation=\"subtract_front\""),
+            "compound emits its operation: {svg}");
+        let parsed = svg_to_document(&svg);
+        let kids = parsed.layers[0].children().unwrap();
+        match kids[1].as_ref() {
+            Element::Live(LiveVariant::Reference(r)) => {
+                assert_eq!(r.target.0, "r1");
+                assert_eq!(r.common.id.as_deref(), Some("ref1"), "reference id round-trips");
+            }
+            other => panic!("expected a Reference, got {other:?}"),
+        }
+        match kids[2].as_ref() {
+            Element::Live(LiveVariant::CompoundShape(cs)) => {
+                assert_eq!(cs.operation, CompoundOperation::SubtractFront);
+                assert_eq!(cs.operands.len(), 2);
+            }
+            other => panic!("expected a CompoundShape, got {other:?}"),
+        }
     }
 
     #[test]

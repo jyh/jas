@@ -202,6 +202,9 @@ mod tests {
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
+            // Live elements round-trip through SVG (Phase 2a): reference as
+            // <use href>, compound as <g data-jas-live ...data-jas-operation>.
+            "live_reference", "live_compound",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -304,6 +307,20 @@ mod tests {
         // first pre-order occurrence keeps the id, later ones are cleared
         // (REFERENCE_GRAPH.md §2.5). All apps normalize identically.
         assert_svg_parse("dup_id_import");
+    }
+
+    #[test]
+    fn svg_parse_live_reference() {
+        // <use href="#id"> imports as a live reference (Phase 2a / F-svg-use);
+        // all apps parse it to the identical canonical JSON.
+        assert_svg_parse("live_reference");
+    }
+
+    #[test]
+    fn svg_parse_live_compound() {
+        // <g data-jas-live="compound_shape" data-jas-operation=...> imports as
+        // a CompoundShape (not a demoted Group) with its operation preserved.
+        assert_svg_parse("live_compound");
     }
 
     // ---------------------------------------------------------------
@@ -564,7 +581,23 @@ mod tests {
             format!("{}/expected/live_reference_roundtrip.json", FIXTURES),
             document_to_test_json(&doc_r),
         ).unwrap();
-        eprintln!("Generated live_compound_roundtrip.json + live_reference_roundtrip.json");
+        // Phase 2a SVG fixtures: the SVG form (compound -> <g data-jas-live
+        // ...data-jas-operation>, reference -> <use href>) plus the json it
+        // parses back to (for the svg_parse cross-language pin). Generated from
+        // the writer so they round-trip stably.
+        let svg_c = document_to_svg(&doc_c);
+        std::fs::write(format!("{}/svg/live_compound.svg", FIXTURES), &svg_c).unwrap();
+        std::fs::write(
+            format!("{}/expected/live_compound.json", FIXTURES),
+            document_to_test_json(&svg_to_document(&svg_c)),
+        ).unwrap();
+        let svg_r = document_to_svg(&doc_r);
+        std::fs::write(format!("{}/svg/live_reference.svg", FIXTURES), &svg_r).unwrap();
+        std::fs::write(
+            format!("{}/expected/live_reference.json", FIXTURES),
+            document_to_test_json(&svg_to_document(&svg_r)),
+        ).unwrap();
+        eprintln!("Generated live_*_roundtrip.json + svg/live_*.svg + expected/live_*.json");
     }
 
     fn run_operation_fixture(fixture: &str) {
