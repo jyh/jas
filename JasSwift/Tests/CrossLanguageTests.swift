@@ -125,6 +125,37 @@ private func assertSvgRoundtrip(_ name: String) {
     #expect(model.document.getElement(path).id == "cmp1")
 }
 
+// MARK: - Dependency index cross-language pin (REFERENCE_GRAPH.md §3)
+
+/// Read the shared input document fixture, build the dependency index,
+/// serialize it, and assert byte-equality with the shared index fixture. All
+/// five apps run this same pair of fixtures; passing means Swift agrees on the
+/// canonical index shape (deps/rdeps/dangling/cycles, operands-opaque).
+@Test func dependencyIndexCrossLanguage() {
+    // Parse the shared input document.
+    let input = readFixture("expected/dependency_index_input.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let doc = testJsonToDocument(input)
+
+    // Sanity: the parsed input must re-serialize to itself (the fixture is
+    // canonical), so the index is computed over the same doc all apps see.
+    #expect(documentToTestJson(doc) == input,
+        "dependency_index_input.json is not canonical: parse->serialize changed it")
+
+    // Build + serialize the index, compare with the expected fixture.
+    let actual = dependencyIndexToTestJson(DependencyIndex.build(doc))
+    let expected = readFixture("expected/dependency_index.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if actual != expected {
+        print("=== EXPECTED (dependency_index) ===")
+        print(expected)
+        print("=== ACTUAL (dependency_index) ===")
+        print(actual)
+    }
+    #expect(actual == expected,
+        "dependency_index cross-language test failed: canonical JSON mismatch")
+}
+
 // MARK: - JSON round-trip (parse → serialize)
 
 private func assertJsonRoundtrip(_ name: String) {

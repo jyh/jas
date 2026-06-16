@@ -40,13 +40,18 @@ let dependencies (lv : live_variant) : element_ref list =
 (* ------------------------------------------------------------------ *)
 
 (* The id-bearing-descendant children of an element, in document order.
-   Containment kinds (Group / Layer / Compound_shape) expose their
-   children; a reference does not own the element it names, so it has
-   none. Mirrors Rust [Element::children] as used by [collect_ref_ids]. *)
+   Only Group / Layer expose children to the render id->element resolver;
+   a CompoundShape's operands are OPAQUE to the by-id graph (operands are
+   owned, not targetable), so the walk never recurses into them, and a
+   reference does not own the element it names, so it has none. This
+   mirrors Rust [Element::children] (None for Live) as used by
+   [collect_ref_ids] and the dependency index, keeping render
+   targetability in agreement with the reference-graph index. The eval
+   path recurses operands directly via [evaluate_with] over [cs.operands],
+   NOT via this function, so the operands stay reachable for evaluation. *)
 let resolver_children (elem : element) : element list =
   match elem with
   | Group { children; _ } | Layer { children; _ } -> Array.to_list children
-  | Live (Compound_shape cs) -> Array.to_list cs.operands
   | _ -> []
 
 (* The stable id carried on an element, if any. *)
