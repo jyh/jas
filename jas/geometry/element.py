@@ -1461,6 +1461,12 @@ class ReferenceElem(LiveElement):
     ``ReferenceElem``.
     """
     target: ElementRef = ""
+    # Stable id / display name, mirroring the Rust ReferenceElem's
+    # ``common`` (id + name). A reference is a first-class element that
+    # can itself be a reference target (REFERENCE_GRAPH.md §4), so it
+    # needs its own id; create_reference stamps ``ref_id`` here.
+    id: str | None = None
+    name: str | None = None
     # Optional instance transform applied to the resolved geometry.
     # Declared now (Fork F2) but always None until Phase 3 wires it.
     transform: Transform | None = None

@@ -151,6 +151,33 @@ class Controller:
         new_elem = replace(elem, id=id)
         self._model.document = doc.replace_element(path, new_elem)
 
+    def create_reference(self, target_path: ElementPath, target_id: str,
+                         ref_id: str) -> None:
+        """Create a by-id reference to the element at ``target_path``
+        (REFERENCE_GRAPH.md §4). Assign-on-create: stamp ``target_id``
+        onto the target *iff* it has no id yet (the lazy-mint trigger);
+        if it already has one, that id names the edge and ``target_id``
+        is ignored. A new ``ReferenceElem`` (its own id = ``ref_id``) is
+        then appended via the regular ``add_element`` path. Both ids are
+        minted by the initiator and carried in the op payload — never
+        minted here — so every app applies identical values. No-op on an
+        invalid path. Mirrors the Rust ``Controller::create_reference``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        try:
+            target = doc.get_element(target_path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if target.id is not None:
+            resolved_id = target.id
+        else:
+            resolved_id = target_id
+            self._model.document = doc.replace_element(
+                target_path, replace(target, id=target_id))
+        reference = ReferenceElem(target=resolved_id, id=ref_id)
+        self.add_element(reference)
+
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:
         """Append ``element`` to the mask subtree of the element at

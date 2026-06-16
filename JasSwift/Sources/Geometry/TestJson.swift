@@ -462,7 +462,7 @@ package func elementJson(_ elem: Element) -> String {
             o.raw("children", jsonArray(children))
         case .reference(let r):
             o.str("target", r.target.id)
-            commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil)
+            commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil, r.id)
             // fill/stroke/transform are emitted only when set; in Phase 1
             // references carry none (paint inheritance default / Fork F2),
             // matching how compound omits its own paint here. (transform is
@@ -990,6 +990,7 @@ package func parseElement(_ v: Any?) -> Element {
             let target = ElementRef(d["target"] as? String ?? "")
             return .live(.reference(ReferenceElem(
                 target: target,
+                id: id,
                 transform: transform,
                 opacity: opacity, locked: locked, visibility: visibility)))
         default:

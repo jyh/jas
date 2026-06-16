@@ -577,6 +577,42 @@ let () =
         ai_ctrl#assign_id [0; 0] "elem-1";
         assert (id_of (Jas.Document.get_element ai_ctrl#document [0; 0])
                 = Some "elem-1"));
+
+      Alcotest.test_case
+        "create_reference stamps target and inserts reference" `Quick
+        (fun () ->
+        (* Target has no id -> create_reference stamps target_id onto it and
+           appends a reference element (id ref_id, target = the stamped id). *)
+        let cr_rect = make_rect 0.0 0.0 10.0 10.0 in
+        let cr_layer = make_layer ~name:"L0" [|cr_rect|] in
+        let cr_doc = Jas.Document.make_document [|cr_layer|] in
+        let cr_ctrl = Jas.Controller.create
+          ~model:(Jas.Model.create ~document:cr_doc ()) () in
+        cr_ctrl#create_reference [0; 0] "tgt-1" "ref-1";
+        let doc = cr_ctrl#document in
+        assert (id_of (Jas.Document.get_element doc [0; 0]) = Some "tgt-1");
+        (match Jas.Document.get_element doc [0; 1] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_id = Some "ref-1");
+           assert (re.Jas.Element.ref_target = "tgt-1")
+         | _ -> assert false));
+
+      Alcotest.test_case
+        "create_reference keeps existing target id" `Quick (fun () ->
+        (* Target already has an id -> it is NOT re-stamped; the reference
+           targets the existing id and target_id is ignored. *)
+        let ce_rect = with_id (make_rect 0.0 0.0 10.0 10.0) (Some "existing") in
+        let ce_layer = make_layer ~name:"L0" [|ce_rect|] in
+        let ce_doc = Jas.Document.make_document [|ce_layer|] in
+        let ce_ctrl = Jas.Controller.create
+          ~model:(Jas.Model.create ~document:ce_doc ()) () in
+        ce_ctrl#create_reference [0; 0] "tgt-ignored" "ref-1";
+        let doc = ce_ctrl#document in
+        assert (id_of (Jas.Document.get_element doc [0; 0]) = Some "existing");
+        (match Jas.Document.get_element doc [0; 1] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "existing")
+         | _ -> assert false));
     ];
 
     "delete selection", [

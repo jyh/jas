@@ -96,6 +96,30 @@ public class Controller {
         model.document = doc.replaceElement(path, with: elem.withId(id))
     }
 
+    /// Create a by-id reference to the element at `targetPath`
+    /// (REFERENCE_GRAPH.md §4). Assign-on-create: stamp `targetId` onto the
+    /// target *iff* it has no id yet (the lazy-mint trigger); if it already
+    /// has one, that id names the edge and `targetId` is ignored. A new
+    /// `ReferenceElem` (its own id = `refId`) is then appended via
+    /// ``addElement``. Both ids are minted by the initiator and carried in
+    /// the operation payload — never minted here — so every app applies the
+    /// identical values. A no-op when `targetPath` is invalid. Mirrors Rust
+    /// `Controller::create_reference`.
+    public func createReference(_ targetPath: ElementPath, targetId: String, refId: String) {
+        let doc = model.document
+        guard let target = doc.tryGetElement(targetPath) else { return }
+        let resolvedId: String
+        if let existing = target.id {
+            resolvedId = existing
+        } else {
+            model.document = doc.replaceElement(targetPath, with: target.withId(targetId))
+            resolvedId = targetId
+        }
+        let reference = Element.live(.reference(ReferenceElem(
+            target: ElementRef(resolvedId), id: refId)))
+        addElement(reference)
+    }
+
     /// Append ``element`` to the mask subtree of the element at
     /// ``path``. Returns ``true`` when the append succeeded,
     /// ``false`` when the target element has no mask or the mask

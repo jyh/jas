@@ -945,18 +945,21 @@ def _parse_element(d: dict) -> Element:
                         stroke=_parse_stroke(d["stroke"]),
                         **tspans_kw, **common)
     elif typ == "live":
-        # Live elements carry no name / id field, so strip those from the
-        # common kwargs (CompoundShape / ReferenceElem don't accept them).
-        live_common = {k: v for k, v in common.items()
-                       if k not in ("name", "id")}
         kind = d.get("kind", "")
         if kind == "compound_shape":
+            # CompoundShape carries no name / id field, so strip those
+            # from the common kwargs (it doesn't accept them).
+            live_common = {k: v for k, v in common.items()
+                           if k not in ("name", "id")}
             op = CompoundOperation(d.get("operation", "union"))
             operands = tuple(_parse_element(c) for c in d.get("children", []))
             return CompoundShape(operation=op, operands=operands,
                                  fill=None, stroke=None, **live_common)
         elif kind == "reference":
-            return ReferenceElem(target=d.get("target", ""), **live_common)
+            # ReferenceElem is a first-class element with its own id /
+            # name (REFERENCE_GRAPH.md §4), so it accepts the full common
+            # kwargs — unlike CompoundShape.
+            return ReferenceElem(target=d.get("target", ""), **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 

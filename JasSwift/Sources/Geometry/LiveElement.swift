@@ -222,6 +222,13 @@ public struct CompoundShape: Equatable {
 public struct ReferenceElem: Equatable {
     /// Stable id of the referenced element.
     public var target: ElementRef
+    /// This reference's own stable id (the lazy assign-on-create slot).
+    /// Mirrors Rust `ReferenceElem.common.id`: `nil` until the reference is
+    /// created with an explicit id by `Controller.createReference`. Unlike
+    /// the other element kinds, `.live` has no flat `Element.id` slot, so a
+    /// reference carries its identity here inline (matching how it carries
+    /// the rest of its common props).
+    public var id: String?
     /// Optional instance transform applied to the resolved geometry.
     /// Declared now (Fork F2) but always `nil` until Phase 3 wires it.
     public var transform: Transform?
@@ -237,6 +244,7 @@ public struct ReferenceElem: Equatable {
 
     public init(
         target: ElementRef,
+        id: String? = nil,
         transform: Transform? = nil,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
@@ -247,6 +255,7 @@ public struct ReferenceElem: Equatable {
         mask: Mask? = nil
     ) {
         self.target = target
+        self.id = id
         self.transform = transform
         self.fill = fill
         self.stroke = stroke
