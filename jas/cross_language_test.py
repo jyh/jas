@@ -123,6 +123,8 @@ class CrossLanguageTest(absltest.TestCase):
             "multi_layer", "complex_document",
             # Stable identity (binary v2): id+name now round-trip generically.
             "element_ids",
+            # Live elements round-trip through binary (Phase 2b).
+            "live_compound_roundtrip", "live_reference_roundtrip",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
