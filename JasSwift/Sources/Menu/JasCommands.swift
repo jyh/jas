@@ -233,6 +233,13 @@ public struct JasCommands: Commands {
                 showAll()
             }
             .keyboardShortcut("3", modifiers: [.command, .option])
+
+            Divider()
+
+            Button("Make Instance") {
+                makeInstance()
+            }
+            .disabled((model?.document.selection.count ?? 0) != 1)
         }
 
         // Replace default toolbar section in View menu with our zoom items.
@@ -626,6 +633,60 @@ public struct JasCommands: Commands {
         model.snapshot()
         let controller = Controller(model: model)
         controller.groupSelection()
+    }
+
+    /// "Make Instance": the first user-facing way to create a live
+    /// reference. Native UI glue (NOT a Controller op) that composes two
+    /// already-pinned ops under ONE snapshot: `createReference` (the UI
+    /// mints `targetId`/`refId`, value-in-op, with a collision-retry loop
+    /// over existing ids — never minted in a Controller) then a move of
+    /// the now-selected reference by `(pasteOffset, pasteOffset)`. The
+    /// offset rides on the new reference's transform via `moveSelection`.
+    /// Enabled only when exactly ONE whole element (kind=.all; not a
+    /// control-point sub-selection) is selected. Mirrors Rust's
+    /// `make_instance` menu_bar dispatch.
+    private func makeInstance() {
+        guard let model = model else { return }
+        let doc = model.document
+        // `Selection` is a Set; sort by path lexicographically so the
+        // single-selection pick is deterministic.
+        let sorted = doc.selection.sorted {
+            $0.path.lexicographicallyPrecedes($1.path)
+        }
+        guard sorted.count == 1, let es = sorted.first else { return }
+        guard es.kind == .all else { return }
+        let targetPath = es.path
+        // Gather every existing element id so the freshly minted
+        // targetId / refId can avoid collisions.
+        var existing: Set<String> = []
+        func gatherIds(_ elem: Element) {
+            if let id = elem.id { existing.insert(id) }
+            switch elem {
+            case .group(let g): for c in g.children { gatherIds(c) }
+            case .layer(let l): for c in l.children { gatherIds(c) }
+            default: break
+            }
+        }
+        for layer in doc.layers { gatherIds(.layer(layer)) }
+        // Mint two distinct, collision-free ids (mirrors the artboard
+        // mint loop in LayersPanel).
+        func mint() -> String? {
+            for _ in 0..<100 {
+                let c = generateElementId()
+                if !existing.contains(c) { return c }
+            }
+            return nil
+        }
+        guard let targetId = mint() else { return }
+        existing.insert(targetId)
+        guard let refId = mint() else { return }
+        // createReference + offset-move under ONE snapshot = a single
+        // undo step (offset rides on the new reference's transform via
+        // moveSelection).
+        model.snapshot()
+        let controller = Controller(model: model)
+        controller.createReference(targetPath, targetId: targetId, refId: refId)
+        controller.moveSelection(dx: pasteOffset, dy: pasteOffset)
     }
 
     private func ungroupSelection() {

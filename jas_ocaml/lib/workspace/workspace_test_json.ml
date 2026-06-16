@@ -286,6 +286,7 @@ let menu_bar = [
     ("Hide", "hide", "\xE2\x8C\x983");
     ("Show All", "show_all", "\xE2\x8C\xA5\xE2\x8C\x983");
     ("---", "", "");
+    ("Make Instance", "make_instance", "");
     ("Simplify", "simplify", "");
   ]);
   ("Window", [

@@ -14,6 +14,7 @@ from menu.menu import (
     _group_selection, _ungroup_selection, _ungroup_all,
     _lock_selection, _unlock_all,
     _hide_selection, _show_all,
+    _link_to_selection,
     _is_svg,
 )
 
@@ -185,6 +186,80 @@ class HideShowTest(absltest.TestCase):
         doc = model.document
         for child in doc.layers[0].children:
             self.assertEqual(child.visibility, Visibility.PREVIEW)
+
+
+class LinkToSelectionTest(absltest.TestCase):
+    """Tests for _link_to_selection (the Make Instance handler).
+
+    Mirrors the Rust make_instance_creates_offset_selected_reference
+    test: a single whole-element selection yields a reference targeting
+    the source's id, offset by (PASTE_OFFSET, PASTE_OFFSET) via its
+    transform and selected; the source keeps its position; the whole
+    gesture is one snapshot (one undo).
+    """
+
+    def _single_selection_model(self):
+        """A model with one rect at [0,0], selected as a whole."""
+        rect = _make_rect(x=0, y=0)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(
+            layers=(layer,),
+            selection=frozenset({ElementSelection.all((0, 0))}))
+        return Model(document=doc)
+
+    def test_make_instance_creates_offset_selected_reference(self):
+        from geometry.element import ReferenceElem
+        from tools.tool import PASTE_OFFSET
+        model = self._single_selection_model()
+        _link_to_selection(model)
+        doc = model.document
+        # Source rect untouched at (0, 0); it gained a stable id.
+        source = doc.get_element((0, 0))
+        self.assertIsInstance(source, Rect)
+        self.assertEqual((source.x, source.y), (0.0, 0.0))
+        self.assertIsNotNone(source.id)
+        # A reference was appended at [0,1], targeting the source's id,
+        # offset by (PASTE_OFFSET, PASTE_OFFSET) on its transform.
+        ref = doc.get_element((0, 1))
+        self.assertIsInstance(ref, ReferenceElem)
+        self.assertEqual(ref.target, source.id)
+        self.assertIsNotNone(ref.id)
+        self.assertNotEqual(ref.id, source.id)
+        self.assertIsNotNone(ref.transform)
+        self.assertEqual(
+            (ref.transform.e, ref.transform.f),
+            (PASTE_OFFSET, PASTE_OFFSET))
+        # The reference is the (single, whole-element) selection.
+        self.assertEqual(len(doc.selection), 1)
+        es = next(iter(doc.selection))
+        self.assertEqual(es.path, (0, 1))
+        # One snapshot => one undo restores the pre-gesture state.
+        model.undo()
+        doc = model.document
+        self.assertEqual(len(doc.layers[0].children), 1)
+        self.assertIsInstance(doc.layers[0].children[0], Rect)
+
+    def test_make_instance_noop_without_single_selection(self):
+        # Two selected elements: not a single-element selection, so the
+        # gesture is a no-op (no reference appended).
+        model = _make_model_with_rects(2)
+        _link_to_selection(model)
+        doc = model.document
+        self.assertEqual(len(doc.layers[0].children), 2)
+        for child in doc.layers[0].children:
+            self.assertIsInstance(child, Rect)
+
+    def test_make_instance_noop_on_partial_selection(self):
+        # A control-point sub-selection (kind=partial) is not a whole-
+        # element selection, so Make Instance is a no-op.
+        rect = _make_rect(x=0, y=0)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(
+            layers=(layer,),
+            selection=frozenset({ElementSelection.partial((0, 0), [0])}))
+        model = Model(document=doc)
+        _link_to_selection(model)
+        self.assertEqual(len(model.document.layers[0].children), 1)
 
 
 if __name__ == "__main__":

@@ -90,6 +90,23 @@ def generate_artboard_id(rng: Optional[Callable[[], int]] = None) -> str:
     )
 
 
+def generate_element_id(rng: Optional[Callable[[], int]] = None) -> str:
+    """Mint a fresh 8-char base36 stable-element id. Identical in shape
+    to :func:`generate_artboard_id` (same alphabet, same length, same
+    rng seam: ``None`` taps ``secrets`` entropy, a callable is
+    deterministic for tests) but minted for element identity rather than
+    artboard identity. This is a UI-layer minter and must never be called
+    inside a Controller method (controllers take ids as parameters so
+    they stay deterministic). Mirrors the Rust ``generate_element_id``."""
+    if rng is None:
+        rng = lambda: secrets.randbelow(1 << 30)
+    alphabet_len = len(_ARTBOARD_ID_ALPHABET)
+    return "".join(
+        _ARTBOARD_ID_ALPHABET[rng() % alphabet_len]
+        for _ in range(_ARTBOARD_ID_LENGTH)
+    )
+
+
 # ── Default-name rule ─────────────────────────────────────────────
 
 _DEFAULT_NAME_RE = re.compile(r"^Artboard (\d+)$")
