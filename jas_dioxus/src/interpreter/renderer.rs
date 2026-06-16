@@ -2762,6 +2762,37 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // doc.copy_selection_to_clipboard — copy the current selection to the
+    // system clipboard (SVG) and the internal clipboard (cut OK path).
+    // Mirrors the inline copy the menu/keyboard cut runs: write the
+    // selection SVG to the system clipboard via clipboard_write, then
+    // snapshot the selected GeoElements into tab.clipboard. This is a
+    // non-document side effect (no snapshot needed), so the cut_orphan
+    // OK action lists exactly one `snapshot` before the document-mutating
+    // doc.delete_selection. The selection is preserved across opening the
+    // confirm dialog, so this copies exactly what the user was about to cut.
+    if eff.get("doc.copy_selection_to_clipboard").is_some() {
+        if let Some(svg) = crate::workspace::clipboard::selection_to_svg(st) {
+            crate::workspace::clipboard::clipboard_write(svg);
+        }
+        let elements: Vec<crate::geometry::element::Element> = {
+            match st.tabs.get(st.active_tab) {
+                Some(tab) => {
+                    let doc = tab.model.document();
+                    doc.selection
+                        .iter()
+                        .filter_map(|es| doc.get_element(&es.path).cloned())
+                        .collect()
+                }
+                None => Vec::new(),
+            }
+        };
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.clipboard = elements;
+        }
+        return deferred;
+    }
+
     // doc.delete_selection — delete every currently-selected element
     // (reference-aware delete OK path). Mirrors the inline delete the
     // menu/keyboard run when no orphan would result: snapshot is a

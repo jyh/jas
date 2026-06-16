@@ -96,7 +96,7 @@ def create_menus(window: QMainWindow) -> None:
 
     cut_action = edit_menu.addAction("Cu&t")
     cut_action.setShortcut(QKeySequence.Cut)
-    cut_action.triggered.connect(lambda: _with_model(lambda m: _cut_selection(m)))
+    cut_action.triggered.connect(lambda: _with_model(lambda m: _cut_selection(m, window)))
 
     copy_action = edit_menu.addAction("&Copy")
     copy_action.setShortcut(QKeySequence.Copy)
@@ -651,12 +651,13 @@ def _show_all(model: Model) -> None:
     controller.show_all()
 
 
-def _orphan_warning_body(n: int) -> str:
-    """Verbatim body for the reference-aware delete confirm (identical
+def _orphan_warning_body(n: int, verb: str) -> str:
+    """Verbatim body for the reference-aware orphan confirm (identical
     across all apps). ``n`` is the number of live references (instances)
-    that would be left pointing at a deleted target."""
+    that would be left pointing at a removed target; ``verb`` is the
+    capitalized gerund for the action ("Deleting", "Cutting")."""
     instance = "instance" if n == 1 else "instances"
-    return f"Deleting will leave {n} live {instance} empty."
+    return f"{verb} will leave {n} live {instance} empty."
 
 
 def _confirm_delete_if_orphans(model: Model, parent=None) -> bool:
@@ -670,7 +671,7 @@ def _confirm_delete_if_orphans(model: Model, parent=None) -> bool:
     user confirms (Ok).
 
     Shared by Edit>Delete and the keyboard Delete/Backspace path so both
-    warn identically. (Cut intentionally still orphans silently.)"""
+    warn identically. (Cut has its own mirrored guard.)"""
     from document.dependency_index import orphaned_references
     doc = model.document
     selection_paths = [es.path for es in doc.selection]
@@ -679,7 +680,7 @@ def _confirm_delete_if_orphans(model: Model, parent=None) -> bool:
         return True
     if parent is None:
         parent = QApplication.activeWindow()
-    body = _orphan_warning_body(len(orphaned))
+    body = _orphan_warning_body(len(orphaned), "Deleting")
     reply = QMessageBox.question(
         parent, "Delete", body,
         QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
@@ -945,8 +946,28 @@ def _copy_selection(model: Model) -> None:
     clipboard.setText(svg)
 
 
-def _cut_selection(model: Model) -> None:
-    """Copy selected elements to clipboard, then delete them."""
+def _cut_selection(model: Model, parent=None) -> None:
+    """Copy selected elements to clipboard, then delete them
+    (reference-aware).
+
+    Cut removes exactly the current selection, so it can orphan live
+    references just like delete. No-orphan cuts proceed silently
+    (unchanged behavior: copy + snapshot + delete). When the cut would
+    orphan a live reference, a modal confirm is shown first; Cancel
+    aborts entirely (no clipboard change, no snapshot, no delete)."""
+    from document.dependency_index import orphaned_references
+    doc = model.document
+    selection_paths = [es.path for es in doc.selection]
+    orphaned = orphaned_references(doc, selection_paths)
+    if orphaned:
+        if parent is None:
+            parent = QApplication.activeWindow()
+        body = _orphan_warning_body(len(orphaned), "Cutting")
+        reply = QMessageBox.question(
+            parent, "Cut", body,
+            QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
+        if reply != QMessageBox.Ok:
+            return
     model.snapshot()
     _copy_selection(model)
     model.document = model.document.delete_selection()

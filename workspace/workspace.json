@@ -1160,6 +1160,16 @@
         "close_dialog"
       ]
     },
+    "cut_orphan_confirm_ok": {
+      "description": "Confirm the reference-aware cut (warn-then-orphan) from the cut_orphan_confirm dialog. Cut is copy-to-clipboard plus delete the selection, so it can orphan live instances exactly like delete. The cut entry points open this dialog only when cutting the current selection would orphan one or more live instances; clicking Cut here commits that cut.\nCopy the current selection to the clipboard (a non-document side effect, so it needs no snapshot), snapshot the document (single undo op), delete the current selection (the same delete_selection the inline no-orphan path runs), then close the dialog. The selection is preserved across opening the dialog, so this operates on exactly the elements the user was about to cut. Cancel uses dismiss_dialog (no clipboard change, no snapshot, no delete).\n",
+      "category": "dialog",
+      "effects": [
+        "snapshot",
+        "doc.copy_selection_to_clipboard",
+        "doc.delete_selection",
+        "close_dialog"
+      ]
+    },
     "close_without_saving": {
       "description": "Close the tab or window without saving changes. Called from the save-changes dialog when the user clicks Discard or Don't Save. Closes the dialog first, then proceeds with the close operation, discarding any unsaved modifications.\n",
       "category": "dialog",
@@ -27073,9 +27083,54 @@
         ]
       }
     },
+    "cut_orphan_confirm": {
+      "summary": "Cut",
+      "description": "Reference-aware cut confirmation (warn-then-orphan). Cut is copy-to-clipboard plus delete the selection, so it can orphan live instances exactly like delete. Opened by the cut entry points (Edit > Cut menu item and the Cmd/Ctrl+X key) ONLY when cutting the current selection would orphan one or more live instances \u2014 that is, when the pure predicate orphaned_references(document, selection_paths) returns a non-empty set. When the predicate is empty the cut proceeds inline with no dialog (unchanged behavior).\nThe count of would-be-orphaned referrers is passed in as the `count` param and surfaced verbatim in the body text: \"Cutting will leave N live instance(s) empty.\" with proper singular (\"instance\") / plural (\"instances\") agreement via the expression-language ternary.\nCut (the destructive, confirming button): copy the current selection to the clipboard, snapshot the document, then delete the current selection (the same copy + delete_selection the inline path runs), then close. The selection is preserved across opening the dialog, so the OK action operates on exactly the elements the user was about to cut. The cut entry points do NOT mutate the clipboard or document when this dialog is opened, so Cancel is a true no-op. Cancel (the safe default): dismiss the dialog and do nothing \u2014 no clipboard change, no snapshot, no delete.\n",
+      "modal": true,
+      "params": {
+        "count": {
+          "type": "number"
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Cutting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "cut_orphan_ok_btn",
+                "type": "button",
+                "label": "Cut",
+                "variant": "primary",
+                "action": "cut_orphan_confirm_ok"
+              }
+            ]
+          }
+        ]
+      }
+    },
     "delete_orphan_confirm": {
       "summary": "Delete",
-      "description": "Reference-aware delete confirmation (warn-then-orphan). Opened by the primary delete entry points (Edit > Delete menu item and the Delete / Backspace key) ONLY when deleting the current selection would orphan one or more live instances \u2014 that is, when the pure predicate orphaned_references(document, selection_paths) returns a non-empty set. When the predicate is empty the delete proceeds inline with no dialog (unchanged behavior).\nThe count of would-be-orphaned referrers is passed in as the `count` param and surfaced verbatim in the body text: \"Deleting will leave N live instance(s) empty.\" with proper singular (\"instance\") / plural (\"instances\") agreement via the expression-language ternary.\nDelete (the destructive, confirming button): snapshot the document then delete the current selection (the same delete_selection the inline path runs), then close. The selection is preserved across opening the dialog, so the OK action operates on exactly the elements the user was about to delete. Cancel (the safe default): dismiss the dialog and do nothing \u2014 no snapshot, no delete.\nCut is intentionally NOT routed through this dialog yet; cut may orphan silently for now (follow-on work).\n",
+      "description": "Reference-aware delete confirmation (warn-then-orphan). Opened by the primary delete entry points (Edit > Delete menu item and the Delete / Backspace key) ONLY when deleting the current selection would orphan one or more live instances \u2014 that is, when the pure predicate orphaned_references(document, selection_paths) returns a non-empty set. When the predicate is empty the delete proceeds inline with no dialog (unchanged behavior).\nThe count of would-be-orphaned referrers is passed in as the `count` param and surfaced verbatim in the body text: \"Deleting will leave N live instance(s) empty.\" with proper singular (\"instance\") / plural (\"instances\") agreement via the expression-language ternary.\nDelete (the destructive, confirming button): snapshot the document then delete the current selection (the same delete_selection the inline path runs), then close. The selection is preserved across opening the dialog, so the OK action operates on exactly the elements the user was about to delete. Cancel (the safe default): dismiss the dialog and do nothing \u2014 no snapshot, no delete.\nCut has its own parallel confirmation (cut_orphan_confirm); it is not routed through this dialog.\n",
       "modal": true,
       "params": {
         "count": {

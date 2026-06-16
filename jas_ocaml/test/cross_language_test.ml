@@ -526,25 +526,45 @@ let () =
       Alcotest.test_case "orphaned_references cross_language" `Quick
         orphaned_references_cross_language;
 
-      (* Reference-aware delete, CONFIRM half: the warn body wording is
-         verbatim and pinned cross-language (singular for n=1, plural
+      (* Reference-aware delete/cut, CONFIRM half: the warn body wording
+         is verbatim and pinned cross-language (singular for n=1, plural
          otherwise). The modal itself needs a live window so cannot be
          driven headless; the pure text builder is what differs per
-         locale/count, so that is what gets asserted. *)
+         locale/count/verb, so that is what gets asserted. The body
+         helper is now verb-parameterized so delete and cut share it. *)
       Alcotest.test_case "delete orphan warning body singular" `Quick
         (fun () ->
           Alcotest.(check string) "n=1 singular"
             "Deleting will leave 1 live instance empty."
-            (Jas.Menubar.delete_orphan_warning_body 1));
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Deleting" 1));
 
       Alcotest.test_case "delete orphan warning body plural" `Quick
         (fun () ->
           Alcotest.(check string) "n=2 plural"
             "Deleting will leave 2 live instances empty."
-            (Jas.Menubar.delete_orphan_warning_body 2);
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Deleting" 2);
           Alcotest.(check string) "n=0 plural"
             "Deleting will leave 0 live instances empty."
-            (Jas.Menubar.delete_orphan_warning_body 0));
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Deleting" 0));
+
+      (* Reference-aware cut reuses the SAME verb-parameterized body
+         helper with verb "Cutting"; the rest of the wording (the count,
+         the singular/plural noun, the trailing clause) is byte-identical
+         to delete and pinned cross-language. *)
+      Alcotest.test_case "cut orphan warning body singular" `Quick
+        (fun () ->
+          Alcotest.(check string) "n=1 singular"
+            "Cutting will leave 1 live instance empty."
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Cutting" 1));
+
+      Alcotest.test_case "cut orphan warning body plural" `Quick
+        (fun () ->
+          Alcotest.(check string) "n=2 plural"
+            "Cutting will leave 2 live instances empty."
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Cutting" 2);
+          Alcotest.(check string) "n=0 plural"
+            "Cutting will leave 0 live instances empty."
+            (Jas.Menubar.delete_orphan_warning_body ~verb:"Cutting" 0));
 
       Alcotest.test_case "orphaned target with two refs returns both" `Quick
         (fun () ->

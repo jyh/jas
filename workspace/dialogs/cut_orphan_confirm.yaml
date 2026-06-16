@@ -1,0 +1,46 @@
+cut_orphan_confirm:
+  summary: "Cut"
+  description: >
+    Reference-aware cut confirmation (warn-then-orphan). Cut is
+    copy-to-clipboard plus delete the selection, so it can orphan live
+    instances exactly like delete. Opened by the cut entry points
+    (Edit > Cut menu item and the Cmd/Ctrl+X key) ONLY when cutting the
+    current selection would orphan one or more live instances — that is,
+    when the pure predicate orphaned_references(document, selection_paths)
+    returns a non-empty set. When the predicate is empty the cut proceeds
+    inline with no dialog (unchanged behavior).
+
+    The count of would-be-orphaned referrers is passed in as the `count`
+    param and surfaced verbatim in the body text:
+    "Cutting will leave N live instance(s) empty." with proper
+    singular ("instance") / plural ("instances") agreement via the
+    expression-language ternary.
+
+    Cut (the destructive, confirming button): copy the current selection
+    to the clipboard, snapshot the document, then delete the current
+    selection (the same copy + delete_selection the inline path runs),
+    then close. The selection is preserved across opening the dialog, so
+    the OK action operates on exactly the elements the user was about to
+    cut. The cut entry points do NOT mutate the clipboard or document
+    when this dialog is opened, so Cancel is a true no-op.
+    Cancel (the safe default): dismiss the dialog and do nothing — no
+    clipboard change, no snapshot, no delete.
+  modal: true
+  params:
+    count: { type: number }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - type: text
+        content: 'Cutting will leave {{param.count}} live {{ param.count == 1 ? "instance" : "instances" }} empty.'
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: cut_orphan_ok_btn
+            type: button
+            label: "Cut"
+            variant: primary
+            action: cut_orphan_confirm_ok

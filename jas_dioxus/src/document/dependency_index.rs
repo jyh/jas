@@ -786,6 +786,64 @@ mod tests {
         assert_eq!(orphaned.len(), 1, "single orphan -> N == 1 (singular wording)");
     }
 
+    // -----------------------------------------------------------------------
+    // Reference-aware CUT gate (warn-then-orphan). Cut is copy-to-clipboard
+    // plus delete the selection, so it can orphan live instances exactly like
+    // delete. The cut handlers (menu_bar.rs "cut" arm; keyboard.rs Cmd/Ctrl+X)
+    // use the SAME orphaned_references(...) predicate over the current
+    // selection, branching identically:
+    //   empty     -> cut inline (copy + snapshot + delete), no dialog
+    //   non-empty -> open cut_orphan_confirm with N = orphaned.len()
+    // The dialog UI is not unit-testable, but the shared gate predicate and
+    // the count N that drives the dialog param ARE. These tests pin that the
+    // cut gate behaves identically to the delete gate over the same selection.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cut_gate_empty_orphans_means_cut_inline() {
+        // `lonely` has no referrers -> cutting it orphans nothing -> the cut
+        // handler takes the inline-cut branch (copy + delete, no dialog).
+        let doc = doc_with_layer(vec![rect_with_id(Some("lonely"))]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            orphaned.is_empty(),
+            "no orphans -> cut handler cuts inline, no confirm dialog"
+        );
+    }
+
+    #[test]
+    fn cut_gate_nonempty_orphans_means_confirm_with_count() {
+        // a <- r1, r2. Cutting `a` would orphan both -> the cut handler takes
+        // the confirm-dialog branch. N (the dialog `count` param) is the
+        // orphan count, here 2. Identical to the delete gate over the same
+        // selection, since cut reuses the same predicate.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            !orphaned.is_empty(),
+            "orphans exist -> cut handler opens the confirm dialog"
+        );
+        assert_eq!(
+            orphaned.len(),
+            2,
+            "N passed as the cut dialog count param equals the orphan count"
+        );
+    }
+
+    #[test]
+    fn cut_gate_single_orphan_count_is_one() {
+        // a <- r1 only. Cutting `a` orphans exactly one referrer; N == 1
+        // drives the cut dialog's singular wording ("instance", not
+        // "instances").
+        let doc = doc_with_layer(vec![rect_with_id(Some("a")), reference("r1", "a")]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert_eq!(orphaned.len(), 1, "single orphan -> N == 1 (singular wording)");
+    }
+
     #[test]
     fn canonical_json_has_sorted_keys_and_arrays() {
         // c1<->c2 cycle plus two refs to `a` and a dangling ref.
