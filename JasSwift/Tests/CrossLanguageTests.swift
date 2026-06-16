@@ -73,7 +73,8 @@ private func assertSvgRoundtrip(_ name: String) {
         // REFERENCE_GRAPH.md Phase 2a: live element SVG codec. A reference
         // round-trips as <use href="#id">; a compound as
         // <g data-jas-live="compound_shape" data-jas-operation="...">.
-        "live_reference", "live_compound",
+        // live_compound_id additionally carries the compound's own id.
+        "live_reference", "live_compound", "live_compound_id",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -104,6 +105,25 @@ private func assertSvgRoundtrip(_ name: String) {
 /// REFERENCE_GRAPH.md Phase 2a: a <g data-jas-live="compound_shape"
 /// data-jas-operation="..."> imports as a CompoundShape, not a Group.
 @Test func svgParseLiveCompound() { assertSvgParse("live_compound") }
+/// REFERENCE_GRAPH.md §4: the compound's own id="..." attribute imports
+/// into CompoundShape.id (name stays excluded for live elements).
+@Test func svgParseLiveCompoundId() { assertSvgParse("live_compound_id") }
+
+/// Pins the motivating equivalence bug (REFERENCE_GRAPH.md §4): import the
+/// id-less live_compound.svg, stamp an id onto the compound via
+/// Controller.assignId, and assert it lands. Before CompoundShape carried
+/// an id, `Element.withId` was a no-op for `.live`, so a compound could
+/// never become a reference target.
+@Test func assignIdOnCompound() {
+    let svg = readFixture("svg/live_compound.svg")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    // The compound is the sole child of the sole layer: path [0, 0].
+    let path: ElementPath = [0, 0]
+    #expect(model.document.getElement(path).id == nil)
+    controller.assignId(path, id: "cmp1")
+    #expect(model.document.getElement(path).id == "cmp1")
+}
 
 // MARK: - JSON round-trip (parse → serialize)
 
@@ -131,8 +151,10 @@ private func assertJsonRoundtrip(_ name: String) {
         "multi_layer", "complex_document",
         "element_ids",
         // REFERENCE_GRAPH.md Phase 1a: live element codec (compound now
-        // emits `operation`; reference emits kind+target).
+        // emits `operation`; reference emits kind+target). live_compound_id
+        // additionally carries the compound's own id (REFERENCE_GRAPH.md §4).
         "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -157,7 +179,9 @@ private func readFixtureData(_ path: String) -> Data {
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
         // Live elements round-trip through binary (REFERENCE_GRAPH.md Phase 2b).
+        // live_compound_id additionally carries the compound's own id (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -179,7 +203,10 @@ private func readFixtureData(_ path: String) -> Data {
         "multi_layer", "complex_document", "element_ids",
         // Cross-app byte pin: decode Python-generated live-element bytes
         // (REFERENCE_GRAPH.md Phase 2b) to the exact expected JSON.
+        // live_compound_id.bin (108 bytes, Python-generated) pins the
+        // compound's own id through the binary common block (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names {
         let binData = readFixtureData("expected/\(name).bin")

@@ -387,12 +387,13 @@ let rec pack_element = function
       | Op_exclude -> "exclude"
     in
     let operands = Array.to_list (Array.map pack_element cs.operands) in
-    (* A compound shape carries no name or id on the wire (positions 5 and 6
-       pack as nil), matching the Python byte oracle and the Rust codec. *)
+    (* A compound shape packs its stable id in the common block (position 6),
+       matching the Python byte oracle and the Rust codec. It still carries no
+       name (position 5 packs as nil): live elements emit no name. *)
     vlist (vint tag_live ::
            pack_common ~locked:cs.locked ~opacity:cs.opacity
              ~visibility:cs.visibility ~transform:cs.transform
-             ~name:None ~id:None @
+             ~name:None ~id:cs.id @
            [vstr "compound_shape"; vstr op; vlist operands])
   | Live (Reference r) ->
     vlist (vint tag_live ::
@@ -696,8 +697,9 @@ let rec unpack_element v =
       in
       let operands =
         Array.of_list (List.map unpack_element (as_list (List.nth arr 9))) in
-      (* A compound shape carries no name or id field; fill / stroke are not
-         persisted in Phase 1 (defaults to None), matching the Rust reader. *)
+      (* The compound takes its id from the common block (position 6); a
+         compound carries no name. fill / stroke are not persisted in Phase 1
+         (default to None), matching the Rust reader. *)
       Live (Compound_shape {
         operation; id; operands; fill = None; stroke = None;
         opacity; transform; locked; visibility; blend_mode = Element.Normal;

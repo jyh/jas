@@ -123,6 +123,14 @@ public enum CompoundOperation: String, Equatable {
 public struct CompoundShape: Equatable {
     public var operation: CompoundOperation
     public var operands: [Element]
+    /// This compound's own stable id (the lazy assign-on-create slot).
+    /// Mirrors Rust `CompoundShape.common.id` and Python's
+    /// `CompoundShape.id`: `nil` until stamped by `Controller.assignId`.
+    /// A compound is a first-class element that can be a reference target
+    /// (REFERENCE_GRAPH.md §4); like `.reference`, `.live` has no flat
+    /// `Element.id` slot, so the compound carries its identity here inline.
+    /// No name field is intended for live elements.
+    public var id: String?
     public var fill: Fill?
     public var stroke: Stroke?
     public var opacity: Double
@@ -135,6 +143,7 @@ public struct CompoundShape: Equatable {
     public init(
         operation: CompoundOperation,
         operands: [Element],
+        id: String? = nil,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
         opacity: Double = 1.0,
@@ -146,6 +155,7 @@ public struct CompoundShape: Equatable {
     ) {
         self.operation = operation
         self.operands = operands
+        self.id = id
         self.fill = fill
         self.stroke = stroke
         self.opacity = opacity
@@ -499,6 +509,17 @@ public enum LiveVariant: Equatable {
         }
     }
 
+    /// This live element's own stable id. Both conformers carry their
+    /// identity inline (CompoundShape.id / ReferenceElem.id) since `.live`
+    /// has no flat `Element.id` slot. Mirrors how the reference's
+    /// `common.id` flows through the generic id machinery in Rust/Python.
+    public var id: String? {
+        switch self {
+        case .compoundShape(let cs): return cs.id
+        case .reference(let r): return r.id
+        }
+    }
+
     public var fill: Fill? {
         switch self {
         case .compoundShape(let cs): return cs.fill
@@ -659,6 +680,24 @@ public enum LiveVariant: Equatable {
         case .reference(let r):
             var updated = r
             updated.mask = mask
+            return .reference(updated)
+        }
+    }
+
+    /// Return a copy with the live element's own stable `id` replaced
+    /// (pass `nil` to clear). Both conformers stamp their inline id,
+    /// so `Controller.assignId` / `clearingIds` work over a compound or
+    /// reference exactly as over any other id-bearing element — matching
+    /// the reference implementations' generic `common_mut().id = ...`.
+    public func withId(_ id: String?) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.id = id
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.id = id
             return .reference(updated)
         }
     }
