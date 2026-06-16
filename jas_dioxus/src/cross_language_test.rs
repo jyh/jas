@@ -150,6 +150,9 @@ mod tests {
             "multi_layer", "complex_document",
             // Stable identity (binary v2): id+name round-trip generically.
             "element_ids",
+            // Live elements (Phase 2b): decode the Python-generated TAG_LIVE
+            // bytes for reference + compound (cross-app byte pin).
+            "live_reference_roundtrip", "live_compound_roundtrip",
         ];
         for name in &names {
             let bin_path = format!("{}/expected/{}.bin", FIXTURES, name);
