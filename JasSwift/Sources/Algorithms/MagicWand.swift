@@ -121,6 +121,7 @@ public func mwElementOpacity(_ e: Element) -> Double {
     case .live(let v):
         switch v {
         case .compoundShape(let cs): return cs.opacity
+        case .reference(let r): return r.opacity
         }
     }
 }

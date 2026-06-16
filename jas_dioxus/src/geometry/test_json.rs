@@ -546,9 +546,27 @@ fn element_json(elem: &Element) -> String {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
                 o.str_val("type", "live");
                 o.str_val("kind", "compound_shape");
+                // `operation` was previously omitted (a round-trip bug, since
+                // the reader had no live arm at all); now emitted so compound
+                // shapes round-trip through test_json.
+                o.str_val("operation", match cs.operation {
+                    crate::geometry::live::CompoundOperation::Union => "union",
+                    crate::geometry::live::CompoundOperation::SubtractFront => "subtract_front",
+                    crate::geometry::live::CompoundOperation::Intersection => "intersection",
+                    crate::geometry::live::CompoundOperation::Exclude => "exclude",
+                });
                 common_fields(&mut o, &cs.common);
                 let children: Vec<String> = cs.operands.iter().map(|c| element_json(c)).collect();
                 o.raw("children", json_array(&children));
+            }
+            crate::geometry::live::LiveVariant::Reference(r) => {
+                o.str_val("type", "live");
+                o.str_val("kind", "reference");
+                o.str_val("target", &r.target.0);
+                common_fields(&mut o, &r.common);
+                // fill/stroke/transform are emitted only when set; in Phase 1
+                // references carry none (paint inheritance default / Fork F2),
+                // matching how compound omits its own paint here.
             }
         },
     }
@@ -1137,6 +1155,34 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             // top-level "name" field — Layer no longer reads name itself.
             Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         },
+        "live" => {
+            let kind = v["kind"].as_str().unwrap_or("");
+            match kind {
+                "compound_shape" => {
+                    let operation = match v["operation"].as_str().unwrap_or("union") {
+                        "subtract_front" => crate::geometry::live::CompoundOperation::SubtractFront,
+                        "intersection" => crate::geometry::live::CompoundOperation::Intersection,
+                        "exclude" => crate::geometry::live::CompoundOperation::Exclude,
+                        _ => crate::geometry::live::CompoundOperation::Union,
+                    };
+                    let operands = v["children"].as_array().unwrap_or(&vec![])
+                        .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
+                    Element::Live(crate::geometry::live::LiveVariant::CompoundShape(
+                        crate::geometry::live::CompoundShape {
+                            operation, operands, fill: None, stroke: None, common,
+                        },
+                    ))
+                }
+                "reference" => {
+                    let target = crate::geometry::live::ElementRef(
+                        v["target"].as_str().unwrap_or("").to_string());
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(
+                        crate::geometry::live::ReferenceElem::new(target, common),
+                    ))
+                }
+                other => panic!("Unknown live kind: {}", other),
+            }
+        }
         _ => panic!("Unknown element type: {}", typ),
     }
 }
@@ -1382,7 +1428,7 @@ pub fn test_json_to_document(json: &str) -> Document {
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
     let document_setup = parse_document_setup(&v["document_setup"]);
     let print_preferences = parse_print_preferences(&v["print_preferences"]);
-    Document {
+    let doc = Document {
         layers,
         selected_layer,
         selection,
@@ -1390,7 +1436,10 @@ pub fn test_json_to_document(json: &str) -> Document {
         artboard_options,
         document_setup,
         print_preferences,
-    }
+    };
+    // Enforce the unique-id invariant on import (first-pre-order-wins);
+    // a no-op for well-formed (unique-id) documents. See REFERENCE_GRAPH.md §2.5.
+    crate::geometry::normalize::dedupe_element_ids(&doc)
 }
 
 // ---------------------------------------------------------------------------

@@ -70,6 +70,11 @@ private func assertSvgRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // REFERENCE_GRAPH.md Phase 2a: live element SVG codec. A reference
+        // round-trips as <use href="#id">; a compound as
+        // <g data-jas-live="compound_shape" data-jas-operation="...">.
+        // live_compound_id additionally carries the compound's own id.
+        "live_reference", "live_compound", "live_compound_id",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -91,6 +96,34 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
+/// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
+/// id="dup"; after dedupe the first keeps it and the second has no id.
+@Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
+/// REFERENCE_GRAPH.md Phase 2a: a <use href="#id"> imports as a live
+/// reference (F-svg-use); the href minus '#' becomes the target.
+@Test func svgParseLiveReference() { assertSvgParse("live_reference") }
+/// REFERENCE_GRAPH.md Phase 2a: a <g data-jas-live="compound_shape"
+/// data-jas-operation="..."> imports as a CompoundShape, not a Group.
+@Test func svgParseLiveCompound() { assertSvgParse("live_compound") }
+/// REFERENCE_GRAPH.md §4: the compound's own id="..." attribute imports
+/// into CompoundShape.id (name stays excluded for live elements).
+@Test func svgParseLiveCompoundId() { assertSvgParse("live_compound_id") }
+
+/// Pins the motivating equivalence bug (REFERENCE_GRAPH.md §4): import the
+/// id-less live_compound.svg, stamp an id onto the compound via
+/// Controller.assignId, and assert it lands. Before CompoundShape carried
+/// an id, `Element.withId` was a no-op for `.live`, so a compound could
+/// never become a reference target.
+@Test func assignIdOnCompound() {
+    let svg = readFixture("svg/live_compound.svg")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    // The compound is the sole child of the sole layer: path [0, 0].
+    let path: ElementPath = [0, 0]
+    #expect(model.document.getElement(path).id == nil)
+    controller.assignId(path, id: "cmp1")
+    #expect(model.document.getElement(path).id == "cmp1")
+}
 
 // MARK: - JSON round-trip (parse → serialize)
 
@@ -117,6 +150,11 @@ private func assertJsonRoundtrip(_ name: String) {
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
         "element_ids",
+        // REFERENCE_GRAPH.md Phase 1a: live element codec (compound now
+        // emits `operation`; reference emits kind+target). live_compound_id
+        // additionally carries the compound's own id (REFERENCE_GRAPH.md §4).
+        "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -140,6 +178,10 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Live elements round-trip through binary (REFERENCE_GRAPH.md Phase 2b).
+        // live_compound_id additionally carries the compound's own id (§4).
+        "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -159,6 +201,12 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Cross-app byte pin: decode Python-generated live-element bytes
+        // (REFERENCE_GRAPH.md Phase 2b) to the exact expected JSON.
+        // live_compound_id.bin (108 bytes, Python-generated) pins the
+        // compound's own id through the binary common block (§4).
+        "live_reference_roundtrip", "live_compound_roundtrip",
+        "live_compound_id",
     ]
     for name in names {
         let binData = readFixtureData("expected/\(name).bin")
@@ -278,6 +326,15 @@ private func runOperationFixture(_ fixture: String) throws {
                 controller.copySelection(
                     dx: op["dx"] as! Double,
                     dy: op["dy"] as! Double)
+            case "assign_id":
+                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.assignId(path, id: op["id"] as! String)
+            case "create_reference":
+                let targetPath = (op["target_path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.createReference(
+                    targetPath,
+                    targetId: op["target_id"] as! String,
+                    refId: op["ref_id"] as! String)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
             case "lock_selection":

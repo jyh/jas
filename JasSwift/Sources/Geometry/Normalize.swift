@@ -17,6 +17,53 @@ public func normalizeDocument(_ doc: Document) -> Document {
     )
 }
 
+/// Enforce the unique-id invariant after import (REFERENCE_GRAPH.md §2.5):
+/// walk the document in canonical pre-order; the FIRST element to use a given
+/// id keeps it, and every later element carrying the same id has its id
+/// cleared to nil (first-pre-order-wins). Element ids are then unique within
+/// the document, so the live-reference index never collides. A no-op on a
+/// document whose ids are already unique (the normal case) — well-formed
+/// documents round-trip unchanged; only ill-formed (e.g. foreign-SVG)
+/// duplicates are normalized. Called by every document reader. Mirrors the
+/// reference implementation's `dedupe_element_ids`.
+public func dedupeElementIds(_ doc: Document) -> Document {
+    var seen = Set<String>()
+    let layers: [Layer] = doc.layers.map { layer in
+        // Walk each top-level layer as an Element so the same pre-order
+        // visitor handles the layer's own id and its descendants.
+        let walked = dedupeIdsWalk(.layer(layer), &seen)
+        guard case .layer(let l) = walked else {
+            fatalError("dedupeElementIds: layer walk returned a non-layer element")
+        }
+        return l
+    }
+    return doc.replacing(layers: layers)
+}
+
+/// Pre-order id-dedupe visitor: visit `elem` (parent) before its children,
+/// depth-first, children in order. The first element to use an id keeps it;
+/// a later element carrying an already-seen id has its id cleared to nil.
+/// Recurses into Group/Layer children only (other kinds have no children),
+/// matching the reference's `children_mut`.
+private func dedupeIdsWalk(_ elem: Element, _ seen: inout Set<String>) -> Element {
+    var out = elem
+    if let id = elem.id {
+        // `insert` returns inserted=false when the id was already present —
+        // that marks this as a later duplicate, so clear it.
+        if !seen.insert(id).inserted {
+            out = elem.withId(nil)
+        }
+    }
+    switch out {
+    case .group(let g):
+        return .group(g.withChildren(g.children.map { dedupeIdsWalk($0, &seen) }))
+    case .layer(let l):
+        return .layer(l.withChildren(l.children.map { dedupeIdsWalk($0, &seen) }))
+    default:
+        return out
+    }
+}
+
 private func normalizeFill(_ fill: Fill) -> Fill {
     Fill(color: fill.color.withAlpha(1.0), opacity: fill.opacity * fill.color.alpha)
 }

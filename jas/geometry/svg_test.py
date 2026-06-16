@@ -576,6 +576,45 @@ class SvgImportTest(absltest.TestCase):
         self.assertIsInstance(elem, Group)
         self.assertEqual(len(elem.children), 2)
 
+    def test_roundtrip_live_reference_and_compound(self):
+        """Phase 2 SVG codec (REFERENCE_GRAPH.md): a reference emits/parses
+        as <use href="#id"> and a compound emits/parses as
+        <g data-jas-live="compound_shape" data-jas-operation=...> — both
+        round-trip (the compound previously demoted to a plain Group and
+        lost its operation). Mirrors the Rust
+        ``live_reference_and_compound_round_trip_through_svg`` test."""
+        from geometry.element import (
+            CompoundOperation, CompoundShape, ReferenceElem,
+        )
+
+        def rect_at(x):
+            return Rect(x=x, y=0, width=10, height=10,
+                        fill=Fill(color=RgbColor(0, 0, 0)))
+
+        target = Rect(x=0, y=0, width=10, height=10,
+                      fill=Fill(color=RgbColor(0, 0, 0)), id="r1")
+        reference = ReferenceElem(target="r1", id="ref1")
+        compound = CompoundShape(
+            operation=CompoundOperation.SUBTRACT_FRONT,
+            operands=(rect_at(0), rect_at(5)))
+        doc = Document(layers=(
+            Layer(children=(target, reference, compound)),
+        ))
+        svg = document_to_svg(doc)
+        self.assertIn('<use href="#r1"', svg)
+        self.assertIn('data-jas-operation="subtract_front"', svg)
+
+        doc2 = svg_to_document(svg)
+        kids = doc2.layers[0].children
+        ref = kids[1]
+        self.assertIsInstance(ref, ReferenceElem)
+        self.assertEqual(ref.target, "r1")
+        self.assertEqual(ref.id, "ref1")
+        cs = kids[2]
+        self.assertIsInstance(cs, CompoundShape)
+        self.assertEqual(cs.operation, CompoundOperation.SUBTRACT_FRONT)
+        self.assertEqual(len(cs.operands), 2)
+
     def test_import_relative_path_commands(self):
         """Relative (lowercase) path commands are converted to absolute."""
         # m 10,20 l 30,0 l 0,40 z => absolute M 10,20 L 40,20 L 40,60 Z

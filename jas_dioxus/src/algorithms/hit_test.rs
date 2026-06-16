@@ -279,6 +279,7 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
                 }
                 segs
             }
+            crate::geometry::live::LiveVariant::Reference(_) => vec![],
         },
         _ => vec![],
     }

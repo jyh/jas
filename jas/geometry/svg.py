@@ -10,12 +10,13 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from document.document import Document
-from geometry.normalize import normalize_document
+from geometry.normalize import dedupe_element_ids, normalize_document
 from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
-    ArcTo, Circle, ClosePath, Color, RgbColor, CurveTo, Element, Ellipse, Fill,
-    Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
-    PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
+    ArcTo, Circle, ClosePath, Color, RgbColor, CompoundOperation,
+    CompoundShape, CurveTo, Element,
+    Ellipse, Fill, Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
+    PathCommand, Polygon, Polyline, QuadTo, Rect, ReferenceElem, SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
 
@@ -415,6 +416,33 @@ def _element_svg(elem: Element, indent: str) -> str:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
             return "\n".join(lines)
+
+        # Live elements (Phase 2, REFERENCE_GRAPH.md): a CompoundShape is
+        # a <g data-jas-live="compound_shape" data-jas-operation=...>
+        # wrapping its operands; a reference is native SVG
+        # <use href="#target">. Both carry their own id/opacity/transform.
+        # Mirrors the Rust ``element_svg`` Live arm.
+        case CompoundShape(operation=operation, operands=operands,
+                           opacity=opacity, transform=transform, id=eid):
+            # Mirror Rust's common_attrs_no_name: opacity + transform + id,
+            # but NOT name (live elements never emit inkscape:label).
+            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                     f'{_id_attr(eid)}')
+            lines = [f'{indent}<g data-jas-live="compound_shape"'
+                     f' data-jas-operation="{operation.value}"{attrs}>']
+            for child in operands:
+                lines.append(_element_svg(child, indent + "  "))
+            lines.append(f'{indent}</g>')
+            return "\n".join(lines)
+
+        case ReferenceElem(target=target, opacity=opacity,
+                           transform=transform, id=eid):
+            # A reference is native SVG <use href="#id"> (Phase 2). Its own
+            # id/opacity/transform ride the common attrs; the target is the
+            # href. Any <use> imports back as a live reference (F-svg-use).
+            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                     f'{_id_attr(eid)}')
+            return f'{indent}<use href="#{escape(target)}"{attrs}/>'
 
     return ""
 
@@ -923,6 +951,7 @@ def _parse_path_d(d: str) -> tuple[PathCommand, ...]:
 
 _SVG_NS = "http://www.w3.org/2000/svg"
 _INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape"
+_XLINK_NS = "http://www.w3.org/1999/xlink"
 
 
 def _parse_tspan(node) -> list:
@@ -1239,6 +1268,22 @@ def _parse_element(node: ET.Element) -> Element | None:
             elem = _parse_element(child)
             if elem is not None:
                 children.append(elem)
+        # A live compound shape is <g data-jas-live="compound_shape">
+        # (REFERENCE_GRAPH.md Phase 2): rebuild it instead of demoting
+        # to a plain Group. Operation comes from data-jas-operation
+        # (default union). Mirrors the Rust ``parse_element`` g-arm.
+        if node.get("data-jas-live") == "compound_shape":
+            op_str = node.get("data-jas-operation") or "union"
+            operation = {
+                "union": CompoundOperation.UNION,
+                "subtract_front": CompoundOperation.SUBTRACT_FRONT,
+                "intersection": CompoundOperation.INTERSECTION,
+                "exclude": CompoundOperation.EXCLUDE,
+            }.get(op_str, CompoundOperation.UNION)
+            return CompoundShape(
+                operation=operation, operands=tuple(children),
+                fill=None, stroke=None,
+                opacity=opacity, transform=transform, id=eid)
         # Layer detection: only inkscape:groupmode="layer" promotes a
         # <g> to a Layer. inkscape:label alone is a Group name now
         # (was historically Layer-only, but with non-Layer naming
@@ -1253,6 +1298,20 @@ def _parse_element(node: ET.Element) -> Element | None:
         return Group(children=tuple(children),
                      opacity=opacity, transform=transform,
                      name=name, id=eid)
+
+    if tag == "use":
+        # Native SVG <use href="#id"> imports as a live reference
+        # (F-svg-use: any <use> becomes a reference). The reference's
+        # own id/opacity/transform came from the common attrs above;
+        # href (xlink:href fallback) names the target, '#' stripped.
+        href = (node.get("href")
+                or node.get(f"{{{_XLINK_NS}}}href")
+                or node.get("xlink:href")
+                or "")
+        target = href[1:] if href.startswith("#") else href
+        return ReferenceElem(
+            target=target, id=eid, name=name,
+            opacity=opacity, transform=transform)
 
     if tag == "title":
         return None  # parent reads as the name
@@ -1576,7 +1635,7 @@ def svg_to_document(svg: str) -> Document:
                     transform=layers[-1].transform)
     if not layers:
         layers = [Layer(children=())]
-    return normalize_document(Document(
+    return dedupe_element_ids(normalize_document(Document(
         layers=tuple(layers),
         document_setup=parsed_setup,
-        print_preferences=parsed_prefs))
+        print_preferences=parsed_prefs)))

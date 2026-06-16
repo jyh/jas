@@ -47,6 +47,7 @@ const TAG_PATH: i64 = 7;
 const TAG_TEXT: i64 = 8;
 const TAG_TEXT_PATH: i64 = 9;
 const TAG_GROUP: i64 = 10;
+const TAG_LIVE: i64 = 11;
 
 // Path command tags.
 const CMD_MOVE_TO: i64 = 0;
@@ -444,11 +445,27 @@ fn pack_element(elem: &Element) -> Value {
                               pack_fill(&e.fill), pack_stroke(&e.stroke),
                               Value::Array(tspans)])
         }
-        Element::Live(_) => {
-            // Live (compound shape etc.) binary serialization is
-            // phase 2-3 scope. No code path creates Live elements yet.
-            panic!("binary serialization of Live elements not yet implemented")
-        }
+        Element::Live(v) => match v {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                let (locked, opacity, vis, xform, name, id) = pack_common(&cs.common);
+                let op = match cs.operation {
+                    crate::geometry::live::CompoundOperation::Union => "union",
+                    crate::geometry::live::CompoundOperation::SubtractFront => "subtract_front",
+                    crate::geometry::live::CompoundOperation::Intersection => "intersection",
+                    crate::geometry::live::CompoundOperation::Exclude => "exclude",
+                };
+                let operands: Vec<Value> = cs.operands.iter().map(|c| pack_element(c)).collect();
+                // [tag, common(1..6), kind(7), operation(8), operands(9)]
+                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("compound_shape"), vstr(op), Value::Array(operands)])
+            }
+            crate::geometry::live::LiveVariant::Reference(r) => {
+                let (locked, opacity, vis, xform, name, id) = pack_common(&r.common);
+                // [tag, common(1..6), kind(7), target(8)]
+                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("reference"), vstr(&r.target.0)])
+            }
+        },
     }
 }
 
@@ -813,6 +830,33 @@ fn unpack_element(v: &Value) -> Element {
             }
             Element::TextPath(tp)
         }
+        TAG_LIVE => {
+            let kind = as_str(&arr[7]);
+            match kind {
+                "compound_shape" => {
+                    let operation = match as_str(&arr[8]) {
+                        "subtract_front" => crate::geometry::live::CompoundOperation::SubtractFront,
+                        "intersection" => crate::geometry::live::CompoundOperation::Intersection,
+                        "exclude" => crate::geometry::live::CompoundOperation::Exclude,
+                        _ => crate::geometry::live::CompoundOperation::Union,
+                    };
+                    let operands = as_array(&arr[9]).iter()
+                        .map(|c| Rc::new(unpack_element(c))).collect();
+                    Element::Live(crate::geometry::live::LiveVariant::CompoundShape(
+                        crate::geometry::live::CompoundShape {
+                            operation, operands, fill: None, stroke: None, common,
+                        },
+                    ))
+                }
+                "reference" => {
+                    let target = crate::geometry::live::ElementRef(as_str(&arr[8]).to_string());
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(
+                        crate::geometry::live::ReferenceElem::new(target, common),
+                    ))
+                }
+                other => panic!("unknown live kind: {}", other),
+            }
+        }
         _ => panic!("unknown element tag: {}", tag),
     }
 }
@@ -932,5 +976,7 @@ pub fn binary_to_document(data: &[u8]) -> Result<Document, String> {
     let value = rmpv::decode::read_value(&mut &raw[..])
         .map_err(|e| format!("msgpack decode failed: {}", e))?;
 
-    Ok(unpack_document(&value))
+    // Enforce the unique-id invariant on import (first-pre-order-wins);
+    // a no-op for well-formed (unique-id) documents. See REFERENCE_GRAPH.md §2.5.
+    Ok(crate::geometry::normalize::dedupe_element_ids(&unpack_document(&value)))
 }

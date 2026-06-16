@@ -9,13 +9,45 @@ color alpha channels.
 from dataclasses import replace
 
 from document.document import Document
-from geometry.element import Fill, Stroke
+from geometry.element import Element, Fill, Group, Stroke
 
 
 def normalize_document(doc: Document) -> Document:
     """Normalize all elements: extract color alpha into fill/stroke opacity,
     set color alpha to 1.0."""
     return replace(doc, layers=tuple(_normalize_element(l) for l in doc.layers))
+
+
+def dedupe_element_ids(doc: Document) -> Document:
+    """Enforce the unique-id invariant after import (REFERENCE_GRAPH.md §2.5):
+    walk the document in canonical pre-order; the FIRST element to use a given
+    id keeps it, and every later element carrying the same id has its id cleared
+    to None (first-pre-order-wins). Element ids are then unique within the
+    document, so the live-reference index never collides. A no-op on a document
+    whose ids are already unique (the normal case) -- well-formed documents
+    round-trip unchanged; only ill-formed (e.g. foreign-SVG) duplicates are
+    normalized. Called by every document reader.
+
+    Elements are frozen dataclasses, so this rebuilds via dataclasses.replace,
+    recursing into Group/Layer children only (mirroring the Rust reference).
+    """
+    seen: set[str] = set()
+    return replace(doc, layers=tuple(_dedupe_walk(l, seen) for l in doc.layers))
+
+
+def _dedupe_walk(elem: Element, seen: set[str]) -> Element:
+    kwargs = {}
+    elem_id = getattr(elem, "id", None)
+    if elem_id is not None:
+        # set.add never reports membership, so check-then-add: a hit marks
+        # this as a later duplicate, so clear its id.
+        if elem_id in seen:
+            kwargs["id"] = None
+        else:
+            seen.add(elem_id)
+    if isinstance(elem, Group):  # also matches Layer (a Group subclass)
+        kwargs["children"] = tuple(_dedupe_walk(c, seen) for c in elem.children)
+    return replace(elem, **kwargs) if kwargs else elem
 
 
 def _normalize_fill(fill: Fill) -> Fill:

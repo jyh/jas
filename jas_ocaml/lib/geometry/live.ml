@@ -5,6 +5,84 @@ open Element
 
 let default_precision = 0.0283
 
+(* ------------------------------------------------------------------ *)
+(* Reference resolution seam (REFERENCE_GRAPH.md section 2.1)          *)
+(* ------------------------------------------------------------------ *)
+
+(* Resolves a stable element id to the element it currently names. Lets
+   the geometry layer evaluate by-id references without depending on
+   Model / Document. Phase 1 backs this with a rebuild-on-demand
+   resolver; the persistent-incremental index is Phase 4. *)
+type element_resolver = element_ref -> element option
+
+(* A resolver that resolves nothing. Used on the resolver-unaware call
+   paths (and wherever no live references are present) so existing
+   geometry behavior is unchanged: a reference resolved through it is
+   treated as dangling. *)
+let null_resolver : element_resolver = fun _ -> None
+
+(* The cycle-guard set threaded through evaluation. Carried as an
+   explicit parameter (never instance / thread state) so all five apps
+   break reference cycles identically (REFERENCE_GRAPH.md section 3). *)
+module VisitSet = Set.Make (String)
+
+(* Stable-id inputs reached by reference rather than containment, in
+   deterministic order. Default empty: containment kinds (Compound_shape)
+   own their inputs and expose them as operands. The reference-graph
+   index reads this; it is the only by-id edge source. *)
+let dependencies (lv : live_variant) : element_ref list =
+  match lv with
+  | Compound_shape _ -> []
+  | Reference r -> [ r.ref_target ]
+
+(* ------------------------------------------------------------------ *)
+(* Render-scoped resolver (REFERENCE_GRAPH.md Phase 1b)               *)
+(* ------------------------------------------------------------------ *)
+
+(* The id-bearing-descendant children of an element, in document order.
+   Containment kinds (Group / Layer / Compound_shape) expose their
+   children; a reference does not own the element it names, so it has
+   none. Mirrors Rust [Element::children] as used by [collect_ref_ids]. *)
+let resolver_children (elem : element) : element list =
+  match elem with
+  | Group { children; _ } | Layer { children; _ } -> Array.to_list children
+  | Live (Compound_shape cs) -> Array.to_list cs.operands
+  | _ -> []
+
+(* The stable id carried on an element, if any. *)
+let resolver_id (elem : element) : element_ref option =
+  match elem with
+  | Rect { id; _ } | Circle { id; _ } | Ellipse { id; _ }
+  | Line { id; _ } | Polyline { id; _ } | Polygon { id; _ }
+  | Path { id; _ } | Text { id; _ } | Text_path { id; _ }
+  | Group { id; _ } | Layer { id; _ } -> id
+  | Live (Compound_shape cs) -> cs.id
+  | Live (Reference r) -> r.ref_id
+
+(* Walk [elem] and its id-bearing descendants, recording the first
+   element seen for each id (first-occurrence wins, matching Rust
+   [collect_ref_ids]; the unique-id invariant means there are no
+   collisions in practice, this just makes the build deterministic). *)
+let rec collect_ref_ids (elem : element) (tbl : (element_ref, element) Hashtbl.t) : unit =
+  (match resolver_id elem with
+   | Some id -> if not (Hashtbl.mem tbl id) then Hashtbl.replace tbl id elem
+   | None -> ());
+  List.iter (fun child -> collect_ref_ids child tbl) (resolver_children elem)
+
+(* Build an [element_resolver] from a document's [layers]. Indexes the
+   id-bearing descendants of each top-level layer; top-level layer ids
+   are not resolution targets in Phase 1 (references target shapes), so
+   the walk starts at each layer's children. Rebuilt on demand by the
+   render each paint (the rebuild strategy; the persistent-incremental
+   index is Phase 4). Mirrors Rust [register_ref_index]. *)
+let resolver_of_document (layers : element array) : element_resolver =
+  let tbl : (element_ref, element) Hashtbl.t = Hashtbl.create 16 in
+  Array.iter (fun layer ->
+    List.iter (fun child -> collect_ref_ids child tbl)
+      (resolver_children layer)
+  ) layers;
+  fun id -> Hashtbl.find_opt tbl id
+
 (** Compute the number of segments required to approximate a circle
     of the given radius so the max perpendicular distance between
     the polyline and the arc is at most [precision]. *)
@@ -90,7 +168,12 @@ let flatten_path_to_rings d =
   flush ();
   List.rev !rings
 
-let rec element_to_polygon_set elem precision =
+(* Resolver-aware flattening. Identical to [element_to_polygon_set]
+   except that by-id references resolve through [resolver], with
+   [visiting] breaking cycles. The 2-arg [element_to_polygon_set]
+   wrapper below passes [null_resolver], so existing call sites are
+   behavior-identical. *)
+let rec element_to_polygon_set_with elem precision resolver visiting =
   match elem with
   | Rect { x; y; width; height; _ } ->
     [| (x, y); (x +. width, y); (x +. width, y +. height); (x, y +. height) |]
@@ -106,9 +189,10 @@ let rec element_to_polygon_set elem precision =
   | Ellipse { cx; cy; rx; ry; _ } -> [ellipse_to_ring cx cy rx ry precision]
   | Group { children; _ } | Layer { children; _ } ->
     Array.fold_left (fun acc child ->
-      acc @ element_to_polygon_set child precision
+      acc @ element_to_polygon_set_with child precision resolver visiting
     ) [] children
-  | Live (Compound_shape cs) -> evaluate cs precision
+  | Live (Compound_shape cs) -> evaluate_with cs precision resolver visiting
+  | Live (Reference r) -> reference_evaluate_with r precision resolver visiting
   | Path { d; _ } | Text_path { d; _ } -> flatten_path_to_rings d
   (* Line has zero area; Text glyph flattening deferred. *)
   | Line _ | Text _ -> []
@@ -134,12 +218,50 @@ and apply_operation op operand_sets =
   | Op_exclude, first :: rest ->
     List.fold_left Boolean.boolean_exclude first rest
 
-and evaluate cs precision =
+(* Resolver-aware evaluation: flattens each operand (threading the
+   resolver + cycle-guard set so a referenced operand resolves through
+   [resolver]), then applies the boolean operation. *)
+and evaluate_with cs precision resolver visiting =
   let operand_sets =
     Array.to_list cs.operands
-    |> List.map (fun op -> element_to_polygon_set op precision)
+    |> List.map (fun op ->
+        element_to_polygon_set_with op precision resolver visiting)
   in
   apply_operation cs.operation operand_sets
+
+(* Resolver-aware evaluation of a reference: resolve the target and
+   return its geometry. A cycle (target already being visited) or a
+   dangling reference (unresolved) yields an empty set — never a
+   failure (REFERENCE_GRAPH.md section 3). *)
+and reference_evaluate_with r precision resolver visiting =
+  if VisitSet.mem r.ref_target !visiting then
+    [] (* cycle: break at the re-entry edge *)
+  else
+    match resolver r.ref_target with
+    | Some target ->
+      visiting := VisitSet.add r.ref_target !visiting;
+      let ps = element_to_polygon_set_with target precision resolver visiting in
+      visiting := VisitSet.remove r.ref_target !visiting;
+      ps
+    | None -> [] (* dangling: target not found *)
+
+(* Convenience wrapper that resolves no references — see
+   [element_to_polygon_set_with] for the resolver-aware form used when a
+   subtree may contain by-id references. *)
+let element_to_polygon_set elem precision =
+  let visiting = ref VisitSet.empty in
+  element_to_polygon_set_with elem precision null_resolver visiting
+
+(* Convenience wrapper that resolves no references (the operands of a
+   compound are owned, not referenced). *)
+let evaluate cs precision =
+  let visiting = ref VisitSet.empty in
+  evaluate_with cs precision null_resolver visiting
+
+(* Resolver-aware reference evaluation, exposed for tests / future render
+   wiring. Mirrors Rust ReferenceElem::evaluate_with. *)
+let reference_evaluate r precision resolver visiting =
+  reference_evaluate_with r precision resolver visiting
 
 (** Replace a compound shape with one Polygon per ring of the
     evaluated geometry. Each output polygon carries the compound
@@ -193,4 +315,8 @@ let () =
   Element.live_bounds_hook := (fun lv ->
     match lv with
     | Compound_shape cs ->
-      bounds_of_polygon_set (evaluate cs default_precision))
+      bounds_of_polygon_set (evaluate cs default_precision)
+    (* Resolver-free bounds are degenerate for a reference (its geometry
+       lives elsewhere); the resolver-aware bounds lands with the render
+       wiring (Phase 1b). *)
+    | Reference _ -> (0.0, 0.0, 0.0, 0.0))

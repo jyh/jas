@@ -451,9 +451,26 @@ package func elementJson(_ elem: Element) -> String {
     case .live(let v):
         o.str("type", "live")
         o.str("kind", v.kind)
-        commonFields(o, v.opacity, v.transform, v.locked, v.visibility, nil)
-        let children = v.operands.map { elementJson($0) }
-        o.raw("children", jsonArray(children))
+        switch v {
+        case .compoundShape(let cs):
+            // `operation` was previously omitted (a round-trip bug, since
+            // the reader had no live arm at all and trapped); now emitted
+            // so compound shapes round-trip through test_json.
+            o.str("operation", cs.operation.rawValue)
+            // CompoundShape carries a stable id but no name field, so emit
+            // id (only when set) while name stays nil — matching the
+            // reference writer and Rust's common_attrs_no_name.
+            commonFields(o, cs.opacity, cs.transform, cs.locked, cs.visibility, nil, cs.id)
+            let children = cs.operands.map { elementJson($0) }
+            o.raw("children", jsonArray(children))
+        case .reference(let r):
+            o.str("target", r.target.id)
+            commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil, r.id)
+            // fill/stroke/transform are emitted only when set; in Phase 1
+            // references carry none (paint inheritance default / Fork F2),
+            // matching how compound omits its own paint here. (transform is
+            // emitted as null by commonFields, matching the fixtures.)
+        }
     }
     return o.build()
 }
@@ -962,6 +979,26 @@ package func parseElement(_ v: Any?) -> Element {
         // the local `name` binding by parseCommon).
         return .layer(Layer(name: name, children: children, opacity: opacity, transform: transform,
                             locked: locked, visibility: visibility, id: id))
+    case "live":
+        let kind = d["kind"] as? String ?? ""
+        switch kind {
+        case "compound_shape":
+            let operation = CompoundOperation(rawValue: d["operation"] as? String ?? "union") ?? .union
+            let operands = (d["children"] as? [Any] ?? []).map { parseElement($0) }
+            return .live(.compoundShape(CompoundShape(
+                operation: operation, operands: operands, id: id,
+                opacity: opacity, transform: transform,
+                locked: locked, visibility: visibility)))
+        case "reference":
+            let target = ElementRef(d["target"] as? String ?? "")
+            return .live(.reference(ReferenceElem(
+                target: target,
+                id: id,
+                transform: transform,
+                opacity: opacity, locked: locked, visibility: visibility)))
+        default:
+            fatalError("Unknown live kind: \(kind)")
+        }
     default:
         fatalError("Unknown element type: \(typ)")
     }
@@ -1183,7 +1220,7 @@ package func testJsonToDocument(_ json: String) -> Document {
     let artboardOptions = parseArtboardOptions(v["artboard_options"])
     let documentSetup = parseDocumentSetup(v["document_setup"])
     let printPreferences = parsePrintPreferences(v["print_preferences"])
-    return Document(
+    return dedupeElementIds(Document(
         rawLayers: layers,
         rawSelectedLayer: selectedLayer,
         rawSelection: selection,
@@ -1191,5 +1228,5 @@ package func testJsonToDocument(_ json: String) -> Document {
         rawArtboardOptions: artboardOptions,
         rawDocumentSetup: documentSetup,
         rawPrintPreferences: printPreferences
-    )
+    ))
 }

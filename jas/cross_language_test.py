@@ -69,6 +69,12 @@ class CrossLanguageTest(absltest.TestCase):
             "polyline_basic", "polygon_basic", "path_all_commands",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer",
+            # Live element SVG codec (REFERENCE_GRAPH.md Phase 2a):
+            # a reference round-trips as <use href="#id">; a compound
+            # as <g data-jas-live="compound_shape" data-jas-operation=...>.
+            "live_reference", "live_compound",
+            # A compound with a stable id round-trips its id="..." attr.
+            "live_compound_id",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -92,6 +98,12 @@ class CrossLanguageTest(absltest.TestCase):
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document", "element_ids",
+            # Live element framework (REFERENCE_GRAPH.md Phase 1a):
+            # compound shape (operation + operands) and by-id reference
+            # (kind + target) round-trip through the test_json live codec.
+            "live_compound_roundtrip", "live_reference_roundtrip",
+            # A compound with a stable id ("c1") round-trips its id field.
+            "live_compound_id",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -115,6 +127,10 @@ class CrossLanguageTest(absltest.TestCase):
             "multi_layer", "complex_document",
             # Stable identity (binary v2): id+name now round-trip generically.
             "element_ids",
+            # Live elements round-trip through binary (Phase 2b).
+            "live_compound_roundtrip", "live_reference_roundtrip",
+            # A compound with a stable id ("c1") round-trips its id field.
+            "live_compound_id",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -173,6 +189,29 @@ class CrossLanguageTest(absltest.TestCase):
 
     def test_svg_parse_complex_document(self):
         _assert_svg_parse(self, "complex_document")
+
+    def test_svg_parse_dup_id_import(self):
+        # Two rects share id="dup". The unique-id invariant on import
+        # (dedupe_element_ids) keeps the id on the first element in
+        # pre-order and clears it on the later duplicate.
+        _assert_svg_parse(self, "dup_id_import")
+
+    def test_svg_parse_live_reference(self):
+        # <use href="#r1"> imports as a live ReferenceElem whose target
+        # is the href minus '#' (F-svg-use). REFERENCE_GRAPH.md Phase 2a.
+        _assert_svg_parse(self, "live_reference")
+
+    def test_svg_parse_live_compound(self):
+        # <g data-jas-live="compound_shape" data-jas-operation=...>
+        # imports as a CompoundShape (operands from children, operation
+        # from data-jas-operation) rather than a plain Group.
+        _assert_svg_parse(self, "live_compound")
+
+    def test_svg_parse_live_compound_id(self):
+        # A <g data-jas-live="compound_shape" ... id="c1"> imports as a
+        # CompoundShape whose stable id is populated from the id attr,
+        # matching Rust's common_attrs_no_name (id but no name).
+        _assert_svg_parse(self, "live_compound_id")
 
     # ---------------------------------------------------------------
     # Algorithm test vectors
@@ -239,6 +278,12 @@ class CrossLanguageTest(absltest.TestCase):
                     ctrl.move_selection(op["dx"], op["dy"])
                 elif op_name == "copy_selection":
                     ctrl.copy_selection(op["dx"], op["dy"])
+                elif op_name == "assign_id":
+                    ctrl.assign_id(tuple(op["path"]), op["id"])
+                elif op_name == "create_reference":
+                    ctrl.create_reference(
+                        tuple(op["target_path"]),
+                        op["target_id"], op["ref_id"])
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":
@@ -270,6 +315,26 @@ class CrossLanguageTest(absltest.TestCase):
 
     def test_operation_controller_ops(self):
         self._run_operation_fixture("controller_ops.json")
+
+    def test_assign_id_on_compound(self):
+        # Regression for the reachable equivalence bug: assign_id does
+        # replace(elem, id=id), which on a CompoundShape used to raise
+        # TypeError (no id field) while Rust/OCaml stamped it fine. Now
+        # CompoundShape carries a stable id, so stamping one (here onto a
+        # previously id-less compound imported from SVG) must succeed and
+        # the parsed id must reach the element. See REFERENCE_GRAPH.md §4.
+        from geometry.element import CompoundShape
+        doc = svg_to_document(_read_fixture("svg/live_compound.svg"))
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        path = (0, 0)
+        compound = model.document.get_element(path)
+        self.assertIsInstance(compound, CompoundShape)
+        self.assertIsNone(compound.id)
+        ctrl.assign_id(path, "c1")  # must not raise TypeError
+        stamped = model.document.get_element(path)
+        self.assertIsInstance(stamped, CompoundShape)
+        self.assertEqual(stamped.id, "c1")
 
     # ---------------------------------------------------------------
     # Workspace layout equivalence tests

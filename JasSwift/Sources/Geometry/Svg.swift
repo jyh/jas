@@ -404,14 +404,31 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return lines.joined(separator: "\n")
 
     case .live(let v):
-        // Phase 1: emit as a group of operands so SVG export remains
-        // round-tripped. Phase 2 replaces with the evaluated geometry.
-        var lines = ["\(indent)<g data-jas-live=\"\(v.kind)\"\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
-        for child in v.operands {
-            lines.append(elementSvg(child, indent: indent + "  "))
+        switch v {
+        case .compoundShape(let cs):
+            // REFERENCE_GRAPH.md Phase 2a: a compound shape emits
+            // <g data-jas-live="compound_shape" data-jas-operation="...">
+            // with its operands as children. The operation attribute lets
+            // the reader rebuild a CompoundShape instead of demoting to a
+            // plain Group (and losing the operation).
+            // Mirror Rust's common_attrs_no_name: opacity + transform + id,
+            // but NOT name (live elements never emit inkscape:label).
+            var lines = ["\(indent)<g data-jas-live=\"compound_shape\"" +
+                " data-jas-operation=\"\(cs.operation.rawValue)\"" +
+                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idAttr(cs.id))>"]
+            for child in cs.operands {
+                lines.append(elementSvg(child, indent: indent + "  "))
+            }
+            lines.append("\(indent)</g>")
+            return lines.joined(separator: "\n")
+        case .reference(let r):
+            // REFERENCE_GRAPH.md Phase 2a: a reference is native SVG
+            // <use href="#id">. Its own id/opacity/transform ride the
+            // common attrs; the target is the href. Any <use> imports back
+            // as a live reference (the F-svg-use decision).
+            return "\(indent)<use href=\"#\(escapeXml(r.target.id))\"" +
+                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))/>"
         }
-        lines.append("\(indent)</g>")
-        return lines.joined(separator: "\n")
     }
 }
 
@@ -1341,6 +1358,18 @@ private func parseElement(_ node: XMLNode) -> Element? {
                 }
             }
         }
+        // A live compound shape is <g data-jas-live="compound_shape">
+        // (REFERENCE_GRAPH.md Phase 2a): rebuild it instead of demoting
+        // to a plain Group. The operation comes from data-jas-operation
+        // (default union when absent / unrecognized).
+        let liveKind = elem.attribute(forName: "data-jas-live")?.stringValue
+        if liveKind == "compound_shape" {
+            let opStr = elem.attribute(forName: "data-jas-operation")?.stringValue ?? ""
+            let operation = CompoundOperation(rawValue: opStr) ?? .union
+            return .live(.compoundShape(CompoundShape(
+                operation: operation, operands: children, id: id,
+                opacity: opacity, transform: transform)))
+        }
         // Layer detection: only explicit inkscape:groupmode="layer"
         // marks a Layer. Plain naming (inkscape:label) on a <g> means
         // a named Group, not a Layer.
@@ -1354,6 +1383,18 @@ private func parseElement(_ node: XMLNode) -> Element? {
         return .group(Group(children: children,
                                 opacity: opacity, transform: transform,
                                 name: name, id: id))
+
+    case "use":
+        // Native SVG <use href="#id"> imports as a live reference
+        // (F-svg-use: any <use> becomes a reference, incl. foreign).
+        // The reference's own id/opacity/transform came from the
+        // element above; href (minus the leading '#') is the target.
+        let href = elem.attribute(forName: "href")?.stringValue
+                ?? elem.attribute(forName: "xlink:href")?.stringValue ?? ""
+        let target = href.hasPrefix("#") ? String(href.dropFirst()) : href
+        return .live(.reference(ReferenceElem(
+            target: ElementRef(target), id: id,
+            transform: transform, opacity: opacity)))
 
     default:
         return nil
@@ -1415,10 +1456,10 @@ public func svgToDocument(_ svg: String) -> Document {
         }
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
-    return normalizeDocument(Document(
+    return dedupeElementIds(normalizeDocument(Document(
         layers: layers, artboards: [],
         documentSetup: parsedSetup,
-        printPreferences: parsedPrefs))
+        printPreferences: parsedPrefs)))
 }
 
 // MARK: - Jas-namespaced print metadata parsing (PRINT.md §Phase 2)

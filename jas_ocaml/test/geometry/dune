@@ -24,6 +24,11 @@
  (libraries jas alcotest))
 
 (test
+ (name normalize_test)
+ (modules normalize_test)
+ (libraries jas alcotest))
+
+(test
  (name path_ops_test)
  (modules path_ops_test)
  (libraries jas alcotest))

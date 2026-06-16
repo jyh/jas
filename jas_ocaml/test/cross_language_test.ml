@@ -52,13 +52,41 @@ let roundtrip_names = [
   "multi_layer"; "complex_document"
 ]
 
+(* SVG round-trip fixtures. Extends [roundtrip_names] with the Live
+   element fixtures (REFERENCE_GRAPH.md Phase 2a): a reference writes as
+   <use href> and reads back; a compound writes as
+   <g data-jas-live=... data-jas-operation=...> and reads back. Kept
+   separate from [roundtrip_names] because the latter also seeds
+   [binary_names], where Live binary serialization is deferred. *)
+let svg_roundtrip_names =
+  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id"]
+
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
    test_json codec both round-trip those fields, so element_ids participates in
    the binary and JSON idempotence tests. It is kept out of [roundtrip_names]
    only because there is no element_ids.svg fixture for the SVG tests. *)
-let json_roundtrip_names = roundtrip_names @ ["element_ids"]
-let binary_names = roundtrip_names @ ["element_ids"]
+(* Live elements (REFERENCE_GRAPH.md Phase 1a): reference + compound
+   round-trip through the test_json codec. Compound now carries
+   [operation]. *)
+let json_roundtrip_names =
+  roundtrip_names @ ["element_ids";
+                     "live_reference_roundtrip"; "live_compound_roundtrip"]
+(* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
+   element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
+   serialize through binary (TAG_LIVE, kind-discriminated), so both the
+   JSON→binary→JSON round-trip and the Python-generated .bin read cases cover
+   them. Mirrors the Rust binary fixture lists. Note these are the
+   [_roundtrip] variants (which have matching expected/*.json and *.bin), not
+   the bare live_reference / live_compound SVG-parse fixtures. *)
+let binary_names =
+  roundtrip_names @ ["element_ids";
+                     "live_reference_roundtrip"; "live_compound_roundtrip";
+                     (* The compound id is the cross-app byte pin: its
+                        Python-generated 108-byte .bin must decode here, and
+                        the JSON to binary to JSON round-trip must preserve the
+                        id (REFERENCE_GRAPH.md compound-id round-trip). *)
+                     "live_compound_id"]
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
@@ -104,6 +132,16 @@ let run_operation_fixture fixture_name =
         let dx = op |> member "dx" |> to_num in
         let dy = op |> member "dy" |> to_num in
         ctrl#copy_selection dx dy
+      | "assign_id" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let id = op |> member "id" |> to_string in
+        ctrl#assign_id path id
+      | "create_reference" ->
+        let target_path =
+          op |> member "target_path" |> to_list |> List.map to_int in
+        let target_id = op |> member "target_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#create_reference target_path target_id ref_id
       | "delete_selection" ->
         let new_doc = Jas.Document.delete_selection model#document in
         model#set_document new_doc
@@ -286,7 +324,7 @@ let () =
     (* SVG round-trip idempotence *)
     "SVG round-trip", [
       Alcotest.test_case "svg_roundtrip all fixtures" `Quick (fun () ->
-        List.iter assert_svg_roundtrip roundtrip_names);
+        List.iter assert_svg_roundtrip svg_roundtrip_names);
     ];
 
     (* JSON round-trip idempotence *)
@@ -312,6 +350,15 @@ let () =
       Alcotest.test_case "svg_parse transform_rotate" `Quick (fun () -> assert_svg_parse "transform_rotate");
       Alcotest.test_case "svg_parse multi_layer" `Quick (fun () -> assert_svg_parse "multi_layer");
       Alcotest.test_case "svg_parse complex_document" `Quick (fun () -> assert_svg_parse "complex_document");
+      Alcotest.test_case "svg_parse dup_id_import" `Quick (fun () -> assert_svg_parse "dup_id_import");
+      (* Live elements (REFERENCE_GRAPH.md Phase 2a): <use href> parses
+         to a reference; <g data-jas-live="compound_shape"
+         data-jas-operation=...> parses to a compound. *)
+      Alcotest.test_case "svg_parse live_reference" `Quick (fun () -> assert_svg_parse "live_reference");
+      Alcotest.test_case "svg_parse live_compound" `Quick (fun () -> assert_svg_parse "live_compound");
+      (* Compound id round-trips through SVG (id="..." on the <g>), unlike
+         name which live elements never emit. *)
+      Alcotest.test_case "svg_parse live_compound_id" `Quick (fun () -> assert_svg_parse "live_compound_id");
     ];
 
     (* Algorithm test vectors *)
@@ -365,6 +412,39 @@ let () =
             assert false
           end
         ) tests);
+    ];
+
+    (* Compound id assignment (regression pin for the cross-language
+       compound-id round-trip bug): assign_id must stamp a compound's id,
+       and the assigned id must survive a binary round-trip. *)
+    "Compound id", [
+      Alcotest.test_case "assign_id stamps a compound" `Quick (fun () ->
+        let svg = read_fixture "svg/live_compound.svg" in
+        let doc = Jas.Svg.svg_to_document svg in
+        let model = Jas.Model.create ~document:doc () in
+        let ctrl = Jas.Controller.create ~model () in
+        (* The compound is the first child of the first layer. *)
+        let path = [0; 0] in
+        (match (try Some (Jas.Document.get_element model#document path)
+                with _ -> None) with
+         | Some (Jas.Element.Live (Jas.Element.Compound_shape _)) -> ()
+         | _ -> failwith "expected a compound at path [0; 0]");
+        ctrl#assign_id path "c-assigned";
+        let stamped = Jas.Document.get_element model#document path in
+        (match Jas.Element.id_of stamped with
+         | Some "c-assigned" -> ()
+         | other ->
+           failwith (Printf.sprintf "compound id not stamped: %s"
+             (match other with Some s -> s | None -> "<none>")));
+        (* And it survives the binary codec. *)
+        let binary = Jas.Binary.document_to_binary model#document in
+        let doc2 = Jas.Binary.binary_to_document binary in
+        let round = Jas.Document.get_element doc2 path in
+        (match Jas.Element.id_of round with
+         | Some "c-assigned" -> ()
+         | other ->
+           failwith (Printf.sprintf "compound id lost through binary: %s"
+             (match other with Some s -> s | None -> "<none>"))));
     ];
 
     (* Operation equivalence tests *)

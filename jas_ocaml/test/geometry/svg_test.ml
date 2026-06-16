@@ -1105,5 +1105,48 @@ let () =
         assert (contains svg "<jas:marks-and-bleed");
         let parsed = Jas.Svg.svg_to_document svg in
         assert (parsed.print_preferences = p));
+
+      Alcotest.test_case "round-trip live reference and compound" `Quick (fun () ->
+        (* REFERENCE_GRAPH.md Phase 2a SVG codec: a reference emits/parses
+           as <use href="#id"> and a compound emits/parses as
+           <g data-jas-live="compound_shape" data-jas-operation=...> — both
+           round-trip (the compound previously demoted to a plain Group and
+           lost its operation; the reference emitted an empty marker). *)
+        let rect_at x = make_rect ~fill:(Some (make_fill (make_color 0.0 0.0 0.0)))
+            x 0.0 10.0 10.0 in
+        let target = Jas.Element.with_id (rect_at 0.0) (Some "r1") in
+        let reference = Jas.Element.with_id
+            (make_reference "r1") (Some "ref1") in
+        let compound = Live (Compound_shape {
+          operation = Op_subtract_front;
+          id = None;
+          operands = [| rect_at 0.0; rect_at 5.0 |];
+          fill = None; stroke = None; opacity = 1.0; transform = None;
+          locked = false; visibility = Preview; blend_mode = Normal;
+          mask = None;
+        }) in
+        let doc = make_document [|make_layer [| target; reference; compound |]|] in
+        let svg = Jas.Svg.document_to_svg doc in
+        let contains s sub =
+          let len_s = String.length s and len_sub = String.length sub in
+          let rec aux i =
+            if i + len_sub > len_s then false
+            else if String.sub s i len_sub = sub then true
+            else aux (i + 1)
+          in aux 0 in
+        assert (contains svg {|<use href="#r1"|});
+        assert (contains svg {|data-jas-operation="subtract_front"|});
+        let doc2 = Jas.Svg.svg_to_document svg in
+        let kids = children_of doc2.Jas.Document.layers.(0) in
+        (match kids.(1) with
+         | Live (Reference r) ->
+           assert (r.ref_target = "r1");
+           assert (r.ref_id = Some "ref1")
+         | _ -> assert false);
+        (match kids.(2) with
+         | Live (Compound_shape cs) ->
+           assert (cs.operation = Op_subtract_front);
+           assert (Array.length cs.operands = 2)
+         | _ -> assert false));
     ];
   ]

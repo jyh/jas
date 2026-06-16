@@ -24,7 +24,13 @@ from algorithms.boolean import (
 )
 
 if TYPE_CHECKING:
-    from geometry.element import CompoundOperation, Element
+    from document.document import Document
+    from geometry.element import (
+        CompoundOperation,
+        Element,
+        ElementRef,
+        ElementResolver,
+    )
 
 
 # Default geometric tolerance in points. Matches the Precision default
@@ -37,13 +43,35 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
     """Flatten a document element into a polygon set suitable for the
     boolean algorithm.
 
+    Convenience wrapper that resolves no references (a NullResolver):
+    existing call sites stay behavior-identical. See
+    ``element_to_polygon_set_with`` for the resolver-aware form used
+    when an element subtree may contain by-id references.
+
     - Rect / Polygon / Polyline / Circle / Ellipse: direct conversion.
       Polyline is implicitly closed for even-odd fill.
     - Group / Layer: recursively concatenate children's rings.
     - CompoundShape: recursively evaluate.
+    - Reference: resolve target (through the resolver) and evaluate.
     - Path / TextPath: flatten Bezier commands to rings per subpath.
     - Line / Text: empty (zero area or glyph-outline flattening
       deferred to a font-outline pipeline).
+    """
+    from geometry.element import NullResolver
+
+    return element_to_polygon_set_with(elem, precision, NullResolver(), set())
+
+
+def element_to_polygon_set_with(
+    elem: "Element",
+    precision: float,
+    resolver: "ElementResolver",
+    visiting: set,
+) -> PolygonSet:
+    """Resolver-aware flattening. Identical to ``element_to_polygon_set``
+    except by-id references resolve through ``resolver``, with
+    ``visiting`` breaking cycles. Mirrors the Rust
+    ``element_to_polygon_set_with``.
     """
     from geometry.element import (
         Circle,
@@ -56,6 +84,7 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
         Polygon,
         Polyline,
         Rect,
+        ReferenceElem,
         Text,
         TextPath,
     )
@@ -78,10 +107,18 @@ def element_to_polygon_set(elem: "Element", precision: float) -> PolygonSet:
     if isinstance(elem, (Group, Layer)):
         out: PolygonSet = []
         for child in elem.children:
-            out.extend(element_to_polygon_set(child, precision))
+            out.extend(
+                element_to_polygon_set_with(child, precision, resolver, visiting)
+            )
         return out
+    # ReferenceElem must precede CompoundShape: both are LiveElement, but
+    # only CompoundShape carries operands. (They are unrelated leaf kinds,
+    # so order is not strictly required, but the explicit case keeps the
+    # dispatch parallel to the Rust LiveVariant match.)
+    if isinstance(elem, ReferenceElem):
+        return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, CompoundShape):
-        return elem.evaluate(precision)
+        return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, (Path, TextPath)):
         return flatten_path_to_rings(elem.d)
     # Line has zero area; Text glyph flattening deferred.
@@ -152,6 +189,62 @@ def bounds_of_polygon_set(
     if not math.isfinite(min_x):
         return (0.0, 0.0, 0.0, 0.0)
     return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+# ── Reference resolution (REFERENCE_GRAPH.md Phase 1b) ─────────────
+
+
+class DictResolver:
+    """An ``ElementResolver`` backed by a flat id→element dict.
+
+    Mirrors the Rust render-scoped ``RenderResolver`` reading a
+    per-paint id→element index: a missing id resolves to ``None``
+    (dangling, never an error). Built by ``resolver_from_document``;
+    the canvas render builds one per paint and threads it through
+    ``evaluate_with`` so by-id references resolve and draw.
+    """
+
+    def __init__(self, index: dict[str, "Element"]):
+        self._index = index
+
+    def resolve(self, ref: "ElementRef") -> "Element | None":
+        return self._index.get(ref)
+
+
+def _collect_ref_ids(elem: "Element", out: dict[str, "Element"]) -> None:
+    """Index ``elem`` (and its descendants) by stable id into ``out``.
+
+    First-occurrence wins (the unique-id invariant means there are no
+    collisions in practice; this just makes the build deterministic).
+    Recurses through Group / Layer ``children``. Mirrors the Rust
+    ``collect_ref_ids``.
+    """
+    eid = getattr(elem, "id", None)
+    if eid is not None and eid not in out:
+        out[eid] = elem
+    children = getattr(elem, "children", None)
+    if children is not None:
+        for child in children:
+            _collect_ref_ids(child, out)
+
+
+def resolver_from_document(doc: "Document") -> DictResolver:
+    """Build an ``ElementResolver`` (id→element) from ``doc``.
+
+    Indexes id-bearing descendants of every layer (which are the
+    Phase-1 reference targets). Top-level layer ids are intentionally
+    excluded — references target shapes, not layers — matching the
+    Rust ``register_ref_index``. The canvas render rebuilds this each
+    paint (the rebuild strategy; the persistent-incremental index is
+    Phase 4, REFERENCE_GRAPH.md §2.4).
+    """
+    index: dict[str, "Element"] = {}
+    for layer in doc.layers:
+        children = getattr(layer, "children", None)
+        if children is not None:
+            for child in children:
+                _collect_ref_ids(child, index)
+    return DictResolver(index)
 
 
 # ── Internal helpers ──────────────────────────────────────────────
