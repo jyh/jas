@@ -65,6 +65,7 @@ pub(crate) fn make_keydown_handler(
     act: Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>,
     app: Rc<RefCell<AppState>>,
     revision: Signal<u64>,
+    dialog_sig: Signal<Option<crate::interpreter::dialog_view::DialogState>>,
 ) -> impl FnMut(Event<KeyboardData>) {
     let app_for_keys = app;
     let revision_for_keys = revision;
@@ -545,13 +546,55 @@ pub(crate) fn make_keydown_handler(
                 }));
             }
             Key::Delete | Key::Backspace => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    if let Some(tab) = st.tab_mut() {
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
+                // Reference-aware delete (warn-then-orphan). Phase A:
+                // compute the pure orphaned_references predicate over the
+                // current selection. Empty -> delete inline exactly as
+                // before (no dialog). Non-empty -> open the confirm dialog
+                // with the orphan count and return WITHOUT mutating; the
+                // dialog's Delete button runs the snapshot + delete_selection.
+                // Selection is left intact so the OK action deletes the same
+                // elements.
+                let orphan_count: usize = {
+                    let st = app_for_keys.borrow();
+                    match st.tab() {
+                        Some(tab) => {
+                            let doc = tab.model.document();
+                            let paths: Vec<Vec<usize>> = doc
+                                .selection
+                                .iter()
+                                .map(|es| es.path.clone())
+                                .collect();
+                            crate::document::dependency_index::orphaned_references(
+                                doc, &paths,
+                            )
+                            .len()
+                        }
+                        None => 0,
                     }
-                }));
+                };
+                if orphan_count == 0 {
+                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            tab.model.snapshot();
+                            let new_doc = tab.model.document().delete_selection();
+                            tab.model.set_document(new_doc);
+                        }
+                    }));
+                } else {
+                    let live_state = {
+                        let st = app_for_keys.borrow();
+                        crate::workspace::dock_panel::build_live_state_map(&st)
+                    };
+                    let mut params = serde_json::Map::new();
+                    params.insert("count".to_string(), serde_json::json!(orphan_count));
+                    let mut sig = dialog_sig;
+                    crate::interpreter::dialog_view::open_dialog(
+                        &mut sig,
+                        "delete_orphan_confirm",
+                        &params,
+                        &live_state,
+                    );
+                }
             }
             _ => {}
         }

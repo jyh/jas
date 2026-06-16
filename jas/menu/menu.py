@@ -1,7 +1,7 @@
 """Menubar for Jas application."""
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
 
 from document.model import Model
 from tools.tool import PASTE_OFFSET
@@ -115,7 +115,7 @@ def create_menus(window: QMainWindow) -> None:
 
     delete_action = edit_menu.addAction("&Delete")
     delete_action.setShortcut(QKeySequence.Delete)
-    delete_action.triggered.connect(lambda: _with_model(lambda m: _delete_selection(m)))
+    delete_action.triggered.connect(lambda: _with_model(lambda m: _delete_selection(m, window)))
 
     select_all_action = edit_menu.addAction("Select &All")
     select_all_action.setShortcut(QKeySequence.SelectAll)
@@ -651,12 +651,52 @@ def _show_all(model: Model) -> None:
     controller.show_all()
 
 
-def _delete_selection(model: Model) -> None:
-    """Delete all selected elements."""
+def _orphan_warning_body(n: int) -> str:
+    """Verbatim body for the reference-aware delete confirm (identical
+    across all apps). ``n`` is the number of live references (instances)
+    that would be left pointing at a deleted target."""
+    instance = "instance" if n == 1 else "instances"
+    return f"Deleting will leave {n} live {instance} empty."
+
+
+def _confirm_delete_if_orphans(model: Model, parent=None) -> bool:
+    """Decide whether the current delete should proceed (REFERENCE_GRAPH.md
+    warn-then-orphan).
+
+    Computes ``orphaned_references`` over the selection paths
+    (``delete_selection`` would remove exactly these). Empty -> proceed
+    silently (unchanged behavior, no dialog). Non-empty -> show a modal
+    confirm whose default is the safe Cancel; returns True only if the
+    user confirms (Ok).
+
+    Shared by Edit>Delete and the keyboard Delete/Backspace path so both
+    warn identically. (Cut intentionally still orphans silently.)"""
+    from document.dependency_index import orphaned_references
+    doc = model.document
+    selection_paths = [es.path for es in doc.selection]
+    orphaned = orphaned_references(doc, selection_paths)
+    if not orphaned:
+        return True
+    if parent is None:
+        parent = QApplication.activeWindow()
+    body = _orphan_warning_body(len(orphaned))
+    reply = QMessageBox.question(
+        parent, "Delete", body,
+        QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
+    return reply == QMessageBox.Ok
+
+
+def _delete_selection(model: Model, window=None) -> None:
+    """Delete all selected elements (reference-aware).
+
+    No-orphan deletes proceed as before (snapshot + delete). When the
+    delete would orphan a live reference, a modal confirm is shown first;
+    Cancel aborts entirely (no snapshot, no delete)."""
     doc = model.document
     if not doc.selection:
         return
-    from document.document import Document
+    if not _confirm_delete_if_orphans(model, window):
+        return
     model.snapshot()
     model.document = doc.delete_selection()
 

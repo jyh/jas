@@ -10,11 +10,14 @@ from document.model import Model
 from geometry.element import (
     RgbColor, Fill, Group, Layer, Rect, Stroke, Visibility,
 )
+import menu.menu as menu_module
 from menu.menu import (
     _group_selection, _ungroup_selection, _ungroup_all,
     _lock_selection, _unlock_all,
     _hide_selection, _show_all,
     _link_to_selection,
+    _delete_selection,
+    _orphan_warning_body,
     _is_svg,
 )
 
@@ -186,6 +189,97 @@ class HideShowTest(absltest.TestCase):
         doc = model.document
         for child in doc.layers[0].children:
             self.assertEqual(child.visibility, Visibility.PREVIEW)
+
+
+class OrphanWarningBodyTest(absltest.TestCase):
+    """The reference-aware delete warning body uses verbatim wording
+    (identical across all apps) with singular/plural ``instance(s)``."""
+
+    def test_singular(self):
+        self.assertEqual(
+            _orphan_warning_body(1),
+            "Deleting will leave 1 live instance empty.")
+
+    def test_plural(self):
+        self.assertEqual(
+            _orphan_warning_body(3),
+            "Deleting will leave 3 live instances empty.")
+
+
+class DeleteSelectionTest(absltest.TestCase):
+    """Tests for _delete_selection (reference-aware warn-then-orphan).
+
+    No-orphan deletes proceed silently (unchanged behavior); deletes
+    that would orphan a live reference go through a modal confirm whose
+    OK proceeds and whose Cancel aborts (no snapshot, no delete).
+    """
+
+    def _model_target_and_ref(self):
+        """A layer with a referenced rect [0,0] and one live reference
+        [0,1] pointing at it; only the target rect is selected. Deleting
+        the target would orphan the surviving reference."""
+        from geometry.element import ReferenceElem
+        target = Rect(x=0, y=0, width=10, height=10, id="t1",
+                      fill=Fill(color=RgbColor(1, 0, 0)))
+        ref = ReferenceElem(target="t1", id="r1")
+        layer = Layer(children=(target, ref), name="L0")
+        doc = Document(
+            layers=(layer,),
+            selection=frozenset({ElementSelection.all((0, 0))}))
+        return Model(document=doc)
+
+    def test_no_selection_is_noop(self):
+        doc = Document(layers=(Layer(children=(), name="L0"),))
+        model = Model(document=doc)
+        _delete_selection(model)
+        self.assertEqual(len(model.document.layers[0].children), 0)
+
+    def test_no_orphans_deletes_without_dialog(self):
+        # Two plain rects, both selected, no references anywhere: delete
+        # proceeds with no dialog (unchanged behavior).
+        model = _make_model_with_rects(2)
+        called = []
+        orig = menu_module.QMessageBox.question
+        menu_module.QMessageBox.question = staticmethod(
+            lambda *a, **k: called.append(a) or menu_module.QMessageBox.Ok)
+        try:
+            _delete_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig
+        self.assertEqual(called, [])  # no dialog shown
+        self.assertEqual(len(model.document.layers[0].children), 0)
+
+    def test_orphan_cancel_aborts(self):
+        model = self._model_target_and_ref()
+        orig = menu_module.QMessageBox.question
+        menu_module.QMessageBox.question = staticmethod(
+            lambda *a, **k: menu_module.QMessageBox.Cancel)
+        try:
+            _delete_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig
+        # Aborted: target still present, nothing deleted.
+        self.assertEqual(len(model.document.layers[0].children), 2)
+
+    def test_orphan_ok_deletes(self):
+        model = self._model_target_and_ref()
+        captured = {}
+        orig = menu_module.QMessageBox.question
+
+        def _fake_question(parent, title, body, *a, **k):
+            captured["title"] = title
+            captured["body"] = body
+            return menu_module.QMessageBox.Ok
+        menu_module.QMessageBox.question = staticmethod(_fake_question)
+        try:
+            _delete_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig
+        # Confirmed: the target rect was deleted; the reference remains.
+        self.assertEqual(len(model.document.layers[0].children), 1)
+        self.assertEqual(captured["title"], "Delete")
+        self.assertEqual(
+            captured["body"], "Deleting will leave 1 live instance empty.")
 
 
 class LinkToSelectionTest(absltest.TestCase):

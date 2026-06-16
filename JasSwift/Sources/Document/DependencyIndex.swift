@@ -211,6 +211,17 @@ extension DependencyIndex {
         }
         return orphaned.sorted()
     }
+
+    /// The body text for the reference-aware-delete confirm dialog, given the
+    /// orphan count `n` (`= orphanedReferences(...).count`). Verbatim wording is
+    /// cross-language-pinned so every app's warn dialog reads identically:
+    /// `"Deleting will leave N live instance(s) empty."`. The singular/plural
+    /// noun toggles on `n == 1`. Centralized here so the three Swift delete
+    /// call sites (Edit-menu Delete, keyboard Delete/Backspace, Layers-panel
+    /// context-menu Delete) cannot drift in wording.
+    public static func orphanWarningBody(_ n: Int) -> String {
+        "Deleting will leave \(n) live \(n == 1 ? "instance" : "instances") empty."
+    }
 }
 
 // MARK: - Node walk

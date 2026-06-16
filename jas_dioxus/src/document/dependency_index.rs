@@ -730,6 +730,62 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Reference-aware delete CONFIRM gate (warn-then-orphan)
+    //
+    // The delete handlers (menu_bar.rs "delete" arm; keyboard.rs
+    // Delete/Backspace) branch on `orphaned_references(...).is_empty()`:
+    //   empty     -> delete inline, no dialog
+    //   non-empty -> open the confirm dialog with N = orphaned.len()
+    // The dialog UI is not unit-testable, but the gate predicate and the
+    // count N that drives the dialog param ARE. These two tests pin that
+    // decision so a regression in the gate is caught here.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delete_gate_empty_orphans_means_delete_inline() {
+        // `lonely` has no referrers -> deleting it orphans nothing -> the
+        // handler takes the inline-delete branch (no dialog).
+        let doc = doc_with_layer(vec![rect_with_id(Some("lonely"))]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            orphaned.is_empty(),
+            "no orphans -> handler deletes inline, no confirm dialog"
+        );
+    }
+
+    #[test]
+    fn delete_gate_nonempty_orphans_means_confirm_with_count() {
+        // a <- r1, r2. Deleting `a` would orphan both -> the handler takes
+        // the confirm-dialog branch. N (the dialog `count` param) is the
+        // orphan count, here 2.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+        ]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert!(
+            !orphaned.is_empty(),
+            "orphans exist -> handler opens the confirm dialog"
+        );
+        assert_eq!(
+            orphaned.len(),
+            2,
+            "N passed as the dialog count param equals the orphan count"
+        );
+    }
+
+    #[test]
+    fn delete_gate_single_orphan_count_is_one() {
+        // a <- r1 only. Deleting `a` orphans exactly one referrer; N == 1
+        // drives the dialog's singular wording ("instance", not
+        // "instances").
+        let doc = doc_with_layer(vec![rect_with_id(Some("a")), reference("r1", "a")]);
+        let orphaned = orphaned_references(&doc, &[vec![0, 0]]);
+        assert_eq!(orphaned.len(), 1, "single orphan -> N == 1 (singular wording)");
+    }
+
     #[test]
     fn canonical_json_has_sorted_keys_and_arrays() {
         // c1<->c2 cycle plus two refs to `a` and a dangling ref.

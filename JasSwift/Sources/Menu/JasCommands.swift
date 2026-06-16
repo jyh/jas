@@ -771,8 +771,37 @@ public struct JasCommands: Commands {
         guard let model = model else { return }
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
+        // Reference-aware delete (warn-then-orphan): if deleting the selection
+        // would leave live instances pointing at a now-gone target, confirm
+        // first. Empty -> delete as today (no dialog). Cut is intentionally
+        // left unguarded for now (it may orphan silently — follow-on work).
+        let paths = doc.selection.map(\.path)
+        let orphaned = DependencyIndex.orphanedReferences(doc, paths)
+        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
+            return
+        }
         model.snapshot()
         model.document = doc.deleteSelection()
+    }
+
+    /// Present the synchronous warn-then-orphan confirm (mirrors `revert()`'s
+    /// `NSAlert` precedent). Returns `true` if the user confirmed the delete.
+    /// "Cancel" is the default/escape button (the safe choice); "Delete" is the
+    /// destructive confirming button. Verbatim title/body/buttons are
+    /// cross-language-pinned. Shared by the three Swift delete entry points.
+    static func confirmOrphaningDelete(_ orphanCount: Int) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Delete"
+        alert.informativeText = DependencyIndex.orphanWarningBody(orphanCount)
+        alert.alertStyle = .warning
+        // Order matters: the destructive action first, then the safe default.
+        // Making "Cancel" the key-equivalent default keeps the safe choice as
+        // the focused button per the spec.
+        let deleteButton = alert.addButton(withTitle: "Delete")
+        let cancelButton = alert.addButton(withTitle: "Cancel")
+        deleteButton.keyEquivalent = ""
+        cancelButton.keyEquivalent = "\r"
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func selectAll() {
