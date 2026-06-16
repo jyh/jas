@@ -1577,6 +1577,10 @@ fn draw_element_body(
                         }
                     }
                 }
+                crate::geometry::live::LiveVariant::Reference(_) => {
+                    // Reference render wiring is Phase 1b (resolver into
+                    // render); a reference draws nothing until then.
+                }
             }
         }
     }
@@ -1817,6 +1821,9 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
                     }
                     ctx.close_path();
                 }
+            }
+            crate::geometry::live::LiveVariant::Reference(_) => {
+                // See draw_element: reference geometry tracing is Phase 1b.
             }
         },
     }
