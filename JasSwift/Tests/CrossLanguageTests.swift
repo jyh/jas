@@ -156,6 +156,8 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Live elements round-trip through binary (REFERENCE_GRAPH.md Phase 2b).
+        "live_reference_roundtrip", "live_compound_roundtrip",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -175,6 +177,9 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Cross-app byte pin: decode Python-generated live-element bytes
+        // (REFERENCE_GRAPH.md Phase 2b) to the exact expected JSON.
+        "live_reference_roundtrip", "live_compound_roundtrip",
     ]
     for name in names {
         let binData = readFixtureData("expected/\(name).bin")
