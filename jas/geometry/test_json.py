@@ -21,7 +21,9 @@ from geometry.element import (
     LineCap, LineJoin,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
+    CompoundOperation, CompoundShape, ReferenceElem,
 )
+from geometry.normalize import dedupe_element_ids
 
 # ------------------------------------------------------------------ #
 # Float formatting                                                    #
@@ -453,6 +455,24 @@ def _element_json(elem: Element) -> str:
         o.raw("tspans", _json_array([_tspan_json(t) for t in elem.tspans]))
         o.empty_as_null("vertical_scale", elem.vertical_scale)
         o.empty_as_null("xml_lang", elem.xml_lang)
+    elif isinstance(elem, ReferenceElem):
+        o.str("type", "live")
+        o.str("kind", "reference")
+        o.str("target", elem.target)
+        _common_fields(o, elem)
+        # fill / stroke / transform are emitted only when set; in Phase 1
+        # references carry none (paint inheritance default / Fork F2),
+        # matching how compound omits its own paint here.
+    elif isinstance(elem, CompoundShape):
+        o.str("type", "live")
+        o.str("kind", "compound_shape")
+        # `operation` was previously omitted (a round-trip bug, since the
+        # reader had no live arm at all); now emitted so compound shapes
+        # round-trip through test_json.
+        o.str("operation", elem.operation.value)
+        _common_fields(o, elem)
+        children = [_element_json(c) for c in elem.operands]
+        o.raw("children", _json_array(children))
     return o.build()
 
 
@@ -924,6 +944,23 @@ def _parse_element(d: dict) -> Element:
                         fill=_parse_fill(d["fill"]),
                         stroke=_parse_stroke(d["stroke"]),
                         **tspans_kw, **common)
+    elif typ == "live":
+        kind = d.get("kind", "")
+        if kind == "compound_shape":
+            # CompoundShape carries a stable id but no name field, so
+            # strip name (it doesn't accept it) and pass id through.
+            live_common = {k: v for k, v in common.items()
+                           if k != "name"}
+            op = CompoundOperation(d.get("operation", "union"))
+            operands = tuple(_parse_element(c) for c in d.get("children", []))
+            return CompoundShape(operation=op, operands=operands,
+                                 fill=None, stroke=None, **live_common)
+        elif kind == "reference":
+            # ReferenceElem is a first-class element with its own id /
+            # name (REFERENCE_GRAPH.md §4), so it accepts the full common
+            # kwargs — unlike CompoundShape.
+            return ReferenceElem(target=d.get("target", ""), **common)
+        raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 
 
@@ -1196,12 +1233,13 @@ def test_json_to_document(json_str: str) -> Document:
     artboard_options = _parse_artboard_options(d.get("artboard_options", None))
     document_setup = _parse_document_setup(d.get("document_setup", None))
     print_preferences = _parse_print_preferences(d.get("print_preferences", None))
-    return Document(layers=layers, selected_layer=selected_layer,
+    return dedupe_element_ids(Document(
+                    layers=layers, selected_layer=selected_layer,
                     selection=selection,
                     artboards=artboards,
                     artboard_options=artboard_options,
                     document_setup=document_setup,
-                    print_preferences=print_preferences)
+                    print_preferences=print_preferences))
 
 # Prevent pytest from collecting this function as a test (the file name
 # test_json.py matches pytest's test_*.py pattern).

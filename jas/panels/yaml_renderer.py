@@ -2165,6 +2165,7 @@ _TYPE_LABELS = {
     "Ellipse": "Ellipse", "Polyline": "Polyline", "Polygon": "Polygon",
     "Path": "Path", "Text": "Text", "TextPath": "Text Path",
     "Group": "Group", "Layer": "Layer",
+    "CompoundShape": "Compound Shape", "ReferenceElem": "Reference",
 }
 
 def _element_type_label(elem):

@@ -13,14 +13,19 @@ import re
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from geometry.element import (
-    ArcTo, BlendMode, Circle, ClosePath, CurveTo, Element, Ellipse, Group, Layer, Line,
-    LineTo, MoveTo, Path, PathCommand, Polygon, Polyline, QuadTo, Rect, SmoothCurveTo,
+    ArcTo, BlendMode, Circle, ClosePath, CompoundShape, CurveTo, Element, Ellipse,
+    Group, Layer, Line, LineTo, LiveElement, MoveTo, NullResolver, Path, PathCommand,
+    Polygon, Polyline, QuadTo, Rect, ReferenceElem, SmoothCurveTo,
     SmoothQuadTo, Text, TextPath,
     Color, Fill, LineCap, LineJoin, Stroke, StrokeAlign, Transform,
     control_points as element_control_points,
+    element_fill, element_stroke,
     path_handle_positions,
     path_distance_to_point,
     path_point_at_offset,
+)
+from geometry.live import (
+    DEFAULT_PRECISION, element_to_polygon_set_with, resolver_from_document,
 )
 from canvas.arrowheads import (
     arrow_setback, shorten_path,
@@ -49,6 +54,20 @@ from tools import create_tools
 # calls set_canvas_brush_libraries() before drawing.
 
 _brush_libraries: dict = {}
+
+
+# ── Reference resolution registry (REFERENCE_GRAPH.md Phase 1b) ──
+#
+# A render-scoped id->element resolver, rebuilt once per paint from the
+# current document (the rebuild strategy; the persistent-incremental
+# index is Phase 4). The live render arm reads it so by-id references
+# resolve and draw without threading a resolver through every drawing
+# helper signature — same module-level pattern as the brush registry.
+# The cycle-guard visit set stays a fresh local per top-level evaluate
+# (never module state), passed to evaluate_with. Mirrors the Rust
+# render-scoped CURRENT_REF_INDEX / RenderResolver.
+
+_ref_resolver = NullResolver()
 
 
 def set_canvas_brush_libraries(libs: dict) -> None:
@@ -1546,6 +1565,49 @@ def _draw_element_body(painter: QPainter, elem: Element,
             for child in children:
                 _draw_element(painter, child, effective)
 
+        case LiveElement():
+            # Live element (CompoundShape / ReferenceElem): evaluate to a
+            # polygon set, resolving by-id references against the
+            # render-scoped resolver, then draw it. The cycle guard is a
+            # fresh local per top-level evaluate (threaded into
+            # evaluate_with). A reference inherits the resolved target's
+            # paint when its own is None (Fork F3). Mirrors the Rust
+            # Element::Live render arm. REFERENCE_GRAPH.md Phase 1b.
+            visiting = set()
+            ps = elem.evaluate_with(DEFAULT_PRECISION, _ref_resolver, visiting)
+            live_fill = element_fill(elem)
+            live_stroke = element_stroke(elem)
+            if isinstance(elem, ReferenceElem):
+                target = _ref_resolver.resolve(elem.target)
+                if live_fill is None and target is not None:
+                    live_fill = element_fill(target)
+                if live_stroke is None and target is not None:
+                    live_stroke = element_stroke(target)
+            if outline:
+                _apply_outline_style(painter)
+            else:
+                _apply_fill(painter, live_fill)
+                stroke_op, stroke_align = _apply_stroke(painter, live_stroke)
+            poly_path = QPainterPath()
+            poly_path.setFillRule(Qt.FillRule.OddEvenFill)
+            drew_any = False
+            for ring in ps:
+                if len(ring) < 2:
+                    continue
+                poly_path.moveTo(ring[0][0], ring[0][1])
+                for x, y in ring[1:]:
+                    poly_path.lineTo(x, y)
+                poly_path.closeSubpath()
+                drew_any = True
+            if drew_any:
+                if outline:
+                    painter.drawPath(poly_path)
+                else:
+                    if live_fill is not None:
+                        painter.fillPath(poly_path, painter.brush())
+                    if live_stroke is not None:
+                        _stroke_aligned(painter, poly_path, stroke_align)
+
         case Element():
             raise ValueError(f"Unknown element type: {elem}")
 
@@ -2263,6 +2325,11 @@ class CanvasWidget(QWidget):
                           self._model.view_offset_y)
         painter.scale(self._model.zoom_level, self._model.zoom_level)
         doc = self._model.document
+        # Build the render-scoped reference resolver once per paint so
+        # by-id references in live elements resolve against the current
+        # document while drawing. REFERENCE_GRAPH.md Phase 1b.
+        global _ref_resolver
+        _ref_resolver = resolver_from_document(doc)
         # Z-layer 2: per-artboard fills.
         _draw_artboard_fills(painter, doc)
         # Z-layer 3: document elements. In mask-isolation mode

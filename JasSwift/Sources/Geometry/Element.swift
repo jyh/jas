@@ -1272,7 +1272,9 @@ public enum Element: Equatable {
         case .textPath(let v): return v.id
         case .group(let v): return v.id
         case .layer(let v): return v.id
-        case .live: return nil
+        // Live elements carry their stable id inline on each conformer
+        // (CompoundShape.id / ReferenceElem.id), not a flat slot.
+        case .live(let v): return v.id
         }
     }
 
@@ -1287,9 +1289,9 @@ public enum Element: Equatable {
     /// reference implementation's `clear_ids`. See the stable-identity
     /// initiative (VISION.md §6.2).
     ///
-    /// Leaf elements (and `.live`, which has no flat id slot) only clear
-    /// their own id; only `.group`/`.layer` carry children to recurse into,
-    /// matching the reference's `children_mut` (None for every other kind).
+    /// Leaf elements (and `.live`, whose id rides inline on each conformer)
+    /// only clear their own id; only `.group`/`.layer` carry children to
+    /// recurse into, matching the reference's `children_mut` (None elsewhere).
     public func clearingIds() -> Element {
         switch self {
         case .line(let v): return .line(v.withId(nil))
@@ -1305,11 +1307,38 @@ public enum Element: Equatable {
             return .group(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
         case .layer(let v):
             return .layer(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
-        case .live:
-            // Live elements have no flat id slot (see `id`) and expose no
-            // uniform children mutator here, mirroring the reference's
-            // `children_mut` returning None for Live. Nothing to clear.
-            return self
+        case .live(let v):
+            // Live elements carry their id inline on each conformer; clear
+            // it like any other element. They expose no uniform children
+            // mutator here (mirroring the reference's `children_mut`
+            // returning None for Live), so operands are not recursed into.
+            return .live(v.withId(nil))
+        }
+    }
+
+    /// Return a copy of this element with its stable `id` replaced by
+    /// `id` (pass `nil` to clear). Only the element itself is touched —
+    /// children of a group/layer keep their own ids, unlike
+    /// ``clearingIds()`` which recurses. Mirrors the reference's
+    /// `common_mut().id = ...` single-element stamp used by
+    /// `Controller.assignId`. `.live` carries its id inline on each
+    /// conformer (see ``id``), so it stamps like any other element.
+    public func withId(_ id: String?) -> Element {
+        switch self {
+        case .line(let v): return .line(v.withId(id))
+        case .rect(let v): return .rect(v.withId(id))
+        case .circle(let v): return .circle(v.withId(id))
+        case .ellipse(let v): return .ellipse(v.withId(id))
+        case .polyline(let v): return .polyline(v.withId(id))
+        case .polygon(let v): return .polygon(v.withId(id))
+        case .path(let v): return .path(v.withId(id))
+        case .text(let v): return .text(v.withId(id))
+        case .textPath(let v): return .textPath(v.withId(id))
+        case .group(let v): return .group(v.withId(id))
+        case .layer(let v): return .layer(v.withId(id))
+        // Live elements carry their id inline on each conformer; stamp it
+        // so `Controller.assignId` works over a compound / reference.
+        case .live(let v): return .live(v.withId(id))
         }
     }
 

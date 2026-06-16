@@ -96,6 +96,48 @@ class controller ?(model = Model.create ()) () =
          model#set_document { doc with Document.layers = new_layers;
                                        Document.selection = sel })
 
+    (** Stamp a stable [id] onto the element at [path] — the lazy
+        assign-on-create primitive (REFERENCE_GRAPH.md \1674). The id is
+        minted by the initiator and carried in the operation payload,
+        never minted here, so every app applies the identical value. A
+        no-op when the path is invalid. The caller owns identity: this
+        overwrites any existing id (re-identification is the initiator
+        responsibility; reference remapping arrives with the graph). *)
+    method assign_id (path : Document.element_path) (id : string) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some elem ->
+        let new_elem = Element.with_id elem (Some id) in
+        model#set_document (Document.replace_element doc path new_elem)
+
+    (** Create a by-id reference to the element at [target_path]
+        (REFERENCE_GRAPH.md \1674). Assign-on-create: stamp [target_id] onto the
+        target iff it has no id yet (the lazy-mint trigger); if it already has
+        one, that id names the edge and [target_id] is ignored. A new reference
+        element (its own id = [ref_id]) is then appended via [add_element]. Both
+        ids are minted by the initiator and carried in the op payload — never
+        minted here — so every app applies identical values. No-op on an
+        invalid path. *)
+    method create_reference (target_path : Document.element_path)
+        (target_id : string) (ref_id : string) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc target_path) with _ -> None) with
+      | None -> ()
+      | Some target ->
+        let resolved_id =
+          match Element.id_of target with
+          | Some existing -> existing
+          | None ->
+            (* Assign-on-create: stamp the carried id and use it. *)
+            let stamped = Element.with_id target (Some target_id) in
+            model#set_document
+              (Document.replace_element doc target_path stamped);
+            target_id
+        in
+        let reference = Element.make_reference ~id:(Some ref_id) resolved_id in
+        self#add_element reference
+
     (** Append [elem] to the mask subtree of the element at [path].
         Returns [true] on success, [false] when the target has no
         mask or the subtree root isn't a [Group] — the caller then
@@ -620,6 +662,7 @@ let element_fill = function
   | Element.Polygon { fill; _ } | Element.Path { fill; _ }
   | Element.Text { fill; _ } | Element.Text_path { fill; _ } -> Some fill
   | Element.Live (Element.Compound_shape cs) -> Some cs.fill
+  | Element.Live (Element.Reference r) -> Some r.Element.ref_fill
   | Element.Line _ | Element.Group _ | Element.Layer _ -> None
 
 let element_stroke = function
@@ -629,6 +672,7 @@ let element_stroke = function
   | Element.Path { stroke; _ } | Element.Text { stroke; _ }
   | Element.Text_path { stroke; _ } -> Some stroke
   | Element.Live (Element.Compound_shape cs) -> Some cs.stroke
+  | Element.Live (Element.Reference r) -> Some r.Element.ref_stroke
   | Element.Group _ | Element.Layer _ -> None
 
 let selection_fill_summary (doc : Document.document) =

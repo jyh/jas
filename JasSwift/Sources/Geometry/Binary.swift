@@ -44,6 +44,9 @@ private let tagPath: Int = 7
 private let tagText: Int = 8
 private let tagTextPath: Int = 9
 private let tagGroup: Int = 10
+// Live elements (REFERENCE_GRAPH.md Phase 2b): one tag for every
+// LiveElement kind, disambiguated by a kind string at index 7.
+private let tagLive: Int = 11
 
 // Path command tags.
 private let cmdMoveTo: Int = 0
@@ -645,10 +648,34 @@ private func packElement(_ elem: Element) -> MsgValue {
                        vstr(e.fontWeight), vstr(e.fontStyle), vstr(e.textDecoration),
                        packFill(e.fill), packStroke(e.stroke),
                        .array(tspans)])
-    case .live:
-        // Phase 1: binary serialization of Live elements is deferred
-        // to the phase that implements compound-shape document I/O.
-        fatalError("binary serialization of Live elements not yet implemented")
+    case .live(let v):
+        // Live elements (REFERENCE_GRAPH.md Phase 2b): a single tagLive
+        // with a kind string at index 7, then a kind-specific payload.
+        // Paint (fill/stroke) is omitted in Phase 1 (references inherit;
+        // compound carries none here), mirroring the test_json live codec.
+        switch v {
+        case .compoundShape(let cs):
+            // CompoundShape carries a stable id but no name field, so name
+            // packs as nil while id packs through (matching Python's
+            // getattr-based _pack_common). An id-less compound is byte-
+            // identical to before.
+            let common = packCommon(locked: cs.locked, opacity: cs.opacity,
+                                    visibility: cs.visibility, transform: cs.transform,
+                                    name: nil, id: cs.id)
+            // [tag, common(1..6), kind(7), operation(8), operands(9)]
+            let operands: [MsgValue] = cs.operands.map { packElement($0) }
+            return .array([vint(tagLive)] + common +
+                          [vstr("compound_shape"), vstr(cs.operation.rawValue),
+                           .array(operands)])
+        case .reference(let r):
+            // ReferenceElem has its own id but no name field (name packs nil).
+            let common = packCommon(locked: r.locked, opacity: r.opacity,
+                                    visibility: r.visibility, transform: r.transform,
+                                    name: nil, id: r.id)
+            // [tag, common(1..6), kind(7), target(8)]
+            return .array([vint(tagLive)] + common +
+                          [vstr("reference"), vstr(r.target.id)])
+        }
     }
 }
 
@@ -870,6 +897,33 @@ private func unpackElement(_ v: MsgValue) -> Element {
                                   fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                   name: name, id: id))
+    case tagLive:
+        // Live elements (REFERENCE_GRAPH.md Phase 2b): dispatch on the
+        // kind string at index 7, mirroring the test_json live reader.
+        let kind = asStr(arr[7])
+        switch kind {
+        case "compound_shape":
+            // Unknown operation strings default to union, matching the
+            // Rust / Python readers. CompoundShape carries a stable id but
+            // no name slot, so id passes through while name is dropped
+            // (paint is nil in Phase 1).
+            let operation = CompoundOperation(rawValue: asStr(arr[8])) ?? .union
+            let operands = asArray(arr[9]).map { unpackElement($0) }
+            return .live(.compoundShape(CompoundShape(
+                operation: operation, operands: operands, id: id,
+                opacity: opacity, transform: xform,
+                locked: locked, visibility: vis)))
+        case "reference":
+            // ReferenceElem is a first-class element with its own id; it
+            // takes the full common block (target at index 8, paint nil).
+            let target = ElementRef(asStr(arr[8]))
+            return .live(.reference(ReferenceElem(
+                target: target,
+                id: id,
+                transform: xform,
+                opacity: opacity, locked: locked, visibility: vis)))
+        default: fatalError("unknown live kind: \(kind)")
+        }
     default: fatalError("unknown element tag: \(tag)")
     }
 }
@@ -904,12 +958,12 @@ private func unpackDocument(_ v: MsgValue) -> Document {
     // Binary format predates the artboards feature — parsed docs have
     // empty artboards; the app's load-time repair adds a default at
     // load.
-    return Document(
+    return dedupeElementIds(Document(
         layers: layers,
         selectedLayer: selectedLayer,
         selection: selection,
         artboards: []
-    )
+    ))
 }
 
 // MARK: - Public API

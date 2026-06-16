@@ -37,6 +37,9 @@ let tag_path = 7
 let tag_text = 8
 let tag_text_path = 9
 let tag_group = 10
+(* Live elements (REFERENCE_GRAPH.md Phase 2b): one tag for every
+   live-element kind, disambiguated by a kind string at index 7. *)
+let tag_live = 11
 
 (* Path command tags *)
 let cmd_move_to = 0
@@ -372,10 +375,32 @@ let rec pack_element = function
             vstr font_weight; vstr font_style; vstr text_decoration;
             pack_fill fill; pack_stroke stroke;
             vlist tspans_list])
-  | Live _ ->
-    (* Phase 1: binary serialization of Live elements is deferred to
-       the phase that implements compound-shape document I/O. *)
-    failwith "binary serialization of Live elements not yet implemented"
+  (* Live elements (REFERENCE_GRAPH.md Phase 2b): a single [tag_live] with a
+     kind string at index 7, then a kind-specific payload. Paint (fill/stroke)
+     is omitted in Phase 1 (references inherit; compound carries none here),
+     mirroring the test_json live codec. *)
+  | Live (Compound_shape cs) ->
+    let op = match cs.operation with
+      | Op_union -> "union"
+      | Op_subtract_front -> "subtract_front"
+      | Op_intersection -> "intersection"
+      | Op_exclude -> "exclude"
+    in
+    let operands = Array.to_list (Array.map pack_element cs.operands) in
+    (* A compound shape packs its stable id in the common block (position 6),
+       matching the Python byte oracle and the Rust codec. It still carries no
+       name (position 5 packs as nil): live elements emit no name. *)
+    vlist (vint tag_live ::
+           pack_common ~locked:cs.locked ~opacity:cs.opacity
+             ~visibility:cs.visibility ~transform:cs.transform
+             ~name:None ~id:cs.id @
+           [vstr "compound_shape"; vstr op; vlist operands])
+  | Live (Reference r) ->
+    vlist (vint tag_live ::
+           pack_common ~locked:r.ref_locked ~opacity:r.ref_opacity
+             ~visibility:r.ref_visibility ~transform:r.ref_transform
+             ~name:None ~id:r.ref_id @
+           [vstr "reference"; vstr r.ref_target])
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -659,6 +684,41 @@ let rec unpack_element v =
                 fill = unpack_fill (List.nth arr 15);
                 stroke = unpack_stroke (List.nth arr 16);
                 opacity; transform; locked; visibility; tspans; blend_mode = Element.Normal; mask = None }
+  else if tag = tag_live then
+    (* Live elements (REFERENCE_GRAPH.md Phase 2b): dispatch on the kind
+       string at index 7, mirroring the test_json live reader. *)
+    let kind = as_str (List.nth arr 7) in
+    if kind = "compound_shape" then
+      let operation = match as_str (List.nth arr 8) with
+        | "subtract_front" -> Op_subtract_front
+        | "intersection" -> Op_intersection
+        | "exclude" -> Op_exclude
+        | _ -> Op_union
+      in
+      let operands =
+        Array.of_list (List.map unpack_element (as_list (List.nth arr 9))) in
+      (* The compound takes its id from the common block (position 6); a
+         compound carries no name. fill / stroke are not persisted in Phase 1
+         (default to None), matching the Rust reader. *)
+      Live (Compound_shape {
+        operation; id; operands; fill = None; stroke = None;
+        opacity; transform; locked; visibility; blend_mode = Element.Normal;
+        mask = None })
+    else if kind = "reference" then
+      let target = as_str (List.nth arr 8) in
+      Live (Reference {
+        ref_target = target;
+        ref_id = id;
+        ref_instance_transform = None;
+        ref_fill = None;
+        ref_stroke = None;
+        ref_opacity = opacity;
+        ref_transform = transform;
+        ref_locked = locked;
+        ref_visibility = visibility;
+        ref_blend_mode = Element.Normal;
+        ref_mask = None })
+    else failwith (Printf.sprintf "unknown live kind: %s" kind)
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 
 let unpack_selection v =
@@ -762,4 +822,4 @@ let binary_to_document data =
     else failwith (Printf.sprintf "unsupported compression method: %d" compression)
   in
   let (_pos, value) = Msgpck.StringBuf.read raw in
-  unpack_document value
+  Normalize.dedupe_element_ids (unpack_document value)

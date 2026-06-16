@@ -131,6 +131,53 @@ class Controller:
         self._model.document = replace(doc, layers=new_layers,
                                        selection=frozenset({es}))
 
+    def assign_id(self, path: ElementPath, id: str) -> None:
+        """Stamp a stable ``id`` onto the element at ``path`` — the lazy
+        assign-on-create primitive (REFERENCE_GRAPH.md §4). The id is
+        minted by the initiator and carried in the operation payload,
+        never minted here, so every app applies the identical value. A
+        no-op when the path is invalid. The caller owns identity: this
+        overwrites any existing id (re-identification is the initiator's
+        responsibility; reference remapping arrives with the graph).
+
+        Mirrors ``add_element``: produces a new document and sets it
+        directly, with no internal snapshot.
+        """
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        new_elem = replace(elem, id=id)
+        self._model.document = doc.replace_element(path, new_elem)
+
+    def create_reference(self, target_path: ElementPath, target_id: str,
+                         ref_id: str) -> None:
+        """Create a by-id reference to the element at ``target_path``
+        (REFERENCE_GRAPH.md §4). Assign-on-create: stamp ``target_id``
+        onto the target *iff* it has no id yet (the lazy-mint trigger);
+        if it already has one, that id names the edge and ``target_id``
+        is ignored. A new ``ReferenceElem`` (its own id = ``ref_id``) is
+        then appended via the regular ``add_element`` path. Both ids are
+        minted by the initiator and carried in the op payload — never
+        minted here — so every app applies identical values. No-op on an
+        invalid path. Mirrors the Rust ``Controller::create_reference``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        try:
+            target = doc.get_element(target_path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if target.id is not None:
+            resolved_id = target.id
+        else:
+            resolved_id = target_id
+            self._model.document = doc.replace_element(
+                target_path, replace(target, id=target_id))
+        reference = ReferenceElem(target=resolved_id, id=ref_id)
+        self.add_element(reference)
+
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:
         """Append ``element`` to the mask subtree of the element at

@@ -178,6 +178,57 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Stamp a stable `id` onto the element at `path` — the lazy
+    /// assign-on-create primitive (REFERENCE_GRAPH.md §4). The id is
+    /// minted by the initiator and carried in the operation payload,
+    /// never minted here, so every app applies the identical value. A
+    /// no-op when the path is invalid. The caller owns identity: this
+    /// overwrites any existing id (re-identification is the initiator's
+    /// responsibility; reference remapping arrives with the graph).
+    pub fn assign_id(model: &mut Model, path: &ElementPath, id: &str) {
+        let mut new_doc = model.document().clone();
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            elem.common_mut().id = Some(id.to_string());
+            model.set_document(new_doc);
+        }
+    }
+
+    /// Create a by-id reference to the element at `target_path`
+    /// (REFERENCE_GRAPH.md §4). Assign-on-create: stamp `target_id` onto the
+    /// target *iff* it has no id yet (the lazy-mint trigger); if it already
+    /// has one, that id names the edge and `target_id` is ignored. A new
+    /// `ReferenceElem` (its own id = `ref_id`) is then appended. Both ids are
+    /// minted by the initiator and carried in the op payload — never minted
+    /// here — so every app applies identical values. No-op on an invalid path.
+    pub fn create_reference(
+        model: &mut Model,
+        target_path: &ElementPath,
+        target_id: &str,
+        ref_id: &str,
+    ) {
+        let doc = model.document().clone();
+        let Some(target) = doc.get_element(target_path) else { return };
+        let resolved_id = match target.common().id.clone() {
+            Some(existing) => existing,
+            None => {
+                let mut t = target.clone();
+                t.common_mut().id = Some(target_id.to_string());
+                model.set_document(doc.replace_element(target_path, t));
+                target_id.to_string()
+            }
+        };
+        let reference = Element::Live(crate::geometry::live::LiveVariant::Reference(
+            crate::geometry::live::ReferenceElem::new(
+                crate::geometry::live::ElementRef(resolved_id),
+                crate::geometry::element::CommonProps {
+                    id: Some(ref_id.to_string()),
+                    ..crate::geometry::element::CommonProps::default()
+                },
+            ),
+        ));
+        Self::add_element(model, reference);
+    }
+
     /// Append ``element`` to the mask subtree of the element at
     /// ``path`` and move the selection onto the new element inside
     /// the subtree. Returns ``true`` when the append succeeded,
@@ -3158,6 +3209,67 @@ mod tests {
         // Original was at index 0; copy is appended at index 1.
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 1]));
+    }
+
+    #[test]
+    fn assign_id_stamps_id_at_path() {
+        // assign_id stamps the carried id onto the element at the path;
+        // the element starts id-less (lazy default).
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            model.document().get_element(&vec![0, 0]).unwrap().common().id,
+            None,
+        );
+        Controller::assign_id(&mut model, &vec![0, 0], "elem-1");
+        assert_eq!(
+            model.document().get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("elem-1"),
+        );
+    }
+
+    #[test]
+    fn create_reference_stamps_target_and_inserts_reference() {
+        // Target has no id → create_reference stamps target_id onto it and
+        // appends a ReferenceElem (id ref_id, target = the stamped id).
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::create_reference(&mut model, &vec![0, 0], "tgt-1", "ref-1");
+        let doc = model.document();
+        assert_eq!(
+            doc.get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("tgt-1"),
+        );
+        match doc.get_element(&vec![0, 1]).unwrap() {
+            Element::Live(crate::geometry::live::LiveVariant::Reference(re)) => {
+                assert_eq!(re.common.id.as_deref(), Some("ref-1"));
+                assert_eq!(re.target.0, "tgt-1");
+            }
+            other => panic!("expected a Reference at [0,1], got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_reference_keeps_existing_target_id() {
+        // Target already has an id → it is NOT re-stamped; the reference
+        // targets the existing id and target_id is ignored.
+        let mut model = Model::default();
+        let mut rect = make_rect(0.0, 0.0, 10.0, 10.0);
+        rect.common_mut().id = Some("existing".into());
+        Controller::add_element(&mut model, rect);
+        Controller::create_reference(&mut model, &vec![0, 0], "tgt-ignored", "ref-1");
+        let doc = model.document();
+        assert_eq!(
+            doc.get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("existing"),
+        );
+        if let Element::Live(crate::geometry::live::LiveVariant::Reference(re)) =
+            doc.get_element(&vec![0, 1]).unwrap()
+        {
+            assert_eq!(re.target.0, "existing");
+        } else {
+            panic!("expected a Reference at [0,1]");
+        }
     }
 
     #[test]

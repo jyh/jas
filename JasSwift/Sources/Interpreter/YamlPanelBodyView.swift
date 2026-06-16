@@ -2668,7 +2668,11 @@ private func elementTypeLabel(_ elem: Element) -> String {
     case .textPath: return "Text Path"
     case .group: return "Group"
     case .layer: return "Layer"
-    case .live: return "Compound Shape"
+    case .live(let v):
+        switch v {
+        case .compoundShape: return "Compound Shape"
+        case .reference: return "Reference"
+        }
     }
 }
 

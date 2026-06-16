@@ -25,7 +25,9 @@ from geometry.element import (
     StrokeWidthPoint,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
+    CompoundOperation, CompoundShape, ReferenceElem,
 )
+from geometry.normalize import dedupe_element_ids
 
 # -- Constants ---------------------------------------------------------------
 
@@ -55,6 +57,9 @@ _TAG_PATH = 7
 _TAG_TEXT = 8
 _TAG_TEXT_PATH = 9
 _TAG_GROUP = 10
+# Live elements (REFERENCE_GRAPH.md Phase 2b): one tag for every
+# LiveElement kind, disambiguated by a kind string at index 7.
+_TAG_LIVE = 11
 
 # Path command tags.
 _CMD_MOVE_TO = 0
@@ -311,13 +316,17 @@ def _pack_common(elem: Element) -> list:
     1..6. name and id are stored as msgpack value-or-nil (None -> nil), so
     every element type round-trips them uniformly — mirroring test_json's
     ``_common_fields``. The type-specific payload follows at index 7."""
+    # name / id are read via getattr because not every element carries
+    # both: CompoundShape (REFERENCE_GRAPH.md Phase 2b) has a stable id but
+    # no name field, so name packs as nil while id packs through —
+    # mirroring test_json's _common_fields.
     return [
         elem.locked,
         elem.opacity,
         _VISIBILITY_TO_INT[elem.visibility],
         _pack_transform(elem.transform),
-        elem.name,
-        elem.id,
+        getattr(elem, "name", None),
+        getattr(elem, "id", None),
     ]
 
 
@@ -378,6 +387,18 @@ def _pack_element(elem: Element) -> list:
                 elem.font_weight, elem.font_style, elem.text_decoration,
                 _pack_fill(elem.fill), _pack_stroke(elem.stroke),
                 tspans]
+    # Live elements (REFERENCE_GRAPH.md Phase 2b): a single _TAG_LIVE with
+    # a kind string at index 7, then a kind-specific payload. Paint
+    # (fill/stroke) is omitted in Phase 1 (references inherit; compound
+    # carries none here), mirroring the test_json live codec.
+    elif isinstance(elem, ReferenceElem):
+        # [tag, common(1..6), kind(7), target(8)]
+        return [_TAG_LIVE, *common, "reference", elem.target]
+    elif isinstance(elem, CompoundShape):
+        # [tag, common(1..6), kind(7), operation(8), operands(9)]
+        operands = [_pack_element(c) for c in elem.operands]
+        return [_TAG_LIVE, *common,
+                "compound_shape", elem.operation.value, operands]
     raise ValueError(f"Unknown element type: {type(elem)}")
 
 
@@ -574,6 +595,28 @@ def _unpack_element(arr: list) -> Element:
                         fill=_unpack_fill(arr[15]),
                         stroke=_unpack_stroke(arr[16]),
                         **tspans_kw, **common)
+    elif tag == _TAG_LIVE:
+        # Live elements (REFERENCE_GRAPH.md Phase 2b): dispatch on the
+        # kind string at index 7, mirroring the test_json live reader.
+        kind = arr[7]
+        if kind == "reference":
+            # ReferenceElem is a first-class element with its own id /
+            # name, so it takes the full common kwargs.
+            return ReferenceElem(target=arr[8], **common)
+        elif kind == "compound_shape":
+            # CompoundShape carries a stable id but no name field, so strip
+            # name (it doesn't accept it) and pass id through. Unknown
+            # operation strings default to union, matching the Rust reader.
+            live_common = {k: v for k, v in common.items()
+                           if k != "name"}
+            try:
+                op = CompoundOperation(arr[8])
+            except ValueError:
+                op = CompoundOperation.UNION
+            operands = tuple(_unpack_element(c) for c in arr[9])
+            return CompoundShape(operation=op, operands=operands,
+                                 fill=None, stroke=None, **live_common)
+        raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element tag: {tag}")
 
 
@@ -662,4 +705,4 @@ def binary_to_document(data: bytes) -> Document:
     except Exception as e:
         raise ValueError(f"Failed to decode MessagePack payload: {e}") from e
 
-    return _unpack_document(obj)
+    return dedupe_element_ids(_unpack_document(obj))
