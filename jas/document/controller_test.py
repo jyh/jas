@@ -775,6 +775,39 @@ class CopySelectionTest(absltest.TestCase):
         self.assertEqual(ctrl.document.get_element((0, 0, 0)).id, "inner-1")
 
 
+class AssignIdTest(absltest.TestCase):
+
+    def test_assign_id_stamps_id_at_path(self):
+        """assign_id stamps the carried id onto the element at the path;
+        the element starts id-less (lazy default)."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        self.assertIsNone(ctrl.document.get_element((0, 0)).id)
+        ctrl.assign_id((0, 0), "elem-1")
+        self.assertEqual(ctrl.document.get_element((0, 0)).id, "elem-1")
+
+    def test_assign_id_overwrites_existing_id(self):
+        """The caller owns identity: assign_id overwrites any existing id."""
+        rect = Rect(x=0, y=0, width=10, height=10, id="old")
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.assign_id((0, 0), "new")
+        self.assertEqual(ctrl.document.get_element((0, 0)).id, "new")
+
+    def test_assign_id_invalid_path_is_noop(self):
+        """An out-of-range path leaves the document untouched."""
+        rect = Rect(x=0, y=0, width=10, height=10)
+        layer = Layer(children=(rect,), name="L0")
+        doc = Document(layers=(layer,))
+        ctrl = Controller(model=Model(document=doc))
+        before = ctrl.document
+        ctrl.assign_id((0, 5), "elem-1")
+        self.assertIs(ctrl.document, before)
+
+
 class DeleteSelectionNestedTest(absltest.TestCase):
 
     def test_delete_selection_simple(self):

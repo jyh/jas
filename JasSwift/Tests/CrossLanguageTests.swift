@@ -278,6 +278,9 @@ private func runOperationFixture(_ fixture: String) throws {
                 controller.copySelection(
                     dx: op["dx"] as! Double,
                     dy: op["dy"] as! Double)
+            case "assign_id":
+                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.assignId(path, id: op["id"] as! String)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
             case "lock_selection":

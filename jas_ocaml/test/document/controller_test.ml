@@ -564,6 +564,19 @@ let () =
         (* Originals untouched. *)
         assert (id_of (Jas.Document.get_element doc [0; 0]) = Some "group-1");
         assert (id_of (Jas.Document.get_element doc [0; 0; 0]) = Some "inner-1"));
+
+      Alcotest.test_case "assign_id stamps id at path" `Quick (fun () ->
+        (* assign_id stamps the carried id onto the element at the path;
+           the element starts id-less (lazy default). *)
+        let ai_rect = make_rect 0.0 0.0 10.0 10.0 in
+        let ai_layer = make_layer ~name:"L0" [|ai_rect|] in
+        let ai_doc = Jas.Document.make_document [|ai_layer|] in
+        let ai_ctrl = Jas.Controller.create
+          ~model:(Jas.Model.create ~document:ai_doc ()) () in
+        assert (id_of (Jas.Document.get_element ai_ctrl#document [0; 0]) = None);
+        ai_ctrl#assign_id [0; 0] "elem-1";
+        assert (id_of (Jas.Document.get_element ai_ctrl#document [0; 0])
+                = Some "elem-1"));
     ];
 
     "delete selection", [

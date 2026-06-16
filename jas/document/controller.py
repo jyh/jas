@@ -131,6 +131,26 @@ class Controller:
         self._model.document = replace(doc, layers=new_layers,
                                        selection=frozenset({es}))
 
+    def assign_id(self, path: ElementPath, id: str) -> None:
+        """Stamp a stable ``id`` onto the element at ``path`` — the lazy
+        assign-on-create primitive (REFERENCE_GRAPH.md §4). The id is
+        minted by the initiator and carried in the operation payload,
+        never minted here, so every app applies the identical value. A
+        no-op when the path is invalid. The caller owns identity: this
+        overwrites any existing id (re-identification is the initiator's
+        responsibility; reference remapping arrives with the graph).
+
+        Mirrors ``add_element``: produces a new document and sets it
+        directly, with no internal snapshot.
+        """
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        new_elem = replace(elem, id=id)
+        self._model.document = doc.replace_element(path, new_elem)
+
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:
         """Append ``element`` to the mask subtree of the element at

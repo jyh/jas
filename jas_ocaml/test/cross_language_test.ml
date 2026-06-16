@@ -104,6 +104,10 @@ let run_operation_fixture fixture_name =
         let dx = op |> member "dx" |> to_num in
         let dy = op |> member "dy" |> to_num in
         ctrl#copy_selection dx dy
+      | "assign_id" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let id = op |> member "id" |> to_string in
+        ctrl#assign_id path id
       | "delete_selection" ->
         let new_doc = Jas.Document.delete_selection model#document in
         model#set_document new_doc

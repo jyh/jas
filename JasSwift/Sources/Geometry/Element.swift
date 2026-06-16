@@ -1313,6 +1313,31 @@ public enum Element: Equatable {
         }
     }
 
+    /// Return a copy of this element with its stable `id` replaced by
+    /// `id` (pass `nil` to clear). Only the element itself is touched —
+    /// children of a group/layer keep their own ids, unlike
+    /// ``clearingIds()`` which recurses. Mirrors the reference's
+    /// `common_mut().id = ...` single-element stamp used by
+    /// `Controller.assignId`. `.live` has no flat id slot (see ``id``),
+    /// so it is returned unchanged, matching ``clearingIds()``.
+    public func withId(_ id: String?) -> Element {
+        switch self {
+        case .line(let v): return .line(v.withId(id))
+        case .rect(let v): return .rect(v.withId(id))
+        case .circle(let v): return .circle(v.withId(id))
+        case .ellipse(let v): return .ellipse(v.withId(id))
+        case .polyline(let v): return .polyline(v.withId(id))
+        case .polygon(let v): return .polygon(v.withId(id))
+        case .path(let v): return .path(v.withId(id))
+        case .text(let v): return .text(v.withId(id))
+        case .textPath(let v): return .textPath(v.withId(id))
+        case .group(let v): return .group(v.withId(id))
+        case .layer(let v): return .layer(v.withId(id))
+        case .live:
+            return self
+        }
+    }
+
     /// Return a copy of this element with its `visibility` replaced.
     public func withVisibility(_ visibility: Visibility) -> Element {
         switch self {

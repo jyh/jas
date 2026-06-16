@@ -178,6 +178,21 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Stamp a stable `id` onto the element at `path` — the lazy
+    /// assign-on-create primitive (REFERENCE_GRAPH.md §4). The id is
+    /// minted by the initiator and carried in the operation payload,
+    /// never minted here, so every app applies the identical value. A
+    /// no-op when the path is invalid. The caller owns identity: this
+    /// overwrites any existing id (re-identification is the initiator's
+    /// responsibility; reference remapping arrives with the graph).
+    pub fn assign_id(model: &mut Model, path: &ElementPath, id: &str) {
+        let mut new_doc = model.document().clone();
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            elem.common_mut().id = Some(id.to_string());
+            model.set_document(new_doc);
+        }
+    }
+
     /// Append ``element`` to the mask subtree of the element at
     /// ``path`` and move the selection onto the new element inside
     /// the subtree. Returns ``true`` when the append succeeded,
@@ -3158,6 +3173,23 @@ mod tests {
         // Original was at index 0; copy is appended at index 1.
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 1]));
+    }
+
+    #[test]
+    fn assign_id_stamps_id_at_path() {
+        // assign_id stamps the carried id onto the element at the path;
+        // the element starts id-less (lazy default).
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            model.document().get_element(&vec![0, 0]).unwrap().common().id,
+            None,
+        );
+        Controller::assign_id(&mut model, &vec![0, 0], "elem-1");
+        assert_eq!(
+            model.document().get_element(&vec![0, 0]).unwrap().common().id.as_deref(),
+            Some("elem-1"),
+        );
     }
 
     #[test]

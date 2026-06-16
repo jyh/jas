@@ -700,6 +700,18 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.getElement([0, 0, 0]).id == "inner-1")
 }
 
+@Test func assignIdStampsIdAtPath() {
+    // assignId stamps the carried id onto the element at the path; the
+    // element starts id-less (lazy default). Mirrors the reference's
+    // assign_id_stamps_id_at_path.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let layer = Layer(name: "L0", children: [rect])
+    let ctrl = Controller(model: Model(document: Document(layers: [layer])))
+    #expect(ctrl.document.getElement([0, 0]).id == nil)
+    ctrl.assignId([0, 0], id: "elem-1")
+    #expect(ctrl.document.getElement([0, 0]).id == "elem-1")
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {
