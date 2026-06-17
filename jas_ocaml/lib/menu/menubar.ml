@@ -228,10 +228,83 @@ let copy_selection (model : Model.model) () =
       GtkBase.Clipboard.set_text clipboard svg
   end
 
-let cut_selection (model : Model.model) () =
-  model#snapshot;
-  copy_selection model ();
-  model#set_document (Document.delete_selection model#document)
+(* Reference-aware delete/cut (warn-then-orphan), the CONFIRM half.
+   [n] is the count of live references that the pending operation would
+   orphan (the length of [Dependency_index.orphaned_references ...]).
+   [verb] is the gerund naming the action ("Deleting" / "Cutting").
+   Verbatim wording is cross-language pinned: it must be byte-identical
+   in every app, so it lives in one named, verb-parameterized helper so
+   delete and cut share it and cannot drift. *)
+let delete_orphan_warning_body ~(verb : string) (n : int) =
+  Printf.sprintf "%s will leave %d live %s empty."
+    verb n (if n = 1 then "instance" else "instances")
+
+(* Generalized modal confirm shown when a delete/cut would orphan [n]
+   (> 0) live references. Mirrors the [revert] confirm above
+   (synchronous [#run] / [#destroy]) but uses custom button labels.
+   [action] labels both the title and the destructive confirming button
+   ("Delete" / "Cut"); [verb] is the gerund fed to the cross-language
+   body ("Deleting" / "Cutting"). [Cancel] is the focused default so the
+   safe choice wins a stray Enter. Returns [true] only when the user
+   picks the destructive action. *)
+let confirm_orphans ~(action : string) ~(verb : string) (n : int)
+    (parent : GWindow.window) =
+  let dialog = GWindow.dialog ~title:action ~modal:true ~parent () in
+  ignore (GMisc.label ~text:(delete_orphan_warning_body ~verb n)
+            ~xpad:12 ~ypad:12 ~packing:dialog#vbox#add ());
+  dialog#add_button "Cancel" `CANCEL;
+  dialog#add_button action `CONFIRM;
+  dialog#set_default_response `CANCEL;
+  let response = dialog#run () in
+  dialog#destroy ();
+  match response with `CONFIRM -> true | _ -> false
+
+(* Modal confirm for a delete that would orphan [n] (> 0) live
+   references. Thin wrapper over {!confirm_orphans} pinning the delete
+   labels ("Delete" / "Deleting"); kept as a named entry point for the
+   delete call site. Returns [true] only on the destructive [Delete]. *)
+let confirm_delete_orphans (n : int) (parent : GWindow.window) =
+  confirm_orphans ~action:"Delete" ~verb:"Deleting" n parent
+
+(* Modal confirm for a cut that would orphan [n] (> 0) live references.
+   Same dialog shape as the delete confirm; only the title /
+   confirming-button label ("Cut") and the body verb ("Cutting") differ.
+   Returns [true] only on the destructive [Cut]. *)
+let confirm_cut_orphans (n : int) (parent : GWindow.window) =
+  confirm_orphans ~action:"Cut" ~verb:"Cutting" n parent
+
+(* Cut = copy-to-clipboard + delete the selection, so it can orphan
+   live instances exactly like Delete. Reference-aware (warn-then-orphan)
+   guard mirroring the keyboard-delete confirm in bin/main.ml: the paths
+   the cut removes are exactly the [es_path] of each selection entry (the
+   same set [delete_selection] folds over). Feed those to the shared,
+   cross-language-pinned [orphaned_references] predicate. Empty -> cut
+   exactly as before (no dialog, no regression). Non-empty -> confirm
+   first; Cancel aborts entirely (no snapshot, no copy, no delete, so the
+   clipboard is left unchanged); Cut runs the full copy + snapshot +
+   delete as one undo step. *)
+let cut_selection (model : Model.model) (parent : GWindow.window) () =
+  let doc = model#document in
+  if Document.PathMap.is_empty doc.Document.selection then ()
+  else begin
+    let selection_paths =
+      Document.PathMap.fold
+        (fun _ (es : Document.element_selection) acc ->
+          es.Document.es_path :: acc)
+        doc.Document.selection [] in
+    let orphaned =
+      Dependency_index.orphaned_references doc selection_paths in
+    let proceed =
+      match orphaned with
+      | [] -> true  (* No live reference orphaned: cut as today. *)
+      | _ -> confirm_cut_orphans (List.length orphaned) parent
+    in
+    if proceed then begin
+      model#snapshot;
+      copy_selection model ();
+      model#set_document (Document.delete_selection model#document)
+    end
+  end
 
 let rec translate_element elem dx dy =
   if dx = 0.0 && dy = 0.0 then elem
@@ -513,32 +586,6 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
-(* Reference-aware delete (warn-then-orphan), the CONFIRM half.
-   [n] is the count of live references that the pending delete would
-   orphan (the length of [Dependency_index.orphaned_references ...]).
-   Verbatim wording is cross-language pinned: it must be byte-identical
-   in every app, so it lives in one named helper. *)
-let delete_orphan_warning_body (n : int) =
-  Printf.sprintf "Deleting will leave %d live %s empty."
-    n (if n = 1 then "instance" else "instances")
-
-(* Modal confirm shown when a delete would orphan [n] (> 0) live
-   references. Mirrors the [revert] confirm above (synchronous
-   [#run] / [#destroy]) but uses custom button labels so they read
-   "Cancel" / "Delete" verbatim; [Cancel] is the focused default so
-   the safe choice wins a stray Enter. Returns [true] only when the
-   user picks the destructive [Delete]. *)
-let confirm_delete_orphans (n : int) (parent : GWindow.window) =
-  let dialog = GWindow.dialog ~title:"Delete" ~modal:true ~parent () in
-  ignore (GMisc.label ~text:(delete_orphan_warning_body n)
-            ~xpad:12 ~ypad:12 ~packing:dialog#vbox#add ());
-  dialog#add_button "Cancel" `CANCEL;
-  dialog#add_button "Delete" `DELETE;
-  dialog#set_default_response `CANCEL;
-  let response = dialog#run () in
-  dialog#destroy ();
-  match response with `DELETE -> true | _ -> false
-
 let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
@@ -605,7 +652,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> (m ())#undo));
   ignore (edit_factory#add_item "Redo" ~callback:(fun () -> (m ())#redo));
   ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) ()));
+  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) parent ()));
   ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> copy_selection (m ()) ()));
   ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) Canvas_tool.paste_offset ()));
   ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
@@ -894,4 +941,10 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   (* Also expose via the Yaml_panel_view hook so dock_panel (which
      can't depend on Menubar without a module cycle) can fire the
      sync after panel-menu Close. *)
-  Yaml_panel_view.panel_check_sync_hook := sync_panel_checks
+  Yaml_panel_view.panel_check_sync_hook := sync_panel_checks;
+  (* Wire the Layers-panel delete confirm to the SAME modal the main
+     Delete/Cut use, closing over the main window. Yaml_panel_view can't
+     name Menubar directly (Menubar already depends on it), so its panel
+     delete consults this hook only when the orphan set is non-empty. *)
+  Yaml_panel_view.confirm_delete_orphans_hook :=
+    (fun n -> confirm_delete_orphans n parent)

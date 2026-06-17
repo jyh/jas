@@ -17,6 +17,7 @@ from menu.menu import (
     _hide_selection, _show_all,
     _link_to_selection,
     _delete_selection,
+    _cut_selection,
     _orphan_warning_body,
     _is_svg,
 )
@@ -192,18 +193,29 @@ class HideShowTest(absltest.TestCase):
 
 
 class OrphanWarningBodyTest(absltest.TestCase):
-    """The reference-aware delete warning body uses verbatim wording
-    (identical across all apps) with singular/plural ``instance(s)``."""
+    """The reference-aware orphan warning body uses verbatim wording
+    (identical across all apps) with singular/plural ``instance(s)``.
+    The leading verb is supplied by the caller (Deleting / Cutting)."""
 
     def test_singular(self):
         self.assertEqual(
-            _orphan_warning_body(1),
+            _orphan_warning_body(1, "Deleting"),
             "Deleting will leave 1 live instance empty.")
 
     def test_plural(self):
         self.assertEqual(
-            _orphan_warning_body(3),
+            _orphan_warning_body(3, "Deleting"),
             "Deleting will leave 3 live instances empty.")
+
+    def test_cut_verb_singular(self):
+        self.assertEqual(
+            _orphan_warning_body(1, "Cutting"),
+            "Cutting will leave 1 live instance empty.")
+
+    def test_cut_verb_plural(self):
+        self.assertEqual(
+            _orphan_warning_body(3, "Cutting"),
+            "Cutting will leave 3 live instances empty.")
 
 
 class DeleteSelectionTest(absltest.TestCase):
@@ -280,6 +292,105 @@ class DeleteSelectionTest(absltest.TestCase):
         self.assertEqual(captured["title"], "Delete")
         self.assertEqual(
             captured["body"], "Deleting will leave 1 live instance empty.")
+
+
+class CutSelectionTest(absltest.TestCase):
+    """Tests for _cut_selection (reference-aware warn-then-orphan).
+
+    Cut = copy-to-clipboard + delete the selection, so it can orphan
+    live references exactly like delete. No-orphan cuts proceed silently
+    (unchanged behavior: copy + snapshot + delete); cuts that would
+    orphan a live reference go through a modal confirm whose OK proceeds
+    and whose Cancel aborts (no snapshot, no delete).
+    """
+
+    def _model_target_and_ref(self):
+        """A layer with a referenced rect [0,0] and one live reference
+        [0,1] pointing at it; only the target rect is selected. Cutting
+        the target would orphan the surviving reference."""
+        from geometry.element import ReferenceElem
+        target = Rect(x=0, y=0, width=10, height=10, id="t1",
+                      fill=Fill(color=RgbColor(1, 0, 0)))
+        ref = ReferenceElem(target="t1", id="r1")
+        layer = Layer(children=(target, ref), name="L0")
+        doc = Document(
+            layers=(layer,),
+            selection=frozenset({ElementSelection.all((0, 0))}))
+        return Model(document=doc)
+
+    def test_no_orphans_cuts_without_dialog(self):
+        # Two plain rects, both selected, no references anywhere: cut
+        # proceeds with no dialog (unchanged behavior).
+        model = _make_model_with_rects(2)
+        called = []
+        orig_q = menu_module.QMessageBox.question
+        orig_clip = menu_module.QApplication.clipboard
+        menu_module.QMessageBox.question = staticmethod(
+            lambda *a, **k: called.append(a) or menu_module.QMessageBox.Ok)
+        menu_module.QApplication.clipboard = staticmethod(
+            lambda: _FakeClipboard())
+        try:
+            _cut_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig_q
+            menu_module.QApplication.clipboard = orig_clip
+        self.assertEqual(called, [])  # no dialog shown
+        self.assertEqual(len(model.document.layers[0].children), 0)
+
+    def test_orphan_cancel_aborts(self):
+        model = self._model_target_and_ref()
+        orig_q = menu_module.QMessageBox.question
+        orig_clip = menu_module.QApplication.clipboard
+        clip = _FakeClipboard()
+        menu_module.QMessageBox.question = staticmethod(
+            lambda *a, **k: menu_module.QMessageBox.Cancel)
+        menu_module.QApplication.clipboard = staticmethod(lambda: clip)
+        try:
+            _cut_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig_q
+            menu_module.QApplication.clipboard = orig_clip
+        # Aborted: target still present, nothing deleted, clipboard
+        # untouched.
+        self.assertEqual(len(model.document.layers[0].children), 2)
+        self.assertIsNone(clip.text_set)
+
+    def test_orphan_ok_cuts(self):
+        model = self._model_target_and_ref()
+        captured = {}
+        clip = _FakeClipboard()
+        orig_q = menu_module.QMessageBox.question
+        orig_clip = menu_module.QApplication.clipboard
+
+        def _fake_question(parent, title, body, *a, **k):
+            captured["title"] = title
+            captured["body"] = body
+            return menu_module.QMessageBox.Ok
+        menu_module.QMessageBox.question = staticmethod(_fake_question)
+        menu_module.QApplication.clipboard = staticmethod(lambda: clip)
+        try:
+            _cut_selection(model)
+        finally:
+            menu_module.QMessageBox.question = orig_q
+            menu_module.QApplication.clipboard = orig_clip
+        # Confirmed: the target rect was cut (deleted); reference remains.
+        self.assertEqual(len(model.document.layers[0].children), 1)
+        self.assertEqual(captured["title"], "Cut")
+        self.assertEqual(
+            captured["body"], "Cutting will leave 1 live instance empty.")
+        # The selection was copied to the clipboard.
+        self.assertIsNotNone(clip.text_set)
+
+
+class _FakeClipboard:
+    """Minimal stand-in for QApplication.clipboard() used by cut tests:
+    records whatever text the copy step writes (None if nothing was)."""
+
+    def __init__(self):
+        self.text_set = None
+
+    def setText(self, text):
+        self.text_set = text
 
 
 class LinkToSelectionTest(absltest.TestCase):

@@ -520,6 +520,46 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         }
     }
 
+    // Native intercept: reference-aware Layers-panel delete (warn-then-orphan).
+    // The panel delete (context-menu "Delete Selection" item AND the in-panel
+    // Delete/Backspace key) both dispatch the YAML action
+    // delete_layer_selection, which would delete unconditionally. Deleting
+    // panel-selected elements can orphan live instances exactly like the
+    // primary canvas delete, so gate it with the SAME pinned predicate
+    // orphaned_references(doc, deletion_paths) — here deletion_paths is the
+    // PANEL selection (st.layers_panel_selection), NOT doc.selection.
+    // Empty -> fall through and run the action's effects unchanged (no dialog,
+    // no regression). Non-empty -> open the delete_layer_orphan_confirm dialog
+    // with the orphan count and SKIP the normal effects (no mutation). The
+    // dialog's Delete button runs delete_layer_orphan_confirm_ok — a DISTINCT
+    // action id, so this intercept does not re-fire (no recursion). The panel
+    // selection is left intact (opening the dialog does not clear it), so the
+    // OK action deletes exactly the same elements.
+    if action == "delete_layer_selection" {
+        let orphan_count: usize = {
+            let paths: Vec<Vec<usize>> = st.layers_panel_selection.clone();
+            match st.tabs.get(st.active_tab) {
+                Some(tab) => crate::document::dependency_index::orphaned_references(
+                    tab.model.document(),
+                    &paths,
+                )
+                .len(),
+                None => 0,
+            }
+        };
+        if orphan_count > 0 {
+            let mut dlg_params = serde_json::Map::new();
+            dlg_params.insert("count".to_string(), serde_json::json!(orphan_count));
+            return vec![serde_json::json!({
+                "open_dialog": {
+                    "id": "delete_layer_orphan_confirm",
+                    "params": dlg_params,
+                }
+            })];
+        }
+        // orphan_count == 0: fall through to the YAML action (delete inline).
+    }
+
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -2758,6 +2798,37 @@ fn run_yaml_effect(
                     map.insert(name, json);
                 }
             }
+        }
+        return deferred;
+    }
+
+    // doc.copy_selection_to_clipboard — copy the current selection to the
+    // system clipboard (SVG) and the internal clipboard (cut OK path).
+    // Mirrors the inline copy the menu/keyboard cut runs: write the
+    // selection SVG to the system clipboard via clipboard_write, then
+    // snapshot the selected GeoElements into tab.clipboard. This is a
+    // non-document side effect (no snapshot needed), so the cut_orphan
+    // OK action lists exactly one `snapshot` before the document-mutating
+    // doc.delete_selection. The selection is preserved across opening the
+    // confirm dialog, so this copies exactly what the user was about to cut.
+    if eff.get("doc.copy_selection_to_clipboard").is_some() {
+        if let Some(svg) = crate::workspace::clipboard::selection_to_svg(st) {
+            crate::workspace::clipboard::clipboard_write(svg);
+        }
+        let elements: Vec<crate::geometry::element::Element> = {
+            match st.tabs.get(st.active_tab) {
+                Some(tab) => {
+                    let doc = tab.model.document();
+                    doc.selection
+                        .iter()
+                        .filter_map(|es| doc.get_element(&es.path).cloned())
+                        .collect()
+                }
+                None => Vec::new(),
+            }
+        };
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.clipboard = elements;
         }
         return deferred;
     }
@@ -7532,6 +7603,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
 
     let kb_app = app.clone();
     let mut kb_rev = revision;
+    // Dialog signal for the in-panel Delete/Backspace path: the
+    // reference-aware delete intercept in dispatch_action may return a
+    // deferred open_dialog effect (delete_layer_orphan_confirm) when the
+    // panel delete would orphan live instances; we must apply it here, just
+    // as the panel context-menu path does.
+    let mut kb_dialog_signal = rctx.dialog_ctx.0;
     let on_keydown = move |evt: Event<KeyboardData>| {
         let key = evt.data().key();
         let a = kb_app.clone();
@@ -7566,9 +7643,44 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         match key {
             dioxus::prelude::Key::Delete | dioxus::prelude::Key::Backspace => {
                 spawn(async move {
-                    let mut st = a.borrow_mut();
-                    let params = serde_json::Map::new();
-                    dispatch_action("delete_layer_selection", &params, &mut st);
+                    let deferred = {
+                        let mut st = a.borrow_mut();
+                        let params = serde_json::Map::new();
+                        dispatch_action("delete_layer_selection", &params, &mut st)
+                    };
+                    // If deleting the panel selection would orphan live
+                    // instances, the intercept returns a deferred open_dialog
+                    // for delete_layer_orphan_confirm; open it (mirrors the
+                    // panel context-menu deferred-effect handling). When the
+                    // delete ran inline (no orphan), `deferred` is empty.
+                    for eff in deferred {
+                        if let Some(od) = eff.get("open_dialog") {
+                            let dlg_id = od
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let raw_params = od
+                                .get("params")
+                                .and_then(|p| p.as_object())
+                                .cloned()
+                                .unwrap_or_default();
+                            let (live_state, outer_scope) = {
+                                let st = a.borrow();
+                                (
+                                    crate::workspace::dock_panel::build_live_state_map(&st),
+                                    build_dialog_outer_scope(&st),
+                                )
+                            };
+                            super::dialog_view::open_dialog_with_outer(
+                                &mut kb_dialog_signal,
+                                &dlg_id,
+                                &raw_params,
+                                &live_state,
+                                &outer_scope,
+                            );
+                        }
+                    }
                     kb_rev += 1;
                 });
             }
