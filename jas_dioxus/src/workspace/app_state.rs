@@ -1519,6 +1519,9 @@ impl AppState {
             // Phase 4b: install the Model's already-built persistent index
             // (O(1) clone) instead of rebuilding per paint.
             tab.model.id_index(),
+            // Phase 4c: epoch the reference-geometry recompute cache off the
+            // Model's generation (cleared on any edit / undo / redo).
+            tab.model.generation(),
         );
         ctx.restore();
 

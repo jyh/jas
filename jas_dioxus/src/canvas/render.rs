@@ -2414,7 +2414,9 @@ fn draw_artboard_display_marks(ctx: &CanvasRenderingContext2d, doc: &Document) {
 /// evaluating compound shapes. `panel_selected_artboards` is the
 /// ordered list of artboard ids currently panel-selected (used for
 /// the accent border at Z-layer 6); pass `&[]` when the Artboards
-/// panel isn't wired (e.g., Rust Phase C not yet landed).
+/// panel isn't wired (e.g., Rust Phase C not yet landed). `generation`
+/// is the Model's modification generation, used to epoch the Phase-4c
+/// reference-geometry recompute cache (cleared whenever it changes).
 pub fn render(
     ctx: &CanvasRenderingContext2d,
     width: f64,
@@ -2426,6 +2428,7 @@ pub fn render(
     layers_isolation_path: Option<&[usize]>,
     brush_libraries: &serde_json::Value,
     id_index: &IdIndex,
+    generation: u64,
 ) {
     // Install the brush registry for this render. Dropped on exit
     // (guard restores the prior value), so nested renders nest safely.
@@ -2435,6 +2438,13 @@ pub fn render(
     // clone is O(1) (rpds structure sharing); paint never rebuilds it. The
     // gate in the Model guarantees this equals rebuild_id_index(doc).
     let _ref_index_guard = install_ref_index(id_index.clone());
+    // Phase 4c: generation-epoch the reference-geometry recompute cache. The
+    // model generation is bumped on every mutation / undo / redo, so this
+    // drops the cache on any edit while preserving it across no-edit repaints
+    // (pan / zoom / hover, plus this render's fill + selection-trace passes).
+    // RUST-ONLY perf cache; no behavior change (gated by a per-hit debug-assert
+    // that cached == fresh in `live.rs`).
+    crate::geometry::live::set_recompute_cache_generation(generation);
 
     // Layer 1 (canvas background) is now painted by the caller
     // (workspace::app_state::repaint) BEFORE applying the

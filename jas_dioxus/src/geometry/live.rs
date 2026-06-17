@@ -65,6 +65,205 @@ impl ElementResolver for NullResolver {
 pub(crate) type VisitSet = std::collections::BTreeSet<ElementRef>;
 
 // ---------------------------------------------------------------------------
+// Reference-geometry recompute cache (REFERENCE_GRAPH.md Phase 4c, first
+// increment). RUST-ONLY perf cache — NO behavior change. Equivalence with the
+// other four apps is pinned on resolve()/eval RESULTS, which this never alters
+// (gated by a debug-assert on every hit). See also the P4b index==rebuild gate
+// in `model.rs`.
+// ---------------------------------------------------------------------------
+//
+// What is cached: the RESOLVED TARGET's UNTRANSFORMED geometry —
+// `element_to_polygon_set_with(resolved_target, precision, ..)`. This is shared
+// across every reference that points at the same target, so the key is the
+// TARGET (its id + the precision it was tessellated at), never the reference.
+// The per-reference instance `transform` is applied AFTER the cached geometry,
+// in `ReferenceElem::evaluate_with`, so it is not part of the cached value.
+//
+// Why pure-geometry-only (the crux): a target T that is a Group containing a
+// Reference to X has geometry that changes when X is edited even though T's
+// `Rc::as_ptr` is unchanged (T points to X by id, not by embedding). A
+// `(target_id, Rc::as_ptr)` cache on T would therefore be STALE. By caching
+// ONLY targets whose owned subtree contains NO Reference (`subtree_has_reference`
+// is false), the geometry is a pure function of the target's `Rc` value, so
+// `Rc::as_ptr` is a complete invalidation signal and that hazard is
+// structurally excluded. Ref-containing targets fall through to today's exact
+// uncached eval (recorded as `HasRefs` so a repeat lookup skips the purity walk
+// but never serves cached geometry).
+//
+// Precision in the key: render makes two passes that may use different
+// precision (the fill pass uses the Boolean-panel precision; the
+// selection-trace pass uses `DEFAULT_PRECISION`). A coarse vs. fine
+// tessellation are DIFFERENT geometry, so precision is part of the key
+// (bit-encoded via `f64::to_bits`) — a coarse entry never serves a fine
+// request and vice versa.
+//
+// Lifetime + invalidation: the cache is a thread-local that PERSISTS across
+// paints, so repaints between edits (pan / zoom / hover, plus render's two
+// passes) reuse it. It is generation-epoched off `model.generation`, which is
+// bumped on every mutation / undo / redo: `set_recompute_cache_generation` (the
+// paint entry, called from `render()`) clears all entries whenever the
+// generation changes. Coarse but trivially correct — any edit drops the whole
+// cache — while keeping the win across no-edit repaints. (A future refinement
+// is a Model-companion cache paired with the snapshot and carried through
+// undo/redo in O(1), mirroring the P4b id-index pairing; this first increment
+// keeps the simpler thread-local-persistent form, relying on the per-hit gate
+// for correctness.)
+
+/// One cache slot keyed by `(target_id, precision_bits)`. `Pure` holds the
+/// target's untransformed geometry, valid while `ptr` still matches the
+/// resolved target's `Rc::as_ptr` (a pure-geometry target's geometry is a pure
+/// function of its `Rc`). `HasRefs` records that the target's subtree contains a
+/// nested reference, so its geometry is NOT cacheable; the entry exists only to
+/// short-circuit the purity walk on a repeat lookup — it never serves geometry.
+enum CacheEntry {
+    Pure { ptr: usize, geom: PolygonSet },
+    HasRefs { ptr: usize },
+}
+
+/// The thread-local recompute cache, epoched by `generation`. Entries are
+/// cleared whenever `generation` changes (any edit / undo / redo).
+struct RecomputeCache {
+    generation: u64,
+    entries: std::collections::HashMap<(String, u64), CacheEntry>,
+}
+
+thread_local! {
+    static RECOMPUTE_CACHE: std::cell::RefCell<RecomputeCache> =
+        std::cell::RefCell::new(RecomputeCache {
+            generation: 0,
+            entries: std::collections::HashMap::new(),
+        });
+}
+
+/// Generation-epoch the recompute cache: if `generation` differs from the
+/// cache's current epoch, CLEAR every entry and adopt the new epoch. Called at
+/// the paint entry (`render()`) with `model.generation()`. Because the
+/// generation is bumped on every mutation / undo / redo, this drops the cache on
+/// any edit while preserving it across no-edit repaints.
+pub fn set_recompute_cache_generation(generation: u64) {
+    RECOMPUTE_CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        if cache.generation != generation {
+            cache.entries.clear();
+            cache.generation = generation;
+        }
+    });
+}
+
+/// Observable cache state for a `(target_id, precision)` slot, for tests only:
+/// `Pure` (geometry cached), `HasRefs` (recorded uncacheable), or absent (no
+/// entry). Lets the focused Phase-4c tests assert WHAT was cached, beyond just
+/// the eval result.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CacheState { Pure, HasRefs }
+
+/// Test-only: report the cache state for `(target_id, precision)`.
+#[cfg(test)]
+pub(crate) fn recompute_cache_state_for_test(target_id: &str, precision: f64) -> Option<CacheState> {
+    RECOMPUTE_CACHE.with(|c| {
+        c.borrow().entries.get(&(target_id.to_string(), precision.to_bits())).map(|e| match e {
+            CacheEntry::Pure { .. } => CacheState::Pure,
+            CacheEntry::HasRefs { .. } => CacheState::HasRefs,
+        })
+    })
+}
+
+/// Test-only: drop all entries and reset the epoch to 0, so each focused test
+/// starts from an empty cache regardless of prior tests on the same thread.
+#[cfg(test)]
+pub(crate) fn clear_recompute_cache_for_test() {
+    RECOMPUTE_CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        cache.entries.clear();
+        cache.generation = 0;
+    });
+}
+
+/// True iff `elem`'s OWNED subtree contains a `Reference` anywhere — the purity
+/// test that decides whether a target's geometry may be cached. A cheap walk:
+/// recurse Group / Layer children and CompoundShape operands (every
+/// containment edge `element_to_polygon_set_with` itself descends), and report
+/// a hit on any `Element::Live(LiveVariant::Reference(..))`. A reference reached
+/// by-id is NOT part of the owned subtree (it is a `dependencies()` edge), so it
+/// is the very thing this detects at its own node, not something it follows.
+fn subtree_has_reference(elem: &Rc<Element>) -> bool {
+    match elem.as_ref() {
+        Element::Live(LiveVariant::Reference(_)) => true,
+        Element::Live(LiveVariant::CompoundShape(cs)) => {
+            cs.operands.iter().any(subtree_has_reference)
+        }
+        Element::Group(g) => g.children.iter().any(subtree_has_reference),
+        Element::Layer(l) => l.children.iter().any(subtree_has_reference),
+        // Leaf geometry kinds own no element subtree.
+        _ => false,
+    }
+}
+
+/// Obtain the resolved target's UNTRANSFORMED geometry, via the recompute
+/// cache. Caches only pure-geometry targets (no nested reference); ref-containing
+/// targets are evaluated fresh every time (recorded as `HasRefs`). The
+/// per-reference instance transform is applied by the caller AFTER this returns.
+///
+/// Correctness gate: on every `Pure` hit, `debug_assert!(cached == fresh)`
+/// (mirroring the P4b index==rebuild gate). Combined with the per-paint
+/// generation epoch and the `Rc::as_ptr` check, this is the proof the cache
+/// never diverges from a fresh eval.
+fn cached_target_geometry(
+    target_id: &str,
+    target: &Rc<Element>,
+    precision: f64,
+    resolver: &dyn ElementResolver,
+    visiting: &mut VisitSet,
+) -> PolygonSet {
+    let tptr = Rc::as_ptr(target) as usize;
+    let key = (target_id.to_string(), precision.to_bits());
+
+    // Fast path: a live entry whose ptr still matches.
+    enum Hit { Reuse(PolygonSet), FreshUncached, Miss }
+    let hit = RECOMPUTE_CACHE.with(|c| {
+        let cache = c.borrow();
+        match cache.entries.get(&key) {
+            Some(CacheEntry::Pure { ptr, geom }) if *ptr == tptr => Hit::Reuse(geom.clone()),
+            Some(CacheEntry::HasRefs { ptr }) if *ptr == tptr => Hit::FreshUncached,
+            _ => Hit::Miss,
+        }
+    });
+
+    match hit {
+        Hit::Reuse(geom) => {
+            // GATE: the cached geometry must equal a fresh eval. Mirrors the
+            // P4b model.rs index==rebuild debug-assert.
+            debug_assert!(
+                {
+                    let mut fresh_visit = VisitSet::new();
+                    let fresh = element_to_polygon_set_with(
+                        target, precision, resolver, &mut fresh_visit);
+                    geom == fresh
+                },
+                "reference geometry recompute cache diverged from fresh eval",
+            );
+            geom
+        }
+        Hit::FreshUncached => {
+            // Target contains nested references — never cache its geometry.
+            element_to_polygon_set_with(target, precision, resolver, visiting)
+        }
+        Hit::Miss => {
+            // Cache miss or stale ptr: evaluate fresh, then record by purity.
+            let fresh = element_to_polygon_set_with(target, precision, resolver, visiting);
+            let entry = if subtree_has_reference(target) {
+                CacheEntry::HasRefs { ptr: tptr }
+            } else {
+                CacheEntry::Pure { ptr: tptr, geom: fresh.clone() }
+            };
+            RECOMPUTE_CACHE.with(|c| { c.borrow_mut().entries.insert(key, entry); });
+            fresh
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
 
@@ -275,7 +474,12 @@ impl ReferenceElem {
         match resolver.resolve(&self.target) {
             Some(target) => {
                 visiting.insert(self.target.clone());
-                let ps = element_to_polygon_set_with(&target, precision, resolver, visiting);
+                // Phase 4c: obtain the resolved target's UNTRANSFORMED geometry
+                // through the recompute cache (shared across all references to
+                // this target; cached only for pure-geometry targets). The
+                // per-reference instance transform is applied AFTER, below.
+                let ps = cached_target_geometry(
+                    &self.target.0, &target, precision, resolver, visiting);
                 visiting.remove(&self.target);
                 // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
                 // field (distinct from common.transform, which renders as the
@@ -1098,5 +1302,286 @@ mod tests {
         assert_eq!(resolved, master_ps,
             "resolved instance geometry must equal the master rect's polygon set");
         assert!(visiting.is_empty(), "cycle-guard set restored after resolve");
+    }
+
+    // --- Phase 4c: reference-geometry recompute cache ------------------------
+    //
+    // RUST-ONLY perf cache. No behavior change: every assertion below pins
+    // eval RESULTS against a fresh `element_to_polygon_set_with`, while
+    // additionally checking the cache STATE (Pure / HasRefs / absent) so the
+    // caching itself is observable. The debug-assert gate inside the lookup
+    // (`cached == fresh`) also fires on every Pure hit in these tests.
+
+    /// A resolver whose backing map can be mutated between evaluations so a
+    /// test can simulate an edit to the target (new `Rc`, hence new ptr).
+    struct CellResolver(std::cell::RefCell<std::collections::HashMap<String, Rc<Element>>>);
+    impl ElementResolver for CellResolver {
+        fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>> {
+            self.0.borrow().get(&id.0).cloned()
+        }
+    }
+    impl CellResolver {
+        fn new() -> Self {
+            Self(std::cell::RefCell::new(std::collections::HashMap::new()))
+        }
+        fn set(&self, id: &str, elem: Rc<Element>) {
+            self.0.borrow_mut().insert(id.to_string(), elem);
+        }
+    }
+
+    /// Evaluate the target the cache would obtain, threading a fresh visit set
+    /// so the comparison oracle is independent of cache state.
+    fn fresh_target_geom(target: &Rc<Element>, precision: f64, resolver: &dyn ElementResolver)
+        -> PolygonSet
+    {
+        let mut v = VisitSet::new();
+        element_to_polygon_set_with(target, precision, resolver, &mut v)
+    }
+
+    #[test]
+    fn subtree_has_reference_detects_nested_reference() {
+        // A bare rect has no reference.
+        let rect = rc_rect(0.0, 0.0, 10.0, 10.0);
+        assert!(!subtree_has_reference(&rect));
+
+        // A group of rects has no reference.
+        let group = Rc::new(Element::Group(crate::geometry::element::GroupElem {
+            children: vec![rc_rect(0.0, 0.0, 5.0, 5.0), rc_rect(5.0, 0.0, 5.0, 5.0)],
+            common: CommonProps::default(),
+            ..Default::default()
+        }));
+        assert!(!subtree_has_reference(&group));
+
+        // A group containing a reference DOES have one (the stale hazard).
+        let group_with_ref = Rc::new(Element::Group(crate::geometry::element::GroupElem {
+            children: vec![
+                rc_rect(0.0, 0.0, 5.0, 5.0),
+                Rc::new(Element::Live(LiveVariant::Reference(ReferenceElem::new(
+                    ElementRef("x".into()), CommonProps::default())))),
+            ],
+            common: CommonProps::default(),
+            ..Default::default()
+        }));
+        assert!(subtree_has_reference(&group_with_ref));
+
+        // A compound shape whose operand is a reference also has one.
+        let compound_with_ref = Rc::new(Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![
+                rc_rect(0.0, 0.0, 5.0, 5.0),
+                Rc::new(Element::Live(LiveVariant::Reference(ReferenceElem::new(
+                    ElementRef("x".into()), CommonProps::default())))),
+            ],
+            fill: None, stroke: None, common: CommonProps::default(),
+        })));
+        assert!(subtree_has_reference(&compound_with_ref));
+    }
+
+    #[test]
+    fn pure_target_reference_is_cached_and_second_eval_hits() {
+        // (a) A pure-geometry target (a plain rect) referenced by an instance:
+        // first eval populates a Pure entry; a second eval at the same
+        // generation + same target ptr reuses the cached geometry (gate
+        // confirms cached == fresh) and the RESULT equals a fresh eval.
+        clear_recompute_cache_for_test();
+        set_recompute_cache_generation(7);
+
+        let resolver = CellResolver::new();
+        resolver.set("r1", rc_rect(0.0, 0.0, 10.0, 10.0));
+        let reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+
+        // Before any eval: no entry.
+        assert!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION).is_none());
+
+        let mut v1 = VisitSet::new();
+        let first = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v1);
+
+        // After first eval: a Pure entry exists.
+        assert_eq!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION),
+                   Some(CacheState::Pure));
+
+        // Result equals a fresh eval of the resolved target.
+        let target = resolver.resolve(&ElementRef("r1".into())).unwrap();
+        assert_eq!(first, fresh_target_geom(&target, DEFAULT_PRECISION, &resolver));
+
+        // Second eval hits the cache (gate fires: cached == fresh) and the
+        // result is identical.
+        let mut v2 = VisitSet::new();
+        let second = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v2);
+        assert_eq!(first, second, "second eval reuses cached geometry, same result");
+        assert_eq!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION),
+                   Some(CacheState::Pure));
+    }
+
+    #[test]
+    fn editing_target_new_generation_re_evaluates_no_stale() {
+        // (b) Editing the target bumps the model generation; the epoch clears
+        // the cache so the next eval recomputes against the NEW target. No
+        // stale geometry survives.
+        clear_recompute_cache_for_test();
+        set_recompute_cache_generation(1);
+
+        let resolver = CellResolver::new();
+        resolver.set("r1", rc_rect(0.0, 0.0, 10.0, 10.0));
+        let reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+
+        let mut v1 = VisitSet::new();
+        let before = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v1);
+        let (_, _, bmaxx, _) = bbox_of_ring(&before[0]);
+        assert!((bmaxx - 10.0).abs() < 1e-6);
+        assert_eq!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION),
+                   Some(CacheState::Pure));
+
+        // Edit: replace the target with a larger rect (a fresh Rc → new ptr)
+        // AND advance the generation, as a real edit would.
+        resolver.set("r1", rc_rect(0.0, 0.0, 40.0, 40.0));
+        set_recompute_cache_generation(2);
+        // The epoch bump cleared the cache.
+        assert!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION).is_none());
+
+        let mut v2 = VisitSet::new();
+        let after = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v2);
+        let (_, _, amaxx, _) = bbox_of_ring(&after[0]);
+        assert!((amaxx - 40.0).abs() < 1e-6, "re-evaluated against the EDITED target");
+        // And it equals a fresh eval of the new target (no stale).
+        let target = resolver.resolve(&ElementRef("r1".into())).unwrap();
+        assert_eq!(after, fresh_target_geom(&target, DEFAULT_PRECISION, &resolver));
+    }
+
+    #[test]
+    fn ref_containing_target_is_not_cached_and_tracks_nested_edits() {
+        // (c) A target that CONTAINS a nested reference must NOT be cached as
+        // Pure (its geometry depends on the nested target, which can change
+        // with the same outer Rc ptr). It records HasRefs and re-resolves
+        // fresh each time. We then change the NESTED target's geometry WITHOUT
+        // bumping the generation; because the outer target is uncached, the
+        // change is reflected — the stale-nested-ref hazard does NOT occur.
+        clear_recompute_cache_for_test();
+        set_recompute_cache_generation(5);
+
+        let resolver = CellResolver::new();
+        // Nested leaf target "x" — a 10x10 rect.
+        resolver.set("x", rc_rect(0.0, 0.0, 10.0, 10.0));
+        // Outer target "g" — a GROUP containing a reference to "x". Its Rc
+        // never changes below, but its geometry depends on "x".
+        let group_referencing_x = Rc::new(Element::Group(crate::geometry::element::GroupElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("x".into()), CommonProps::default()))))],
+            common: CommonProps::default(),
+            ..Default::default()
+        }));
+        resolver.set("g", group_referencing_x);
+
+        // An instance pointing at the ref-containing target "g".
+        let outer_ref = ReferenceElem::new(ElementRef("g".into()), CommonProps::default());
+
+        let mut v1 = VisitSet::new();
+        let first = outer_ref.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v1);
+        // The outer target was recorded as HasRefs (NOT cached as Pure).
+        assert_eq!(recompute_cache_state_for_test("g", DEFAULT_PRECISION),
+                   Some(CacheState::HasRefs));
+        let (_, _, fmaxx, _) = bbox_of_ring(&first[0]);
+        assert!((fmaxx - 10.0).abs() < 1e-6);
+
+        // Mutate the NESTED target "x" WITHOUT bumping the generation. (This
+        // is the stale hazard a (target_id, Rc::as_ptr) Pure cache on "g"
+        // would suffer: "g"'s ptr is unchanged.)
+        resolver.set("x", rc_rect(0.0, 0.0, 30.0, 30.0));
+
+        let mut v2 = VisitSet::new();
+        let second = outer_ref.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v2);
+        let (_, _, smaxx, _) = bbox_of_ring(&second[0]);
+        assert!((smaxx - 30.0).abs() < 1e-6,
+            "ref-containing target re-resolves: nested edit is reflected, not stale");
+        // Still HasRefs, never promoted to Pure.
+        assert_eq!(recompute_cache_state_for_test("g", DEFAULT_PRECISION),
+                   Some(CacheState::HasRefs));
+        // Equals a fresh eval of the (unchanged-ptr) outer target.
+        let target = resolver.resolve(&ElementRef("g".into())).unwrap();
+        assert_eq!(second, fresh_target_geom(&target, DEFAULT_PRECISION, &resolver));
+    }
+
+    #[test]
+    fn instance_transform_composes_on_top_of_cached_pure_geometry() {
+        // (d) The per-reference instance transform is applied AFTER the
+        // (shared, cached) target geometry. A plain instance caches the
+        // untransformed target; a scaled instance of the SAME target reuses
+        // that cached geometry and applies its own transform on top.
+        clear_recompute_cache_for_test();
+        set_recompute_cache_generation(9);
+
+        let resolver = CellResolver::new();
+        resolver.set("r1", rc_rect(0.0, 0.0, 10.0, 10.0));
+
+        // Plain instance populates the Pure cache with UNTRANSFORMED geometry.
+        let plain = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        let mut v1 = VisitSet::new();
+        let plain_ps = plain.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v1);
+        assert_eq!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION),
+                   Some(CacheState::Pure));
+        let (_, _, pmaxx, pmaxy) = bbox_of_ring(&plain_ps[0]);
+        assert!((pmaxx - 10.0).abs() < 1e-6 && (pmaxy - 10.0).abs() < 1e-6);
+
+        // Scaled instance of the SAME target: hits the cached (untransformed)
+        // geometry, then applies scale(2,2) on top.
+        let mut scaled = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        scaled.transform = Some(crate::geometry::element::Transform::scale(2.0, 2.0));
+        let mut v2 = VisitSet::new();
+        let scaled_ps = scaled.evaluate_with(DEFAULT_PRECISION, &resolver, &mut v2);
+        let (sminx, sminy, smaxx, smaxy) = bbox_of_ring(&scaled_ps[0]);
+        assert!((sminx - 0.0).abs() < 1e-6 && (sminy - 0.0).abs() < 1e-6);
+        assert!((smaxx - 20.0).abs() < 1e-6 && (smaxy - 20.0).abs() < 1e-6,
+            "instance transform composes on top of the cached target geometry");
+
+        // The cache still holds the UNTRANSFORMED geometry (Pure), shared.
+        assert_eq!(recompute_cache_state_for_test("r1", DEFAULT_PRECISION),
+                   Some(CacheState::Pure));
+        // And the scaled result equals applying the transform to a fresh eval.
+        let target = resolver.resolve(&ElementRef("r1".into())).unwrap();
+        let fresh = fresh_target_geom(&target, DEFAULT_PRECISION, &resolver);
+        let t = crate::geometry::element::Transform::scale(2.0, 2.0);
+        let fresh_scaled: PolygonSet = fresh.into_iter()
+            .map(|ring| ring.into_iter().map(|(x, y)| t.apply_point(x, y)).collect())
+            .collect();
+        assert_eq!(scaled_ps, fresh_scaled);
+    }
+
+    #[test]
+    fn cache_keys_on_precision_so_two_render_passes_dont_collide() {
+        // The two render passes use different precision (fill precision vs
+        // DEFAULT_PRECISION). The cache key includes precision, so a circle
+        // target tessellated at one precision never serves a request at
+        // another precision (which would be a wrong-detail result).
+        clear_recompute_cache_for_test();
+        set_recompute_cache_generation(3);
+
+        let resolver = CellResolver::new();
+        resolver.set("c1", Rc::new(Element::Circle(crate::geometry::element::CircleElem {
+            cx: 0.0, cy: 0.0, r: 100.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        })));
+        let reference = ReferenceElem::new(ElementRef("c1".into()), CommonProps::default());
+
+        let coarse = 1.0;
+        let fine = 0.01;
+
+        let mut v1 = VisitSet::new();
+        let ps_coarse = reference.evaluate_with(coarse, &resolver, &mut v1);
+        let mut v2 = VisitSet::new();
+        let ps_fine = reference.evaluate_with(fine, &resolver, &mut v2);
+
+        // Distinct precisions tessellate to distinct ring lengths — they must
+        // not have served each other from one cache slot.
+        assert_ne!(ps_coarse[0].len(), ps_fine[0].len(),
+            "different precision must produce different tessellation");
+        // Both keys are live in the cache simultaneously.
+        assert_eq!(recompute_cache_state_for_test("c1", coarse), Some(CacheState::Pure));
+        assert_eq!(recompute_cache_state_for_test("c1", fine), Some(CacheState::Pure));
+
+        // Each equals its own fresh eval.
+        let target = resolver.resolve(&ElementRef("c1".into())).unwrap();
+        assert_eq!(ps_coarse, fresh_target_geom(&target, coarse, &resolver));
+        assert_eq!(ps_fine, fresh_target_geom(&target, fine, &resolver));
     }
 }
