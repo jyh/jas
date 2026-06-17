@@ -489,6 +489,17 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "toggle_panel_symbols" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Symbols) {
+                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Symbols) {
+                                st.workspace_layout.close_panel(addr);
+                            }
+                        } else {
+                            st.workspace_layout.show_panel(super::workspace::PanelKind::Symbols);
+                        }
+                    }));
+                }
                 "toggle_panel_align" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Align) {
@@ -843,6 +854,7 @@ pub(crate) fn MenuBarView(
                             "toggle_panel_boolean" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Boolean),
                             "toggle_panel_opacity" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Opacity),
                             "toggle_panel_magic_wand" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::MagicWand),
+                            "toggle_panel_symbols" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Symbols),
                             _ => false,
                         };
                         if cmd.starts_with("toggle_") {

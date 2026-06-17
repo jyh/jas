@@ -3564,3 +3564,79 @@ actions:
       - "doc.set_attr_on_selection":
           attr: "stroke_brush_overrides"
           value: "null"
+
+  # ── Symbols panel (SYMBOLS.md §7, §8 — P3 first slice) ──────────
+  # The mutating ops (new_symbol / place_instance / delete_symbol_action)
+  # mint ids by the value-in-op rule and call the shared symbol
+  # operations, which native apps own (like group / make_instance). The
+  # YAML side is a `log` stub; the real work lives in each app's native
+  # action arm so every app applies identical minted values.
+
+  symbols_panel_select:
+    description: >
+      Panel-select a master in the Symbols panel by id. Replaces the
+      single-master selection with this id, which becomes the target of
+      Place Instance and Delete Symbol. The selection keys on the stable
+      master id, so it survives instance placement / deletion. Clicking
+      empty panel area is a no-op (no row dispatches this).
+    category: symbols
+    params:
+      symbol_id: { type: string }
+    effects:
+      - set_panel_state:
+          panel: symbols
+          key: selected_symbol
+          value: "param.symbol_id"
+
+  new_symbol:
+    description: >
+      Promote the single selected canvas element to a master (SYMBOLS.md
+      §7 Make Symbol). The selected element moves off-canvas into the
+      master store and an instance of it is left in its place, so the
+      canvas looks unchanged. Enabled only when exactly one whole canvas
+      element is selected. A fresh master id and instance id are minted by
+      the initiator (value-in-op) and carried in the operation; never
+      minted inside the shared core. Single undo op.
+    category: symbols
+    enabled_when: "active_document.selection_count == 1"
+    effects:
+      - log: "new_symbol"
+
+  place_instance:
+    description: >
+      Append a new instance of the panel-selected master to the active
+      layer and select it (SYMBOLS.md §7 Place Instance). Enabled only
+      when a master is panel-selected. A fresh instance id is minted by
+      the initiator (value-in-op). Single undo op.
+    category: symbols
+    enabled_when: "panel.selected_symbol != null"
+    effects:
+      - log: "place_instance"
+
+  delete_symbol_action:
+    description: >
+      Delete the panel-selected master from the master store (SYMBOLS.md
+      §7 Delete Symbol). Reference-aware: when the master still has live
+      instances (usage count > 0) a confirmation warning first reports how
+      many instances will be left empty; confirming deletes the master.
+      With no instances it deletes silently. The master's instances are
+      never touched — they become recoverable via undo. Enabled only when
+      a master is panel-selected. Single undo op.
+    category: symbols
+    enabled_when: "panel.selected_symbol != null"
+    effects:
+      - log: "delete_symbol_action"
+
+  delete_symbol_orphan_confirm_ok:
+    description: >
+      Confirm the reference-aware Symbols-panel delete from the
+      delete_symbol_orphan_confirm dialog. The panel Delete entry point
+      opens that dialog only when the panel-selected master still has live
+      instances; clicking Delete here commits the deletion. A DISTINCT
+      action id from delete_symbol_action so the native warn intercept does
+      not re-fire. The native arm snapshots and removes the master; the
+      orphaned instances resolve to nothing until undone. Cancel uses
+      dismiss_dialog (no snapshot, no delete).
+    category: dialog
+    effects:
+      - log: "delete_symbol_orphan_confirm_ok"

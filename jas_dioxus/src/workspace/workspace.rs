@@ -55,6 +55,7 @@ pub enum PanelKind {
     Boolean,
     Opacity,
     MagicWand,
+    Symbols,
 }
 
 impl PanelKind {
@@ -72,6 +73,7 @@ impl PanelKind {
         Self::Boolean,
         Self::Opacity,
         Self::MagicWand,
+        Self::Symbols,
     ];
 }
 
@@ -320,7 +322,7 @@ impl WorkspaceLayout {
                         PanelGroup::new(vec![PanelKind::Align, PanelKind::Boolean]),
                         PanelGroup::new(vec![PanelKind::Character, PanelKind::Paragraph]),
                         PanelGroup::new(vec![PanelKind::Stroke, PanelKind::Properties]),
-                        PanelGroup::new(vec![PanelKind::Artboards, PanelKind::Layers]),
+                        PanelGroup::new(vec![PanelKind::Artboards, PanelKind::Layers, PanelKind::Symbols]),
                     ],
                     DEFAULT_DOCK_WIDTH,
                 ),
@@ -1553,8 +1555,12 @@ mod tests {
         // and verify the now-empty source group is removed.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        // Pull out both of Layers' default group-mates (Artboards and
+        // Symbols) so Layers stands alone in its group.
         let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
         l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
+        let (sg2, spi2) = panel_of(&l, id, PanelKind::Symbols);
+        l.detach_panel(pa(id.0, sg2, spi2), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         let cg = group_of(&l, id, PanelKind::Color);
@@ -1646,8 +1652,12 @@ mod tests {
         // sit in the last group by itself.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        // Pull out both of Layers' default group-mates (Artboards and
+        // Symbols) so Layers stands alone in its single-panel group.
         let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
         l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
+        let (sg2, spi2) = panel_of(&l, id, PanelKind::Symbols);
+        l.detach_panel(pa(id.0, sg2, spi2), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.insert_panel_as_new_group(pa(id.0, lg, lpi), id, 99);
@@ -1700,9 +1710,11 @@ mod tests {
         // disappear.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Pull Artboards out first so Layers stands alone in its group.
+        // Pull Artboards and Symbols out first so Layers stands alone.
         let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
         l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
+        let (sg2, spi2) = panel_of(&l, id, PanelKind::Symbols);
+        l.detach_panel(pa(id.0, sg2, spi2), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.detach_panel(pa(id.0, lg, lpi), 50.0, 50.0);
@@ -1838,7 +1850,7 @@ mod tests {
 
     #[test]
     fn panel_kind_all_count() {
-        assert_eq!(PanelKind::ALL.len(), 12);
+        assert_eq!(PanelKind::ALL.len(), 13);
     }
 
     #[test]
@@ -1900,8 +1912,12 @@ mod tests {
         // hidden.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
+        // Pull out both of Layers' default group-mates (Artboards and
+        // Symbols) so Layers stands alone in its group.
         let (ag, api) = panel_of(&l, id, PanelKind::Artboards);
         l.detach_panel(pa(id.0, ag, api), 0.0, 0.0);
+        let (sg2, spi2) = panel_of(&l, id, PanelKind::Symbols);
+        l.detach_panel(pa(id.0, sg2, spi2), 0.0, 0.0);
         let before = l.dock(id).unwrap().groups.len();
         let (lg, lpi) = panel_of(&l, id, PanelKind::Layers);
         l.close_panel(pa(id.0, lg, lpi));
