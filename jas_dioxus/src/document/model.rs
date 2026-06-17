@@ -404,10 +404,14 @@ impl Model {
 
     /// Finalize the open transaction: clear the redo stack (the relocated
     /// "new edit invalidates redo" semantics — previously in [`snapshot`]) and
-    /// close the bracket. Safe to call when no transaction is open (it simply
-    /// clears redo and leaves `in_txn` false), though callers should pair it
-    /// with [`begin_txn`].
+    /// close the bracket. **No-op when no transaction is open**, so a caller that
+    /// commits unconditionally at the end of a possibly-no-edit session (e.g. the
+    /// type tools, which open the bracket lazily on the first keystroke) does not
+    /// spuriously clear redo when nothing was edited.
     pub fn commit_txn(&mut self) {
+        if !self.in_txn {
+            return;
+        }
         self.redo_stack.clear();
         self.in_txn = false;
     }
