@@ -8,11 +8,13 @@
 //!
 //! It exposes, for the **by-id reference graph only**:
 //!
-//! - `deps`     — `id -> sorted list of target ids it directly references`
-//! - `rdeps`    — `id -> sorted list of ids that reference it` (reverse of deps)
-//! - `dangling` — sorted list of *referencing* ids whose target id is not
-//!                present/targetable
-//! - `cycles`   — sorted list of ids that participate in a cycle
+//! - `deps`      — `id -> sorted list of target ids it directly references`
+//! - `rdeps`     — `id -> sorted list of ids that reference it` (reverse of deps)
+//! - `dangling`  — sorted list of *referencing* ids whose target id is not
+//!                 present/targetable
+//! - `cycles`    — sorted list of ids that participate in a cycle
+//! - `topo_order`— a deterministic topological ordering (dependencies-first) of
+//!                 the by-id graph; the only intentionally-non-sorted output
 //!
 //! ## Operands are OPAQUE to the by-id graph (locked design)
 //!
@@ -33,11 +35,17 @@
 //! output is inherently ordered. The cycle DFS iterates neighbors in **sorted**
 //! order. No part of the output relies on `HashMap` iteration order.
 //!
+//! ## `topo_order` (Phase 4a — REFERENCE_GRAPH.md §8)
+//!
+//! A deterministic, dependencies-first topological ordering of the by-id graph,
+//! computed by Kahn's algorithm with sorted-id tie-breaking (see
+//! [`topo_order`]). It is the recompute schedule a future incremental phase
+//! (P4c) will walk. The ordering is the *only* intentionally-non-sorted output:
+//! its sequence IS the data. The ALGORITHM IS LOCKED and must be byte-identical
+//! across all four apps — it is the highest cross-language desync risk here.
+//!
 //! ## Deferred (NOT implemented here)
 //!
-//! - **`topo_order`** — the Phase 4 recompute ordering (a topological sort of
-//!   the deps DAG, with cycles broken). Deferred until a consumer needs a
-//!   recompute schedule; it would live alongside `deps`/`rdeps` here.
 //! - **Write-time cycle rejection** — no authoring op can form a cycle yet
 //!   (`create_reference` only links to an existing target), and eval-time
 //!   cycle-break (the threaded visited-set in `geometry::live`) already handles
@@ -78,6 +86,13 @@ pub struct DependencyIndex {
     /// Sorted, de-duplicated list of ids that lie on a cycle in the `deps`
     /// graph (a node that can reach itself). A self-target (`R -> R`) is a cycle.
     pub cycles: Vec<String>,
+    /// A deterministic topological ordering of the by-id graph,
+    /// **dependencies-first** (a reference's target precedes the reference).
+    /// Computed by Kahn's algorithm with sorted-id tie-breaking; cycle members
+    /// (== `cycles`) are appended at the end in sorted-id order. This is the
+    /// ONLY field whose order is NOT alphabetical — its sequence IS the data
+    /// (the recompute schedule). The algorithm is LOCKED; see [`topo_order`].
+    pub topo_order: Vec<String>,
 }
 
 impl DependencyIndex {
@@ -194,12 +209,144 @@ pub fn dependency_index(doc: &Document) -> DependencyIndex {
     // Phase 3: cycles — every id that can reach itself in the `deps` graph.
     let cycles = find_cycle_members(&deps);
 
+    // Phase 4a: the dependencies-first topological ordering (recompute schedule).
+    // Computed from the same `deps`/`rdeps` graph; cycle members trail in sorted
+    // order. The algorithm is LOCKED across all four apps.
+    let topo = topo_order(&deps, &rdeps, &cycles);
+
     DependencyIndex {
         deps,
         rdeps,
         dangling: dangling.into_iter().collect(),
         cycles,
+        topo_order: topo,
     }
+}
+
+/// Compute the deterministic, **dependencies-first** topological ordering of the
+/// by-id reference graph (REFERENCE_GRAPH.md §8 Phase 4a). The recompute
+/// schedule a future incremental phase walks: a reference's target always
+/// precedes the reference.
+///
+/// **This algorithm is LOCKED and must be byte-identical across all four apps.**
+/// It is the highest cross-language desync risk in this module.
+///
+/// Kahn's algorithm with SORTED-ID tie-breaking, processed LEVEL-BY-LEVEL:
+///
+/// - **NODES** = the sorted set of all ids that are a `deps`-key OR an
+///   `rdeps`-key (every id that is a source or a *present* target of an edge).
+///   Dangling / operand-opaque targets (referenced but not present/targetable,
+///   i.e. they appear in `deps` values but are not nodes) are NOT nodes and
+///   create NO topo edge.
+/// - Each node's **dependency count** = the number of its `deps` targets that
+///   ARE nodes (present). Edges to non-node targets are ignored.
+/// - Take the WHOLE current ready set (every un-emitted node whose remaining
+///   dependency count is 0), emit it in sorted-id order, and decrement the
+///   remaining count of every node that depends on an emitted node (its
+///   `rdeps`). Nodes freed during this level become ready only for the NEXT
+///   level — a node freed by emitting `a` is NOT eligible to slot in before
+///   the rest of `a`'s level. (This is what the LOCKED worked example pins:
+///   emitting {a,r3,r4} as one level frees r1,r2 for the next level, so the
+///   order is a,r3,r4,r1,r2 — NOT a,r1,r2,r3,r4.) Ties ALWAYS by sorted id.
+/// - **Cycle remnants:** any nodes that never reach dependency-count 0 are
+///   appended at the END in sorted-id order. These are the nodes blocked by a
+///   cycle: every cycle member (the `cycles` set) PLUS any node that
+///   transitively depends on a cycle (e.g. `tail -> c1` where c1<->c2 — `tail`
+///   never frees). `cycles` is therefore a SUBSET of the remnants, not the whole
+///   set; the operational rule is "any node that never reaches count 0".
+///
+/// Result: dependencies before dependents, fully deterministic.
+///
+/// `deps`/`rdeps`/`cycles` are the already-built (sorted) members of the index.
+fn topo_order(
+    deps: &BTreeMap<String, Vec<String>>,
+    rdeps: &BTreeMap<String, Vec<String>>,
+    cycles: &[String],
+) -> Vec<String> {
+    // NODES: sorted union of deps-keys and rdeps-keys. A BTreeSet keeps it
+    // sorted and de-duplicated; iteration is deterministic.
+    let mut nodes: BTreeSet<String> = BTreeSet::new();
+    for k in deps.keys() {
+        nodes.insert(k.clone());
+    }
+    for k in rdeps.keys() {
+        nodes.insert(k.clone());
+    }
+
+    // Remaining dependency count per node: number of its deps targets that are
+    // themselves nodes (present). Non-node (dangling/opaque) targets are ignored.
+    let mut remaining: BTreeMap<String, usize> = BTreeMap::new();
+    for node in &nodes {
+        let count = deps
+            .get(node)
+            .map(|targets| targets.iter().filter(|t| nodes.contains(*t)).count())
+            .unwrap_or(0);
+        remaining.insert(node.clone(), count);
+    }
+
+    let mut emitted: BTreeSet<String> = BTreeSet::new();
+    let mut order: Vec<String> = Vec::with_capacity(nodes.len());
+
+    // Level-by-level Kahn loop. Each pass snapshots the CURRENT ready set (all
+    // un-emitted nodes with remaining count 0), emits it in sorted-id order, and
+    // only then applies the decrements its emissions cause — so newly-freed
+    // nodes wait for the next level. Iterating the sorted `nodes` set yields the
+    // ready set already in sorted order. A node blocked by a cycle never reaches
+    // count 0, so the loop terminates when no node is ready.
+    loop {
+        // Snapshot this level's ready set (sorted, since `nodes` is a BTreeSet).
+        let level: Vec<String> = nodes
+            .iter()
+            .filter(|n| !emitted.contains(*n) && remaining.get(*n).copied() == Some(0))
+            .cloned()
+            .collect();
+        if level.is_empty() {
+            break; // no node ready -> remaining un-emitted are cyclic
+        }
+        // Emit the whole level in sorted order, marking each emitted first so
+        // decrements below cannot re-add a same-level node.
+        for node in &level {
+            order.push(node.clone());
+            emitted.insert(node.clone());
+        }
+        // Apply this level's decrements AFTER emitting the level, so a node
+        // freed now only becomes ready on the NEXT iteration.
+        for node in &level {
+            if let Some(dependents) = rdeps.get(node) {
+                for dep in dependents {
+                    if let Some(c) = remaining.get_mut(dep) {
+                        // Saturating guard: a present dependent always had this
+                        // node counted, so c > 0 here; saturating keeps it sound
+                        // even on a (impossible) double-count.
+                        *c = c.saturating_sub(1);
+                    }
+                }
+            }
+        }
+    }
+
+    // Remnants: any node never emitted is blocked by a cycle — either it is ON
+    // a cycle (it is in `cycles`) OR it transitively DEPENDS on a cycle and so
+    // can never reach count 0 (e.g. `tail -> c1` where c1<->c2). Both kinds are
+    // appended at the END in sorted-id order. `cycles` is a SUBSET of these
+    // remnants, not necessarily the whole set; we therefore derive the remnants
+    // from the un-emitted nodes directly (the operational rule "any node that
+    // never reaches dependency-count 0"), which keeps the order deterministic
+    // and dependencies-first for the entire acyclic prefix. Iterating the sorted
+    // `nodes` set yields the remnants already in sorted-id order.
+    debug_assert!(
+        cycles
+            .iter()
+            .all(|c| !emitted.contains(c)),
+        "every cycle member must remain un-emitted (a subset of the remnants)"
+    );
+    for node in &nodes {
+        if !emitted.contains(node) {
+            order.push(node.clone());
+        }
+    }
+
+    order
 }
 
 /// Return the sorted, de-duplicated set of node ids that lie on a cycle in the
@@ -366,27 +513,36 @@ fn map_json(m: &BTreeMap<String, Vec<String>>) -> String {
     format!("{{{}}}", entries.join(","))
 }
 
-/// Render a sorted string array (the input `Vec` is already sorted).
+/// Render a string array verbatim (preserving the input `Vec`'s order). Used for
+/// the already-sorted `cycles`/`dangling` arrays AND for `topo_order`, whose
+/// order is deliberately the topological sequence (NOT sorted) — its order is
+/// the data, so it must be rendered as-is.
 fn array_json(v: &[String]) -> String {
     let items: Vec<String> = v.iter().map(|s| format!("\"{}\"", escape(s))).collect();
     format!("[{}]", items.join(","))
 }
 
 /// Serialize a [`DependencyIndex`] to canonical JSON: an object with the sorted
-/// keys `cycles`, `dangling`, `deps`, `rdeps`; `deps`/`rdeps` as objects of
-/// sorted id keys to sorted id arrays; `cycles`/`dangling` as sorted arrays.
+/// keys `cycles`, `dangling`, `deps`, `rdeps`, `topo_order`; `deps`/`rdeps` as
+/// objects of sorted id keys to sorted id arrays; `cycles`/`dangling` as sorted
+/// arrays; `topo_order` as an array IN TOPOLOGICAL ORDER (NOT sorted — its order
+/// is the data).
 ///
 /// Byte-identical to what the sibling apps hand-roll (and the
-/// `dependency_index.json` fixture). The top-level keys appear in alphabetical
-/// order to match the `JsonObj` sorted-key convention.
+/// `dependency_index.json` fixture). The top-level KEYS appear in alphabetical
+/// order (`cycles` < `dangling` < `deps` < `rdeps` < `topo_order`) to match the
+/// `JsonObj` sorted-key convention; only the `topo_order` VALUE is unsorted.
 pub fn dependency_index_to_test_json(idx: &DependencyIndex) -> String {
-    // Keys emitted in sorted (alphabetical) order: cycles, dangling, deps, rdeps.
+    // Keys emitted in sorted (alphabetical) order: cycles, dangling, deps,
+    // rdeps, topo_order. Only topo_order's array value is non-sorted (it is the
+    // topological sequence itself).
     format!(
-        "{{\"cycles\":{},\"dangling\":{},\"deps\":{},\"rdeps\":{}}}",
+        "{{\"cycles\":{},\"dangling\":{},\"deps\":{},\"rdeps\":{},\"topo_order\":{}}}",
         array_json(&idx.cycles),
         array_json(&idx.dangling),
         map_json(&idx.deps),
         map_json(&idx.rdeps),
+        array_json(&idx.topo_order),
     )
 }
 
@@ -973,12 +1129,225 @@ mod tests {
         ]);
         let idx = dependency_index(&doc);
         let json = dependency_index_to_test_json(&idx);
-        // Top-level keys are alphabetical: cycles, dangling, deps, rdeps.
+        // Top-level keys are alphabetical: cycles, dangling, deps, rdeps, topo_order.
         assert!(json.starts_with("{\"cycles\":[\"c1\",\"c2\"],\"dangling\":[\"r3\"],"));
         // deps object keys sorted; rdeps value list sorted (r1 before r2).
         assert!(json.contains("\"a\":[\"r1\",\"r2\"]"));
         assert!(json.contains("\"r1\":[\"a\"]"));
+        // topo_order is the LAST key (alphabetical) and its VALUE is the topo
+        // sequence: level 0 {a, r3} (r3 dangling -> count 0) emitted sorted,
+        // freeing r1, r2 for level 1; c1/c2 cycle remnants trail in sorted order.
+        assert!(json.contains("\"topo_order\":[\"a\",\"r3\",\"r1\",\"r2\",\"c1\",\"c2\"]"));
         // Parse back as generic JSON to confirm well-formedness.
         let _v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    }
+
+    // -----------------------------------------------------------------------
+    // topo_order (Phase 4a — LOCKED algorithm). Kahn with sorted-id tie-break;
+    // dependencies-first; cycle remnants appended in sorted order. These tests
+    // pin the deterministic sequence the algorithm must produce; the SAME cases
+    // are mirrored across all four apps.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn topo_order_worked_example_matches_locked_spec() {
+        // The cross-language fixture graph (REFERENCE_GRAPH.md §8 worked
+        // example): deps c1<->c2, r1->a, r2->a, r3->ghost, r4->op1; nodes are
+        // {a,c1,c2,r1,r2,r3,r4} (ghost/op1 are non-nodes). Expected sequence:
+        // ready {a,r3,r4} sorted -> a,r3,r4 frees r1,r2 -> r1,r2; cycle c1,c2 trail.
+        let op1 = rect_with_id(Some("op1"));
+        let op2 = rect_with_id(None);
+        let compound = Rc::new(Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![op1, op2],
+            fill: None,
+            stroke: None,
+            common: CommonProps {
+                id: Some("cs".to_string()),
+                ..Default::default()
+            },
+        })));
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("a")),
+            reference("r1", "a"),
+            reference("r2", "a"),
+            reference("r3", "ghost"),
+            reference("c1", "c2"),
+            reference("c2", "c1"),
+            compound,
+            reference("r4", "op1"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert_eq!(
+            idx.topo_order,
+            vec!["a", "r3", "r4", "r1", "r2", "c1", "c2"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn topo_order_chain_is_dependencies_first() {
+        // The chain/diamond fixture graph: b; s1->b; s2->s1; t1->b; t2->b; d1->s1.
+        // Level-by-level Kahn:
+        //   level 0: {b}                  emit b      -> frees s1, t1, t2
+        //   level 1: {s1, t1, t2} sorted  emit s1,t1,t2 -> emitting s1 frees d1, s2
+        //   level 2: {d1, s2} sorted      emit d1, s2
+        // Expected: b, s1, t1, t2, d1, s2.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("b")),
+            reference("s1", "b"),
+            reference("s2", "s1"),
+            reference("t1", "b"),
+            reference("t2", "b"),
+            reference("d1", "s1"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert_eq!(
+            idx.topo_order,
+            vec!["b", "s1", "t1", "t2", "d1", "s2"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+        // Dependencies-first invariant: every target precedes its referrer.
+        let pos = |id: &str| idx.topo_order.iter().position(|n| n == id).unwrap();
+        assert!(pos("b") < pos("s1"));
+        assert!(pos("b") < pos("t1"));
+        assert!(pos("b") < pos("t2"));
+        assert!(pos("s1") < pos("s2"));
+        assert!(pos("s1") < pos("d1"));
+        assert!(idx.cycles.is_empty());
+    }
+
+    #[test]
+    fn topo_order_pure_dag_no_cycle_full_ordering() {
+        // A pure DAG with no cycle: a -> b -> c (a depends on b depends on c).
+        // Dependencies-first means c, b, a — the reverse of the reference chain.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("c")),
+            reference("b", "c"),
+            reference("a", "b"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert!(idx.cycles.is_empty());
+        assert_eq!(
+            idx.topo_order,
+            vec!["c", "b", "a"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn topo_order_all_dangling_is_empty() {
+        // Every reference points at an absent target -> the targets are NOT
+        // nodes, so the only nodes are the referencing ids, all with dependency
+        // count 0. They emit in sorted order and none is cyclic/dangling-as-node.
+        let doc = doc_with_layer(vec![
+            reference("z", "ghost1"),
+            reference("a", "ghost2"),
+            reference("m", "ghost3"),
+        ]);
+        let idx = dependency_index(&doc);
+        // All three referrers are dangling (their targets are absent).
+        assert_eq!(
+            idx.dangling,
+            vec!["a", "m", "z"].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+        // No present targets -> no rdeps; nodes are just the 3 sources, all
+        // ready immediately -> emitted in sorted id order.
+        assert!(idx.rdeps.is_empty());
+        assert!(idx.cycles.is_empty());
+        assert_eq!(
+            idx.topo_order,
+            vec!["a", "m", "z"].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn topo_order_truly_empty_graph_is_empty() {
+        // No id-bearing elements -> no nodes -> empty topo order.
+        let doc = doc_with_layer(vec![rect_with_id(None)]);
+        let idx = dependency_index(&doc);
+        assert!(idx.topo_order.is_empty());
+    }
+
+    #[test]
+    fn topo_order_cycle_remnants_trail_in_sorted_order() {
+        // A DAG prefix feeding a cycle, plus an unrelated cyclic pair, to pin
+        // that ALL cycle members trail at the end in sorted-id order while the
+        // acyclic part is emitted dependencies-first.
+        // Graph: head -> root (root is a plain rect, count 0);
+        //        a cycle z<->y; a cycle q<->p.
+        // Acyclic nodes: root (0), head (1, dep root). Emit root, head.
+        // Cyclic nodes never reach 0: p,q,y,z -> trail sorted: p,q,y,z.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("root")),
+            reference("head", "root"),
+            reference("z", "y"),
+            reference("y", "z"),
+            reference("q", "p"),
+            reference("p", "q"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert_eq!(
+            idx.cycles,
+            vec!["p", "q", "y", "z"].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            idx.topo_order,
+            vec!["root", "head", "p", "q", "y", "z"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn topo_order_node_blocked_by_cycle_trails_with_remnants() {
+        // A node that DEPENDS on a cycle but is not ON it (tail -> c1, c1<->c2)
+        // never reaches dependency-count 0, so it is a remnant too. The remnants
+        // are ALL un-emitted nodes appended in sorted order — here the superset
+        // {c1, c2, tail}, NOT just the cycle set {c1, c2}. There is no acyclic
+        // prefix (every node is blocked), so topo_order is exactly the sorted
+        // remnants. This pins that `cycles` is a SUBSET of the remnants.
+        let doc = doc_with_layer(vec![
+            reference("tail", "c1"),
+            reference("c1", "c2"),
+            reference("c2", "c1"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert_eq!(
+            idx.cycles,
+            vec!["c1", "c2"].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            idx.topo_order,
+            vec!["c1", "c2", "tail"].into_iter().map(String::from).collect::<Vec<_>>(),
+            "tail is blocked by the cycle -> a remnant, appended sorted after the cycle"
+        );
+    }
+
+    #[test]
+    fn topo_order_self_cycle_node_trails() {
+        // A self-targeting reference is a cycle of one; it must trail after the
+        // acyclic nodes in sorted order. tail -> leaf (leaf count 0); self -> self.
+        let doc = doc_with_layer(vec![
+            rect_with_id(Some("leaf")),
+            reference("tail", "leaf"),
+            reference("self", "self"),
+        ]);
+        let idx = dependency_index(&doc);
+        assert_eq!(idx.cycles, vec!["self".to_string()]);
+        assert_eq!(
+            idx.topo_order,
+            vec!["leaf", "tail", "self"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
     }
 }

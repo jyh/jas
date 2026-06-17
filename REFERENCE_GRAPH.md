@@ -185,11 +185,20 @@ it has its **own canonical JSON serializer** (sorted keys, sorted arrays — mir
 the test-json / menu-structure serializers) used only for cross-language fixtures.
 Rebuild-on-demand in Phase 3 (no Model storage; no consumer caches it yet).
 
-**Deferred:** `topo_order` (Phase-4 recompute ordering; the highest cross-language
-iteration-order desync risk) and **write-time cycle rejection** (Fork F4 nicety: no
-authoring op can *form* a cycle — `create_reference` only makes brand-new references
-with no incoming edges — so eval-time cycle-break + the `cycles` report suffice).
-First consumer of `rdeps`/`dangling` will be reference-aware delete (its own UX fork).
+`topo_order` (Phase 4a): a deterministic dependency-first ordering (a reference's
+target precedes the reference), Kahn's algorithm with **sorted-id tie-breaking,
+emitted level-by-level** (each pass emits the whole current ready set in sorted
+order, then applies that level's decrements — so a node freed by an emission waits
+for the next level; this is the pinned ordering). **Remnants** (nodes never reaching
+in-degree 0) are appended in sorted-id order — note this is a **superset** of
+`cycles` (a node that *depends on* a cycle without being on it is also a remnant), so
+the earlier "remnants == cycles" claim is wrong. The recompute cache (P4c) consumes
+it. Pinned by the `topo_order` key in `dependency_index.json` + a chain/diamond
+fixture `dependency_index_chain`.
+
+**Still deferred:** **write-time cycle rejection** (Fork F4 nicety: no authoring op
+can *form* a cycle — `create_reference` only makes brand-new references with no
+incoming edges — so eval-time cycle-break + the `cycles` report suffice).
 
 ---
 
