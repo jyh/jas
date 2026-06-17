@@ -360,10 +360,25 @@ let rec element_svg indent (elem : Element.element) =
     (* A reference is native SVG <use href="#id"> (REFERENCE_GRAPH.md
        Phase 2a). Its own id/opacity/transform ride the common attrs; the
        target is the href. Any <use> imports back as a live reference
-       (decision F-svg-use). *)
-    Printf.sprintf "%s<use href=\"#%s\"%s%s%s/>"
+       (decision F-svg-use).
+
+       Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+       field is distinct from [ref_transform] (which rides the
+       <use transform=...> attr via [transform_attr]). It is emitted as
+       data-jas-instance-transform in the same matrix format as
+       [transform_attr], and ONLY when set so existing <use> fixtures stay
+       byte-identical. *)
+    let inst_xform = match r.ref_instance_transform with
+      | None -> ""
+      | Some (t : Element.transform) ->
+        Printf.sprintf " data-jas-instance-transform=\"matrix(%s,%s,%s,%s,%s,%s)\""
+          (fmt t.a) (fmt t.b) (fmt t.c) (fmt t.d)
+          (fmt (px t.e)) (fmt (px t.f))
+    in
+    Printf.sprintf "%s<use href=\"#%s\"%s%s%s%s/>"
       indent (escape_xml r.ref_target) (id_attr r.ref_id)
       (opacity_attr r.ref_opacity) (transform_attr r.ref_transform)
+      inst_xform
 
 (* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
    Stored as <jas:document-setup> and <jas:print-preferences> children
@@ -676,6 +691,20 @@ let parse_stroke attrs =
         | None -> false in
       Some (Element.make_stroke ~width ~linecap ~linejoin ~opacity
               ~dash_align_anchors c)
+
+(* Parse a [matrix(a,b,c,d,e,f)] value from the named attribute, returning
+   None when the attribute is absent or malformed. Used for the Symbols P4
+   instance transform (data-jas-instance-transform); e/f are converted from
+   px to pt to match the common transform attr (SYMBOLS.md section 4 /
+   Fork F2). *)
+let parse_matrix_attr attrs name =
+  match get_attr attrs name with
+  | None -> None
+  | Some s ->
+    try Scanf.sscanf s "matrix(%f,%f,%f,%f,%f,%f)"
+      (fun a b c d e f ->
+        Some { Element.a; b; c; d; e = pt e; f = pt f })
+    with _ -> None
 
 let parse_transform attrs =
   match get_attr attrs "transform" with
@@ -1016,7 +1045,15 @@ let rec parse_element i =
           if String.length target > 0 && target.[0] = '#'
           then String.sub target 1 (String.length target - 1)
           else target in
-        Some (Element.make_reference ~opacity ~transform target)
+        (* Symbols P4: the instance transform field rides
+           data-jas-instance-transform (same matrix format as the common
+           transform attr; e/f are px on the wire, pt in the model). *)
+        let inst_t = parse_matrix_attr attrs "data-jas-instance-transform" in
+        (match Element.make_reference ~opacity ~transform target with
+         | Element.Live (Element.Reference r) ->
+           Some (Element.Live (Element.Reference
+             { r with ref_instance_transform = inst_t }))
+         | other -> Some other)
       | _ ->
         skip_element i;
         None

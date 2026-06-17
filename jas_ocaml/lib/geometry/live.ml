@@ -271,7 +271,19 @@ and reference_evaluate_with r precision resolver visiting =
       visiting := VisitSet.add r.ref_target !visiting;
       let ps = element_to_polygon_set_with target precision resolver visiting in
       visiting := VisitSet.remove r.ref_target !visiting;
-      ps
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+         field (distinct from [ref_transform], which renders as the CTM) is
+         applied to the resolved geometry here, so an instance can be
+         mirrored / scaled relative to its master. This single seam covers
+         every consumer of the resolved set — both render sites, polygon-set,
+         and compound-operand use. None yields the geometry unchanged (no
+         transform, no double-apply). *)
+      (match r.ref_instance_transform with
+       | Some t ->
+         List.map (fun ring ->
+           Array.map (fun (x, y) -> apply_point t x y) ring
+         ) ps
+       | None -> ps)
     | None -> [] (* dangling: target not found *)
 
 (* Convenience wrapper that resolves no references — see

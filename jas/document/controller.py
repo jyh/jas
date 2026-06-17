@@ -15,7 +15,7 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Fill, Gradient, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Visibility,
+    Element, Fill, Gradient, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
@@ -299,13 +299,21 @@ class Controller:
         # Independent copy of the resolved target, born id-less.
         copy = clear_ids(target)
 
-        # Apply the instance's transform override. Compose if the copy already
-        # carries one (instance transform applied on top of the copy's),
-        # otherwise just set it.
-        if elem.transform is not None:
+        # Apply the instance's transform overrides. The render composition is
+        # transform (CTM) ∘ instance_transform (Symbols P4 / Fork F2); detach
+        # must fold BOTH onto the copy so neither is dropped. Build the
+        # instance-side transform first (CTM ∘ instance field), then compose
+        # onto any transform the copy already carries.
+        if elem.transform is not None and elem.instance_transform is not None:
+            inst_combined = elem.transform.multiply(elem.instance_transform)
+        elif elem.transform is not None:
+            inst_combined = elem.transform
+        else:
+            inst_combined = elem.instance_transform
+        if inst_combined is not None:
             copy_t = getattr(copy, "transform", None)
-            composed = elem.transform.multiply(copy_t) \
-                if copy_t is not None else elem.transform
+            composed = inst_combined.multiply(copy_t) \
+                if copy_t is not None else inst_combined
             copy = replace(copy, transform=composed)
         # Apply the instance's paint overrides (only when not None).
         if elem.fill is not None:
@@ -314,6 +322,30 @@ class Controller:
             copy = _with_stroke(copy, elem.stroke)
 
         self._model.document = doc.replace_element(path, copy)
+
+    def set_instance_transform(self, path: ElementPath,
+                               transform: Transform) -> None:
+        """Set the instance transform of the ``ReferenceElem`` at ``path``
+        (Symbols P4, SYMBOLS.md §4 / Fork F2). Value-in-op: the ``transform``
+        is carried in the payload (not minted), letting an instance be mirrored
+        / scaled relative to its master. This is the instance transform,
+        distinct from the render CTM (``transform`` / common.transform); the
+        render composition is CTM ∘ instance transform. No-op when ``path`` is
+        invalid or the element there is not a reference. Mirrors the Rust
+        ``Controller::set_instance_transform``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if not isinstance(elem, ReferenceElem):
+            return
+        # Rebuild the reference with the instance transform set, preserving the
+        # target, paint overrides, and the render CTM.
+        new_elem = replace(elem, instance_transform=transform)
+        self._model.document = doc.replace_element(path, new_elem)
 
     def redefine(self, master_id: str, path: ElementPath,
                  ref_id: str) -> None:

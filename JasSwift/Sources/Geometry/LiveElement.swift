@@ -239,9 +239,18 @@ public struct ReferenceElem: Equatable {
     /// reference carries its identity here inline (matching how it carries
     /// the rest of its common props).
     public var id: String?
-    /// Optional instance transform applied to the resolved geometry.
-    /// Declared now (Fork F2) but always `nil` until Phase 3 wires it.
+    /// The render CTM (Rust's `common.transform`): a whole-element move /
+    /// rotate / scale that rides the render layer only. Set by moveSelection /
+    /// translated; serialized as the `transform` key. Distinct from
+    /// `instanceTransform`.
     public var transform: Transform?
+    /// The instance `transform` field (Symbols P4, SYMBOLS.md §4 / Fork F2):
+    /// an affine applied to the RESOLVED geometry at eval time, so an instance
+    /// can be mirrored/scaled relative to its shared master. Distinct from the
+    /// render CTM (`transform`); the render composition is
+    /// `transform` (CTM) ∘ `instanceTransform` (eval) ∘ target. Serialized as
+    /// the separate `instance_transform` key. `nil` ⇒ geometry unchanged.
+    public var instanceTransform: Transform?
     /// Own paint; `nil` inherits the resolved target's paint (Fork F3).
     public var fill: Fill?
     public var stroke: Stroke?
@@ -256,6 +265,7 @@ public struct ReferenceElem: Equatable {
         target: ElementRef,
         id: String? = nil,
         transform: Transform? = nil,
+        instanceTransform: Transform? = nil,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
         opacity: Double = 1.0,
@@ -267,6 +277,7 @@ public struct ReferenceElem: Equatable {
         self.target = target
         self.id = id
         self.transform = transform
+        self.instanceTransform = instanceTransform
         self.fill = fill
         self.stroke = stroke
         self.opacity = opacity
@@ -298,7 +309,17 @@ public struct ReferenceElem: Equatable {
         let ps = elementToPolygonSetWith(
             resolved, precision: precision, resolver: resolver, visiting: &visiting)
         visiting.remove(target)
-        return ps
+        // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform` field
+        // (distinct from the render CTM, which renders as `transform`) is
+        // applied to the resolved geometry here, so an instance can be
+        // mirrored/scaled relative to its master. This single seam covers every
+        // consumer of the resolved set — both render sites, polygon-set, and
+        // compound-operand use. nil ⇒ return the geometry unchanged (no
+        // transform, no double-apply).
+        guard let t = instanceTransform else { return ps }
+        return ps.map { ring in
+            ring.map { (x, y) in t.applyPoint(x, y) }
+        }
     }
 }
 

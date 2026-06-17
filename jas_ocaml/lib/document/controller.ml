@@ -262,11 +262,23 @@ class controller ?(model = Model.create ()) () =
            | Some target ->
              (* Independent copy of the resolved target, born id-less. *)
              let copy = Element.clear_ids target in
-             (* Apply the instance transform override. Compose if the copy
-                already carries one (instance transform applied on top of the
-                copy one), otherwise just set it. *)
+             (* Apply the instance transform overrides. The render
+                composition is [ref_transform] (CTM) of
+                [ref_instance_transform] (Symbols P4 / Fork F2); detach must
+                fold BOTH onto the copy so neither is dropped. Build the
+                instance-side transform first (common transform of instance
+                field), then compose onto any transform the copy already
+                carries. *)
+             let inst_combined =
+               match instance.Element.ref_transform,
+                     instance.Element.ref_instance_transform with
+               | Some ct, Some it -> Some (Element.multiply ct it)
+               | Some ct, None -> Some ct
+               | None, Some it -> Some it
+               | None, None -> None
+             in
              let copy =
-               match instance.Element.ref_transform with
+               match inst_combined with
                | None -> copy
                | Some inst_t ->
                  let composed =
@@ -288,6 +300,31 @@ class controller ?(model = Model.create ()) () =
                | None -> copy
              in
              model#set_document (Document.replace_element doc path copy))
+        | _ -> ()
+
+    (** Set the instance transform of the reference at [path] (Symbols P4,
+        SYMBOLS.md section 4 / Fork F2). Value-in-op: the [transform] is
+        carried in the payload (not minted), letting an instance be
+        mirrored / scaled relative to its master. This is the instance
+        transform, distinct from [ref_transform] (the render CTM); the
+        render composition is [ref_transform] of the instance transform.
+        No-op when [path] is invalid or the element there is not a
+        reference. *)
+    method set_instance_transform (path : Document.element_path)
+        (transform : Element.transform) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some elem ->
+        match elem with
+        | Element.Live (Element.Reference instance) ->
+          (* Rebuild the reference with the instance transform set,
+             preserving the target, paint overrides, and common props. *)
+          let updated =
+            { instance with
+              Element.ref_instance_transform = Some transform } in
+          let new_elem = Element.Live (Element.Reference updated) in
+          model#set_document (Document.replace_element doc path new_elem)
         | _ -> ()
 
     (** Redefine: replace the master with id [master_id] in [doc.symbols] with

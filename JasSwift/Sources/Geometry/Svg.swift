@@ -72,6 +72,15 @@ private func transformAttr(_ t: Transform?) -> String {
     return " transform=\"matrix(\(fmt(t.a)),\(fmt(t.b)),\(fmt(t.c)),\(fmt(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))\""
 }
 
+/// The Symbols P4 instance `transform` field (SYMBOLS.md §4 / Fork F2),
+/// emitted as data-jas-instance-transform in the same matrix format as
+/// `transformAttr` (e/f converted pt→px), and ONLY when set. Distinct from
+/// the render CTM, which rides the `transform` attr.
+private func instanceTransformAttr(_ t: Transform?) -> String {
+    guard let t = t else { return "" }
+    return " data-jas-instance-transform=\"matrix(\(fmt(t.a)),\(fmt(t.b)),\(fmt(t.c)),\(fmt(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))\""
+}
+
 private func opacityAttr(_ o: Double) -> String {
     o >= 1.0 ? "" : " opacity=\"\(fmt(o))\""
 }
@@ -426,8 +435,16 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // <use href="#id">. Its own id/opacity/transform ride the
             // common attrs; the target is the href. Any <use> imports back
             // as a live reference (the F-svg-use decision).
+            //
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+            // field is distinct from the render CTM (which rides the
+            // <use transform=...> attr via transformAttr). It is emitted as
+            // data-jas-instance-transform in the same matrix format as
+            // transformAttr, and ONLY when set so existing <use> fixtures stay
+            // byte-identical.
             return "\(indent)<use href=\"#\(escapeXml(r.target.id))\"" +
-                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))/>"
+                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))" +
+                "\(instanceTransformAttr(r.instanceTransform))/>"
         }
     }
 }
@@ -1011,6 +1028,21 @@ private func parseTransform(_ node: XMLElement) -> Transform? {
     return nil
 }
 
+/// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
+/// nil when the attribute is absent or malformed. Used for the Symbols P4
+/// instance transform (data-jas-instance-transform); e/f are converted from px
+/// to pt to match the render CTM (`transform`) attr (SYMBOLS.md §4 / Fork F2).
+private func parseMatrixAttr(_ node: XMLElement, _ attr: String) -> Transform? {
+    guard let val = node.attribute(forName: attr)?.stringValue else { return nil }
+    guard val.hasPrefix("matrix(") else { return nil }
+    let inner = val.dropFirst(7).dropLast(1)
+    let parts = inner.split(whereSeparator: { $0 == "," || $0 == " " })
+        .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard parts.count == 6 else { return nil }
+    return Transform(a: parts[0], b: parts[1], c: parts[2],
+                     d: parts[3], e: toPt(parts[4]), f: toPt(parts[5]))
+}
+
 private func parseOpacity(_ node: XMLElement) -> Double {
     Double(node.attribute(forName: "opacity")?.stringValue ?? "1") ?? 1.0
 }
@@ -1408,9 +1440,15 @@ private func parseElement(_ node: XMLNode) -> Element? {
         let href = elem.attribute(forName: "href")?.stringValue
                 ?? elem.attribute(forName: "xlink:href")?.stringValue ?? ""
         let target = href.hasPrefix("#") ? String(href.dropFirst()) : href
+        // Symbols P4: the instance `transform` field rides
+        // data-jas-instance-transform (same matrix format as the render CTM
+        // attr; e/f are px on the wire, pt in the model). Distinct from
+        // `transform` (the render CTM, already parsed above).
         return .live(.reference(ReferenceElem(
             target: ElementRef(target), id: id,
-            transform: transform, opacity: opacity)))
+            transform: transform,
+            instanceTransform: parseMatrixAttr(elem, "data-jas-instance-transform"),
+            opacity: opacity)))
 
     default:
         return nil

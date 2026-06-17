@@ -231,6 +231,54 @@ let test_resolver_of_document_resolves_reference () =
   Alcotest.(check bool) "min_x = 0" true (approx_equal min_x 0.0);
   Alcotest.(check bool) "max_x = 10" true (approx_equal max_x 10.0)
 
+(* --- Symbols P4: the instance transform field (SYMBOLS.md section 4 /
+   Fork F2) --------------------------------------------------------- *)
+
+let test_reference_instance_transform_scales_target () =
+  (* A reference whose instance transform is scale(2,2), targeting a
+     10x10 rect at the origin, evaluates to the rect geometry scaled 2x
+     (a 20x20 ring). The instance transform is applied to every point of
+     the resolved polygon set (composition: instance.transform of
+     geometry). *)
+  let resolver = map_resolver [ ("r1", rect_at 0.0 0.0) ] in
+  let r = { (reference_elem "r1") with
+            ref_instance_transform = Some (make_scale 2.0 2.0) } in
+  let visiting = ref Live.VisitSet.empty in
+  let scaled = Live.reference_evaluate r Live.default_precision resolver visiting in
+  (* Unscaled reference for comparison. *)
+  let plain = reference_elem "r1" in
+  let visiting2 = ref Live.VisitSet.empty in
+  let unscaled =
+    Live.reference_evaluate plain Live.default_precision resolver visiting2 in
+  Alcotest.(check int) "same ring count, just scaled"
+    (List.length unscaled) (List.length scaled);
+  let (sminx, sminy, smaxx, smaxy) = bbox_of_ring (List.hd scaled) in
+  let (uminx, uminy, umaxx, umaxy) = bbox_of_ring (List.hd unscaled) in
+  Alcotest.(check bool) "min_x scaled 2x" true (approx_equal sminx (uminx *. 2.0));
+  Alcotest.(check bool) "min_y scaled 2x" true (approx_equal sminy (uminy *. 2.0));
+  Alcotest.(check bool) "max_x scaled 2x" true (approx_equal smaxx (umaxx *. 2.0));
+  Alcotest.(check bool) "max_y scaled 2x" true (approx_equal smaxy (umaxy *. 2.0));
+  (* Concretely: the 10x10 rect at origin scales to a 20x20 box. *)
+  Alcotest.(check bool) "min at origin" true
+    (approx_equal sminx 0.0 && approx_equal sminy 0.0);
+  Alcotest.(check bool) "max at 20,20" true
+    (approx_equal smaxx 20.0 && approx_equal smaxy 20.0);
+  Alcotest.(check bool) "visiting empty" true (Live.VisitSet.is_empty !visiting)
+
+let test_reference_none_instance_transform_unchanged () =
+  (* The default instance transform is None; eval is identical to the
+     resolved target geometry (no transform applied, no double-apply). *)
+  let resolver = map_resolver [ ("r1", rect_at 0.0 0.0) ] in
+  let r = reference_elem "r1" in
+  Alcotest.(check bool) "instance transform defaults to None" true
+    (r.ref_instance_transform = None);
+  let visiting = ref Live.VisitSet.empty in
+  let via_ref = Live.reference_evaluate r Live.default_precision resolver visiting in
+  (* Equal to evaluating the target rect directly. *)
+  let direct = Live.element_to_polygon_set (rect_at 0.0 0.0) Live.default_precision in
+  Alcotest.(check bool) "None instance transform leaves geometry unchanged"
+    true (via_ref = direct)
+
 let test_compound_has_no_dependencies () =
   let cs = {
     operation = Op_union;
@@ -276,5 +324,9 @@ let () =
           test_resolver_of_document_resolves_reference;
         Alcotest.test_case "compound shape has no dependencies" `Quick
           test_compound_has_no_dependencies;
+        Alcotest.test_case "instance transform scales target geometry" `Quick
+          test_reference_instance_transform_scales_target;
+        Alcotest.test_case "None instance transform leaves eval unchanged" `Quick
+          test_reference_none_instance_transform_unchanged;
       ]
     ]

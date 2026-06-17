@@ -969,6 +969,86 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+// MARK: - Symbols P4 — the instance `transform` field (SYMBOLS.md §4 / Fork F2)
+
+@Test func setInstanceTransformSetsTheField() {
+    // setInstanceTransform writes the given Transform into the instance's
+    // `instanceTransform` field, leaving `transform` (the render CTM)
+    // untouched — the two are independent. Mirrors Rust
+    // set_instance_transform_sets_the_field.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Precondition: a fresh instance has no instance transform.
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        #expect(re.instanceTransform == nil)
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        let t = re.instanceTransform
+        #expect(t != nil)
+        #expect((t!.a, t!.d) == (2, 2))
+        #expect((t!.b, t!.c, t!.e, t!.f) == (0, 0, 0, 0))
+        // The render CTM (`transform`) is left alone (still nil for a fresh
+        // instance).
+        #expect(re.transform == nil,
+            "setInstanceTransform must not touch the render CTM")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func setInstanceTransformNonReferenceIsNoop() {
+    // The element at `path` is a plain rect, not a reference -> no-op (no
+    // crash, the rect is unchanged). Mirrors Rust
+    // set_instance_transform_non_reference_is_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("expected an unchanged Rect at [0,0]")
+    }
+}
+
+@Test func detachComposesInstanceTransformField() {
+    // An instance carrying BOTH a render CTM (a translate, on `transform`) AND
+    // a non-nil instance `transform` field (a scale, on `instanceTransform`)
+    // -> the detached copy composes both, in render order
+    // (CTM ∘ instanceTransform), so detach drops neither. Mirrors Rust
+    // detach_composes_instance_transform_field.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Render CTM = translate(24, 24).
+    ctrl.selectElement([0, 0])
+    ctrl.moveSelection(dx: 24, dy: 24)
+    // Instance transform = scale(2, 2).
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    ctrl.detach([0, 0])
+
+    let copy = ctrl.document.getElement([0, 0])
+    let t = copy.transform
+    #expect(t != nil)
+    // Expected = translate(24,24) ∘ scale(2,2) (the master copy has no own
+    // transform, so the composition is exactly CTM * instance).
+    let expected = Transform.translate(24, 24).multiply(Transform.scale(2, 2))
+    #expect(abs(t!.a - expected.a) < 1e-9)
+    #expect(abs(t!.b - expected.b) < 1e-9)
+    #expect(abs(t!.c - expected.c) < 1e-9)
+    #expect(abs(t!.d - expected.d) < 1e-9)
+    #expect(abs(t!.e - expected.e) < 1e-9)
+    #expect(abs(t!.f - expected.f) < 1e-9)
+    // Concretely: scale 2, then translate 24.
+    #expect((t!.a, t!.d) == (2, 2))
+    #expect((t!.e, t!.f) == (24, 24))
+}
+
 @Test func redefineSwapsMasterAndMakesInstance() {
     // makeSymbol a rect (m1), add a separate circle, then redefine m1 from the
     // circle -> doc.symbols[m1] becomes the circle, and the circle's path

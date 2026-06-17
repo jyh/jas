@@ -733,6 +733,78 @@ let () =
          | Some t -> assert (t.e = 24.0 && t.f = 24.0)
          | None -> assert false));
 
+      Alcotest.test_case "set_instance_transform sets the field" `Quick
+        (fun () ->
+        (* Symbols P4 (SYMBOLS.md section 4 / Fork F2):
+           set_instance_transform writes the given transform into the
+           instance ref_instance_transform field, leaving ref_transform
+           untouched (the two are independent). *)
+        let si_ctrl = Jas.Controller.create () in
+        si_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        si_ctrl#make_symbol [0; 0] "m1" "i1";
+        (* Precondition: a fresh instance has no instance transform. *)
+        (match Jas.Document.get_element si_ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_instance_transform = None)
+         | _ -> assert false);
+        si_ctrl#set_instance_transform [0; 0] (make_scale 2.0 2.0);
+        (match Jas.Document.get_element si_ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           (match re.Jas.Element.ref_instance_transform with
+            | Some t ->
+              assert (t.a = 2.0 && t.d = 2.0);
+              assert (t.b = 0.0 && t.c = 0.0 && t.e = 0.0 && t.f = 0.0)
+            | None -> assert false);
+           (* ref_transform is left alone (still None for a fresh instance). *)
+           assert (re.Jas.Element.ref_transform = None)
+         | _ -> assert false));
+
+      Alcotest.test_case "set_instance_transform non reference is noop" `Quick
+        (fun () ->
+        (* The element at path is a plain rect, not a reference -> no-op (no
+           exception, the rect is unchanged). *)
+        let sn_ctrl = Jas.Controller.create () in
+        sn_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        sn_ctrl#set_instance_transform [0; 0] (make_scale 2.0 2.0);
+        (match Jas.Document.get_element sn_ctrl#document [0; 0] with
+         | Rect _ -> () | _ -> assert false));
+
+      Alcotest.test_case "detach composes instance transform field" `Quick
+        (fun () ->
+        (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): an instance carrying
+           BOTH a ref_transform (a translate) AND a non-None instance
+           transform field (a scale) -> the detached copy composes both, in
+           render order (ref_transform of instance transform), so detach
+           drops neither. *)
+        let dc_ctrl = Jas.Controller.create () in
+        dc_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dc_ctrl#make_symbol [0; 0] "m1" "i1";
+        (* ref_transform = translate(24, 24). *)
+        dc_ctrl#select_element [0; 0];
+        dc_ctrl#move_selection 24.0 24.0;
+        (* instance transform = scale(2, 2). *)
+        dc_ctrl#set_instance_transform [0; 0] (make_scale 2.0 2.0);
+        dc_ctrl#detach [0; 0];
+        let copy = Jas.Document.get_element dc_ctrl#document [0; 0] in
+        (match Jas.Element.get_transform copy with
+         | Some t ->
+           (* Expected = translate(24,24) of scale(2,2). The master copy has
+              no own transform, so the composition is exactly
+              ref_transform * instance. *)
+           let expected =
+             Jas.Element.multiply (make_translate 24.0 24.0)
+               (make_scale 2.0 2.0) in
+           assert (abs_float (t.a -. expected.a) < 1e-9);
+           assert (abs_float (t.b -. expected.b) < 1e-9);
+           assert (abs_float (t.c -. expected.c) < 1e-9);
+           assert (abs_float (t.d -. expected.d) < 1e-9);
+           assert (abs_float (t.e -. expected.e) < 1e-9);
+           assert (abs_float (t.f -. expected.f) < 1e-9);
+           (* Concretely: scale 2, then translate 24. *)
+           assert (t.a = 2.0 && t.d = 2.0);
+           assert (t.e = 24.0 && t.f = 24.0)
+         | None -> assert false));
+
       Alcotest.test_case "detach applies instance paint override" `Quick
         (fun () ->
         (* An instance with its own fill -> the detached copy adopts that

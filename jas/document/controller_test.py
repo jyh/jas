@@ -995,6 +995,79 @@ class SymbolOpsTest(absltest.TestCase):
         ref = self._as_reference(ctrl, (0, 0))
         self.assertEqual(ref.target, "ghost")
 
+    def test_detach_composes_instance_transform_field(self):
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): an instance carrying BOTH a
+        # render CTM (transform = a translate) AND a non-None instance
+        # transform field (a scale) → the detached copy composes both, in
+        # render order (transform ∘ instance_transform), so detach drops
+        # neither.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        # transform (the render CTM) = translate(24, 24).
+        ctrl.select_element((0, 0))
+        ctrl.move_selection(24, 24)
+        # instance_transform = scale(2, 2).
+        ctrl.set_instance_transform((0, 0), Transform.scale(2.0, 2.0))
+        ctrl.detach((0, 0))
+
+        copy = ctrl.document.get_element((0, 0))
+        t = copy.transform
+        self.assertIsNotNone(t, "composed transform on copy")
+        # Expected = translate(24,24) ∘ scale(2,2) (the master copy has no own
+        # transform, so the composition is exactly transform * instance).
+        expected = Transform.translate(24.0, 24.0).multiply(
+            Transform.scale(2.0, 2.0))
+        self.assertAlmostEqual(t.a, expected.a)
+        self.assertAlmostEqual(t.b, expected.b)
+        self.assertAlmostEqual(t.c, expected.c)
+        self.assertAlmostEqual(t.d, expected.d)
+        self.assertAlmostEqual(t.e, expected.e)
+        self.assertAlmostEqual(t.f, expected.f)
+        # Concretely: scale 2, then translate 24.
+        self.assertEqual((t.a, t.d), (2.0, 2.0))
+        self.assertEqual((t.e, t.f), (24.0, 24.0))
+
+    # ── set_instance_transform ─────────────────────────────────
+
+    def test_set_instance_transform_sets_the_field(self):
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): set_instance_transform writes
+        # the given Transform into the instance's instance_transform field,
+        # leaving the render CTM (transform) untouched (the two are
+        # independent).
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        # Precondition: a fresh instance has no instance transform.
+        self.assertIsNone(self._as_reference(ctrl, (0, 0)).instance_transform)
+
+        ctrl.set_instance_transform((0, 0), Transform.scale(2.0, 2.0))
+        ref = self._as_reference(ctrl, (0, 0))
+        t = ref.instance_transform
+        self.assertIsNotNone(t, "instance transform set")
+        self.assertEqual((t.a, t.d), (2.0, 2.0))
+        self.assertEqual((t.b, t.c, t.e, t.f), (0.0, 0.0, 0.0, 0.0))
+        # transform (the render CTM) is left alone (still None for a fresh
+        # instance).
+        self.assertIsNone(ref.transform,
+            "set_instance_transform must not touch the render CTM")
+
+    def test_set_instance_transform_non_reference_is_noop(self):
+        # The element at path is a plain rect, not a reference → no-op
+        # (no error, the rect is unchanged).
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.set_instance_transform((0, 0), Transform.scale(2.0, 2.0))
+        self.assertIsInstance(ctrl.document.get_element((0, 0)), Rect)
+
+    def test_set_instance_transform_invalid_path_is_noop(self):
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        ctrl.set_instance_transform((0, 9), Transform.scale(2.0, 2.0))
+        # Instance unchanged: still no instance transform.
+        self.assertIsNone(self._as_reference(ctrl, (0, 0)).instance_transform)
+
     # ── redefine ───────────────────────────────────────────────
 
     def test_redefine_swaps_master_and_makes_instance(self):

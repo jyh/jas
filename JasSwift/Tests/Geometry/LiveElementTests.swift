@@ -308,3 +308,67 @@ private func bareReference(_ target: String) -> Element {
     }
     #expect((re.transform!.e, re.transform!.f) == (24, 24))
 }
+
+// MARK: - Symbols P4: the instance `transform` field (SYMBOLS.md §4 / Fork F2)
+//
+// Swift's ReferenceElem carries TWO transforms: `transform` plays Rust's
+// render-only `common.transform` (the CTM), and `instanceTransform` plays
+// Rust's instance `transform` field — the affine applied to the resolved
+// geometry at eval time, so an instance can be mirrored/scaled relative to
+// its master. Mirrors Rust live.rs reference_instance_transform_* tests.
+
+@Test func referenceInstanceTransformScalesTargetGeometry() {
+    // A reference whose instance `transform` is scale(2,2), targeting a 10x10
+    // rect at the origin, evaluates to the rect geometry scaled 2x (a 20x20
+    // ring). The instance transform is applied to every point of the resolved
+    // PolygonSet (composition: instanceTransform ∘ geometry). Mirrors Rust
+    // `reference_instance_transform_scales_target_geometry`.
+    let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
+    var reference = ReferenceElem(target: ElementRef("r1"))
+    reference.instanceTransform = Transform.scale(2, 2)
+    var visiting = VisitSet()
+    let scaled = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+
+    // Unscaled reference for comparison.
+    let plain = ReferenceElem(target: ElementRef("r1"))
+    let resolver2 = MapResolver(map: ["r1": rectAt(0, 0)])
+    var visiting2 = VisitSet()
+    let unscaled = plain.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver2, visiting: &visiting2)
+
+    #expect(scaled.count == unscaled.count)  // same ring count, just scaled
+    let (sminx, sminy, smaxx, smaxy) = bboxOfRing(scaled[0])
+    let (uminx, uminy, umaxx, umaxy) = bboxOfRing(unscaled[0])
+    #expect(abs(sminx - uminx * 2) < 1e-6)
+    #expect(abs(sminy - uminy * 2) < 1e-6)
+    #expect(abs(smaxx - umaxx * 2) < 1e-6)
+    #expect(abs(smaxy - umaxy * 2) < 1e-6)
+    // Concretely: the 10x10 rect at origin scales to a 20x20 box.
+    #expect(abs(sminx - 0) < 1e-6 && abs(sminy - 0) < 1e-6)
+    #expect(abs(smaxx - 20) < 1e-6 && abs(smaxy - 20) < 1e-6)
+    #expect(visiting.isEmpty)
+}
+
+@Test func referenceNoneInstanceTransformLeavesEvalUnchanged() {
+    // The default instance transform is nil; eval is identical to the resolved
+    // target geometry (no transform applied, no double-apply). Mirrors Rust
+    // `reference_none_instance_transform_leaves_eval_unchanged`.
+    let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
+    let reference = ReferenceElem(target: ElementRef("r1"))
+    #expect(reference.instanceTransform == nil, "instance transform defaults to nil")
+    var visiting = VisitSet()
+    let viaRef = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    // Equal to evaluating the target rect directly, coordinate-by-coordinate
+    // (BoolPolygonSet tuples are not Equatable).
+    let direct = elementToPolygonSet(rectAt(0, 0), precision: DEFAULT_PRECISION)
+    #expect(viaRef.count == direct.count,
+        "nil instance transform leaves the resolved geometry unchanged")
+    for (rr, dr) in zip(viaRef, direct) {
+        #expect(rr.count == dr.count)
+        for (rp, dp) in zip(rr, dr) {
+            #expect(rp.0 == dp.0 && rp.1 == dp.1)
+        }
+    }
+}

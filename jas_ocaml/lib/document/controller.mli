@@ -17,6 +17,8 @@ class controller : ?model:Model.model -> unit -> object
     Document.element_path -> string -> string -> unit
   method place_instance : string -> string -> unit
   method detach : Document.element_path -> unit
+  method set_instance_transform :
+    Document.element_path -> Element.transform -> unit
   method redefine :
     string -> Document.element_path -> string -> unit
   method delete_symbol : string -> unit
