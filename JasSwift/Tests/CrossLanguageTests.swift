@@ -75,6 +75,10 @@ private func assertSvgRoundtrip(_ name: String) {
         // <g data-jas-live="compound_shape" data-jas-operation="...">.
         // live_compound_id additionally carries the compound's own id.
         "live_reference", "live_compound", "live_compound_id",
+        // Symbols P1: <defs> master + <use> instance round-trips through SVG
+        // (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols, not
+        // layers, and re-export identically.
+        "symbols_basic",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -108,6 +112,11 @@ private func assertSvgRoundtrip(_ name: String) {
 /// REFERENCE_GRAPH.md §4: the compound's own id="..." attribute imports
 /// into CompoundShape.id (name stays excluded for live elements).
 @Test func svgParseLiveCompoundId() { assertSvgParse("live_compound_id") }
+/// Symbols P1 (SYMBOLS.md §10): the <defs> master (id="m1") imports into
+/// doc.symbols (NOT layers); the <use href="#m1" id="i1"> imports as a live
+/// reference in the layer. The canonical JSON shows the `symbols` array + the
+/// instance. All apps parse it to the identical canonical JSON.
+@Test func svgParseSymbolsBasic() { assertSvgParse("symbols_basic") }
 
 /// Pins the motivating equivalence bug (REFERENCE_GRAPH.md §4): import the
 /// id-less live_compound.svg, stamp an id onto the compound via
@@ -215,6 +224,9 @@ private func assertJsonRoundtrip(_ name: String) {
         // additionally carries the compound's own id (REFERENCE_GRAPH.md §4).
         "live_reference_roundtrip", "live_compound_roundtrip",
         "live_compound_id",
+        // Symbols P1: the `symbols` array (a master) + the instance in layers
+        // round-trips through test_json (SYMBOLS.md §10).
+        "symbols_basic",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -242,6 +254,9 @@ private func readFixtureData(_ path: String) -> Data {
         // live_compound_id additionally carries the compound's own id (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",
         "live_compound_id",
+        // Symbols P1: the master store rides the trailing element array in the
+        // binary document (SYMBOLS.md §5); JSON-compare round-trip.
+        "symbols_basic",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -267,6 +282,9 @@ private func readFixtureData(_ path: String) -> Data {
         // compound's own id through the binary common block (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",
         "live_compound_id",
+        // Symbols P1: decode the Python-generated symbols_basic.bin (master
+        // store + instance) to the exact expected JSON (SYMBOLS.md §5).
+        "symbols_basic",
     ]
     for name in names {
         let binData = readFixtureData("expected/\(name).bin")

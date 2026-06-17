@@ -466,6 +466,22 @@ public func documentToSvg(_ doc: Document) -> String {
         }
         lines.append("  </sodipodi:namedview>")
     }
+    // Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
+    // inside a single <defs> block (each as its normal element SVG, carrying
+    // its id), placed before the layer content so the standard SVG
+    // non-rendered-definition mechanism applies. Emitted only when the store
+    // is non-empty (so existing fixtures stay byte-identical), sorted by id
+    // (the §2 deterministic-order rule). Instances ride the existing
+    // <use href="#id"> path in the layer tree. On import, <defs> children
+    // become doc.symbols (see svgToDocument).
+    if !doc.symbols.isEmpty {
+        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+        lines.append("  <defs>")
+        for master in sortedMasters {
+            lines.append(elementSvg(master, indent: "    "))
+        }
+        lines.append("  </defs>")
+    }
     for layer in doc.layers {
         lines.append(elementSvg(.layer(layer), indent: "  "))
     }
@@ -1425,12 +1441,29 @@ public func svgToDocument(_ svg: String) -> Document {
 
     let (parsedSetup, parsedPrefs) = parseJasPrintBlocks(root)
     var layers: [Layer] = []
+    // Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
+    // into doc.symbols (NOT into layers), so masters are never painted in
+    // document order. Each <defs> child is its normal element (carrying its
+    // id); instances ride the existing <use href="#id"> path in the layers.
+    var symbols: [Element] = []
     if let childNodes = root.children {
         for child in childNodes {
             // Skip the namedview wrapper — it carries
             // <jas:document-setup> / <jas:print-preferences>
             // metadata pulled out by parseJasPrintBlocks above.
             if let elem = child as? XMLElement, elem.localName == "namedview" {
+                continue
+            }
+            // A <defs> block holds the master store: its element children
+            // become doc.symbols, never layers.
+            if let defs = child as? XMLElement, defs.localName == "defs" {
+                if let defChildren = defs.children {
+                    for def in defChildren {
+                        if let master = parseElement(def) {
+                            symbols.append(master)
+                        }
+                    }
+                }
                 continue
             }
             guard let elem = parseElement(child) else { continue }
@@ -1457,7 +1490,7 @@ public func svgToDocument(_ svg: String) -> Document {
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
     return dedupeElementIds(normalizeDocument(Document(
-        layers: layers, artboards: [],
+        layers: layers, symbols: symbols, artboards: [],
         documentSetup: parsedSetup,
         printPreferences: parsedPrefs)))
 }

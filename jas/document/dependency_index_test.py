@@ -160,6 +160,26 @@ class DependencyIndexTest(absltest.TestCase):
         self.assertEqual(idx.deps.get("g_ref"), ["a"])
         self.assertEqual(idx.rdeps.get("a"), ["g_ref"])
 
+    def test_symbols_master_is_targetable_and_instance_resolves(self):
+        # SYMBOLS.md §6: an instance (a reference) in `layers` targeting a
+        # master in `doc.symbols`. The targetable-set walk includes symbols,
+        # so the instance is NOT dangling and rdeps[master] lists the instance.
+        from dataclasses import replace
+        master = replace(_rect_with_id("m1"), width=30.0, height=40.0)
+        doc = replace(
+            _doc_with_layer([_reference("i1", "m1")]),
+            symbols=(master,))
+
+        idx = dependency_index(doc)
+        # The instance's edge resolves to a targetable master -> not dangling.
+        self.assertEqual(idx.dangling, [],
+                         "instance -> master must not be dangling")
+        # rdeps[m1] is exactly the instance i1.
+        self.assertEqual(idx.rdeps.get("m1"), ["i1"])
+        # The instance's out-edge is recorded; no cycles.
+        self.assertEqual(idx.deps.get("i1"), ["m1"])
+        self.assertEqual(idx.cycles, [])
+
     # -----------------------------------------------------------------------
     # orphaned_references predicate (reference-aware delete core)
     # -----------------------------------------------------------------------

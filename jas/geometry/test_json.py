@@ -683,7 +683,22 @@ def document_to_test_json(doc: Document) -> str:
         o.raw("print_preferences", _print_preferences_json(doc.print_preferences))
     o.int_("selected_layer", doc.selected_layer)
     o.raw("selection", _selection_json(doc.selection))
+    # Symbols (master store, SYMBOLS.md §5): emit only when non-empty so
+    # existing fixtures stay byte-identical, mirroring print_preferences /
+    # artboards. Masters are sorted by id (the §2 deterministic-order rule);
+    # an id-less master sorts as the empty string.
+    if doc.symbols:
+        o.raw("symbols", _symbols_json(doc.symbols))
     return o.build()
+
+
+def _symbols_json(symbols) -> str:
+    """Serialize the master store as a sorted-by-id JSON array of element JSON.
+    Sorting is on `id` (id-less masters sort as the empty string) so the
+    output is deterministic regardless of storage order (SYMBOLS.md §2)."""
+    sorted_masters = sorted(symbols, key=lambda m: getattr(m, "id", None) or "")
+    items = [_element_json(m) for m in sorted_masters]
+    return _json_array(items)
 
 
 # ------------------------------------------------------------------ #
@@ -1233,8 +1248,13 @@ def test_json_to_document(json_str: str) -> Document:
     artboard_options = _parse_artboard_options(d.get("artboard_options", None))
     document_setup = _parse_document_setup(d.get("document_setup", None))
     print_preferences = _parse_print_preferences(d.get("print_preferences", None))
+    # Symbols (master store): absent key -> empty (legacy fixtures predate
+    # symbols and stay byte-identical). Masters parse with the same
+    # _parse_element as layer content.
+    symbols = tuple(_parse_element(m) for m in d.get("symbols", []))
     return dedupe_element_ids(Document(
-                    layers=layers, selected_layer=selected_layer,
+                    layers=layers, symbols=symbols,
+                    selected_layer=selected_layer,
                     selection=selection,
                     artboards=artboards,
                     artboard_options=artboard_options,

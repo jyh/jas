@@ -165,6 +165,8 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols: a master in doc.symbols + an instance referencing it.
+            "symbols_basic",
         ];
         for name in &names {
             let bin_path = format!("{}/expected/{}.bin", FIXTURES, name);

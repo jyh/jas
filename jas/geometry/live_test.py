@@ -304,3 +304,53 @@ def test_resolver_from_document_indexes_nested_descendants():
     # The top-level layer id is intentionally excluded (references
     # target shapes, not layers). Mirrors Rust register_ref_index.
     assert resolver.resolve("lyr") is None
+
+
+# ── Symbols P1: an instance resolves a master from doc.symbols ──────
+# Mirror jas_dioxus live.rs instance_resolves_to_master_geometry_from_symbols
+# and render.rs render_ref_index_resolves_master_from_symbols.
+
+
+def test_resolver_from_document_resolves_master_from_symbols():
+    """SYMBOLS.md §10 RESOLVE gate: ONE master rect (id "m1") in
+    doc.symbols and ONE instance (a ReferenceElem id "i1" targeting "m1")
+    in a layer. resolver_from_document ALSO indexes doc.symbols (a master's
+    OWN id is the target), so the instance evaluates to the master's
+    geometry — non-empty and equal to the rect's polygon set. This is the
+    whole point of the off-canvas store: masters are resolvable but never in
+    `layers`, so render never paints them."""
+    from dataclasses import replace
+    from document.document import Document
+    from geometry.element import Layer, ReferenceElem
+    from geometry.live import (
+        DEFAULT_PRECISION,
+        element_to_polygon_set,
+        resolver_from_document,
+    )
+
+    # The master rect (matching symbols_basic) lives ONLY in doc.symbols.
+    master = replace(_rect_at(9.0, 18.0, 27.0, 36.0), id="m1")
+    # The instance lives in a layer, off the master.
+    instance = ReferenceElem(target="m1", id="i1")
+    doc = Document(
+        layers=(Layer(name="Layer", children=(instance,)),),
+        symbols=(master,),
+    )
+
+    resolver = resolver_from_document(doc)
+    # The master (off-canvas) resolves by its OWN id from doc.symbols.
+    assert resolver.resolve("m1") is master
+    # The instance evaluates to the master's geometry (a single ring) equal
+    # to evaluating the master rect directly.
+    visiting: set = set()
+    resolved = instance.evaluate_with(DEFAULT_PRECISION, resolver, visiting)
+    assert resolved, "instance must resolve to the master geometry"
+    master_ps = element_to_polygon_set(master, DEFAULT_PRECISION)
+    assert resolved == master_ps, (
+        "resolved instance geometry must equal the master rect's polygon set")
+    assert not visiting, "cycle-guard set restored after resolve"
+    # Masters are never painted: the master lives only in doc.symbols, never
+    # in the layer tree (the off-canvas guarantee).
+    assert len(doc.layers[0].children) == 1, "layer holds only the instance"
+    assert doc.layers[0].children[0] is instance
+    assert len(doc.symbols) == 1, "the master lives only in doc.symbols"

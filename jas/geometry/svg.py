@@ -638,6 +638,21 @@ def document_to_svg(doc: Document) -> str:
         if not prefs_default:
             lines.append(_print_preferences_to_xml(doc.print_preferences, "    "))
         lines.append('  </sodipodi:namedview>')
+    # Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
+    # inside a single <defs> block (each as its normal element SVG, carrying
+    # its id), placed before the layer content so the standard SVG
+    # non-rendered-definition mechanism applies. Emitted only when the store
+    # is non-empty (so existing fixtures stay byte-identical), sorted by id
+    # (the §2 deterministic-order rule). Instances ride the existing
+    # <use href="#id"> path in the layer tree. On import, <defs> children
+    # become doc.symbols (see svg_to_document).
+    if doc.symbols:
+        sorted_masters = sorted(
+            doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+        lines.append("  <defs>")
+        for master in sorted_masters:
+            lines.append(_element_svg(master, "    "))
+        lines.append("  </defs>")
     for layer in doc.layers:
         lines.append(_element_svg(layer, "  "))
     lines.append("</svg>")
@@ -1609,9 +1624,22 @@ def svg_to_document(svg: str) -> Document:
         return Document(layers=(Layer(children=()),))
     parsed_setup, parsed_prefs = _parse_jas_print_blocks(root)
     layers: list[Layer] = []
+    # Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
+    # into doc.symbols (NOT into layers), so masters are never painted in
+    # document order. Each <defs> child is its normal element (carrying its
+    # id); instances ride the existing <use href="#id"> path in the layers.
+    symbols: list[Element] = []
     for child in root:
         # Skip namedview — its children are pulled out above.
         if _strip_ns(child.tag) == "namedview":
+            continue
+        # A <defs> block holds the master store: its element children become
+        # doc.symbols, never layers.
+        if _strip_ns(child.tag) == "defs":
+            for def_child in child:
+                master = _parse_element(def_child)
+                if master is not None:
+                    symbols.append(master)
             continue
         elem = _parse_element(child)
         if elem is None:
@@ -1637,5 +1665,6 @@ def svg_to_document(svg: str) -> Document:
         layers = [Layer(children=())]
     return dedupe_element_ids(normalize_document(Document(
         layers=tuple(layers),
+        symbols=tuple(symbols),
         document_setup=parsed_setup,
         print_preferences=parsed_prefs)))

@@ -175,6 +175,15 @@ class Document:
     a list of artboards (ARTBOARDS.md), and document-global artboard
     options."""
     layers: tuple[Layer, ...] = (Layer(name="Layer"),)
+    # Off-canvas master store for Symbols (SYMBOLS.md §2, Fork S1). Each
+    # master is a plain Element keyed by its `id`; instances are
+    # ReferenceElems targeting a master id. AUTHORITATIVE document data
+    # (unlike the derived dependency index), so it IS part of equality and
+    # every codec. It is NOT in `layers`, so render and hit-test never touch
+    # it (masters are never painted). Storage order is unconstrained, but it
+    # MUST be emitted sorted-by-id at every order-dependent site (codecs,
+    # resolver, index) per §2 deterministic order.
+    symbols: tuple[Element, ...] = ()
     selected_layer: int = 0
     selection: Selection = frozenset()
     artboards: tuple = ()

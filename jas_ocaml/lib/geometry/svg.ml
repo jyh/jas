@@ -525,8 +525,31 @@ let document_to_svg doc =
       else [] in
     opens @ setup @ prefs @ ["  </sodipodi:namedview>"]
   end else [] in
+  (* Symbols (master store, SYMBOLS.md section 5 / Fork S3): masters
+     serialize inside a single <defs> block (each as its normal element
+     SVG, carrying its id), placed before the layer content so the
+     standard SVG non-rendered-definition mechanism applies. Emitted only
+     when the store is non-empty (so existing fixtures stay
+     byte-identical), sorted by id (the section 2 deterministic-order
+     rule). Instances ride the existing <use href="#id"> path in the
+     layer tree. On import, <defs> children become doc.symbols (see
+     svg_to_document). *)
+  let defs_lines =
+    if Array.length doc.Document.symbols = 0 then []
+    else begin
+      let id_of m = match Element.id_of m with Some s -> s | None -> "" in
+      let sorted =
+        Array.to_list doc.Document.symbols
+        |> List.stable_sort (fun a b -> String.compare (id_of a) (id_of b))
+      in
+      ["  <defs>"]
+      @ List.map (element_svg "    ") sorted
+      @ ["  </defs>"]
+    end
+  in
   let layer_lines = Array.to_list (Array.map (element_svg "  ") doc.Document.layers) in
-  String.concat "\n" (header_lines @ namedview_lines @ layer_lines @ ["</svg>"])
+  String.concat "\n"
+    (header_lines @ namedview_lines @ defs_lines @ layer_lines @ ["</svg>"])
 
 (* ----------------------------------------------------------------------- *)
 (* SVG Import: parse SVG XML string back to a Document                     *)
@@ -1238,6 +1261,36 @@ and parse_children i =
   loop ();
   Array.of_list (List.rev !children)
 
+(* Parse the body of the top-level <svg> element, separating the master
+   store from the layer content (SYMBOLS.md section 5 / Fork S3). A
+   <defs> block holds the masters: its element children become
+   doc.symbols (NOT layers), so masters are never painted in document
+   order. Every other child is the normal layer content (instances ride
+   the existing <use href="#id"> path in the layers). Returns
+   [(layer_children, symbols)]. Mirrors parse_children but peels off
+   <defs>. *)
+and parse_svg_body i =
+  let layers = ref [] in
+  let symbols = ref [] in
+  let rec loop () =
+    match Xmlm.peek i with
+    | `El_end -> let _ = Xmlm.input i in ()
+    | `Data _ -> let _ = Xmlm.input i in loop ()
+    | `El_start ((_, "defs"), _) ->
+      let _ = Xmlm.input i in (* consume <defs> start *)
+      let defs = parse_children i in (* consumes through </defs> *)
+      Array.iter (fun m -> symbols := m :: !symbols) defs;
+      loop ()
+    | `El_start _ ->
+      (match parse_element i with
+       | Some e -> layers := e :: !layers
+       | None -> ());
+      loop ()
+    | `Dtd _ -> let _ = Xmlm.input i in loop ()
+  in
+  loop ();
+  (Array.of_list (List.rev !layers), Array.of_list (List.rev !symbols))
+
 and skip_element i =
   (* skip all children until end tag *)
   let rec loop depth =
@@ -1568,7 +1621,9 @@ let svg_to_document svg =
     (match Xmlm.peek i with `Dtd _ -> let _ = Xmlm.input i in () | _ -> ());
     (* expect <svg> start *)
     (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected <svg> element");
-    let children = parse_children i in
+    (* <defs> children become the master store (doc.symbols), every
+       other child is layer content (SYMBOLS.md section 5 / Fork S3). *)
+    let (children, symbols) = parse_svg_body i in
     let layers = Array.to_list (Array.map (fun elem ->
       match elem with
       | Element.Layer _ -> elem
@@ -1581,6 +1636,7 @@ let svg_to_document svg =
     Normalize.dedupe_element_ids
       (Normalize.normalize_document
          (Document.make_document
+            ~symbols
             ~document_setup:parsed_setup
             ~print_preferences:parsed_prefs
             (Array.of_list layers)))

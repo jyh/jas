@@ -418,7 +418,14 @@ def _pack_selection(sel: frozenset[ElementSelection]) -> list:
 
 def _pack_document(doc: Document) -> list:
     layers = [_pack_element(l) for l in doc.layers]
-    return [layers, doc.selected_layer, _pack_selection(doc.selection)]
+    # Symbols (master store, SYMBOLS.md §5): appended to the positional
+    # document array AFTER the existing fields, as a (possibly empty) element
+    # array sorted by id (the §2 deterministic-order rule). Trailing position
+    # keeps existing .bin fixtures (which predate symbols) decodable — unpack
+    # tolerates the field's absence via arr index 3.
+    sorted_masters = sorted(doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+    symbols = [_pack_element(m) for m in sorted_masters]
+    return [layers, doc.selected_layer, _pack_selection(doc.selection), symbols]
 
 
 # -- Unpack (msgpack structure -> Document) ----------------------------------
@@ -637,7 +644,16 @@ def _unpack_document(arr: list) -> Document:
     layers = tuple(_unpack_element(l) for l in arr[0])
     selected_layer = arr[1]
     selection = _unpack_selection(arr[2])
-    return Document(layers=layers, selected_layer=selected_layer,
+    # Symbols (master store): a trailing element array at index 3. TOLERANT of
+    # its absence — existing .bin fixtures predate symbols and decode to an
+    # empty store. Present-but-empty arrays decode the same, so empty-symbols
+    # docs round-trip unchanged.
+    if len(arr) > 3 and isinstance(arr[3], list):
+        symbols = tuple(_unpack_element(m) for m in arr[3])
+    else:
+        symbols = ()
+    return Document(layers=layers, symbols=symbols,
+                    selected_layer=selected_layer,
                     selection=selection)
 
 

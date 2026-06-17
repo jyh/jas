@@ -15,7 +15,11 @@ from geometry.element import Element, Fill, Group, Stroke
 def normalize_document(doc: Document) -> Document:
     """Normalize all elements: extract color alpha into fill/stroke opacity,
     set color alpha to 1.0."""
-    return replace(doc, layers=tuple(_normalize_element(l) for l in doc.layers))
+    return replace(
+        doc,
+        layers=tuple(_normalize_element(l) for l in doc.layers),
+        # Masters get the same opacity normalization as layer content.
+        symbols=tuple(_normalize_element(m) for m in doc.symbols))
 
 
 def dedupe_element_ids(doc: Document) -> Document:
@@ -32,7 +36,12 @@ def dedupe_element_ids(doc: Document) -> Document:
     recursing into Group/Layer children only (mirroring the Rust reference).
     """
     seen: set[str] = set()
-    return replace(doc, layers=tuple(_dedupe_walk(l, seen) for l in doc.layers))
+    layers = tuple(_dedupe_walk(l, seen) for l in doc.layers)
+    # The id space spans layers + symbols (SYMBOLS.md §6): the master store is
+    # part of the same pre-order walk so a master id can never collide with a
+    # layer-element id. Layers walk first (first-pre-order-wins), then symbols.
+    symbols = tuple(_dedupe_walk(m, seen) for m in doc.symbols)
+    return replace(doc, layers=layers, symbols=symbols)
 
 
 def _dedupe_walk(elem: Element, seen: set[str]) -> Element:
