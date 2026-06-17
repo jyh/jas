@@ -481,6 +481,53 @@ mod tests {
                     op["ref_id"].as_str().unwrap(),
                 );
             }
+            // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
+            // paths are read literally from the fixture payload, exactly like
+            // the create_reference arm.
+            "make_symbol" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::make_symbol(
+                    model,
+                    &path,
+                    op["master_id"].as_str().unwrap(),
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
+            "place_instance" => {
+                Controller::place_instance(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
+            "detach" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::detach(model, &path);
+            }
+            "redefine" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::redefine(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                    &path,
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);
@@ -561,7 +608,8 @@ mod tests {
     fn generate_operation_expected() {
         for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json",
                          "operations/controller_ops.json",
-                         "operations/tspan_ops.json"] {
+                         "operations/tspan_ops.json",
+                         "operations/symbols_ops.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -903,6 +951,14 @@ mod tests {
     #[test]
     fn operation_tspan_ops() {
         run_operation_fixture("operations/tspan_ops.json");
+    }
+
+    /// Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol, place_instance,
+    /// detach, redefine. Each setup parses through the P1 SVG <defs> codec, runs
+    /// the op, and pins the canonical JSON all four apps must reproduce.
+    #[test]
+    fn operation_symbols_ops() {
+        run_operation_fixture("operations/symbols_ops.json");
     }
 
     // ---------------------------------------------------------------

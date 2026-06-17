@@ -134,6 +134,46 @@ impl Default for BooleanOptions {
     }
 }
 
+/// Find the first id-bearing element named `id`, searching `doc.symbols`
+/// (sorted-by-id for determinism, matching every order-dependent symbols site)
+/// then `doc.layers` in pre-order. A pure lookup — no entropy — used by
+/// `Controller::detach` to resolve an instance's target across both the
+/// off-canvas master store and the canvas tree (SYMBOLS.md §7). Returns an
+/// owned clone so callers can mutate it independently.
+fn find_element_by_id(doc: &Document, id: &str) -> Option<Element> {
+    fn walk(elem: &Element, id: &str) -> Option<Element> {
+        if elem.common().id.as_deref() == Some(id) {
+            return Some(elem.clone());
+        }
+        if let Some(children) = elem.children() {
+            for child in children {
+                if let Some(found) = walk(child, id) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    // Symbols first, in sorted-by-id order (the §2 deterministic-order rule).
+    let mut sorted_masters: Vec<&Element> = doc.symbols.iter().collect();
+    sorted_masters.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    for master in sorted_masters {
+        if let Some(found) = walk(master, id) {
+            return Some(found);
+        }
+    }
+    // Then the layer tree.
+    for layer in &doc.layers {
+        if let Some(found) = walk(layer, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
@@ -227,6 +267,161 @@ impl Controller {
             ),
         ));
         Self::add_element(model, reference);
+    }
+
+    // -----------------------------------------------------------------------
+    // Symbols P2 — operations (SYMBOLS.md §7). Value-in-op: every id is minted
+    // by the initiator/UI and carried in the op payload, never minted inside the
+    // Controller (same rule as create_reference / assign_id), so all apps apply
+    // identical values. Each clones the doc, mutates, and set_document — no
+    // internal snapshot; the caller owns undo.
+    // -----------------------------------------------------------------------
+
+    /// Make Symbol (promote): move the element at `path` into `doc.symbols` as a
+    /// master and leave a `ReferenceElem` instance in its place (SYMBOLS.md §7,
+    /// Fork S6 — the dual of Detach). Assign-on-create: if the element already
+    /// has a `common.id`, that id is KEPT as the master key and `master_id` is
+    /// ignored (mirrors create_reference's target rule); otherwise `master_id`
+    /// is stamped. The instance carries `common.id = ref_id` and targets the
+    /// master id. Net: the master lives off-canvas in `symbols`, an instance
+    /// sits where the element was, so the canvas looks unchanged (the instance
+    /// resolves to the master geometry). No-op on an invalid path.
+    pub fn make_symbol(
+        model: &mut Model,
+        path: &ElementPath,
+        master_id: &str,
+        ref_id: &str,
+    ) {
+        let doc = model.document().clone();
+        let Some(target) = doc.get_element(path) else { return };
+        // Resolve the master id: keep the element's own id if it has one,
+        // else stamp the carried master_id (assign-on-create).
+        let resolved_id = target.common().id.clone()
+            .unwrap_or_else(|| master_id.to_string());
+        // The master carries the resolved id.
+        let mut master = target.clone();
+        master.common_mut().id = Some(resolved_id.clone());
+        // The in-place instance targets the master id, with its own ref_id.
+        let reference = Element::Live(crate::geometry::live::LiveVariant::Reference(
+            crate::geometry::live::ReferenceElem::new(
+                crate::geometry::live::ElementRef(resolved_id),
+                crate::geometry::element::CommonProps {
+                    id: Some(ref_id.to_string()),
+                    ..crate::geometry::element::CommonProps::default()
+                },
+            ),
+        ));
+        // Replace the element in place with the instance, then push the master
+        // into the off-canvas store.
+        let mut new_doc = doc.replace_element(path, reference);
+        new_doc.symbols.push(master);
+        model.set_document(new_doc);
+    }
+
+    /// Place Instance: append a `ReferenceElem` targeting an existing master
+    /// (`master_id`) to the active layer via [`add_element`] (which auto-selects
+    /// it) — exactly like create_reference's final step (SYMBOLS.md §7). No
+    /// offset: placement offset is a UI concern (like Make Instance handles it
+    /// separately). It is fine if `master_id` does not currently exist; the
+    /// instance simply renders empty until the master appears (dangling is
+    /// already handled by the resolver). The instance carries `common.id =
+    /// ref_id`, minted by the initiator.
+    pub fn place_instance(model: &mut Model, master_id: &str, ref_id: &str) {
+        let reference = Element::Live(crate::geometry::live::LiveVariant::Reference(
+            crate::geometry::live::ReferenceElem::new(
+                crate::geometry::live::ElementRef(master_id.to_string()),
+                crate::geometry::element::CommonProps {
+                    id: Some(ref_id.to_string()),
+                    ..crate::geometry::element::CommonProps::default()
+                },
+            ),
+        ));
+        Self::add_element(model, reference);
+    }
+
+    /// Detach (break the link / expand): replace the `ReferenceElem` instance at
+    /// `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md §7,
+    /// Fork S6 — the inverse of Make Symbol). The target id is resolved by a
+    /// pure lookup over ALL id-bearing elements (`doc.symbols` AND `layers`;
+    /// deterministic, no entropy). The copy is born id-less ([`clear_ids`], per
+    /// the duplication rule) and the instance's own overrides are applied onto
+    /// it: its `common.transform` (set, or compose if the copy already has one)
+    /// and its paint (`fill`/`stroke` applied only when `Some`). The master and
+    /// every other instance are untouched, and nothing is minted. No-op when the
+    /// path is invalid, not a reference, or the target is unresolvable.
+    pub fn detach(model: &mut Model, path: &ElementPath) {
+        let doc = model.document().clone();
+        let Some(elem) = doc.get_element(path) else { return };
+        // Must be a reference instance.
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Reference(instance),
+        ) = elem else { return };
+        // Resolve the target id over symbols + layers (a pure id->element map).
+        let target_id = &instance.target.0;
+        let Some(target) = find_element_by_id(&doc, target_id) else { return };
+
+        // Independent copy of the resolved target, born id-less.
+        let mut copy = target;
+        crate::geometry::element::clear_ids(&mut copy);
+
+        // Apply the instance's transform override. Compose if the copy already
+        // carries one (instance transform applied on top of the copy's),
+        // otherwise just set it.
+        if let Some(inst_t) = instance.common.transform {
+            let composed = match copy.common().transform {
+                Some(copy_t) => inst_t.multiply(&copy_t),
+                None => inst_t,
+            };
+            copy.common_mut().transform = Some(composed);
+        }
+        // Apply the instance's paint overrides (only when Some).
+        if instance.fill.is_some() {
+            copy = crate::geometry::element::with_fill(&copy, instance.fill.clone());
+        }
+        if instance.stroke.is_some() {
+            copy = crate::geometry::element::with_stroke(&copy, instance.stroke.clone());
+        }
+
+        model.set_document(doc.replace_element(path, copy));
+    }
+
+    /// Redefine: replace the master with id `master_id` in `doc.symbols` with a
+    /// clone of the element at `path` (re-id the clone to `master_id`), then
+    /// replace the element at `path` in place with a `ReferenceElem` instance
+    /// (`common.id = ref_id`, targeting `master_id`) — the selection becomes an
+    /// instance of the redefined master (SYMBOLS.md §7, Fork S2). All other
+    /// instances of `master_id` re-resolve to the new definition on the next
+    /// paint. No-op when `master_id` is not in `symbols` or `path` is invalid.
+    pub fn redefine(
+        model: &mut Model,
+        master_id: &str,
+        path: &ElementPath,
+        ref_id: &str,
+    ) {
+        let doc = model.document().clone();
+        // The master must already exist.
+        let Some(master_idx) = doc.symbols.iter().position(|m| {
+            m.common().id.as_deref() == Some(master_id)
+        }) else { return };
+        let Some(source) = doc.get_element(path) else { return };
+
+        // New master = clone of the selection, re-id'd to master_id.
+        let mut new_master = source.clone();
+        new_master.common_mut().id = Some(master_id.to_string());
+
+        // The selection becomes an instance of the redefined master.
+        let reference = Element::Live(crate::geometry::live::LiveVariant::Reference(
+            crate::geometry::live::ReferenceElem::new(
+                crate::geometry::live::ElementRef(master_id.to_string()),
+                crate::geometry::element::CommonProps {
+                    id: Some(ref_id.to_string()),
+                    ..crate::geometry::element::CommonProps::default()
+                },
+            ),
+        ));
+        let mut new_doc = doc.replace_element(path, reference);
+        new_doc.symbols[master_idx] = new_master;
+        model.set_document(new_doc);
     }
 
     /// Append ``element`` to the mask subtree of the element at
@@ -3315,6 +3510,229 @@ mod tests {
         } else {
             panic!("expected a Reference at [0,1]");
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // Symbols P2 — operations (SYMBOLS.md §7)
+    // ----------------------------------------------------------------------
+
+    /// Helper: pull a `ReferenceElem` out of the element at `path` or panic.
+    fn as_reference<'a>(
+        doc: &'a Document,
+        path: &ElementPath,
+    ) -> &'a crate::geometry::live::ReferenceElem {
+        match doc.get_element(path) {
+            Some(Element::Live(crate::geometry::live::LiveVariant::Reference(re))) => re,
+            other => panic!("expected a Reference at {path:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn make_symbol_promotes_and_leaves_instance() {
+        // An id-less element → make_symbol stamps master_id, moves the element
+        // into doc.symbols as a master, and replaces it in place with an
+        // instance (ref_id, target = master_id).
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        let doc = model.document();
+        // The master lives off-canvas in symbols, carrying master_id.
+        assert_eq!(doc.symbols.len(), 1);
+        assert_eq!(doc.symbols[0].common().id.as_deref(), Some("m1"));
+        assert!(matches!(doc.symbols[0], Element::Rect(_)));
+        // The in-place element is now an instance targeting the master.
+        let re = as_reference(doc, &vec![0, 0]);
+        assert_eq!(re.common.id.as_deref(), Some("i1"));
+        assert_eq!(re.target.0, "m1");
+    }
+
+    #[test]
+    fn make_symbol_keeps_existing_id_as_master_key() {
+        // If the element already carries an id, that id is KEPT as the master
+        // key and master_id is ignored (assign-on-create, like create_reference).
+        let mut model = Model::default();
+        let mut rect = make_rect(0.0, 0.0, 10.0, 10.0);
+        rect.common_mut().id = Some("existing".into());
+        Controller::add_element(&mut model, rect);
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1-ignored", "i1");
+        let doc = model.document();
+        assert_eq!(doc.symbols[0].common().id.as_deref(), Some("existing"));
+        let re = as_reference(doc, &vec![0, 0]);
+        assert_eq!(re.target.0, "existing");
+        assert_eq!(re.common.id.as_deref(), Some("i1"));
+    }
+
+    #[test]
+    fn make_symbol_invalid_path_is_noop() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        let before = model.document().clone();
+        Controller::make_symbol(&mut model, &vec![0, 9], "m1", "i1");
+        // Symbols untouched, element unchanged.
+        assert!(model.document().symbols.is_empty());
+        assert!(matches!(
+            model.document().get_element(&vec![0, 0]).unwrap(),
+            Element::Rect(_)
+        ));
+        let _ = before;
+    }
+
+    #[test]
+    fn place_instance_appends_and_selects() {
+        // place_instance appends a reference to the active layer and selects it.
+        let mut model = Model::default();
+        // Pre-seed a master so the doc has one; not strictly required.
+        let mut master = make_rect(0.0, 0.0, 10.0, 10.0);
+        master.common_mut().id = Some("m1".into());
+        model.document_mut().symbols.push(master);
+
+        Controller::place_instance(&mut model, "m1", "i2");
+        let doc = model.document();
+        // Appended as the only layer child (index 0).
+        let re = as_reference(doc, &vec![0, 0]);
+        assert_eq!(re.target.0, "m1");
+        assert_eq!(re.common.id.as_deref(), Some("i2"));
+        // The new instance is the selection (auto-select via add_element).
+        assert_eq!(doc.selection.len(), 1);
+        assert_eq!(doc.selection[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn place_instance_dangling_master_ok() {
+        // It is fine if the master does not exist; the instance still appears
+        // (renders empty until the master exists — dangling is handled).
+        let mut model = Model::default();
+        Controller::place_instance(&mut model, "ghost", "i9");
+        let re = as_reference(model.document(), &vec![0, 0]);
+        assert_eq!(re.target.0, "ghost");
+        assert_eq!(re.common.id.as_deref(), Some("i9"));
+    }
+
+    #[test]
+    fn detach_replaces_instance_with_idless_copy() {
+        // make_symbol then detach the instance → the path holds an id-less copy
+        // of the master geometry (NOT a reference); the master is untouched.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(3.0, 4.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        Controller::detach(&mut model, &vec![0, 0]);
+        let doc = model.document();
+        // No longer a reference: an independent rect copy.
+        match doc.get_element(&vec![0, 0]).unwrap() {
+            Element::Rect(r) => {
+                assert_eq!((r.x, r.y), (3.0, 4.0));
+                assert_eq!(r.common.id, None, "detached copy is born id-less");
+            }
+            other => panic!("expected an id-less Rect copy, got {other:?}"),
+        }
+        // The master still exists.
+        assert_eq!(doc.symbols.len(), 1);
+        assert_eq!(doc.symbols[0].common().id.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn detach_applies_instance_transform_override() {
+        // An instance with a common.transform offset → the detached copy carries
+        // that transform composed onto the master geometry.
+        use crate::geometry::element::Transform;
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        // Move the instance (rides on common.transform).
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::move_selection(&mut model, 24.0, 24.0);
+        Controller::detach(&mut model, &vec![0, 0]);
+        let copy = model.document().get_element(&vec![0, 0]).unwrap();
+        let t = copy.common().transform.expect("instance transform applied to copy");
+        assert_eq!((t.e, t.f), (24.0, 24.0));
+        let _ = Transform::IDENTITY;
+    }
+
+    #[test]
+    fn detach_applies_instance_paint_override() {
+        // An instance with its own fill → the detached copy adopts that fill.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        // Override the instance's fill.
+        let red = Some(Fill::new(Color::rgb(1.0, 0.0, 0.0)));
+        let new_ref = crate::geometry::element::with_fill(
+            model.document().get_element(&vec![0, 0]).unwrap(),
+            red.clone(),
+        );
+        model.set_document(model.document().replace_element(&vec![0, 0], new_ref));
+        Controller::detach(&mut model, &vec![0, 0]);
+        if let Element::Rect(r) = model.document().get_element(&vec![0, 0]).unwrap() {
+            assert_eq!(r.fill, red);
+        } else {
+            panic!("expected a Rect copy");
+        }
+    }
+
+    #[test]
+    fn detach_non_reference_is_noop() {
+        // A plain element (not a reference) → detach is a no-op.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::detach(&mut model, &vec![0, 0]);
+        assert!(matches!(
+            model.document().get_element(&vec![0, 0]).unwrap(),
+            Element::Rect(_)
+        ));
+    }
+
+    #[test]
+    fn detach_unresolvable_target_is_noop() {
+        // An instance whose target is missing → detach leaves it as-is.
+        let mut model = Model::default();
+        Controller::place_instance(&mut model, "ghost", "i1");
+        Controller::detach(&mut model, &vec![0, 0]);
+        // Still a reference.
+        let re = as_reference(model.document(), &vec![0, 0]);
+        assert_eq!(re.target.0, "ghost");
+    }
+
+    #[test]
+    fn redefine_swaps_master_and_makes_instance() {
+        // make_symbol a rect (m1), add a separate circle, then redefine m1 from
+        // the circle → doc.symbols[m1] becomes the circle, and the circle's path
+        // holds a new instance (ref_id) targeting m1.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        // Add a circle at [0,1].
+        Controller::add_element(&mut model, Element::Circle(CircleElem {
+            cx: 50.0, cy: 50.0, r: 20.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        }));
+        Controller::redefine(&mut model, "m1", &vec![0, 1], "i2");
+        let doc = model.document();
+        // The master is now the circle, keyed by m1.
+        assert_eq!(doc.symbols.len(), 1);
+        assert!(matches!(doc.symbols[0], Element::Circle(_)));
+        assert_eq!(doc.symbols[0].common().id.as_deref(), Some("m1"));
+        // The selection's path is now an instance of m1.
+        let re = as_reference(doc, &vec![0, 1]);
+        assert_eq!(re.target.0, "m1");
+        assert_eq!(re.common.id.as_deref(), Some("i2"));
+        // The original instance still targets m1 (now resolves to the circle).
+        let re0 = as_reference(doc, &vec![0, 0]);
+        assert_eq!(re0.target.0, "m1");
+        assert_eq!(re0.common.id.as_deref(), Some("i1"));
+    }
+
+    #[test]
+    fn redefine_unknown_master_is_noop() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::redefine(&mut model, "nope", &vec![0, 0], "i1");
+        // No symbols created, element unchanged.
+        assert!(model.document().symbols.is_empty());
+        assert!(matches!(
+            model.document().get_element(&vec![0, 0]).unwrap(),
+            Element::Rect(_)
+        ));
     }
 
     #[test]

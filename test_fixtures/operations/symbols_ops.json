@@ -1,0 +1,51 @@
+[
+    {
+        "name": "make_symbol_promotes_first_rect",
+        "setup_svg": "two_rects.svg",
+        "ops": [
+            {
+                "op": "make_symbol",
+                "path": [0, 0],
+                "master_id": "m1",
+                "ref_id": "i1"
+            }
+        ],
+        "expected_json": "make_symbol.json"
+    },
+    {
+        "name": "place_instance_of_existing_master",
+        "setup_svg": "symbols_basic.svg",
+        "ops": [
+            {
+                "op": "place_instance",
+                "master_id": "m1",
+                "ref_id": "i2"
+            }
+        ],
+        "expected_json": "place_instance.json"
+    },
+    {
+        "name": "detach_instance_to_independent_copy",
+        "setup_svg": "symbols_basic.svg",
+        "ops": [
+            {
+                "op": "detach",
+                "path": [0, 0]
+            }
+        ],
+        "expected_json": "detach.json"
+    },
+    {
+        "name": "redefine_master_from_selection",
+        "setup_svg": "symbols_redefine_setup.svg",
+        "ops": [
+            {
+                "op": "redefine",
+                "master_id": "m1",
+                "path": [0, 1],
+                "ref_id": "i2"
+            }
+        ],
+        "expected_json": "redefine.json"
+    }
+]
