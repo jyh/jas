@@ -209,6 +209,56 @@ private struct CycleResolver: ElementResolver {
     #expect(resolver.resolve(ElementRef("missing")) == nil)
 }
 
+// MARK: - Symbols P1: an instance resolves a master from doc.symbols
+
+@Test func instanceResolvesToMasterGeometryFromSymbols() {
+    // SYMBOLS.md §10 RESOLVE gate: the symbols_basic doc — ONE master rect
+    // (id "m1") in doc.symbols and ONE instance (a ReferenceElem id "i1"
+    // targeting "m1") in a layer. A resolver that indexes doc.symbols (as
+    // RebuildResolver does) makes the instance evaluate to the master's
+    // geometry — non-empty and equal to the rect's polygon set. This is the
+    // whole point of the off-canvas store: masters are resolvable but never in
+    // `layers`. Mirrors Rust `instance_resolves_to_master_geometry_from_symbols`.
+    let masterRect = Rect(x: 9, y: 18, width: 27, height: 36, id: "m1")
+    let instance = Element.live(.reference(ReferenceElem(target: ElementRef("m1"), id: "i1")))
+    let doc = Document(
+        layers: [Layer(name: "Layer", children: [instance])],
+        symbols: [.rect(masterRect)])
+
+    // RebuildResolver indexes doc.symbols (the symbols half): a master's OWN
+    // id is the target. The master (off-canvas) resolves by its own id.
+    let resolver = RebuildResolver(document: doc)
+    #expect(resolver.resolve(ElementRef("m1")) != nil,
+        "RebuildResolver must index masters from doc.symbols")
+
+    // The instance evaluates to the master rect's single ring.
+    var visiting = VisitSet()
+    let resolved = elementToPolygonSetWith(
+        instance, precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(!resolved.isEmpty, "instance must resolve to the master geometry")
+    // Equal to evaluating the master rect directly. BoolPolygonSet is
+    // [[(Double, Double)]] (tuples are not Equatable), so compare the rings
+    // coordinate-by-coordinate.
+    let masterPs = elementToPolygonSet(.rect(masterRect), precision: DEFAULT_PRECISION)
+    #expect(resolved.count == masterPs.count,
+        "instance resolves to the master rect's single ring")
+    if resolved.count == masterPs.count {
+        for (rr, mr) in zip(resolved, masterPs) {
+            #expect(rr.count == mr.count)
+            for (rp, mp) in zip(rr, mr) {
+                #expect(rp.0 == mp.0 && rp.1 == mp.1,
+                    "resolved instance geometry must equal the master rect's polygon set")
+            }
+        }
+    }
+    #expect(visiting.isEmpty, "cycle-guard set restored after resolve")
+
+    // Masters are never painted: the master appears only in doc.symbols, never
+    // in the layer tree (the off-canvas guarantee).
+    #expect(doc.layers[0].children.count == 1, "layer holds only the instance")
+    #expect(doc.symbols.count == 1, "the master lives only in doc.symbols")
+}
+
 // MARK: - Moving a reference (Make Instance; mirrors Rust element.rs
 // move_reference_* / translate_reference_* tests).
 //

@@ -97,6 +97,15 @@ type selection = element_selection PathMap.t
     artboards and document-global artboard options. *)
 type document = {
   layers : element array;
+  (** Off-canvas master store for Symbols (SYMBOLS.md section 2, Fork S1).
+      Each master is a plain [Element] keyed by its [common.id]; instances are
+      references targeting a master id. AUTHORITATIVE document data (unlike the
+      derived dependency index), so it IS part of equality and every codec. It
+      is NOT in [layers], so render and hit-test never touch it (masters are
+      never painted). Storage order is unconstrained, but it MUST be emitted
+      sorted-by-id at every order-dependent site (codecs, resolver, index) per
+      section 2 "deterministic order". *)
+  symbols : element array;
   selected_layer : int;
   selection : selection;
   artboards : Artboard.artboard list;
@@ -106,6 +115,7 @@ type document = {
 }
 
 let make_document
+    ?(symbols = [||])
     ?(selected_layer = 0)
     ?(selection = PathMap.empty)
     ?(artboards = [])
@@ -113,7 +123,7 @@ let make_document
     ?(document_setup = Document_setup.default)
     ?(print_preferences = Print_preferences.default)
     layers =
-  { layers; selected_layer; selection; artboards; artboard_options;
+  { layers; symbols; selected_layer; selection; artboards; artboard_options;
     document_setup; print_preferences }
 
 (** Build a fully-selected entry for [path]. *)

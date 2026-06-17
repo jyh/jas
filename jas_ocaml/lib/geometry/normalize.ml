@@ -7,6 +7,9 @@
 
 let rec normalize_document (doc : Document.document) =
   Document.make_document
+    (* Masters get the same opacity normalization as layer content
+       (SYMBOLS.md section 5). *)
+    ~symbols:(Array.map normalize_element doc.Document.symbols)
     ~document_setup:doc.Document.document_setup
     ~print_preferences:doc.Document.print_preferences
     (Array.map normalize_element doc.Document.layers)
@@ -101,4 +104,10 @@ let dedupe_element_ids (doc : Document.document) =
     | Element.Layer r -> Element.Layer { r with children = Array.map walk r.children }
     | _ -> elem
   in
-  { doc with Document.layers = Array.map walk doc.Document.layers }
+  (* The id space spans layers + symbols (SYMBOLS.md section 6): the
+     master store is part of the same pre-order walk so a master id can
+     never collide with a layer-element id. Layers walk first
+     (first-pre-order-wins), then symbols, sharing the [seen] set. *)
+  let layers = Array.map walk doc.Document.layers in
+  let symbols = Array.map walk doc.Document.symbols in
+  { doc with Document.layers; Document.symbols }

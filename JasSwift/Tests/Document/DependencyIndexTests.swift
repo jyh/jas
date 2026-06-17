@@ -137,6 +137,26 @@ private func docWithLayer(_ children: [Element]) -> Document {
     #expect(idx.rdeps["cs"] == nil)
 }
 
+@Test func symbolsMasterIsTargetableAndInstanceResolves() {
+    // SYMBOLS.md §6: an instance (a reference) in `layers` targeting a master
+    // in `doc.symbols`. The targetable-set walk includes symbols, so the
+    // instance is NOT dangling and rdeps[master] lists the instance. Mirrors
+    // Rust `symbols_master_is_targetable_and_instance_resolves`.
+    let master = Element.rect(Rect(x: 0, y: 0, width: 30, height: 40, id: "m1"))
+    let doc = Document(
+        layers: [Layer(name: "Layer", children: [reference("i1", "m1")])],
+        symbols: [master])
+
+    let idx = DependencyIndex.build(doc)
+    // The instance's edge resolves to a targetable master -> not dangling.
+    #expect(idx.dangling.isEmpty, "instance -> master must not be dangling")
+    // rdeps[m1] is exactly the instance i1.
+    #expect(idx.rdeps["m1"] == ["i1"])
+    // The instance's out-edge is recorded; no cycles.
+    #expect(idx.deps["i1"] == ["m1"])
+    #expect(idx.cycles.isEmpty)
+}
+
 @Test func groupChildrenAreWalkedButOperandsAreNot() {
     // A group nesting a reference proves the walk recurses into Group/Layer.
     let innerRef = reference("g_ref", "a")

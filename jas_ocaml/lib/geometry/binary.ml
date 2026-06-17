@@ -417,7 +417,20 @@ let pack_selection sel =
 
 let pack_document doc =
   let layers = Array.to_list (Array.map pack_element doc.layers) in
-  vlist [vlist layers; vint doc.selected_layer; pack_selection doc.selection]
+  (* Symbols (master store, SYMBOLS.md section 5): appended to the
+     positional document array AFTER the existing fields, as a (possibly
+     empty) element array sorted by common.id (the section 2
+     deterministic-order rule). Trailing position keeps existing .bin
+     fixtures (which predate symbols) decodable — unpack tolerates the
+     field's absence via List.nth_opt arr 3. *)
+  let id_of m = match Element.id_of m with Some s -> s | None -> "" in
+  let sorted =
+    Array.to_list doc.symbols
+    |> List.stable_sort (fun a b -> String.compare (id_of a) (id_of b))
+  in
+  let symbols = List.map pack_element sorted in
+  vlist [vlist layers; vint doc.selected_layer; pack_selection doc.selection;
+         vlist symbols]
 
 (* -- Unpack -------------------------------------------------------------- *)
 
@@ -742,9 +755,19 @@ let unpack_document v =
   let layers = Array.of_list (List.map unpack_element (as_list (List.nth arr 0))) in
   let selected_layer = as_int (List.nth arr 1) in
   let selection = unpack_selection (List.nth arr 2) in
+  (* Symbols (master store): a trailing element array at index 3.
+     TOLERANT of its absence — existing .bin fixtures predate symbols
+     and decode to an empty store (List.nth_opt arr 3 is None).
+     Present-but-empty arrays decode the same, so empty-symbols docs
+     round-trip unchanged. *)
+  let symbols =
+    match List.nth_opt arr 3 with
+    | Some (Msgpck.List xs) -> Array.of_list (List.map unpack_element xs)
+    | _ -> [||]
+  in
   (* Binary format predates artboards — parsed docs have empty
      artboards; app load-time repair seeds a default. *)
-  { layers; selected_layer; selection;
+  { layers; symbols; selected_layer; selection;
     artboards = [];
     artboard_options = Artboard.default_options;
     document_setup = Document_setup.default;

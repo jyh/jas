@@ -689,7 +689,22 @@ package func documentToTestJson(_ doc: Document) -> String {
     }
     o.int("selected_layer", doc.selectedLayer)
     o.raw("selection", selectionJson(Array(doc.selection)))
+    // Symbols (master store, SYMBOLS.md §5): emit only when non-empty so
+    // existing fixtures stay byte-identical, mirroring print_preferences /
+    // artboards. Masters are sorted by id (the §2 deterministic-order rule);
+    // an id-less master sorts as the empty string.
+    if !doc.symbols.isEmpty {
+        o.raw("symbols", symbolsJson(doc.symbols))
+    }
     return o.build()
+}
+
+/// Serialize the master store as a sorted-by-id JSON array of element JSON.
+/// Sorting is on `id` (id-less masters sort as the empty string) so the output
+/// is deterministic regardless of storage order (SYMBOLS.md §2).
+private func symbolsJson(_ symbols: [Element]) -> String {
+    let sorted = symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+    return jsonArray(sorted.map { elementJson($0) })
 }
 
 // MARK: - JSON → Document parser (inverse of documentToTestJson)
@@ -1220,8 +1235,13 @@ package func testJsonToDocument(_ json: String) -> Document {
     let artboardOptions = parseArtboardOptions(v["artboard_options"])
     let documentSetup = parseDocumentSetup(v["document_setup"])
     let printPreferences = parsePrintPreferences(v["print_preferences"])
+    // Symbols (master store): absent key -> empty (legacy fixtures predate
+    // symbols and stay byte-identical). Masters parse with the same
+    // parseElement as layer content.
+    let symbols: [Element] = (v["symbols"] as? [Any] ?? []).map { parseElement($0) }
     return dedupeElementIds(Document(
         rawLayers: layers,
+        rawSymbols: symbols,
         rawSelectedLayer: selectedLayer,
         rawSelection: selection,
         rawArtboards: artboards,

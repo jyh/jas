@@ -59,7 +59,12 @@ let roundtrip_names = [
    separate from [roundtrip_names] because the latter also seeds
    [binary_names], where Live binary serialization is deferred. *)
 let svg_roundtrip_names =
-  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id"]
+  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id";
+                     (* Symbols P1: <defs> master + <use> instance
+                        round-trips through SVG (SYMBOLS.md section 5 /
+                        Fork S3) — defs masters import to symbols, not
+                        layers, and re-export identically. *)
+                     "symbols_basic"]
 
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
@@ -71,7 +76,11 @@ let svg_roundtrip_names =
    [operation]. *)
 let json_roundtrip_names =
   roundtrip_names @ ["element_ids";
-                     "live_reference_roundtrip"; "live_compound_roundtrip"]
+                     "live_reference_roundtrip"; "live_compound_roundtrip";
+                     (* Symbols P1: the [symbols] array (a master) + the
+                        instance in layers round-trips through test_json
+                        (SYMBOLS.md section 10). *)
+                     "symbols_basic"]
 (* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
    element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
    serialize through binary (TAG_LIVE, kind-discriminated), so both the
@@ -86,7 +95,16 @@ let binary_names =
                         Python-generated 108-byte .bin must decode here, and
                         the JSON to binary to JSON round-trip must preserve the
                         id (REFERENCE_GRAPH.md compound-id round-trip). *)
-                     "live_compound_id"]
+                     "live_compound_id";
+                     (* Symbols P1: the master store rides the trailing element
+                        array in the binary document (SYMBOLS.md section 5); its
+                        Python-generated symbols_basic.bin is the cross-app pin. *)
+                     "symbols_basic"]
+
+(* Binary JSON->binary->JSON round-trip fixtures = [binary_names] (which now
+   includes symbols_basic and also feeds the binary-read-Python test). *)
+let binary_roundtrip_names =
+  binary_names
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
@@ -377,7 +395,7 @@ let () =
     (* Binary round-trip *)
     "Binary round-trip", [
       Alcotest.test_case "binary_roundtrip all expected" `Quick (fun () ->
-        List.iter assert_binary_roundtrip binary_names);
+        List.iter assert_binary_roundtrip binary_roundtrip_names);
     ];
 
     (* Binary read Python fixtures *)
@@ -424,6 +442,12 @@ let () =
       (* Compound id round-trips through SVG (id="..." on the <g>), unlike
          name which live elements never emit. *)
       Alcotest.test_case "svg_parse live_compound_id" `Quick (fun () -> assert_svg_parse "live_compound_id");
+      (* Symbols P1 (SYMBOLS.md section 10): the <defs> master (id="m1")
+         imports into doc.symbols (NOT layers); the
+         <use href="#m1" id="i1"> imports as a live reference in the
+         layer. The canonical JSON shows the [symbols] array + the
+         instance. All apps parse it to the identical canonical JSON. *)
+      Alcotest.test_case "svg_parse symbols_basic" `Quick (fun () -> assert_svg_parse "symbols_basic");
     ];
 
     (* Algorithm test vectors *)
@@ -807,6 +831,87 @@ let () =
             in go 0 in
           Alcotest.(check bool) "rdeps a sorted" true (contains "\"a\":[\"r1\",\"r2\"]");
           Alcotest.(check bool) "deps r1" true (contains "\"r1\":[\"a\"]"));
+    ];
+
+    (* Symbols P1 (SYMBOLS.md section 10): the off-canvas master store.
+       The RESOLVE test shows an instance in a layer evaluates to a
+       master that lives ONLY in doc.symbols; the dep-index test shows
+       the instance -> master edge is not dangling and rdeps[m1]==[i1]. *)
+    "Symbols", [
+      Alcotest.test_case "instance resolves to master geometry from symbols"
+        `Quick (fun () ->
+          (* SYMBOLS.md section 10 RESOLVE gate: ONE master rect (id "m1")
+             in doc.symbols and ONE instance (a reference id "i1"
+             targeting "m1") in a layer. A resolver that indexes
+             doc.symbols (as the canvas render does) makes the instance
+             evaluate to the master's geometry — non-empty and equal to
+             evaluating the master rect directly. This is the whole point
+             of the off-canvas store: masters are resolvable but never in
+             [layers]. *)
+          let master =
+            Jas.Element.with_id
+              (Jas.Element.make_rect 9.0 18.0 27.0 36.0) (Some "m1") in
+          let instance =
+            Jas.Element.make_reference ~id:(Some "i1") "m1" in
+          let doc =
+            Jas.Document.make_document
+              ~symbols:[| master |]
+              [| Jas.Element.make_layer ~name:"Layer" [| instance |] |] in
+          (* The master lives ONLY in doc.symbols, never in layers. *)
+          Alcotest.(check int) "one master in symbols" 1
+            (Array.length doc.Jas.Document.symbols);
+          (* The layer's sole child is the instance (a reference). *)
+          let layer0_children =
+            Jas.Document.children_of doc.Jas.Document.layers.(0) in
+          Alcotest.(check int) "layer holds only the instance" 1
+            (Array.length layer0_children);
+
+          (* Build the resolver spanning layers + symbols (the symbols
+             half is what makes the master resolvable). *)
+          let resolver =
+            Jas.Live.resolver_of_layers_and_symbols
+              doc.Jas.Document.layers doc.Jas.Document.symbols in
+          let precision = Jas.Live.default_precision in
+          let visiting = ref Jas.Live.VisitSet.empty in
+          let resolved =
+            Jas.Live.element_to_polygon_set_with
+              layer0_children.(0) precision resolver visiting in
+          (* Non-empty, and equal to evaluating the master rect directly. *)
+          Alcotest.(check bool) "instance resolves to master geometry"
+            true (resolved <> []);
+          let master_ps =
+            Jas.Live.element_to_polygon_set master precision in
+          Alcotest.(check bool) "resolved equals master rect geometry"
+            true (resolved = master_ps);
+          (* The cycle-guard set is restored after the resolve. *)
+          Alcotest.(check bool) "cycle-guard set restored"
+            true (Jas.Live.VisitSet.is_empty !visiting));
+
+      Alcotest.test_case "symbols master is targetable and instance resolves"
+        `Quick (fun () ->
+          (* SYMBOLS.md section 6: an instance (a reference) in [layers]
+             targeting a master in doc.symbols. The targetable-set walk
+             includes symbols, so the instance is NOT dangling and
+             rdeps[master] lists the instance. *)
+          let master =
+            Jas.Element.with_id
+              (Jas.Element.make_rect 0.0 0.0 30.0 40.0) (Some "m1") in
+          let doc =
+            Jas.Document.make_document
+              ~symbols:[| master |]
+              [| Jas.Element.make_layer ~name:"Layer"
+                   [| dep_reference ~id:"i1" ~target:"m1" |] |] in
+          let idx = Jas.Dependency_index.build doc in
+          (* The instance's edge resolves to a targetable master -> not
+             dangling. *)
+          Alcotest.(check (list string)) "no dangling" [] idx.dangling;
+          (* rdeps[m1] is exactly the instance i1. *)
+          Alcotest.(check (option (list string))) "rdeps m1"
+            (Some ["i1"]) (List.assoc_opt "m1" idx.rdeps);
+          (* The instance's out-edge is recorded; no cycles. *)
+          Alcotest.(check (option (list string))) "deps i1"
+            (Some ["m1"]) (List.assoc_opt "i1" idx.deps);
+          Alcotest.(check (list string)) "no cycles" [] idx.cycles);
     ];
 
     (* Operation equivalence tests *)

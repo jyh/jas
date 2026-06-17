@@ -75,6 +75,10 @@ class CrossLanguageTest(absltest.TestCase):
             "live_reference", "live_compound",
             # A compound with a stable id round-trips its id="..." attr.
             "live_compound_id",
+            # Symbols P1: <defs> master + <use> instance round-trips through
+            # SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
+            # not layers, and re-export identically.
+            "symbols_basic",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -104,6 +108,9 @@ class CrossLanguageTest(absltest.TestCase):
             "live_compound_roundtrip", "live_reference_roundtrip",
             # A compound with a stable id ("c1") round-trips its id field.
             "live_compound_id",
+            # Symbols P1: the `symbols` array (a master) + the instance in
+            # layers round-trips through test_json (SYMBOLS.md §10).
+            "symbols_basic",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -131,6 +138,9 @@ class CrossLanguageTest(absltest.TestCase):
             "live_compound_roundtrip", "live_reference_roundtrip",
             # A compound with a stable id ("c1") round-trips its id field.
             "live_compound_id",
+            # Symbols P1: the master store rides the trailing element array in
+            # the binary document (SYMBOLS.md §5); JSON-compare round-trip.
+            "symbols_basic",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -212,6 +222,13 @@ class CrossLanguageTest(absltest.TestCase):
         # CompoundShape whose stable id is populated from the id attr,
         # matching Rust's common_attrs_no_name (id but no name).
         _assert_svg_parse(self, "live_compound_id")
+
+    def test_svg_parse_symbols_basic(self):
+        # The <defs> master (id="m1") imports into doc.symbols (NOT layers);
+        # the <use href="#m1" id="i1"> imports as a live reference in the
+        # layer. The canonical JSON shows the `symbols` array + the instance.
+        # All apps parse it to the identical canonical JSON (SYMBOLS.md §10).
+        _assert_svg_parse(self, "symbols_basic")
 
     # ---------------------------------------------------------------
     # Algorithm test vectors

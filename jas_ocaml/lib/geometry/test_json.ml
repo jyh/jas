@@ -652,6 +652,18 @@ let print_preferences_json (p : Print_preferences.t) =
   json_bool o "transverse" p.transverse;
   json_build o
 
+(** Serialize the master store as a sorted-by-id JSON array of element
+    JSON. Sorting is on [common.id] (an id-less master sorts as the
+    empty string) so the output is deterministic regardless of storage
+    order (SYMBOLS.md section 2). *)
+let symbols_json (symbols : element array) =
+  let id_of m = match Element.id_of m with Some s -> s | None -> "" in
+  let sorted =
+    Array.to_list symbols
+    |> List.stable_sort (fun a b -> String.compare (id_of a) (id_of b))
+  in
+  json_array (List.map element_json sorted)
+
 (** Serialize a Document to canonical test JSON.
 
     Artboards and artboard_options are omitted when they carry
@@ -674,6 +686,12 @@ let document_to_test_json doc =
     json_raw o "print_preferences" (print_preferences_json doc.print_preferences);
   json_int o "selected_layer" doc.selected_layer;
   json_raw o "selection" (selection_json doc.selection);
+  (* Symbols (master store, SYMBOLS.md section 5): emit only when
+     non-empty so existing fixtures stay byte-identical, mirroring
+     artboards / print_preferences. The builder sorts the "symbols" key
+     into place; the array itself is sorted by common.id. *)
+  if Array.length doc.symbols > 0 then
+    json_raw o "symbols" (symbols_json doc.symbols);
   json_build o
 
 (* ------------------------------------------------------------------ *)
@@ -1383,6 +1401,14 @@ let test_json_to_document json_str =
     | `Null -> Print_preferences.default
     | v -> parse_print_preferences v
   in
+  (* Symbols (master store): absent key -> empty (legacy fixtures
+     predate symbols and stay byte-identical). Masters parse with the
+     same parse_element as layer content. *)
+  let symbols =
+    match j |> member "symbols" with
+    | `Null -> [||]
+    | v -> v |> to_list |> List.map parse_element |> Array.of_list
+  in
   Normalize.dedupe_element_ids
-    (make_document ~selected_layer ~selection ~artboards ~artboard_options
+    (make_document ~symbols ~selected_layer ~selection ~artboards ~artboard_options
        ~document_setup ~print_preferences layers)

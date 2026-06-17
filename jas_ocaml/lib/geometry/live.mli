@@ -38,6 +38,16 @@ val dependencies : Element.live_variant -> Element.element_ref list
     See REFERENCE_GRAPH.md Phase 1b. *)
 val resolver_of_document : Element.element array -> element_resolver
 
+(** Build an [element_resolver] spanning a document's [layers] AND its
+    off-canvas master store [symbols] (SYMBOLS.md section 2). Layers are
+    indexed as in {!resolver_of_document} (descendants only); each master
+    is indexed directly (its OWN id is a valid target, since a master is
+    reached only through a reference). Masters are sorted by id first so a
+    duplicate-id master resolves deterministically. Mirrors Rust
+    [register_ref_index], which indexes layers + doc.symbols. *)
+val resolver_of_layers_and_symbols :
+  Element.element array -> Element.element array -> element_resolver
+
 (** Ring-aware path flattening. MoveTo starts a new ring; ClosePath
     finalizes. Open subpaths finalize at the next MoveTo or end.
     Rings with fewer than 3 points are dropped. Bezier / quad use
