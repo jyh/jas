@@ -209,6 +209,35 @@ private struct CycleResolver: ElementResolver {
     #expect(resolver.resolve(ElementRef("missing")) == nil)
 }
 
+@Test func rebuildIdIndexIndexesDescendantsAndSortedMasters() {
+    // The pure builder (REFERENCE_GRAPH.md §2.3) indexes id-bearing layer
+    // descendants and doc.symbols masters; top-level layers are skipped. This
+    // is the single canonical walk shared by paint and the gate, so its result
+    // must match what IdIndexResolver reads. Mirrors Rust
+    // `rebuild_id_index_indexes_descendants_and_sorted_masters`.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "r1"))
+    // The layer carries an id; it must NOT be a resolution target.
+    let layer = Layer(name: "layer0", children: [rect], id: "layer0")
+    let master = Element.rect(Rect(x: 1, y: 2, width: 3, height: 4, id: "m1"))
+    let doc = Document(layers: [layer], symbols: [master])
+
+    let index = rebuildIdIndex(doc)
+    #expect(index["r1"] != nil, "descendant rect is indexed by id")
+    #expect(index["m1"] != nil, "master is indexed from doc.symbols")
+    #expect(index["layer0"] == nil,
+        "a top-level layer's own id is not a resolution target")
+    // The persistent map equals itself rebuilt (the gate's equality used by the
+    // Model) — and an IdIndexResolver over it resolves identically.
+    #expect(index == rebuildIdIndex(doc), "rebuild is deterministic")
+    let resolver = IdIndexResolver(index: index)
+    #expect(resolver.resolve(ElementRef("r1")) != nil)
+    #expect(resolver.resolve(ElementRef("m1")) != nil)
+    // RebuildResolver delegates to the same walk, so its results match.
+    let rebuild = RebuildResolver(document: doc)
+    #expect(rebuild.resolve(ElementRef("r1")) == resolver.resolve(ElementRef("r1")))
+    #expect(rebuild.resolve(ElementRef("m1")) == resolver.resolve(ElementRef("m1")))
+}
+
 // MARK: - Symbols P1: an instance resolves a master from doc.symbols
 
 @Test func instanceResolvesToMasterGeometryFromSymbols() {

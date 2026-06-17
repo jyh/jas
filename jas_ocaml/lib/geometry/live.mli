@@ -29,22 +29,51 @@ module VisitSet : Set.S with type elt = string
     owned operands); the referenced target for [Reference]. *)
 val dependencies : Element.live_variant -> Element.element_ref list
 
+(** The persistent map backing the id->element index: a [Map.Make(String)]
+    keyed by [Element.element_ref]. Exposed so callers (the Model gate) can
+    compare two indices by value via {!Id_map.equal}. *)
+module Id_map : Map.S with type key = string
+
+(** Persistent id->element index (REFERENCE_GRAPH.md section 2.4, Phase
+    4b). A pure function of the document, carried on the Model paired with
+    the snapshot so paint reads it without rebuilding and undo carries it in
+    O(1) (structure sharing). Sorted, O(log n) lookup. Mirrors the Rust
+    [IdIndex]; per section 2.3 apps may differ in the persistent-map type. *)
+type id_index = Element.element Id_map.t
+
+(** Build the persistent id->element index from a document's [layers] and
+    [symbols]. The SINGLE canonical walk (section 2.3): both the live-index
+    builder and the gate oracle, so its values are bit-identical to the old
+    per-paint rebuild and resolve() results are unchanged. Layers are
+    indexed at each layer's children (top-level layer ids are not Phase-1
+    targets); each master is indexed directly (its own id is a target),
+    masters sorted by id first. First-occurrence wins per id. Mirrors Rust
+    [rebuild_id_index]. *)
+val rebuild_id_index :
+  Element.element array -> Element.element array -> id_index
+
+(** Build an [element_resolver] that reads an already-built persistent
+    index (an O(1) borrow; no rebuild). The hot paint path passes the
+    Model's companion index here. Mirrors the Rust [RenderResolver]. *)
+val resolver_of_index : id_index -> element_resolver
+
 (** Build an [element_resolver] from a document's top-level layers.
     Indexes the id-bearing descendants of each layer (top-level layer
     ids are not Phase-1 resolution targets, so the walk starts at each
-    layer's children). First-occurrence wins per id. Intended to be
-    rebuilt on demand by the canvas render each paint, so by-id
-    references resolve while drawing. Mirrors Rust [register_ref_index].
-    See REFERENCE_GRAPH.md Phase 1b. *)
+    layer's children). First-occurrence wins per id. Equivalent to
+    [resolver_of_index (rebuild_id_index layers [||])]. Mirrors Rust
+    [register_ref_index]. See REFERENCE_GRAPH.md Phase 1b. *)
 val resolver_of_document : Element.element array -> element_resolver
 
 (** Build an [element_resolver] spanning a document's [layers] AND its
-    off-canvas master store [symbols] (SYMBOLS.md section 2). Layers are
-    indexed as in {!resolver_of_document} (descendants only); each master
-    is indexed directly (its OWN id is a valid target, since a master is
-    reached only through a reference). Masters are sorted by id first so a
-    duplicate-id master resolves deterministically. Mirrors Rust
-    [register_ref_index], which indexes layers + doc.symbols. *)
+    off-canvas master store [symbols] (SYMBOLS.md section 2) by rebuilding
+    the index from scratch. Layers are indexed as in {!resolver_of_document}
+    (descendants only); each master is indexed directly (its OWN id is a
+    valid target, since a master is reached only through a reference).
+    Masters are sorted by id first so a duplicate-id master resolves
+    deterministically. Equivalent to [resolver_of_index (rebuild_id_index
+    layers symbols)]; the hot paint path uses {!resolver_of_index} with the
+    Model's persistent index instead. *)
 val resolver_of_layers_and_symbols :
   Element.element array -> Element.element array -> element_resolver
 

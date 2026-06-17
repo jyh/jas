@@ -28,6 +28,14 @@ type editing_target =
 
 class model : ?document:Document.document -> ?filename:string -> unit -> object
   method document : Document.document
+
+  (** Persistent id->element index paired with the current document
+      (REFERENCE_GRAPH.md section 2.4, Phase 4b). Always equal to a
+      from-scratch rebuild of {!document} (held to a debug [assert] gate at
+      every update). The canvas paint path reads this via
+      [Live.resolver_of_index] instead of rebuilding the index per frame;
+      undo/redo carry it in O(1). *)
+  method id_index : Live.id_index
   method set_document : Document.document -> unit
   method filename : string
   method set_filename : string -> unit
