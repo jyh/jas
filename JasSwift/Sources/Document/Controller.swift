@@ -194,11 +194,21 @@ public class Controller {
         // Independent copy of the resolved target, born id-less.
         var copy = target.clearingIds()
 
-        // Apply the instance's transform override. Compose if the copy already
-        // carries one (instance transform applied on top of the copy's),
-        // otherwise just set it — withTransformPremultiplied computes
-        // instT * (copy.transform ?? identity), matching the reference.
-        if let instT = instance.transform {
+        // Apply the instance's transform overrides. The render composition is
+        // `transform` (the render CTM) ∘ `instanceTransform` (Symbols P4 /
+        // Fork F2); detach must fold BOTH onto the copy so neither is dropped.
+        // Build the instance-side transform first (CTM ∘ instance field), then
+        // pre-multiply onto any transform the copy already carries
+        // (withTransformPremultiplied computes instCombined * (copy.transform ??
+        // identity), matching the reference).
+        let instCombined: Transform?
+        switch (instance.transform, instance.instanceTransform) {
+        case let (ct?, it?): instCombined = ct.multiply(it)
+        case let (ct?, nil): instCombined = ct
+        case let (nil, it?): instCombined = it
+        case (nil, nil): instCombined = nil
+        }
+        if let instT = instCombined {
             copy = copy.withTransformPremultiplied(instT)
         }
         // Apply the instance's paint overrides (only when non-nil).
@@ -210,6 +220,24 @@ public class Controller {
         }
 
         model.document = doc.replaceElement(path, with: copy)
+    }
+
+    /// Set the instance `transform` of the `ReferenceElem` at `path` (Symbols
+    /// P4, SYMBOLS.md §4 / Fork F2). Value-in-op: the `transform` is carried in
+    /// the payload (not minted), letting an instance be mirrored/scaled relative
+    /// to its master. This is the instance transform, distinct from the render
+    /// CTM (`transform`); the render composition is
+    /// `transform` (CTM) ∘ instance `transform`. No-op when `path` is invalid
+    /// or the element there is not a reference. Mirrors Rust
+    /// `Controller::set_instance_transform`.
+    public func setInstanceTransform(_ path: ElementPath, transform: Transform) {
+        let doc = model.document
+        guard let elem = doc.tryGetElement(path) else { return }
+        guard case .live(.reference(var instance)) = elem else { return }
+        // Rebuild the reference with the instance transform set, preserving the
+        // target, render CTM, paint overrides, and common props.
+        instance.instanceTransform = transform
+        model.document = doc.replaceElement(path, with: .live(.reference(instance)))
     }
 
     /// Redefine: replace the master with id `masterId` in `doc.symbols` with a

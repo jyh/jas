@@ -460,9 +460,18 @@ def _element_json(elem: Element) -> str:
         o.str("kind", "reference")
         o.str("target", elem.target)
         _common_fields(o, elem)
-        # fill / stroke / transform are emitted only when set; in Phase 1
-        # references carry none (paint inheritance default / Fork F2),
-        # matching how compound omits its own paint here.
+        # fill / stroke are emitted only when set; in Phase 1 references carry
+        # none (paint inheritance default / Fork F2), matching how compound
+        # omits its own paint here.
+        #
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform field
+        # (distinct from the render CTM, which ``_common_fields`` emits as the
+        # ``transform`` key) is emitted as a separate ``instance_transform``
+        # key, and ONLY when set — omitting it when None keeps existing
+        # reference fixtures byte-identical.
+        if elem.instance_transform is not None:
+            o.raw("instance_transform",
+                  _transform_json(elem.instance_transform))
     elif isinstance(elem, CompoundShape):
         o.str("type", "live")
         o.str("kind", "compound_shape")
@@ -974,7 +983,15 @@ def _parse_element(d: dict) -> Element:
             # ReferenceElem is a first-class element with its own id /
             # name (REFERENCE_GRAPH.md §4), so it accepts the full common
             # kwargs — unlike CompoundShape.
-            return ReferenceElem(target=d.get("target", ""), **common)
+            #
+            # Symbols P4: the instance transform field rides the
+            # ``instance_transform`` key (absent ⇒ None / null ⇒ None),
+            # distinct from the render CTM in ``transform`` (SYMBOLS.md §4 /
+            # Fork F2).
+            return ReferenceElem(
+                target=d.get("target", ""),
+                instance_transform=_parse_transform(d.get("instance_transform")),
+                **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 

@@ -175,6 +175,8 @@ mod tests {
             "live_compound_id",
             // Symbols: a master in doc.symbols + an instance referencing it.
             "symbols_basic",
+            // A reference carrying a non-identity instance transform (scale 2x).
+            "reference_instance_transform",
         ];
         for name in &names {
             let bin_path = format!("{}/expected/{}.bin", FIXTURES, name);

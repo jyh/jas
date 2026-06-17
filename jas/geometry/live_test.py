@@ -221,6 +221,57 @@ def test_reference_reports_its_target_as_dependency():
     assert reference.dependencies() == ["t"]
 
 
+# ── Symbols P4: the instance transform field (SYMBOLS.md §4 / Fork F2) ──
+# Mirror the jas_dioxus live.rs instance-transform eval tests. The instance
+# transform (ReferenceElem.instance_transform) is distinct from the render
+# CTM (ReferenceElem.transform / common.transform); it is applied to the
+# resolved PolygonSet here, the single eval seam.
+
+def test_reference_instance_transform_scales_target_geometry():
+    # A reference whose instance transform is scale(2,2), targeting a 10x10
+    # rect at the origin, evaluates to the rect geometry scaled 2x (a 20x20
+    # ring). The instance transform is applied to every point of the resolved
+    # PolygonSet (composition: instance.transform ∘ geometry).
+    from geometry.element import ReferenceElem, Transform
+    from geometry.live import DEFAULT_PRECISION
+    resolver = _MapResolver({"r1": _rect_at(0, 0)})
+    reference = ReferenceElem(target="r1",
+                             instance_transform=Transform.scale(2.0, 2.0))
+    visiting = set()
+    scaled = reference.evaluate_with(DEFAULT_PRECISION, resolver, visiting)
+
+    # Unscaled reference for comparison.
+    plain = ReferenceElem(target="r1")
+    unscaled = plain.evaluate_with(
+        DEFAULT_PRECISION, _MapResolver({"r1": _rect_at(0, 0)}), set())
+
+    assert len(scaled) == len(unscaled)  # same ring count, just scaled
+    sminx, sminy, smaxx, smaxy = _bbox(scaled[0])
+    uminx, uminy, umaxx, umaxy = _bbox(unscaled[0])
+    assert abs(sminx - uminx * 2.0) < 1e-6
+    assert abs(sminy - uminy * 2.0) < 1e-6
+    assert abs(smaxx - umaxx * 2.0) < 1e-6
+    assert abs(smaxy - umaxy * 2.0) < 1e-6
+    # Concretely: the 10x10 rect at origin scales to a 20x20 box.
+    assert abs(sminx - 0.0) < 1e-6 and abs(sminy - 0.0) < 1e-6
+    assert abs(smaxx - 20.0) < 1e-6 and abs(smaxy - 20.0) < 1e-6
+    assert visiting == set()
+
+
+def test_reference_none_instance_transform_leaves_eval_unchanged():
+    # The default instance transform is None; eval is identical to the
+    # resolved target geometry (no transform applied, no double-apply).
+    from geometry.element import ReferenceElem
+    from geometry.live import DEFAULT_PRECISION, element_to_polygon_set
+    resolver = _MapResolver({"r1": _rect_at(0, 0)})
+    reference = ReferenceElem(target="r1")
+    assert reference.instance_transform is None  # defaults to None
+    via_ref = reference.evaluate_with(DEFAULT_PRECISION, resolver, set())
+    # Equal to evaluating the target rect directly.
+    direct = element_to_polygon_set(_rect_at(0, 0), DEFAULT_PRECISION)
+    assert via_ref == direct
+
+
 def test_compound_dependencies_default_empty():
     from geometry.element import CompoundOperation, CompoundShape
     cs = CompoundShape(operation=CompoundOperation.UNION, operands=())

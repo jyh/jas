@@ -79,6 +79,10 @@ class CrossLanguageTest(absltest.TestCase):
             # SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
             # not layers, and re-export identically.
             "symbols_basic",
+            # Symbols P4: the instance transform rides
+            # data-jas-instance-transform on the <use> and round-trips through
+            # SVG distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -111,6 +115,10 @@ class CrossLanguageTest(absltest.TestCase):
             # Symbols P1: the `symbols` array (a master) + the instance in
             # layers round-trips through test_json (SYMBOLS.md §10).
             "symbols_basic",
+            # Symbols P4: a reference whose instance transform field is set
+            # (the instance_transform key) round-trips through test_json
+            # distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -141,6 +149,10 @@ class CrossLanguageTest(absltest.TestCase):
             # Symbols P1: the master store rides the trailing element array in
             # the binary document (SYMBOLS.md §5); JSON-compare round-trip.
             "symbols_basic",
+            # Symbols P4: the instance transform packs at TAG_LIVE slot 9 and
+            # round-trips through binary distinct from the render CTM
+            # (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -230,6 +242,14 @@ class CrossLanguageTest(absltest.TestCase):
         # All apps parse it to the identical canonical JSON (SYMBOLS.md §10).
         _assert_svg_parse(self, "symbols_basic")
 
+    def test_svg_parse_reference_instance_transform(self):
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): a <use> carrying
+        # data-jas-instance-transform="matrix(2,0,0,2,0,0)" imports as a
+        # reference whose instance transform field is scale(2,2) (emitted as
+        # instance_transform), while the render CTM (transform) stays null —
+        # the two transforms are independent.
+        _assert_svg_parse(self, "reference_instance_transform")
+
     # ---------------------------------------------------------------
     # Algorithm test vectors
     # ---------------------------------------------------------------
@@ -316,6 +336,16 @@ class CrossLanguageTest(absltest.TestCase):
                         op["master_id"], tuple(op["path"]), op["ref_id"])
                 elif op_name == "delete_symbol":
                     ctrl.delete_symbol(op["master_id"])
+                # Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the
+                # instance transform is carried in the payload as {a,b,c,d,e,f}
+                # (the same matrix shape parsed elsewhere) and applied verbatim.
+                elif op_name == "set_instance_transform":
+                    from geometry.element import Transform
+                    t = op["transform"]
+                    ctrl.set_instance_transform(
+                        tuple(op["path"]),
+                        Transform(a=t["a"], b=t["b"], c=t["c"],
+                                  d=t["d"], e=t["e"], f=t["f"]))
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":

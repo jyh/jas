@@ -81,6 +81,17 @@ def _transform_attr(t: Transform | None) -> str:
             f'{_fmt(t.d)},{_fmt(_px(t.e))},{_fmt(_px(t.f))})"')
 
 
+def _instance_transform_attr(t: Transform | None) -> str:
+    """Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform rides
+    ``data-jas-instance-transform`` (the render CTM rides the ``transform``
+    attr). Same matrix format as ``_transform_attr``; emitted ONLY when set so
+    existing <use> fixtures stay byte-identical."""
+    if t is None:
+        return ""
+    return (f' data-jas-instance-transform="matrix({_fmt(t.a)},{_fmt(t.b)},'
+            f'{_fmt(t.c)},{_fmt(t.d)},{_fmt(_px(t.e))},{_fmt(_px(t.f))})"')
+
+
 def _opacity_attr(opacity: float) -> str:
     if opacity >= 1.0:
         return ""
@@ -436,12 +447,20 @@ def _element_svg(elem: Element, indent: str) -> str:
             return "\n".join(lines)
 
         case ReferenceElem(target=target, opacity=opacity,
-                           transform=transform, id=eid):
+                           transform=transform, id=eid,
+                           instance_transform=instance_transform):
             # A reference is native SVG <use href="#id"> (Phase 2). Its own
             # id/opacity/transform ride the common attrs; the target is the
             # href. Any <use> imports back as a live reference (F-svg-use).
+            #
+            # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform is
+            # distinct from the render CTM (which rides the <use transform=...>
+            # attr). It is emitted as data-jas-instance-transform in the same
+            # matrix format, and ONLY when set so existing <use> fixtures stay
+            # byte-identical.
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}')
+                     f'{_id_attr(eid)}'
+                     f'{_instance_transform_attr(instance_transform)}')
             return f'{indent}<use href="#{escape(target)}"{attrs}/>'
 
     return ""
@@ -803,6 +822,24 @@ def _parse_transform(node: ET.Element) -> Transform | None:
         parts = [float(x) for x in m.group(1).split(",")]
         sy = parts[1] if len(parts) > 1 else parts[0]
         return Transform.scale(parts[0], sy)
+    return None
+
+
+def _parse_matrix_attr(node: ET.Element, attr: str) -> Transform | None:
+    """Parse a ``matrix(a,b,c,d,e,f)`` value from the named attribute,
+    returning None when the attribute is absent or malformed. Used for the
+    Symbols P4 instance transform (data-jas-instance-transform); e/f are
+    converted from px to pt to match the render CTM attr (SYMBOLS.md §4 /
+    Fork F2)."""
+    val = node.get(attr)
+    if val is None:
+        return None
+    m = re.match(r"matrix\(([^)]+)\)", val)
+    if m:
+        parts = [float(x) for x in re.split(r"[,\s]+", m.group(1).strip())]
+        if len(parts) == 6:
+            return Transform(a=parts[0], b=parts[1], c=parts[2],
+                             d=parts[3], e=_pt(parts[4]), f=_pt(parts[5]))
     return None
 
 
@@ -1324,9 +1361,14 @@ def _parse_element(node: ET.Element) -> Element | None:
                 or node.get("xlink:href")
                 or "")
         target = href[1:] if href.startswith("#") else href
+        # Symbols P4: the instance transform field rides
+        # data-jas-instance-transform (same matrix format as the render CTM
+        # attr; e/f are px on the wire, pt in the model). SYMBOLS.md §4 / F2.
         return ReferenceElem(
             target=target, id=eid, name=name,
-            opacity=opacity, transform=transform)
+            opacity=opacity, transform=transform,
+            instance_transform=_parse_matrix_attr(
+                node, "data-jas-instance-transform"))
 
     if tag == "title":
         return None  # parent reads as the name

@@ -466,10 +466,19 @@ package func elementJson(_ elem: Element) -> String {
         case .reference(let r):
             o.str("target", r.target.id)
             commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil, r.id)
-            // fill/stroke/transform are emitted only when set; in Phase 1
-            // references carry none (paint inheritance default / Fork F2),
-            // matching how compound omits its own paint here. (transform is
+            // fill/stroke are emitted only when set; in Phase 1 references
+            // carry none (paint inheritance default / Fork F2), matching how
+            // compound omits its own paint here. (The render CTM `transform` is
             // emitted as null by commonFields, matching the fixtures.)
+            //
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+            // field (distinct from the render CTM, which `commonFields` emits as
+            // the `transform` key) is emitted as a separate `instance_transform`
+            // key, and ONLY when set — omitting it when nil keeps existing
+            // reference fixtures byte-identical.
+            if let it = r.instanceTransform {
+                o.raw("instance_transform", transformJson(it))
+            }
         }
     }
     return o.build()
@@ -1006,10 +1015,13 @@ package func parseElement(_ v: Any?) -> Element {
                 locked: locked, visibility: visibility)))
         case "reference":
             let target = ElementRef(d["target"] as? String ?? "")
+            // Symbols P4: the instance `transform` field rides the
+            // `instance_transform` key (absent ⇒ nil / null ⇒ nil).
             return .live(.reference(ReferenceElem(
                 target: target,
                 id: id,
                 transform: transform,
+                instanceTransform: parseTransform(d["instance_transform"]),
                 opacity: opacity, locked: locked, visibility: visibility)))
         default:
             fatalError("Unknown live kind: \(kind)")

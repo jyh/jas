@@ -396,11 +396,17 @@ let rec pack_element = function
              ~name:None ~id:cs.id @
            [vstr "compound_shape"; vstr op; vlist operands])
   | Live (Reference r) ->
+    (* [tag, common(1..6), kind(7), target(8), instance_transform(9)].
+       Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+       (distinct from [ref_transform] packed in the common block at slot 4)
+       rides slot 9 via [pack_transform]; Nil when None. Old 9-element .bin
+       (no slot 9) still decode TOLERANTLY to None on the read side. *)
     vlist (vint tag_live ::
            pack_common ~locked:r.ref_locked ~opacity:r.ref_opacity
              ~visibility:r.ref_visibility ~transform:r.ref_transform
              ~name:None ~id:r.ref_id @
-           [vstr "reference"; vstr r.ref_target])
+           [vstr "reference"; vstr r.ref_target;
+            pack_transform r.ref_instance_transform])
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -719,10 +725,18 @@ let rec unpack_element v =
         mask = None })
     else if kind = "reference" then
       let target = as_str (List.nth arr 8) in
+      (* Symbols P4: the instance transform rides slot 9, read TOLERANTLY so
+         existing 9-element .bin (no slot 9) decode to None
+         (SYMBOLS.md section 4 / Fork F2). *)
+      let instance_transform =
+        match List.nth_opt arr 9 with
+        | Some v -> unpack_transform v
+        | None -> None
+      in
       Live (Reference {
         ref_target = target;
         ref_id = id;
-        ref_instance_transform = None;
+        ref_instance_transform = instance_transform;
         ref_fill = None;
         ref_stroke = None;
         ref_opacity = opacity;

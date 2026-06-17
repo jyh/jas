@@ -64,7 +64,12 @@ let svg_roundtrip_names =
                         round-trips through SVG (SYMBOLS.md section 5 /
                         Fork S3) — defs masters import to symbols, not
                         layers, and re-export identically. *)
-                     "symbols_basic"]
+                     "symbols_basic";
+                     (* Symbols P4: the instance transform rides
+                        data-jas-instance-transform on the <use> and
+                        round-trips through SVG distinct from
+                        [ref_transform] (SYMBOLS.md section 4 / Fork F2). *)
+                     "reference_instance_transform"]
 
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
@@ -80,7 +85,12 @@ let json_roundtrip_names =
                      (* Symbols P1: the [symbols] array (a master) + the
                         instance in layers round-trips through test_json
                         (SYMBOLS.md section 10). *)
-                     "symbols_basic"]
+                     "symbols_basic";
+                     (* Symbols P4: a reference whose instance transform
+                        field is set (the "instance_transform" key)
+                        round-trips through test_json distinct from
+                        [ref_transform] (SYMBOLS.md section 4 / Fork F2). *)
+                     "reference_instance_transform"]
 (* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
    element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
    serialize through binary (TAG_LIVE, kind-discriminated), so both the
@@ -99,12 +109,20 @@ let binary_names =
                      (* Symbols P1: the master store rides the trailing element
                         array in the binary document (SYMBOLS.md section 5); its
                         Python-generated symbols_basic.bin is the cross-app pin. *)
-                     "symbols_basic"]
+                     "symbols_basic";
+                     (* Symbols P4: a reference carrying a non-identity instance
+                        transform (the instance transform rides binary slot 9). *)
+                     "reference_instance_transform"]
 
 (* Binary JSON->binary->JSON round-trip fixtures = [binary_names] (which now
-   includes symbols_basic and also feeds the binary-read-Python test). *)
+   includes symbols_basic and also feeds the binary-read-Python test), PLUS
+   the Symbols P4 instance-transform fixture. The instance transform packs at
+   TAG_LIVE slot 9 and round-trips through binary distinct from
+   [ref_transform] (SYMBOLS.md section 4 / Fork F2). It is kept OUT of
+   [binary_names] (the Python-read list) deliberately: the lead owns wiring
+   the Python byte oracle for this fixture. *)
 let binary_roundtrip_names =
-  binary_names
+  binary_names @ ["reference_instance_transform"]
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
@@ -175,6 +193,21 @@ let run_operation_fixture fixture_name =
       | "detach" ->
         let path = op |> member "path" |> to_list |> List.map to_int in
         ctrl#detach path
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2). Value-in-op: the
+         instance transform is carried in the payload as {a,b,c,d,e,f} (the
+         same matrix shape parsed elsewhere) and applied verbatim. *)
+      | "set_instance_transform" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let t = op |> member "transform" in
+        let transform = {
+          Jas.Element.a = t |> member "a" |> to_num;
+          b = t |> member "b" |> to_num;
+          c = t |> member "c" |> to_num;
+          d = t |> member "d" |> to_num;
+          e = t |> member "e" |> to_num;
+          f = t |> member "f" |> to_num;
+        } in
+        ctrl#set_instance_transform path transform
       | "redefine" ->
         let master_id = op |> member "master_id" |> to_string in
         let path = op |> member "path" |> to_list |> List.map to_int in
@@ -471,6 +504,12 @@ let () =
          layer. The canonical JSON shows the [symbols] array + the
          instance. All apps parse it to the identical canonical JSON. *)
       Alcotest.test_case "svg_parse symbols_basic" `Quick (fun () -> assert_svg_parse "symbols_basic");
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): a <use> carrying
+         data-jas-instance-transform parses to a reference whose instance
+         transform field (emitted as "instance_transform") is set, distinct
+         from [ref_transform] (common.transform stays null). *)
+      Alcotest.test_case "svg_parse reference_instance_transform" `Quick
+        (fun () -> assert_svg_parse "reference_instance_transform");
     ];
 
     (* Algorithm test vectors *)

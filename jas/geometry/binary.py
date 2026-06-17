@@ -392,8 +392,13 @@ def _pack_element(elem: Element) -> list:
     # (fill/stroke) is omitted in Phase 1 (references inherit; compound
     # carries none here), mirroring the test_json live codec.
     elif isinstance(elem, ReferenceElem):
-        # [tag, common(1..6), kind(7), target(8)]
-        return [_TAG_LIVE, *common, "reference", elem.target]
+        # [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform
+        # (distinct from the render CTM packed at index 4) rides slot 9 via
+        # _pack_transform; nil when None. Old 9-element .bin (no slot 9) still
+        # decode TOLERANTLY to None on the read side.
+        return [_TAG_LIVE, *common, "reference", elem.target,
+                _pack_transform(elem.instance_transform)]
     elif isinstance(elem, CompoundShape):
         # [tag, common(1..6), kind(7), operation(8), operands(9)]
         operands = [_pack_element(c) for c in elem.operands]
@@ -609,7 +614,13 @@ def _unpack_element(arr: list) -> Element:
         if kind == "reference":
             # ReferenceElem is a first-class element with its own id /
             # name, so it takes the full common kwargs.
-            return ReferenceElem(target=arr[8], **common)
+            #
+            # Symbols P4: the instance transform rides slot 9, read TOLERANTLY
+            # so existing 9-element .bin (no slot 9) decode to None (SYMBOLS.md
+            # §4 / Fork F2).
+            inst_t = _unpack_transform(arr[9]) if len(arr) > 9 else None
+            return ReferenceElem(target=arr[8],
+                                 instance_transform=inst_t, **common)
         elif kind == "compound_shape":
             # CompoundShape carries a stable id but no name field, so strip
             # name (it doesn't accept it) and pass id through. Unknown

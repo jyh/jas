@@ -672,9 +672,14 @@ private func packElement(_ elem: Element) -> MsgValue {
             let common = packCommon(locked: r.locked, opacity: r.opacity,
                                     visibility: r.visibility, transform: r.transform,
                                     name: nil, id: r.id)
-            // [tag, common(1..6), kind(7), target(8)]
+            // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+            // (distinct from the render CTM packed at slot 4) rides slot 9 via
+            // packTransform; nil when unset. Old 9-element .bin (no slot 9)
+            // still decode TOLERANTLY to nil on the read side.
             return .array([vint(tagLive)] + common +
-                          [vstr("reference"), vstr(r.target.id)])
+                          [vstr("reference"), vstr(r.target.id),
+                           packTransform(r.instanceTransform)])
         }
     }
 }
@@ -925,10 +930,15 @@ private func unpackElement(_ v: MsgValue) -> Element {
             // ReferenceElem is a first-class element with its own id; it
             // takes the full common block (target at index 8, paint nil).
             let target = ElementRef(asStr(arr[8]))
+            // Symbols P4: the instance `transform` rides slot 9, read
+            // TOLERANTLY so existing 9-element .bin (no slot 9) decode to nil
+            // (SYMBOLS.md §4 / Fork F2).
+            let instanceXform = arr.count > 9 ? unpackTransform(arr[9]) : nil
             return .live(.reference(ReferenceElem(
                 target: target,
                 id: id,
                 transform: xform,
+                instanceTransform: instanceXform,
                 opacity: opacity, locked: locked, visibility: vis)))
         default: fatalError("unknown live kind: \(kind)")
         }

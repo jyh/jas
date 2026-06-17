@@ -464,9 +464,19 @@ let rec element_json = function
     json_str o "target" r.ref_target;
     common_fields o ~opacity:r.ref_opacity ~transform:r.ref_transform
       ~locked:r.ref_locked ~visibility:r.ref_visibility ~name:None ~id:r.ref_id ();
-    (* fill / stroke / instance transform are emitted only when set; in
-       Phase 1 references carry none (paint inheritance default / Fork F2),
-       matching how compound omits its own paint here. *)
+    (* fill / stroke are emitted only when set; in Phase 1 references carry
+       none (paint inheritance default / Fork F2), matching how compound
+       omits its own paint here.
+
+       Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+       field (distinct from [ref_transform], which [common_fields] emits as
+       the "transform" key) is emitted as a separate "instance_transform"
+       key, and ONLY when set — omitting it when None keeps existing
+       reference fixtures byte-identical. *)
+    (match r.ref_instance_transform with
+     | Some _ -> json_raw o "instance_transform"
+                   (transform_json r.ref_instance_transform)
+     | None -> ());
     json_build o
 
 (* ------------------------------------------------------------------ *)
@@ -1028,10 +1038,14 @@ let rec parse_element j =
        })
      | "reference" ->
        let target = j |> member "target" |> to_string in
+       (* Symbols P4: the instance transform field rides the
+          "instance_transform" key (absent or null yields None). *)
+       let instance_transform =
+         parse_transform (j |> member "instance_transform") in
        Live (Reference {
          ref_target = target;
          ref_id = id;
-         ref_instance_transform = None;
+         ref_instance_transform = instance_transform;
          ref_fill = None;
          ref_stroke = None;
          ref_opacity = opacity;
