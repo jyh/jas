@@ -64,17 +64,39 @@ let resolver_id (elem : element) : element_ref option =
   | Live (Compound_shape cs) -> cs.id
   | Live (Reference r) -> r.ref_id
 
+(* Persistent id->element index (REFERENCE_GRAPH.md section 2.4, Phase 4b).
+   [Map.Make(String)] gives O(log n) lookup/insert, O(1) structure-sharing
+   on a stack snapshot (so each undo entry carries the index cheaply), and
+   sorted iteration. It is a pure function of the document, so polymorphic
+   structural [=] compares a Model-held index against a from-scratch rebuild
+   for the debug gate (the [element] type has no functional fields). Mirrors
+   the Rust [IdIndex] (an [rpds::RedBlackTreeMap]); per REFERENCE_GRAPH.md
+   section 2.3 apps may differ in the concrete persistent-map type. *)
+module Id_map = Map.Make (String)
+type id_index = element Id_map.t
+
 (* Walk [elem] and its id-bearing descendants, recording the first
    element seen for each id (first-occurrence wins, matching Rust
    [collect_ref_ids]; the unique-id invariant means there are no
-   collisions in practice, this just makes the build deterministic). *)
-let rec collect_ref_ids (elem : element) (tbl : (element_ref, element) Hashtbl.t) : unit =
-  (match resolver_id elem with
-   | Some id -> if not (Hashtbl.mem tbl id) then Hashtbl.replace tbl id elem
-   | None -> ());
-  List.iter (fun child -> collect_ref_ids child tbl) (resolver_children elem)
+   collisions in practice, this just makes the build deterministic).
+   Threads the persistent map functionally (no mutation), so this is the
+   pure builder shared by the live index and the gate oracle. *)
+let rec collect_ref_ids (elem : element) (acc : id_index) : id_index =
+  let acc =
+    match resolver_id elem with
+    | Some id -> if Id_map.mem id acc then acc else Id_map.add id elem acc
+    | None -> acc
+  in
+  List.fold_left (fun acc child -> collect_ref_ids child acc)
+    acc (resolver_children elem)
 
-(* Build an [element_resolver] from a document's [layers] and [symbols].
+(* Build the persistent id->element index from a document's [layers] and
+   [symbols]. This is the SINGLE canonical walk (REFERENCE_GRAPH.md section
+   2.3): both the builder that populates the Model's companion index (so
+   paint reads it without rebuilding) and the oracle the debug-assert gate
+   compares against, so the resulting map's values are bit-identical to the
+   pre-Phase-4b per-paint rebuild and resolve() results are unchanged.
+
    Indexes the id-bearing descendants of each top-level layer; top-level
    layer ids are not resolution targets in Phase 1 (references target
    shapes), so the layer walk starts at each layer's children.
@@ -89,23 +111,39 @@ let rec collect_ref_ids (elem : element) (tbl : (element_ref, element) Hashtbl.t
    making them painted. Masters are sorted by id before indexing so a
    duplicate-id master resolves deterministically (first-by-id wins).
 
-   Rebuilt on demand by the render each paint (the rebuild strategy; the
-   persistent-incremental index is Phase 4). Mirrors Rust
-   [register_ref_index]. *)
-let resolver_of_layers_and_symbols
-    (layers : element array) (symbols : element array) : element_resolver =
-  let tbl : (element_ref, element) Hashtbl.t = Hashtbl.create 16 in
-  Array.iter (fun layer ->
-    List.iter (fun child -> collect_ref_ids child tbl)
-      (resolver_children layer)
-  ) layers;
+   Mirrors Rust [rebuild_id_index]. *)
+let rebuild_id_index
+    (layers : element array) (symbols : element array) : id_index =
+  let index =
+    Array.fold_left (fun acc layer ->
+      List.fold_left (fun acc child -> collect_ref_ids child acc)
+        acc (resolver_children layer)
+    ) Id_map.empty layers
+  in
   let id_of_master m = match resolver_id m with Some s -> s | None -> "" in
   let sorted_masters =
     Array.to_list symbols
     |> List.stable_sort (fun a b -> String.compare (id_of_master a) (id_of_master b))
   in
-  List.iter (fun master -> collect_ref_ids master tbl) sorted_masters;
-  fun id -> Hashtbl.find_opt tbl id
+  List.fold_left (fun acc master -> collect_ref_ids master acc)
+    index sorted_masters
+
+(* Build an [element_resolver] that reads an already-built persistent
+   index (an O(1) borrow of the Model's companion index; no per-paint
+   rebuild). Mirrors the Rust [RenderResolver] reading the installed
+   [IdIndex]. *)
+let resolver_of_index (index : id_index) : element_resolver =
+  fun id -> Id_map.find_opt id index
+
+(* Build an [element_resolver] from a document's [layers] and [symbols] by
+   rebuilding the index from scratch. Retained for the resolver / symbols
+   test fixtures and any call path without a precomputed index; the hot
+   paint path uses {!resolver_of_index} with the Model's persistent index
+   instead. Equivalent to [resolver_of_index (rebuild_id_index layers
+   symbols)] — the single canonical walk. *)
+let resolver_of_layers_and_symbols
+    (layers : element array) (symbols : element array) : element_resolver =
+  resolver_of_index (rebuild_id_index layers symbols)
 
 (* Backwards-compatible wrapper indexing only [layers] (no master
    store). Equivalent to [resolver_of_layers_and_symbols layers [||]]. *)

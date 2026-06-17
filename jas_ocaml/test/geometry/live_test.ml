@@ -279,6 +279,63 @@ let test_reference_none_instance_transform_unchanged () =
   Alcotest.(check bool) "None instance transform leaves geometry unchanged"
     true (via_ref = direct)
 
+(* --- Phase 4b: persistent id->element index (REFERENCE_GRAPH.md
+   section 2.4) ------------------------------------------------------ *)
+
+(* A master rect carrying its own id (a master's OWN id is a valid target,
+   unlike a top-level layer's). *)
+let master_rect id = rect_with_id id 1.0 2.0
+
+(* Mirror of Rust rebuild_id_index_indexes_descendants_and_sorted_masters:
+   the pure builder indexes id-bearing layer descendants and doc.symbols
+   masters; a top-level layer's OWN id is NOT a resolution target. The map
+   it returns equals itself rebuilt (the gate's equality), and a resolver
+   over it resolves identically to resolver_of_layers_and_symbols. *)
+let test_rebuild_id_index_indexes_descendants_and_sorted_masters () =
+  let layer =
+    make_layer ~name:"layer0" [| rect_with_id "r1" 0.0 0.0 |] in
+  (* Give the top-level layer its own id; it must NOT become a target. *)
+  let layer = match layer with
+    | Layer l -> Layer { l with id = Some "layer0" }
+    | other -> other in
+  let layers = [| layer |] in
+  let symbols = [| master_rect "m1" |] in
+  let index = Live.rebuild_id_index layers symbols in
+  let resolver = Live.resolver_of_index index in
+  Alcotest.(check bool) "descendant rect indexed" true (resolver "r1" <> None);
+  Alcotest.(check bool) "master indexed from symbols" true (resolver "m1" <> None);
+  Alcotest.(check bool) "top-level layer id is not a target" true
+    (resolver "layer0" = None);
+  (* The persistent map equals itself rebuilt — the gate's value equality. *)
+  Alcotest.(check bool) "rebuild is deterministic" true
+    (Live.Id_map.equal ( = ) index (Live.rebuild_id_index layers symbols));
+  (* resolver_of_index resolves identically to the rebuild-each-call form. *)
+  let direct = Live.resolver_of_layers_and_symbols layers symbols in
+  Alcotest.(check bool) "resolver_of_index agrees with rebuild form" true
+    (resolver "r1" = direct "r1" && resolver "m1" = direct "m1"
+     && resolver "missing" = direct "missing")
+
+(* The new pure builder produces the SAME index regardless of master
+   input order when ids are distinct (masters are sorted by id before
+   indexing), and that index agrees value-for-value with the pre-existing
+   resolver_of_layers_and_symbols — so resolve() results are unchanged
+   (the equivalence pin). *)
+let test_rebuild_id_index_matches_legacy_resolver_and_is_order_stable () =
+  let m_a = master_rect "a" in
+  let m_b = master_rect "b" in
+  (* Distinct ids: the sort makes the index independent of input order. *)
+  let index1 = Live.rebuild_id_index [||] [| m_b; m_a |] in
+  let index2 = Live.rebuild_id_index [||] [| m_a; m_b |] in
+  Alcotest.(check bool) "distinct-id masters: order-independent index" true
+    (Live.Id_map.equal ( = ) index1 index2);
+  (* The index resolves exactly what the legacy build-each-call resolver
+     did, pinning resolve() results unchanged across the refactor. *)
+  let legacy = Live.resolver_of_layers_and_symbols [||] [| m_a; m_b |] in
+  let via_index = Live.resolver_of_index index2 in
+  Alcotest.(check bool) "rebuild_id_index agrees with legacy resolver" true
+    (via_index "a" = legacy "a" && via_index "b" = legacy "b"
+     && via_index "z" = legacy "z")
+
 let test_compound_has_no_dependencies () =
   let cs = {
     operation = Op_union;
@@ -328,5 +385,11 @@ let () =
           test_reference_instance_transform_scales_target;
         Alcotest.test_case "None instance transform leaves eval unchanged" `Quick
           test_reference_none_instance_transform_unchanged;
+      ];
+      "id index (Phase 4b)", [
+        Alcotest.test_case "rebuild_id_index indexes descendants + sorted masters"
+          `Quick test_rebuild_id_index_indexes_descendants_and_sorted_masters;
+        Alcotest.test_case "rebuild_id_index matches legacy resolver, order-stable"
+          `Quick test_rebuild_id_index_matches_legacy_resolver_and_is_order_stable;
       ]
     ]
