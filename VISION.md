@@ -110,12 +110,14 @@ off for many goals at once.
    `workspace/actions.yaml` operations) is the *single* way the document changes. The AI, a
    gesture, a panel, and a future collaborator are all just *producers* of the same
    operations. No privileged mutation path.
-2. **Stable element identity + a live dependency graph — the keystone.** Today identity is the
-   tree-path (`ARCH.md` §"Element paths") and liveness is *containment*-based (a live element
-   owns its inputs). The vision needs **stable ids** (additive — keep paths for the UI) and
-   **reference-based, many-to-many** inputs, forming a true dependency graph with incremental
-   recompute. This one change unlocks liveness, cross-tree relationships, multiple
-   interpretations, versioning, comments, and collaboration.
+2. **Stable element identity + a live dependency graph — the keystone.** *(Foundation SHIPPED
+   2026-06; see §6.2.)* Identity is now path **and** id: the tree-path stays the UI address,
+   and an additive `common.id` is the stable "which element" handle. Liveness is no longer only
+   *containment*-based — a `Reference` element names its inputs by id, giving **reference-based,
+   many-to-many** edges and a true dependency graph with incremental + cached recompute. This
+   one change unlocks liveness, cross-tree relationships, multiple interpretations, versioning,
+   comments, and collaboration — most of which (everything past the graph itself) remain to be
+   built on top of the now-laid foundation.
 3. **Concepts as declarative data packs.** A concept (gear, eye, connector, hatch, …) is
    *data*, not native code: a **fitter** (raw selection → parameters/roles — the "promote"
    that is the dual of today's `release`/`expand`), a **generator** (parameters → geometry),
@@ -160,12 +162,20 @@ clean operation-API boundary must be held; depends on 6.2.
 
 ### 6.2 Stable identity + the live relationship graph — the keystone
 Generalize liveness from owned-children to elements referenced by stable id, anywhere in the
-document; build the dependency DAG with incremental recompute. **Today:** no `id` field;
-`LiveVariant` is a closed native enum (one variant); `mark_dirty`/cache hooks exist but are
-stubbed ("a cache lives in a future"). **Benefit:** unlocks essentially the whole intent
-vision at once. **Downside:** the biggest single change (touches all apps + SVG round-trip);
-adds cycles/dangling-reference policy; the one-way DAG covers most cases but bidirectional
-**constraint solving** (IK, mutual constraints) is a separate, harder layer.
+document; build the dependency DAG with incremental recompute. **Today (SHIPPED 2026-06, all
+5 apps — see `REFERENCE_GRAPH.md` / `SYMBOLS.md`):** an additive `common.id` exists on every
+element (tree-paths kept for the UI); `LiveVariant` now has two arms (`CompoundShape` +
+`Reference`), where a `Reference` names its target by id and resolves through an
+`ElementResolver` seam; a derived `DependencyIndex` (`deps`/`rdeps`/`dangling`/`cycles`/
+`topo_order`, with a cross-language-locked Kahn ordering) is a pure function of the document;
+recompute is now both incremental (persistent id→element index, O(changed) maintenance) and
+cached (a generation-epoched reference-geometry cache), each held to a from-scratch ==
+incremental debug-assert gate; cycles/dangling break to empty at eval; identity round-trips
+via SVG `id`/`<use>`; and Symbols (reusable masters + live instances) ride the same machinery.
+**Benefit:** unlocks essentially the whole intent vision at once. **Still ahead:** write-time
+cycle rejection (eval-time break already handles imported cycles); importing *foreign* `<use>`
+as live vs. flattening; and bidirectional **constraint solving** (IK, mutual constraints) —
+the one-way DAG covers most cases but constraint solving is a separate, harder layer.
 
 ### 6.3 Domains as declarative packs
 Concepts (fitter + generator + operations + constraints) ship as data, interpreted identically
@@ -294,9 +304,11 @@ Three regimes; push everything as far *down* as possible (cheaper, cross-platfor
    algorithms, liveness recompute (`incremental == from-scratch`), the resolved render-*tree*,
    generators. This regime *is* the equivalence harness.
 2. **Capture / replay** — record the seam: an AI plan, a gesture, or a whole session becomes a
-   deterministic fixture replayed across all apps. **Our 82 manual-test transcripts are already
-   scripted action sequences with coordinates and Do/Expect — adding session capture turns them
-   into executable, cross-app regression fixtures, so each manual session is paid for once.**
+   deterministic fixture replayed across all apps. **Our 36 manual-test transcripts
+   (`transcripts/*_TESTS.md`) are already scripted action sequences with coordinates and
+   Do/Expect — adding session capture turns them into executable, cross-app regression
+   fixtures, so each manual session is paid for once.** (No capture/replay recorder exists yet;
+   this regime is unbuilt. Manual passes are currently Rust-only in practice.)
 3. **Perceptual / evaluative** — the irreducible frontier: "is the AI plan good?", "does it look
    right?", "does the gesture feel right?" Eval datasets, golden images (per-platform, sparingly),
    LLM-as-judge (calibrated), and a *bounded* human sample.
@@ -312,16 +324,22 @@ tracks periodically) so heavy testing never fights iteration speed.
 
 Everything stands on three things — build them first:
 
-1. **Stable element identity** (additive; coexists with tree-paths; round-trips via SVG `id`;
-   defined lifecycle on duplicate/paste/undo).
-2. **The operation / transaction log** formalized as the atomic, reversible, summarizable unit
-   (generalizing today's boolean+simplify undo grouping).
-3. **The expression-language conformance corpus** (pin the language before extending it).
+1. **Stable element identity** — ✅ **SHIPPED** (additive `common.id` in all 5 apps; coexists
+   with tree-paths; round-trips via SVG `id`; duplicate clears id, undo/redo preserve it).
+2. **The operation / transaction log** — ⬜ **not started.** Still to be formalized as the
+   atomic, reversible, summarizable unit (generalizing today's boolean+simplify undo grouping,
+   which is currently whole-document snapshots, not a recordable op stream). **This is now the
+   top critical-path item** — versioning, AI legibility, capture/replay, and collaboration all
+   block on it.
+3. **The expression-language conformance corpus** — 🟡 **partial.** The corpus file exists
+   (`workspace/tests/expressions.yaml`) but gates **Python only**; make it a true
+   cross-language gate (load it in Rust/Swift/OCaml) and close the OCaml closure-scope
+   divergence **before** extending the language with geometry generators.
 
-Then, in dependency order: the live dependency graph (6.2) → concept-pack format + language
-extension (6.3) → render-tree conformance and the gesture/lens layer (6.4) → the AI operation
-API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
-deferred-but-ready throughout.
+Then, in dependency order: the live dependency graph (6.2 — ✅ shipped) → concept-pack format
++ language extension (6.3) → render-tree conformance and the gesture/lens layer (6.4) → the AI
+operation API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration
+(6.9) stay deferred-but-ready throughout.
 
 ---
 
@@ -330,16 +348,24 @@ deferred-but-ready throughout.
 The 2026-06-13 codebase review produced a prioritized backlog whose equivalence-pinning items are
 direct prerequisites for this vision. The most relevant:
 
-- **Restore the cross-language algorithm harness** so the lead implementation is actually verified
-  (done — the `algorithm_roundtrip` build break is fixed; harness runs again).
+- **Restore the cross-language algorithm harness** so the lead implementation is actually
+  verified (done, then it **silently re-broke** when Phase-4b put `IdIndex` in the web-gated
+  `canvas::render` and core `model.rs` imported it — `--no-default-features` stopped compiling;
+  re-fixed 2026-06 by moving the index into core `document::id_index`; `algorithm_roundtrip`
+  418/0, commutativity 192/0). **Lesson, still open:** there is no fast unit-stage
+  `cargo build --no-default-features` guard, so a web-into-core leak surfaces only deep in the
+  cross-language CI job. Add that guard.
 - **Fix canonical-serialization fidelity** (CompoundShape and per-range tspans were silently
-  dropped) — required before any interop or liveness round-trip can be trusted.
+  dropped) — ✅ **done**: CompoundShape and per-range tspans now round-trip through JSON,
+  binary, and SVG, pinned by the shared cross-language harness.
 - **Build the expression-language conformance corpus and fix closure-scope divergence** — the
-  prerequisite for concept packs (6.3).
-- **Consolidate to one mutation path** (Rust currently has two effect runners) — required for
-  artist primacy (6.10) to be architecturally enforced.
-- **Add the widget/effect parity guard and validator cross-reference layer** — catches whole
-  classes of five-app divergence cheaply.
+  prerequisite for concept packs (6.3). 🟡 corpus file exists but gates Python only; OCaml
+  closure-scope divergence is still unfixed and unpinned.
+- **Consolidate to one mutation path** (Rust currently has two effect runners: `renderer.rs`
+  on `AppState`, `effects.rs` on `StateStore`/`Model`) — ⬜ not done; required for artist
+  primacy (6.10) to be architecturally enforced.
+- **Add the widget/effect parity guard and validator cross-reference layer** — ⬜ not done;
+  catches whole classes of five-app divergence cheaply.
 
 ---
 

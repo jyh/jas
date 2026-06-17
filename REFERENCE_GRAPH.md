@@ -192,9 +192,12 @@ order, then applies that level's decrements — so a node freed by an emission w
 for the next level; this is the pinned ordering). **Remnants** (nodes never reaching
 in-degree 0) are appended in sorted-id order — note this is a **superset** of
 `cycles` (a node that *depends on* a cycle without being on it is also a remnant), so
-the earlier "remnants == cycles" claim is wrong. The recompute cache (P4c) consumes
-it. Pinned by the `topo_order` key in `dependency_index.json` + a chain/diamond
-fixture `dependency_index_chain`.
+the earlier "remnants == cycles" claim is wrong. `topo_order` has **no production
+consumer today** — it is computed and cross-language-pinned now (the determinism it
+encodes is expensive to retrofit) and is the dependency-first ordering a future
+incremental-subgraph recompute (§8 of VISION.md) would walk; the P4c recompute cache
+does **not** use it (see below). Pinned by the `topo_order` key in
+`dependency_index.json` + a chain/diamond fixture `dependency_index_chain`.
 
 **Still deferred:** **write-time cycle rejection** (Fork F4 nicety: no authoring op
 can *form* a cycle — `create_reference` only makes brand-new references with no
@@ -357,10 +360,15 @@ in all five before advancing.
   dependency index (`deps`, `rdeps`, `topo_order`, `cycles`, `dangling`); add
   write-time cycle rejection; wire the `transform` field + a "link to selection"
   gesture (VISION §7: mirrored eyes, connectors-follow-blocks); Symbols.
-- **Phase 4 — scale.** Persistent-incremental index (per §2.4) + incremental
-  recompute cache keyed on `(target_id, Rc::as_ptr)` in sorted-topo order, with
-  `reference_incremental_equals_fresh` as the gate. Python remains the rebuild
-  oracle.
+- **Phase 4 — scale (SHIPPED across all 4 native apps; Python = rebuild oracle).**
+  Persistent-incremental id→element index (per §2.4) + a reference-geometry
+  recompute cache. The cache is keyed on **`(target_id, precision)`** (NOT a topo
+  walk) and caches only pure-geometry targets; its invalidation signal is per-app
+  (Rust adds the target's `Rc::as_ptr`; Swift/OCaml use the Model generation epoch
+  alone — §2.3 permits the strategy to differ since equivalence is pinned on
+  resolve() results). Gated by `index == rebuild` and `cached == fresh`
+  debug-asserts running across each suite. `topo_order` (Phase 4a) is pinned but
+  not yet consumed.
 - **Phase 5 — optional.** Migrate `CompoundShape` operands to references (may need
   no struct change, since a `Reference` already composes as an operand).
 
