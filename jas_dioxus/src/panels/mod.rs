@@ -21,6 +21,7 @@ pub mod paragraph_panel;
 pub mod properties_panel;
 pub mod stroke_panel;
 pub mod swatches_panel;
+pub mod symbols_panel;
 
 use crate::interpreter::workspace::{Workspace, panel_kind_to_content_id};
 use crate::workspace::app_state::AppState;
@@ -53,6 +54,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Boolean => boolean_panel::menu_items(),
         PanelKind::Opacity => opacity_panel::menu_items(),
         PanelKind::MagicWand => magic_wand_panel::menu_items(),
+        PanelKind::Symbols => symbols_panel::menu_items(),
     }
 }
 
@@ -76,6 +78,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
         PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
         PanelKind::MagicWand => magic_wand_panel::dispatch(cmd, addr, state),
+        PanelKind::Symbols => symbols_panel::dispatch(cmd, addr, state),
     }
 }
 
@@ -109,6 +112,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Boolean => boolean_panel::is_checked(cmd, state),
         PanelKind::Opacity => opacity_panel::is_checked(cmd, state),
         PanelKind::MagicWand => magic_wand_panel::is_checked(cmd, state),
+        PanelKind::Symbols => symbols_panel::is_checked(cmd, state),
     }
 }
 
@@ -261,6 +265,7 @@ mod tests {
             artboards_renaming: None,
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
+            symbols_selected: None,
         }
     }
 }

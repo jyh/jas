@@ -623,6 +623,16 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         J::String(st.artboards_reference_point.clone()),
     );
 
+    // Symbols panel: the panel-selected master id (or null). Drives the
+    // row highlight and the footer buttons' bind.disabled expressions.
+    m.insert(
+        "selected_symbol".into(),
+        match &st.symbols_selected {
+            Some(id) => J::String(id.clone()),
+            None => J::Null,
+        },
+    );
+
     m
 }
 

@@ -106,6 +106,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Boolean => "boolean",
         PanelKind::Opacity => "opacity",
         PanelKind::MagicWand => "magic_wand",
+        PanelKind::Symbols => "symbols",
     }
 }
 
@@ -530,6 +531,9 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "artboards" => PanelKind::Artboards,
         "align" => PanelKind::Align,
         "boolean" => PanelKind::Boolean,
+        "opacity" => PanelKind::Opacity,
+        "magic_wand" => PanelKind::MagicWand,
+        "symbols" => PanelKind::Symbols,
         _ => PanelKind::Layers,
     }
 }
