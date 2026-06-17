@@ -270,9 +270,10 @@ pub(crate) fn make_keydown_handler(
                         };
                         let Some(tab) = st.tab_mut() else { return; };
                         tab.clipboard = elements;
-                        tab.model.snapshot();
-                        let new_doc = tab.model.document().delete_selection();
-                        tab.model.set_document(new_doc);
+                        tab.model.with_txn(|m| {
+                            let new_doc = m.document().delete_selection();
+                            m.set_document(new_doc);
+                        });
                     }));
                 } else {
                     let live_state = {
@@ -311,15 +312,13 @@ pub(crate) fn make_keydown_handler(
                 if mods.alt() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::unlock_all(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::unlock_all(m));
                         }
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::lock_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::lock_selection(m));
                         }
                     }));
                 }
@@ -329,15 +328,13 @@ pub(crate) fn make_keydown_handler(
                 if mods.alt() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::show_all(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::show_all(m));
                         }
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::hide_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::hide_selection(m));
                         }
                     }));
                 }
@@ -379,15 +376,13 @@ pub(crate) fn make_keydown_handler(
                 if mods.shift() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::ungroup_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::ungroup_selection(m));
                         }
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::group_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::group_selection(m));
                         }
                     }));
                 }
@@ -619,9 +614,10 @@ pub(crate) fn make_keydown_handler(
                 if orphan_count == 0 {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            let new_doc = tab.model.document().delete_selection();
-                            tab.model.set_document(new_doc);
+                            tab.model.with_txn(|m| {
+                                let new_doc = m.document().delete_selection();
+                                m.set_document(new_doc);
+                            });
                         }
                     }));
                 } else {
