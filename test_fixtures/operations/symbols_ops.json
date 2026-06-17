@@ -47,5 +47,16 @@
             }
         ],
         "expected_json": "redefine.json"
+    },
+    {
+        "name": "delete_symbol_removes_master",
+        "setup_svg": "symbols_basic.svg",
+        "ops": [
+            {
+                "op": "delete_symbol",
+                "master_id": "m1"
+            }
+        ],
+        "expected_json": "delete_symbol.json"
     }
 ]

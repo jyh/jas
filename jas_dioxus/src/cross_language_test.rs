@@ -528,6 +528,12 @@ mod tests {
                     op["ref_id"].as_str().unwrap(),
                 );
             }
+            "delete_symbol" => {
+                Controller::delete_symbol(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                );
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);
