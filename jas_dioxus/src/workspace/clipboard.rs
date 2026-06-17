@@ -177,7 +177,6 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
             let trimmed = text.trim();
             if trimmed.starts_with("<?xml") || trimmed.starts_with("<svg") {
                 let pasted_doc = svg_to_document(text);
-                tab.model.snapshot();
                 let mut doc = tab.model.document().clone();
                 let idx = doc.selected_layer;
                 let mut new_selection = Vec::new();
@@ -198,7 +197,11 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
                 }
                 if j > 0 {
                     doc.selection = new_selection;
+                    // One paste = one undo step (OP_LOG.md Increment 1). begin_txn
+                    // captures the pre-paste document; commit clears redo.
+                    tab.model.begin_txn();
                     tab.model.set_document(doc);
+                    tab.model.commit_txn();
                     drop(st);
                     revision += 1;
                     return;
@@ -210,7 +213,6 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
         if tab.clipboard.is_empty() {
             return;
         }
-        tab.model.snapshot();
         let mut doc = tab.model.document().clone();
         let idx = doc.selected_layer;
         let mut new_selection = Vec::new();
@@ -224,7 +226,10 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
             }
         }
         doc.selection = new_selection;
+        // One paste = one undo step (OP_LOG.md Increment 1).
+        tab.model.begin_txn();
         tab.model.set_document(doc);
+        tab.model.commit_txn();
         drop(st);
         revision += 1;
     });

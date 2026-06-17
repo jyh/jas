@@ -1706,7 +1706,12 @@ impl Controller {
         if doc.selection.is_empty() {
             return;
         }
-        if take_snapshot { model.snapshot(); }
+        // OP_LOG.md Increment 1: open the undo transaction here only when this is
+        // a standalone simplify (take_snapshot). When called as the boolean
+        // post-step (take_snapshot=false) the caller already opened the
+        // transaction, so the refit joins it (one undo entry). The take_snapshot
+        // param is retained for Increment 1; its removal is Increment 2.
+        if take_snapshot { model.begin_txn(); }
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             let Some(elem) = new_doc.get_element(&es.path).cloned() else { continue; };
@@ -1786,6 +1791,7 @@ impl Controller {
             }
         }
         model.set_document(new_doc);
+        if take_snapshot { model.commit_txn(); }
     }
 
     pub fn lock_selection(model: &mut Model) {
@@ -3636,7 +3642,9 @@ mod tests {
         // Pre-seed a master so the doc has one; not strictly required.
         let mut master = make_rect(0.0, 0.0, 10.0, 10.0);
         master.common_mut().id = Some("m1".into());
-        model.document_mut().symbols.push(master);
+        let mut seed = model.document().clone();
+        seed.symbols.push(master);
+        model.set_document(seed);
 
         Controller::place_instance(&mut model, "m1", "i2");
         let doc = model.document();

@@ -132,8 +132,10 @@ impl TypeOnPathTool {
     }
 
     fn ensure_snapshot(&mut self, model: &mut Model) {
+        // Lazily open the session's undo transaction on first edit; end_session
+        // commits it (OP_LOG.md Increment 1). begin_txn is idempotent while open.
         if !self.did_snapshot {
-            model.snapshot();
+            model.begin_txn();
             self.did_snapshot = true;
         }
     }
@@ -166,7 +168,7 @@ impl TypeOnPathTool {
     /// Replace a Path element with an empty TextPath using the same `d`,
     /// then start an editing session.
     fn begin_session_convert_path(&mut self, model: &mut Model, path: Vec<usize>, d: Vec<PathCommand>, click_offset: f64) {
-        model.snapshot();
+        model.begin_txn();
         self.did_snapshot = true;
         let mut new_tp = empty_text_path_elem(d);
         new_tp.start_offset = click_offset;
@@ -186,7 +188,7 @@ impl TypeOnPathTool {
 
     /// Insert a brand new empty TextPath built from a drag gesture.
     fn begin_session_new_curve(&mut self, model: &mut Model, d: Vec<PathCommand>) {
-        model.snapshot();
+        model.begin_txn();
         self.did_snapshot = true;
         let new_tp = empty_text_path_elem(d);
         let mut doc = model.document().clone();
@@ -209,7 +211,10 @@ impl TypeOnPathTool {
         ));
     }
 
-    fn end_session(&mut self) {
+    /// End the session, committing its undo transaction (no-op if no edit opened
+    /// one) so the whole session is one undo step (OP_LOG.md Increment 1).
+    fn end_session(&mut self, model: &mut Model) {
+        model.commit_txn();
         self.session = None;
         self.did_snapshot = false;
         self.state = State::Idle;
@@ -362,7 +367,7 @@ impl CanvasTool for TypeOnPathTool {
                 s.blink_epoch_ms = now_ms();
                 return;
             }
-            self.end_session();
+            self.end_session(model);
         }
 
         // Offset-handle drag on a selected TextPath.
@@ -483,11 +488,13 @@ impl CanvasTool for TypeOnPathTool {
                         None
                     };
                     if let Some(mut new_e) = cloned {
-                        model.snapshot();
+                        // One-shot edit (not a typing session): bracket it.
+                        model.begin_txn();
                         new_e.start_offset = new_offset;
                         let new_doc =
                             model.document().replace_element(&path, Element::TextPath(new_e));
                         model.set_document(new_doc);
+                        model.commit_txn();
                     }
                 }
             }
@@ -600,7 +607,7 @@ impl CanvasTool for TypeOnPathTool {
         }
 
         match key {
-            "Escape" => { self.end_session(); return true; }
+            "Escape" => { self.end_session(model); return true; }
             "Backspace" => {
                 self.ensure_snapshot(model);
                 let s = self.session.as_mut().unwrap();
@@ -689,8 +696,8 @@ impl CanvasTool for TypeOnPathTool {
         self.session.as_mut()
     }
 
-    fn deactivate(&mut self, _model: &mut Model) {
-        self.end_session();
+    fn deactivate(&mut self, model: &mut Model) {
+        self.end_session(model);
     }
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
