@@ -54,6 +54,13 @@ pub struct Model {
     redo_stack: Vec<(Document, IdIndex)>,
     generation: u64,
     saved_generation: u64,
+    /// True while an undoable transaction is open (between `begin_txn` and
+    /// `commit_txn`). OP_LOG.md Increment 1: the operation-log spine consolidates
+    /// every undoable mutation through one bracket. In this first sub-step the
+    /// flag is wired but nothing opens a transaction yet (call sites migrate in
+    /// later sub-steps); it exists so a future `debug_assert!(self.in_txn)` on the
+    /// committing write can prove "no undoable edit bypasses the bracket."
+    in_txn: bool,
     /// Default fill for newly created elements.
     pub default_fill: Option<Fill>,
     /// Default stroke for newly created elements.
@@ -105,6 +112,7 @@ impl Default for Model {
             redo_stack: Vec::new(),
             generation: 0,
             saved_generation: 0,
+            in_txn: false,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -135,6 +143,7 @@ impl Model {
             redo_stack: Vec::new(),
             generation: 0,
             saved_generation: 0,
+            in_txn: false,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -223,9 +232,34 @@ impl Model {
 
     /// Replace the current document, update the paired id->element index
     /// incrementally (O(changed)), and bump the modification generation.
-    /// Callers that want this change to be undoable should call [`snapshot`]
-    /// first; `set_document` itself does not push onto the undo stack.
+    /// Callers that want this change to be undoable should open a transaction
+    /// ([`begin_txn`]/[`commit_txn`] or [`with_txn`]) first; `set_document`
+    /// itself does not push onto the undo stack.
+    ///
+    /// This is the committing write for UNDOABLE mutations. OP_LOG.md Increment 1
+    /// will (in a later sub-step) add a `debug_assert!(self.in_txn)` here so any
+    /// undoable edit that skipped the bracket fails the test suite; sanctioned
+    /// non-undoable writes use [`set_document_unbracketed`] instead, which never
+    /// asserts. In this sub-step the two are behavior-identical.
     pub fn set_document(&mut self, doc: Document) {
+        self.write_document(doc);
+    }
+
+    /// Committing write for sanctioned NON-undoable mutations — selection-only
+    /// and pure view-state changes, dialog-preview re-apply, and live drag
+    /// (OP_LOG.md §7/§8). Behavior-identical to [`set_document`] today; the
+    /// distinct name is what lets the future `in_txn` guard tell "deliberately
+    /// not undoable" from "forgot to open a transaction." No call site uses it
+    /// yet (later sub-steps route the non-undoable writes here).
+    pub fn set_document_unbracketed(&mut self, doc: Document) {
+        self.write_document(doc);
+    }
+
+    /// The single committing write to `self.document`: incrementally update the
+    /// paired index (O(changed)), overwrite, gate `id_index == rebuild`, bump the
+    /// generation. Both [`set_document`] and [`set_document_unbracketed`] funnel
+    /// here so there is exactly one place document content is committed.
+    fn write_document(&mut self, doc: Document) {
         // Incrementally bring the index from the OLD document to the new one
         // (O(changed) via CoW `Rc::ptr_eq` diffing), instead of a full rebuild.
         // Capture the old document before overwriting it.
@@ -353,6 +387,74 @@ impl Model {
     /// Call this after a successful save.
     pub fn mark_saved(&mut self) {
         self.saved_generation = self.generation;
+    }
+
+    // --- Transaction bracket (OP_LOG.md Increment 1) ----------------------
+    //
+    // The operation-log spine consolidates every undoable mutation through one
+    // bracket: `begin_txn()` captures the pre-edit checkpoint, the caller commits
+    // the edit via `set_document`, and `commit_txn()` finalizes (relocating the
+    // redo-clear here, off of `snapshot()`). This is the bool-primitive form:
+    // `begin_txn` is idempotent while a transaction is already open, so a session
+    // that calls it on every keystroke (e.g. the type tools) still pushes exactly
+    // one checkpoint per session and commits once at the end — without holding a
+    // borrowing guard across event-handler calls (which Rust's borrow rules make
+    // impractical). `with_txn` is the scoped one-shot form. Nothing calls these
+    // yet in this sub-step; the existing `snapshot()` path is untouched, so undo
+    // behavior is byte-identical until the call sites migrate.
+
+    /// Open an undoable transaction: push the pre-edit checkpoint (the document
+    /// and its paired index) onto the undo stack, exactly like [`snapshot`] but
+    /// WITHOUT clearing the redo stack — the redo-clear happens at
+    /// [`commit_txn`], so a new edit clears redo only once the edit commits.
+    /// Idempotent while a transaction is already open (a nested `begin_txn` is a
+    /// no-op), so many edits can ride one checkpoint.
+    pub fn begin_txn(&mut self) {
+        if self.in_txn {
+            return;
+        }
+        self.undo_stack
+            .push((self.document.clone(), self.id_index.clone()));
+        if self.undo_stack.len() > MAX_UNDO {
+            self.undo_stack.remove(0);
+        }
+        self.in_txn = true;
+    }
+
+    /// Finalize the open transaction: clear the redo stack (the relocated
+    /// "new edit invalidates redo" semantics — previously in [`snapshot`]) and
+    /// close the bracket. Safe to call when no transaction is open (it simply
+    /// clears redo and leaves `in_txn` false), though callers should pair it
+    /// with [`begin_txn`].
+    pub fn commit_txn(&mut self) {
+        self.redo_stack.clear();
+        self.in_txn = false;
+    }
+
+    /// Abandon the open transaction, rolling the document and index back to the
+    /// pre-edit checkpoint and discarding it (no redo entry). A `begin_txn`
+    /// immediately followed by `abort_txn` is a no-op. No call site uses this in
+    /// Increment 1; it exists for Increment 2 (e.g. an AI proposal the artist
+    /// rejects after edits were applied through the bracket).
+    pub fn abort_txn(&mut self) {
+        if self.in_txn {
+            if let Some((doc, index)) = self.undo_stack.pop() {
+                self.document = doc;
+                self.id_index = index;
+            }
+            self.in_txn = false;
+        }
+    }
+
+    /// Run `f` inside a transaction: `begin_txn`, then `f(self)` (which performs
+    /// the edit via [`set_document`] / Controller methods), then `commit_txn`.
+    /// The scoped one-shot form of the bracket — no borrowing guard, so `f` has
+    /// full `&mut Model` access. Returns whatever `f` returns.
+    pub fn with_txn<R>(&mut self, f: impl FnOnce(&mut Model) -> R) -> R {
+        self.begin_txn();
+        let r = f(self);
+        self.commit_txn();
+        r
     }
 }
 
@@ -842,5 +944,134 @@ mod tests {
         model.restore_preview_snapshot();
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "pv"), "preview edit reverted");
+    }
+
+    // --- Transaction bracket (OP_LOG.md Increment 1, sub-step 1) ----------
+    //
+    // These pin the new begin_txn/commit_txn/abort_txn/with_txn primitives.
+    // The bracket is byte-equivalent to the old snapshot()+set_document path
+    // except the redo-clear is relocated to commit_txn (not begin) — verified
+    // explicitly below.
+
+    fn empty_doc() -> Document {
+        Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() }
+    }
+
+    #[test]
+    fn begin_txn_captures_pre_edit_doc_for_undo() {
+        // begin_txn pushes the PRE-edit checkpoint; after a set_document edit and
+        // commit, undo restores the document as it was before begin_txn.
+        let mut model = Model::default();
+        assert_eq!(model.document().layers.len(), 1); // pre-edit state
+
+        model.begin_txn();
+        assert!(model.in_txn);
+        model.set_document(empty_doc()); // the edit
+        model.commit_txn();
+        assert!(!model.in_txn);
+        assert_eq!(model.document().layers.len(), 0);
+
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1, "undo restored the pre-begin_txn document");
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+    }
+
+    #[test]
+    fn redo_clears_at_commit_not_begin() {
+        // The redo-clear moved from snapshot() into commit_txn(). So after an
+        // undo (redo non-empty), begin_txn must LEAVE redo intact and only
+        // commit_txn clears it.
+        let mut model = Model::default();
+        model.begin_txn();
+        model.set_document(empty_doc());
+        model.commit_txn();
+        model.undo();
+        assert!(model.can_redo(), "undo populates redo");
+
+        model.begin_txn();
+        assert!(model.can_redo(), "begin_txn does NOT clear redo");
+        model.set_document(empty_doc());
+        model.commit_txn();
+        assert!(!model.can_redo(), "commit_txn clears redo (new edit invalidates redo)");
+    }
+
+    #[test]
+    fn begin_txn_is_idempotent_while_open() {
+        // A session that calls begin_txn repeatedly pushes exactly ONE checkpoint
+        // and undoes in one step (the type-tool lazy-session shape).
+        let mut model = Model::default();
+        let before = model.undo_stack.len();
+        model.begin_txn();
+        model.set_document(empty_doc());
+        model.begin_txn(); // nested / repeated — no-op while open
+        model.set_document(Document { layers: vec![make_layer("L")], ..Document::default() });
+        model.commit_txn();
+        assert_eq!(model.undo_stack.len(), before + 1, "exactly one checkpoint for the session");
+
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1, "one undo step reverts the whole session");
+    }
+
+    #[test]
+    fn abort_txn_rolls_back_edits() {
+        let mut model = Model::default();
+        let undo_before = model.undo_stack.len();
+
+        model.begin_txn();
+        model.set_document(empty_doc()); // edit
+        model.abort_txn();
+
+        assert!(!model.in_txn);
+        assert_eq!(model.document().layers.len(), 1, "abort restored the pre-edit document");
+        assert_eq!(model.undo_stack.len(), undo_before, "abort discarded the checkpoint");
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+    }
+
+    #[test]
+    fn begin_then_abort_with_no_edit_is_noop() {
+        let mut model = Model::default();
+        let gen_before = model.generation();
+        let undo_before = model.undo_stack.len();
+
+        model.begin_txn();
+        model.abort_txn();
+
+        assert!(!model.in_txn);
+        assert_eq!(model.generation(), gen_before, "no generation churn");
+        assert_eq!(model.undo_stack.len(), undo_before);
+        assert_eq!(model.document().layers.len(), 1);
+    }
+
+    #[test]
+    fn with_txn_brackets_one_undo_step() {
+        let mut model = Model::default();
+        model.with_txn(|m| {
+            m.set_document(empty_doc());
+            m.set_document(Document { layers: vec![make_layer("A"), make_layer("B")], ..Document::default() });
+        });
+        assert!(!model.in_txn);
+        assert_eq!(model.document().layers.len(), 2);
+
+        model.undo();
+        assert_eq!(model.document().layers.len(), 1, "the whole with_txn body is one undo step");
+    }
+
+    #[test]
+    fn set_document_unbracketed_matches_set_document() {
+        // Behavior-identical in this sub-step: same resulting document, same
+        // generation bump, index stays consistent — but no checkpoint is pushed
+        // (it is the non-undoable channel).
+        let mut a = Model::default();
+        let mut b = Model::default();
+        let g_a = a.generation();
+        let g_b = b.generation();
+
+        a.set_document(empty_doc());
+        b.set_document_unbracketed(empty_doc());
+
+        assert_eq!(a.document().layers.len(), b.document().layers.len());
+        assert_eq!(a.generation() - g_a, b.generation() - g_b, "both bump generation by one");
+        assert_eq!(b.id_index(), &rebuild_id_index(b.document()));
+        assert!(!b.can_undo(), "unbracketed write pushes no checkpoint");
     }
 }
