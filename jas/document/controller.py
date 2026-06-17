@@ -350,6 +350,26 @@ class Controller:
                        + new_doc.symbols[master_idx + 1:])
         self._model.document = replace(new_doc, symbols=new_symbols)
 
+    def delete_symbol(self, master_id: str) -> None:
+        """Delete Symbol: remove the master whose ``id == master_id`` from
+        ``doc.symbols`` (SYMBOLS.md §7). No-op when no master carries that id.
+        The instances (``ReferenceElem``s targeting ``master_id``) are left
+        untouched — they simply become dangling and resolve to empty until the
+        master returns (recoverable via undo, since the caller owns the
+        snapshot). The Symbols-panel confirm-before-delete warning is a UI
+        concern, not part of this op. Mirrors the Rust
+        ``Controller::delete_symbol``.
+        """
+        doc = self._model.document
+        idx = next(
+            (i for i, m in enumerate(doc.symbols)
+             if getattr(m, "id", None) == master_id),
+            None)
+        if idx is None:
+            return
+        new_symbols = doc.symbols[:idx] + doc.symbols[idx + 1:]
+        self._model.document = replace(doc, symbols=new_symbols)
+
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:
         """Append ``element`` to the mask subtree of the element at

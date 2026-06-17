@@ -19,6 +19,7 @@ class controller : ?model:Model.model -> unit -> object
   method detach : Document.element_path -> unit
   method redefine :
     string -> Document.element_path -> string -> unit
+  method delete_symbol : string -> unit
   method select_all : unit
   method select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method select_polygon : ?extend:bool -> (float * float) array -> unit
