@@ -593,14 +593,14 @@ impl Controller {
         }
         let mut new_doc = doc;
         new_doc.selection = entries;
-        model.set_document(new_doc);
+        model.set_document_unbracketed(new_doc);
     }
 
     /// Set the document selection directly.
     pub fn set_selection(model: &mut Model, selection: Selection) {
         let mut doc = model.document().clone();
         doc.selection = selection;
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
     }
 
     /// Clear the document selection. Shorthand for `set_selection(model, vec![])`.
@@ -620,7 +620,7 @@ impl Controller {
         sel.push(ElementSelection::all(path.clone()));
         let mut new_doc = doc;
         new_doc.selection = sel;
-        model.set_document(new_doc);
+        model.set_document_unbracketed(new_doc);
     }
 
     /// Toggle a path in or out of the selection. If present, removes the
@@ -636,7 +636,7 @@ impl Controller {
         }
         let mut new_doc = doc;
         new_doc.selection = sel;
-        model.set_document(new_doc);
+        model.set_document_unbracketed(new_doc);
     }
 
     /// Select an element by path.
@@ -671,20 +671,20 @@ impl Controller {
                     }
                     let mut new_doc = doc;
                     new_doc.selection = entries;
-                    model.set_document(new_doc);
+                    model.set_document_unbracketed(new_doc);
                     return;
                 }
         }
         let mut new_doc = doc;
         new_doc.selection = vec![ElementSelection::all(path.clone())];
-        model.set_document(new_doc);
+        model.set_document_unbracketed(new_doc);
     }
 
     /// Select a single control point on an element.
     pub fn select_control_point(model: &mut Model, path: &ElementPath, index: usize) {
         let mut doc = model.document().clone();
         doc.selection = vec![ElementSelection::partial(path.clone(), [index])];
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
     }
 
     /// Move all selected control points by (dx, dy).
@@ -2141,7 +2141,7 @@ fn select_flat(
     };
     let mut new_doc = doc;
     new_doc.selection = new_sel;
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Recursive selection: traverse the full element tree, calling
@@ -2195,7 +2195,7 @@ fn select_recursive(
     };
     let mut new_doc = doc;
     new_doc.selection = new_sel;
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Combine two selections by XOR-ing per-element CP membership.
