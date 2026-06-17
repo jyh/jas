@@ -8129,7 +8129,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     let saved = st.layers_solo_state.as_ref().unwrap().saved.clone();
                                     if let Some(tab) = st.tab_mut() {
                                         tab.model.snapshot();
-                                        let doc = tab.model.document_mut();
+                                        let mut doc = tab.model.document_mut();
                                         for (sp, vis) in &saved {
                                             if let Some(elem) = doc.get_element_mut(sp) {
                                                 elem.common_mut().visibility = *vis;
@@ -8152,7 +8152,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     }
                                     if let Some(tab) = st.tab_mut() {
                                         tab.model.snapshot();
-                                        let doc = tab.model.document_mut();
+                                        let mut doc = tab.model.document_mut();
                                         // Ensure soloed element is visible
                                         if let Some(elem) = doc.get_element_mut(&p) {
                                             if elem.visibility() == Visibility::Invisible {
@@ -8178,7 +8178,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 st.layers_solo_state = None;
                                 if let Some(tab) = st.tab_mut() {
                                     tab.model.snapshot();
-                                    let doc = tab.model.document_mut();
+                                    let mut doc = tab.model.document_mut();
                                     if let Some(elem) = doc.get_element_mut(&p) {
                                         let new_vis = match elem.visibility() {
                                             Visibility::Preview => Visibility::Outline,
@@ -8245,21 +8245,23 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
 
                             if let Some(tab) = st.tab_mut() {
                                 tab.model.snapshot();
-                                let doc = tab.model.document_mut();
-                                if let Some(elem) = doc.get_element_mut(&p) {
-                                    elem.common_mut().locked = was_unlocked;
-                                    // When locking a container, also lock all direct children
-                                    if is_container && was_unlocked {
-                                        if let Some(children) = elem.children_mut() {
-                                            for c in children.iter_mut() {
-                                                std::rc::Rc::make_mut(c).common_mut().locked = true;
+                                {
+                                    let mut doc = tab.model.document_mut();
+                                    if let Some(elem) = doc.get_element_mut(&p) {
+                                        elem.common_mut().locked = was_unlocked;
+                                        // When locking a container, also lock all direct children
+                                        if is_container && was_unlocked {
+                                            if let Some(children) = elem.children_mut() {
+                                                for c in children.iter_mut() {
+                                                    std::rc::Rc::make_mut(c).common_mut().locked = true;
+                                                }
                                             }
                                         }
                                     }
                                 }
                                 // Restore saved child lock states on unlock
                                 if let Some(saved) = saved_to_restore {
-                                    let doc = tab.model.document_mut();
+                                    let mut doc = tab.model.document_mut();
                                     if let Some(elem) = doc.get_element_mut(&p) {
                                         if let Some(children) = elem.children_mut() {
                                             for (i, c) in children.iter_mut().enumerate() {
@@ -8273,7 +8275,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 // Locking an element removes it and its descendants from selection
                                 if was_unlocked {
                                     let path = p.clone();
-                                    let doc = tab.model.document_mut();
+                                    let mut doc = tab.model.document_mut();
                                     doc.selection.retain(|es| {
                                         !(es.path == path || es.path.starts_with(&path))
                                     });
@@ -8312,7 +8314,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
 
                             let mut st = a.borrow_mut();
                             if let Some(tab) = st.tab_mut() {
-                                let doc = tab.model.document_mut();
+                                let mut doc = tab.model.document_mut();
                                 // Build the list of paths to select: the element itself
                                 // plus all descendants if it's a container.
                                 let mut paths_to_select = vec![p.clone()];
@@ -8838,7 +8840,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                 let mut st = a.borrow_mut();
                                                                 if let Some(tab) = st.tab_mut() {
                                                                     tab.model.snapshot();
-                                                                    let doc = tab.model.document_mut();
+                                                                    let mut doc = tab.model.document_mut();
                                                                     if let Some(elem) = doc.get_element_mut(&p) {
                                                                         // Write to common.name for any
                                                                         // element type (LYR-091); Layers
@@ -8902,7 +8904,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                         if st.layers_renaming.as_ref() == Some(&p) {
                                                             if let Some(tab) = st.tab_mut() {
                                                                 tab.model.snapshot();
-                                                                let doc = tab.model.document_mut();
+                                                                let mut doc = tab.model.document_mut();
                                                                 if let Some(elem) = doc.get_element_mut(&p) {
                                                                     elem.common_mut().name = if val_inner.is_empty() {
                                                                         None

@@ -14,6 +14,7 @@ type t = {
   rdeps : (string * string list) list;
   dangling : string list;
   cycles : string list;
+  topo_order : string list;
 }
 
 (* Out-edges of a single element: a [Reference]'s target, or empty for
@@ -101,6 +102,132 @@ let find_cycle_members (deps : string list SMap.t) : string list =
   ) deps;
   SSet.elements !on_cycle
 
+(* Compute the deterministic, DEPENDENCIES-FIRST topological ordering of
+   the by-id reference graph (REFERENCE_GRAPH.md section 8 Phase 4a). The
+   recompute schedule a future incremental phase walks: a reference's
+   target always precedes the reference.
+
+   THIS ALGORITHM IS LOCKED and must be byte-identical across all four
+   apps. It is the highest cross-language desync risk in this module.
+
+   Kahn's algorithm with SORTED-ID tie-breaking, processed LEVEL-BY-LEVEL:
+
+   - NODES = the sorted set of all ids that are a [deps]-key OR an
+     [rdeps]-key (every id that is a source or a PRESENT target of an
+     edge). Dangling / operand-opaque targets (referenced but not
+     present/targetable, i.e. they appear in [deps] values but are not
+     nodes) are NOT nodes and create NO topo edge.
+   - Each node dependency count = the number of its [deps] targets that
+     ARE nodes (present). Edges to non-node targets are ignored.
+   - Take the WHOLE current ready set (every un-emitted node whose
+     remaining dependency count is 0), emit it in sorted-id order, and
+     decrement the remaining count of every node that depends on an
+     emitted node (its [rdeps]). Nodes freed during this level become
+     ready only for the NEXT level — a node freed by emitting [a] is NOT
+     eligible to slot in before the rest of [a]'s level. (This is what
+     the LOCKED worked example pins: emitting {a,r3,r4} as one level
+     frees r1,r2 for the next level, so the order is a,r3,r4,r1,r2 — NOT
+     a,r1,r2,r3,r4.) Ties ALWAYS by sorted id.
+   - Cycle remnants: any nodes that never reach dependency-count 0 are
+     appended at the END in sorted-id order. These are the nodes blocked
+     by a cycle: every cycle member (the [cycles] set) PLUS any node that
+     transitively depends on a cycle (e.g. [tail -> c1] where c1<->c2 —
+     [tail] never frees). [cycles] is therefore a SUBSET of the remnants,
+     not the whole set; the operational rule is "any node that never
+     reaches count 0".
+
+   Result: dependencies before dependents, fully deterministic.
+
+   [deps] / [rdeps] here are the already-built (sorted) SMaps. *)
+let topo_order (deps : string list SMap.t) (rdeps : string list SMap.t) : string list =
+  (* NODES: sorted union of deps-keys and rdeps-keys. The SSet keeps it
+     sorted and de-duplicated; iteration is deterministic. *)
+  let nodes =
+    SMap.fold (fun k _ acc -> SSet.add k acc)
+      rdeps
+      (SMap.fold (fun k _ acc -> SSet.add k acc) deps SSet.empty)
+  in
+  (* Remaining dependency count per node: number of its deps targets that
+     are themselves nodes (present). Non-node (dangling/opaque) targets
+     are ignored. *)
+  let remaining = ref (
+    SSet.fold (fun node acc ->
+      let count =
+        match SMap.find_opt node deps with
+        | Some targets ->
+          List.fold_left (fun n t -> if SSet.mem t nodes then n + 1 else n) 0 targets
+        | None -> 0
+      in
+      SMap.add node count acc
+    ) nodes SMap.empty
+  ) in
+  let emitted = ref SSet.empty in
+  let order = ref [] in (* accumulated in reverse; reversed once at the end *)
+
+  (* Level-by-level Kahn loop. Each pass snapshots the CURRENT ready set
+     (all un-emitted nodes with remaining count 0), emits it in sorted-id
+     order, and only then applies the decrements its emissions cause — so
+     newly-freed nodes wait for the next level. Iterating the sorted
+     [nodes] set yields the ready set already in sorted order. A node
+     blocked by a cycle never reaches count 0, so the loop terminates when
+     no node is ready. *)
+  let rec loop () =
+    (* Snapshot this level's ready set (sorted, since [nodes] is an SSet). *)
+    let level =
+      SSet.fold (fun n acc ->
+        if (not (SSet.mem n !emitted)) && SMap.find_opt n !remaining = Some 0
+        then n :: acc else acc
+      ) nodes []
+      |> List.rev (* SSet.fold is ascending; the cons-reverse restores it *)
+    in
+    if level = [] then ()
+      (* no node ready -> remaining un-emitted are cyclic remnants *)
+    else begin
+      (* Emit the whole level in sorted order, marking each emitted first
+         so decrements below cannot re-add a same-level node. *)
+      List.iter (fun node ->
+        order := node :: !order;
+        emitted := SSet.add node !emitted
+      ) level;
+      (* Apply this level's decrements AFTER emitting the level, so a node
+         freed now only becomes ready on the NEXT iteration. *)
+      List.iter (fun node ->
+        match SMap.find_opt node rdeps with
+        | Some dependents ->
+          List.iter (fun dep ->
+            match SMap.find_opt dep !remaining with
+            | Some c ->
+              (* Saturating guard: a present dependent always had this
+                 node counted, so c > 0 here; max 0 keeps it sound even on
+                 a (impossible) double-count. *)
+              remaining := SMap.add dep (max 0 (c - 1)) !remaining
+            | None -> ()
+          ) dependents
+        | None -> ()
+      ) level;
+      loop ()
+    end
+  in
+  loop ();
+
+  (* Remnants: any node never emitted is blocked by a cycle — either it is
+     ON a cycle (it is in [cycles]) OR it transitively DEPENDS on a cycle
+     and so can never reach count 0 (e.g. [tail -> c1] where c1<->c2).
+     Both kinds are appended at the END in sorted-id order. [cycles] is a
+     SUBSET of these remnants, not necessarily the whole set; we therefore
+     derive the remnants from the un-emitted nodes directly (the
+     operational rule "any node that never reaches dependency-count 0"),
+     which keeps the order deterministic and dependencies-first for the
+     entire acyclic prefix. Iterating the sorted [nodes] set yields the
+     remnants already in sorted-id order. *)
+  let remnants =
+    SSet.fold (fun node acc ->
+      if SSet.mem node !emitted then acc else node :: acc
+    ) nodes []
+    |> List.rev
+  in
+  List.rev_append !order remnants
+
 let build (doc : Document.document) : t =
   (* Phase 1: gather the node set (targetable ids) and raw out-edges by
      walking layers + Group/Layer children (operands stay opaque), THEN
@@ -150,11 +277,18 @@ let build (doc : Document.document) : t =
   (* Phase 3: cycles — every id that can reach itself in the deps graph. *)
   let cycles = find_cycle_members deps in
 
+  (* Phase 4a: the dependencies-first topological ordering (recompute
+     schedule). Computed from the same [deps] / [rdeps] graph; cycle
+     remnants trail in sorted order. The algorithm is LOCKED across all
+     four apps. *)
+  let topo = topo_order deps rdeps in
+
   {
     deps = SMap.bindings deps;
     rdeps = SMap.bindings rdeps;
     dangling = SSet.elements !dangling;
     cycles;
+    topo_order = topo;
   }
 
 (* ------------------------------------------------------------------ *)
@@ -255,7 +389,10 @@ let escape (s : string) : string =
 
 let quote (s : string) : string = Printf.sprintf "\"%s\"" (escape s)
 
-(* Render a sorted string array (the input list is already sorted). *)
+(* Render a string array verbatim (preserving the input list's order).
+   Used for the already-sorted [cycles] / [dangling] arrays AND for
+   [topo_order], whose order is deliberately the topological sequence (NOT
+   sorted) — its order is the data, so it must be rendered as-is. *)
 let array_json (v : string list) : string =
   Printf.sprintf "[%s]" (String.concat "," (List.map quote v))
 
@@ -269,9 +406,12 @@ let map_json (m : (string * string list) list) : string =
 
 let to_test_json (idx : t) : string =
   (* Keys emitted in sorted (alphabetical) order: cycles, dangling,
-     deps, rdeps. *)
-  Printf.sprintf "{\"cycles\":%s,\"dangling\":%s,\"deps\":%s,\"rdeps\":%s}"
+     deps, rdeps, topo_order. Only topo_order's array value is non-sorted
+     (it is the topological sequence itself). *)
+  Printf.sprintf
+    "{\"cycles\":%s,\"dangling\":%s,\"deps\":%s,\"rdeps\":%s,\"topo_order\":%s}"
     (array_json idx.cycles)
     (array_json idx.dangling)
     (map_json idx.deps)
     (map_json idx.rdeps)
+    (array_json idx.topo_order)

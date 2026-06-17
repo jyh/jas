@@ -103,5 +103,79 @@ let () =
         assert (m#mask_isolation_path = Some [0; 3]);
         m#set_mask_isolation_path None;
         assert (m#mask_isolation_path = None));
+
+      (* ── Phase 4b: id->element index companion ─────────
+         REFERENCE_GRAPH.md section 2.4. The [assert] gate inside
+         set_document/undo/redo also fires while these run (the suite runs
+         with assertions on), proving the stored index never diverges from a
+         from-scratch rebuild. Equivalence is pinned on the index VALUE
+         (and so on resolve() results), unchanged. *)
+
+      Alcotest.test_case "id index paired at construction" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        let expect =
+          Jas.Live.rebuild_id_index
+            m#document.Jas.Document.layers m#document.Jas.Document.symbols in
+        assert (Jas.Live.Id_map.equal ( = ) m#id_index expect));
+
+      Alcotest.test_case "id index tracks set_document" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        let id_rect id =
+          Jas.Element.Rect { name = None; id = Some id; x = 0.0; y = 0.0;
+            width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+            fill = None; stroke = None; opacity = 1.0; transform = None;
+            locked = false; visibility = Jas.Element.Preview;
+            blend_mode = Jas.Element.Normal; mask = None;
+            fill_gradient = None; stroke_gradient = None } in
+        let layer = Jas.Element.make_layer [| id_rect "a" |] in
+        m#set_document (Jas.Document.make_document [| layer |]);
+        (* The chokepoint rebuilt the index: "a" resolves, and the stored
+           index equals a from-scratch rebuild of the new document. *)
+        assert (Jas.Live.Id_map.mem "a" m#id_index);
+        let expect =
+          Jas.Live.rebuild_id_index
+            m#document.Jas.Document.layers m#document.Jas.Document.symbols in
+        assert (Jas.Live.Id_map.equal ( = ) m#id_index expect));
+
+      Alcotest.test_case "id index carried + restored across undo/redo"
+        `Quick (fun () ->
+        let m = Jas.Model.create () in
+        let id_rect id =
+          Jas.Element.Rect { name = None; id = Some id; x = 0.0; y = 0.0;
+            width = 10.0; height = 10.0; rx = 0.0; ry = 0.0;
+            fill = None; stroke = None; opacity = 1.0; transform = None;
+            locked = false; visibility = Jas.Element.Preview;
+            blend_mode = Jas.Element.Normal; mask = None;
+            fill_gradient = None; stroke_gradient = None } in
+        let layer_with ids =
+          Jas.Element.make_layer (Array.of_list (List.map id_rect ids)) in
+        (* Edit 1: add "r1" (undoable). *)
+        m#snapshot;
+        m#set_document (Jas.Document.make_document [| layer_with ["r1"] |]);
+        (* Edit 2: add "r2" (undoable). *)
+        m#snapshot;
+        m#set_document (Jas.Document.make_document [| layer_with ["r1"; "r2"] |]);
+        assert (Jas.Live.Id_map.mem "r1" m#id_index);
+        assert (Jas.Live.Id_map.mem "r2" m#id_index);
+        (* Undo edit 2: the carried (paired) index must equal a from-scratch
+           rebuild of the restored document — the gate, asserted explicitly
+           (it also fires as the [assert] inside undo). *)
+        m#undo;
+        let expect_after_undo =
+          Jas.Live.rebuild_id_index
+            m#document.Jas.Document.layers m#document.Jas.Document.symbols in
+        assert (Jas.Live.Id_map.equal ( = ) m#id_index expect_after_undo);
+        assert (Jas.Live.Id_map.mem "r1" m#id_index);
+        assert (not (Jas.Live.Id_map.mem "r2" m#id_index));
+        (* The carried index resolves a live reference to the survivor. *)
+        let resolver = Jas.Live.resolver_of_index m#id_index in
+        assert (resolver "r1" <> None);
+        (* Redo edit 2: index again carries r2 and matches rebuild. *)
+        m#redo;
+        assert (Jas.Live.Id_map.mem "r2" m#id_index);
+        let expect_after_redo =
+          Jas.Live.rebuild_id_index
+            m#document.Jas.Document.layers m#document.Jas.Document.symbols in
+        assert (Jas.Live.Id_map.equal ( = ) m#id_index expect_after_redo));
     ];
   ]

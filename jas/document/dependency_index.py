@@ -8,11 +8,13 @@ REFERENCE_GRAPH.md §2.4); no consumer caches it yet.
 
 It exposes, for the **by-id reference graph only**:
 
-- ``deps``     -- ``id -> sorted list of target ids it directly references``
-- ``rdeps``    -- ``id -> sorted list of ids that reference it`` (reverse of deps)
-- ``dangling`` -- sorted list of *referencing* ids whose target id is not
-                  present/targetable
-- ``cycles``   -- sorted list of ids that participate in a cycle
+- ``deps``       -- ``id -> sorted list of target ids it directly references``
+- ``rdeps``      -- ``id -> sorted list of ids that reference it`` (reverse of deps)
+- ``dangling``   -- sorted list of *referencing* ids whose target id is not
+                    present/targetable
+- ``cycles``     -- sorted list of ids that participate in a cycle
+- ``topo_order`` -- a deterministic topological ordering (dependencies-first) of
+                    the by-id graph; the only intentionally-non-sorted output
 
 ## Operands are OPAQUE to the by-id graph (locked design)
 
@@ -33,11 +35,17 @@ Every map is built with explicitly sorted keys and every value list is sorted,
 so the output is inherently ordered. The cycle DFS iterates neighbors in
 **sorted** order. No part of the output relies on dict insertion order.
 
+## ``topo_order`` (Phase 4a -- REFERENCE_GRAPH.md §8)
+
+A deterministic, dependencies-first topological ordering of the by-id graph,
+computed by Kahn's algorithm with sorted-id tie-breaking (see
+:func:`_topo_order`). It is the recompute schedule a future incremental phase
+(P4c) will walk. The ordering is the *only* intentionally-non-sorted output:
+its sequence IS the data. The ALGORITHM IS LOCKED and must be byte-identical
+across all four apps -- it is the highest cross-language desync risk here.
+
 ## Deferred (NOT implemented here)
 
-- **``topo_order``** -- the Phase 4 recompute ordering (a topological sort of
-  the deps DAG, with cycles broken). Deferred until a consumer needs a recompute
-  schedule; it would live alongside ``deps``/``rdeps`` here.
 - **Write-time cycle rejection** -- no authoring op can form a cycle yet
   (``create_reference`` only links to an existing target), and eval-time
   cycle-break (the threaded visited-set in ``geometry.live``) already handles
@@ -77,6 +85,13 @@ class DependencyIndex:
     # Sorted, de-duplicated list of ids that lie on a cycle in the deps graph
     # (a node that can reach itself). A self-target (R -> R) is a cycle.
     cycles: list[str] = field(default_factory=list)
+    # A deterministic topological ordering of the by-id graph,
+    # **dependencies-first** (a reference's target precedes the reference).
+    # Computed by Kahn's algorithm with sorted-id tie-breaking; cycle members
+    # (== `cycles`) are appended at the end in sorted-id order. This is the ONLY
+    # field whose order is NOT alphabetical -- its sequence IS the data (the
+    # recompute schedule). The algorithm is LOCKED; see :func:`_topo_order`.
+    topo_order: list[str] = field(default_factory=list)
 
     @staticmethod
     def build(doc: "Document") -> "DependencyIndex":
@@ -180,12 +195,124 @@ def dependency_index(doc: "Document") -> DependencyIndex:
     # Phase 3: cycles -- every id that can reach itself in the deps graph.
     cycles = _find_cycle_members(deps)
 
+    # Phase 4a: the dependencies-first topological ordering (recompute schedule).
+    # Computed from the same deps/rdeps graph; cycle members trail in sorted
+    # order. The algorithm is LOCKED across all four apps.
+    topo = _topo_order(deps, rdeps, cycles)
+
     return DependencyIndex(
         deps=deps,
         rdeps=rdeps,
         dangling=sorted(dangling),
         cycles=cycles,
+        topo_order=topo,
     )
+
+
+def _topo_order(
+    deps: dict[str, list[str]],
+    rdeps: dict[str, list[str]],
+    cycles: list[str],
+) -> list[str]:
+    """Compute the deterministic, **dependencies-first** topological ordering of
+    the by-id reference graph (REFERENCE_GRAPH.md §8 Phase 4a). The recompute
+    schedule a future incremental phase walks: a reference's target always
+    precedes the reference.
+
+    **This algorithm is LOCKED and must be byte-identical across all four apps.**
+    It is the highest cross-language desync risk in this module.
+
+    Kahn's algorithm with SORTED-ID tie-breaking, processed LEVEL-BY-LEVEL:
+
+    - **NODES** = the sorted set of all ids that are a ``deps``-key OR an
+      ``rdeps``-key (every id that is a source or a *present* target of an edge).
+      Dangling / operand-opaque targets (referenced but not present/targetable,
+      i.e. they appear in ``deps`` values but are not nodes) are NOT nodes and
+      create NO topo edge.
+    - Each node's **dependency count** = the number of its ``deps`` targets that
+      ARE nodes (present). Edges to non-node targets are ignored.
+    - Take the WHOLE current ready set (every un-emitted node whose remaining
+      dependency count is 0), emit it in sorted-id order, and decrement the
+      remaining count of every node that depends on an emitted node (its
+      ``rdeps``). Nodes freed during this level become ready only for the NEXT
+      level -- a node freed by emitting ``a`` is NOT eligible to slot in before
+      the rest of ``a``'s level. (This is what the LOCKED worked example pins:
+      emitting {a,r3,r4} as one level frees r1,r2 for the next level, so the
+      order is a,r3,r4,r1,r2 -- NOT a,r1,r2,r3,r4.) Ties ALWAYS by sorted id.
+    - **Cycle remnants:** any nodes that never reach dependency-count 0 are
+      appended at the END in sorted-id order. These are the nodes blocked by a
+      cycle: every cycle member (the ``cycles`` set) PLUS any node that
+      transitively depends on a cycle (e.g. ``tail -> c1`` where c1<->c2 --
+      ``tail`` never frees). ``cycles`` is therefore a SUBSET of the remnants,
+      not the whole set; the operational rule is "any node that never reaches
+      count 0".
+
+    Result: dependencies before dependents, fully deterministic.
+
+    ``deps``/``rdeps``/``cycles`` are the already-built (sorted) members of the
+    index. Mirrors the Rust ``topo_order``."""
+    # NODES: sorted union of deps-keys and rdeps-keys. A sorted set keeps
+    # iteration deterministic and de-duplicated.
+    nodes_set: set[str] = set(deps.keys()) | set(rdeps.keys())
+    nodes: list[str] = sorted(nodes_set)
+
+    # Remaining dependency count per node: number of its deps targets that are
+    # themselves nodes (present). Non-node (dangling/opaque) targets are ignored.
+    remaining: dict[str, int] = {}
+    for node in nodes:
+        targets = deps.get(node, [])
+        remaining[node] = sum(1 for t in targets if t in nodes_set)
+
+    emitted: set[str] = set()
+    order: list[str] = []
+
+    # Level-by-level Kahn loop. Each pass snapshots the CURRENT ready set (all
+    # un-emitted nodes with remaining count 0), emits it in sorted-id order, and
+    # only then applies the decrements its emissions cause -- so newly-freed
+    # nodes wait for the next level. Iterating the sorted `nodes` list yields the
+    # ready set already in sorted order. A node blocked by a cycle never reaches
+    # count 0, so the loop terminates when no node is ready.
+    while True:
+        # Snapshot this level's ready set (sorted, since `nodes` is sorted).
+        level = [
+            n for n in nodes
+            if n not in emitted and remaining.get(n) == 0
+        ]
+        if not level:
+            break  # no node ready -> remaining un-emitted are cyclic
+        # Emit the whole level in sorted order, marking each emitted first so
+        # decrements below cannot re-add a same-level node.
+        for node in level:
+            order.append(node)
+            emitted.add(node)
+        # Apply this level's decrements AFTER emitting the level, so a node
+        # freed now only becomes ready on the NEXT iteration.
+        for node in level:
+            dependents = rdeps.get(node)
+            if dependents is not None:
+                for dep in dependents:
+                    if dep in remaining:
+                        # A present dependent always had this node counted, so
+                        # the count is > 0 here; the max(0, ...) guard keeps it
+                        # sound even on a (impossible) double-count.
+                        remaining[dep] = max(0, remaining[dep] - 1)
+
+    # Remnants: any node never emitted is blocked by a cycle -- either it is ON
+    # a cycle (it is in `cycles`) OR it transitively DEPENDS on a cycle and so
+    # can never reach count 0 (e.g. `tail -> c1` where c1<->c2). Both kinds are
+    # appended at the END in sorted-id order. `cycles` is a SUBSET of these
+    # remnants, not necessarily the whole set; we therefore derive the remnants
+    # from the un-emitted nodes directly (the operational rule "any node that
+    # never reaches dependency-count 0"), which keeps the order deterministic and
+    # dependencies-first for the entire acyclic prefix. Iterating the sorted
+    # `nodes` list yields the remnants already in sorted-id order.
+    assert all(c not in emitted for c in cycles), (
+        "every cycle member must remain un-emitted (a subset of the remnants)")
+    for node in nodes:
+        if node not in emitted:
+            order.append(node)
+
+    return order
 
 
 def _find_cycle_members(deps: dict[str, list[str]]) -> list[str]:
@@ -347,27 +474,33 @@ def _map_json(m: dict[str, list[str]]) -> str:
 
 
 def _array_json(v: list[str]) -> str:
-    """Render a sorted string array (the input list is already sorted)."""
+    """Render a string array verbatim (preserving the input list's order). Used
+    for the already-sorted ``cycles``/``dangling`` arrays AND for ``topo_order``,
+    whose order is deliberately the topological sequence (NOT sorted) -- its
+    order is the data, so it must be rendered as-is."""
     items = ",".join(f'"{_escape(s)}"' for s in v)
     return "[" + items + "]"
 
 
 def dependency_index_to_test_json(idx: DependencyIndex) -> str:
     """Serialize a :class:`DependencyIndex` to canonical JSON: an object with
-    the sorted keys ``cycles``, ``dangling``, ``deps``, ``rdeps``;
-    ``deps``/``rdeps`` as objects of sorted id keys to sorted id arrays;
-    ``cycles``/``dangling`` as sorted arrays.
+    the sorted keys ``cycles``, ``dangling``, ``deps``, ``rdeps``,
+    ``topo_order``; ``deps``/``rdeps`` as objects of sorted id keys to sorted id
+    arrays; ``cycles``/``dangling`` as sorted arrays; ``topo_order`` as an array
+    IN TOPOLOGICAL ORDER (NOT sorted -- its order is the data).
 
     Byte-identical to what the sibling apps hand-roll (and the
-    ``dependency_index.json`` fixture). The top-level keys appear in
-    alphabetical order to match the ``_JsonObj`` sorted-key convention. Mirrors
-    the Rust ``dependency_index_to_test_json``."""
+    ``dependency_index.json`` fixture). The top-level KEYS appear in alphabetical
+    order (``cycles`` < ``dangling`` < ``deps`` < ``rdeps`` < ``topo_order``) to
+    match the ``_JsonObj`` sorted-key convention; only the ``topo_order`` VALUE
+    is unsorted. Mirrors the Rust ``dependency_index_to_test_json``."""
     return (
         "{"
         f'"cycles":{_array_json(idx.cycles)},'
         f'"dangling":{_array_json(idx.dangling)},'
         f'"deps":{_map_json(idx.deps)},'
-        f'"rdeps":{_map_json(idx.rdeps)}'
+        f'"rdeps":{_map_json(idx.rdeps)},'
+        f'"topo_order":{_array_json(idx.topo_order)}'
         "}"
     )
 

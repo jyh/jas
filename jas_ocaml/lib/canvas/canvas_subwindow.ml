@@ -33,14 +33,15 @@ let set_brush_libraries (libs : Yojson.Safe.t) : unit =
    that flows through Brush_registry too via the symmetry below. *)
 let () = Brush_registry.on_change (fun libs -> _brush_libraries := libs)
 
-(* ── Reference resolver registry (REFERENCE_GRAPH.md Phase 1b) ──
+(* ── Reference resolver registry (REFERENCE_GRAPH.md Phase 1b/4b) ──
    The live render arm resolves by-id references through an
    [element_resolver]. Threading a resolver through every drawing
    helper signature would be invasive, so — like the brush registry
    above — a module-local mutable ref holds the resolver for the
-   duration of one paint. The draw callback rebuilds it from the
-   current document each frame (the rebuild strategy; the
-   persistent-incremental index is Phase 4) and the cycle-guard set
+   duration of one paint. As of Phase 4b the draw callback installs a
+   resolver over the Model's PERSISTENT id->element index (carried with
+   the document, rebuilt only at the mutation chokepoint) instead of
+   rebuilding the index from the document each frame; the cycle-guard set
    stays a fresh local per top-level evaluate. *)
 
 let _ref_resolver : Live.element_resolver ref = ref Live.null_resolver
@@ -2368,15 +2369,23 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         Cairo.scale cr model#zoom_level model#zoom_level;
         (* Layer 2: artboard fills *)
         draw_artboard_fills cr current_doc;
-        (* Rebuild the render-scoped reference resolver from the
-           current document so the live render arm resolves by-id
-           references this paint (REFERENCE_GRAPH.md Phase 1b). The
-           rebuild strategy; the persistent-incremental index is
-           Phase 4. Spans layers + the off-canvas master store so an
-           instance resolves a master (SYMBOLS.md section 2); masters are
-           never in [layers], so this never paints them. *)
-        _ref_resolver := Live.resolver_of_layers_and_symbols
-          current_doc.Document.layers current_doc.Document.symbols;
+        (* Install the Model's already-built persistent id->element index
+           so the live render arm resolves by-id references this paint
+           (REFERENCE_GRAPH.md section 2.4 Phase 4b). Paint no longer
+           rebuilds the index per frame; it reads the index the Model
+           carries with the document (an O(log n) lookup resolver over a
+           shared Map), which the Model keeps equal to a from-scratch
+           rebuild via its [assert] gate. The index spans layers + the
+           off-canvas master store so an instance resolves a master
+           (SYMBOLS.md section 2); masters are never in [layers], so this
+           never paints them. *)
+        _ref_resolver := Live.resolver_of_index model#id_index;
+        (* Phase 4c: epoch the reference-geometry recompute cache off the
+           Model's generation (cleared on any edit / undo / redo), so no-edit
+           repaints reuse the cached target geometry. PER-APP perf cache; no
+           behavior change (gated by a per-hit [assert (cached = fresh)] in
+           [Live]). *)
+        Live.set_recompute_cache_generation model#generation;
         (* Layer 3: document element tree. In mask-isolation mode
            (OPACITY.md Preview interactions), render only the
            mask subtree of the isolated element — everything else

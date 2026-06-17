@@ -175,6 +175,32 @@ private func assertSvgRoundtrip(_ name: String) {
         "dependency_index cross-language test failed: canonical JSON mismatch")
 }
 
+/// Cross-language pin for the chain/diamond graph (REFERENCE_GRAPH.md §8
+/// Phase 4a): read the shared input document, build the index, serialize it,
+/// and assert byte-equality with the shared chain fixture. Exercises
+/// multi-level topological ordering that the primary fixture cannot.
+@Test func dependencyIndexChainCrossLanguage() {
+    let input = readFixture("expected/dependency_index_chain_input.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let doc = testJsonToDocument(input)
+
+    // Sanity: the parsed input must re-serialize to itself (it is canonical).
+    #expect(documentToTestJson(doc) == input,
+        "dependency_index_chain_input.json is not canonical: parse->serialize changed it")
+
+    let actual = dependencyIndexToTestJson(DependencyIndex.build(doc))
+    let expected = readFixture("expected/dependency_index_chain.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if actual != expected {
+        print("=== EXPECTED (dependency_index_chain) ===")
+        print(expected)
+        print("=== ACTUAL (dependency_index_chain) ===")
+        print(actual)
+    }
+    #expect(actual == expected,
+        "dependency_index_chain cross-language test failed: canonical JSON mismatch")
+}
+
 // MARK: - orphaned_references cross-language pin (REFERENCE_GRAPH.md)
 
 /// Parse the shared input document, read the shared orphaned-references

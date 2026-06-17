@@ -878,6 +878,117 @@ mod tests {
         }
     }
 
+    /// A richer, fully-acyclic chain/diamond document for the topo-order pin
+    /// (REFERENCE_GRAPH.md §8 Phase 4a). The primary `dependency_index` fixture
+    /// is mostly cycle + dangling, so it exercises little of the topological
+    /// ordering; this one is a multi-level DAG:
+    ///   - a rect `b` (no deps);
+    ///   - a chain `s1 -> b`, then `s2 -> s1` (s2 depends on s1 depends on b);
+    ///   - two refs `t1 -> b`, `t2 -> b` (b has multiple referrers);
+    ///   - `d1 -> s1` (a diamond: s1 is referenced by both s2 and d1).
+    /// No cycles, no dangling. The expected `topo_order` is the deterministic
+    /// level-by-level Kahn output: b, s1, t1, t2, d1, s2 (level 0 {b} frees
+    /// {s1,t1,t2}; emitting s1 at level 1 frees {d1,s2} for level 2 —
+    /// dependencies-first; verified in the chain unit test). Constructed here so
+    /// the document is unambiguous.
+    fn dependency_index_chain_document() -> crate::document::document::Document {
+        use crate::geometry::element::{Element, RectElem, CommonProps, Color, Fill};
+        use crate::document::document::Document;
+        use crate::geometry::live::{ReferenceElem, ElementRef, LiveVariant};
+        use std::rc::Rc;
+
+        let rect = |id: Option<&str>, x: f64| {
+            Rc::new(Element::Rect(RectElem {
+                x, y: 0.0, width: 36.0, height: 36.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                common: CommonProps { id: id.map(String::from), ..Default::default() },
+                fill_gradient: None, stroke_gradient: None,
+            }))
+        };
+        let reference = |id: &str, target: &str| {
+            Rc::new(Element::Live(LiveVariant::Reference(ReferenceElem::new(
+                ElementRef(target.to_string()),
+                CommonProps { id: Some(id.to_string()), ..Default::default() },
+            ))))
+        };
+
+        let mut doc = Document::default();
+        // Clear the random layer id + default artboard for a deterministic,
+        // regeneration-stable input fixture (matching the primary fixture).
+        doc.layers[0].common_mut().id = None;
+        doc.artboards.clear();
+        {
+            let kids = doc.layers[0].children_mut().unwrap();
+            kids.push(rect(Some("b"), 0.0));
+            kids.push(reference("s1", "b"));
+            kids.push(reference("s2", "s1"));
+            kids.push(reference("t1", "b"));
+            kids.push(reference("t2", "b"));
+            kids.push(reference("d1", "s1"));
+        }
+        doc
+    }
+
+    /// Bootstrap: generate the shared chain/diamond dependency-index fixtures.
+    /// Run with:
+    ///   cargo test generate_dependency_index_chain_fixtures -- --ignored --nocapture
+    /// Emits two fixtures (Rust is the source of truth for the canonical shape):
+    ///   - expected/dependency_index_chain_input.json — the input Document;
+    ///   - expected/dependency_index_chain.json — the canonical serialized index
+    ///     (incl. topo_order in topological sequence).
+    #[test]
+    #[ignore]
+    fn generate_dependency_index_chain_fixtures() {
+        use crate::document::dependency_index::{
+            dependency_index, dependency_index_to_test_json,
+        };
+        let doc = dependency_index_chain_document();
+        std::fs::write(
+            format!("{}/expected/dependency_index_chain_input.json", FIXTURES),
+            document_to_test_json(&doc),
+        ).unwrap();
+        let idx = dependency_index(&doc);
+        std::fs::write(
+            format!("{}/expected/dependency_index_chain.json", FIXTURES),
+            dependency_index_to_test_json(&idx),
+        ).unwrap();
+        eprintln!(
+            "Generated expected/dependency_index_chain_input.json + dependency_index_chain.json"
+        );
+    }
+
+    /// Cross-language pin for the chain/diamond graph (REFERENCE_GRAPH.md §8
+    /// Phase 4a): read the shared input document, build the index, serialize it,
+    /// and assert byte-equality with the shared chain fixture. Exercises
+    /// multi-level topological ordering that the primary fixture cannot.
+    #[test]
+    fn dependency_index_chain_cross_language() {
+        use crate::document::dependency_index::{
+            dependency_index, dependency_index_to_test_json,
+        };
+        let input = read_fixture("expected/dependency_index_chain_input.json");
+        let input = input.trim();
+        let doc = test_json_to_document(input);
+
+        // Sanity: the parsed input must re-serialize to itself (it is canonical).
+        assert_eq!(
+            document_to_test_json(&doc),
+            input,
+            "dependency_index_chain_input.json is not canonical: parse->serialize changed it"
+        );
+
+        let actual = dependency_index_to_test_json(&dependency_index(&doc));
+        let expected = read_fixture("expected/dependency_index_chain.json");
+        let expected = expected.trim();
+        if actual != expected {
+            eprintln!("=== EXPECTED (dependency_index_chain) ===");
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL (dependency_index_chain) ===");
+            eprintln!("{}", actual);
+            panic!("dependency_index_chain cross-language test failed: canonical JSON mismatch");
+        }
+    }
+
     // ---------------------------------------------------------------
     // orphaned_references predicate (reference-aware delete core)
     // ---------------------------------------------------------------

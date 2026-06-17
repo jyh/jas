@@ -254,12 +254,158 @@ private func docWithLayer(_ children: [Element]) -> Document {
         reference("c2", "c1"),
     ]))
     let json = dependencyIndexToTestJson(idx)
-    // Top-level keys are alphabetical: cycles, dangling, deps, rdeps.
+    // Top-level keys are alphabetical: cycles, dangling, deps, rdeps, topo_order.
     #expect(json.hasPrefix("{\"cycles\":[\"c1\",\"c2\"],\"dangling\":[\"r3\"],"))
     // deps object keys sorted; rdeps value list sorted (r1 before r2).
     #expect(json.contains("\"a\":[\"r1\",\"r2\"]"))
     #expect(json.contains("\"r1\":[\"a\"]"))
+    // topo_order is the LAST key (alphabetical) and its VALUE is the topo
+    // sequence: level 0 {a, r3} (r3 dangling -> count 0) emitted sorted,
+    // freeing r1, r2 for level 1; c1/c2 cycle remnants trail in sorted order.
+    #expect(json.contains("\"topo_order\":[\"a\",\"r3\",\"r1\",\"r2\",\"c1\",\"c2\"]"))
     // Parse back as generic JSON to confirm well-formedness.
     let data = json.data(using: .utf8)!
     #expect((try? JSONSerialization.jsonObject(with: data)) != nil)
+}
+
+// MARK: - topoOrder (Phase 4a — LOCKED algorithm)
+//
+// Kahn with sorted-id tie-break; dependencies-first; cycle remnants appended in
+// sorted order. These tests pin the deterministic sequence the algorithm must
+// produce; the SAME cases are mirrored across all four apps.
+
+@Test func topoOrderWorkedExampleMatchesLockedSpec() {
+    // The cross-language fixture graph (REFERENCE_GRAPH.md §8 worked example):
+    // deps c1<->c2, r1->a, r2->a, r3->ghost, r4->op1; nodes are
+    // {a,c1,c2,r1,r2,r3,r4} (ghost/op1 are non-nodes). Expected sequence:
+    // ready {a,r3,r4} sorted -> a,r3,r4 frees r1,r2 -> r1,r2; cycle c1,c2 trail.
+    let op1 = rectWithId("op1")
+    let op2 = rectWithId(nil)
+    let compound = Element.live(.compoundShape(CompoundShape(
+        operation: .subtractFront,
+        operands: [op1, op2],
+        id: "cs"
+    )))
+    let idx = DependencyIndex.build(docWithLayer([
+        rectWithId("a"),
+        reference("r1", "a"),
+        reference("r2", "a"),
+        reference("r3", "ghost"),
+        reference("c1", "c2"),
+        reference("c2", "c1"),
+        compound,
+        reference("r4", "op1"),
+    ]))
+    #expect(idx.topoOrder == ["a", "r3", "r4", "r1", "r2", "c1", "c2"])
+}
+
+@Test func topoOrderChainIsDependenciesFirst() {
+    // The chain/diamond fixture graph: b; s1->b; s2->s1; t1->b; t2->b; d1->s1.
+    // Level-by-level Kahn:
+    //   level 0: {b}                  emit b      -> frees s1, t1, t2
+    //   level 1: {s1, t1, t2} sorted  emit s1,t1,t2 -> emitting s1 frees d1, s2
+    //   level 2: {d1, s2} sorted      emit d1, s2
+    // Expected: b, s1, t1, t2, d1, s2.
+    let idx = DependencyIndex.build(docWithLayer([
+        rectWithId("b"),
+        reference("s1", "b"),
+        reference("s2", "s1"),
+        reference("t1", "b"),
+        reference("t2", "b"),
+        reference("d1", "s1"),
+    ]))
+    #expect(idx.topoOrder == ["b", "s1", "t1", "t2", "d1", "s2"])
+    // Dependencies-first invariant: every target precedes its referrer.
+    func pos(_ id: String) -> Int { idx.topoOrder.firstIndex(of: id)! }
+    #expect(pos("b") < pos("s1"))
+    #expect(pos("b") < pos("t1"))
+    #expect(pos("b") < pos("t2"))
+    #expect(pos("s1") < pos("s2"))
+    #expect(pos("s1") < pos("d1"))
+    #expect(idx.cycles.isEmpty)
+}
+
+@Test func topoOrderPureDagNoCycleFullOrdering() {
+    // A pure DAG with no cycle: a -> b -> c (a depends on b depends on c).
+    // Dependencies-first means c, b, a — the reverse of the reference chain.
+    let idx = DependencyIndex.build(docWithLayer([
+        rectWithId("c"),
+        reference("b", "c"),
+        reference("a", "b"),
+    ]))
+    #expect(idx.cycles.isEmpty)
+    #expect(idx.topoOrder == ["c", "b", "a"])
+}
+
+@Test func topoOrderAllDanglingIsEmpty() {
+    // Every reference points at an absent target -> the targets are NOT nodes,
+    // so the only nodes are the referencing ids, all with dependency count 0.
+    // They emit in sorted order and none is cyclic/dangling-as-node.
+    let idx = DependencyIndex.build(docWithLayer([
+        reference("z", "ghost1"),
+        reference("a", "ghost2"),
+        reference("m", "ghost3"),
+    ]))
+    // All three referrers are dangling (their targets are absent).
+    #expect(idx.dangling == ["a", "m", "z"])
+    // No present targets -> no rdeps; nodes are just the 3 sources, all ready
+    // immediately -> emitted in sorted id order.
+    #expect(idx.rdeps.isEmpty)
+    #expect(idx.cycles.isEmpty)
+    #expect(idx.topoOrder == ["a", "m", "z"])
+}
+
+@Test func topoOrderTrulyEmptyGraphIsEmpty() {
+    // No id-bearing elements -> no nodes -> empty topo order.
+    let idx = DependencyIndex.build(docWithLayer([rectWithId(nil)]))
+    #expect(idx.topoOrder.isEmpty)
+}
+
+@Test func topoOrderCycleRemnantsTrailInSortedOrder() {
+    // A DAG prefix feeding a cycle, plus an unrelated cyclic pair, to pin that
+    // ALL cycle members trail at the end in sorted-id order while the acyclic
+    // part is emitted dependencies-first.
+    // Graph: head -> root (root is a plain rect, count 0);
+    //        a cycle z<->y; a cycle q<->p.
+    // Acyclic nodes: root (0), head (1, dep root). Emit root, head.
+    // Cyclic nodes never reach 0: p,q,y,z -> trail sorted: p,q,y,z.
+    let idx = DependencyIndex.build(docWithLayer([
+        rectWithId("root"),
+        reference("head", "root"),
+        reference("z", "y"),
+        reference("y", "z"),
+        reference("q", "p"),
+        reference("p", "q"),
+    ]))
+    #expect(idx.cycles == ["p", "q", "y", "z"])
+    #expect(idx.topoOrder == ["root", "head", "p", "q", "y", "z"])
+}
+
+@Test func topoOrderNodeBlockedByCycleTrailsWithRemnants() {
+    // A node that DEPENDS on a cycle but is not ON it (tail -> c1, c1<->c2)
+    // never reaches dependency-count 0, so it is a remnant too. The remnants
+    // are ALL un-emitted nodes appended in sorted order — here the superset
+    // {c1, c2, tail}, NOT just the cycle set {c1, c2}. There is no acyclic
+    // prefix (every node is blocked), so topoOrder is exactly the sorted
+    // remnants. This pins that `cycles` is a SUBSET of the remnants.
+    let idx = DependencyIndex.build(docWithLayer([
+        reference("tail", "c1"),
+        reference("c1", "c2"),
+        reference("c2", "c1"),
+    ]))
+    #expect(idx.cycles == ["c1", "c2"])
+    #expect(idx.topoOrder == ["c1", "c2", "tail"],
+        "tail is blocked by the cycle -> a remnant, appended sorted after the cycle")
+}
+
+@Test func topoOrderSelfCycleNodeTrails() {
+    // A self-targeting reference is a cycle of one; it must trail after the
+    // acyclic nodes in sorted order. tail -> leaf (leaf count 0); self -> self.
+    let idx = DependencyIndex.build(docWithLayer([
+        rectWithId("leaf"),
+        reference("tail", "leaf"),
+        reference("self", "self"),
+    ]))
+    #expect(idx.cycles == ["self"])
+    #expect(idx.topoOrder == ["leaf", "tail", "self"])
 }
