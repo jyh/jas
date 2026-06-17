@@ -211,25 +211,6 @@ impl Model {
         self.generation
     }
 
-    /// Mutably borrow the current document. Bumps the modification
-    /// generation so the UI re-renders. Callers that want this change
-    /// to be undoable should call [`snapshot`] first.
-    ///
-    /// Returns a [`DocumentMutGuard`] that derefs to `&mut Document`, so
-    /// existing callers (`let doc = model.document_mut(); doc.foo()`) are
-    /// unchanged. When the guard is dropped (the `&mut` borrow ends) the
-    /// paired id->element index is rebuilt, keeping it consistent with the
-    /// edit the Model could not otherwise observe (REFERENCE_GRAPH.md §2.4).
-    pub fn document_mut(&mut self) -> DocumentMutGuard<'_> {
-        self.generation += 1;
-        // Snapshot the document as it is BEFORE the in-place edit; the guard's
-        // Drop diffs this against the mutated document to update the index
-        // incrementally. Cloning a Document is cheap — its layer/symbol
-        // subtrees are `Rc`-held, so the clone shares structure (O(top-level)).
-        let old_doc = self.document.clone();
-        DocumentMutGuard { model: self, old_doc }
-    }
-
     /// Replace the current document, update the paired id->element index
     /// incrementally (O(changed)), and bump the modification generation.
     /// Callers that want this change to be undoable should open a transaction
@@ -458,49 +439,6 @@ impl Model {
     }
 }
 
-/// Drop-guard returned by [`Model::document_mut`]. Derefs to the underlying
-/// `Document` so callers use it exactly like the old `&mut Document`; when it
-/// drops (the borrow ends) it updates the Model's paired id->element index
-/// incrementally, because the Model cannot otherwise observe edits made through
-/// the raw `&mut Document` (REFERENCE_GRAPH.md §2.4). The guard captures the
-/// pre-edit document (`old_doc`) at creation and diffs it against the mutated
-/// document on Drop ([`incremental_update_index`], O(changed) via CoW
-/// `Rc::ptr_eq`). The debug-assert gate confirms the result equals a
-/// from-scratch rebuild.
-pub struct DocumentMutGuard<'a> {
-    model: &'a mut Model,
-    /// The document as it was when the guard was created, used as the diff
-    /// baseline on Drop.
-    old_doc: Document,
-}
-
-impl std::ops::Deref for DocumentMutGuard<'_> {
-    type Target = Document;
-    fn deref(&self) -> &Document {
-        &self.model.document
-    }
-}
-
-impl std::ops::DerefMut for DocumentMutGuard<'_> {
-    fn deref_mut(&mut self) -> &mut Document {
-        &mut self.model.document
-    }
-}
-
-impl Drop for DocumentMutGuard<'_> {
-    fn drop(&mut self) {
-        self.model.id_index = incremental_update_index(
-            std::mem::take(&mut self.model.id_index),
-            &self.old_doc,         // old (pre-edit baseline)
-            &self.model.document,  // new (mutated in place)
-        );
-        debug_assert!(
-            self.model.id_index == rebuild_id_index(&self.model.document),
-            "id index diverged from rebuild after document_mut drop",
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,20 +641,19 @@ mod tests {
     }
 
     #[test]
-    fn id_index_tracks_set_document_and_document_mut() {
+    fn id_index_tracks_set_document() {
         let mut model = Model::default();
-        // set_document refreshes the index.
+        // set_document refreshes the index incrementally.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("a")));
         model.set_document(doc);
         assert!(model.id_index().get("a").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
-        // The document_mut drop-guard rebuilds the index when the borrow ends.
-        {
-            let mut d = model.document_mut();
-            d.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("b")));
-        }
+        // A second clone -> mutate -> set_document keeps the index consistent.
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("b")));
+        model.set_document(doc);
         assert!(model.id_index().get("b").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
     }
@@ -777,7 +714,7 @@ mod tests {
     // ── Phase 4b: incremental index maintenance wiring ──────────────────
     //
     // The Model now maintains `id_index` incrementally (O(changed)) at the
-    // set_document / document_mut chokepoints instead of full rebuilds. Each
+    // single set_document chokepoint instead of full rebuilds. Each
     // test asserts `id_index() == rebuild_id_index(document())` explicitly
     // after the edit (beyond the always-on debug_assert gate) and that an
     // affected reference still resolves.
@@ -816,19 +753,17 @@ mod tests {
     }
 
     #[test]
-    fn incremental_document_mut_guard_matches_rebuild() {
+    fn incremental_insert_then_delete_matches_rebuild() {
         let mut model = Model::default();
-        {
-            let mut d = model.document_mut();
-            d.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("gm")));
-        }
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("gm")));
+        model.set_document(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "gm"));
-        // A second in-place edit (delete) through the guard also stays consistent.
-        {
-            let mut d = model.document_mut();
-            d.layers[0].children_mut().unwrap().clear();
-        }
+        // A second edit (delete) through set_document also stays consistent.
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().clear();
+        model.set_document(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "gm"), "deleted target no longer resolves");
     }
