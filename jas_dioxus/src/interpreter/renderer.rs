@@ -631,8 +631,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     let Some(master_id) = mint(&existing) else { return Vec::new(); };
                     existing.insert(master_id.clone());
                     let Some(ref_id) = mint(&existing) else { return Vec::new(); };
-                    tab.model.snapshot();
-                    Controller::make_symbol(&mut tab.model, &path, &master_id, &ref_id);
+                    tab.model.with_txn(|m| Controller::make_symbol(m, &path, &master_id, &ref_id));
                     // Keep the new master panel-selected so Place/Delete
                     // target it immediately. make_symbol keeps an existing
                     // id as the master key; resolve which id actually
@@ -660,8 +659,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 if let Some(tab) = st.tab_mut() {
                     let existing = existing_ids(&tab.model);
                     let Some(ref_id) = mint(&existing) else { return Vec::new(); };
-                    tab.model.snapshot();
-                    Controller::place_instance(&mut tab.model, &master_id, &ref_id);
+                    tab.model.with_txn(|m| Controller::place_instance(m, &master_id, &ref_id));
                 }
                 return Vec::new();
             }
@@ -699,8 +697,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 }
                 // No instances: delete silently.
                 if let Some(tab) = st.tab_mut() {
-                    tab.model.snapshot();
-                    Controller::delete_symbol(&mut tab.model, &master_id);
+                    tab.model.with_txn(|m| Controller::delete_symbol(m, &master_id));
                 }
                 st.symbols_selected = None;
                 return Vec::new();
@@ -709,8 +706,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
             "delete_symbol_orphan_confirm_ok" => {
                 if let Some(master_id) = st.symbols_selected.clone() {
                     if let Some(tab) = st.tab_mut() {
-                        tab.model.snapshot();
-                        Controller::delete_symbol(&mut tab.model, &master_id);
+                        tab.model.with_txn(|m| Controller::delete_symbol(m, &master_id));
                     }
                     st.symbols_selected = None;
                 }
@@ -1126,9 +1122,9 @@ fn set_app_state_field(
                 // path AppState::set_active_color uses for the
                 // Color-panel slider commits.
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    crate::document::controller::Controller::set_selection_fill(
-                        &mut tab.model, new_fill);
+                    tab.model.with_txn(|m| {
+                        crate::document::controller::Controller::set_selection_fill(m, new_fill);
+                    });
                 }
             }
         }
@@ -1138,9 +1134,9 @@ fn set_app_state_field(
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
                     tab.model.default_stroke = None;
                     if !tab.model.document().selection.is_empty() {
-                        tab.model.snapshot();
-                        crate::document::controller::Controller::set_selection_stroke(
-                            &mut tab.model, None);
+                        tab.model.with_txn(|m| {
+                            crate::document::controller::Controller::set_selection_stroke(m, None);
+                        });
                     }
                 }
             } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
@@ -1152,9 +1148,9 @@ fn set_app_state_field(
                     let tab_stroke = Some(Stroke::new(color, tab_width));
                     tab.model.default_stroke = tab_stroke;
                     if !tab.model.document().selection.is_empty() {
-                        tab.model.snapshot();
-                        crate::document::controller::Controller::set_selection_stroke(
-                            &mut tab.model, tab_stroke);
+                        tab.model.with_txn(|m| {
+                            crate::document::controller::Controller::set_selection_stroke(m, tab_stroke);
+                        });
                     }
                 }
             }
@@ -2201,8 +2197,20 @@ fn run_yaml_effects(
 ) -> Vec<serde_json::Value> {
     let mut scope = ctx_in.clone();
     let mut deferred = Vec::new();
+    // OP_LOG.md Increment 1, sub-step 6: a YAML action opens its undo
+    // transaction via the `snapshot` effect; this loop owns it only if none was
+    // open when it started (reentrancy-safe — foreach/branch bodies re-enter
+    // run_yaml_effects, and doc.* effects delegate to effects.rs::run_effects
+    // which has the same ownership rule). The owner commits once at the end so
+    // the whole action is one undo step. commit_txn is a no-op if nothing opened.
+    let owns_txn = st.tabs.get(st.active_tab).map_or(false, |t| !t.model.in_txn());
     for eff in effects {
         deferred.extend(run_yaml_effect(eff, &mut scope, st));
+    }
+    if owns_txn {
+        if let Some(t) = st.tabs.get_mut(st.active_tab) {
+            t.model.commit_txn();
+        }
     }
     deferred
 }
@@ -2225,7 +2233,7 @@ fn run_yaml_effect(
     if let Some(name) = eff.as_str() {
         if name == "snapshot" {
             if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                tab.model.snapshot();
+                tab.model.begin_txn();
             }
         } else if name == "close_dialog" {
             // Dialog effects are applied outside the AppState borrow.
@@ -2253,7 +2261,7 @@ fn run_yaml_effect(
     // snapshot — PHASE3 §5.2
     if eff.get("snapshot").is_some() {
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            tab.model.snapshot();
+            tab.model.begin_txn();
         }
         return deferred;
     }
@@ -8128,7 +8136,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     // Restore saved visibilities
                                     let saved = st.layers_solo_state.as_ref().unwrap().saved.clone();
                                     if let Some(tab) = st.tab_mut() {
-                                        tab.model.snapshot();
+                                        tab.model.begin_txn();
                                         let mut doc = tab.model.document().clone();
                                         for (sp, vis) in &saved {
                                             if let Some(elem) = doc.get_element_mut(sp) {
@@ -8136,6 +8144,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             }
                                         }
                                         tab.model.set_document(doc);
+                                        tab.model.commit_txn();
                                     }
                                     st.layers_solo_state = None;
                                 } else {
@@ -8152,7 +8161,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         }
                                     }
                                     if let Some(tab) = st.tab_mut() {
-                                        tab.model.snapshot();
+                                        tab.model.begin_txn();
                                         let mut doc = tab.model.document().clone();
                                         // Ensure soloed element is visible
                                         if let Some(elem) = doc.get_element_mut(&p) {
@@ -8168,6 +8177,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             }
                                         }
                                         tab.model.set_document(doc);
+                                        tab.model.commit_txn();
                                     }
                                     st.layers_solo_state = Some(crate::workspace::app_state::LayerSoloState {
                                         soloed_path: p.clone(),
@@ -8179,7 +8189,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 // Clicking normally discards any pending solo restore state
                                 st.layers_solo_state = None;
                                 if let Some(tab) = st.tab_mut() {
-                                    tab.model.snapshot();
+                                    tab.model.begin_txn();
                                     let mut doc = tab.model.document().clone();
                                     if let Some(elem) = doc.get_element_mut(&p) {
                                         let new_vis = match elem.visibility() {
@@ -8196,6 +8206,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         }
                                     }
                                     tab.model.set_document(doc);
+                                    tab.model.commit_txn();
                                 }
                             }
                             eye_rev += 1;
@@ -8247,7 +8258,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             };
 
                             if let Some(tab) = st.tab_mut() {
-                                tab.model.snapshot();
+                                tab.model.begin_txn();
                                 // One clone -> all three lock mutations -> one commit, so the
                                 // whole lock toggle is a single undo step / one index update.
                                 let mut doc = tab.model.document().clone();
@@ -8282,6 +8293,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     });
                                 }
                                 tab.model.set_document(doc);
+                                tab.model.commit_txn();
                             }
                             lock_rev += 1;
                         });
@@ -8633,7 +8645,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 };
                                 if allowed {
                                     if let Some(tab) = st.tab_mut() {
-                                        tab.model.snapshot();
+                                        tab.model.begin_txn();
                                         let mut elements: Vec<(Vec<usize>, crate::geometry::element::Element)> = Vec::new();
                                         let doc = tab.model.document();
                                         for src in &sources {
@@ -8663,6 +8675,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             .map(|p| crate::document::document::ElementSelection::all(p.clone()))
                                             .collect();
                                         tab.model.set_document(doc);
+                                        tab.model.commit_txn();
                                         st.layers_panel_selection = new_paths;
                                     }
                                 } else {
@@ -8842,7 +8855,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                             spawn(async move {
                                                                 let mut st = a.borrow_mut();
                                                                 if let Some(tab) = st.tab_mut() {
-                                                                    tab.model.snapshot();
+                                                                    tab.model.begin_txn();
                                                                     let mut doc = tab.model.document().clone();
                                                                     if let Some(elem) = doc.get_element_mut(&p) {
                                                                         // Write to common.name for any
@@ -8862,6 +8875,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                         let _ = val_inner;
                                                                     }
                                                                     tab.model.set_document(doc);
+                                                                    tab.model.commit_txn();
                                                                 }
                                                                 st.layers_renaming = None;
                                                                 confirm_rev += 1;
@@ -8907,7 +8921,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                         let mut st = a.borrow_mut();
                                                         if st.layers_renaming.as_ref() == Some(&p) {
                                                             if let Some(tab) = st.tab_mut() {
-                                                                tab.model.snapshot();
+                                                                tab.model.begin_txn();
                                                                 let mut doc = tab.model.document().clone();
                                                                 if let Some(elem) = doc.get_element_mut(&p) {
                                                                     elem.common_mut().name = if val_inner.is_empty() {
@@ -8920,6 +8934,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                                     let _ = val_inner;
                                                                 }
                                                                 tab.model.set_document(doc);
+                                                                tab.model.commit_txn();
                                                             }
                                                             st.layers_renaming = None;
                                                             blur_rev += 1;
