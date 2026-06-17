@@ -9,11 +9,13 @@
 
     It exposes, for the {b by-id reference graph only}:
 
-    - [deps]     — id to the sorted list of target ids it directly references
-    - [rdeps]    — id to the sorted list of ids that reference it (reverse of deps)
-    - [dangling] — sorted list of {i referencing} ids whose target id is not
-                   present in the targetable set (absent, or operand-nested)
-    - [cycles]   — sorted list of ids that participate in a cycle
+    - [deps]       — id to the sorted list of target ids it directly references
+    - [rdeps]      — id to the sorted list of ids that reference it (reverse of deps)
+    - [dangling]   — sorted list of {i referencing} ids whose target id is not
+                     present in the targetable set (absent, or operand-nested)
+    - [cycles]     — sorted list of ids that participate in a cycle
+    - [topo_order] — a deterministic topological ordering (dependencies-first)
+                     of the by-id graph; the only intentionally-non-sorted output
 
     {2 Operands are OPAQUE to the by-id graph (locked design)}
 
@@ -33,11 +35,19 @@
     iterates neighbors in {b sorted} order. No part of the output relies
     on hash-table iteration order.
 
+    {2 [topo_order] (Phase 4a — REFERENCE_GRAPH.md section 8)}
+
+    A deterministic, dependencies-first topological ordering of the by-id
+    graph, computed by Kahn's algorithm with sorted-id tie-breaking
+    (emitted level-by-level: each pass emits the whole ready set sorted,
+    then applies that level's decrements). It is the recompute schedule a
+    future incremental phase (P4c) will walk. The ordering is the {b only}
+    intentionally-non-sorted output: its sequence IS the data. The
+    ALGORITHM IS LOCKED and must be byte-identical across all four apps —
+    it is the highest cross-language desync risk here.
+
     {2 Deferred (NOT implemented here)}
 
-    - [topo_order] — the Phase 4 recompute ordering (a topological sort
-      of the deps DAG, with cycles broken). Deferred until a consumer
-      needs a recompute schedule.
     - Write-time cycle rejection — no authoring op can form a cycle yet
       ([create_reference] only links to an existing target), and the
       eval-time cycle-break (the threaded visit set in [Live]) already
@@ -66,6 +76,16 @@ type t = {
     (** Sorted, de-duplicated list of ids that lie on a cycle in the
         [deps] graph (a node that can reach itself). A self-target
         ([R -> R]) is a cycle. *)
+  topo_order : string list;
+    (** A deterministic topological ordering of the by-id graph,
+        {b dependencies-first} (a reference's target precedes the
+        reference). Computed by Kahn's algorithm with sorted-id
+        tie-breaking, emitted level-by-level; nodes that never reach
+        dependency-count 0 (the cycle members PLUS any node transitively
+        depending on a cycle — a SUPERSET of {!cycles}) are appended at
+        the end in sorted-id order. This is the ONLY field whose order is
+        NOT alphabetical — its sequence IS the data (the recompute
+        schedule). The algorithm is LOCKED across all four apps. *)
 }
 
 (** Build the dependency index for [doc]. A pure, allocation-only
@@ -73,10 +93,13 @@ type t = {
 val build : Document.document -> t
 
 (** Serialize a {!t} to canonical JSON: an object with the sorted keys
-    [cycles], [dangling], [deps], [rdeps]; [deps] / [rdeps] as objects of
-    sorted id keys to sorted id arrays; [cycles] / [dangling] as sorted
-    arrays. Byte-identical to what the sibling apps hand-roll (and the
-    [dependency_index.json] fixture). *)
+    [cycles], [dangling], [deps], [rdeps], [topo_order]; [deps] / [rdeps]
+    as objects of sorted id keys to sorted id arrays; [cycles] /
+    [dangling] as sorted arrays; [topo_order] as an array IN TOPOLOGICAL
+    ORDER (NOT sorted — its order is the data). The top-level KEYS appear
+    in alphabetical order to match the sorted-key convention; only the
+    [topo_order] value is unsorted. Byte-identical to what the sibling
+    apps hand-roll (and the [dependency_index.json] fixture). *)
 val to_test_json : t -> string
 
 (** Reference-aware delete: answer "if I delete the elements at these

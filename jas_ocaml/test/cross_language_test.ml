@@ -419,6 +419,29 @@ let dependency_index_cross_language () =
     assert false
   end
 
+(* Cross-language pin for the chain/diamond graph (REFERENCE_GRAPH.md
+   section 8 Phase 4a): read the shared input document, build the index,
+   serialize it, and assert byte-equality with the shared chain fixture.
+   Exercises multi-level topological ordering that the primary fixture
+   cannot (it is mostly cycle + dangling). All apps run this same fixture. *)
+let dependency_index_chain_cross_language () =
+  let input = read_fixture "expected/dependency_index_chain_input.json" in
+  let doc = Jas.Test_json.test_json_to_document input in
+  (* Sanity: the parsed input must re-serialize to itself (it is canonical). *)
+  let reser = Jas.Test_json.document_to_test_json doc in
+  if reser <> input then begin
+    Printf.eprintf "=== dependency_index_chain_input.json not canonical ===\n";
+    Printf.eprintf "EXPECTED: %s\nACTUAL:   %s\n" input reser;
+    assert false
+  end;
+  let actual = Jas.Dependency_index.to_test_json (Jas.Dependency_index.build doc) in
+  let expected = read_fixture "expected/dependency_index_chain.json" in
+  if actual <> expected then begin
+    Printf.eprintf "=== EXPECTED (dependency_index_chain) ===\n%s\n" expected;
+    Printf.eprintf "=== ACTUAL (dependency_index_chain) ===\n%s\n" actual;
+    assert false
+  end
+
 (* Cross-language pin (REFERENCE_GRAPH.md): parse the shared input
    document, read the shared orphaned-references fixture, and for each
    case assert that [orphaned_references doc delete_paths] equals the
@@ -604,6 +627,12 @@ let () =
     "Dependency index", [
       Alcotest.test_case "cross_language fixture" `Quick
         dependency_index_cross_language;
+
+      (* Phase 4a topo_order: the multi-level chain/diamond fixture pins
+         level-by-level Kahn ordering that the primary fixture (mostly
+         cycle + dangling) cannot exercise. *)
+      Alcotest.test_case "chain cross_language fixture" `Quick
+        dependency_index_chain_cross_language;
 
       (* orphaned_references predicate (reference-aware delete core).
          The cross-language case pins the shared fixture; the unit cases
@@ -892,7 +921,179 @@ let () =
               else go (i + 1)
             in go 0 in
           Alcotest.(check bool) "rdeps a sorted" true (contains "\"a\":[\"r1\",\"r2\"]");
-          Alcotest.(check bool) "deps r1" true (contains "\"r1\":[\"a\"]"));
+          Alcotest.(check bool) "deps r1" true (contains "\"r1\":[\"a\"]");
+          (* topo_order is the LAST key (alphabetical) and its VALUE is the
+             topo sequence: level 0 {a, r3} (r3 dangling -> count 0)
+             emitted sorted, freeing r1, r2 for level 1; c1/c2 cycle
+             remnants trail in sorted order. *)
+          Alcotest.(check bool) "topo_order value" true
+            (contains "\"topo_order\":[\"a\",\"r3\",\"r1\",\"r2\",\"c1\",\"c2\"]"));
+
+      (* ---------------------------------------------------------------
+         topo_order (Phase 4a — LOCKED algorithm). Kahn with sorted-id
+         tie-break; dependencies-first; cycle remnants appended in sorted
+         order. These tests pin the deterministic sequence the algorithm
+         must produce; the SAME cases are mirrored across all four apps.
+         --------------------------------------------------------------- *)
+
+      Alcotest.test_case "topo_order worked example matches locked spec"
+        `Quick (fun () ->
+          (* The cross-language fixture graph (REFERENCE_GRAPH.md section 8
+             worked example): deps c1<->c2, r1->a, r2->a, r3->ghost,
+             r4->op1; nodes are {a,c1,c2,r1,r2,r3,r4} (ghost/op1 are
+             non-nodes). Expected sequence: ready {a,r3,r4} sorted ->
+             a,r3,r4 frees r1,r2 -> r1,r2; cycle c1,c2 trail. *)
+          let compound = Jas.Element.Live (Jas.Element.Compound_shape {
+            operation = Jas.Element.Op_subtract_front;
+            id = Some "cs";
+            operands = [| dep_rect ~id:"op1" (); dep_rect () |];
+            fill = None; stroke = None; opacity = 1.0;
+            transform = None; locked = false;
+            visibility = Jas.Element.Preview; blend_mode = Jas.Element.Normal;
+            mask = None;
+          }) in
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"a" ();
+            dep_reference ~id:"r1" ~target:"a";
+            dep_reference ~id:"r2" ~target:"a";
+            dep_reference ~id:"r3" ~target:"ghost";
+            dep_reference ~id:"c1" ~target:"c2";
+            dep_reference ~id:"c2" ~target:"c1";
+            compound;
+            dep_reference ~id:"r4" ~target:"op1";
+          ]) in
+          Alcotest.(check (list string)) "topo_order"
+            ["a"; "r3"; "r4"; "r1"; "r2"; "c1"; "c2"] idx.topo_order);
+
+      Alcotest.test_case "topo_order chain is dependencies-first" `Quick
+        (fun () ->
+          (* The chain/diamond fixture graph: b; s1->b; s2->s1; t1->b;
+             t2->b; d1->s1. Level-by-level Kahn:
+               level 0: {b}                  emit b      -> frees s1,t1,t2
+               level 1: {s1,t1,t2} sorted    emit s1,t1,t2 -> emitting s1
+                                                            frees d1, s2
+               level 2: {d1,s2} sorted       emit d1, s2
+             Expected: b, s1, t1, t2, d1, s2. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"b" ();
+            dep_reference ~id:"s1" ~target:"b";
+            dep_reference ~id:"s2" ~target:"s1";
+            dep_reference ~id:"t1" ~target:"b";
+            dep_reference ~id:"t2" ~target:"b";
+            dep_reference ~id:"d1" ~target:"s1";
+          ]) in
+          Alcotest.(check (list string)) "topo_order"
+            ["b"; "s1"; "t1"; "t2"; "d1"; "s2"] idx.topo_order;
+          (* Dependencies-first invariant: every target precedes its
+             referrer. *)
+          let pos id =
+            let rec go i = function
+              | [] -> failwith (Printf.sprintf "id %s not in topo_order" id)
+              | x :: _ when x = id -> i
+              | _ :: rest -> go (i + 1) rest
+            in go 0 idx.topo_order
+          in
+          Alcotest.(check bool) "b<s1" true (pos "b" < pos "s1");
+          Alcotest.(check bool) "b<t1" true (pos "b" < pos "t1");
+          Alcotest.(check bool) "b<t2" true (pos "b" < pos "t2");
+          Alcotest.(check bool) "s1<s2" true (pos "s1" < pos "s2");
+          Alcotest.(check bool) "s1<d1" true (pos "s1" < pos "d1");
+          Alcotest.(check bool) "no cycles" true (idx.cycles = []));
+
+      Alcotest.test_case "topo_order pure dag no cycle full ordering" `Quick
+        (fun () ->
+          (* A pure DAG with no cycle: a -> b -> c (a depends on b depends
+             on c). Dependencies-first means c, b, a — the reverse of the
+             reference chain. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"c" ();
+            dep_reference ~id:"b" ~target:"c";
+            dep_reference ~id:"a" ~target:"b";
+          ]) in
+          Alcotest.(check bool) "no cycles" true (idx.cycles = []);
+          Alcotest.(check (list string)) "topo_order"
+            ["c"; "b"; "a"] idx.topo_order);
+
+      Alcotest.test_case "topo_order all dangling is empty" `Quick (fun () ->
+          (* Every reference points at an absent target -> the targets are
+             NOT nodes, so the only nodes are the referencing ids, all with
+             dependency count 0. They emit in sorted order. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_reference ~id:"z" ~target:"ghost1";
+            dep_reference ~id:"a" ~target:"ghost2";
+            dep_reference ~id:"m" ~target:"ghost3";
+          ]) in
+          Alcotest.(check (list string)) "dangling"
+            ["a"; "m"; "z"] idx.dangling;
+          Alcotest.(check bool) "no rdeps" true (idx.rdeps = []);
+          Alcotest.(check bool) "no cycles" true (idx.cycles = []);
+          Alcotest.(check (list string)) "topo_order"
+            ["a"; "m"; "z"] idx.topo_order);
+
+      Alcotest.test_case "topo_order truly empty graph is empty" `Quick
+        (fun () ->
+          (* No id-bearing elements -> no nodes -> empty topo order. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ();
+          ]) in
+          Alcotest.(check (list string)) "topo_order empty"
+            [] idx.topo_order);
+
+      Alcotest.test_case "topo_order cycle remnants trail in sorted order"
+        `Quick (fun () ->
+          (* A DAG prefix feeding a plain rect, plus two unrelated cyclic
+             pairs, to pin that ALL cycle members trail at the end in
+             sorted-id order while the acyclic part is emitted
+             dependencies-first.
+             Graph: head -> root (root is a plain rect, count 0);
+                    a cycle z<->y; a cycle q<->p.
+             Acyclic nodes: root (0), head (1, dep root). Emit root, head.
+             Cyclic nodes never reach 0: p,q,y,z -> trail sorted. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"root" ();
+            dep_reference ~id:"head" ~target:"root";
+            dep_reference ~id:"z" ~target:"y";
+            dep_reference ~id:"y" ~target:"z";
+            dep_reference ~id:"q" ~target:"p";
+            dep_reference ~id:"p" ~target:"q";
+          ]) in
+          Alcotest.(check (list string)) "cycles"
+            ["p"; "q"; "y"; "z"] idx.cycles;
+          Alcotest.(check (list string)) "topo_order"
+            ["root"; "head"; "p"; "q"; "y"; "z"] idx.topo_order);
+
+      Alcotest.test_case "topo_order node blocked by cycle trails with remnants"
+        `Quick (fun () ->
+          (* A node that DEPENDS on a cycle but is not ON it (tail -> c1,
+             c1<->c2) never reaches dependency-count 0, so it is a remnant
+             too. The remnants are ALL un-emitted nodes appended in sorted
+             order — here the superset {c1, c2, tail}, NOT just the cycle
+             set {c1, c2}. There is no acyclic prefix (every node is
+             blocked), so topo_order is exactly the sorted remnants. This
+             pins that [cycles] is a SUBSET of the remnants. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_reference ~id:"tail" ~target:"c1";
+            dep_reference ~id:"c1" ~target:"c2";
+            dep_reference ~id:"c2" ~target:"c1";
+          ]) in
+          Alcotest.(check (list string)) "cycles" ["c1"; "c2"] idx.cycles;
+          Alcotest.(check (list string))
+            "tail trails sorted after the cycle"
+            ["c1"; "c2"; "tail"] idx.topo_order);
+
+      Alcotest.test_case "topo_order self cycle node trails" `Quick
+        (fun () ->
+          (* A self-targeting reference is a cycle of one; it must trail
+             after the acyclic nodes in sorted order. tail -> leaf (leaf
+             count 0); self -> self. *)
+          let idx = Jas.Dependency_index.build (dep_doc_with_layer [
+            dep_rect ~id:"leaf" ();
+            dep_reference ~id:"tail" ~target:"leaf";
+            dep_reference ~id:"self" ~target:"self";
+          ]) in
+          Alcotest.(check (list string)) "cycles" ["self"] idx.cycles;
+          Alcotest.(check (list string)) "topo_order"
+            ["leaf"; "tail"; "self"] idx.topo_order);
     ];
 
     (* Symbols P1 (SYMBOLS.md section 10): the off-canvas master store.
