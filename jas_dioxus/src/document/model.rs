@@ -8,7 +8,11 @@
 //! manual callbacks. The Model still owns undo/redo stacks and filename state.
 
 use super::document::Document;
-use crate::canvas::render::{incremental_update_index, rebuild_id_index, IdIndex};
+// Phase 4b: the persistent id->element index + its builders live in the CORE
+// `document::id_index` module (not the web-gated `canvas::render`), so the
+// Model — which is core — compiles under `--no-default-features` and the
+// web-decoupled cross-language harness driver builds again.
+use crate::document::id_index::{incremental_update_index, rebuild_id_index, IdIndex};
 use crate::geometry::element::{Color, Fill, Stroke};
 
 const MAX_UNDO: usize = 100;
