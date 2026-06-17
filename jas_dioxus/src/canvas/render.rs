@@ -50,21 +50,34 @@ pub fn register_brush_libraries(libs: serde_json::Value) -> BrushLibsGuard {
     BrushLibsGuard { prior }
 }
 
-// Reference resolution (REFERENCE_GRAPH.md Phase 1b): a render-scoped
-// id->element index, rebuilt each paint (the rebuild strategy; the
-// persistent-incremental index is Phase 4). Installed via a thread-local
-// guard mirroring the brush registry above, so the live render arms resolve
-// by-id references without threading a resolver through every draw_element
+// Reference resolution (REFERENCE_GRAPH.md Phase 1b / Phase 4b): an
+// id->element index. As of Phase 4b the index is a PERSISTENT map computed
+// once and carried on the Model paired with the snapshot (so undo carries it
+// in O(1) and paint never rebuilds it), rather than a fresh HashMap rebuilt
+// each paint. Paint installs the Model's already-built index into a
+// thread-local (an O(1) rpds clone) so the live render arms resolve by-id
+// references without threading a resolver through every draw_element
 // signature. The cycle-guard VisitSet stays a fresh local per top-level
 // evaluate (passed to evaluate_with) — never thread state.
+//
+// The map values are bit-identical to the old rebuild (same walk, same
+// first-occurrence-wins discipline, same sorted-symbols order), so resolve()
+// results are unchanged — this is a pure Rust-only perf refactor.
+
+/// Persistent id->element index (REFERENCE_GRAPH.md §2.4). `RedBlackTreeMap`
+/// gives O(log n) lookup/insert, O(1) structure-sharing clone (so each undo
+/// snapshot carries the index cheaply), and sorted iteration. `PartialEq` is
+/// available because `Element` is `PartialEq`, which lets the debug-assert gate
+/// compare a maintained index against a from-scratch rebuild by value.
+pub type IdIndex = rpds::RedBlackTreeMap<String, std::rc::Rc<Element>>;
+
 thread_local! {
-    static CURRENT_REF_INDEX: RefCell<std::collections::HashMap<String, std::rc::Rc<Element>>> =
-        RefCell::new(std::collections::HashMap::new());
+    static CURRENT_REF_INDEX: RefCell<IdIndex> = RefCell::new(IdIndex::new());
 }
 
 /// Restores the prior index on drop, so nested renders nest safely.
 pub struct RefIndexGuard {
-    prior: std::collections::HashMap<String, std::rc::Rc<Element>>,
+    prior: IdIndex,
 }
 impl Drop for RefIndexGuard {
     fn drop(&mut self) {
@@ -72,14 +85,13 @@ impl Drop for RefIndexGuard {
     }
 }
 
-fn collect_ref_ids(
-    elem: &std::rc::Rc<Element>,
-    out: &mut std::collections::HashMap<String, std::rc::Rc<Element>>,
-) {
+fn collect_ref_ids(elem: &std::rc::Rc<Element>, out: &mut IdIndex) {
     if let Some(id) = &elem.common().id {
         // first-occurrence wins (the unique-id invariant means there are no
         // collisions in practice; this just makes the build deterministic).
-        out.entry(id.clone()).or_insert_with(|| elem.clone());
+        if !out.contains_key(id) {
+            out.insert_mut(id.clone(), elem.clone());
+        }
     }
     if let Some(children) = elem.children() {
         for child in children {
@@ -88,7 +100,13 @@ fn collect_ref_ids(
     }
 }
 
-/// Build the id->element index from `doc` and install it for this render.
+/// Build the persistent id->element index from `doc`. This is the SINGLE
+/// canonical walk: it is both the builder used to populate the Model's
+/// companion index (so paint can read it without rebuilding) and the oracle
+/// the debug-assert gate compares against (REFERENCE_GRAPH.md §2.3 trust
+/// mechanism). The walk is identical to the pre-Phase-4b per-paint rebuild, so
+/// the resulting map's values are bit-identical.
+///
 /// Indexes id-bearing descendants (which are `Rc`-held); top-level layer ids
 /// are not resolution targets in Phase 1 (references target shapes).
 ///
@@ -103,8 +121,8 @@ fn collect_ref_ids(
 /// duplicate-id master resolves deterministically (first-by-id wins), matching
 /// the §2 deterministic-order rule (the unique-id invariant means there are no
 /// collisions in a well-formed document).
-pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
-    let mut index = std::collections::HashMap::new();
+pub fn rebuild_id_index(doc: &Document) -> IdIndex {
+    let mut index = IdIndex::new();
     for layer in &doc.layers {
         if let Some(children) = layer.children() {
             for child in children {
@@ -120,8 +138,28 @@ pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
     for master in sorted_masters {
         collect_ref_ids(&std::rc::Rc::new(master.clone()), &mut index);
     }
+    index
+}
+
+/// Install an already-built `index` for this render and return a guard that
+/// restores the prior index on drop (so nested renders nest safely). This is
+/// the Phase-4b paint entry: the caller passes the Model's persistent index
+/// (an O(1) rpds clone) — no per-paint rebuild.
+pub fn install_ref_index(index: IdIndex) -> RefIndexGuard {
     let prior = CURRENT_REF_INDEX.with(|c| c.replace(index));
     RefIndexGuard { prior }
+}
+
+/// Build the index from `doc` and install it for this render, returning a
+/// restore guard. Retained for tests that don't have a precomputed index
+/// (the resolver/symbols fixtures); the hot paint path uses
+/// [`install_ref_index`] with the Model's persistent index instead.
+// Only referenced from the #[cfg(test)] resolver fixtures now that paint
+// installs the Model's prebuilt index — keep it as the convenience
+// build-and-install used by those tests.
+#[allow(dead_code)]
+pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
+    install_ref_index(rebuild_id_index(doc))
 }
 
 /// Zero-sized resolver reading the render-scoped index; passed to
@@ -2278,13 +2316,16 @@ pub fn render(
     mask_isolation_path: Option<&[usize]>,
     layers_isolation_path: Option<&[usize]>,
     brush_libraries: &serde_json::Value,
+    id_index: &IdIndex,
 ) {
     // Install the brush registry for this render. Dropped on exit
     // (guard restores the prior value), so nested renders nest safely.
     let _brush_guard = register_brush_libraries(brush_libraries.clone());
-    // Install the render-scoped id->element index so live references resolve
-    // and display (REFERENCE_GRAPH.md Phase 1b).
-    let _ref_index_guard = register_ref_index(doc);
+    // Install the Model's already-built persistent id->element index so live
+    // references resolve and display (REFERENCE_GRAPH.md §2.4 Phase 4b). The
+    // clone is O(1) (rpds structure sharing); paint never rebuilds it. The
+    // gate in the Model guarantees this equals rebuild_id_index(doc).
+    let _ref_index_guard = install_ref_index(id_index.clone());
 
     // Layer 1 (canvas background) is now painted by the caller
     // (workspace::app_state::repaint) BEFORE applying the
@@ -2361,6 +2402,48 @@ mod tests {
     fn css_color_opaque_black() {
         let c = Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
         assert_eq!(css_color(&c), "rgb(0,0,0)");
+    }
+
+    #[test]
+    fn rebuild_id_index_indexes_descendants_and_sorted_masters() {
+        // The pure builder (REFERENCE_GRAPH.md §2.3) indexes id-bearing layer
+        // descendants and doc.symbols masters; top-level layers are skipped.
+        // This is the single canonical walk shared by paint and the gate, so
+        // its result must match what RenderResolver reads via the thread-local.
+        use crate::geometry::element::{RectElem, CommonProps};
+        let mut rect = RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        rect.common.id = Some("r1".into());
+        let mut doc = Document::default();
+        // The default layer carries an id; it must NOT be a resolution target.
+        doc.layers[0].common_mut().id = Some("layer0".into());
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(Element::Rect(rect)));
+        let master = Element::Rect(RectElem {
+            x: 1.0, y: 2.0, width: 3.0, height: 4.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("m1".into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        doc.symbols = vec![master];
+
+        let index = rebuild_id_index(&doc);
+        assert!(index.get("r1").is_some(), "descendant rect is indexed by id");
+        assert!(index.get("m1").is_some(), "master is indexed from doc.symbols");
+        assert!(
+            index.get("layer0").is_none(),
+            "a top-level layer's own id is not a resolution target",
+        );
+        // The persistent map equals itself rebuilt (the gate's equality used by
+        // the Model) — and a fresh install resolves identically.
+        assert!(index == rebuild_id_index(&doc), "rebuild is deterministic");
+        let _guard = install_ref_index(index);
+        use crate::geometry::live::ElementRef;
+        assert!(RenderResolver.resolve(&ElementRef("r1".into())).is_some());
+        assert!(RenderResolver.resolve(&ElementRef("m1".into())).is_some());
     }
 
     #[test]
