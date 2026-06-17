@@ -211,6 +211,14 @@ impl Model {
         self.generation
     }
 
+    /// True while an undoable transaction is open. Lets a reentrant effect
+    /// runner decide whether IT opened the transaction (and so should commit
+    /// it) versus running nested inside an already-open one (OP_LOG.md
+    /// Increment 1, sub-step 5).
+    pub fn in_txn(&self) -> bool {
+        self.in_txn
+    }
+
     /// Replace the current document, update the paired id->element index
     /// incrementally (O(changed)), and bump the modification generation.
     /// Callers that want this change to be undoable should open a transaction
