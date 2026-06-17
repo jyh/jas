@@ -99,6 +99,10 @@ mod tests {
             // Symbols P1: the `symbols` array (a master) + the instance in
             // layers round-trips through test_json (SYMBOLS.md §10).
             "symbols_basic",
+            // Symbols P4: a reference whose instance `transform` field is set
+            // (the `instance_transform` key) round-trips through test_json
+            // distinct from common.transform (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -134,6 +138,10 @@ mod tests {
             // Symbols P1: the master store rides the trailing element array in
             // the binary document (SYMBOLS.md §5); JSON-compare round-trip.
             "symbols_basic",
+            // Symbols P4: the instance transform packs at TAG_LIVE slot 9 and
+            // round-trips through binary distinct from common.transform
+            // (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -208,6 +216,11 @@ mod tests {
             // (<use> -> i1) parses to the canonical `symbols` array + the
             // layer's reference. Rust is the canonical generator.
             "symbols_basic",
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): a <use> carrying
+            // data-jas-instance-transform parses to a reference whose instance
+            // `transform` field (emitted as `instance_transform`) is set,
+            // distinct from common.transform.
+            "reference_instance_transform",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -240,10 +253,23 @@ mod tests {
             // SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
             // not layers, and re-export identically.
             "symbols_basic",
+            // Symbols P4: the instance transform rides
+            // data-jas-instance-transform on the <use> and round-trips through
+            // SVG distinct from common.transform.
+            "reference_instance_transform",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    #[test]
+    fn svg_parse_reference_instance_transform() {
+        // <use href="#r1" id="i1" data-jas-instance-transform="matrix(2,0,0,2,0,0)">
+        // imports as a reference whose instance `transform` field is scale(2,2)
+        // (emitted as `instance_transform`), while common.transform stays null
+        // (SYMBOLS.md §4 / Fork F2 — the two transforms are independent).
+        assert_svg_parse("reference_instance_transform");
     }
 
     #[test]
@@ -533,6 +559,27 @@ mod tests {
                     model,
                     op["master_id"].as_str().unwrap(),
                 );
+            }
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
+            // transform is carried in the payload as {a,b,c,d,e,f} (the same
+            // matrix shape parsed elsewhere) and applied verbatim.
+            "set_instance_transform" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                let t = &op["transform"];
+                let transform = crate::geometry::element::Transform {
+                    a: t["a"].as_f64().unwrap(),
+                    b: t["b"].as_f64().unwrap(),
+                    c: t["c"].as_f64().unwrap(),
+                    d: t["d"].as_f64().unwrap(),
+                    e: t["e"].as_f64().unwrap(),
+                    f: t["f"].as_f64().unwrap(),
+                };
+                Controller::set_instance_transform(model, &path, transform);
             }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();

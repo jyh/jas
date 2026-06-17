@@ -520,11 +520,26 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 // A reference is native SVG <use href="#id"> (Phase 2). Its own
                 // id/opacity/transform ride the common attrs; the target is the
                 // href. Any <use> imports back as a live reference (F-svg-use).
+                //
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // field is distinct from common.transform (which rides the
+                // <use transform=...> attr via common_attrs_no_name). It is
+                // emitted as data-jas-instance-transform in the same matrix
+                // format as transform_attr, and ONLY when set so existing <use>
+                // fixtures stay byte-identical.
+                let inst_xform = match &r.transform {
+                    None => String::new(),
+                    Some(t) => format!(
+                        " data-jas-instance-transform=\"matrix({},{},{},{},{},{})\"",
+                        fmt(t.a), fmt(t.b), fmt(t.c), fmt(t.d), fmt(px(t.e)), fmt(px(t.f))
+                    ),
+                };
                 format!(
-                    "{}<use href=\"#{}\"{}/>",
+                    "{}<use href=\"#{}\"{}{}/>",
                     indent,
                     escape_xml(&r.target.0),
                     common_attrs_no_name(&r.common),
+                    inst_xform,
                 )
             }
         },
@@ -1173,6 +1188,28 @@ fn parse_transform(node: &XmlNode) -> Option<Transform> {
     None
 }
 
+/// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
+/// `None` when the attribute is absent or malformed. Used for the Symbols P4
+/// instance transform (data-jas-instance-transform); e/f are converted from px
+/// to pt to match the common transform attr (SYMBOLS.md §4 / Fork F2).
+fn parse_matrix_attr(node: &XmlNode, attr: &str) -> Option<Transform> {
+    let val = node.attrs.get(attr)?;
+    if val.starts_with("matrix(") {
+        let inner = val.trim_start_matches("matrix(").trim_end_matches(')');
+        let parts: Vec<f64> = inner.split([',', ' '])
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        if parts.len() == 6 {
+            return Some(Transform {
+                a: parts[0], b: parts[1], c: parts[2], d: parts[3],
+                e: pt(parts[4]), f: pt(parts[5]),
+            });
+        }
+    }
+    None
+}
+
 fn parse_opacity(node: &XmlNode) -> f64 {
     get_f(node, "opacity", 1.0)
 }
@@ -1772,12 +1809,15 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 .or_else(|| node.attrs.get("xlink:href"))
                 .map(|h| h.trim_start_matches('#').to_string())
                 .unwrap_or_default();
-            Some(Element::Live(crate::geometry::live::LiveVariant::Reference(
-                crate::geometry::live::ReferenceElem::new(
-                    crate::geometry::live::ElementRef(target),
-                    common,
-                ),
-            )))
+            let mut re = crate::geometry::live::ReferenceElem::new(
+                crate::geometry::live::ElementRef(target),
+                common,
+            );
+            // Symbols P4: the instance `transform` field rides
+            // data-jas-instance-transform (same matrix format as the common
+            // transform attr; e/f are px on the wire, pt in the model).
+            re.transform = parse_matrix_attr(node, "data-jas-instance-transform");
+            Some(Element::Live(crate::geometry::live::LiveVariant::Reference(re)))
         }
         _ => None,
     }

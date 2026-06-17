@@ -277,7 +277,21 @@ impl ReferenceElem {
                 visiting.insert(self.target.clone());
                 let ps = element_to_polygon_set_with(&target, precision, resolver, visiting);
                 visiting.remove(&self.target);
-                ps
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // field (distinct from common.transform, which renders as the
+                // CTM) is applied to the resolved geometry here, so an instance
+                // can be mirrored/scaled relative to its master. This single
+                // seam covers every consumer of the resolved set — both render
+                // sites, polygon-set, and compound-operand use. None ⇒ return
+                // the geometry unchanged (no transform, no double-apply).
+                match self.transform {
+                    Some(t) => ps.into_iter()
+                        .map(|ring| ring.into_iter()
+                            .map(|(x, y)| t.apply_point(x, y))
+                            .collect())
+                        .collect(),
+                    None => ps,
+                }
             }
             None => PolygonSet::new(), // dangling: target not found
         }
@@ -968,6 +982,67 @@ mod tests {
         let reference = ReferenceElem::new(ElementRef("t".into()), CommonProps::default());
         assert_eq!(reference.dependencies(), vec![ElementRef("t".into())]);
         assert!(reference.children().is_empty());
+    }
+
+    // --- Symbols P4: the instance `transform` field (SYMBOLS.md §4 / Fork F2) -
+
+    #[test]
+    fn reference_instance_transform_scales_target_geometry() {
+        // A reference whose instance `transform` is scale(2,2), targeting a
+        // 10x10 rect at the origin, evaluates to the rect geometry scaled 2x
+        // (a 20x20 ring). The instance transform is applied to every point of
+        // the resolved PolygonSet (composition: instance.transform ∘ geometry).
+        use crate::geometry::element::Transform;
+        let mut map = std::collections::HashMap::new();
+        map.insert("r1".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let resolver = MapResolver(map);
+        let mut reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        reference.transform = Some(Transform::scale(2.0, 2.0));
+        let mut visiting = VisitSet::new();
+        let scaled = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+
+        // Unscaled reference for comparison.
+        let plain = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        let mut visiting2 = VisitSet::new();
+        let mut map2 = std::collections::HashMap::new();
+        map2.insert("r1".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let resolver2 = MapResolver(map2);
+        let unscaled = plain.evaluate_with(DEFAULT_PRECISION, &resolver2, &mut visiting2);
+
+        assert_eq!(scaled.len(), unscaled.len(), "same ring count, just scaled");
+        let (sminx, sminy, smaxx, smaxy) = bbox_of_ring(&scaled[0]);
+        let (uminx, uminy, umaxx, umaxy) = bbox_of_ring(&unscaled[0]);
+        assert!((sminx - uminx * 2.0).abs() < 1e-6);
+        assert!((sminy - uminy * 2.0).abs() < 1e-6);
+        assert!((smaxx - umaxx * 2.0).abs() < 1e-6);
+        assert!((smaxy - umaxy * 2.0).abs() < 1e-6);
+        // Concretely: the 10x10 rect at origin scales to a 20x20 box.
+        assert!((sminx - 0.0).abs() < 1e-6 && (sminy - 0.0).abs() < 1e-6);
+        assert!((smaxx - 20.0).abs() < 1e-6 && (smaxy - 20.0).abs() < 1e-6);
+        assert!(visiting.is_empty());
+    }
+
+    #[test]
+    fn reference_none_instance_transform_leaves_eval_unchanged() {
+        // The default instance transform is None; eval is byte-identical to the
+        // resolved target geometry (no transform applied, no double-apply).
+        let mut map = std::collections::HashMap::new();
+        map.insert("r1".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let resolver = MapResolver(map);
+        let reference = ReferenceElem::new(ElementRef("r1".into()), CommonProps::default());
+        assert!(reference.transform.is_none(), "instance transform defaults to None");
+        let mut visiting = VisitSet::new();
+        let via_ref = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+        // Equal to evaluating the target rect directly.
+        let direct = element_to_polygon_set(
+            &Element::Rect(crate::geometry::element::RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None, common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            }),
+            DEFAULT_PRECISION);
+        assert_eq!(via_ref, direct,
+            "None instance transform leaves the resolved geometry unchanged");
     }
 
     // --- Symbols P1: an instance resolves a master from doc.symbols ----------

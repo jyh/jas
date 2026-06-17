@@ -564,9 +564,18 @@ fn element_json(elem: &Element) -> String {
                 o.str_val("kind", "reference");
                 o.str_val("target", &r.target.0);
                 common_fields(&mut o, &r.common);
-                // fill/stroke/transform are emitted only when set; in Phase 1
-                // references carry none (paint inheritance default / Fork F2),
-                // matching how compound omits its own paint here.
+                // fill/stroke are emitted only when set; in Phase 1 references
+                // carry none (paint inheritance default / Fork F2), matching how
+                // compound omits its own paint here.
+                //
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // field (distinct from common.transform, which `common_fields`
+                // emits as the `transform` key) is emitted as a separate
+                // `instance_transform` key, and ONLY when set — omitting it when
+                // None keeps existing reference fixtures byte-identical.
+                if r.transform.is_some() {
+                    o.raw("instance_transform", transform_json(&r.transform));
+                }
             }
         },
     }
@@ -1196,9 +1205,11 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
                 "reference" => {
                     let target = crate::geometry::live::ElementRef(
                         v["target"].as_str().unwrap_or("").to_string());
-                    Element::Live(crate::geometry::live::LiveVariant::Reference(
-                        crate::geometry::live::ReferenceElem::new(target, common),
-                    ))
+                    let mut re = crate::geometry::live::ReferenceElem::new(target, common);
+                    // Symbols P4: the instance `transform` field rides the
+                    // `instance_transform` key (absent ⇒ None / null ⇒ None).
+                    re.transform = parse_transform_opt(&v["instance_transform"]);
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
                 other => panic!("Unknown live kind: {}", other),
             }
