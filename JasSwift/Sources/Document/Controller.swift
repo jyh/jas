@@ -239,6 +239,22 @@ public class Controller {
         model.document = newDoc.replacing(symbols: newSymbols)
     }
 
+    /// Delete Symbol: remove the master whose `common.id == masterId` from
+    /// `doc.symbols` (SYMBOLS.md §7). No-op when no master carries that id.
+    /// The instances (`ReferenceElem`s targeting `masterId`) are left
+    /// untouched — they simply become dangling and resolve to empty until the
+    /// master returns (recoverable via undo, since the caller owns the
+    /// snapshot). The Symbols-panel confirm-before-delete warning is a UI
+    /// concern, not part of this op. Mirrors Rust `Controller::delete_symbol`.
+    public func deleteSymbol(masterId: String) {
+        let doc = model.document
+        guard let idx = doc.symbols.firstIndex(where: { $0.id == masterId })
+        else { return }
+        var newSymbols = doc.symbols
+        newSymbols.remove(at: idx)
+        model.document = doc.replacing(symbols: newSymbols)
+    }
+
     /// Append ``element`` to the mask subtree of the element at
     /// ``path``. Returns ``true`` when the append succeeded,
     /// ``false`` when the target element has no mask or the mask

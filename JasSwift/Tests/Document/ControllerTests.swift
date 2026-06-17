@@ -1016,6 +1016,50 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+@Test func deleteSymbolRemovesMaster() {
+    // makeSymbol a rect (m1), then deleteSymbol m1 -> doc.symbols is empty.
+    // Mirrors Rust delete_symbol_removes_master.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    #expect(ctrl.document.symbols.count == 1)
+    ctrl.deleteSymbol(masterId: "m1")
+    #expect(ctrl.document.symbols.isEmpty)
+}
+
+@Test func deleteSymbolUnknownIdNoop() {
+    // Deleting an id that is not a master leaves doc.symbols untouched.
+    // Mirrors Rust delete_symbol_unknown_id_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    ctrl.deleteSymbol(masterId: "ghost")
+    #expect(ctrl.document.symbols.count == 1)
+    #expect(ctrl.document.symbols[0].id == "m1")
+}
+
+@Test func deleteSymbolLeavesInstancesDangling() {
+    // The instances are NOT removed; they stay in the layer, still targeting
+    // the now-absent master id (dangling -> resolves to empty). Mirrors Rust
+    // delete_symbol_leaves_instances_dangling.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    ctrl.deleteSymbol(masterId: "m1")
+    let doc = ctrl.document
+    #expect(doc.symbols.isEmpty)
+    // The instance is still present, still targeting the absent master.
+    if case .live(.reference(let re)) = doc.getElement([0, 0]) {
+        #expect(re.target.id == "m1")
+        #expect(re.id == "i1")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {

@@ -1030,6 +1030,40 @@ class SymbolOpsTest(absltest.TestCase):
         self.assertEqual(ctrl.document.symbols, ())
         self.assertIsInstance(ctrl.document.get_element((0, 0)), Rect)
 
+    # ── delete_symbol ──────────────────────────────────────────
+
+    def test_delete_symbol_removes_master(self):
+        # make_symbol a rect (m1), then delete_symbol m1 → doc.symbols is empty.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        self.assertEqual(len(ctrl.document.symbols), 1)
+        ctrl.delete_symbol("m1")
+        self.assertEqual(ctrl.document.symbols, ())
+
+    def test_delete_symbol_unknown_id_noop(self):
+        # Deleting an id that is not a master leaves doc.symbols untouched.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        ctrl.delete_symbol("ghost")
+        self.assertEqual(len(ctrl.document.symbols), 1)
+        self.assertEqual(ctrl.document.symbols[0].id, "m1")
+
+    def test_delete_symbol_leaves_instances_dangling(self):
+        # The instances are NOT removed; they stay in the layer, still
+        # targeting the now-absent master id (dangling → resolves to empty).
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        ctrl.delete_symbol("m1")
+        doc = ctrl.document
+        self.assertEqual(doc.symbols, ())
+        # The instance is still present, still targeting the absent master.
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.target, "m1")
+        self.assertEqual(ref.id, "i1")
+
 
 class DeleteSelectionNestedTest(absltest.TestCase):
 

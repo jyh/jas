@@ -314,6 +314,8 @@ class CrossLanguageTest(absltest.TestCase):
                 elif op_name == "redefine":
                     ctrl.redefine(
                         op["master_id"], tuple(op["path"]), op["ref_id"])
+                elif op_name == "delete_symbol":
+                    ctrl.delete_symbol(op["master_id"])
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":

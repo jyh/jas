@@ -328,6 +328,36 @@ class controller ?(model = Model.create ()) () =
           model#set_document
             { new_doc with Document.symbols = new_symbols }
 
+    (** Delete Symbol: remove the master whose [common.id = master_id] from
+        [doc.symbols] (SYMBOLS.md section 7). No-op when no master carries that
+        id. The instances ([Reference]s targeting [master_id]) are left
+        untouched — they simply become dangling and resolve to empty until the
+        master returns (recoverable via undo, since the caller owns the
+        snapshot). The Symbols-panel confirm-before-delete warning is a UI
+        concern, not part of this op. *)
+    method delete_symbol (master_id : string) =
+      let doc = model#document in
+      let idx =
+        let rec find i =
+          if i >= Array.length doc.Document.symbols then None
+          else if Element.id_of doc.Document.symbols.(i) = Some master_id
+          then Some i
+          else find (i + 1)
+        in
+        find 0
+      in
+      match idx with
+      | None -> ()
+      | Some idx ->
+        let new_symbols =
+          Array.append
+            (Array.sub doc.Document.symbols 0 idx)
+            (Array.sub doc.Document.symbols (idx + 1)
+               (Array.length doc.Document.symbols - idx - 1))
+        in
+        model#set_document
+          { doc with Document.symbols = new_symbols }
+
     (** Append [elem] to the mask subtree of the element at [path].
         Returns [true] on success, [false] when the target has no
         mask or the subtree root isn't a [Group] — the caller then

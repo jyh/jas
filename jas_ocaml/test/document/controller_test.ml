@@ -813,6 +813,44 @@ let () =
         assert (Array.length ru_ctrl#document.Jas.Document.symbols = 0);
         (match Jas.Document.get_element ru_ctrl#document [0; 0] with
          | Rect _ -> () | _ -> assert false));
+
+      Alcotest.test_case "delete_symbol removes master" `Quick (fun () ->
+        (* make_symbol a rect (m1), then delete_symbol m1 -> doc.symbols is
+           empty. *)
+        let ds_ctrl = Jas.Controller.create () in
+        ds_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        ds_ctrl#make_symbol [0; 0] "m1" "i1";
+        assert (Array.length ds_ctrl#document.Jas.Document.symbols = 1);
+        ds_ctrl#delete_symbol "m1";
+        assert (Array.length ds_ctrl#document.Jas.Document.symbols = 0));
+
+      Alcotest.test_case "delete_symbol unknown id noop" `Quick (fun () ->
+        (* Deleting an id that is not a master leaves doc.symbols untouched. *)
+        let dk_ctrl = Jas.Controller.create () in
+        dk_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dk_ctrl#make_symbol [0; 0] "m1" "i1";
+        dk_ctrl#delete_symbol "ghost";
+        let doc = dk_ctrl#document in
+        assert (Array.length doc.Jas.Document.symbols = 1);
+        assert (id_of doc.Jas.Document.symbols.(0) = Some "m1"));
+
+      Alcotest.test_case "delete_symbol leaves instances dangling" `Quick
+        (fun () ->
+        (* The instances are NOT removed; they stay in the layer, still
+           targeting the now-absent master id (dangling -> resolves to
+           empty). *)
+        let dd_ctrl = Jas.Controller.create () in
+        dd_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dd_ctrl#make_symbol [0; 0] "m1" "i1";
+        dd_ctrl#delete_symbol "m1";
+        let doc = dd_ctrl#document in
+        assert (Array.length doc.Jas.Document.symbols = 0);
+        (* The instance is still present, still targeting the absent master. *)
+        (match Jas.Document.get_element doc [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "m1");
+           assert (re.Jas.Element.ref_id = Some "i1")
+         | _ -> assert false));
     ];
 
     "delete selection", [

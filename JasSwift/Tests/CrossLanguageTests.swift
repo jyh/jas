@@ -435,6 +435,9 @@ private func runOperationFixture(_ fixture: String) throws {
                     masterId: op["master_id"] as! String,
                     path,
                     refId: op["ref_id"] as! String)
+            case "delete_symbol":
+                controller.deleteSymbol(
+                    masterId: op["master_id"] as! String)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
             case "lock_selection":
