@@ -953,6 +953,43 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                   ctrl#set_selection_stroke new_stroke
                 end;
                 update_color_panel_widgets ()
+              (* Symbols panel (SYMBOLS.md section 8). These are native,
+                 value-in-op arms (mint ids / snapshot / shared symbol
+                 ops), so the shared YAML actions are [log] stubs and the
+                 real work is intercepted here — exactly like the Rust
+                 lead's dispatch_action symbol arms. Selection + the
+                 three footer ops all write panel state (selection or the
+                 master store), so each returns [wrote_state = true] to
+                 drive a panel re-render (row highlight + button enabled
+                 state refresh). *)
+              | "symbols_panel_select" ->
+                (match !_current_store,
+                       List.assoc_opt "symbol_id" params_list with
+                 | Some store, Some (`String id) when id <> "" ->
+                   Symbols_panel.set_selected_symbol store id;
+                   wrote_state := true
+                 | _ -> ())
+              | "new_symbol" ->
+                (match !_current_store with
+                 | Some store ->
+                   Symbols_panel.new_symbol store m; wrote_state := true
+                 | None -> ())
+              | "place_instance" ->
+                (match !_current_store with
+                 | Some store ->
+                   Symbols_panel.place_instance store m; wrote_state := true
+                 | None -> ())
+              | "delete_symbol_action" ->
+                (match !_current_store with
+                 | Some store ->
+                   (* Reuse the reference-aware confirm hook — its body
+                      ("Deleting will leave N live instance(s) empty.")
+                      is the cross-language-pinned wording the shared
+                      delete_symbol_orphan_confirm dialog also renders. *)
+                   Symbols_panel.delete_symbol_action store m
+                     ~confirm:(fun n -> !confirm_delete_orphans_hook n);
+                   wrote_state := true
+                 | None -> ())
               | _ ->
                 Panel_menu.dispatch_yaml_action
                   ~params:params_list action_name m)
@@ -1288,8 +1325,46 @@ and render_text ~packing ~ctx el =
     Buffer.contents buf
   in
   let markup = Printf.sprintf "<span %s%s>%s</span>" attr_color attr_size (escape text) in
-  let lbl = GMisc.label ~markup ~packing () in
-  lbl#set_xalign 0.0
+  (* A [type: text] element may carry a [behavior] array (e.g. the
+     Symbols / Artboards panel row labels select the row on click). The
+     plain GMisc.label has no input window, so when behaviors are present
+     wrap it in an event_box and dispatch the click behaviors — the same
+     generic gesture the icon_button / color-swatch paths use. Labels
+     without a behavior render exactly as before. *)
+  let has_click_behavior =
+    match el |> member "behavior" with
+    | `List bs ->
+      List.exists (fun b ->
+        (b |> member "event" |> to_string_option) = Some "click") bs
+    | _ -> false in
+  if has_click_behavior && !_current_panel_id <> None then begin
+    let evt = GBin.event_box ~packing () in
+    let lbl = GMisc.label ~markup ~packing:evt#add () in
+    lbl#set_xalign 0.0;
+    evt#event#add [`BUTTON_PRESS];
+    ignore (evt#event#connect#button_press ~callback:(fun ev ->
+      if GdkEvent.Button.button ev = 1 then begin
+        (* Rebuild panel/state from the live store before dispatch so
+           the click sees current panel.selected_symbol (mirrors the
+           color-swatch click_ctx refresh). *)
+        let click_ctx =
+          match !_current_store, !_current_panel_id, ctx with
+          | Some store, Some pid, `Assoc pairs ->
+            let live_panel = State_store.get_panel_state store pid in
+            let live_state = State_store.get_all store in
+            let pairs' = List.filter
+              (fun (k, _) -> k <> "panel" && k <> "state") pairs in
+            `Assoc (("panel", `Assoc live_panel)
+                    :: ("state", `Assoc live_state) :: pairs')
+          | _ -> ctx in
+        let wrote_state = dispatch_click_behaviors el click_ctx in
+        if wrote_state then schedule_panel_rerender ();
+        true
+      end else false))
+  end else begin
+    let lbl = GMisc.label ~markup ~packing () in
+    lbl#set_xalign 0.0
+  end
 
 and render_icon ~packing el =
   let open Yojson.Safe.Util in

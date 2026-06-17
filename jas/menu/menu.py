@@ -337,7 +337,8 @@ def create_menus(window: QMainWindow) -> None:
                         (PanelKind.ALIGN, "Ali&gn"),
                         (PanelKind.BOOLEAN, "&Boolean"),
                         (PanelKind.OPACITY, "&Opacity"),
-                        (PanelKind.MAGIC_WAND, "&Magic Wand")]:
+                        (PanelKind.MAGIC_WAND, "&Magic Wand"),
+                        (PanelKind.SYMBOLS, "S&ymbols")]:
         action = window_menu.addAction(label)
         action.setCheckable(True)
         action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))

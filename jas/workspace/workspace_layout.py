@@ -52,13 +52,14 @@ class PanelKind(Enum):
     BOOLEAN = auto()
     OPACITY = auto()
     MAGIC_WAND = auto()
+    SYMBOLS = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
     PanelKind.STROKE, PanelKind.PROPERTIES,
     PanelKind.CHARACTER, PanelKind.PARAGRAPH, PanelKind.ARTBOARDS,
     PanelKind.ALIGN, PanelKind.BOOLEAN, PanelKind.OPACITY,
-    PanelKind.MAGIC_WAND,
+    PanelKind.MAGIC_WAND, PanelKind.SYMBOLS,
 ]
 
 @dataclass
@@ -226,7 +227,8 @@ class WorkspaceLayout:
                     PanelGroup(panels=[PanelKind.ALIGN, PanelKind.BOOLEAN]),
                     PanelGroup(panels=[PanelKind.CHARACTER, PanelKind.PARAGRAPH]),
                     PanelGroup(panels=[PanelKind.STROKE, PanelKind.PROPERTIES]),
-                    PanelGroup(panels=[PanelKind.ARTBOARDS, PanelKind.LAYERS]),
+                    PanelGroup(panels=[PanelKind.ARTBOARDS, PanelKind.LAYERS,
+                                       PanelKind.SYMBOLS]),
                 ],
             ))],
             floating=[],
@@ -469,6 +471,7 @@ class WorkspaceLayout:
             PanelKind.BOOLEAN: "Boolean",
             PanelKind.OPACITY: "Opacity",
             PanelKind.MAGIC_WAND: "Magic Wand",
+            PanelKind.SYMBOLS: "Symbols",
         }[kind]
 
     # -- Close / show panels --

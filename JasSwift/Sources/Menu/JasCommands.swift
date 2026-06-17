@@ -375,6 +375,7 @@ public struct JasCommands: Commands {
             panelToggle(.properties, "Properties")
             panelToggle(.stroke, "Stroke")
             panelToggle(.swatches, "Swatches")
+            panelToggle(.symbols, "Symbols")
         }
     }
 
