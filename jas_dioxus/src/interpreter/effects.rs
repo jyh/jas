@@ -35,6 +35,14 @@ pub fn run_effects(
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
 ) {
+    // OP_LOG.md Increment 1, sub-step 5: a YAML action opens its undo
+    // transaction via the `doc.snapshot` effect (and self-contained doc.*
+    // mutators open one lazily). This run_effects call OWNS the transaction
+    // only if none was open when it started — so a reentrant nested run_effects
+    // (dispatch / on_change / dialog) does NOT commit the outer's transaction.
+    // The owner commits once at the end, spanning every effect in this batch
+    // into a single undo step. commit_txn is a no-op if nothing opened one.
+    let owns_txn = model.as_deref().map_or(false, |m| !m.in_txn());
     for effect in effects {
         if let serde_json::Value::Object(map) = effect {
             run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs);
@@ -57,6 +65,13 @@ pub fn run_effects(
                         actions, dialogs);
             }
             store.set_firing_on_change(false);
+        }
+    }
+    // Commit the transaction this batch opened (if any), making the whole
+    // action one undo step. No-op when nothing opened one or when nested.
+    if owns_txn {
+        if let Some(m) = model.as_deref_mut() {
+            m.commit_txn();
         }
     }
 }
@@ -590,7 +605,7 @@ fn run_doc_effect(
 ) {
     match name {
         "doc.snapshot" => {
-            model.snapshot();
+            model.begin_txn();
         }
         "doc.preview.capture" => {
             // Out-of-band document snapshot for dialog Preview flows
@@ -1337,7 +1352,7 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 if rw > 1.0 || rh > 1.0 {
-                    model.snapshot();
+                    model.begin_txn();
                     Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
                 } else if !additive {
                     Controller::set_selection(model, Vec::new());
@@ -2849,7 +2864,7 @@ fn path_commit_anchor_edit(
     };
     match mode.as_str() {
         "pressed_smooth" => {
-            model.snapshot();
+            model.begin_txn();
             let new_pe = convert_smooth_to_corner(&pe, anchor_idx);
             let doc = model.document().replace_element(
                 &path, Element::Path(new_pe));
@@ -2863,7 +2878,7 @@ fn path_commit_anchor_edit(
             if moved <= 1.0 {
                 return;
             }
-            model.snapshot();
+            model.begin_txn();
             let new_pe = convert_corner_to_smooth(
                 &pe, anchor_idx, target_x, target_y);
             let doc = model.document().replace_element(
@@ -2879,7 +2894,7 @@ fn path_commit_anchor_edit(
             if dx.abs() <= 0.5 && dy.abs() <= 0.5 {
                 return;
             }
-            model.snapshot();
+            model.begin_txn();
             let new_pe = move_path_handle_independent(
                 &pe, anchor_idx, &handle_type, dx, dy);
             let doc = model.document().replace_element(
@@ -3280,7 +3295,7 @@ fn artboard_delete_panel_selected_with_ids(model: &mut Model, target_ids: &[Stri
         // surface is a wider UI concern, deferred).
         return;
     }
-    model.snapshot();
+    model.begin_txn();
     let mut new_doc = model.document().clone();
     new_doc
         .artboards
@@ -4098,7 +4113,7 @@ fn path_probe_partial_hit(
         let already_selected = model.document().selection.iter()
             .any(|es| es.path == path && es.kind.contains(cp_idx));
         if !already_selected || shift {
-            model.snapshot();
+            model.begin_txn();
             if shift {
                 use crate::document::document::{SelectionKind, SortedCps, ElementSelection};
                 let doc = model.document();
@@ -5370,7 +5385,7 @@ fn path_insert_anchor_on_segment_near(
         Some(Element::Path(pe)) => pe.clone(),
         _ => return,
     };
-    model.snapshot();
+    model.begin_txn();
     let ins = insert_point_in_path(&pe.d, seg_idx, t);
     let new_pe = crate::geometry::element::PathElem {
         d: ins.commands,
@@ -5402,7 +5417,7 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
         Some(Element::Path(pe)) => pe.clone(),
         _ => return,
     };
-    model.snapshot();
+    model.begin_txn();
     match delete_anchor_from_path(&pe.d, anchor_idx) {
         Some(new_cmds) => {
             let new_pe = crate::geometry::element::PathElem {
