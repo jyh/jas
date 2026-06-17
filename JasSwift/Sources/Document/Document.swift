@@ -1,4 +1,5 @@
 import Foundation
+import Collections
 
 /// A path identifies an element by its position in the document tree.
 /// Each integer is a child index at that level.
@@ -426,61 +427,96 @@ public struct Document: Equatable {
     }
 }
 
-// MARK: - RebuildResolver (REFERENCE_GRAPH.md §2.4 — Phase 1 rebuild strategy)
+// MARK: - id→element index (REFERENCE_GRAPH.md §2.3/§2.4)
 
-/// An `ElementResolver` backed by an id→element index rebuilt from a
-/// `Document`. Phase 1's "rebuild on demand" resolver: the canvas builds a
-/// fresh `RebuildResolver` each paint so by-id references resolve to (and
-/// display) their current target geometry; the persistent-incremental index
-/// is Phase 4. Mirrors Rust's `register_ref_index` + `RenderResolver`, but as
-/// a plain value resolver (Swift `Element` is a value type, so the index holds
-/// element copies rather than a shared handle, and no thread-local is needed).
-public struct RebuildResolver: ElementResolver {
-    /// id → the element it currently names. First-occurrence wins (the
-    /// unique-id invariant means no collisions in practice; this just makes
-    /// the build deterministic).
-    private let index: [String: Element]
+/// The persistent id→element index (REFERENCE_GRAPH.md §2.4). A
+/// `TreeDictionary` (swift-collections HAMT) gives O(log n) lookup/insert,
+/// O(1) structure-sharing copy (so each undo snapshot carries the index
+/// cheaply — see ``Model``), and value semantics so it can be paired with the
+/// snapshot without an authoritative-state risk. It is `Equatable` because
+/// `Element` is, which lets the debug-only gate compare a stored index against
+/// a from-scratch rebuild by value. Mirrors Rust's `rpds::RedBlackTreeMap`
+/// (`IdIndex`); §2.3 explicitly permits each app to pick its own persistent
+/// map, so equivalence is pinned on `resolve()` *results*, not on the map type.
+public typealias IdIndex = TreeDictionary<String, Element>
 
-    /// Build the index from `doc`. Indexes id-bearing descendants of every
-    /// layer — top-level layer ids are not resolution targets in Phase 1
-    /// (references target shapes), matching the Rust reference.
-    ///
-    /// Also indexes `doc.symbols` (SYMBOLS.md §2): each master is walked with
-    /// the same operands-opaque discipline so a `ReferenceElem` instance can
-    /// resolve a master by its `id`. Unlike a top-level layer, a master's OWN
-    /// id is a valid target (a master is reached only through a reference), so
-    /// each master is indexed directly (its own id + id-bearing descendants),
-    /// not skipped. Masters live off-canvas (not in `layers`), so indexing
-    /// them here makes them resolvable WITHOUT ever making them painted — the
-    /// whole point of the off-canvas store. Masters are sorted by id first so a
-    /// (well-formed: impossible) duplicate-id master resolves deterministically
-    /// (first-by-id wins), matching the §2 deterministic-order rule.
-    public init(document doc: Document) {
-        var index: [String: Element] = [:]
-        for layer in doc.layers {
-            for child in layer.children {
-                RebuildResolver.collect(child, into: &index)
-            }
-        }
-        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
-        for master in sortedMasters {
-            RebuildResolver.collect(master, into: &index)
-        }
-        self.index = index
-    }
-
-    private static func collect(_ elem: Element, into index: inout [String: Element]) {
-        if let id = elem.id, index[id] == nil {
-            index[id] = elem
-        }
-        switch elem {
-        case .group(let g): for c in g.children { collect(c, into: &index) }
-        case .layer(let l): for c in l.children { collect(c, into: &index) }
-        default: break
+/// Build the persistent id→element index from `doc`. This is the SINGLE
+/// canonical walk (REFERENCE_GRAPH.md §2.3 trust mechanism): it is both the
+/// builder that populates the Model's companion index (so paint reads it
+/// without rebuilding) AND the oracle the gate compares against. The walk is
+/// identical to the pre-companion per-paint rebuild, so the resulting map's
+/// values are bit-identical — zero behavior change.
+///
+/// Indexes id-bearing descendants of every layer — top-level layer ids are not
+/// resolution targets (references target shapes), matching the Rust reference.
+///
+/// Also indexes `doc.symbols` (SYMBOLS.md §2): each master is walked with the
+/// same operands-opaque discipline so a `ReferenceElem` instance can resolve a
+/// master by its `id`. Unlike a top-level layer, a master's OWN id is a valid
+/// target (a master is reached only through a reference), so each master is
+/// indexed directly (its own id + id-bearing descendants), not skipped.
+/// Masters live off-canvas (not in `layers`), so indexing them here makes them
+/// resolvable WITHOUT ever making them painted — the whole point of the
+/// off-canvas store. Masters are sorted by id first so a (well-formed:
+/// impossible) duplicate-id master resolves deterministically (first-by-id
+/// wins), matching the §2 deterministic-order rule.
+public func rebuildIdIndex(_ doc: Document) -> IdIndex {
+    var index = IdIndex()
+    for layer in doc.layers {
+        for child in layer.children {
+            collectRefIds(child, into: &index)
         }
     }
+    let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+    for master in sortedMasters {
+        collectRefIds(master, into: &index)
+    }
+    return index
+}
 
+/// Recursive worker for ``rebuildIdIndex``. First-occurrence wins (the
+/// unique-id invariant means no collisions in practice; this just makes the
+/// build deterministic), so an already-present id is never overwritten.
+private func collectRefIds(_ elem: Element, into index: inout IdIndex) {
+    if let id = elem.id, index[id] == nil {
+        index[id] = elem
+    }
+    switch elem {
+    case .group(let g): for c in g.children { collectRefIds(c, into: &index) }
+    case .layer(let l): for c in l.children { collectRefIds(c, into: &index) }
+    default: break
+    }
+}
+
+/// An `ElementResolver` that reads an already-built ``IdIndex`` (the Phase-4b
+/// paint seam). The canvas installs the Model's persistent index here instead
+/// of rebuilding per paint; lookups are O(log n) against the structure-shared
+/// map. Mirrors Rust's `RenderResolver` reading the installed `IdIndex`.
+public struct IdIndexResolver: ElementResolver {
+    private let index: IdIndex
+    public init(index: IdIndex) { self.index = index }
     public func resolve(_ id: ElementRef) -> Element? { index[id.id] }
+}
+
+// MARK: - RebuildResolver (REFERENCE_GRAPH.md §2.4 — rebuild-on-demand)
+
+/// An `ElementResolver` that rebuilds the id→element index from a `Document`
+/// on construction (the rebuild-on-demand strategy). Retained as the
+/// convenience build-and-resolve used by the resolver/symbols fixtures and any
+/// caller that lacks a precomputed index; the hot paint path reads the Model's
+/// persistent companion index via ``IdIndexResolver`` instead (no per-paint
+/// rebuild). Delegates to ``rebuildIdIndex`` so its `resolve()` results are
+/// identical to the companion index. Mirrors Rust's `register_ref_index`.
+public struct RebuildResolver: ElementResolver {
+    private let inner: IdIndexResolver
+
+    /// Build the index from `doc` (via the shared ``rebuildIdIndex`` walk) and
+    /// wrap it in an ``IdIndexResolver``.
+    public init(document doc: Document) {
+        self.inner = IdIndexResolver(index: rebuildIdIndex(doc))
+    }
+
+    public func resolve(_ id: ElementRef) -> Element? { inner.resolve(id) }
 }
 
 // MARK: - Private helpers

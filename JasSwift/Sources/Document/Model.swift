@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Collections
 
 /// The target that drawing tools operate on. The default is the
 /// document's normal content; mask-editing mode switches the
@@ -29,8 +30,47 @@ private func freshFilename() -> String {
 /// whenever the document is replaced.
 public class Model: ObservableObject {
     @Published public var document: Document {
-        didSet { notify() }
+        didSet {
+            // The document setter is the single mutation chokepoint
+            // (every edit goes through `model.document = ...`), so refresh
+            // the paired id->element index here (REFERENCE_GRAPH.md §2.4
+            // Phase 4b, Option B "rebuild-at-chokepoint"). undo/redo restore
+            // a SNAPSHOT-CARRIED index in O(1) instead of rebuilding, so they
+            // hand it in via `restoringIndex`; every other write rebuilds.
+            if let carried = restoringIndex {
+                idIndex = carried
+                restoringIndex = nil
+            } else {
+                refreshIdIndex()
+            }
+            // Phase 4c: bump the modification generation on every document
+            // write (the chokepoint covers normal edits, undo/redo, and
+            // preview restore). Read at the paint entry to epoch the
+            // reference-geometry recompute cache: any edit changes the
+            // generation and drops the cache. Mirrors Rust `Model.generation`.
+            generation &+= 1
+            notify()
+        }
     }
+    /// Monotonic modification generation (Phase 4c). Bumped in the `document`
+    /// `didSet` chokepoint, so every document replacement advances it. Read at
+    /// the paint entry to epoch the reference-geometry recompute cache (cleared
+    /// whenever it changes). Mirrors Rust's `Model.generation`.
+    public private(set) var generation: UInt64 = 0
+    /// Persistent id->element index paired with `document`
+    /// (REFERENCE_GRAPH.md §2.4 Phase 4b). A pure function of `document`
+    /// (always equal to `rebuildIdIndex(document)`; checked by the
+    /// `assert` gate in `refreshIdIndex`), so it is never serialized and
+    /// never part of Document equality. Stored here, alongside the snapshot,
+    /// so paint reads it without rebuilding and undo carries it in O(1)
+    /// (TreeDictionary structure sharing — the undo/redo stacks pair each
+    /// Document with its index for the same reason). Mirrors Rust's
+    /// `Model.id_index`.
+    public private(set) var idIndex: IdIndex
+    /// Set by undo/redo to the snapshot-carried index just before the paired
+    /// document assignment, so the setter's `didSet` adopts it in O(1) rather
+    /// than rebuilding from scratch. nil for all other writes.
+    private var restoringIndex: IdIndex? = nil
     @Published public var filename: String
     @Published public var defaultFill: Fill? = nil
     @Published public var defaultStroke: Stroke? = Stroke(color: .black)
@@ -81,13 +121,23 @@ public class Model: ObservableObject {
     public var currentEditSession: TextEditSession? = nil
     public private(set) var savedDocument: Document
     private var listeners: [(Document) -> Void] = []
-    private var undoStack: [Document] = []
-    private var redoStack: [Document] = []
+    /// Undo/redo stacks pair each Document with its id->element index so
+    /// undo/redo restore the index in O(1) without a rebuild (TreeDictionary
+    /// copy is O(1) structure sharing). Mirrors Rust's `Vec<(Document,
+    /// IdIndex)>`.
+    private var undoStack: [(Document, IdIndex)] = []
+    private var redoStack: [(Document, IdIndex)] = []
     private let maxUndo = 100
 
     public var isModified: Bool { document != savedDocument }
 
     public init(document: Document = Document(), filename: String? = nil) {
+        // Build the companion index BEFORE assigning `document`, because the
+        // setter's `didSet` reads `idIndex`/`restoringIndex` (both must be
+        // initialized first). The didSet then rebuilds it from `document`, so
+        // the stored value equals a fresh rebuild from the first observable
+        // point. Mirrors Rust building the index in `Model::new`.
+        self.idIndex = rebuildIdIndex(document)
         self.document = document
         self.savedDocument = document
         self.filename = filename ?? freshFilename()
@@ -193,11 +243,27 @@ public class Model: ObservableObject {
     }
 
     public func snapshot() {
-        undoStack.append(document)
+        // Pair the index with the document on the stack so undo/redo restore
+        // it in O(1) without a rebuild (TreeDictionary copy is O(1) structure
+        // sharing). Mirrors Rust `snapshot` pushing `(document, id_index)`.
+        undoStack.append((document, idIndex))
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
         }
         redoStack.removeAll()
+    }
+
+    /// Rebuild the id->element index from the current document and assert it
+    /// equals a from-scratch rebuild. Called from the `document` `didSet`
+    /// chokepoint (every non-undo/redo write). The `assert` is the trust gate
+    /// (REFERENCE_GRAPH.md §2.3): active in debug — the whole test suite runs
+    /// in debug — so it proves the stored index always matches a fresh
+    /// rebuild, with zero release-build cost. Mirrors Rust's
+    /// `refresh_id_index` + `debug_assert!`.
+    private func refreshIdIndex() {
+        idIndex = rebuildIdIndex(document)
+        assert(idIndex == rebuildIdIndex(document),
+               "id index diverged from rebuild after refresh")
     }
 
     /// Out-of-band document snapshot used by dialog Preview flows
@@ -226,15 +292,24 @@ public class Model: ObservableObject {
     public var hasPreviewSnapshot: Bool { previewDocSnapshot != nil }
 
     public func undo() {
-        guard let prev = undoStack.popLast() else { return }
-        redoStack.append(document)
-        document = prev
+        guard let (prevDoc, prevIndex) = undoStack.popLast() else { return }
+        redoStack.append((document, idIndex))
+        // Hand the snapshot-carried index to the setter so its didSet adopts
+        // it in O(1) instead of rebuilding (Option B O(1) carry). The
+        // refresh-path assert below confirms it still equals a fresh rebuild.
+        restoringIndex = prevIndex
+        document = prevDoc
+        assert(idIndex == rebuildIdIndex(document),
+               "id index diverged from rebuild after undo")
     }
 
     public func redo() {
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(document)
-        document = next
+        guard let (nextDoc, nextIndex) = redoStack.popLast() else { return }
+        undoStack.append((document, idIndex))
+        restoringIndex = nextIndex
+        document = nextDoc
+        assert(idIndex == rebuildIdIndex(document),
+               "id index diverged from rebuild after redo")
     }
 
     public var canUndo: Bool { !undoStack.isEmpty }

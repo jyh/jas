@@ -54,16 +54,36 @@ let advance_next_untitled_past (existing_filenames : string list) : unit =
   ) existing_filenames;
   next_untitled := !max_n + 1
 
+(* Persistent id->element index for the document [doc]. Phase 4b
+   (REFERENCE_GRAPH.md section 2.4): a pure function of the document
+   (always equal to [rebuild_index doc]; checked by the [assert] gate
+   below), so it is never serialized and never part of Document equality.
+   Held alongside [doc] on the Model so paint reads it without rebuilding
+   each frame, and paired with each undo/redo entry so a snapshot carries
+   it in O(1) (Map structure sharing). Mirrors the Rust [Model.id_index]. *)
+let rebuild_index (d : Document.document) : Live.id_index =
+  Live.rebuild_id_index d.Document.layers d.Document.symbols
+
 class model ?(document = Document.default_document ()) ?filename () =
   let filename = match filename with Some f -> f | None -> fresh_filename () in
   object (_self)
     val mutable doc = document
+    val mutable id_index = rebuild_index document
+    (* Monotonic modification generation (Phase 4c). Bumped on every path
+       that replaces [doc] (set_document / restore_preview_snapshot / undo /
+       redo) so paint can epoch the reference-geometry recompute cache off it:
+       any edit changes the generation and drops the cache. Mirrors the Rust
+       [Model.generation]. *)
+    val mutable generation = 0
     val mutable saved_doc = document
     val mutable current_filename = filename
     val mutable listeners : (Document.document -> unit) list = []
     val mutable filename_listeners : (string -> unit) list = []
-    val mutable undo_stack : Document.document list = []
-    val mutable redo_stack : Document.document list = []
+    (* Each undo/redo entry pairs the document with its index so undo/redo
+       restore the index in O(1) without a rebuild (Map clone is O(1)
+       structure sharing). Mirrors the Rust [Vec<(Document, IdIndex)>]. *)
+    val mutable undo_stack : (Document.document * Live.id_index) list = []
+    val mutable redo_stack : (Document.document * Live.id_index) list = []
     val mutable default_fill : Element.fill option = None
     val mutable default_stroke : Element.stroke option =
       Some (Element.make_stroke Element.black)
@@ -95,6 +115,27 @@ class model ?(document = Document.default_document ()) ?filename () =
 
     method document = doc
 
+    (* Borrow the persistent id->element index paired with the current
+       document (REFERENCE_GRAPH.md section 2.4). Equal to
+       [rebuild_index doc] at all observable points. The canvas paint path
+       reads this (via [Live.resolver_of_index]) instead of rebuilding the
+       index per frame. Mirrors the Rust [Model.id_index]. *)
+    method id_index : Live.id_index = id_index
+
+    (* The modification generation (Phase 4c). Read at the paint entry to
+       epoch the reference-geometry recompute cache. Mirrors the Rust
+       [Model.generation]. *)
+    method generation : int = generation
+
+    (* Phase 4b gate: after any path that sets [id_index], assert the stored
+       index equals a from-scratch rebuild of [doc]. OCaml [assert] is on by
+       default and the whole test suite runs with it active, so this proves
+       the stored index always matches a fresh rebuild — pinning resolve()
+       results unchanged. Mirrors the Rust [debug_assert!]. The polymorphic
+       [=] is exact here: [element] has no functional fields. *)
+    method private assert_index_matches_rebuild =
+      assert (Live.Id_map.equal ( = ) id_index (rebuild_index doc))
+
     method filename = current_filename
 
     method set_filename (f : string) =
@@ -102,7 +143,14 @@ class model ?(document = Document.default_document ()) ?filename () =
       List.iter (fun cb -> cb f) filename_listeners
 
     method set_document (d : Document.document) =
+      (* The mutation chokepoint: all document edits funnel through here
+         (the controller always clones, mutates, and [set_document]s).
+         Rebuild the paired index here so paint never rebuilds it
+         (REFERENCE_GRAPH.md section 2.4 Phase 4b). *)
       doc <- d;
+      id_index <- rebuild_index d;
+      generation <- generation + 1;
+      _self#assert_index_matches_rebuild;
       List.iter (fun f -> f doc) listeners
 
     method on_document_changed (f : Document.document -> unit) =
@@ -112,7 +160,10 @@ class model ?(document = Document.default_document ()) ?filename () =
       filename_listeners <- f :: filename_listeners
 
     method snapshot =
-      undo_stack <- doc :: undo_stack;
+      (* Pair the index with the document on the stack so undo/redo restore
+         it in O(1) without a rebuild (Map clone is O(1) structure
+         sharing). Phase 4b. *)
+      undo_stack <- (doc, id_index) :: undo_stack;
       if List.length undo_stack > max_undo then
         undo_stack <- List.filteri (fun i _ -> i < max_undo) undo_stack;
       redo_stack <- []
@@ -131,6 +182,12 @@ class model ?(document = Document.default_document ()) ?filename () =
       (match preview_doc_snapshot with
        | Some snap ->
          doc <- snap;
+         (* The preview snapshot carries no index (it is out-of-band from
+            the undo stack), so rebuild it from the restored document.
+            Phase 4b; mirrors the Rust [refresh_id_index] here. *)
+         id_index <- rebuild_index snap;
+         generation <- generation + 1;
+         _self#assert_index_matches_rebuild;
          List.iter (fun f -> f doc) listeners
        | None -> ())
 
@@ -142,19 +199,29 @@ class model ?(document = Document.default_document ()) ?filename () =
     method undo =
       match undo_stack with
       | [] -> ()
-      | prev :: rest ->
-        redo_stack <- doc :: redo_stack;
+      | (prev_doc, prev_index) :: rest ->
+        (* Carry the current (doc, index) onto redo and restore the paired
+           index in O(1) — no rebuild (Phase 4b). The gate confirms the
+           carried index equals a from-scratch rebuild of the restored
+           document. *)
+        redo_stack <- (doc, id_index) :: redo_stack;
         undo_stack <- rest;
-        doc <- prev;
+        doc <- prev_doc;
+        id_index <- prev_index;
+        generation <- generation + 1;
+        _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 
     method redo =
       match redo_stack with
       | [] -> ()
-      | next :: rest ->
-        undo_stack <- doc :: undo_stack;
+      | (next_doc, next_index) :: rest ->
+        undo_stack <- (doc, id_index) :: undo_stack;
         redo_stack <- rest;
-        doc <- next;
+        doc <- next_doc;
+        id_index <- next_index;
+        generation <- generation + 1;
+        _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 
     method is_modified = doc != saved_doc

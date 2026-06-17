@@ -63,6 +63,10 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 rmpv = { version = "1", features = ["with-serde"] }
 flate2 = "1"
+# Persistent map for the id->element index (REFERENCE_GRAPH.md §2.4): O(log n)
+# ops, O(1) structure-sharing clone, sorted iteration, WASM-clean. Backs the
+# Model's `IdIndex` so undo snapshots carry the index in O(1).
+rpds = "1.2"
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }

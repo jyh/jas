@@ -2510,13 +2510,27 @@ class CanvasNSView: NSView {
             ctx.scaleBy(x: CGFloat(model.zoomLevel),
                         y: CGFloat(model.zoomLevel))
         }
-        // Install the render-scoped reference resolver so live by-id
-        // references resolve and display (REFERENCE_GRAPH.md Phase 1b).
-        // Rebuilt each paint from the current document (the rebuild
-        // strategy; persistent-incremental index is Phase 4). Restored
-        // after the selection overlays, which also evaluate live geometry.
+        // Install the reference resolver so live by-id references resolve and
+        // display (REFERENCE_GRAPH.md §2.4 Phase 4b). Reads the Model's
+        // already-built persistent id->element index (an O(log n)-lookup map
+        // carried with the snapshot) instead of rebuilding it per paint — the
+        // Model's gate guarantees that index equals rebuildIdIndex(document),
+        // so resolve() results are unchanged. Falls back to a per-paint
+        // RebuildResolver when no Model is attached (e.g. detached views).
+        // Restored after the selection overlays, which also evaluate live
+        // geometry.
         let priorRefResolver = _currentRefResolver
-        setCanvasRefResolver(RebuildResolver(document: document))
+        if let model = controller?.model {
+            setCanvasRefResolver(IdIndexResolver(index: model.idIndex))
+            // Phase 4c: epoch the reference-geometry recompute cache off the
+            // Model's generation (cleared on any edit / undo / redo), so
+            // no-edit repaints reuse the cached target geometry. Per-app perf
+            // cache; no behavior change (gated by a per-hit assert that
+            // cached == fresh in LiveElement.swift).
+            setRecomputeCacheGeneration(model.generation)
+        } else {
+            setCanvasRefResolver(RebuildResolver(document: document))
+        }
         // Layer 2: artboard fills (list order, later wins overlaps).
         drawArtboardFills(ctx, document)
         // Layer 3: document element tree. In mask-isolation mode
