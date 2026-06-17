@@ -69,6 +69,12 @@ class model ?(document = Document.default_document ()) ?filename () =
   object (_self)
     val mutable doc = document
     val mutable id_index = rebuild_index document
+    (* Monotonic modification generation (Phase 4c). Bumped on every path
+       that replaces [doc] (set_document / restore_preview_snapshot / undo /
+       redo) so paint can epoch the reference-geometry recompute cache off it:
+       any edit changes the generation and drops the cache. Mirrors the Rust
+       [Model.generation]. *)
+    val mutable generation = 0
     val mutable saved_doc = document
     val mutable current_filename = filename
     val mutable listeners : (Document.document -> unit) list = []
@@ -116,6 +122,11 @@ class model ?(document = Document.default_document ()) ?filename () =
        index per frame. Mirrors the Rust [Model.id_index]. *)
     method id_index : Live.id_index = id_index
 
+    (* The modification generation (Phase 4c). Read at the paint entry to
+       epoch the reference-geometry recompute cache. Mirrors the Rust
+       [Model.generation]. *)
+    method generation : int = generation
+
     (* Phase 4b gate: after any path that sets [id_index], assert the stored
        index equals a from-scratch rebuild of [doc]. OCaml [assert] is on by
        default and the whole test suite runs with it active, so this proves
@@ -138,6 +149,7 @@ class model ?(document = Document.default_document ()) ?filename () =
          (REFERENCE_GRAPH.md section 2.4 Phase 4b). *)
       doc <- d;
       id_index <- rebuild_index d;
+      generation <- generation + 1;
       _self#assert_index_matches_rebuild;
       List.iter (fun f -> f doc) listeners
 
@@ -174,6 +186,7 @@ class model ?(document = Document.default_document ()) ?filename () =
             the undo stack), so rebuild it from the restored document.
             Phase 4b; mirrors the Rust [refresh_id_index] here. *)
          id_index <- rebuild_index snap;
+         generation <- generation + 1;
          _self#assert_index_matches_rebuild;
          List.iter (fun f -> f doc) listeners
        | None -> ())
@@ -195,6 +208,7 @@ class model ?(document = Document.default_document ()) ?filename () =
         undo_stack <- rest;
         doc <- prev_doc;
         id_index <- prev_index;
+        generation <- generation + 1;
         _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 
@@ -206,6 +220,7 @@ class model ?(document = Document.default_document ()) ?filename () =
         redo_stack <- rest;
         doc <- next_doc;
         id_index <- next_index;
+        generation <- generation + 1;
         _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 

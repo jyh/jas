@@ -36,6 +36,11 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
       [Live.resolver_of_index] instead of rebuilding the index per frame;
       undo/redo carry it in O(1). *)
   method id_index : Live.id_index
+
+  (** Monotonic modification generation (Phase 4c). Bumped on every path that
+      replaces the document; read at the paint entry to epoch the
+      reference-geometry recompute cache. Mirrors the Rust [Model.generation]. *)
+  method generation : int
   method set_document : Document.document -> unit
   method filename : string
   method set_filename : string -> unit

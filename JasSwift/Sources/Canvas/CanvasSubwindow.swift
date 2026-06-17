@@ -2522,6 +2522,12 @@ class CanvasNSView: NSView {
         let priorRefResolver = _currentRefResolver
         if let model = controller?.model {
             setCanvasRefResolver(IdIndexResolver(index: model.idIndex))
+            // Phase 4c: epoch the reference-geometry recompute cache off the
+            // Model's generation (cleared on any edit / undo / redo), so
+            // no-edit repaints reuse the cached target geometry. Per-app perf
+            // cache; no behavior change (gated by a per-hit assert that
+            // cached == fresh in LiveElement.swift).
+            setRecomputeCacheGeneration(model.generation)
         } else {
             setCanvasRefResolver(RebuildResolver(document: document))
         }

@@ -348,6 +348,219 @@ let test_compound_has_no_dependencies () =
   Alcotest.(check (list string)) "no dependencies" []
     (Live.dependencies (Compound_shape cs))
 
+(* --- Phase 4c: reference-geometry recompute cache (mirror of the Rust
+   live.rs Phase-4c tests) -------------------------------------------- *)
+(*
+   PER-APP perf cache (REFERENCE_GRAPH.md section 2.3). No behavior change:
+   every assertion pins eval RESULTS against a fresh eval, while additionally
+   checking the cache STATE (Pure / Has_refs / absent). The [assert (cached =
+   fresh)] gate inside the lookup also fires on every Pure hit here. *)
+
+(* A rect with explicit width/height (the [rect_at] helper is fixed 10x10). *)
+let rect_wh x y w h =
+  Rect { name = None; id = None; x; y; width = w; height = h; rx = 0.0; ry = 0.0;
+         fill = None; stroke = None; opacity = 1.0; transform = None;
+         locked = false; visibility = Preview; blend_mode = Normal; mask = None;
+         fill_gradient = None; stroke_gradient = None }
+
+let circle_at cx cy r =
+  Circle { name = None; id = None; cx; cy; r;
+           fill = None; stroke = None; opacity = 1.0; transform = None;
+           locked = false; visibility = Preview; blend_mode = Normal; mask = None;
+           fill_gradient = None; stroke_gradient = None }
+
+(* A resolver whose backing store can be mutated between evaluations so a test
+   can simulate an edit to the target. Mirrors the Rust CellResolver. *)
+let cell_resolver () =
+  let store = ref [] in
+  let resolver : Live.element_resolver = fun id -> List.assoc_opt id !store in
+  let set id elem = store := (id, elem) :: List.remove_assoc id !store in
+  (resolver, set)
+
+(* Evaluate the target the cache would obtain, with a fresh visit set so the
+   comparison oracle is independent of cache state. *)
+let fresh_target_geom target precision resolver =
+  let v = ref Live.VisitSet.empty in
+  Live.element_to_polygon_set_with target precision resolver v
+
+let test_subtree_has_reference_detects_nested_reference () =
+  (* A bare rect has no reference. *)
+  Alcotest.(check bool) "bare rect" false
+    (Live.subtree_has_reference (rect_at 0.0 0.0));
+  (* A group of rects has no reference. *)
+  let group = make_group [| rect_at 0.0 0.0; rect_at 5.0 0.0 |] in
+  Alcotest.(check bool) "group of rects" false (Live.subtree_has_reference group);
+  (* A group containing a reference DOES have one (the stale hazard). *)
+  let group_with_ref =
+    make_group [| rect_at 0.0 0.0; Live (Reference (reference_elem "x")) |] in
+  Alcotest.(check bool) "group with reference" true
+    (Live.subtree_has_reference group_with_ref);
+  (* A compound shape whose operand is a reference also has one. *)
+  let compound_with_ref = Live (Compound_shape {
+    operation = Op_union; id = None;
+    operands = [| rect_at 0.0 0.0; Live (Reference (reference_elem "x")) |];
+    fill = None; stroke = None; opacity = 1.0; transform = None;
+    locked = false; visibility = Preview; blend_mode = Normal; mask = None;
+  }) in
+  Alcotest.(check bool) "compound with reference" true
+    (Live.subtree_has_reference compound_with_ref)
+
+let test_pure_target_reference_is_cached_and_second_eval_hits () =
+  (* A pure-geometry target referenced by an instance: first eval populates a
+     Pure entry; a second eval at the same generation reuses it (the gate
+     confirms cached = fresh) and the RESULT equals a fresh eval. *)
+  Live.clear_recompute_cache_for_test ();
+  Live.set_recompute_cache_generation 7;
+  let (resolver, set) = cell_resolver () in
+  set "r1" (rect_at 0.0 0.0);
+  let r = reference_elem "r1" in
+  Alcotest.(check bool) "no entry before eval" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision = None);
+  let v1 = ref Live.VisitSet.empty in
+  let first = Live.reference_evaluate r Live.default_precision resolver v1 in
+  Alcotest.(check bool) "Pure entry after eval" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision
+     = Some Live.Pure_state);
+  let target = match resolver "r1" with
+    | Some t -> t | None -> Alcotest.fail "r1 missing" in
+  Alcotest.(check bool) "result equals fresh eval" true
+    (first = fresh_target_geom target Live.default_precision resolver);
+  let v2 = ref Live.VisitSet.empty in
+  let second = Live.reference_evaluate r Live.default_precision resolver v2 in
+  Alcotest.(check bool) "second eval same result" true (first = second);
+  Alcotest.(check bool) "still Pure" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision
+     = Some Live.Pure_state)
+
+let test_editing_target_new_generation_re_evaluates_no_stale () =
+  (* Editing the target bumps the generation; the epoch clears the cache so the
+     next eval recomputes against the NEW target. No stale geometry survives. *)
+  Live.clear_recompute_cache_for_test ();
+  Live.set_recompute_cache_generation 1;
+  let (resolver, set) = cell_resolver () in
+  set "r1" (rect_at 0.0 0.0);                  (* 10x10 *)
+  let r = reference_elem "r1" in
+  let v1 = ref Live.VisitSet.empty in
+  let before = Live.reference_evaluate r Live.default_precision resolver v1 in
+  let (_, _, bmaxx, _) = bbox_of_ring (List.hd before) in
+  Alcotest.(check bool) "before max_x = 10" true (approx_equal bmaxx 10.0);
+  Alcotest.(check bool) "Pure" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision
+     = Some Live.Pure_state);
+  (* Edit: a larger rect, AND advance the generation, as a real edit would. *)
+  set "r1" (rect_wh 0.0 0.0 40.0 40.0);
+  Live.set_recompute_cache_generation 2;
+  Alcotest.(check bool) "cache cleared by epoch" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision = None);
+  let v2 = ref Live.VisitSet.empty in
+  let after = Live.reference_evaluate r Live.default_precision resolver v2 in
+  let (_, _, amaxx, _) = bbox_of_ring (List.hd after) in
+  Alcotest.(check bool) "after max_x = 40 (edited target)" true
+    (approx_equal amaxx 40.0);
+  let target = match resolver "r1" with
+    | Some t -> t | None -> Alcotest.fail "r1 missing" in
+  Alcotest.(check bool) "equals fresh eval of new target" true
+    (after = fresh_target_geom target Live.default_precision resolver)
+
+let test_ref_containing_target_is_not_cached_and_tracks_nested_edits () =
+  (* A target that CONTAINS a nested reference must NOT be cached as Pure: its
+     resolved geometry depends on the nested target AND on the ambient
+     cycle-guard (visiting) state, so it is never safe to share. It is recorded
+     [Has_refs] and re-resolved fresh on every lookup.
+
+     OPTION-B DIVERGENCE FROM RUST (REFERENCE_GRAPH.md section 2.3): the Rust
+     test mutates the nested target WITHOUT bumping the generation, relying on
+     Rust's per-entry [Rc::as_ptr] check to invalidate. This app rebuilds the
+     index at the mutation chokepoint, so every edit bumps the generation and a
+     pure target never goes stale within a generation — there is no
+     mutate-without-bump scenario and no pointer check. The meaningful pin here
+     is the real edit path: the ref-containing target is [Has_refs] (so it
+     re-resolves), and a nested edit, which bumps the generation, is reflected. *)
+  Live.clear_recompute_cache_for_test ();
+  Live.set_recompute_cache_generation 5;
+  let (resolver, set) = cell_resolver () in
+  set "x" (rect_at 0.0 0.0);                    (* nested leaf, 10x10 *)
+  let g = make_group [| Live (Reference (reference_elem "x")) |] in
+  set "g" g;                                    (* outer = group referencing x *)
+  let outer = reference_elem "g" in
+  let v1 = ref Live.VisitSet.empty in
+  let first = Live.reference_evaluate outer Live.default_precision resolver v1 in
+  Alcotest.(check bool) "g recorded Has_refs (never Pure-cached)" true
+    (Live.recompute_cache_state_for_test "g" Live.default_precision
+     = Some Live.Has_refs_state);
+  let (_, _, fmaxx, _) = bbox_of_ring (List.hd first) in
+  Alcotest.(check bool) "first max_x = 10" true (approx_equal fmaxx 10.0);
+  (* A no-edit repaint (same generation) re-resolves "g" fresh because it is
+     Has_refs — the cache never serves a ref-containing target's geometry. *)
+  let v1b = ref Live.VisitSet.empty in
+  let again = Live.reference_evaluate outer Live.default_precision resolver v1b in
+  Alcotest.(check bool) "same-generation repaint is consistent" true
+    (again = first);
+  (* Edit the NESTED target — a real edit, which bumps the generation. The
+     epoch clears the cache; the next eval reflects the new nested geometry. *)
+  set "x" (rect_wh 0.0 0.0 30.0 30.0);
+  Live.set_recompute_cache_generation 6;
+  let v2 = ref Live.VisitSet.empty in
+  let second = Live.reference_evaluate outer Live.default_precision resolver v2 in
+  let (_, _, smaxx, _) = bbox_of_ring (List.hd second) in
+  Alcotest.(check bool) "nested edit reflected after gen bump (max_x = 30)" true
+    (approx_equal smaxx 30.0);
+  Alcotest.(check bool) "still Has_refs, never Pure" true
+    (Live.recompute_cache_state_for_test "g" Live.default_precision
+     = Some Live.Has_refs_state)
+
+let test_instance_transform_composes_on_cached_pure_geometry () =
+  (* The per-reference instance transform is applied AFTER the (shared, cached)
+     target geometry. A plain instance caches the untransformed target; a
+     scaled instance of the SAME target reuses that cache and applies its own
+     transform on top. *)
+  Live.clear_recompute_cache_for_test ();
+  Live.set_recompute_cache_generation 9;
+  let (resolver, set) = cell_resolver () in
+  set "r1" (rect_at 0.0 0.0);
+  let plain = reference_elem "r1" in
+  let v1 = ref Live.VisitSet.empty in
+  let plain_ps = Live.reference_evaluate plain Live.default_precision resolver v1 in
+  Alcotest.(check bool) "Pure after plain" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision
+     = Some Live.Pure_state);
+  let (_, _, pmaxx, pmaxy) = bbox_of_ring (List.hd plain_ps) in
+  Alcotest.(check bool) "plain max 10,10" true
+    (approx_equal pmaxx 10.0 && approx_equal pmaxy 10.0);
+  let scaled = { (reference_elem "r1") with
+                 ref_instance_transform = Some (make_scale 2.0 2.0) } in
+  let v2 = ref Live.VisitSet.empty in
+  let scaled_ps = Live.reference_evaluate scaled Live.default_precision resolver v2 in
+  let (sminx, sminy, smaxx, smaxy) = bbox_of_ring (List.hd scaled_ps) in
+  Alcotest.(check bool) "scaled min at origin" true
+    (approx_equal sminx 0.0 && approx_equal sminy 0.0);
+  Alcotest.(check bool) "scaled max 20,20" true
+    (approx_equal smaxx 20.0 && approx_equal smaxy 20.0);
+  Alcotest.(check bool) "cache still holds untransformed Pure geometry" true
+    (Live.recompute_cache_state_for_test "r1" Live.default_precision
+     = Some Live.Pure_state)
+
+let test_cache_keys_on_precision () =
+  (* The two render passes use different precision. The cache key includes
+     precision, so a circle tessellated at one precision never serves a request
+     at another (which would be a wrong-detail result). *)
+  Live.clear_recompute_cache_for_test ();
+  Live.set_recompute_cache_generation 3;
+  let (resolver, set) = cell_resolver () in
+  set "c1" (circle_at 0.0 0.0 100.0);
+  let r = reference_elem "c1" in
+  let coarse = 1.0 and fine = 0.01 in
+  let v1 = ref Live.VisitSet.empty in
+  let ps_coarse = Live.reference_evaluate r coarse resolver v1 in
+  let v2 = ref Live.VisitSet.empty in
+  let ps_fine = Live.reference_evaluate r fine resolver v2 in
+  Alcotest.(check bool) "different precision different tessellation" true
+    (Array.length (List.hd ps_coarse) <> Array.length (List.hd ps_fine));
+  Alcotest.(check bool) "coarse key Pure" true
+    (Live.recompute_cache_state_for_test "c1" coarse = Some Live.Pure_state);
+  Alcotest.(check bool) "fine key Pure" true
+    (Live.recompute_cache_state_for_test "c1" fine = Some Live.Pure_state)
+
 let () =
   Alcotest.run "Live"
     [ "compound shape", [
@@ -391,5 +604,19 @@ let () =
           `Quick test_rebuild_id_index_indexes_descendants_and_sorted_masters;
         Alcotest.test_case "rebuild_id_index matches legacy resolver, order-stable"
           `Quick test_rebuild_id_index_matches_legacy_resolver_and_is_order_stable;
+      ];
+      "recompute cache (Phase 4c)", [
+        Alcotest.test_case "subtree_has_reference detects nested reference"
+          `Quick test_subtree_has_reference_detects_nested_reference;
+        Alcotest.test_case "pure target is cached and second eval hits"
+          `Quick test_pure_target_reference_is_cached_and_second_eval_hits;
+        Alcotest.test_case "editing target (new generation) re-evaluates, no stale"
+          `Quick test_editing_target_new_generation_re_evaluates_no_stale;
+        Alcotest.test_case "ref-containing target not cached, tracks nested edits"
+          `Quick test_ref_containing_target_is_not_cached_and_tracks_nested_edits;
+        Alcotest.test_case "instance transform composes on cached pure geometry"
+          `Quick test_instance_transform_composes_on_cached_pure_geometry;
+        Alcotest.test_case "cache keys on precision"
+          `Quick test_cache_keys_on_precision;
       ]
     ]

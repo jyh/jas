@@ -133,6 +133,30 @@ val reference_evaluate :
   Element.reference_elem -> float -> element_resolver ->
   VisitSet.t ref -> Boolean.polygon_set
 
+(** Phase 4c reference-geometry recompute cache (REFERENCE_GRAPH.md section
+    2.3 — a PER-APP perf cache; equivalence is pinned on resolve() RESULTS,
+    which it never alters, gated by an [assert (cached = fresh)] on every hit).
+    Generation-epoch the cache: clears every entry when [generation] differs
+    from the current epoch. Called at the paint entry with [Model#generation]
+    (bumped on every mutation / undo / redo). *)
+val set_recompute_cache_generation : int -> unit
+
+(** True iff the element's owned subtree contains a Reference anywhere (the
+    purity test that decides whether a target's geometry may be cached).
+    Exposed for the Phase-4c tests. *)
+val subtree_has_reference : Element.element -> bool
+
+(** Observable recompute-cache state for a [(target_id, precision)] slot. *)
+type recompute_cache_state = Pure_state | Has_refs_state
+
+(** Test/introspection: the cache state for [(target_id, precision)], or
+    [None] if no entry exists. *)
+val recompute_cache_state_for_test :
+  string -> float -> recompute_cache_state option
+
+(** Test-only: drop all recompute-cache entries and reset the epoch to 0. *)
+val clear_recompute_cache_for_test : unit -> unit
+
 (** Replace a compound shape with Polygon elements derived from its
     evaluated geometry. Each polygon carries the compound shape's
     own paint; rings with fewer than 3 points are dropped. *)
