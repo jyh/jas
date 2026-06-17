@@ -727,6 +727,12 @@ val with_width_points : element -> stroke_width_point list -> element
     required). *)
 val with_name : element -> string option -> element
 
+(** Read the user-visible name on any element. [None] for an element
+    with no name. {!Live} variants (compound shapes / references) carry
+    no name field and read as [None]. Mirrors the Rust [common().name]
+    accessor. *)
+val name_of : element -> string option
+
 (** Read the stable, opaque element id. [None] for an element that has
     no id yet. See the doc on {!type:element}. *)
 val id_of : element -> string option

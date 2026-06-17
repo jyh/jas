@@ -124,6 +124,7 @@ mod tests {
             artboards_renaming: None,
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
+            symbols_selected: None,
         }
     }
 

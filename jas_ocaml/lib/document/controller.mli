@@ -13,6 +13,15 @@ class controller : ?model:Model.model -> unit -> object
   method assign_id : Document.element_path -> string -> unit
   method create_reference :
     Document.element_path -> string -> string -> unit
+  method make_symbol :
+    Document.element_path -> string -> string -> unit
+  method place_instance : string -> string -> unit
+  method detach : Document.element_path -> unit
+  method set_instance_transform :
+    Document.element_path -> Element.transform -> unit
+  method redefine :
+    string -> Document.element_path -> string -> unit
+  method delete_symbol : string -> unit
   method select_all : unit
   method select_rect : ?extend:bool -> float -> float -> float -> float -> unit
   method select_polygon : ?extend:bool -> (float * float) array -> unit

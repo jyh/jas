@@ -81,6 +81,17 @@ def _transform_attr(t: Transform | None) -> str:
             f'{_fmt(t.d)},{_fmt(_px(t.e))},{_fmt(_px(t.f))})"')
 
 
+def _instance_transform_attr(t: Transform | None) -> str:
+    """Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform rides
+    ``data-jas-instance-transform`` (the render CTM rides the ``transform``
+    attr). Same matrix format as ``_transform_attr``; emitted ONLY when set so
+    existing <use> fixtures stay byte-identical."""
+    if t is None:
+        return ""
+    return (f' data-jas-instance-transform="matrix({_fmt(t.a)},{_fmt(t.b)},'
+            f'{_fmt(t.c)},{_fmt(t.d)},{_fmt(_px(t.e))},{_fmt(_px(t.f))})"')
+
+
 def _opacity_attr(opacity: float) -> str:
     if opacity >= 1.0:
         return ""
@@ -436,12 +447,20 @@ def _element_svg(elem: Element, indent: str) -> str:
             return "\n".join(lines)
 
         case ReferenceElem(target=target, opacity=opacity,
-                           transform=transform, id=eid):
+                           transform=transform, id=eid,
+                           instance_transform=instance_transform):
             # A reference is native SVG <use href="#id"> (Phase 2). Its own
             # id/opacity/transform ride the common attrs; the target is the
             # href. Any <use> imports back as a live reference (F-svg-use).
+            #
+            # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform is
+            # distinct from the render CTM (which rides the <use transform=...>
+            # attr). It is emitted as data-jas-instance-transform in the same
+            # matrix format, and ONLY when set so existing <use> fixtures stay
+            # byte-identical.
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}')
+                     f'{_id_attr(eid)}'
+                     f'{_instance_transform_attr(instance_transform)}')
             return f'{indent}<use href="#{escape(target)}"{attrs}/>'
 
     return ""
@@ -638,6 +657,21 @@ def document_to_svg(doc: Document) -> str:
         if not prefs_default:
             lines.append(_print_preferences_to_xml(doc.print_preferences, "    "))
         lines.append('  </sodipodi:namedview>')
+    # Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
+    # inside a single <defs> block (each as its normal element SVG, carrying
+    # its id), placed before the layer content so the standard SVG
+    # non-rendered-definition mechanism applies. Emitted only when the store
+    # is non-empty (so existing fixtures stay byte-identical), sorted by id
+    # (the §2 deterministic-order rule). Instances ride the existing
+    # <use href="#id"> path in the layer tree. On import, <defs> children
+    # become doc.symbols (see svg_to_document).
+    if doc.symbols:
+        sorted_masters = sorted(
+            doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+        lines.append("  <defs>")
+        for master in sorted_masters:
+            lines.append(_element_svg(master, "    "))
+        lines.append("  </defs>")
     for layer in doc.layers:
         lines.append(_element_svg(layer, "  "))
     lines.append("</svg>")
@@ -788,6 +822,24 @@ def _parse_transform(node: ET.Element) -> Transform | None:
         parts = [float(x) for x in m.group(1).split(",")]
         sy = parts[1] if len(parts) > 1 else parts[0]
         return Transform.scale(parts[0], sy)
+    return None
+
+
+def _parse_matrix_attr(node: ET.Element, attr: str) -> Transform | None:
+    """Parse a ``matrix(a,b,c,d,e,f)`` value from the named attribute,
+    returning None when the attribute is absent or malformed. Used for the
+    Symbols P4 instance transform (data-jas-instance-transform); e/f are
+    converted from px to pt to match the render CTM attr (SYMBOLS.md §4 /
+    Fork F2)."""
+    val = node.get(attr)
+    if val is None:
+        return None
+    m = re.match(r"matrix\(([^)]+)\)", val)
+    if m:
+        parts = [float(x) for x in re.split(r"[,\s]+", m.group(1).strip())]
+        if len(parts) == 6:
+            return Transform(a=parts[0], b=parts[1], c=parts[2],
+                             d=parts[3], e=_pt(parts[4]), f=_pt(parts[5]))
     return None
 
 
@@ -1309,9 +1361,14 @@ def _parse_element(node: ET.Element) -> Element | None:
                 or node.get("xlink:href")
                 or "")
         target = href[1:] if href.startswith("#") else href
+        # Symbols P4: the instance transform field rides
+        # data-jas-instance-transform (same matrix format as the render CTM
+        # attr; e/f are px on the wire, pt in the model). SYMBOLS.md §4 / F2.
         return ReferenceElem(
             target=target, id=eid, name=name,
-            opacity=opacity, transform=transform)
+            opacity=opacity, transform=transform,
+            instance_transform=_parse_matrix_attr(
+                node, "data-jas-instance-transform"))
 
     if tag == "title":
         return None  # parent reads as the name
@@ -1609,9 +1666,22 @@ def svg_to_document(svg: str) -> Document:
         return Document(layers=(Layer(children=()),))
     parsed_setup, parsed_prefs = _parse_jas_print_blocks(root)
     layers: list[Layer] = []
+    # Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
+    # into doc.symbols (NOT into layers), so masters are never painted in
+    # document order. Each <defs> child is its normal element (carrying its
+    # id); instances ride the existing <use href="#id"> path in the layers.
+    symbols: list[Element] = []
     for child in root:
         # Skip namedview — its children are pulled out above.
         if _strip_ns(child.tag) == "namedview":
+            continue
+        # A <defs> block holds the master store: its element children become
+        # doc.symbols, never layers.
+        if _strip_ns(child.tag) == "defs":
+            for def_child in child:
+                master = _parse_element(def_child)
+                if master is not None:
+                    symbols.append(master)
             continue
         elem = _parse_element(child)
         if elem is None:
@@ -1637,5 +1707,6 @@ def svg_to_document(svg: str) -> Document:
         layers = [Layer(children=())]
     return dedupe_element_ids(normalize_document(Document(
         layers=tuple(layers),
+        symbols=tuple(symbols),
         document_setup=parsed_setup,
         print_preferences=parsed_prefs)))

@@ -88,6 +88,7 @@ private func panelKindStr(_ k: PanelKind) -> String {
     case .boolean: return "boolean"
     case .opacity: return "opacity"
     case .magicWand: return "magic_wand"
+    case .symbols: return "symbols"
     }
 }
 
@@ -334,6 +335,7 @@ private let menuBar: [(String, [MenuItem])] = [
         ("Properties", "toggle_panel_properties", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Swatches", "toggle_panel_swatches", ""),
+        ("Symbols", "toggle_panel_symbols", ""),
     ]),
 ]
 
@@ -559,6 +561,7 @@ private func parsePanelKind(_ v: Any?) -> PanelKind {
     case "boolean": return .boolean
     case "opacity": return .opacity
     case "magic_wand": return .magicWand
+    case "symbols": return .symbols
     default: return .layers
     }
 }

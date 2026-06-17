@@ -75,6 +75,7 @@ pub const MENU_BAR: &[(&str, &[MenuItem])] = &[
         ("Properties", "toggle_panel_properties", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Swatches", "toggle_panel_swatches", ""),
+        ("Symbols", "toggle_panel_symbols", ""),
     ]),
 ];
 
@@ -100,6 +101,7 @@ pub const DISPATCH_COMMANDS: &[&str] = &[
     "toggle_panel_magic_wand", "toggle_panel_opacity",
     "toggle_panel_paragraph", "toggle_panel_properties",
     "toggle_panel_stroke", "toggle_panel_swatches",
+    "toggle_panel_symbols",
 ];
 
 #[cfg(test)]
@@ -252,9 +254,9 @@ mod tests {
         let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
         // 9 (File: +Document Setup +Print +Export to PDF +separator)
         // + 10 (Edit) + 12 (Object: + separator + Make Instance + Simplify)
-        // + 20 (Window: alphabetised panels incl. Align / Boolean /
-        // Magic Wand / Opacity) = 51
-        assert_eq!(total, 51);
+        // + 21 (Window: alphabetised panels incl. Align / Boolean /
+        // Magic Wand / Opacity / Symbols) = 52
+        assert_eq!(total, 52);
     }
 
     #[test]

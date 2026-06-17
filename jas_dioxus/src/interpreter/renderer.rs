@@ -560,6 +560,166 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         // orphan_count == 0: fall through to the YAML action (delete inline).
     }
 
+    // Native intercept: Symbols panel operations (SYMBOLS.md §7, §8).
+    // These mint ids by the value-in-op rule (like the make_instance arm
+    // in menu_bar.rs) and call the shared symbol Controller ops, so the
+    // YAML actions are `log` stubs. Each takes a single snapshot so the
+    // op is one undo step. After mutating, return [] (no further YAML
+    // effects). Falls through to the YAML catalog only for unrelated
+    // actions.
+    if action == "new_symbol"
+        || action == "place_instance"
+        || action == "delete_symbol_action"
+        || action == "delete_symbol_orphan_confirm_ok"
+    {
+        use crate::document::artboard::generate_element_id;
+        use crate::document::controller::Controller;
+
+        // Gather every existing element id (layers + master store) so the
+        // freshly minted ids avoid collisions, then mint a collision-free
+        // id. Mirrors the make_instance mint loop.
+        fn gather_ids(
+            elem: &crate::geometry::element::Element,
+            out: &mut std::collections::HashSet<String>,
+        ) {
+            if let Some(id) = elem.common().id.as_deref() {
+                out.insert(id.to_string());
+            }
+            if let Some(children) = elem.children() {
+                for c in children {
+                    gather_ids(c, out);
+                }
+            }
+        }
+        fn existing_ids(
+            model: &crate::document::model::Model,
+        ) -> std::collections::HashSet<String> {
+            let mut set = std::collections::HashSet::new();
+            let doc = model.document();
+            for layer in &doc.layers {
+                gather_ids(layer, &mut set);
+            }
+            for master in &doc.symbols {
+                gather_ids(master, &mut set);
+            }
+            set
+        }
+        fn mint(existing: &std::collections::HashSet<String>) -> Option<String> {
+            for _ in 0..100 {
+                let c = generate_element_id(None);
+                if !existing.contains(&c) {
+                    return Some(c);
+                }
+            }
+            None
+        }
+
+        match action {
+            // Promote the single selected canvas element to a master.
+            "new_symbol" => {
+                if let Some(tab) = st.tab_mut() {
+                    use crate::document::document::SelectionKind;
+                    // Enabled only when exactly ONE whole element is
+                    // selected (kind = All), mirroring make_instance.
+                    let sel = &tab.model.document().selection;
+                    let [es] = sel.as_slice() else { return Vec::new(); };
+                    if es.kind != SelectionKind::All {
+                        return Vec::new();
+                    }
+                    let path = es.path.clone();
+                    let mut existing = existing_ids(&tab.model);
+                    let Some(master_id) = mint(&existing) else { return Vec::new(); };
+                    existing.insert(master_id.clone());
+                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    tab.model.snapshot();
+                    Controller::make_symbol(&mut tab.model, &path, &master_id, &ref_id);
+                    // Keep the new master panel-selected so Place/Delete
+                    // target it immediately. make_symbol keeps an existing
+                    // id as the master key; resolve which id actually
+                    // became the master from the path's instance target.
+                    let resolved = tab
+                        .model
+                        .document()
+                        .get_element(&path)
+                        .and_then(|e| match e {
+                            crate::geometry::element::Element::Live(
+                                crate::geometry::live::LiveVariant::Reference(r),
+                            ) => Some(r.target.0.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or(master_id);
+                    st.symbols_selected = Some(resolved);
+                }
+                return Vec::new();
+            }
+            // Place a new instance of the panel-selected master.
+            "place_instance" => {
+                let Some(master_id) = st.symbols_selected.clone() else {
+                    return Vec::new();
+                };
+                if let Some(tab) = st.tab_mut() {
+                    let existing = existing_ids(&tab.model);
+                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    tab.model.snapshot();
+                    Controller::place_instance(&mut tab.model, &master_id, &ref_id);
+                }
+                return Vec::new();
+            }
+            // Delete the panel-selected master. Reference-aware: warn via
+            // a confirm dialog when it still has instances.
+            "delete_symbol_action" => {
+                let Some(master_id) = st.symbols_selected.clone() else {
+                    return Vec::new();
+                };
+                let usage = st
+                    .tabs
+                    .get(st.active_tab)
+                    .map(|tab| {
+                        crate::document::dependency_index::dependency_index(
+                            tab.model.document(),
+                        )
+                        .rdeps
+                        .get(&master_id)
+                        .map(|v| v.len())
+                        .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                if usage > 0 {
+                    // Open the reference-aware confirm; do not mutate yet.
+                    // The dialog's Delete button fires the distinct
+                    // delete_symbol_orphan_confirm_ok action below.
+                    let mut dlg_params = serde_json::Map::new();
+                    dlg_params.insert("count".to_string(), serde_json::json!(usage));
+                    return vec![serde_json::json!({
+                        "open_dialog": {
+                            "id": "delete_symbol_orphan_confirm",
+                            "params": dlg_params,
+                        }
+                    })];
+                }
+                // No instances: delete silently.
+                if let Some(tab) = st.tab_mut() {
+                    tab.model.snapshot();
+                    Controller::delete_symbol(&mut tab.model, &master_id);
+                }
+                st.symbols_selected = None;
+                return Vec::new();
+            }
+            // Confirmed delete from the warn dialog.
+            "delete_symbol_orphan_confirm_ok" => {
+                if let Some(master_id) = st.symbols_selected.clone() {
+                    if let Some(tab) = st.tab_mut() {
+                        tab.model.snapshot();
+                        Controller::delete_symbol(&mut tab.model, &master_id);
+                    }
+                    st.symbols_selected = None;
+                }
+                return vec![serde_json::json!({ "close_dialog": null })];
+            }
+            _ => {}
+        }
+    }
+
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -1610,6 +1770,12 @@ fn build_appstate_ctx(
         .collect();
     let panel = serde_json::json!({
         "layers_panel_selection": sel_paths,
+        // Symbols panel: the panel-selected master id (or null). Needed so
+        // the symbols actions' enabled_when ("panel.selected_symbol != null")
+        // resolves when fired from the panel menu / dispatch path.
+        "selected_symbol": st.symbols_selected.clone()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
     });
     let mut ctx = serde_json::Map::new();
     ctx.insert("state".to_string(), state);
@@ -1713,7 +1879,7 @@ pub(crate) fn build_active_document_view(
     use crate::geometry::element::{Element, Visibility};
     use std::collections::HashSet;
     let Some(tab) = st.tabs.get(st.active_tab) else {
-        return serde_json::json!({
+        let mut empty = serde_json::json!({
             "top_level_layers": [],
             "top_level_layer_paths": [],
             "next_layer_name": "Layer 1",
@@ -1795,6 +1961,12 @@ pub(crate) fn build_active_document_view(
             "view_offset_x": 0.0,
             "view_offset_y": 0.0,
         });
+        // Inserted outside the json! literal to keep the macro under the
+        // recursion limit (the no-tab object is already at the ceiling).
+        if let serde_json::Value::Object(m) = &mut empty {
+            m.insert("symbols".to_string(), serde_json::json!([]));
+        }
+        return empty;
     };
     let mut top_level_layers = Vec::new();
     let mut top_level_layer_paths = Vec::new();
@@ -1906,7 +2078,36 @@ pub(crate) fn build_active_document_view(
     let current_id = current.map(|a| serde_json::Value::String(a.id.clone())).unwrap_or(serde_json::Value::Null);
     // next_artboard_name: smallest N not used by any "Artboard N" pattern name.
     let next_artboard_name = crate::document::artboard::next_artboard_name(&doc.artboards);
-    serde_json::json!({
+    // Symbols view (SYMBOLS.md §8). One row per master in the off-canvas
+    // store. `name` is the master's common.name, falling back to a
+    // positional "Symbol N" label so every row shows something readable.
+    // `usage_count` is the number of live instances of the master — the
+    // length of its reverse-dependency list (rdeps) in the dependency
+    // index, the same signal that gates the reference-aware delete.
+    let dep_index = crate::document::dependency_index::dependency_index(&doc);
+    let symbols_json: Vec<serde_json::Value> = doc
+        .symbols
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let id = m.common().id.clone().unwrap_or_default();
+            let name = match m.common().name.as_deref() {
+                Some(n) if !n.is_empty() => n.to_string(),
+                _ => format!("Symbol {}", i + 1),
+            };
+            let usage_count = dep_index
+                .rdeps
+                .get(&id)
+                .map(|v| v.len())
+                .unwrap_or(0);
+            serde_json::json!({
+                "id": id,
+                "name": name,
+                "usage_count": usage_count,
+            })
+        })
+        .collect();
+    let mut view = serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
         "next_layer_name": next_layer_name,
@@ -1979,7 +2180,14 @@ pub(crate) fn build_active_document_view(
         "zoom_level": tab.model.zoom_level,
         "view_offset_x": tab.model.view_offset_x,
         "view_offset_y": tab.model.view_offset_y,
-    })
+    });
+    // Inserted after the json! literal: the populated active-document
+    // object is already at the macro recursion ceiling, so the symbols
+    // list is attached here (SYMBOLS.md §8).
+    if let serde_json::Value::Object(m) = &mut view {
+        m.insert("symbols".to_string(), serde_json::Value::Array(symbols_json));
+    }
+    view
 }
 
 /// Execute one YAML effect against AppState, returning any deferred dialog effects.
@@ -7114,6 +7322,7 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "align_panel_content"      => Some(PanelKind::Align),
             "boolean_panel_content"    => Some(PanelKind::Boolean),
             "magic_wand_panel_content" => Some(PanelKind::MagicWand),
+            "symbols_panel_content"    => Some(PanelKind::Symbols),
             _ => None,
         });
         let mut child = rctx.clone();

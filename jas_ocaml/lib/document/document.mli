@@ -50,6 +50,14 @@ type selection = element_selection PathMap.t
     artboards and document-global artboard options. *)
 type document = {
   layers : Element.element array;
+  (** Off-canvas master store for Symbols (SYMBOLS.md section 2, Fork S1).
+      Each master is a plain [Element] keyed by its [common.id]; instances are
+      references targeting a master id. AUTHORITATIVE document data, part of
+      equality and every codec. It is NOT in [layers], so render and hit-test
+      never touch it (masters are never painted). Storage order is
+      unconstrained, but it MUST be emitted sorted-by-id at every
+      order-dependent site (codecs, resolver, index). *)
+  symbols : Element.element array;
   selected_layer : int;
   selection : selection;
   artboards : Artboard.artboard list;
@@ -62,6 +70,7 @@ type document = {
 }
 
 val make_document :
+  ?symbols:Element.element array ->
   ?selected_layer:int -> ?selection:selection ->
   ?artboards:Artboard.artboard list ->
   ?artboard_options:Artboard.options ->

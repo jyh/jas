@@ -1293,6 +1293,29 @@ public enum Element: Equatable {
         }
     }
 
+    /// The element's user-visible name (`common.name`), or nil when unnamed.
+    /// Used by the Symbols panel to label a master row, with a positional
+    /// "Symbol N" fallback computed by the view-builder when this is nil.
+    /// Mirrors how Rust reads `common().name`. Live elements (compound /
+    /// reference) carry no name slot, so they return nil here.
+    public var name: String? {
+        switch self {
+        case .line(let v): return v.name
+        case .rect(let v): return v.name
+        case .circle(let v): return v.name
+        case .ellipse(let v): return v.name
+        case .polyline(let v): return v.name
+        case .polygon(let v): return v.name
+        case .path(let v): return v.name
+        case .text(let v): return v.name
+        case .textPath(let v): return v.name
+        case .group(let v): return v.name
+        case .layer(let v): return v.name
+        // Live elements carry no name slot (see LiveElement.swift).
+        case .live: return nil
+        }
+    }
+
     /// Return a copy of this element with its stable `id` cleared (set to
     /// nil) on the element itself AND, for groups/layers, recursively on
     /// every descendant.

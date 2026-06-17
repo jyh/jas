@@ -103,10 +103,23 @@ let find_cycle_members (deps : string list SMap.t) : string list =
 
 let build (doc : Document.document) : t =
   (* Phase 1: gather the node set (targetable ids) and raw out-edges by
-     walking layers + Group/Layer children (operands stay opaque). *)
+     walking layers + Group/Layer children (operands stay opaque), THEN
+     the master store (SYMBOLS.md section 6). Including doc.symbols puts
+     master ids in the targetable set so an instance -> master is not
+     dangling, and rdeps[master] lists the master's instances. Masters
+     are walked with the SAME operands-opaque discipline as layers; their
+     OWN id is targetable (a master is reached only through a reference).
+     Sorted by id first for deterministic first-occurrence-wins on the
+     (well-formed: impossible) duplicate-id case. *)
   let targetable = ref SSet.empty in
   let out_edges = ref SMap.empty in
   Array.iter (fun layer -> walk layer targetable out_edges) doc.Document.layers;
+  let id_of m = match Element.id_of m with Some s -> s | None -> "" in
+  let sorted_masters =
+    Array.to_list doc.Document.symbols
+    |> List.stable_sort (fun a b -> String.compare (id_of a) (id_of b))
+  in
+  List.iter (fun master -> walk master targetable out_edges) sorted_masters;
   let targetable = !targetable in
 
   (* Phase 2: build [deps] (sorted out-edges) and [rdeps] (reverse), and

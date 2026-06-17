@@ -461,9 +461,14 @@ fn pack_element(elem: &Element) -> Value {
             }
             crate::geometry::live::LiveVariant::Reference(r) => {
                 let (locked, opacity, vis, xform, name, id) = pack_common(&r.common);
-                // [tag, common(1..6), kind(7), target(8)]
+                // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // (distinct from common.transform packed at slot 4) rides slot 9
+                // via pack_transform; Nil when None. Old 9-element .bin (no slot
+                // 9) still decode TOLERANTLY to None on the read side.
                 Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
-                                  vstr("reference"), vstr(&r.target.0)])
+                                  vstr("reference"), vstr(&r.target.0),
+                                  pack_transform(&r.transform)])
             }
         },
     }
@@ -488,10 +493,22 @@ fn pack_selection(sel: &Selection) -> Value {
 
 fn pack_document(doc: &Document) -> Value {
     let layers: Vec<Value> = doc.layers.iter().map(|l| pack_element(l)).collect();
+    // Symbols (master store, SYMBOLS.md §5): appended to the positional
+    // document array AFTER the existing fields, as a (possibly empty) element
+    // array sorted by common.id (the §2 deterministic-order rule). Trailing
+    // position keeps existing .bin fixtures (which predate symbols) decodable
+    // — unpack tolerates the field's absence via arr.get(3).
+    let mut sorted: Vec<&Element> = doc.symbols.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    let symbols: Vec<Value> = sorted.iter().map(|m| pack_element(m)).collect();
     Value::Array(vec![
         Value::Array(layers),
         vuint(doc.selected_layer),
         pack_selection(&doc.selection),
+        Value::Array(symbols),
     ])
 }
 
@@ -850,9 +867,14 @@ fn unpack_element(v: &Value) -> Element {
                 }
                 "reference" => {
                     let target = crate::geometry::live::ElementRef(as_str(&arr[8]).to_string());
-                    Element::Live(crate::geometry::live::LiveVariant::Reference(
-                        crate::geometry::live::ReferenceElem::new(target, common),
-                    ))
+                    let mut re = crate::geometry::live::ReferenceElem::new(target, common);
+                    // Symbols P4: the instance `transform` rides slot 9, read
+                    // TOLERANTLY so existing 9-element .bin (no slot 9) decode
+                    // to None (SYMBOLS.md §4 / Fork F2).
+                    if let Some(v) = arr.get(9) {
+                        re.transform = unpack_transform(v);
+                    }
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
                 other => panic!("unknown live kind: {}", other),
             }
@@ -888,6 +910,14 @@ fn unpack_document(v: &Value) -> Document {
         .map(unpack_element).collect();
     let selected_layer = as_i64(&arr[1]) as usize;
     let selection = unpack_selection(&arr[2]);
+    // Symbols (master store): a trailing element array at index 3. TOLERANT of
+    // its absence — existing .bin fixtures predate symbols and decode to an
+    // empty store (arr.get(3) is None). Present-but-empty arrays decode the
+    // same, so empty-symbols docs round-trip unchanged.
+    let symbols: Vec<Element> = match arr.get(3) {
+        Some(Value::Array(xs)) => xs.iter().map(unpack_element).collect(),
+        _ => Vec::new(),
+    };
     // Binary format predates the artboards feature — parsed docs
     // start with empty artboards. Callers that hand the result to the
     // app (session.rs::load_session) run
@@ -897,6 +927,7 @@ fn unpack_document(v: &Value) -> Document {
     // compare bytes, not semantics).
     Document {
         layers,
+        symbols,
         selected_layer,
         selection,
         artboards: Vec::new(),

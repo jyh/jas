@@ -75,6 +75,14 @@ class CrossLanguageTest(absltest.TestCase):
             "live_reference", "live_compound",
             # A compound with a stable id round-trips its id="..." attr.
             "live_compound_id",
+            # Symbols P1: <defs> master + <use> instance round-trips through
+            # SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
+            # not layers, and re-export identically.
+            "symbols_basic",
+            # Symbols P4: the instance transform rides
+            # data-jas-instance-transform on the <use> and round-trips through
+            # SVG distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -104,6 +112,13 @@ class CrossLanguageTest(absltest.TestCase):
             "live_compound_roundtrip", "live_reference_roundtrip",
             # A compound with a stable id ("c1") round-trips its id field.
             "live_compound_id",
+            # Symbols P1: the `symbols` array (a master) + the instance in
+            # layers round-trips through test_json (SYMBOLS.md §10).
+            "symbols_basic",
+            # Symbols P4: a reference whose instance transform field is set
+            # (the instance_transform key) round-trips through test_json
+            # distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -131,6 +146,13 @@ class CrossLanguageTest(absltest.TestCase):
             "live_compound_roundtrip", "live_reference_roundtrip",
             # A compound with a stable id ("c1") round-trips its id field.
             "live_compound_id",
+            # Symbols P1: the master store rides the trailing element array in
+            # the binary document (SYMBOLS.md §5); JSON-compare round-trip.
+            "symbols_basic",
+            # Symbols P4: the instance transform packs at TAG_LIVE slot 9 and
+            # round-trips through binary distinct from the render CTM
+            # (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -213,6 +235,21 @@ class CrossLanguageTest(absltest.TestCase):
         # matching Rust's common_attrs_no_name (id but no name).
         _assert_svg_parse(self, "live_compound_id")
 
+    def test_svg_parse_symbols_basic(self):
+        # The <defs> master (id="m1") imports into doc.symbols (NOT layers);
+        # the <use href="#m1" id="i1"> imports as a live reference in the
+        # layer. The canonical JSON shows the `symbols` array + the instance.
+        # All apps parse it to the identical canonical JSON (SYMBOLS.md §10).
+        _assert_svg_parse(self, "symbols_basic")
+
+    def test_svg_parse_reference_instance_transform(self):
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): a <use> carrying
+        # data-jas-instance-transform="matrix(2,0,0,2,0,0)" imports as a
+        # reference whose instance transform field is scale(2,2) (emitted as
+        # instance_transform), while the render CTM (transform) stays null —
+        # the two transforms are independent.
+        _assert_svg_parse(self, "reference_instance_transform")
+
     # ---------------------------------------------------------------
     # Algorithm test vectors
     # ---------------------------------------------------------------
@@ -284,6 +321,31 @@ class CrossLanguageTest(absltest.TestCase):
                     ctrl.create_reference(
                         tuple(op["target_path"]),
                         op["target_id"], op["ref_id"])
+                # Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids
+                # and paths are read literally from the fixture payload,
+                # exactly like the create_reference arm.
+                elif op_name == "make_symbol":
+                    ctrl.make_symbol(
+                        tuple(op["path"]), op["master_id"], op["ref_id"])
+                elif op_name == "place_instance":
+                    ctrl.place_instance(op["master_id"], op["ref_id"])
+                elif op_name == "detach":
+                    ctrl.detach(tuple(op["path"]))
+                elif op_name == "redefine":
+                    ctrl.redefine(
+                        op["master_id"], tuple(op["path"]), op["ref_id"])
+                elif op_name == "delete_symbol":
+                    ctrl.delete_symbol(op["master_id"])
+                # Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the
+                # instance transform is carried in the payload as {a,b,c,d,e,f}
+                # (the same matrix shape parsed elsewhere) and applied verbatim.
+                elif op_name == "set_instance_transform":
+                    from geometry.element import Transform
+                    t = op["transform"]
+                    ctrl.set_instance_transform(
+                        tuple(op["path"]),
+                        Transform(a=t["a"], b=t["b"], c=t["c"],
+                                  d=t["d"], e=t["e"], f=t["f"]))
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":
@@ -315,6 +377,13 @@ class CrossLanguageTest(absltest.TestCase):
 
     def test_operation_controller_ops(self):
         self._run_operation_fixture("controller_ops.json")
+
+    def test_operation_symbols_ops(self):
+        # Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol,
+        # place_instance, detach, redefine. Each setup parses through the P1
+        # SVG <defs> codec, runs the op, and pins the canonical JSON all four
+        # apps must reproduce.
+        self._run_operation_fixture("symbols_ops.json")
 
     def test_assign_id_on_compound(self):
         # Regression for the reachable equivalence bug: assign_id does

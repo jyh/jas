@@ -466,10 +466,19 @@ package func elementJson(_ elem: Element) -> String {
         case .reference(let r):
             o.str("target", r.target.id)
             commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil, r.id)
-            // fill/stroke/transform are emitted only when set; in Phase 1
-            // references carry none (paint inheritance default / Fork F2),
-            // matching how compound omits its own paint here. (transform is
+            // fill/stroke are emitted only when set; in Phase 1 references
+            // carry none (paint inheritance default / Fork F2), matching how
+            // compound omits its own paint here. (The render CTM `transform` is
             // emitted as null by commonFields, matching the fixtures.)
+            //
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+            // field (distinct from the render CTM, which `commonFields` emits as
+            // the `transform` key) is emitted as a separate `instance_transform`
+            // key, and ONLY when set — omitting it when nil keeps existing
+            // reference fixtures byte-identical.
+            if let it = r.instanceTransform {
+                o.raw("instance_transform", transformJson(it))
+            }
         }
     }
     return o.build()
@@ -689,7 +698,22 @@ package func documentToTestJson(_ doc: Document) -> String {
     }
     o.int("selected_layer", doc.selectedLayer)
     o.raw("selection", selectionJson(Array(doc.selection)))
+    // Symbols (master store, SYMBOLS.md §5): emit only when non-empty so
+    // existing fixtures stay byte-identical, mirroring print_preferences /
+    // artboards. Masters are sorted by id (the §2 deterministic-order rule);
+    // an id-less master sorts as the empty string.
+    if !doc.symbols.isEmpty {
+        o.raw("symbols", symbolsJson(doc.symbols))
+    }
     return o.build()
+}
+
+/// Serialize the master store as a sorted-by-id JSON array of element JSON.
+/// Sorting is on `id` (id-less masters sort as the empty string) so the output
+/// is deterministic regardless of storage order (SYMBOLS.md §2).
+private func symbolsJson(_ symbols: [Element]) -> String {
+    let sorted = symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+    return jsonArray(sorted.map { elementJson($0) })
 }
 
 // MARK: - JSON → Document parser (inverse of documentToTestJson)
@@ -991,10 +1015,13 @@ package func parseElement(_ v: Any?) -> Element {
                 locked: locked, visibility: visibility)))
         case "reference":
             let target = ElementRef(d["target"] as? String ?? "")
+            // Symbols P4: the instance `transform` field rides the
+            // `instance_transform` key (absent ⇒ nil / null ⇒ nil).
             return .live(.reference(ReferenceElem(
                 target: target,
                 id: id,
                 transform: transform,
+                instanceTransform: parseTransform(d["instance_transform"]),
                 opacity: opacity, locked: locked, visibility: visibility)))
         default:
             fatalError("Unknown live kind: \(kind)")
@@ -1220,8 +1247,13 @@ package func testJsonToDocument(_ json: String) -> Document {
     let artboardOptions = parseArtboardOptions(v["artboard_options"])
     let documentSetup = parseDocumentSetup(v["document_setup"])
     let printPreferences = parsePrintPreferences(v["print_preferences"])
+    // Symbols (master store): absent key -> empty (legacy fixtures predate
+    // symbols and stay byte-identical). Masters parse with the same
+    // parseElement as layer content.
+    let symbols: [Element] = (v["symbols"] as? [Any] ?? []).map { parseElement($0) }
     return dedupeElementIds(Document(
         rawLayers: layers,
+        rawSymbols: symbols,
         rawSelectedLayer: selectedLayer,
         rawSelection: selection,
         rawArtboards: artboards,

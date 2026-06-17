@@ -1,0 +1,42 @@
+delete_symbol_orphan_confirm:
+  summary: "Delete Symbol"
+  description: >
+    Reference-aware delete confirmation for the Symbols panel's Delete
+    Symbol action (SYMBOLS.md §8). Deleting a master that still has live
+    instances would leave those instances empty (they resolve to nothing
+    until the master returns), so the panel Delete is gated by the master's
+    usage count — the length of its reverse-dependency list (rdeps) in the
+    dependency index. Opened by the panel Delete entry point ONLY when the
+    panel-selected master has one or more instances. When the master has no
+    instances the panel delete proceeds inline with no dialog.
+
+    The count of would-be-orphaned instances is passed in as the `count`
+    param and surfaced verbatim in the body text:
+    "Deleting will leave N live instance(s) empty." — with proper singular
+    ("instance") / plural ("instances") agreement via the expression-language
+    ternary.
+
+    Delete (the destructive, confirming button): snapshot the document then
+    remove the master from the master store (the same delete the inline path
+    runs), then close. The master's instances are left in place and become
+    recoverable via undo. Cancel (the safe default): dismiss the dialog and
+    do nothing — no snapshot, no delete.
+  modal: true
+  params:
+    count: { type: number }
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - type: text
+        content: 'Deleting will leave {{param.count}} live {{ param.count == 1 ? "instance" : "instances" }} empty.'
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - id: delete_symbol_orphan_ok_btn
+            type: button
+            label: "Delete"
+            variant: primary
+            action: delete_symbol_orphan_confirm_ok

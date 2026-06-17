@@ -177,6 +177,15 @@ public typealias Selection = Set<ElementSelection>
 /// and a list of artboards (with document-global options).
 public struct Document: Equatable {
     public let layers: [Layer]
+    /// Off-canvas master store for Symbols (SYMBOLS.md §2, Fork S1). Each
+    /// master is a plain `Element` keyed by its `id`; instances are
+    /// `ReferenceElem`s targeting a master id. AUTHORITATIVE document data
+    /// (unlike the derived dependency index), so it IS part of Equatable and
+    /// every codec. It is NOT in `layers`, so render and hit-test never touch
+    /// it (masters are never painted). Storage order is unconstrained, but it
+    /// MUST be emitted sorted-by-id at every order-dependent site (codecs,
+    /// resolver, index) per §2 "deterministic order".
+    public let symbols: [Element]
     public let selectedLayer: Int
     public let selection: Selection
     /// Print-page regions. The at-least-one-artboard invariant
@@ -196,6 +205,7 @@ public struct Document: Equatable {
 
     public init(
         layers: [Layer] = [Layer(name: "Layer", children: [])],
+        symbols: [Element] = [],
         selectedLayer: Int = 0,
         selection: Selection = [],
         artboards: [Artboard] = [],
@@ -204,6 +214,7 @@ public struct Document: Equatable {
         printPreferences: PrintPreferences = .default
     ) {
         self.layers = layers
+        self.symbols = symbols
         self.selectedLayer = selectedLayer
         self.selection = selection
         self.artboards = artboards
@@ -232,6 +243,7 @@ public struct Document: Equatable {
     /// and similar legacy-fixture readers.
     public init(
         rawLayers: [Layer],
+        rawSymbols: [Element] = [],
         rawSelectedLayer: Int,
         rawSelection: Selection,
         rawArtboards: [Artboard],
@@ -240,6 +252,7 @@ public struct Document: Equatable {
         rawPrintPreferences: PrintPreferences = .default
     ) {
         self.layers = rawLayers
+        self.symbols = rawSymbols
         self.selectedLayer = rawSelectedLayer
         self.selection = rawSelection
         self.artboards = rawArtboards
@@ -257,6 +270,7 @@ public struct Document: Equatable {
     /// mutation.
     public func replacing(
         layers: [Layer]? = nil,
+        symbols: [Element]? = nil,
         selectedLayer: Int? = nil,
         selection: Selection? = nil,
         artboards: [Artboard]? = nil,
@@ -266,6 +280,7 @@ public struct Document: Equatable {
     ) -> Document {
         Document(
             layers: layers ?? self.layers,
+            symbols: symbols ?? self.symbols,
             selectedLayer: selectedLayer ?? self.selectedLayer,
             selection: selection ?? self.selection,
             artboards: artboards ?? self.artboards,
@@ -358,7 +373,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
+        return Document(layers: newLayers, symbols: symbols, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
     /// Return a new document with newElem inserted immediately after path.
     public func insertElementAfter(_ path: ElementPath, element newElem: Element) -> Document {
@@ -375,7 +390,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
+        return Document(layers: newLayers, symbols: symbols, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
 
     /// Return a new document with the element at path removed.
@@ -390,7 +405,7 @@ public struct Document: Equatable {
             guard case .layer(let l) = layerElem else { fatalError("unreachable") }
             newLayers[path[0]] = l
         }
-        return Document(layers: newLayers, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
+        return Document(layers: newLayers, symbols: symbols, selectedLayer: selectedLayer, selection: selection, artboards: artboards, artboardOptions: artboardOptions, documentSetup: documentSetup, printPreferences: printPreferences)
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
@@ -401,6 +416,7 @@ public struct Document: Equatable {
             doc = doc.deleteElement(path)
         }
         return Document(layers: doc.layers,
+                           symbols: symbols,
                            selectedLayer: doc.selectedLayer,
                            selection: [],
                            artboards: artboards,
@@ -428,12 +444,27 @@ public struct RebuildResolver: ElementResolver {
     /// Build the index from `doc`. Indexes id-bearing descendants of every
     /// layer — top-level layer ids are not resolution targets in Phase 1
     /// (references target shapes), matching the Rust reference.
+    ///
+    /// Also indexes `doc.symbols` (SYMBOLS.md §2): each master is walked with
+    /// the same operands-opaque discipline so a `ReferenceElem` instance can
+    /// resolve a master by its `id`. Unlike a top-level layer, a master's OWN
+    /// id is a valid target (a master is reached only through a reference), so
+    /// each master is indexed directly (its own id + id-bearing descendants),
+    /// not skipped. Masters live off-canvas (not in `layers`), so indexing
+    /// them here makes them resolvable WITHOUT ever making them painted — the
+    /// whole point of the off-canvas store. Masters are sorted by id first so a
+    /// (well-formed: impossible) duplicate-id master resolves deterministically
+    /// (first-by-id wins), matching the §2 deterministic-order rule.
     public init(document doc: Document) {
         var index: [String: Element] = [:]
         for layer in doc.layers {
             for child in layer.children {
                 RebuildResolver.collect(child, into: &index)
             }
+        }
+        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+        for master in sortedMasters {
+            RebuildResolver.collect(master, into: &index)
         }
         self.index = index
     }

@@ -921,6 +921,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   toggle_panel Workspace_layout.Properties "Properties";
   toggle_panel Workspace_layout.Stroke "Stroke";
   toggle_panel Workspace_layout.Swatches "Swatches";
+  toggle_panel Workspace_layout.Symbols "Symbols";
 
   (* Wire the sync closure: canvas.ml's dock_refresh calls this after
      any panel state change to keep the Window menu checkmarks
@@ -947,4 +948,9 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      name Menubar directly (Menubar already depends on it), so its panel
      delete consults this hook only when the orphan set is non-empty. *)
   Yaml_panel_view.confirm_delete_orphans_hook :=
+    (fun n -> confirm_delete_orphans n parent);
+  (* Symbols-panel hamburger-menu Delete confirm: the SAME modal, so the
+     menu path and the footer-button path show identical reference-aware
+     warnings (SYMBOLS.md section 8). *)
+  Panel_menu.symbols_confirm_delete_hook :=
     (fun n -> confirm_delete_orphans n parent)

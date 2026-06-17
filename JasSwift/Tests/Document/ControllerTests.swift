@@ -794,6 +794,352 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(doc.tryGetElement([0, 0]) != nil)
 }
 
+// MARK: - Symbols P2 — operations (SYMBOLS.md §7)
+
+@Test func makeSymbolPromotesAndLeavesInstance() {
+    // An id-less element -> makeSymbol stamps masterId, moves the element into
+    // doc.symbols as a master, and replaces it in place with an instance
+    // (refId, target = masterId). Mirrors Rust
+    // make_symbol_promotes_and_leaves_instance.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    let doc = ctrl.document
+    // The master lives off-canvas in symbols, carrying masterId.
+    #expect(doc.symbols.count == 1)
+    #expect(doc.symbols[0].id == "m1")
+    if case .rect = doc.symbols[0] {} else { Issue.record("expected a Rect master") }
+    // The in-place element is now an instance targeting the master.
+    if case .live(.reference(let re)) = doc.getElement([0, 0]) {
+        #expect(re.id == "i1")
+        #expect(re.target.id == "m1")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func makeSymbolKeepsExistingIdAsMasterKey() {
+    // If the element already carries an id, that id is KEPT as the master key
+    // and masterId is ignored (assign-on-create, like createReference).
+    // Mirrors Rust make_symbol_keeps_existing_id_as_master_key.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "existing")))
+    ctrl.makeSymbol([0, 0], masterId: "m1-ignored", refId: "i1")
+    let doc = ctrl.document
+    #expect(doc.symbols[0].id == "existing")
+    if case .live(.reference(let re)) = doc.getElement([0, 0]) {
+        #expect(re.target.id == "existing")
+        #expect(re.id == "i1")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func makeSymbolInvalidPathIsNoop() {
+    // Mirrors Rust make_symbol_invalid_path_is_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 9], masterId: "m1", refId: "i1")
+    // Symbols untouched, element unchanged.
+    #expect(ctrl.document.symbols.isEmpty)
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("expected an unchanged Rect at [0,0]")
+    }
+}
+
+@Test func placeInstanceAppendsAndSelects() {
+    // placeInstance appends a reference to the active layer and selects it.
+    // Mirrors Rust place_instance_appends_and_selects.
+    let master = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "m1"))
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [master])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeInstance(masterId: "m1", refId: "i2")
+    let out = ctrl.document
+    // Appended as the only layer child (index 0).
+    if case .live(.reference(let re)) = out.getElement([0, 0]) {
+        #expect(re.target.id == "m1")
+        #expect(re.id == "i2")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+    // The new instance is the selection (auto-select via addElement).
+    #expect(out.selection.count == 1)
+    #expect(out.selection.first?.path == [0, 0])
+}
+
+@Test func placeInstanceDanglingMasterOk() {
+    // It is fine if the master does not exist; the instance still appears
+    // (renders empty until the master exists — dangling is handled).
+    // Mirrors Rust place_instance_dangling_master_ok.
+    let ctrl = Controller()
+    ctrl.placeInstance(masterId: "ghost", refId: "i9")
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        #expect(re.target.id == "ghost")
+        #expect(re.id == "i9")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func detachReplacesInstanceWithIdlessCopy() {
+    // makeSymbol then detach the instance -> the path holds an id-less copy of
+    // the master geometry (NOT a reference); the master is untouched. Mirrors
+    // Rust detach_replaces_instance_with_idless_copy.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 3, y: 4, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    ctrl.detach([0, 0])
+    let doc = ctrl.document
+    // No longer a reference: an independent rect copy.
+    if case .rect(let r) = doc.getElement([0, 0]) {
+        #expect((r.x, r.y) == (3, 4))
+        #expect(r.id == nil)
+    } else {
+        Issue.record("expected an id-less Rect copy at [0,0]")
+    }
+    // The master still exists.
+    #expect(doc.symbols.count == 1)
+    #expect(doc.symbols[0].id == "m1")
+}
+
+@Test func detachAppliesInstanceTransformOverride() {
+    // An instance with a transform offset -> the detached copy carries that
+    // transform composed onto the master geometry. Mirrors Rust
+    // detach_applies_instance_transform_override.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Move the instance (rides on the common transform).
+    ctrl.selectElement([0, 0])
+    ctrl.moveSelection(dx: 24, dy: 24)
+    ctrl.detach([0, 0])
+    let copy = ctrl.document.getElement([0, 0])
+    let t = copy.transform
+    #expect(t != nil)
+    #expect((t!.e, t!.f) == (24, 24))
+}
+
+@Test func detachAppliesInstancePaintOverride() {
+    // An instance with its own fill -> the detached copy adopts that fill.
+    // Mirrors Rust detach_applies_instance_paint_override.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Override the instance's fill.
+    let red = Fill(color: Color(r: 1, g: 0, b: 0))
+    let newRef = withFill(ctrl.document.getElement([0, 0]), fill: red)
+    ctrl.setDocument(ctrl.document.replaceElement([0, 0], with: newRef))
+    ctrl.detach([0, 0])
+    if case .rect(let r) = ctrl.document.getElement([0, 0]) {
+        #expect(r.fill == red)
+    } else {
+        Issue.record("expected a Rect copy at [0,0]")
+    }
+}
+
+@Test func detachNonReferenceIsNoop() {
+    // A plain element (not a reference) -> detach is a no-op. Mirrors Rust
+    // detach_non_reference_is_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.detach([0, 0])
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("expected an unchanged Rect at [0,0]")
+    }
+}
+
+@Test func detachUnresolvableTargetIsNoop() {
+    // An instance whose target is missing -> detach leaves it as-is. Mirrors
+    // Rust detach_unresolvable_target_is_noop.
+    let ctrl = Controller()
+    ctrl.placeInstance(masterId: "ghost", refId: "i1")
+    ctrl.detach([0, 0])
+    // Still a reference.
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        #expect(re.target.id == "ghost")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+// MARK: - Symbols P4 — the instance `transform` field (SYMBOLS.md §4 / Fork F2)
+
+@Test func setInstanceTransformSetsTheField() {
+    // setInstanceTransform writes the given Transform into the instance's
+    // `instanceTransform` field, leaving `transform` (the render CTM)
+    // untouched — the two are independent. Mirrors Rust
+    // set_instance_transform_sets_the_field.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Precondition: a fresh instance has no instance transform.
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        #expect(re.instanceTransform == nil)
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    if case .live(.reference(let re)) = ctrl.document.getElement([0, 0]) {
+        let t = re.instanceTransform
+        #expect(t != nil)
+        #expect((t!.a, t!.d) == (2, 2))
+        #expect((t!.b, t!.c, t!.e, t!.f) == (0, 0, 0, 0))
+        // The render CTM (`transform`) is left alone (still nil for a fresh
+        // instance).
+        #expect(re.transform == nil,
+            "setInstanceTransform must not touch the render CTM")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func setInstanceTransformNonReferenceIsNoop() {
+    // The element at `path` is a plain rect, not a reference -> no-op (no
+    // crash, the rect is unchanged). Mirrors Rust
+    // set_instance_transform_non_reference_is_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("expected an unchanged Rect at [0,0]")
+    }
+}
+
+@Test func detachComposesInstanceTransformField() {
+    // An instance carrying BOTH a render CTM (a translate, on `transform`) AND
+    // a non-nil instance `transform` field (a scale, on `instanceTransform`)
+    // -> the detached copy composes both, in render order
+    // (CTM ∘ instanceTransform), so detach drops neither. Mirrors Rust
+    // detach_composes_instance_transform_field.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Render CTM = translate(24, 24).
+    ctrl.selectElement([0, 0])
+    ctrl.moveSelection(dx: 24, dy: 24)
+    // Instance transform = scale(2, 2).
+    ctrl.setInstanceTransform([0, 0], transform: Transform.scale(2, 2))
+    ctrl.detach([0, 0])
+
+    let copy = ctrl.document.getElement([0, 0])
+    let t = copy.transform
+    #expect(t != nil)
+    // Expected = translate(24,24) ∘ scale(2,2) (the master copy has no own
+    // transform, so the composition is exactly CTM * instance).
+    let expected = Transform.translate(24, 24).multiply(Transform.scale(2, 2))
+    #expect(abs(t!.a - expected.a) < 1e-9)
+    #expect(abs(t!.b - expected.b) < 1e-9)
+    #expect(abs(t!.c - expected.c) < 1e-9)
+    #expect(abs(t!.d - expected.d) < 1e-9)
+    #expect(abs(t!.e - expected.e) < 1e-9)
+    #expect(abs(t!.f - expected.f) < 1e-9)
+    // Concretely: scale 2, then translate 24.
+    #expect((t!.a, t!.d) == (2, 2))
+    #expect((t!.e, t!.f) == (24, 24))
+}
+
+@Test func redefineSwapsMasterAndMakesInstance() {
+    // makeSymbol a rect (m1), add a separate circle, then redefine m1 from the
+    // circle -> doc.symbols[m1] becomes the circle, and the circle's path
+    // holds a new instance (refId) targeting m1. Mirrors Rust
+    // redefine_swaps_master_and_makes_instance.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    // Add a circle at [0,1].
+    ctrl.addElement(Element.circle(Circle(cx: 50, cy: 50, r: 20,
+                                          fill: Fill(color: Color(r: 0, g: 0, b: 0)))))
+    ctrl.redefine(masterId: "m1", [0, 1], refId: "i2")
+    let doc = ctrl.document
+    // The master is now the circle, keyed by m1.
+    #expect(doc.symbols.count == 1)
+    if case .circle = doc.symbols[0] {} else { Issue.record("expected a Circle master") }
+    #expect(doc.symbols[0].id == "m1")
+    // The selection's path is now an instance of m1.
+    if case .live(.reference(let re)) = doc.getElement([0, 1]) {
+        #expect(re.target.id == "m1")
+        #expect(re.id == "i2")
+    } else {
+        Issue.record("expected a Reference at [0,1]")
+    }
+    // The original instance still targets m1 (now resolves to the circle).
+    if case .live(.reference(let re0)) = doc.getElement([0, 0]) {
+        #expect(re0.target.id == "m1")
+        #expect(re0.id == "i1")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
+@Test func redefineUnknownMasterIsNoop() {
+    // Mirrors Rust redefine_unknown_master_is_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.redefine(masterId: "nope", [0, 0], refId: "i1")
+    // No symbols created, element unchanged.
+    #expect(ctrl.document.symbols.isEmpty)
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("expected an unchanged Rect at [0,0]")
+    }
+}
+
+@Test func deleteSymbolRemovesMaster() {
+    // makeSymbol a rect (m1), then deleteSymbol m1 -> doc.symbols is empty.
+    // Mirrors Rust delete_symbol_removes_master.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    #expect(ctrl.document.symbols.count == 1)
+    ctrl.deleteSymbol(masterId: "m1")
+    #expect(ctrl.document.symbols.isEmpty)
+}
+
+@Test func deleteSymbolUnknownIdNoop() {
+    // Deleting an id that is not a master leaves doc.symbols untouched.
+    // Mirrors Rust delete_symbol_unknown_id_noop.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    ctrl.deleteSymbol(masterId: "ghost")
+    #expect(ctrl.document.symbols.count == 1)
+    #expect(ctrl.document.symbols[0].id == "m1")
+}
+
+@Test func deleteSymbolLeavesInstancesDangling() {
+    // The instances are NOT removed; they stay in the layer, still targeting
+    // the now-absent master id (dangling -> resolves to empty). Mirrors Rust
+    // delete_symbol_leaves_instances_dangling.
+    let model = Model(document: Document(layers: [Layer(name: "Layer 1", children: [])]))
+    let ctrl = Controller(model: model)
+    ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
+    ctrl.deleteSymbol(masterId: "m1")
+    let doc = ctrl.document
+    #expect(doc.symbols.isEmpty)
+    // The instance is still present, still targeting the absent master.
+    if case .live(.reference(let re)) = doc.getElement([0, 0]) {
+        #expect(re.target.id == "m1")
+        #expect(re.id == "i1")
+    } else {
+        Issue.record("expected a Reference at [0,0]")
+    }
+}
+
 // MARK: - Delete selection with nested groups
 
 @Test func deleteSelectionSimple() {

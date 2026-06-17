@@ -2372,8 +2372,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            current document so the live render arm resolves by-id
            references this paint (REFERENCE_GRAPH.md Phase 1b). The
            rebuild strategy; the persistent-incremental index is
-           Phase 4. *)
-        _ref_resolver := Live.resolver_of_document current_doc.Document.layers;
+           Phase 4. Spans layers + the off-canvas master store so an
+           instance resolves a master (SYMBOLS.md section 2); masters are
+           never in [layers], so this never paints them. *)
+        _ref_resolver := Live.resolver_of_layers_and_symbols
+          current_doc.Document.layers current_doc.Document.symbols;
         (* Layer 3: document element tree. In mask-isolation mode
            (OPACITY.md Preview interactions), render only the
            mask subtree of the isolated element — everything else

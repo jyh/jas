@@ -237,6 +237,19 @@ def resolver_from_document(doc: "Document") -> DictResolver:
     Rust ``register_ref_index``. The canvas render rebuilds this each
     paint (the rebuild strategy; the persistent-incremental index is
     Phase 4, REFERENCE_GRAPH.md §2.4).
+
+    Also indexes ``doc.symbols`` (SYMBOLS.md §2): each master is walked
+    with the same operands-opaque discipline so a ``ReferenceElem``
+    instance can resolve a master by its ``id``. Unlike layers, a
+    master's OWN id is a valid target (a master is reached only through a
+    reference), so each master is indexed directly (its own id +
+    id-bearing descendants), not skipped like a top-level layer. Masters
+    live off-canvas (not in ``layers``), so indexing them here makes them
+    resolvable WITHOUT ever making them painted — the whole point of the
+    off-canvas store. Masters are sorted by id before indexing so a
+    duplicate-id master resolves deterministically (first-by-id wins),
+    matching the §2 deterministic-order rule (the unique-id invariant
+    means there are no collisions in a well-formed document).
     """
     index: dict[str, "Element"] = {}
     for layer in doc.layers:
@@ -244,6 +257,10 @@ def resolver_from_document(doc: "Document") -> DictResolver:
         if children is not None:
             for child in children:
                 _collect_ref_ids(child, index)
+    sorted_masters = sorted(
+        doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+    for master in sorted_masters:
+        _collect_ref_ids(master, index)
     return DictResolver(index)
 
 

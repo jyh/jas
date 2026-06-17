@@ -133,11 +133,22 @@ def dependency_index(doc: "Document") -> DependencyIndex:
     function; no document state is mutated. See the module docs for the locked
     semantics. Mirrors the Rust ``dependency_index``."""
     # Phase 1: gather the node set (targetable ids) and raw out-edges by walking
-    # layers + Group/Layer children (operands stay opaque).
+    # layers + Group/Layer children (operands stay opaque), THEN the master
+    # store (SYMBOLS.md §6). Including doc.symbols puts master ids in the
+    # targetable set so an instance -> master is not dangling, and
+    # rdeps[master] lists the master's instances. Masters are walked with the
+    # SAME operands-opaque discipline as layers; their OWN id is targetable (a
+    # master is reached only through a reference). Sorted by id first for
+    # deterministic first-occurrence-wins on the (well-formed: impossible)
+    # duplicate-id case.
     targetable: set[str] = set()
     out_edges: dict[str, list[str]] = {}
     for layer in doc.layers:
         _walk(layer, targetable, out_edges)
+    sorted_masters = sorted(
+        doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+    for master in sorted_masters:
+        _walk(master, targetable, out_edges)
 
     # Phase 2: build deps (sorted out-edges) and rdeps (reverse), and collect
     # dangling (any out-edge target missing from the targetable set).

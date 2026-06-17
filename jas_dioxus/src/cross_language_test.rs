@@ -96,6 +96,13 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols P1: the `symbols` array (a master) + the instance in
+            // layers round-trips through test_json (SYMBOLS.md §10).
+            "symbols_basic",
+            // Symbols P4: a reference whose instance `transform` field is set
+            // (the `instance_transform` key) round-trips through test_json
+            // distinct from common.transform (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -128,6 +135,13 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols P1: the master store rides the trailing element array in
+            // the binary document (SYMBOLS.md §5); JSON-compare round-trip.
+            "symbols_basic",
+            // Symbols P4: the instance transform packs at TAG_LIVE slot 9 and
+            // round-trips through binary distinct from common.transform
+            // (SYMBOLS.md §4 / Fork F2).
+            "reference_instance_transform",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -159,6 +173,10 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols: a master in doc.symbols + an instance referencing it.
+            "symbols_basic",
+            // A reference carrying a non-identity instance transform (scale 2x).
+            "reference_instance_transform",
         ];
         for name in &names {
             let bin_path = format!("{}/expected/{}.bin", FIXTURES, name);
@@ -196,6 +214,15 @@ mod tests {
             // all three codecs; id is the only common field SVG preserves for
             // live elements — name is intentionally excluded).
             "live_compound_id",
+            // Symbols P1 (SYMBOLS.md §10): a <defs> master (m1) + an instance
+            // (<use> -> i1) parses to the canonical `symbols` array + the
+            // layer's reference. Rust is the canonical generator.
+            "symbols_basic",
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): a <use> carrying
+            // data-jas-instance-transform parses to a reference whose instance
+            // `transform` field (emitted as `instance_transform`) is set,
+            // distinct from common.transform.
+            "reference_instance_transform",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -224,10 +251,36 @@ mod tests {
             // A compound shape carrying its own stable id (SVG preserves the
             // compound's id attribute through the round-trip).
             "live_compound_id",
+            // Symbols P1: <defs> master + <use> instance round-trips through
+            // SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
+            // not layers, and re-export identically.
+            "symbols_basic",
+            // Symbols P4: the instance transform rides
+            // data-jas-instance-transform on the <use> and round-trips through
+            // SVG distinct from common.transform.
+            "reference_instance_transform",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    #[test]
+    fn svg_parse_reference_instance_transform() {
+        // <use href="#r1" id="i1" data-jas-instance-transform="matrix(2,0,0,2,0,0)">
+        // imports as a reference whose instance `transform` field is scale(2,2)
+        // (emitted as `instance_transform`), while common.transform stays null
+        // (SYMBOLS.md §4 / Fork F2 — the two transforms are independent).
+        assert_svg_parse("reference_instance_transform");
+    }
+
+    #[test]
+    fn svg_parse_symbols_basic() {
+        // The <defs> master (id="m1") imports into doc.symbols (NOT layers);
+        // the <use href="#m1" id="i1"> imports as a live reference in the
+        // layer. The canonical JSON shows the `symbols` array + the instance.
+        // All apps parse it to the identical canonical JSON (SYMBOLS.md §10).
+        assert_svg_parse("symbols_basic");
     }
 
     #[test]
@@ -456,6 +509,80 @@ mod tests {
                     op["ref_id"].as_str().unwrap(),
                 );
             }
+            // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
+            // paths are read literally from the fixture payload, exactly like
+            // the create_reference arm.
+            "make_symbol" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::make_symbol(
+                    model,
+                    &path,
+                    op["master_id"].as_str().unwrap(),
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
+            "place_instance" => {
+                Controller::place_instance(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
+            "detach" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::detach(model, &path);
+            }
+            "redefine" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                Controller::redefine(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                    &path,
+                    op["ref_id"].as_str().unwrap(),
+                );
+            }
+            "delete_symbol" => {
+                Controller::delete_symbol(
+                    model,
+                    op["master_id"].as_str().unwrap(),
+                );
+            }
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
+            // transform is carried in the payload as {a,b,c,d,e,f} (the same
+            // matrix shape parsed elsewhere) and applied verbatim.
+            "set_instance_transform" => {
+                let path: ElementPath = op["path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i.as_u64().unwrap() as usize)
+                    .collect();
+                let t = &op["transform"];
+                let transform = crate::geometry::element::Transform {
+                    a: t["a"].as_f64().unwrap(),
+                    b: t["b"].as_f64().unwrap(),
+                    c: t["c"].as_f64().unwrap(),
+                    d: t["d"].as_f64().unwrap(),
+                    e: t["e"].as_f64().unwrap(),
+                    f: t["f"].as_f64().unwrap(),
+                };
+                Controller::set_instance_transform(model, &path, transform);
+            }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
                 model.set_document(new_doc);
@@ -536,7 +663,8 @@ mod tests {
     fn generate_operation_expected() {
         for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json",
                          "operations/controller_ops.json",
-                         "operations/tspan_ops.json"] {
+                         "operations/tspan_ops.json",
+                         "operations/symbols_ops.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -878,6 +1006,14 @@ mod tests {
     #[test]
     fn operation_tspan_ops() {
         run_operation_fixture("operations/tspan_ops.json");
+    }
+
+    /// Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol, place_instance,
+    /// detach, redefine. Each setup parses through the P1 SVG <defs> codec, runs
+    /// the op, and pins the canonical JSON all four apps must reproduce.
+    #[test]
+    fn operation_symbols_ops() {
+        run_operation_fixture("operations/symbols_ops.json");
     }
 
     // ---------------------------------------------------------------
