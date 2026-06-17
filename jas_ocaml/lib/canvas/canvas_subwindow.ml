@@ -2380,6 +2380,12 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
            (SYMBOLS.md section 2); masters are never in [layers], so this
            never paints them. *)
         _ref_resolver := Live.resolver_of_index model#id_index;
+        (* Phase 4c: epoch the reference-geometry recompute cache off the
+           Model's generation (cleared on any edit / undo / redo), so no-edit
+           repaints reuse the cached target geometry. PER-APP perf cache; no
+           behavior change (gated by a per-hit [assert (cached = fresh)] in
+           [Live]). *)
+        Live.set_recompute_cache_generation model#generation;
         (* Layer 3: document element tree. In mask-isolation mode
            (OPACITY.md Preview interactions), render only the
            mask subtree of the isolated element — everything else

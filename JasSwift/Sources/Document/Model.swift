@@ -43,9 +43,20 @@ public class Model: ObservableObject {
             } else {
                 refreshIdIndex()
             }
+            // Phase 4c: bump the modification generation on every document
+            // write (the chokepoint covers normal edits, undo/redo, and
+            // preview restore). Read at the paint entry to epoch the
+            // reference-geometry recompute cache: any edit changes the
+            // generation and drops the cache. Mirrors Rust `Model.generation`.
+            generation &+= 1
             notify()
         }
     }
+    /// Monotonic modification generation (Phase 4c). Bumped in the `document`
+    /// `didSet` chokepoint, so every document replacement advances it. Read at
+    /// the paint entry to epoch the reference-geometry recompute cache (cleared
+    /// whenever it changes). Mirrors Rust's `Model.generation`.
+    public private(set) var generation: UInt64 = 0
     /// Persistent id->element index paired with `document`
     /// (REFERENCE_GRAPH.md §2.4 Phase 4b). A pure function of `document`
     /// (always equal to `rebuildIdIndex(document)`; checked by the

@@ -235,6 +235,104 @@ let flatten_path_to_rings d =
   flush ();
   List.rev !rings
 
+(* ------------------------------------------------------------------ *)
+(* Phase 4c: reference-geometry recompute cache                        *)
+(* ------------------------------------------------------------------ *)
+(*
+   PER-APP PERF CACHE. REFERENCE_GRAPH.md section 2.3 lets the cache strategy
+   differ per app; equivalence is pinned on resolve() RESULTS, which this
+   never alters (gated by [assert] on every Pure hit). Mirrors the Rust
+   Phase-4c cache in [live.rs], adapted to this app's Option-B index strategy.
+
+   What is cached: the RESOLVED TARGET's UNTRANSFORMED geometry —
+   [element_to_polygon_set_with target precision ..]. Shared across every
+   reference that names the same target, so the key is the TARGET (its id +
+   the precision it was tessellated at), never the reference. The per-reference
+   instance transform is applied AFTER the cached geometry, in
+   [reference_evaluate_with].
+
+   Why pure-geometry only (the crux): a target T that is a Group containing a
+   Reference to X has geometry that changes when X is edited. Caching ONLY
+   targets whose subtree contains NO Reference ([subtree_has_reference] is
+   false) makes the geometry a pure function of the target's content at this
+   generation, so the generation epoch is a complete invalidation signal.
+   Ref-containing targets fall through to exact uncached eval (recorded
+   [Has_refs] so a repeat lookup skips the purity walk but never serves
+   cached geometry).
+
+   Divergence from Rust (allowed by section 2.3): Rust additionally keys on the
+   target's [Rc::as_ptr] (it pairs with the Rust-only incremental Rc-diff
+   index). This app rebuilds the index at the mutation chokepoint (Option B),
+   so within a generation the document is immutable and id -> geometry is
+   fixed; the generation epoch alone is the complete signal and there is no
+   pointer-identity check. The per-hit [assert (cached = fresh)] proves it.
+
+   Lifetime + invalidation: a module-global cache that PERSISTS across paints,
+   so no-edit repaints (pan / zoom / hover, plus the fill + selection-trace
+   passes) reuse it. It is generation-epoched off [Model#generation], bumped on
+   every mutation / undo / redo; [set_recompute_cache_generation] (the paint
+   entry) clears all entries whenever the generation changes. Precision is part
+   of the key (the two render passes may use different precision; coarse vs
+   fine are different geometry, encoded via [Int64.bits_of_float]). *)
+
+(* Observable cache state for a [(target_id, precision)] slot, for tests:
+   [Pure_state] (geometry cached), [Has_refs_state] (recorded uncacheable),
+   or absent (no entry). *)
+type recompute_cache_state = Pure_state | Has_refs_state
+
+(* One cache slot keyed by [(target_id, precision_bits)]. [Pure] holds the
+   target's untransformed geometry, valid for the current epoch. [Has_refs]
+   records that the target's subtree contains a nested reference, so its
+   geometry is NOT cacheable; the entry exists only to short-circuit the purity
+   walk on a repeat lookup — it never serves geometry. *)
+type cache_entry =
+  | Pure of Boolean.polygon_set
+  | Has_refs
+
+let recompute_cache_generation = ref 0
+let recompute_cache : (string * int64, cache_entry) Hashtbl.t = Hashtbl.create 64
+
+(* Generation-epoch the cache: if [generation] differs from the current epoch,
+   clear every entry and adopt the new epoch. Called at the paint entry with
+   [Model#generation]. Because the generation is bumped on every mutation /
+   undo / redo, this drops the cache on any edit while preserving it across
+   no-edit repaints. *)
+let set_recompute_cache_generation generation =
+  if !recompute_cache_generation <> generation then begin
+    Hashtbl.clear recompute_cache;
+    recompute_cache_generation := generation
+  end
+
+(* True iff [elem]'s OWNED subtree contains a Reference anywhere — the purity
+   test deciding whether a target's geometry may be cached. Recurses Group /
+   Layer children and Compound_shape operands (every containment edge
+   [element_to_polygon_set_with] itself descends). A reference reached by-id is
+   NOT part of the owned subtree, so this detects a Reference at its own node,
+   it never follows one. *)
+let rec subtree_has_reference (elem : element) : bool =
+  match elem with
+  | Live (Reference _) -> true
+  | Live (Compound_shape cs) -> Array.exists subtree_has_reference cs.operands
+  | Group { children; _ } | Layer { children; _ } ->
+    Array.exists subtree_has_reference children
+  | _ -> false
+
+(* Test-only: report the cache state for [(target_id, precision)]. Lets the
+   focused Phase-4c tests assert WHAT was cached, beyond the eval result. *)
+let recompute_cache_state_for_test target_id precision =
+  match
+    Hashtbl.find_opt recompute_cache (target_id, Int64.bits_of_float precision)
+  with
+  | Some (Pure _) -> Some Pure_state
+  | Some Has_refs -> Some Has_refs_state
+  | None -> None
+
+(* Test-only: drop all entries and reset the epoch to 0, so each focused test
+   starts from an empty cache regardless of prior tests. *)
+let clear_recompute_cache_for_test () =
+  Hashtbl.clear recompute_cache;
+  recompute_cache_generation := 0
+
 (* Resolver-aware flattening. Identical to [element_to_polygon_set]
    except that by-id references resolve through [resolver], with
    [visiting] breaking cycles. The 2-arg [element_to_polygon_set]
@@ -307,7 +405,11 @@ and reference_evaluate_with r precision resolver visiting =
     match resolver r.ref_target with
     | Some target ->
       visiting := VisitSet.add r.ref_target !visiting;
-      let ps = element_to_polygon_set_with target precision resolver visiting in
+      (* Phase 4c: obtain the resolved target's UNTRANSFORMED geometry through
+         the recompute cache (shared across all references to this target;
+         cached only for pure-geometry targets). The per-reference instance
+         transform is applied AFTER, below. *)
+      let ps = cached_target_geometry r.ref_target target precision resolver visiting in
       visiting := VisitSet.remove r.ref_target !visiting;
       (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
          field (distinct from [ref_transform], which renders as the CTM) is
@@ -323,6 +425,31 @@ and reference_evaluate_with r precision resolver visiting =
          ) ps
        | None -> ps)
     | None -> [] (* dangling: target not found *)
+
+(* Obtain the resolved target's UNTRANSFORMED geometry via the recompute cache
+   (Phase 4c). Caches only pure-geometry targets (no nested reference);
+   ref-containing targets are evaluated fresh every time (recorded [Has_refs]).
+   The per-reference instance transform is applied by the caller AFTER this
+   returns. Correctness gate: on every Pure hit, [assert (cached = fresh)]
+   (mirroring the Phase-4b index = rebuild gate); the fresh eval is inside the
+   assert so it is elided under -noassert. *)
+and cached_target_geometry target_id target precision resolver visiting =
+  let key = (target_id, Int64.bits_of_float precision) in
+  match Hashtbl.find_opt recompute_cache key with
+  | Some (Pure geom) ->
+    assert (
+      let fresh_visit = ref VisitSet.empty in
+      geom = element_to_polygon_set_with target precision resolver fresh_visit);
+    geom
+  | Some Has_refs ->
+    (* Target contains a nested reference: never serve cached geometry. *)
+    element_to_polygon_set_with target precision resolver visiting
+  | None ->
+    (* Cache miss: evaluate fresh, then record by purity. *)
+    let fresh = element_to_polygon_set_with target precision resolver visiting in
+    let entry = if subtree_has_reference target then Has_refs else Pure fresh in
+    Hashtbl.replace recompute_cache key entry;
+    fresh
 
 (* Convenience wrapper that resolves no references — see
    [element_to_polygon_set_with] for the resolver-aware form used when a

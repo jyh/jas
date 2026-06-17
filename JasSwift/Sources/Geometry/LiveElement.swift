@@ -306,8 +306,13 @@ public struct ReferenceElem: Equatable {
             return []  // dangling: target not found
         }
         visiting.insert(target)
-        let ps = elementToPolygonSetWith(
-            resolved, precision: precision, resolver: resolver, visiting: &visiting)
+        // Phase 4c: obtain the resolved target's UNTRANSFORMED geometry through
+        // the recompute cache (shared across all references to this target;
+        // cached only for pure-geometry targets). The per-reference instance
+        // transform is applied AFTER, below.
+        let ps = cachedTargetGeometry(
+            targetId: target.id, target: resolved, precision: precision,
+            resolver: resolver, visiting: &visiting)
         visiting.remove(target)
         // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform` field
         // (distinct from the render CTM, which renders as `transform`) is
@@ -321,6 +326,187 @@ public struct ReferenceElem: Equatable {
             ring.map { (x, y) in t.applyPoint(x, y) }
         }
     }
+}
+
+// MARK: - Reference-geometry recompute cache (REFERENCE_GRAPH.md §2.4 Phase 4c)
+//
+// PER-APP PERF CACHE. §2.3 lets the cache strategy differ per app; equivalence
+// is pinned on resolve() RESULTS, which this never alters (gated by `assert` on
+// every pure hit). Mirrors the Rust Phase-4c cache in `live.rs`, adapted to
+// this app's Option-B index strategy.
+//
+// What is cached: the RESOLVED TARGET's UNTRANSFORMED geometry —
+// `elementToPolygonSetWith(target, ...)`. Shared across every reference that
+// names the same target, so the key is the TARGET (its id + the precision it
+// was tessellated at), never the reference. The per-reference instance
+// transform is applied AFTER the cached geometry, in `evaluateWith`.
+//
+// Why pure-geometry only (the crux): a target whose subtree contains a
+// reference has geometry that depends on the nested target AND on the ambient
+// cycle-guard (`visiting`) state, so it is never safe to share. Caching ONLY
+// targets whose subtree contains NO reference (`subtreeHasReference` is false)
+// makes the geometry a pure function of the target's own content at this
+// generation. Ref-containing targets fall through to exact uncached eval
+// (recorded `.hasRefs` so a repeat lookup skips the purity walk but never
+// serves cached geometry).
+//
+// Divergence from Rust (allowed by §2.3): Rust additionally keys on the
+// target's `Rc::as_ptr` (it pairs with the Rust-only incremental Rc-diff
+// index). This app rebuilds the index at the mutation chokepoint (Option B),
+// so within a generation the document is immutable and id -> geometry is fixed;
+// the generation epoch alone is the complete signal, and there is no
+// pointer-identity check (Element is a value type — there is none to check).
+// The per-hit `assert(cached == fresh)` proves it.
+//
+// Lifetime + invalidation: a module-global cache that PERSISTS across paints,
+// so no-edit repaints (pan / zoom / hover, plus the fill + selection-trace
+// passes) reuse it. It is generation-epoched off `Model.generation`, bumped on
+// every mutation / undo / redo; `setRecomputeCacheGeneration` (the paint entry)
+// clears all entries whenever the generation changes. Precision is part of the
+// key (the two render passes may use different precision; coarse vs fine are
+// different geometry).
+
+/// Observable cache state for a `(targetId, precision)` slot, for tests:
+/// `.pure` (geometry cached), `.hasRefs` (recorded uncacheable), or `nil`
+/// (no entry).
+enum RecomputeCacheState: Equatable { case pure, hasRefs }
+
+/// One cache slot. `.pure` holds the target's untransformed geometry, valid for
+/// the current epoch. `.hasRefs` records that the target's subtree contains a
+/// nested reference, so its geometry is NOT cacheable; it only short-circuits
+/// the purity walk on a repeat lookup — it never serves geometry.
+private enum RecomputeCacheEntry {
+    case pure(BoolPolygonSet)
+    case hasRefs
+}
+
+private struct RecomputeKey: Hashable {
+    let id: String
+    let precisionBits: UInt64
+}
+
+// THREAD-LOCAL storage, mirroring Rust's `thread_local! RECOMPUTE_CACHE`. The
+// production render path is single-threaded (the cache persists across paints
+// on the render thread); per-thread storage additionally isolates the parallel
+// test runner so concurrent tests neither data-race the dictionary nor share
+// cache entries. The box is created lazily per thread and reused thereafter.
+private final class RecomputeCacheBox {
+    var generation: UInt64 = 0
+    var entries: [RecomputeKey: RecomputeCacheEntry] = [:]
+}
+
+private let recomputeCacheThreadKey = "JasLib.RecomputeCache"
+
+private func recomputeCacheBox() -> RecomputeCacheBox {
+    let dict = Thread.current.threadDictionary
+    if let box = dict[recomputeCacheThreadKey] as? RecomputeCacheBox { return box }
+    let box = RecomputeCacheBox()
+    dict[recomputeCacheThreadKey] = box
+    return box
+}
+
+/// Generation-epoch the recompute cache: if `generation` differs from the
+/// current epoch, clear every entry and adopt the new epoch. Called at the
+/// paint entry with `Model.generation` (bumped on every mutation / undo /
+/// redo), so this drops the cache on any edit while preserving it across
+/// no-edit repaints.
+func setRecomputeCacheGeneration(_ generation: UInt64) {
+    let box = recomputeCacheBox()
+    if box.generation != generation {
+        box.entries.removeAll(keepingCapacity: true)
+        box.generation = generation
+    }
+}
+
+/// True iff `elem`'s OWNED subtree contains a reference anywhere — the purity
+/// test deciding whether a target's geometry may be cached. Recurses group /
+/// layer children and compound-shape operands (every containment edge
+/// `elementToPolygonSetWith` itself descends). A reference reached by-id is NOT
+/// part of the owned subtree, so this detects a reference at its own node, it
+/// never follows one. Mirrors Rust `subtree_has_reference`.
+func subtreeHasReference(_ elem: Element) -> Bool {
+    switch elem {
+    case .live(.reference):
+        return true
+    case .live(.compoundShape(let cs)):
+        return cs.operands.contains(where: subtreeHasReference)
+    case .group(let g):
+        return g.children.contains(where: subtreeHasReference)
+    case .layer(let l):
+        return l.children.contains(where: subtreeHasReference)
+    default:
+        return false
+    }
+}
+
+/// Exact polygon-set equality (a `BoolRing` is `[(Double, Double)]`; tuples are
+/// not `Equatable`, so compare element-wise). Used only by the gate, where
+/// cached and fresh are computed by the same function on the same input, so the
+/// comparison is bit-exact.
+func boolPolygonSetsEqual(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> Bool {
+    guard a.count == b.count else { return false }
+    for (ra, rb) in zip(a, b) {
+        guard ra.count == rb.count else { return false }
+        for (pa, pb) in zip(ra, rb) {
+            if pa.0 != pb.0 || pa.1 != pb.1 { return false }
+        }
+    }
+    return true
+}
+
+/// Obtain the resolved target's UNTRANSFORMED geometry via the recompute cache.
+/// Caches only pure-geometry targets (no nested reference); ref-containing
+/// targets are evaluated fresh every time (recorded `.hasRefs`). The
+/// per-reference instance transform is applied by the caller AFTER this returns.
+///
+/// Correctness gate: on every `.pure` hit, `assert(cached == fresh)` (mirroring
+/// the Phase-4b `idIndex == rebuildIdIndex` assert). The fresh eval is inside
+/// the `assert` autoclosure, so it runs only in debug (the whole test suite
+/// runs in debug); zero release-build cost.
+func cachedTargetGeometry(
+    targetId: String, target: Element, precision: Double,
+    resolver: ElementResolver, visiting: inout VisitSet
+) -> BoolPolygonSet {
+    let box = recomputeCacheBox()
+    let key = RecomputeKey(id: targetId, precisionBits: precision.bitPattern)
+    switch box.entries[key] {
+    case .pure(let geom):
+        assert({
+            var freshVisit = VisitSet()
+            let fresh = elementToPolygonSetWith(
+                target, precision: precision, resolver: resolver, visiting: &freshVisit)
+            return boolPolygonSetsEqual(geom, fresh)
+        }(), "reference geometry recompute cache diverged from fresh eval")
+        return geom
+    case .hasRefs:
+        // Target contains a nested reference: never serve cached geometry.
+        return elementToPolygonSetWith(
+            target, precision: precision, resolver: resolver, visiting: &visiting)
+    case nil:
+        // Cache miss: evaluate fresh, then record by purity.
+        let fresh = elementToPolygonSetWith(
+            target, precision: precision, resolver: resolver, visiting: &visiting)
+        box.entries[key] = subtreeHasReference(target) ? .hasRefs : .pure(fresh)
+        return fresh
+    }
+}
+
+/// Test/introspection: the cache state for `(targetId, precision)`, or `nil`
+/// if no entry exists.
+func recomputeCacheStateForTest(_ targetId: String, _ precision: Double) -> RecomputeCacheState? {
+    switch recomputeCacheBox().entries[RecomputeKey(id: targetId, precisionBits: precision.bitPattern)] {
+    case .pure: return .pure
+    case .hasRefs: return .hasRefs
+    case nil: return nil
+    }
+}
+
+/// Test-only: drop all recompute-cache entries and reset the epoch to 0, so
+/// each focused test starts from an empty cache.
+func clearRecomputeCacheForTest() {
+    let box = recomputeCacheBox()
+    box.entries.removeAll()
+    box.generation = 0
 }
 
 // MARK: - Geometry helpers

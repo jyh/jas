@@ -401,3 +401,210 @@ private func bareReference(_ target: String) -> Element {
         }
     }
 }
+
+// MARK: - Phase 4c: reference-geometry recompute cache
+//
+// PER-APP perf cache (REFERENCE_GRAPH.md §2.3). No behavior change: every
+// assertion pins eval RESULTS against a fresh eval, while additionally checking
+// the cache STATE (.pure / .hasRefs / nil). The `assert(cached == fresh)` gate
+// inside the lookup also fires on every pure hit here. The cache is
+// thread-local, so these tests are isolated from the parallel test runner;
+// each clears first, and they use `p4c_`-prefixed ids so a shared thread never
+// collides with the other reference tests above.
+
+/// A resolver whose backing map can be mutated between evaluations so a test
+/// can simulate an edit to the target. Mirrors Rust `CellResolver`.
+private final class CellResolver: ElementResolver {
+    var map: [String: Element] = [:]
+    func resolve(_ id: ElementRef) -> Element? { map[id.id] }
+    func set(_ id: String, _ elem: Element) { map[id] = elem }
+}
+
+private func bigRect(_ w: Double, _ h: Double) -> Element {
+    .rect(Rect(x: 0, y: 0, width: w, height: h))
+}
+
+@Test func subtreeHasReferenceDetectsNestedReference() {
+    // A bare rect has no reference.
+    #expect(subtreeHasReference(rectAt(0, 0)) == false)
+    // A group of rects has no reference.
+    let group = Element.group(Group(children: [rectAt(0, 0), rectAt(5, 0)]))
+    #expect(subtreeHasReference(group) == false)
+    // A group containing a reference DOES have one (the stale hazard).
+    let groupWithRef = Element.group(Group(children: [
+        rectAt(0, 0),
+        .live(.reference(ReferenceElem(target: ElementRef("x")))),
+    ]))
+    #expect(subtreeHasReference(groupWithRef) == true)
+    // A compound shape whose operand is a reference also has one.
+    let compoundWithRef = Element.live(.compoundShape(CompoundShape(
+        operation: .union,
+        operands: [rectAt(0, 0), .live(.reference(ReferenceElem(target: ElementRef("x"))))]
+    )))
+    #expect(subtreeHasReference(compoundWithRef) == true)
+}
+
+@Test func pureTargetReferenceIsCachedAndSecondEvalHits() {
+    // A pure-geometry target referenced by an instance: first eval populates a
+    // .pure entry; a second eval at the same generation reuses it (the gate
+    // confirms cached == fresh) and the RESULT equals a fresh eval.
+    clearRecomputeCacheForTest()
+    setRecomputeCacheGeneration(7)
+    let resolver = CellResolver()
+    resolver.set("p4c_r1", rectAt(0, 0))
+    let reference = ReferenceElem(target: ElementRef("p4c_r1"))
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == nil)
+
+    var v1 = VisitSet()
+    let first = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1)
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == .pure)
+
+    var fv = VisitSet()
+    let fresh = elementToPolygonSetWith(
+        resolver.resolve(ElementRef("p4c_r1"))!, precision: DEFAULT_PRECISION,
+        resolver: resolver, visiting: &fv)
+    #expect(boolPolygonSetsEqual(first, fresh))
+
+    var v2 = VisitSet()
+    let second = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
+    #expect(boolPolygonSetsEqual(first, second))
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == .pure)
+}
+
+@Test func editingTargetNewGenerationReEvaluatesNoStale() {
+    // Editing the target bumps the generation; the epoch clears the cache so
+    // the next eval recomputes against the NEW target. No stale geometry.
+    clearRecomputeCacheForTest()
+    setRecomputeCacheGeneration(1)
+    let resolver = CellResolver()
+    resolver.set("p4c_r1", rectAt(0, 0))           // 10x10
+    let reference = ReferenceElem(target: ElementRef("p4c_r1"))
+
+    var v1 = VisitSet()
+    let before = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1)
+    let (_, _, bmaxx, _) = bboxOfRing(before[0])
+    #expect(abs(bmaxx - 10) < 1e-6)
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == .pure)
+
+    // Edit: a larger rect, AND advance the generation, as a real edit would.
+    resolver.set("p4c_r1", bigRect(40, 40))
+    setRecomputeCacheGeneration(2)
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == nil)
+
+    var v2 = VisitSet()
+    let after = reference.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
+    let (_, _, amaxx, _) = bboxOfRing(after[0])
+    #expect(abs(amaxx - 40) < 1e-6)
+    var fv = VisitSet()
+    let fresh = elementToPolygonSetWith(
+        resolver.resolve(ElementRef("p4c_r1"))!, precision: DEFAULT_PRECISION,
+        resolver: resolver, visiting: &fv)
+    #expect(boolPolygonSetsEqual(after, fresh))
+}
+
+@Test func refContainingTargetIsNotCachedAndTracksNestedEdits() {
+    // A target that CONTAINS a nested reference must NOT be cached as .pure: its
+    // resolved geometry depends on the nested target AND on the ambient
+    // cycle-guard (visiting) state, so it is never safe to share. It is
+    // recorded .hasRefs and re-resolved fresh on every lookup.
+    //
+    // OPTION-B DIVERGENCE FROM RUST (REFERENCE_GRAPH.md §2.3): the Rust test
+    // mutates the nested target WITHOUT bumping the generation, relying on
+    // Rust's per-entry Rc::as_ptr check to invalidate. This app rebuilds the
+    // index at the mutation chokepoint, so every edit bumps the generation and
+    // a pure target never goes stale within a generation — there is no
+    // mutate-without-bump scenario and no pointer check (Element is a value
+    // type). The meaningful pin here is the real edit path: the ref-containing
+    // target is .hasRefs (so it re-resolves), and a nested edit, which bumps
+    // the generation, is reflected.
+    clearRecomputeCacheForTest()
+    setRecomputeCacheGeneration(5)
+    let resolver = CellResolver()
+    resolver.set("p4c_x", rectAt(0, 0))            // nested leaf, 10x10
+    let g = Element.group(Group(children: [
+        .live(.reference(ReferenceElem(target: ElementRef("p4c_x")))),
+    ]))
+    resolver.set("p4c_g", g)                        // outer = group referencing x
+    let outer = ReferenceElem(target: ElementRef("p4c_g"))
+
+    var v1 = VisitSet()
+    let first = outer.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1)
+    #expect(recomputeCacheStateForTest("p4c_g", DEFAULT_PRECISION) == .hasRefs)
+    let (_, _, fmaxx, _) = bboxOfRing(first[0])
+    #expect(abs(fmaxx - 10) < 1e-6)
+
+    // A no-edit repaint (same generation) re-resolves "g" fresh because it is
+    // .hasRefs — the cache never serves a ref-containing target's geometry.
+    var v1b = VisitSet()
+    let again = outer.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1b)
+    #expect(boolPolygonSetsEqual(again, first))
+
+    // Edit the NESTED target — a real edit, which bumps the generation. The
+    // epoch clears the cache; the next eval reflects the new nested geometry.
+    resolver.set("p4c_x", bigRect(30, 30))
+    setRecomputeCacheGeneration(6)
+    var v2 = VisitSet()
+    let second = outer.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
+    let (_, _, smaxx, _) = bboxOfRing(second[0])
+    #expect(abs(smaxx - 30) < 1e-6)
+    #expect(recomputeCacheStateForTest("p4c_g", DEFAULT_PRECISION) == .hasRefs)
+}
+
+@Test func instanceTransformComposesOnCachedPureGeometry() {
+    // The per-reference instance transform is applied AFTER the (shared,
+    // cached) target geometry. A plain instance caches the untransformed
+    // target; a scaled instance of the SAME target reuses that cache and
+    // applies its own transform on top.
+    clearRecomputeCacheForTest()
+    setRecomputeCacheGeneration(9)
+    let resolver = CellResolver()
+    resolver.set("p4c_r1", rectAt(0, 0))
+
+    let plain = ReferenceElem(target: ElementRef("p4c_r1"))
+    var v1 = VisitSet()
+    let plainPs = plain.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1)
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == .pure)
+    let (_, _, pmaxx, pmaxy) = bboxOfRing(plainPs[0])
+    #expect(abs(pmaxx - 10) < 1e-6 && abs(pmaxy - 10) < 1e-6)
+
+    let scaled = ReferenceElem(
+        target: ElementRef("p4c_r1"), instanceTransform: Transform.scale(2, 2))
+    var v2 = VisitSet()
+    let scaledPs = scaled.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
+    let (sminx, sminy, smaxx, smaxy) = bboxOfRing(scaledPs[0])
+    #expect(abs(sminx - 0) < 1e-6 && abs(sminy - 0) < 1e-6)
+    #expect(abs(smaxx - 20) < 1e-6 && abs(smaxy - 20) < 1e-6)
+    // The cache still holds the UNTRANSFORMED geometry (.pure), shared.
+    #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == .pure)
+}
+
+@Test func cacheKeysOnPrecisionSoTwoRenderPassesDontCollide() {
+    // The two render passes use different precision. The cache key includes
+    // precision, so a circle tessellated at one precision never serves a
+    // request at another (which would be a wrong-detail result).
+    clearRecomputeCacheForTest()
+    setRecomputeCacheGeneration(3)
+    let resolver = CellResolver()
+    resolver.set("p4c_c1", .circle(Circle(cx: 0, cy: 0, r: 100)))
+    let reference = ReferenceElem(target: ElementRef("p4c_c1"))
+
+    let coarse = 1.0
+    let fine = 0.01
+    var v1 = VisitSet()
+    let psCoarse = reference.evaluateWith(precision: coarse, resolver: resolver, visiting: &v1)
+    var v2 = VisitSet()
+    let psFine = reference.evaluateWith(precision: fine, resolver: resolver, visiting: &v2)
+
+    #expect(psCoarse[0].count != psFine[0].count)
+    #expect(recomputeCacheStateForTest("p4c_c1", coarse) == .pure)
+    #expect(recomputeCacheStateForTest("p4c_c1", fine) == .pure)
+}
