@@ -29,6 +29,27 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     #expect(items.count == 10)
 }
 
+@Test func builderReadsSymbolsPanel() {
+    // SYMBOLS.md §8: the Symbols panel menu has New Symbol / Place
+    // Instance / Delete Symbol, a separator, and Close Symbols. Mirrors
+    // the Rust lead's symbols_panel menu tests.
+    let items = menuItemsFromYaml("symbols_panel_content")
+    let labels: [String] = items.compactMap { item in
+        switch item {
+        case .action(let l, _, _), .toggle(let l, _), .radio(let l, _, _): return l
+        case .separator: return nil
+        }
+    }
+    #expect(labels.contains("New Symbol"))
+    #expect(labels.contains("Place Instance"))
+    #expect(labels.contains("Delete Symbol"))
+    #expect(labels.contains("Close Symbols"))
+    let cmds = commands(items)
+    for cmd in ["new_symbol", "place_instance", "delete_symbol_action", "close_panel"] {
+        #expect(cmds.contains(cmd), "Symbols menu should include command \(cmd)")
+    }
+}
+
 @Test func builderFoldsColorRadioParamsIntoCommand() {
     // The Color panel's five mode rows share `action: set_color_panel_mode`,
     // so the builder treats them as a radio group and folds each
@@ -90,7 +111,7 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
 }
 
 @Test func panelKindAllCount() {
-    #expect(PanelKind.all.count == 12)
+    #expect(PanelKind.all.count == 13)
 }
 
 @Test func panelKindAllContainsAllVariants() {
@@ -106,6 +127,7 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     #expect(PanelKind.all.contains(.boolean))
     #expect(PanelKind.all.contains(.opacity))
     #expect(PanelKind.all.contains(.magicWand))
+    #expect(PanelKind.all.contains(.symbols))
 }
 
 @Test func alignPanelMenuHasExpectedEntries() {

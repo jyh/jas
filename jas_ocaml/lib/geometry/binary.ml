@@ -396,11 +396,17 @@ let rec pack_element = function
              ~name:None ~id:cs.id @
            [vstr "compound_shape"; vstr op; vlist operands])
   | Live (Reference r) ->
+    (* [tag, common(1..6), kind(7), target(8), instance_transform(9)].
+       Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+       (distinct from [ref_transform] packed in the common block at slot 4)
+       rides slot 9 via [pack_transform]; Nil when None. Old 9-element .bin
+       (no slot 9) still decode TOLERANTLY to None on the read side. *)
     vlist (vint tag_live ::
            pack_common ~locked:r.ref_locked ~opacity:r.ref_opacity
              ~visibility:r.ref_visibility ~transform:r.ref_transform
              ~name:None ~id:r.ref_id @
-           [vstr "reference"; vstr r.ref_target])
+           [vstr "reference"; vstr r.ref_target;
+            pack_transform r.ref_instance_transform])
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -417,7 +423,20 @@ let pack_selection sel =
 
 let pack_document doc =
   let layers = Array.to_list (Array.map pack_element doc.layers) in
-  vlist [vlist layers; vint doc.selected_layer; pack_selection doc.selection]
+  (* Symbols (master store, SYMBOLS.md section 5): appended to the
+     positional document array AFTER the existing fields, as a (possibly
+     empty) element array sorted by common.id (the section 2
+     deterministic-order rule). Trailing position keeps existing .bin
+     fixtures (which predate symbols) decodable — unpack tolerates the
+     field's absence via List.nth_opt arr 3. *)
+  let id_of m = match Element.id_of m with Some s -> s | None -> "" in
+  let sorted =
+    Array.to_list doc.symbols
+    |> List.stable_sort (fun a b -> String.compare (id_of a) (id_of b))
+  in
+  let symbols = List.map pack_element sorted in
+  vlist [vlist layers; vint doc.selected_layer; pack_selection doc.selection;
+         vlist symbols]
 
 (* -- Unpack -------------------------------------------------------------- *)
 
@@ -706,10 +725,18 @@ let rec unpack_element v =
         mask = None })
     else if kind = "reference" then
       let target = as_str (List.nth arr 8) in
+      (* Symbols P4: the instance transform rides slot 9, read TOLERANTLY so
+         existing 9-element .bin (no slot 9) decode to None
+         (SYMBOLS.md section 4 / Fork F2). *)
+      let instance_transform =
+        match List.nth_opt arr 9 with
+        | Some v -> unpack_transform v
+        | None -> None
+      in
       Live (Reference {
         ref_target = target;
         ref_id = id;
-        ref_instance_transform = None;
+        ref_instance_transform = instance_transform;
         ref_fill = None;
         ref_stroke = None;
         ref_opacity = opacity;
@@ -742,9 +769,19 @@ let unpack_document v =
   let layers = Array.of_list (List.map unpack_element (as_list (List.nth arr 0))) in
   let selected_layer = as_int (List.nth arr 1) in
   let selection = unpack_selection (List.nth arr 2) in
+  (* Symbols (master store): a trailing element array at index 3.
+     TOLERANT of its absence — existing .bin fixtures predate symbols
+     and decode to an empty store (List.nth_opt arr 3 is None).
+     Present-but-empty arrays decode the same, so empty-symbols docs
+     round-trip unchanged. *)
+  let symbols =
+    match List.nth_opt arr 3 with
+    | Some (Msgpck.List xs) -> Array.of_list (List.map unpack_element xs)
+    | _ -> [||]
+  in
   (* Binary format predates artboards — parsed docs have empty
      artboards; app load-time repair seeds a default. *)
-  { layers; selected_layer; selection;
+  { layers; symbols; selected_layer; selection;
     artboards = [];
     artboard_options = Artboard.default_options;
     document_setup = Document_setup.default;

@@ -57,6 +57,7 @@ def build_active_document_view(
             "current_artboard_id": None,
             "current_artboard": {},
             "artboards_panel_selection_ids": ab_sel,
+            "symbols": [],
         }
 
     doc = model.document
@@ -135,6 +136,27 @@ def build_active_document_view(
         current_artboard_id = None
         current_artboard_view = {}
 
+    # Symbols view (SYMBOLS.md §8). One row per master in the off-canvas
+    # store. ``name`` is the master's user-visible name, falling back to a
+    # positional "Symbol N" (1-based) label so every row shows something
+    # readable. ``usage_count`` is the number of live instances of the
+    # master — the length of its reverse-dependency list (rdeps) in the
+    # dependency index, the same signal that gates the reference-aware
+    # delete. Mirrors the Rust ``build_active_document_view`` symbols arm.
+    from document.dependency_index import dependency_index
+    dep_index = dependency_index(doc)
+    symbols_view = []
+    for i, master in enumerate(doc.symbols):
+        master_id = getattr(master, "id", None) or ""
+        master_name = getattr(master, "name", None)
+        name = master_name if master_name else f"Symbol {i + 1}"
+        usage_count = len(dep_index.rdeps.get(master_id, []))
+        symbols_view.append({
+            "id": master_id,
+            "name": name,
+            "usage_count": usage_count,
+        })
+
     return {
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -156,6 +178,7 @@ def build_active_document_view(
         "current_artboard_id": current_artboard_id,
         "current_artboard": current_artboard_view,
         "artboards_panel_selection_ids": ab_sel,
+        "symbols": symbols_view,
     }
 
 

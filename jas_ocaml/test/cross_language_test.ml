@@ -59,7 +59,17 @@ let roundtrip_names = [
    separate from [roundtrip_names] because the latter also seeds
    [binary_names], where Live binary serialization is deferred. *)
 let svg_roundtrip_names =
-  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id"]
+  roundtrip_names @ ["live_reference"; "live_compound"; "live_compound_id";
+                     (* Symbols P1: <defs> master + <use> instance
+                        round-trips through SVG (SYMBOLS.md section 5 /
+                        Fork S3) — defs masters import to symbols, not
+                        layers, and re-export identically. *)
+                     "symbols_basic";
+                     (* Symbols P4: the instance transform rides
+                        data-jas-instance-transform on the <use> and
+                        round-trips through SVG distinct from
+                        [ref_transform] (SYMBOLS.md section 4 / Fork F2). *)
+                     "reference_instance_transform"]
 
 (* Names that additionally include the id-bearing "element_ids" fixture, which
    exercises the per-element name and id fields. The binary v2 format and the
@@ -71,7 +81,16 @@ let svg_roundtrip_names =
    [operation]. *)
 let json_roundtrip_names =
   roundtrip_names @ ["element_ids";
-                     "live_reference_roundtrip"; "live_compound_roundtrip"]
+                     "live_reference_roundtrip"; "live_compound_roundtrip";
+                     (* Symbols P1: the [symbols] array (a master) + the
+                        instance in layers round-trips through test_json
+                        (SYMBOLS.md section 10). *)
+                     "symbols_basic";
+                     (* Symbols P4: a reference whose instance transform
+                        field is set (the "instance_transform" key)
+                        round-trips through test_json distinct from
+                        [ref_transform] (SYMBOLS.md section 4 / Fork F2). *)
+                     "reference_instance_transform"]
 (* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
    element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
    serialize through binary (TAG_LIVE, kind-discriminated), so both the
@@ -86,7 +105,24 @@ let binary_names =
                         Python-generated 108-byte .bin must decode here, and
                         the JSON to binary to JSON round-trip must preserve the
                         id (REFERENCE_GRAPH.md compound-id round-trip). *)
-                     "live_compound_id"]
+                     "live_compound_id";
+                     (* Symbols P1: the master store rides the trailing element
+                        array in the binary document (SYMBOLS.md section 5); its
+                        Python-generated symbols_basic.bin is the cross-app pin. *)
+                     "symbols_basic";
+                     (* Symbols P4: a reference carrying a non-identity instance
+                        transform (the instance transform rides binary slot 9). *)
+                     "reference_instance_transform"]
+
+(* Binary JSON->binary->JSON round-trip fixtures = [binary_names] (which now
+   includes symbols_basic and also feeds the binary-read-Python test), PLUS
+   the Symbols P4 instance-transform fixture. The instance transform packs at
+   TAG_LIVE slot 9 and round-trips through binary distinct from
+   [ref_transform] (SYMBOLS.md section 4 / Fork F2). It is kept OUT of
+   [binary_names] (the Python-read list) deliberately: the lead owns wiring
+   the Python byte oracle for this fixture. *)
+let binary_roundtrip_names =
+  binary_names @ ["reference_instance_transform"]
 
 let assert_json_roundtrip name =
   let expected = read_fixture (Printf.sprintf "expected/%s.json" name) in
@@ -142,6 +178,44 @@ let run_operation_fixture fixture_name =
         let target_id = op |> member "target_id" |> to_string in
         let ref_id = op |> member "ref_id" |> to_string in
         ctrl#create_reference target_path target_id ref_id
+      (* Symbols P2 operations (SYMBOLS.md section 7). Value-in-op: the ids and
+         paths are read literally from the fixture payload, exactly like the
+         create_reference arm. *)
+      | "make_symbol" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let master_id = op |> member "master_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#make_symbol path master_id ref_id
+      | "place_instance" ->
+        let master_id = op |> member "master_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#place_instance master_id ref_id
+      | "detach" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        ctrl#detach path
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2). Value-in-op: the
+         instance transform is carried in the payload as {a,b,c,d,e,f} (the
+         same matrix shape parsed elsewhere) and applied verbatim. *)
+      | "set_instance_transform" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let t = op |> member "transform" in
+        let transform = {
+          Jas.Element.a = t |> member "a" |> to_num;
+          b = t |> member "b" |> to_num;
+          c = t |> member "c" |> to_num;
+          d = t |> member "d" |> to_num;
+          e = t |> member "e" |> to_num;
+          f = t |> member "f" |> to_num;
+        } in
+        ctrl#set_instance_transform path transform
+      | "redefine" ->
+        let master_id = op |> member "master_id" |> to_string in
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#redefine master_id path ref_id
+      | "delete_symbol" ->
+        let master_id = op |> member "master_id" |> to_string in
+        ctrl#delete_symbol master_id
       | "delete_selection" ->
         let new_doc = Jas.Document.delete_selection model#document in
         model#set_document new_doc
@@ -377,7 +451,7 @@ let () =
     (* Binary round-trip *)
     "Binary round-trip", [
       Alcotest.test_case "binary_roundtrip all expected" `Quick (fun () ->
-        List.iter assert_binary_roundtrip binary_names);
+        List.iter assert_binary_roundtrip binary_roundtrip_names);
     ];
 
     (* Binary read Python fixtures *)
@@ -424,6 +498,18 @@ let () =
       (* Compound id round-trips through SVG (id="..." on the <g>), unlike
          name which live elements never emit. *)
       Alcotest.test_case "svg_parse live_compound_id" `Quick (fun () -> assert_svg_parse "live_compound_id");
+      (* Symbols P1 (SYMBOLS.md section 10): the <defs> master (id="m1")
+         imports into doc.symbols (NOT layers); the
+         <use href="#m1" id="i1"> imports as a live reference in the
+         layer. The canonical JSON shows the [symbols] array + the
+         instance. All apps parse it to the identical canonical JSON. *)
+      Alcotest.test_case "svg_parse symbols_basic" `Quick (fun () -> assert_svg_parse "symbols_basic");
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): a <use> carrying
+         data-jas-instance-transform parses to a reference whose instance
+         transform field (emitted as "instance_transform") is set, distinct
+         from [ref_transform] (common.transform stays null). *)
+      Alcotest.test_case "svg_parse reference_instance_transform" `Quick
+        (fun () -> assert_svg_parse "reference_instance_transform");
     ];
 
     (* Algorithm test vectors *)
@@ -809,6 +895,87 @@ let () =
           Alcotest.(check bool) "deps r1" true (contains "\"r1\":[\"a\"]"));
     ];
 
+    (* Symbols P1 (SYMBOLS.md section 10): the off-canvas master store.
+       The RESOLVE test shows an instance in a layer evaluates to a
+       master that lives ONLY in doc.symbols; the dep-index test shows
+       the instance -> master edge is not dangling and rdeps[m1]==[i1]. *)
+    "Symbols", [
+      Alcotest.test_case "instance resolves to master geometry from symbols"
+        `Quick (fun () ->
+          (* SYMBOLS.md section 10 RESOLVE gate: ONE master rect (id "m1")
+             in doc.symbols and ONE instance (a reference id "i1"
+             targeting "m1") in a layer. A resolver that indexes
+             doc.symbols (as the canvas render does) makes the instance
+             evaluate to the master's geometry — non-empty and equal to
+             evaluating the master rect directly. This is the whole point
+             of the off-canvas store: masters are resolvable but never in
+             [layers]. *)
+          let master =
+            Jas.Element.with_id
+              (Jas.Element.make_rect 9.0 18.0 27.0 36.0) (Some "m1") in
+          let instance =
+            Jas.Element.make_reference ~id:(Some "i1") "m1" in
+          let doc =
+            Jas.Document.make_document
+              ~symbols:[| master |]
+              [| Jas.Element.make_layer ~name:"Layer" [| instance |] |] in
+          (* The master lives ONLY in doc.symbols, never in layers. *)
+          Alcotest.(check int) "one master in symbols" 1
+            (Array.length doc.Jas.Document.symbols);
+          (* The layer's sole child is the instance (a reference). *)
+          let layer0_children =
+            Jas.Document.children_of doc.Jas.Document.layers.(0) in
+          Alcotest.(check int) "layer holds only the instance" 1
+            (Array.length layer0_children);
+
+          (* Build the resolver spanning layers + symbols (the symbols
+             half is what makes the master resolvable). *)
+          let resolver =
+            Jas.Live.resolver_of_layers_and_symbols
+              doc.Jas.Document.layers doc.Jas.Document.symbols in
+          let precision = Jas.Live.default_precision in
+          let visiting = ref Jas.Live.VisitSet.empty in
+          let resolved =
+            Jas.Live.element_to_polygon_set_with
+              layer0_children.(0) precision resolver visiting in
+          (* Non-empty, and equal to evaluating the master rect directly. *)
+          Alcotest.(check bool) "instance resolves to master geometry"
+            true (resolved <> []);
+          let master_ps =
+            Jas.Live.element_to_polygon_set master precision in
+          Alcotest.(check bool) "resolved equals master rect geometry"
+            true (resolved = master_ps);
+          (* The cycle-guard set is restored after the resolve. *)
+          Alcotest.(check bool) "cycle-guard set restored"
+            true (Jas.Live.VisitSet.is_empty !visiting));
+
+      Alcotest.test_case "symbols master is targetable and instance resolves"
+        `Quick (fun () ->
+          (* SYMBOLS.md section 6: an instance (a reference) in [layers]
+             targeting a master in doc.symbols. The targetable-set walk
+             includes symbols, so the instance is NOT dangling and
+             rdeps[master] lists the instance. *)
+          let master =
+            Jas.Element.with_id
+              (Jas.Element.make_rect 0.0 0.0 30.0 40.0) (Some "m1") in
+          let doc =
+            Jas.Document.make_document
+              ~symbols:[| master |]
+              [| Jas.Element.make_layer ~name:"Layer"
+                   [| dep_reference ~id:"i1" ~target:"m1" |] |] in
+          let idx = Jas.Dependency_index.build doc in
+          (* The instance's edge resolves to a targetable master -> not
+             dangling. *)
+          Alcotest.(check (list string)) "no dangling" [] idx.dangling;
+          (* rdeps[m1] is exactly the instance i1. *)
+          Alcotest.(check (option (list string))) "rdeps m1"
+            (Some ["i1"]) (List.assoc_opt "m1" idx.rdeps);
+          (* The instance's out-edge is recorded; no cycles. *)
+          Alcotest.(check (option (list string))) "deps i1"
+            (Some ["m1"]) (List.assoc_opt "i1" idx.deps);
+          Alcotest.(check (list string)) "no cycles" [] idx.cycles);
+    ];
+
     (* Operation equivalence tests *)
     "Operation", [
       Alcotest.test_case "select_and_move operations" `Quick (fun () ->
@@ -817,6 +984,12 @@ let () =
         run_operation_fixture "undo_redo_laws.json");
       Alcotest.test_case "controller_ops operations" `Quick (fun () ->
         run_operation_fixture "controller_ops.json");
+      (* Symbols P2 operation fixtures (SYMBOLS.md section 7): make_symbol,
+         place_instance, detach, redefine. Each setup parses through the P1 SVG
+         <defs> codec, runs the op, and pins the canonical JSON all apps must
+         reproduce. *)
+      Alcotest.test_case "symbols_ops operations" `Quick (fun () ->
+        run_operation_fixture "symbols_ops.json");
     ];
 
     (* Workspace layout tests *)

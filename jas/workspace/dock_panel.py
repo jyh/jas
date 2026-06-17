@@ -423,6 +423,20 @@ class DockPanelWidget(QWidget):
         from panels.yaml_menu import PANEL_KIND_TO_CONTENT_ID
         from workspace_interpreter.effects import run_effects
 
+        # Native intercept: Symbols panel operations (SYMBOLS.md §7, §8).
+        # These mint ids by the value-in-op rule and call the shared
+        # symbol Controller ops, so the YAML actions are `log` stubs (like
+        # the make_instance arm in menu.py). The panel-selected master id
+        # lives in the store under the panel CONTENT id
+        # (symbols_panel_content), key selected_symbol, so the YAML body's
+        # `panel.selected_symbol` row-highlight + footer-disabled binds
+        # resolve at render. Handled before the generic effect path.
+        if action_name in ("symbols_panel_select", "new_symbol",
+                            "place_instance", "delete_symbol_action",
+                            "delete_symbol_orphan_confirm_ok"):
+            if self._dispatch_symbols_action(action_name, params):
+                return
+
         # Look up the action in the workspace
         ws = get_workspace_data()
         if ws and action_name in ws.get("actions", {}):
@@ -639,6 +653,104 @@ class DockPanelWidget(QWidget):
                     self._dispatch_yaml_cmd(kind, action_name, params, addr)
                     return
 
+    def _dispatch_symbols_action(self, action_name: str, params: dict) -> bool:
+        """Native arms for the Symbols panel (SYMBOLS.md §7, §8), modeled
+        on menu._link_to_selection (Make Instance) + the layers-panel
+        reference-aware delete confirm. Returns True when handled (the
+        caller then skips the generic YAML effect path).
+
+        The panel-selected master id is stored under the panel content id
+        ``symbols_panel_content`` (key ``selected_symbol``) so the YAML
+        body's ``panel.selected_symbol`` binds resolve at render. Mirrors
+        the Rust dispatch_action symbols intercept (value-in-op minting;
+        one snapshot per op; reference-aware delete warns when the master
+        still has live instances)."""
+        store = self._state_store
+        if store is None:
+            return True
+        pid = "symbols_panel_content"
+        # Ensure the panel scope exists so the selection write lands even
+        # when the panel has not been mounted yet (set_panel is a no-op on
+        # an uninitialised scope). The selection is app-level state, like
+        # the Rust AppState.symbols_selected, not gated on panel mount.
+        if not store.get_panel_state(pid):
+            store.init_panel(pid, {"selected_symbol": None})
+
+        # Panel-select: replace the single-master selection with this id.
+        if action_name == "symbols_panel_select":
+            symbol_id = params.get("symbol_id") if params else None
+            store.set_panel(pid, "selected_symbol", symbol_id)
+            self.rebuild()
+            return True
+
+        from panels.symbols_apply import (
+            apply_new_symbol, apply_place_instance, apply_delete_symbol,
+            symbol_usage_count,
+        )
+        model = self._get_model() if self._get_model else None
+        if model is None:
+            return True
+
+        if action_name == "new_symbol":
+            # Promote the single canvas selection; keep the new master
+            # panel-selected so Place/Delete target it immediately.
+            new_id = apply_new_symbol(model)
+            if new_id is not None:
+                store.set_panel(pid, "selected_symbol", new_id)
+            self.rebuild()
+            return True
+
+        if action_name == "place_instance":
+            master_id = store.get_panel(pid, "selected_symbol")
+            apply_place_instance(model, master_id if isinstance(master_id, str) else None)
+            self.rebuild()
+            return True
+
+        if action_name == "delete_symbol_action":
+            master_id = store.get_panel(pid, "selected_symbol")
+            master_id = master_id if isinstance(master_id, str) else None
+            if master_id is None:
+                return True
+            usage = symbol_usage_count(model, master_id)
+            if usage > 0:
+                # Reference-aware confirm: this app's native modal, the
+                # same idiom as the layers-panel orphan confirm. The body
+                # wording matches the shared delete_symbol_orphan_confirm
+                # dialog ("Deleting will leave N live instance(s) empty.").
+                if not self._confirm_delete_symbol(usage):
+                    return True
+            apply_delete_symbol(model, master_id)
+            store.set_panel(pid, "selected_symbol", None)
+            self.rebuild()
+            return True
+
+        if action_name == "delete_symbol_orphan_confirm_ok":
+            # Confirmed delete from the warn path (kept for parity with
+            # the shared action id; the native modal above already gates
+            # the deletion, so this commits unconditionally).
+            master_id = store.get_panel(pid, "selected_symbol")
+            master_id = master_id if isinstance(master_id, str) else None
+            if master_id is not None:
+                apply_delete_symbol(model, master_id)
+                store.set_panel(pid, "selected_symbol", None)
+            self.rebuild()
+            return True
+
+        return True
+
+    def _confirm_delete_symbol(self, count: int) -> bool:
+        """Reference-aware delete confirm for the Symbols panel. Native
+        modal whose default is the safe Cancel; returns True only on OK.
+        Body wording mirrors the shared delete_symbol_orphan_confirm
+        dialog, with singular / plural agreement."""
+        from PySide6.QtWidgets import QMessageBox
+        noun = "instance" if count == 1 else "instances"
+        body = f"Deleting will leave {count} live {noun} empty."
+        reply = QMessageBox.question(
+            self, "Delete Symbol", body,
+            QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
+        return reply == QMessageBox.Ok
+
     def _check_dialog_opened(self, store, dialog_before=None):
         """Show a YAML dialog if one was opened by effects."""
         dialog_after = store.get_dialog_id() if store else None
@@ -757,6 +869,13 @@ class DockPanelWidget(QWidget):
         """Get current panel-local state for expression evaluation."""
         if kind == PanelKind.COLOR:
             return {"mode": self._layout_data.color_panel_mode}
+        if kind == PanelKind.SYMBOLS and self._state_store is not None:
+            # Surface the panel-selected master id so the Symbols menu's
+            # enabled_when ("panel.selected_symbol != null") on Place
+            # Instance / Delete Symbol resolves to the live selection.
+            sel = self._state_store.get_panel(
+                "symbols_panel_content", "selected_symbol")
+            return {"selected_symbol": sel}
         return {}
 
     def _get_global_state(self) -> dict:

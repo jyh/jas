@@ -200,5 +200,6 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .boolean: return "boolean_panel_content"
     case .opacity: return "opacity_panel_content"
     case .magicWand: return "magic_wand_panel_content"
+    case .symbols: return "symbols_panel_content"
     }
 }

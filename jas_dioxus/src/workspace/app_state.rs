@@ -229,6 +229,12 @@ pub(crate) struct AppState {
     /// list change in a session; phase-1 has no clear path (Rearrange
     /// Dialogue deferred).
     pub(crate) artboards_rearrange_dirty: bool,
+
+    /// Symbols panel — id of the panel-selected master, or None. Keys on
+    /// the stable master id so the selection survives instance placement /
+    /// deletion. The target of Place Instance and Delete Symbol
+    /// (SYMBOLS.md §8).
+    pub(crate) symbols_selected: Option<String>,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -724,6 +730,7 @@ impl AppState {
             artboards_renaming: None,
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
+            symbols_selected: None,
         }
     }
 

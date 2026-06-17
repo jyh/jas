@@ -392,8 +392,13 @@ def _pack_element(elem: Element) -> list:
     # (fill/stroke) is omitted in Phase 1 (references inherit; compound
     # carries none here), mirroring the test_json live codec.
     elif isinstance(elem, ReferenceElem):
-        # [tag, common(1..6), kind(7), target(8)]
-        return [_TAG_LIVE, *common, "reference", elem.target]
+        # [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform
+        # (distinct from the render CTM packed at index 4) rides slot 9 via
+        # _pack_transform; nil when None. Old 9-element .bin (no slot 9) still
+        # decode TOLERANTLY to None on the read side.
+        return [_TAG_LIVE, *common, "reference", elem.target,
+                _pack_transform(elem.instance_transform)]
     elif isinstance(elem, CompoundShape):
         # [tag, common(1..6), kind(7), operation(8), operands(9)]
         operands = [_pack_element(c) for c in elem.operands]
@@ -418,7 +423,14 @@ def _pack_selection(sel: frozenset[ElementSelection]) -> list:
 
 def _pack_document(doc: Document) -> list:
     layers = [_pack_element(l) for l in doc.layers]
-    return [layers, doc.selected_layer, _pack_selection(doc.selection)]
+    # Symbols (master store, SYMBOLS.md §5): appended to the positional
+    # document array AFTER the existing fields, as a (possibly empty) element
+    # array sorted by id (the §2 deterministic-order rule). Trailing position
+    # keeps existing .bin fixtures (which predate symbols) decodable — unpack
+    # tolerates the field's absence via arr index 3.
+    sorted_masters = sorted(doc.symbols, key=lambda m: getattr(m, "id", None) or "")
+    symbols = [_pack_element(m) for m in sorted_masters]
+    return [layers, doc.selected_layer, _pack_selection(doc.selection), symbols]
 
 
 # -- Unpack (msgpack structure -> Document) ----------------------------------
@@ -602,7 +614,13 @@ def _unpack_element(arr: list) -> Element:
         if kind == "reference":
             # ReferenceElem is a first-class element with its own id /
             # name, so it takes the full common kwargs.
-            return ReferenceElem(target=arr[8], **common)
+            #
+            # Symbols P4: the instance transform rides slot 9, read TOLERANTLY
+            # so existing 9-element .bin (no slot 9) decode to None (SYMBOLS.md
+            # §4 / Fork F2).
+            inst_t = _unpack_transform(arr[9]) if len(arr) > 9 else None
+            return ReferenceElem(target=arr[8],
+                                 instance_transform=inst_t, **common)
         elif kind == "compound_shape":
             # CompoundShape carries a stable id but no name field, so strip
             # name (it doesn't accept it) and pass id through. Unknown
@@ -637,7 +655,16 @@ def _unpack_document(arr: list) -> Document:
     layers = tuple(_unpack_element(l) for l in arr[0])
     selected_layer = arr[1]
     selection = _unpack_selection(arr[2])
-    return Document(layers=layers, selected_layer=selected_layer,
+    # Symbols (master store): a trailing element array at index 3. TOLERANT of
+    # its absence — existing .bin fixtures predate symbols and decode to an
+    # empty store. Present-but-empty arrays decode the same, so empty-symbols
+    # docs round-trip unchanged.
+    if len(arr) > 3 and isinstance(arr[3], list):
+        symbols = tuple(_unpack_element(m) for m in arr[3])
+    else:
+        symbols = ()
+    return Document(layers=layers, symbols=symbols,
+                    selected_layer=selected_layer,
                     selection=selection)
 
 

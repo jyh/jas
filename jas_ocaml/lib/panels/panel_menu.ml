@@ -85,6 +85,17 @@ let _dialog_opener : (string -> unit) option ref = ref None
 let register_dialog_opener (f : string -> unit) : unit =
   _dialog_opener := Some f
 
+(** Hook for the reference-aware Symbols-panel Delete confirm fired from
+    the panel hamburger menu (SYMBOLS.md section 8). Given the count
+    [n] (> 0) of live instances the master still has, returns [true] to
+    proceed (delete) and [false] to abort. Wired by [Menubar.create] to
+    the SAME modal the layers delete confirm uses — its body reads
+    "Deleting will leave N live instance(s) empty.", the cross-language
+    pinned wording of the shared delete_symbol_orphan_confirm dialog. The
+    default proceeds unconditionally (headless / before-wiring); only
+    consulted when the master has instances. *)
+let symbols_confirm_delete_hook : (int -> bool) ref = ref (fun _ -> true)
+
 (** Helper: dispatch a Paragraph menu command through the live
     State_store + Controller. No-op when the panel isn't mounted or
     the model thunk yields [None]. *)
@@ -163,6 +174,7 @@ let panel_label = function
   | Boolean -> "Boolean"
   | Opacity -> "Opacity"
   | Magic_wand -> "Magic Wand"
+  | Symbols -> "Symbols"
 
 (** Menu items for a panel kind. Reads the panel's [menu:] array from
     the compiled workspace bundle (the single source of truth, review
@@ -1228,6 +1240,24 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
        let cur = _opacity_store_bool key ~default in
        State_store.set_panel store "opacity_panel_content"
          key (`Bool (not cur)))
+  (* Symbols panel (SYMBOLS.md section 8). The hamburger-menu entries
+     fire the SAME native value-in-op arms the footer buttons do (mint
+     ids / snapshot / shared symbol ops); the YAML actions are [log]
+     stubs. Route through the symbols panel store so selection-gated ops
+     read the live panel-selected master. *)
+  | ("new_symbol" | "place_instance" | "delete_symbol_action")
+    when kind = Symbols ->
+    (match lookup_panel_store Symbols_panel.content_id with
+     | None -> ()
+     | Some store ->
+       let m = get_model () in
+       (match cmd with
+        | "new_symbol" -> Symbols_panel.new_symbol store m
+        | "place_instance" -> Symbols_panel.place_instance store m
+        | "delete_symbol_action" ->
+          Symbols_panel.delete_symbol_action store m
+            ~confirm:(fun n -> !symbols_confirm_delete_hook n)
+        | _ -> ()))
   | _ -> ()
 
 (** Query whether a toggle/radio command is checked. *)

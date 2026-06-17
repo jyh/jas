@@ -8,6 +8,8 @@
 public func normalizeDocument(_ doc: Document) -> Document {
     Document(
         layers: doc.layers.map { normalizeLayer($0) },
+        // Masters get the same opacity normalization as layer content.
+        symbols: doc.symbols.map { normalizeElement($0) },
         selectedLayer: doc.selectedLayer,
         selection: doc.selection,
         artboards: doc.artboards,
@@ -37,7 +39,11 @@ public func dedupeElementIds(_ doc: Document) -> Document {
         }
         return l
     }
-    return doc.replacing(layers: layers)
+    // The id space spans layers + symbols (SYMBOLS.md §6): the master store is
+    // part of the same pre-order walk so a master id can never collide with a
+    // layer-element id. Layers walk first (first-pre-order-wins), then symbols.
+    let symbols: [Element] = doc.symbols.map { dedupeIdsWalk($0, &seen) }
+    return doc.replacing(layers: layers, symbols: symbols)
 }
 
 /// Pre-order id-dedupe visitor: visit `elem` (parent) before its children,

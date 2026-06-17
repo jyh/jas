@@ -85,7 +85,14 @@ public struct DependencyIndex: Equatable {
     /// no document state is mutated. See the type docs for the locked semantics.
     public static func build(_ doc: Document) -> DependencyIndex {
         // Phase 1: gather the node set (targetable ids) and raw out-edges by
-        // walking layers + Group/Layer children (operands stay opaque).
+        // walking layers + Group/Layer children (operands stay opaque), THEN
+        // the master store (SYMBOLS.md §6). Including doc.symbols puts master
+        // ids in the targetable set so an instance -> master is not dangling,
+        // and rdeps[master] lists the master's instances. Masters are walked
+        // with the SAME operands-opaque discipline as layers; their OWN id is
+        // targetable (a master is reached only through a reference). Sorted by
+        // id first for deterministic first-occurrence-wins on the (well-formed:
+        // impossible) duplicate-id case.
         var targetable = Set<String>()
         var outEdges: [String: [String]] = [:]
         for layer in doc.layers {
@@ -93,6 +100,10 @@ public struct DependencyIndex: Equatable {
             // top-level layer's own id is recorded just like Rust's
             // `walk(layer)` over an `Element::Layer`.
             walk(.layer(layer), &targetable, &outEdges)
+        }
+        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+        for master in sortedMasters {
+            walk(master, &targetable, &outEdges)
         }
 
         // Phase 2: build `deps` (sorted out-edges) and `rdeps` (reverse), and

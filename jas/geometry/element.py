@@ -1472,9 +1472,18 @@ class ReferenceElem(LiveElement):
     # needs its own id; create_reference stamps ``ref_id`` here.
     id: str | None = None
     name: str | None = None
-    # Optional instance transform applied to the resolved geometry.
-    # Declared now (Fork F2) but always None until Phase 3 wires it.
+    # The render CTM (common.transform): how the instance is placed on the
+    # canvas. None means identity. This is the render-only transform, distinct
+    # from the instance transform below; the render composition is
+    # transform (CTM) ∘ instance_transform (SYMBOLS.md §4 / Fork F2).
     transform: Transform | None = None
+    # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform applied to
+    # the resolved target geometry, letting an instance be mirrored / scaled
+    # relative to its shared master. Distinct from the render CTM above; it is
+    # applied at the eval seam (evaluate_with), so every consumer of the
+    # resolved set inherits it. None ⇒ the geometry is returned unchanged.
+    # Mirrors the Rust ReferenceElem.transform field.
+    instance_transform: Transform | None = None
     # Own paint; None inherits the resolved target's paint (Fork F3).
     fill: Fill | None = None
     stroke: Stroke | None = None
@@ -1501,6 +1510,15 @@ class ReferenceElem(LiveElement):
         visiting.add(self.target)
         ps = element_to_polygon_set_with(target, precision, resolver, visiting)
         visiting.discard(self.target)
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance transform (distinct
+        # from the render CTM ``transform``) is applied to the resolved geometry
+        # here, so an instance can be mirrored / scaled relative to its master.
+        # This single seam covers every consumer of the resolved set — both
+        # render sites, polygon-set, and compound-operand use. None ⇒ return the
+        # geometry unchanged (no transform, no double-apply).
+        if self.instance_transform is not None:
+            t = self.instance_transform
+            return [[t.apply_point(x, y) for (x, y) in ring] for ring in ps]
         return ps
 
     def dependencies(self) -> list[ElementRef]:

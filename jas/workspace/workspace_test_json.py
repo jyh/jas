@@ -98,6 +98,7 @@ def _panel_kind_str(k: PanelKind) -> str:
         PanelKind.BOOLEAN: "boolean",
         PanelKind.OPACITY: "opacity",
         PanelKind.MAGIC_WAND: "magic_wand",
+        PanelKind.SYMBOLS: "symbols",
     }[k]
 
 
@@ -343,6 +344,7 @@ MENU_BAR = [
         ("Properties", "toggle_panel_properties", ""),
         ("Stroke", "toggle_panel_stroke", ""),
         ("Swatches", "toggle_panel_swatches", ""),
+        ("Symbols", "toggle_panel_symbols", ""),
     ]),
 ]
 
@@ -588,6 +590,7 @@ def _parse_panel_kind(v) -> PanelKind:
         "boolean": PanelKind.BOOLEAN,
         "opacity": PanelKind.OPACITY,
         "magic_wand": PanelKind.MAGIC_WAND,
+        "symbols": PanelKind.SYMBOLS,
     }.get(v, PanelKind.LAYERS)
 
 

@@ -754,7 +754,8 @@ let () =
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| existing |] in
         model#set_document
-          { Jas.Document.layers = [| layer |]; selected_layer = 0;
+          { Jas.Document.layers = [| layer |]; symbols = [||];
+            selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
             artboard_options = Jas.Artboard.default_options;
@@ -854,7 +855,8 @@ let () =
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
         model#set_document
-          { Jas.Document.layers = [| layer |]; selected_layer = 0;
+          { Jas.Document.layers = [| layer |]; symbols = [||];
+            selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
             artboard_options = Jas.Artboard.default_options;
@@ -907,7 +909,8 @@ let () =
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
         model#set_document
-          { Jas.Document.layers = [| layer |]; selected_layer = 0;
+          { Jas.Document.layers = [| layer |]; symbols = [||];
+            selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
             artboards = [];
             artboard_options = Jas.Artboard.default_options;

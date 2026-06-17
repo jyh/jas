@@ -211,6 +211,15 @@ pub type Selection = Vec<ElementSelection>;
 #[derive(Debug, Clone)]
 pub struct Document {
     pub layers: Vec<Element>,
+    /// Off-canvas master store for Symbols (SYMBOLS.md §2, Fork S1). Each
+    /// master is a plain `Element` keyed by its `common.id`; instances are
+    /// `ReferenceElem`s targeting a master id. AUTHORITATIVE document data
+    /// (unlike the derived dependency index), so it IS part of Clone/PartialEq
+    /// and every codec. It is NOT in `layers`, so render and hit-test never
+    /// touch it (masters are never painted). Storage order is unconstrained,
+    /// but it MUST be emitted sorted-by-id at every order-dependent site
+    /// (codecs, resolver, index) per §2 "deterministic order".
+    pub symbols: Vec<Element>,
     pub selected_layer: usize,
     pub selection: Selection,
     /// Artboards — print-page regions. The at-least-one invariant
@@ -246,6 +255,7 @@ impl Default for Document {
                 isolated_blending: false,
                 knockout_group: false,
             })],
+            symbols: Vec::new(),
             selected_layer: 0,
             selection: Vec::new(),
             artboards,

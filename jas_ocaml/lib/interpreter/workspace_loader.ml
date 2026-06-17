@@ -157,3 +157,4 @@ let panel_kind_to_content_id (kind : Workspace_layout.panel_kind) : string =
   | Workspace_layout.Boolean -> "boolean_panel_content"
   | Workspace_layout.Opacity -> "opacity_panel_content"
   | Workspace_layout.Magic_wand -> "magic_wand_panel_content"
+  | Workspace_layout.Symbols -> "symbols_panel_content"

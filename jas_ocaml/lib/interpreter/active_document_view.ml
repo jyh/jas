@@ -135,6 +135,38 @@ let print_preferences_view (p : Print_preferences.t) : Yojson.Safe.t =
     ("advanced", advanced_view p.advanced);
   ]
 
+(** Build the [symbols] view (SYMBOLS.md section 8). One row per master in
+    the off-canvas store: [id] is the master's stable id; [name] is its
+    common.name falling back to a positional "Symbol N" (1-based) label so
+    every row always shows something readable; [usage_count] is the number
+    of live instances of that master — the length of its reverse-dependency
+    list (rdeps) in the dependency index, the same signal that gates the
+    reference-aware delete. Mirrors the Rust build_active_document_view
+    symbols block. *)
+let symbols_view (doc : Document.document) : Yojson.Safe.t =
+  let dep_index = Dependency_index.build doc in
+  let symbols_json =
+    Array.to_list doc.Document.symbols
+    |> List.mapi (fun i m ->
+      let id = match Element.id_of m with Some s -> s | None -> "" in
+      let name =
+        match Element.name_of m with
+        | Some n when n <> "" -> n
+        | _ -> Printf.sprintf "Symbol %d" (i + 1)
+      in
+      let usage_count =
+        match List.assoc_opt id dep_index.Dependency_index.rdeps with
+        | Some refs -> List.length refs
+        | None -> 0
+      in
+      `Assoc [
+        ("id", `String id);
+        ("name", `String name);
+        ("usage_count", `Int usage_count);
+      ])
+  in
+  `List symbols_json
+
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
   `Assoc [
     ("top_level_layers", `List []);
@@ -145,6 +177,7 @@ let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
     ("has_selection", `Bool false);
     ("selection_count", `Int 0);
     ("element_selection", `List []);
+    ("symbols", `List []);
     ("document_setup", document_setup_view Document_setup.default);
     ("print_preferences", print_preferences_view Print_preferences.default);
   ]
@@ -225,6 +258,7 @@ let build
       ("has_selection", `Bool (selection_count > 0));
       ("selection_count", `Int selection_count);
       ("element_selection", element_selection_json);
+      ("symbols", symbols_view m#document);
       ("document_setup", document_setup_view m#document.Document.document_setup);
       ("print_preferences", print_preferences_view m#document.Document.print_preferences);
     ]

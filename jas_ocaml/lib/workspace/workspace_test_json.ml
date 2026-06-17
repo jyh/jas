@@ -96,6 +96,7 @@ let panel_kind_str = function
   | Boolean -> "boolean"
   | Opacity -> "opacity"
   | Magic_wand -> "magic_wand"
+  | Symbols -> "symbols"
 
 let pane_kind_str = function
   | Toolbar -> "toolbar"
@@ -310,6 +311,7 @@ let menu_bar = [
     ("Properties", "toggle_panel_properties", "");
     ("Stroke", "toggle_panel_stroke", "");
     ("Swatches", "toggle_panel_swatches", "");
+    ("Symbols", "toggle_panel_symbols", "");
   ]);
 ]
 
@@ -511,6 +513,7 @@ let parse_panel_kind_str s =
   | "boolean" -> Boolean
   | "opacity" -> Opacity
   | "magic_wand" -> Magic_wand
+  | "symbols" -> Symbols
   | _ -> Layers
 
 let parse_panel_kind j = parse_panel_kind_str (to_string j)

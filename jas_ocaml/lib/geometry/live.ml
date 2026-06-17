@@ -74,19 +74,43 @@ let rec collect_ref_ids (elem : element) (tbl : (element_ref, element) Hashtbl.t
    | None -> ());
   List.iter (fun child -> collect_ref_ids child tbl) (resolver_children elem)
 
-(* Build an [element_resolver] from a document's [layers]. Indexes the
-   id-bearing descendants of each top-level layer; top-level layer ids
-   are not resolution targets in Phase 1 (references target shapes), so
-   the walk starts at each layer's children. Rebuilt on demand by the
-   render each paint (the rebuild strategy; the persistent-incremental
-   index is Phase 4). Mirrors Rust [register_ref_index]. *)
-let resolver_of_document (layers : element array) : element_resolver =
+(* Build an [element_resolver] from a document's [layers] and [symbols].
+   Indexes the id-bearing descendants of each top-level layer; top-level
+   layer ids are not resolution targets in Phase 1 (references target
+   shapes), so the layer walk starts at each layer's children.
+
+   ALSO indexes [symbols] (SYMBOLS.md section 2): each master is walked
+   with the same operands-opaque discipline so a reference instance can
+   resolve a master by its [common.id]. Unlike layers, a master's OWN id
+   is a valid target (a master is reached only through a reference), so
+   each master is indexed directly (its own id + id-bearing descendants),
+   not skipped like a top-level layer. Masters live off-canvas (not in
+   [layers]), so indexing them here makes them resolvable WITHOUT ever
+   making them painted. Masters are sorted by id before indexing so a
+   duplicate-id master resolves deterministically (first-by-id wins).
+
+   Rebuilt on demand by the render each paint (the rebuild strategy; the
+   persistent-incremental index is Phase 4). Mirrors Rust
+   [register_ref_index]. *)
+let resolver_of_layers_and_symbols
+    (layers : element array) (symbols : element array) : element_resolver =
   let tbl : (element_ref, element) Hashtbl.t = Hashtbl.create 16 in
   Array.iter (fun layer ->
     List.iter (fun child -> collect_ref_ids child tbl)
       (resolver_children layer)
   ) layers;
+  let id_of_master m = match resolver_id m with Some s -> s | None -> "" in
+  let sorted_masters =
+    Array.to_list symbols
+    |> List.stable_sort (fun a b -> String.compare (id_of_master a) (id_of_master b))
+  in
+  List.iter (fun master -> collect_ref_ids master tbl) sorted_masters;
   fun id -> Hashtbl.find_opt tbl id
+
+(* Backwards-compatible wrapper indexing only [layers] (no master
+   store). Equivalent to [resolver_of_layers_and_symbols layers [||]]. *)
+let resolver_of_document (layers : element array) : element_resolver =
+  resolver_of_layers_and_symbols layers [||]
 
 (** Compute the number of segments required to approximate a circle
     of the given radius so the max perpendicular distance between
@@ -247,7 +271,19 @@ and reference_evaluate_with r precision resolver visiting =
       visiting := VisitSet.add r.ref_target !visiting;
       let ps = element_to_polygon_set_with target precision resolver visiting in
       visiting := VisitSet.remove r.ref_target !visiting;
-      ps
+      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2): the instance transform
+         field (distinct from [ref_transform], which renders as the CTM) is
+         applied to the resolved geometry here, so an instance can be
+         mirrored / scaled relative to its master. This single seam covers
+         every consumer of the resolved set — both render sites, polygon-set,
+         and compound-operand use. None yields the geometry unchanged (no
+         transform, no double-apply). *)
+      (match r.ref_instance_transform with
+       | Some t ->
+         List.map (fun ring ->
+           Array.map (fun (x, y) -> apply_point t x y) ring
+         ) ps
+       | None -> ps)
     | None -> [] (* dangling: target not found *)
 
 (* Convenience wrapper that resolves no references — see

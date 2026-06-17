@@ -221,6 +221,57 @@ def test_reference_reports_its_target_as_dependency():
     assert reference.dependencies() == ["t"]
 
 
+# ── Symbols P4: the instance transform field (SYMBOLS.md §4 / Fork F2) ──
+# Mirror the jas_dioxus live.rs instance-transform eval tests. The instance
+# transform (ReferenceElem.instance_transform) is distinct from the render
+# CTM (ReferenceElem.transform / common.transform); it is applied to the
+# resolved PolygonSet here, the single eval seam.
+
+def test_reference_instance_transform_scales_target_geometry():
+    # A reference whose instance transform is scale(2,2), targeting a 10x10
+    # rect at the origin, evaluates to the rect geometry scaled 2x (a 20x20
+    # ring). The instance transform is applied to every point of the resolved
+    # PolygonSet (composition: instance.transform ∘ geometry).
+    from geometry.element import ReferenceElem, Transform
+    from geometry.live import DEFAULT_PRECISION
+    resolver = _MapResolver({"r1": _rect_at(0, 0)})
+    reference = ReferenceElem(target="r1",
+                             instance_transform=Transform.scale(2.0, 2.0))
+    visiting = set()
+    scaled = reference.evaluate_with(DEFAULT_PRECISION, resolver, visiting)
+
+    # Unscaled reference for comparison.
+    plain = ReferenceElem(target="r1")
+    unscaled = plain.evaluate_with(
+        DEFAULT_PRECISION, _MapResolver({"r1": _rect_at(0, 0)}), set())
+
+    assert len(scaled) == len(unscaled)  # same ring count, just scaled
+    sminx, sminy, smaxx, smaxy = _bbox(scaled[0])
+    uminx, uminy, umaxx, umaxy = _bbox(unscaled[0])
+    assert abs(sminx - uminx * 2.0) < 1e-6
+    assert abs(sminy - uminy * 2.0) < 1e-6
+    assert abs(smaxx - umaxx * 2.0) < 1e-6
+    assert abs(smaxy - umaxy * 2.0) < 1e-6
+    # Concretely: the 10x10 rect at origin scales to a 20x20 box.
+    assert abs(sminx - 0.0) < 1e-6 and abs(sminy - 0.0) < 1e-6
+    assert abs(smaxx - 20.0) < 1e-6 and abs(smaxy - 20.0) < 1e-6
+    assert visiting == set()
+
+
+def test_reference_none_instance_transform_leaves_eval_unchanged():
+    # The default instance transform is None; eval is identical to the
+    # resolved target geometry (no transform applied, no double-apply).
+    from geometry.element import ReferenceElem
+    from geometry.live import DEFAULT_PRECISION, element_to_polygon_set
+    resolver = _MapResolver({"r1": _rect_at(0, 0)})
+    reference = ReferenceElem(target="r1")
+    assert reference.instance_transform is None  # defaults to None
+    via_ref = reference.evaluate_with(DEFAULT_PRECISION, resolver, set())
+    # Equal to evaluating the target rect directly.
+    direct = element_to_polygon_set(_rect_at(0, 0), DEFAULT_PRECISION)
+    assert via_ref == direct
+
+
 def test_compound_dependencies_default_empty():
     from geometry.element import CompoundOperation, CompoundShape
     cs = CompoundShape(operation=CompoundOperation.UNION, operands=())
@@ -304,3 +355,53 @@ def test_resolver_from_document_indexes_nested_descendants():
     # The top-level layer id is intentionally excluded (references
     # target shapes, not layers). Mirrors Rust register_ref_index.
     assert resolver.resolve("lyr") is None
+
+
+# ── Symbols P1: an instance resolves a master from doc.symbols ──────
+# Mirror jas_dioxus live.rs instance_resolves_to_master_geometry_from_symbols
+# and render.rs render_ref_index_resolves_master_from_symbols.
+
+
+def test_resolver_from_document_resolves_master_from_symbols():
+    """SYMBOLS.md §10 RESOLVE gate: ONE master rect (id "m1") in
+    doc.symbols and ONE instance (a ReferenceElem id "i1" targeting "m1")
+    in a layer. resolver_from_document ALSO indexes doc.symbols (a master's
+    OWN id is the target), so the instance evaluates to the master's
+    geometry — non-empty and equal to the rect's polygon set. This is the
+    whole point of the off-canvas store: masters are resolvable but never in
+    `layers`, so render never paints them."""
+    from dataclasses import replace
+    from document.document import Document
+    from geometry.element import Layer, ReferenceElem
+    from geometry.live import (
+        DEFAULT_PRECISION,
+        element_to_polygon_set,
+        resolver_from_document,
+    )
+
+    # The master rect (matching symbols_basic) lives ONLY in doc.symbols.
+    master = replace(_rect_at(9.0, 18.0, 27.0, 36.0), id="m1")
+    # The instance lives in a layer, off the master.
+    instance = ReferenceElem(target="m1", id="i1")
+    doc = Document(
+        layers=(Layer(name="Layer", children=(instance,)),),
+        symbols=(master,),
+    )
+
+    resolver = resolver_from_document(doc)
+    # The master (off-canvas) resolves by its OWN id from doc.symbols.
+    assert resolver.resolve("m1") is master
+    # The instance evaluates to the master's geometry (a single ring) equal
+    # to evaluating the master rect directly.
+    visiting: set = set()
+    resolved = instance.evaluate_with(DEFAULT_PRECISION, resolver, visiting)
+    assert resolved, "instance must resolve to the master geometry"
+    master_ps = element_to_polygon_set(master, DEFAULT_PRECISION)
+    assert resolved == master_ps, (
+        "resolved instance geometry must equal the master rect's polygon set")
+    assert not visiting, "cycle-guard set restored after resolve"
+    # Masters are never painted: the master lives only in doc.symbols, never
+    # in the layer tree (the off-canvas guarantee).
+    assert len(doc.layers[0].children) == 1, "layer holds only the instance"
+    assert doc.layers[0].children[0] is instance
+    assert len(doc.symbols) == 1, "the master lives only in doc.symbols"

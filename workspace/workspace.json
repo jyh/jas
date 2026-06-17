@@ -5715,6 +5715,63 @@
           }
         }
       ]
+    },
+    "symbols_panel_select": {
+      "description": "Panel-select a master in the Symbols panel by id. Replaces the single-master selection with this id, which becomes the target of Place Instance and Delete Symbol. The selection keys on the stable master id, so it survives instance placement / deletion. Clicking empty panel area is a no-op (no row dispatches this).\n",
+      "category": "symbols",
+      "params": {
+        "symbol_id": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "symbols",
+            "key": "selected_symbol",
+            "value": "param.symbol_id"
+          }
+        }
+      ]
+    },
+    "new_symbol": {
+      "description": "Promote the single selected canvas element to a master (SYMBOLS.md \u00a77 Make Symbol). The selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected. A fresh master id and instance id are minted by the initiator (value-in-op) and carried in the operation; never minted inside the shared core. Single undo op.\n",
+      "category": "symbols",
+      "enabled_when": "active_document.selection_count == 1",
+      "effects": [
+        {
+          "log": "new_symbol"
+        }
+      ]
+    },
+    "place_instance": {
+      "description": "Append a new instance of the panel-selected master to the active layer and select it (SYMBOLS.md \u00a77 Place Instance). Enabled only when a master is panel-selected. A fresh instance id is minted by the initiator (value-in-op). Single undo op.\n",
+      "category": "symbols",
+      "enabled_when": "panel.selected_symbol != null",
+      "effects": [
+        {
+          "log": "place_instance"
+        }
+      ]
+    },
+    "delete_symbol_action": {
+      "description": "Delete the panel-selected master from the master store (SYMBOLS.md \u00a77 Delete Symbol). Reference-aware: when the master still has live instances (usage count > 0) a confirmation warning first reports how many instances will be left empty; confirming deletes the master. With no instances it deletes silently. The master's instances are never touched \u2014 they become recoverable via undo. Enabled only when a master is panel-selected. Single undo op.\n",
+      "category": "symbols",
+      "enabled_when": "panel.selected_symbol != null",
+      "effects": [
+        {
+          "log": "delete_symbol_action"
+        }
+      ]
+    },
+    "delete_symbol_orphan_confirm_ok": {
+      "description": "Confirm the reference-aware Symbols-panel delete from the delete_symbol_orphan_confirm dialog. The panel Delete entry point opens that dialog only when the panel-selected master still has live instances; clicking Delete here commits the deletion. A DISTINCT action id from delete_symbol_action so the native warn intercept does not re-fire. The native arm snapshots and removes the master; the orphaned instances resolve to nothing until undone. Cancel uses dismiss_dialog (no snapshot, no delete).\n",
+      "category": "dialog",
+      "effects": [
+        {
+          "log": "delete_symbol_orphan_confirm_ok"
+        }
+      ]
     }
   },
   "version": 1,
@@ -6592,6 +6649,14 @@
     "artboard_new": {
       "viewbox": "0 0 16 16",
       "svg": "<path d=\"M2,3 L9,3 L9,13 L2,13 Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"miter\"/> <line x1=\"13\" y1=\"5\" x2=\"13\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <line x1=\"10\" y1=\"8\" x2=\"16\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n"
+    },
+    "symbol_new": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M6,2 L10,6 L6,10 L2,6 Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/> <line x1=\"12\" y1=\"9\" x2=\"12\" y2=\"15\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <line x1=\"9\" y1=\"12\" x2=\"15\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n"
+    },
+    "symbol_place": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M6,1 L10,5 L6,9 L2,5 Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/> <line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <path d=\"M10,12 L12,14 L14,12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
     },
     "artboard_options": {
       "viewbox": "0 0 16 16",
@@ -19214,6 +19279,208 @@
           }
         ]
       }
+    },
+    "symbols_panel_content": {
+      "id": "symbols_panel_content",
+      "type": "panel",
+      "summary": "Symbols",
+      "description": "Symbols panel \u2014 the document's library of reusable master definitions (SYMBOLS.md \u00a78, P3 first slice). A symbol is an off-canvas master element stored in the document's master store; every place on the canvas that uses it is an instance (a lightweight reference that resolves to the master's geometry at paint time). Editing a master once updates every instance, so symbols are the document's mechanism for \"draw once, reuse many\".\nThis first slice is a TEXT LIST modeled directly on the Artboards panel \u2014 a scrolling foreach over document-derived master data, one row per master, plus a small footer of actions. Thumbnails, rename, redefine-from-UI, duplicate, and drag-to-place are deferred to a later slice.\n=== Row Layout ===\nEach row is laid out left to right as:\nSYMBOL_NAME \u2014 SYMBOL_USAGE_COUNT\nSYMBOL_NAME is the master's user-visible name (its common.name). Masters promoted from an already-named element keep that name; masters with no name fall back to a derived \"Symbol N\" label computed positionally by the view-builder, so every row always shows something readable. Click selects the row as the sole panel-selected master.\nSYMBOL_USAGE_COUNT is the number of live instances of that master in the document \u2014 the length of the master's reverse-dependency list (rdeps) in the dependency index. It is a derived, read-only value that updates whenever instances are placed, detached, or deleted. It doubles as the safe-delete signal: a non-zero count means deleting the master would leave instances empty (see Delete below).\n=== Panel Selection ===\nPanel-selection is a single master id (or none). Clicking a row replaces the selection with that master. Clicking empty panel area (below the last row) is a no-op. The selection keys on the stable master id, so it survives list reordering and the placing or deleting of instances. The panel-selected master is the target of Place Instance and Delete.\n=== Actions (footer) ===\nNEW_SYMBOL_BUTTON promotes the current canvas selection to a master: the selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected (active_document.selection_count == 1); a fresh master id and instance id are minted by the initiator and carried in the operation (value-in-op), never minted inside the shared core.\nPLACE_INSTANCE_BUTTON appends a new instance of the panel-selected master to the active layer and selects it. Enabled only when a master is panel-selected. A fresh instance id is minted by the initiator.\nDELETE_SYMBOL_BUTTON removes the panel-selected master from the master store. Enabled only when a master is panel-selected. It is reference-aware: when the master still has live instances (usage count > 0) it first opens a confirmation warning that says how many instances will be left empty; confirming deletes the master (the orphaned instances resolve to nothing until undone). When the master has no instances it deletes silently. Deleting a master never touches its instances \u2014 they are left in place and become recoverable via undo.\n=== Deferrals (this slice) ===\nThumbnail previews, inline rename, Redefine from the panel, Duplicate, drag-to-place onto the canvas, multi-select, and reordering are all deferred. Their underlying operations exist in the shared core but are not surfaced here yet.\n",
+      "state": {
+        "selected_symbol": {
+          "type": "string",
+          "default": null,
+          "nullable": true,
+          "description": "Id of the panel-selected master, or null when none is selected"
+        }
+      },
+      "init": {
+        "selected_symbol": "null"
+      },
+      "menu": [
+        {
+          "label": "New Symbol",
+          "action": "new_symbol",
+          "enabled_when": "active_document.selection_count == 1",
+          "description": "Promote the single selected canvas element to a master"
+        },
+        {
+          "label": "Place Instance",
+          "action": "place_instance",
+          "enabled_when": "panel.selected_symbol != null",
+          "description": "Place a new instance of the panel-selected master"
+        },
+        {
+          "label": "Delete Symbol",
+          "action": "delete_symbol_action",
+          "enabled_when": "panel.selected_symbol != null",
+          "description": "Delete the panel-selected master (warns if it still has instances)"
+        },
+        "separator",
+        {
+          "label": "Close Symbols",
+          "action": "close_panel",
+          "params": {
+            "panel": "symbols"
+          },
+          "description": "Close the Symbols panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "sym_root",
+        "layout": "column",
+        "style": {
+          "padding": 0,
+          "gap": 0
+        },
+        "children": [
+          {
+            "id": "sym_list",
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "flex": 1,
+              "overflow_y": "auto",
+              "padding": 0,
+              "gap": 0
+            },
+            "foreach": {
+              "source": "active_document.symbols",
+              "as": "sym"
+            },
+            "do": {
+              "type": "container",
+              "layout": "row",
+              "style": {
+                "height": 24,
+                "padding": "0 6",
+                "gap": 4,
+                "alignment": "center"
+              },
+              "bind": {
+                "background": "if sym.id == panel.selected_symbol then '{{theme.colors.selection}}' else 'transparent'"
+              },
+              "children": [
+                {
+                  "id": "sym_name",
+                  "type": "text",
+                  "content": "{{sym.name}}",
+                  "style": {
+                    "flex": 1,
+                    "font_size": 11,
+                    "color": "{{theme.colors.text}}",
+                    "overflow": "hidden",
+                    "text_overflow": "ellipsis",
+                    "white_space": "nowrap"
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "symbols_panel_select",
+                      "params": {
+                        "symbol_id": "sym.id"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "sym_usage",
+                  "type": "text",
+                  "content": "{{sym.usage_count}}",
+                  "style": {
+                    "width": 32,
+                    "text_align": "right",
+                    "font_size": 11,
+                    "color": "{{theme.colors.text_dim}}"
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "symbols_panel_select",
+                      "params": {
+                        "symbol_id": "sym.id"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "id": "sym_footer",
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "padding": "4 6",
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "sym_new",
+                "type": "icon_button",
+                "icon": "symbol_new",
+                "summary": "New Symbol",
+                "description": "Promote the single selected canvas element to a master",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "active_document.selection_count != 1"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "new_symbol"
+                  }
+                ]
+              },
+              {
+                "id": "sym_place",
+                "type": "icon_button",
+                "icon": "symbol_place",
+                "summary": "Place Instance",
+                "description": "Place a new instance of the panel-selected master",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "panel.selected_symbol == null"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "place_instance"
+                  }
+                ]
+              },
+              {
+                "id": "sym_delete",
+                "type": "icon_button",
+                "icon": "trash",
+                "summary": "Delete Symbol",
+                "description": "Delete the panel-selected master (warns if it still has instances)",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "panel.selected_symbol == null"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "delete_symbol_action"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
   },
   "tools": {
@@ -27237,6 +27504,51 @@
                 "label": "Delete",
                 "variant": "primary",
                 "action": "delete_orphan_confirm_ok"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "delete_symbol_orphan_confirm": {
+      "summary": "Delete Symbol",
+      "description": "Reference-aware delete confirmation for the Symbols panel's Delete Symbol action (SYMBOLS.md \u00a78). Deleting a master that still has live instances would leave those instances empty (they resolve to nothing until the master returns), so the panel Delete is gated by the master's usage count \u2014 the length of its reverse-dependency list (rdeps) in the dependency index. Opened by the panel Delete entry point ONLY when the panel-selected master has one or more instances. When the master has no instances the panel delete proceeds inline with no dialog.\nThe count of would-be-orphaned instances is passed in as the `count` param and surfaced verbatim in the body text: \"Deleting will leave N live instance(s) empty.\" \u2014 with proper singular (\"instance\") / plural (\"instances\") agreement via the expression-language ternary.\nDelete (the destructive, confirming button): snapshot the document then remove the master from the master store (the same delete the inline path runs), then close. The master's instances are left in place and become recoverable via undo. Cancel (the safe default): dismiss the dialog and do nothing \u2014 no snapshot, no delete.\n",
+      "modal": true,
+      "params": {
+        "count": {
+          "type": "number"
+        }
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Deleting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "id": "delete_symbol_orphan_ok_btn",
+                "type": "button",
+                "label": "Delete",
+                "variant": "primary",
+                "action": "delete_symbol_orphan_confirm_ok"
               }
             ]
           }

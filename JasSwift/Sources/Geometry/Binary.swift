@@ -672,9 +672,14 @@ private func packElement(_ elem: Element) -> MsgValue {
             let common = packCommon(locked: r.locked, opacity: r.opacity,
                                     visibility: r.visibility, transform: r.transform,
                                     name: nil, id: r.id)
-            // [tag, common(1..6), kind(7), target(8)]
+            // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+            // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+            // (distinct from the render CTM packed at slot 4) rides slot 9 via
+            // packTransform; nil when unset. Old 9-element .bin (no slot 9)
+            // still decode TOLERANTLY to nil on the read side.
             return .array([vint(tagLive)] + common +
-                          [vstr("reference"), vstr(r.target.id)])
+                          [vstr("reference"), vstr(r.target.id),
+                           packTransform(r.instanceTransform)])
         }
     }
 }
@@ -698,7 +703,15 @@ private func packSelection(_ sel: Selection) -> MsgValue {
 
 private func packDocument(_ doc: Document) -> MsgValue {
     let layers: [MsgValue] = doc.layers.map { packElement(.layer($0)) }
-    return .array([.array(layers), vint(doc.selectedLayer), packSelection(doc.selection)])
+    // Symbols (master store, SYMBOLS.md §5): appended to the positional
+    // document array AFTER the existing fields, as a (possibly empty) element
+    // array sorted by id (the §2 deterministic-order rule). Trailing position
+    // keeps existing .bin fixtures (which predate symbols) decodable — unpack
+    // tolerates the field's absence via arr.count.
+    let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+    let symbols: [MsgValue] = sortedMasters.map { packElement($0) }
+    return .array([.array(layers), vint(doc.selectedLayer), packSelection(doc.selection),
+                   .array(symbols)])
 }
 
 // MARK: - Unpack (MsgValue -> Document)
@@ -917,10 +930,15 @@ private func unpackElement(_ v: MsgValue) -> Element {
             // ReferenceElem is a first-class element with its own id; it
             // takes the full common block (target at index 8, paint nil).
             let target = ElementRef(asStr(arr[8]))
+            // Symbols P4: the instance `transform` rides slot 9, read
+            // TOLERANTLY so existing 9-element .bin (no slot 9) decode to nil
+            // (SYMBOLS.md §4 / Fork F2).
+            let instanceXform = arr.count > 9 ? unpackTransform(arr[9]) : nil
             return .live(.reference(ReferenceElem(
                 target: target,
                 id: id,
                 transform: xform,
+                instanceTransform: instanceXform,
                 opacity: opacity, locked: locked, visibility: vis)))
         default: fatalError("unknown live kind: \(kind)")
         }
@@ -955,11 +973,22 @@ private func unpackDocument(_ v: MsgValue) -> Document {
     }
     let selectedLayer = asInt(arr[1])
     let selection = unpackSelection(arr[2])
+    // Symbols (master store): a trailing element array at index 3. TOLERANT of
+    // its absence — existing .bin fixtures predate symbols and decode to an
+    // empty store (arr.count <= 3). Present-but-empty arrays decode the same,
+    // so empty-symbols docs round-trip unchanged.
+    let symbols: [Element]
+    if arr.count > 3, case .array(let xs) = arr[3] {
+        symbols = xs.map { unpackElement($0) }
+    } else {
+        symbols = []
+    }
     // Binary format predates the artboards feature — parsed docs have
     // empty artboards; the app's load-time repair adds a default at
     // load.
     return dedupeElementIds(Document(
         layers: layers,
+        symbols: symbols,
         selectedLayer: selectedLayer,
         selection: selection,
         artboards: []

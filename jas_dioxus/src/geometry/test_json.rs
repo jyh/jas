@@ -564,9 +564,18 @@ fn element_json(elem: &Element) -> String {
                 o.str_val("kind", "reference");
                 o.str_val("target", &r.target.0);
                 common_fields(&mut o, &r.common);
-                // fill/stroke/transform are emitted only when set; in Phase 1
-                // references carry none (paint inheritance default / Fork F2),
-                // matching how compound omits its own paint here.
+                // fill/stroke are emitted only when set; in Phase 1 references
+                // carry none (paint inheritance default / Fork F2), matching how
+                // compound omits its own paint here.
+                //
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // field (distinct from common.transform, which `common_fields`
+                // emits as the `transform` key) is emitted as a separate
+                // `instance_transform` key, and ONLY when set — omitting it when
+                // None keeps existing reference fixtures byte-identical.
+                if r.transform.is_some() {
+                    o.raw("instance_transform", transform_json(&r.transform));
+                }
             }
         },
     }
@@ -793,7 +802,27 @@ pub fn document_to_test_json(doc: &Document) -> String {
     }
     o.int("selected_layer", doc.selected_layer);
     o.raw("selection", selection_json(&doc.selection));
+    // Symbols (master store, SYMBOLS.md §5): emit only when non-empty so
+    // existing fixtures stay byte-identical, mirroring print_preferences /
+    // artboards. Masters are sorted by common.id (the §2 deterministic-order
+    // rule); an id-less master sorts as the empty string.
+    if !doc.symbols.is_empty() {
+        o.raw("symbols", symbols_json(&doc.symbols));
+    }
     o.build()
+}
+
+/// Serialize the master store as a sorted-by-id JSON array of element JSON.
+/// Sorting is on `common.id` (id-less masters sort as the empty string) so
+/// the output is deterministic regardless of storage order (SYMBOLS.md §2).
+fn symbols_json(symbols: &[Element]) -> String {
+    let mut sorted: Vec<&Element> = symbols.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    let items: Vec<String> = sorted.iter().map(|m| element_json(m)).collect();
+    json_array(&items)
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,9 +1205,11 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
                 "reference" => {
                     let target = crate::geometry::live::ElementRef(
                         v["target"].as_str().unwrap_or("").to_string());
-                    Element::Live(crate::geometry::live::LiveVariant::Reference(
-                        crate::geometry::live::ReferenceElem::new(target, common),
-                    ))
+                    let mut re = crate::geometry::live::ReferenceElem::new(target, common);
+                    // Symbols P4: the instance `transform` field rides the
+                    // `instance_transform` key (absent ⇒ None / null ⇒ None).
+                    re.transform = parse_transform_opt(&v["instance_transform"]);
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
                 other => panic!("Unknown live kind: {}", other),
             }
@@ -1428,8 +1459,15 @@ pub fn test_json_to_document(json: &str) -> Document {
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
     let document_setup = parse_document_setup(&v["document_setup"]);
     let print_preferences = parse_print_preferences(&v["print_preferences"]);
+    // Symbols (master store): absent key → empty (legacy fixtures predate
+    // symbols and stay byte-identical). Masters parse with the same
+    // parse_element as layer content.
+    let symbols: Vec<Element> = v["symbols"].as_array()
+        .map(|arr| arr.iter().map(parse_element).collect())
+        .unwrap_or_default();
     let doc = Document {
         layers,
+        symbols,
         selected_layer,
         selection,
         artboards,
