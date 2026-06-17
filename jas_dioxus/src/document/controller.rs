@@ -3636,7 +3636,9 @@ mod tests {
         // Pre-seed a master so the doc has one; not strictly required.
         let mut master = make_rect(0.0, 0.0, 10.0, 10.0);
         master.common_mut().id = Some("m1".into());
-        model.document_mut().symbols.push(master);
+        let mut seed = model.document().clone();
+        seed.symbols.push(master);
+        model.set_document(seed);
 
         Controller::place_instance(&mut model, "m1", "i2");
         let doc = model.document();
