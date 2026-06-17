@@ -965,9 +965,10 @@ impl AppState {
             let new_fill = tab.model.default_fill;
             let new_stroke = tab.model.default_stroke;
             if !tab.model.document().selection.is_empty() {
-                tab.model.snapshot();
-                Controller::set_selection_fill(&mut tab.model, new_fill);
-                Controller::set_selection_stroke(&mut tab.model, new_stroke);
+                tab.model.with_txn(|m| {
+                    Controller::set_selection_fill(m, new_fill);
+                    Controller::set_selection_stroke(m, new_stroke);
+                });
             }
         }
     }
@@ -979,9 +980,10 @@ impl AppState {
             tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
             // Apply to selection
             if !tab.model.document().selection.is_empty() {
-                tab.model.snapshot();
-                Controller::set_selection_fill(&mut tab.model, None);
-                Controller::set_selection_stroke(&mut tab.model, Some(Stroke::new(Color::BLACK, 1.0)));
+                tab.model.with_txn(|m| {
+                    Controller::set_selection_fill(m, None);
+                    Controller::set_selection_stroke(m, Some(Stroke::new(Color::BLACK, 1.0)));
+                });
             }
         }
     }
@@ -992,14 +994,12 @@ impl AppState {
             if self.fill_on_top {
                 tab.model.default_fill = None;
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    Controller::set_selection_fill(&mut tab.model, None);
+                    tab.model.with_txn(|m| Controller::set_selection_fill(m, None));
                 }
             } else {
                 tab.model.default_stroke = None;
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    Controller::set_selection_stroke(&mut tab.model, None);
+                    tab.model.with_txn(|m| Controller::set_selection_stroke(m, None));
                 }
             }
         }
@@ -1019,15 +1019,13 @@ impl AppState {
             if self.fill_on_top {
                 tab.model.default_fill = Some(Fill::new(color));
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    Controller::set_selection_fill(&mut tab.model, Some(Fill::new(color)));
+                    tab.model.with_txn(|m| Controller::set_selection_fill(m, Some(Fill::new(color))));
                 }
             } else {
                 let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
                 tab.model.default_stroke = Some(Stroke::new(color, width));
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    Controller::set_selection_stroke(&mut tab.model, Some(Stroke::new(color, width)));
+                    tab.model.with_txn(|m| Controller::set_selection_stroke(m, Some(Stroke::new(color, width))));
                 }
             }
             // Push to recent colors (move-to-front dedup, max 10)
@@ -1148,13 +1146,14 @@ impl AppState {
                 self.app_default_stroke = Some(new_stroke);
                 // Apply to selection
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.snapshot();
-                    Controller::set_selection_stroke(&mut tab.model, Some(new_stroke));
-                    // Apply width profile
-                    let width_pts = crate::geometry::element::profile_to_width_points(
-                        &sp.profile, width, sp.profile_flipped,
-                    );
-                    Controller::set_selection_width_profile(&mut tab.model, width_pts);
+                    tab.model.with_txn(|m| {
+                        Controller::set_selection_stroke(m, Some(new_stroke));
+                        // Apply width profile
+                        let width_pts = crate::geometry::element::profile_to_width_points(
+                            &sp.profile, width, sp.profile_flipped,
+                        );
+                        Controller::set_selection_width_profile(m, width_pts);
+                    });
                 }
             }
         }
@@ -1240,13 +1239,14 @@ impl AppState {
         let fill_on_top = self.fill_on_top;
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if !tab.model.document().selection.is_empty() {
-                tab.model.snapshot();
-                let boxed = Some(Box::new(g));
-                if fill_on_top {
-                    Controller::set_selection_fill_gradient(&mut tab.model, boxed);
-                } else {
-                    Controller::set_selection_stroke_gradient(&mut tab.model, boxed);
-                }
+                tab.model.with_txn(|m| {
+                    let boxed = Some(Box::new(g));
+                    if fill_on_top {
+                        Controller::set_selection_fill_gradient(m, boxed);
+                    } else {
+                        Controller::set_selection_stroke_gradient(m, boxed);
+                    }
+                });
             }
         }
         // First-edit-after-promotion clears the preview-state flag so
@@ -1265,12 +1265,13 @@ impl AppState {
         let fill_on_top = self.fill_on_top;
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if !tab.model.document().selection.is_empty() {
-                tab.model.snapshot();
-                if fill_on_top {
-                    Controller::set_selection_fill_gradient(&mut tab.model, None);
-                } else {
-                    Controller::set_selection_stroke_gradient(&mut tab.model, None);
-                }
+                tab.model.with_txn(|m| {
+                    if fill_on_top {
+                        Controller::set_selection_fill_gradient(m, None);
+                    } else {
+                        Controller::set_selection_stroke_gradient(m, None);
+                    }
+                });
             }
         }
     }
@@ -1737,9 +1738,10 @@ impl AppState {
                     _ => None,
                 };
                 if let Some(new_elem) = new_elem {
-                    tab.model.snapshot();
+                    tab.model.begin_txn();
                     let new_doc = doc.replace_element(&path, new_elem);
                     tab.model.set_document(new_doc);
+                    tab.model.commit_txn();
                 }
             }
             return;
@@ -1865,7 +1867,7 @@ impl AppState {
                 .collect()
         };
         if target_paths.is_empty() { return; }
-        tab.model.snapshot();
+        tab.model.begin_txn();
         for path in target_paths {
             let doc = tab.model.document().clone();
             let new_elem = match doc.get_element(&path) {
@@ -1924,6 +1926,7 @@ impl AppState {
                 tab.model.set_document(new_doc);
             }
         }
+        tab.model.commit_txn();
     }
 
     /// Reset every Paragraph panel control to its default per
@@ -2299,7 +2302,7 @@ impl AppState {
                 .collect()
         };
         if target_paths.is_empty() { return; }
-        tab.model.snapshot();
+        tab.model.begin_txn();
         for path in target_paths {
             let doc = tab.model.document().clone();
             let new_elem = match doc.get_element(&path) {
@@ -2352,6 +2355,7 @@ impl AppState {
                 tab.model.set_document(new_doc);
             }
         }
+        tab.model.commit_txn();
     }
 
     /// Commit the 8 Hyphenation-dialog field values onto every
@@ -2394,7 +2398,7 @@ impl AppState {
                 .collect()
         };
         if target_paths.is_empty() { return; }
-        tab.model.snapshot();
+        tab.model.begin_txn();
         for path in target_paths {
             let doc = tab.model.document().clone();
             let new_elem = match doc.get_element(&path) {
@@ -2441,6 +2445,7 @@ impl AppState {
                 tab.model.set_document(new_doc);
             }
         }
+        tab.model.commit_txn();
         // Master mirror: keep the typed paragraph panel state in
         // sync so the main panel's HYPHENATE_CHECKBOX reflects the
         // dialog's commit immediately rather than waiting for the
