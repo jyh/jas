@@ -96,6 +96,9 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols P1: the `symbols` array (a master) + the instance in
+            // layers round-trips through test_json (SYMBOLS.md §10).
+            "symbols_basic",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -128,6 +131,9 @@ mod tests {
             "live_reference_roundtrip", "live_compound_roundtrip",
             // A compound shape carrying its own stable id.
             "live_compound_id",
+            // Symbols P1: the master store rides the trailing element array in
+            // the binary document (SYMBOLS.md §5); JSON-compare round-trip.
+            "symbols_basic",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -196,6 +202,10 @@ mod tests {
             // all three codecs; id is the only common field SVG preserves for
             // live elements — name is intentionally excluded).
             "live_compound_id",
+            // Symbols P1 (SYMBOLS.md §10): a <defs> master (m1) + an instance
+            // (<use> -> i1) parses to the canonical `symbols` array + the
+            // layer's reference. Rust is the canonical generator.
+            "symbols_basic",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -224,10 +234,23 @@ mod tests {
             // A compound shape carrying its own stable id (SVG preserves the
             // compound's id attribute through the round-trip).
             "live_compound_id",
+            // Symbols P1: <defs> master + <use> instance round-trips through
+            // SVG (SYMBOLS.md §5 / Fork S3) — defs masters import to symbols,
+            // not layers, and re-export identically.
+            "symbols_basic",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    #[test]
+    fn svg_parse_symbols_basic() {
+        // The <defs> master (id="m1") imports into doc.symbols (NOT layers);
+        // the <use href="#m1" id="i1"> imports as a live reference in the
+        // layer. The canonical JSON shows the `symbols` array + the instance.
+        // All apps parse it to the identical canonical JSON (SYMBOLS.md §10).
+        assert_svg_parse("symbols_basic");
     }
 
     #[test]

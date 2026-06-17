@@ -583,6 +583,26 @@ pub fn document_to_svg(doc: &Document) -> String {
         }
         lines.push("  </sodipodi:namedview>".to_string());
     }
+    // Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
+    // inside a single <defs> block (each as its normal element SVG, carrying
+    // its id), placed before the layer content so the standard SVG
+    // non-rendered-definition mechanism applies. Emitted only when the store
+    // is non-empty (so existing fixtures stay byte-identical), sorted by id
+    // (the §2 deterministic-order rule). Instances ride the existing
+    // <use href="#id"> path in the layer tree. On import, <defs> children
+    // become doc.symbols (see svg_to_document).
+    if !doc.symbols.is_empty() {
+        let mut sorted: Vec<&Element> = doc.symbols.iter().collect();
+        sorted.sort_by(|a, b| {
+            a.common().id.as_deref().unwrap_or("")
+                .cmp(b.common().id.as_deref().unwrap_or(""))
+        });
+        lines.push("  <defs>".to_string());
+        for master in sorted {
+            lines.push(element_svg(master, "    "));
+        }
+        lines.push("  </defs>".to_string());
+    }
     for layer in &doc.layers {
         lines.push(element_svg(layer, "  "));
     }
@@ -1772,12 +1792,27 @@ pub fn svg_to_document(svg: &str) -> Document {
     let artboards = parse_artboards(&root);
     let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
     let mut layers: Vec<Element> = Vec::new();
+    // Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
+    // into doc.symbols (NOT into layers), so masters are never painted in
+    // document order. Each <defs> child is its normal element (carrying its
+    // id); instances ride the existing <use href="#id"> path in the layers.
+    let mut symbols: Vec<Element> = Vec::new();
     for child in &root.children {
         // Skip Inkscape's namedview block — it carries artboard
         // (page) metadata which has been pulled out above by
         // parse_artboards. parse_element returns None for it
         // anyway; this short-circuit just makes the intent explicit.
         if strip_ns(&child.tag) == "namedview" {
+            continue;
+        }
+        // A <defs> block holds the master store: its element children become
+        // doc.symbols, never layers.
+        if strip_ns(&child.tag) == "defs" {
+            for def in &child.children {
+                if let Some(master) = parse_element(def) {
+                    symbols.push(master);
+                }
+            }
             continue;
         }
         let elem = match parse_element(child) {
@@ -1821,6 +1856,7 @@ pub fn svg_to_document(svg: &str) -> Document {
     // load-time repair contract.
     if layers.is_empty() {
         let mut d = Document::default();
+        d.symbols = symbols;
         d.artboards = artboards;
         d.artboard_options = crate::document::artboard::ArtboardOptions::default();
         d.document_setup = document_setup;
@@ -1829,6 +1865,7 @@ pub fn svg_to_document(svg: &str) -> Document {
     }
     let doc = Document {
         layers,
+        symbols,
         selected_layer: 0,
         selection: Vec::new(),
         artboards,

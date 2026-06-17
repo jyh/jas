@@ -15,6 +15,8 @@ use crate::geometry::element::*;
 pub fn normalize_document(doc: &Document) -> Document {
     Document {
         layers: doc.layers.iter().map(|l| normalize_element(l)).collect(),
+        // Masters get the same opacity normalization as layer content.
+        symbols: doc.symbols.iter().map(|m| normalize_element(m)).collect(),
         selected_layer: doc.selected_layer,
         selection: doc.selection.clone(),
         artboards: doc.artboards.clone(),
@@ -38,8 +40,16 @@ pub fn dedupe_element_ids(doc: &Document) -> Document {
     for l in layers.iter_mut() {
         dedupe_ids_walk(l, &mut seen);
     }
+    // The id space spans layers + symbols (SYMBOLS.md §6): the master store is
+    // part of the same pre-order walk so a master id can never collide with a
+    // layer-element id. Layers walk first (first-pre-order-wins), then symbols.
+    let mut symbols: Vec<Element> = doc.symbols.clone();
+    for m in symbols.iter_mut() {
+        dedupe_ids_walk(m, &mut seen);
+    }
     Document {
         layers,
+        symbols,
         selected_layer: doc.selected_layer,
         selection: doc.selection.clone(),
         artboards: doc.artboards.clone(),

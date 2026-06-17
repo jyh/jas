@@ -91,6 +91,18 @@ fn collect_ref_ids(
 /// Build the id->element index from `doc` and install it for this render.
 /// Indexes id-bearing descendants (which are `Rc`-held); top-level layer ids
 /// are not resolution targets in Phase 1 (references target shapes).
+///
+/// Also indexes `doc.symbols` (SYMBOLS.md §2): each master is walked with the
+/// same operands-opaque discipline so a `ReferenceElem` instance can resolve a
+/// master by its `common.id`. Unlike layers, a master's OWN id is a valid
+/// target (a master is reached only through a reference), so each master is
+/// indexed directly (its own id + id-bearing descendants), not skipped like a
+/// top-level layer. Masters live off-canvas (not in `layers`), so indexing them
+/// here makes them resolvable WITHOUT ever making them painted — the whole
+/// point of the off-canvas store. Masters are sorted by id before indexing so a
+/// duplicate-id master resolves deterministically (first-by-id wins), matching
+/// the §2 deterministic-order rule (the unique-id invariant means there are no
+/// collisions in a well-formed document).
 pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
     let mut index = std::collections::HashMap::new();
     for layer in &doc.layers {
@@ -99,6 +111,14 @@ pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
                 collect_ref_ids(child, &mut index);
             }
         }
+    }
+    let mut sorted_masters: Vec<&Element> = doc.symbols.iter().collect();
+    sorted_masters.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    for master in sorted_masters {
+        collect_ref_ids(&std::rc::Rc::new(master.clone()), &mut index);
     }
     let prior = CURRENT_REF_INDEX.with(|c| c.replace(index));
     RefIndexGuard { prior }
@@ -2372,6 +2392,53 @@ mod tests {
             RenderResolver.resolve(&ElementRef("missing".into())).is_none(),
             "an unindexed id resolves to None (dangling)",
         );
+    }
+
+    #[test]
+    fn render_ref_index_resolves_master_from_symbols() {
+        // SYMBOLS.md §10: register_ref_index ALSO indexes doc.symbols, so an
+        // instance resolves a master whose ONLY home is the off-canvas store.
+        // The master is NOT in layers, so render never paints it — verified by
+        // asserting the layer is empty while the master still resolves.
+        use crate::geometry::element::{RectElem, CommonProps};
+        use crate::geometry::live::{ReferenceElem, ElementRef, VisitSet, DEFAULT_PRECISION};
+        let master = Element::Rect(RectElem {
+            x: 9.0, y: 18.0, width: 27.0, height: 36.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("m1".into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut doc = Document::default();
+        doc.symbols = vec![master];
+        // The instance lives in a layer; the master does NOT.
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(Element::Live(
+            crate::geometry::live::LiveVariant::Reference(ReferenceElem::new(
+                ElementRef("m1".into()),
+                CommonProps { id: Some("i1".into()), ..Default::default() },
+            )),
+        )));
+
+        let _guard = register_ref_index(&doc);
+        // The master (off-canvas) resolves by its own id from doc.symbols.
+        assert!(
+            RenderResolver.resolve(&ElementRef("m1".into())).is_some(),
+            "register_ref_index must index masters from doc.symbols",
+        );
+        // The instance evaluates to the master's geometry (a single ring).
+        let instance = ReferenceElem::new(ElementRef("m1".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = instance.evaluate_with(DEFAULT_PRECISION, &RenderResolver, &mut visiting);
+        assert_eq!(ps.len(), 1, "instance resolves to the master rect's single ring");
+
+        // Masters are never painted: the master appears only in doc.symbols,
+        // never in the layer tree (the off-canvas guarantee).
+        let only_child = doc.layers[0].children().unwrap();
+        assert_eq!(only_child.len(), 1, "layer holds only the instance");
+        assert!(
+            matches!(&*only_child[0], Element::Live(_)),
+            "the layer's sole child is the instance (a reference), not the master",
+        );
+        assert_eq!(doc.symbols.len(), 1, "the master lives only in doc.symbols");
     }
 
     // ── bleed rect (PRINT.md §1A) ──────────────────────────
