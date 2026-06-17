@@ -788,6 +788,121 @@ let menu_tests = [
 ]
 
 (* ================================================================== *)
+(* Reference-aware Layers-panel delete (warn-then-orphan)             *)
+(*                                                                    *)
+(* do_delete_panel_selection is the single seam both panel delete     *)
+(* sub-paths route through (context-menu "Delete Selection" AND the   *)
+(* in-panel Delete/Backspace). It must compute orphaned_references on *)
+(* the PANEL selection and gate the YAML dispatch: empty -> delete as *)
+(* today; non-empty -> consult confirm_delete_orphans_hook (the same  *)
+(* modal the main delete uses, here stubbed), deleting only on OK.    *)
+(* ================================================================== *)
+
+(* A document whose top-level elements are [kids], so panel paths are
+   [[i]]. Top-level placement matters: the OCaml YAML doc.delete_at
+   handler only removes top-level (single-index) paths, so the gated
+   delete must operate on top-level elements to actually execute — the
+   same shape the passing delete_layer_selection_via_yaml test uses.
+   References across top-level elements still set up the orphan relation
+   by id, exercising the new orphaned_references gate. *)
+let orphan_doc kids = Jas.Document.make_document (Array.of_list kids)
+
+let orphan_rect ?id () =
+  Jas.Element.with_id (Jas.Element.make_rect 0.0 0.0 10.0 10.0) id
+
+let orphan_ref ~id ~target =
+  Jas.Element.make_reference ~id:(Some id) target
+
+(* Drive do_delete_panel_selection with model [m], panel selection
+   [paths], and a confirm hook that records its calls and answers
+   [confirm]. Restores the module-global hooks/refs afterwards so tests
+   stay independent. Returns the list of orphan-counts the hook saw. *)
+let run_panel_delete m ~paths ~confirm =
+  let saved_hook = !Jas.Yaml_panel_view.confirm_delete_orphans_hook in
+  let saved_model = !Jas.Yaml_panel_view._get_model_ref in
+  let saved_sel = !Jas.Layers_panel_state.panel_selection in
+  let seen = ref [] in
+  Jas.Yaml_panel_view._get_model_ref := (fun () -> Some m);
+  Jas.Yaml_panel_view.confirm_delete_orphans_hook :=
+    (fun n -> seen := n :: !seen; confirm);
+  Jas.Layers_panel_state.panel_selection :=
+    List.fold_left
+      (fun s p -> Jas.Layers_panel_state.PathSet.add p s)
+      Jas.Layers_panel_state.PathSet.empty paths;
+  Jas.Yaml_panel_view.do_delete_panel_selection ();
+  Jas.Yaml_panel_view.confirm_delete_orphans_hook := saved_hook;
+  Jas.Yaml_panel_view._get_model_ref := saved_model;
+  Jas.Layers_panel_state.panel_selection := saved_sel;
+  List.rev !seen
+
+let top_count m = Array.length m#document.Jas.Document.layers
+
+let delete_orphan_confirm_tests = [
+  (* No live reference orphaned: delete proceeds with NO confirm — the
+     existing no-dialog behavior must be preserved exactly. *)
+  Alcotest.test_case "panel_delete_no_orphan_skips_confirm" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_document (orphan_doc [ orphan_rect (); orphan_rect (); orphan_rect () ]);
+    (* Delete the second plain rect [1]: nothing points at it. *)
+    let seen = run_panel_delete m ~paths:[[1]] ~confirm:false in
+    assert (seen = []);                 (* hook never consulted *)
+    assert (top_count m = 2));          (* delete happened *)
+
+  (* Deleting the referenced target would orphan its instance: the hook
+     fires; Cancel (false) aborts entirely — no delete, doc unchanged. *)
+  Alcotest.test_case "panel_delete_orphan_cancel_aborts" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_document
+      (orphan_doc [ orphan_rect ~id:"a" (); orphan_ref ~id:"r1" ~target:"a";
+                    orphan_rect () ]);
+    let before = m#document in
+    let seen = run_panel_delete m ~paths:[[0]] ~confirm:false in
+    assert (seen = [1]);                (* one instance would orphan *)
+    assert (top_count m = 3);           (* nothing deleted *)
+    assert (m#document == before));     (* no snapshot / mutation *)
+
+  (* Same setup, but OK (true) proceeds: the target is deleted in one
+     undo step (the YAML action snapshots), restorable via undo. *)
+  Alcotest.test_case "panel_delete_orphan_ok_deletes" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_document
+      (orphan_doc [ orphan_rect ~id:"a" (); orphan_ref ~id:"r1" ~target:"a";
+                    orphan_rect () ]);
+    let seen = run_panel_delete m ~paths:[[0]] ~confirm:true in
+    assert (seen = [1]);                (* confirm was shown *)
+    assert (top_count m = 2);           (* target removed *)
+    assert m#can_undo;                  (* exactly one undo step *)
+    m#undo;
+    assert (top_count m = 3));          (* restored *)
+
+  (* Two instances point at one target: the confirm reports the count
+     (2), matching orphaned_references. *)
+  Alcotest.test_case "panel_delete_orphan_count_plural" `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_document
+      (orphan_doc [ orphan_rect ~id:"a" ();
+                    orphan_ref ~id:"r1" ~target:"a";
+                    orphan_ref ~id:"r2" ~target:"a" ]);
+    let seen = run_panel_delete m ~paths:[[0]] ~confirm:false in
+    assert (seen = [2]);
+    assert (top_count m = 3));
+
+  (* Deleting the target AND one of its referrers in the same selection
+     leaves only the other referrer orphaned (count 1) — the predicate
+     excludes referrers that are themselves being deleted. *)
+  Alcotest.test_case "panel_delete_orphan_excludes_deleted_referrer"
+    `Quick (fun () ->
+    let m = Jas.Model.create () in
+    m#set_document
+      (orphan_doc [ orphan_rect ~id:"a" ();
+                    orphan_ref ~id:"r1" ~target:"a";
+                    orphan_ref ~id:"r2" ~target:"a" ]);
+    let seen = run_panel_delete m ~paths:[[0]; [1]] ~confirm:false in
+    assert (seen = [1]);
+    assert (top_count m = 3));
+]
+
+(* ================================================================== *)
 (* Runner                                                             *)
 (* ================================================================== *)
 
@@ -828,5 +943,6 @@ let () =
   Alcotest.run "Panel menu" [
     "Labels", label_tests;
     "Menus", menu_tests;
+    "DeleteOrphanConfirm", delete_orphan_confirm_tests;
     "RecentColors", recent_colors_tests;
   ]

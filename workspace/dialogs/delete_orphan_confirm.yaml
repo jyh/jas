@@ -23,8 +23,8 @@ delete_orphan_confirm:
     Cancel (the safe default): dismiss the dialog and do nothing — no
     snapshot, no delete.
 
-    Cut is intentionally NOT routed through this dialog yet; cut may
-    orphan silently for now (follow-on work).
+    Cut has its own parallel confirmation (cut_orphan_confirm); it is not
+    routed through this dialog.
   modal: true
   params:
     count: { type: number }

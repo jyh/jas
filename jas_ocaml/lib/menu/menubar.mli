@@ -21,16 +21,19 @@ val save : Model.model -> GWindow.window -> unit -> unit
 
 val revert : (unit -> Model.model) -> GWindow.window -> unit -> unit
 
-(** Body text of the reference-aware delete confirm (the warn-then-orphan
-    CONFIRM half). [delete_orphan_warning_body n] is verbatim, pinned
-    cross-language: ["Deleting will leave N live instance(s) empty."],
-    singular for [n = 1]. Pure; exposed for testing. *)
-val delete_orphan_warning_body : int -> string
+(** Body text of the reference-aware delete/cut confirm (the
+    warn-then-orphan CONFIRM half). [delete_orphan_warning_body ~verb n]
+    is verbatim, pinned cross-language:
+    [<Verb> ^ " will leave N live instance(s) empty."], singular for
+    [n = 1]. [verb] is the gerund of the action (["Deleting"] for delete,
+    ["Cutting"] for cut). Pure; exposed for testing. *)
+val delete_orphan_warning_body : verb:string -> int -> string
 
 (** Show the modal confirm for a delete that would orphan [n] (> 0) live
-    references. Title ["Delete"], body {!delete_orphan_warning_body},
-    buttons ["Cancel"] (focused default) and ["Delete"] (destructive).
-    Returns [true] only when the user confirms with [Delete]. *)
+    references. Title ["Delete"], body
+    [delete_orphan_warning_body ~verb:"Deleting" n], buttons ["Cancel"]
+    (focused default) and ["Delete"] (destructive). Returns [true] only
+    when the user confirms with [Delete]. *)
 val confirm_delete_orphans : int -> GWindow.window -> bool
 
 val create : (unit -> Model.model) -> GWindow.window -> on_open:(Model.model -> unit) -> ?workspace_layout:Workspace_layout.workspace_layout -> ?app_config:Workspace_layout.app_config -> ?refresh_dock:(unit -> unit) -> GPack.box -> unit

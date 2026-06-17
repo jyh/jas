@@ -790,16 +790,32 @@ public struct JasCommands: Commands {
     /// destructive confirming button. Verbatim title/body/buttons are
     /// cross-language-pinned. Shared by the three Swift delete entry points.
     static func confirmOrphaningDelete(_ orphanCount: Int) -> Bool {
+        confirmOrphaning(orphanCount, action: "Delete", verb: "Deleting")
+    }
+
+    /// Present the synchronous warn-then-orphan confirm for Cut. Returns `true`
+    /// if the user confirmed. Same dialog shape as the delete confirm; only the
+    /// title/confirming-button label and the body verb differ.
+    static func confirmOrphaningCut(_ orphanCount: Int) -> Bool {
+        confirmOrphaning(orphanCount, action: "Cut", verb: "Cutting")
+    }
+
+    /// Generalized warn-then-orphan confirm shared by Delete and Cut. `action`
+    /// labels the title and the destructive confirming button ("Delete" /
+    /// "Cut"); `verb` is the gerund passed to the cross-language-pinned body
+    /// (`"Deleting"` / `"Cutting"`). "Cancel" is the default/escape button (the
+    /// safe choice) per the spec.
+    private static func confirmOrphaning(_ orphanCount: Int, action: String, verb: String) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Delete"
-        alert.informativeText = DependencyIndex.orphanWarningBody(orphanCount)
+        alert.messageText = action
+        alert.informativeText = DependencyIndex.orphanWarningBody(orphanCount, verb: verb)
         alert.alertStyle = .warning
         // Order matters: the destructive action first, then the safe default.
         // Making "Cancel" the key-equivalent default keeps the safe choice as
         // the focused button per the spec.
-        let deleteButton = alert.addButton(withTitle: "Delete")
+        let confirmButton = alert.addButton(withTitle: action)
         let cancelButton = alert.addButton(withTitle: "Cancel")
-        deleteButton.keyEquivalent = ""
+        confirmButton.keyEquivalent = ""
         cancelButton.keyEquivalent = "\r"
         return alert.runModal() == .alertFirstButtonReturn
     }
@@ -812,6 +828,16 @@ public struct JasCommands: Commands {
 
     private func cutSelection() {
         guard let model = model else { return }
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        // Reference-aware cut (warn-then-orphan): cut = copy + delete, so it can
+        // orphan live instances exactly like Delete. Same pinned predicate;
+        // empty orphan set -> cut as today (no dialog). Confirm before touching
+        // the clipboard so Cancel leaves it unchanged.
+        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
+        if !orphaned.isEmpty && !JasCommands.confirmOrphaningCut(orphaned.count) {
+            return
+        }
         model.snapshot()
         copySelection()
         model.document = model.document.deleteSelection()
