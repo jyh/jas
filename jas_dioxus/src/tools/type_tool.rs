@@ -175,8 +175,12 @@ impl TypeTool {
     }
 
     fn ensure_snapshot(&mut self, model: &mut Model) {
+        // Open the undo transaction lazily on the first content change of the
+        // session (OP_LOG.md Increment 1). begin_txn is idempotent while open, so
+        // every subsequent keystroke's sync_to_model rides this one checkpoint;
+        // end_session commits it. did_snapshot keeps this to a single call.
         if !self.did_snapshot {
-            model.snapshot();
+            model.begin_txn();
             self.did_snapshot = true;
         }
     }
@@ -225,8 +229,8 @@ impl TypeTool {
         width: f64,
         height: f64,
     ) {
-        // Inserting an element is itself a content change, so snapshot.
-        model.snapshot();
+        // Inserting an element is itself a content change, so open the txn.
+        model.begin_txn();
         self.did_snapshot = true;
         let elem = empty_text_elem(x, y, width, height);
         let mut doc = model.document().clone();
@@ -249,8 +253,11 @@ impl TypeTool {
         ));
     }
 
-    /// End the current editing session, leaving the element in place.
-    fn end_session(&mut self) {
+    /// End the current editing session, leaving the element in place. Commits
+    /// the session's undo transaction (a no-op if no edit opened one), so the
+    /// whole session is exactly one undo step (OP_LOG.md Increment 1).
+    fn end_session(&mut self, model: &mut Model) {
+        model.commit_txn();
         self.session = None;
         self.did_snapshot = false;
         self.state = State::Idle;
@@ -438,7 +445,7 @@ impl CanvasTool for TypeTool {
             }
             // Click outside the editing element: end the session and fall
             // through to the normal press handling below.
-            self.end_session();
+            self.end_session(model);
         }
 
         // Not editing. Hit-test for an unlocked text element.
@@ -624,7 +631,7 @@ impl CanvasTool for TypeTool {
 
         match key {
             "Escape" => {
-                self.end_session();
+                self.end_session(model);
                 return true;
             }
             "Enter" => {
@@ -742,8 +749,8 @@ impl CanvasTool for TypeTool {
         self.session.as_mut()
     }
 
-    fn deactivate(&mut self, _model: &mut Model) {
-        self.end_session();
+    fn deactivate(&mut self, model: &mut Model) {
+        self.end_session(model);
     }
 
     fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {

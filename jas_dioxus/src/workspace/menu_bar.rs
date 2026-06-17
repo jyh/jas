@@ -119,9 +119,10 @@ pub(crate) fn MenuBarView(
                             };
                             let Some(tab) = st.tab_mut() else { return; };
                             tab.clipboard = elements;
-                            tab.model.snapshot();
-                            let new_doc = tab.model.document().delete_selection();
-                            tab.model.set_document(new_doc);
+                            tab.model.with_txn(|m| {
+                                let new_doc = m.document().delete_selection();
+                                m.set_document(new_doc);
+                            });
                         }));
                     } else {
                         let st = app_for_menu.borrow();
@@ -204,9 +205,10 @@ pub(crate) fn MenuBarView(
                     if orphan_count == 0 {
                         (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                             if let Some(tab) = st.tab_mut() {
-                                tab.model.snapshot();
-                                let new_doc = tab.model.document().delete_selection();
-                                tab.model.set_document(new_doc);
+                                tab.model.with_txn(|m| {
+                                    let new_doc = m.document().delete_selection();
+                                    m.set_document(new_doc);
+                                });
                             }
                         }));
                     } else {
@@ -231,56 +233,49 @@ pub(crate) fn MenuBarView(
                 "group" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::group_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::group_selection(m));
                         }
                     }));
                 }
                 "ungroup" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::ungroup_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::ungroup_selection(m));
                         }
                     }));
                 }
                 "ungroup_all" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::ungroup_all(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::ungroup_all(m));
                         }
                     }));
                 }
                 "lock" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::lock_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::lock_selection(m));
                         }
                     }));
                 }
                 "unlock_all" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::unlock_all(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::unlock_all(m));
                         }
                     }));
                 }
                 "hide" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::hide_selection(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::hide_selection(m));
                         }
                     }));
                 }
                 "show_all" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.snapshot();
-                            Controller::show_all(&mut tab.model);
+                            tab.model.with_txn(|m| Controller::show_all(m));
                         }
                     }));
                 }
@@ -329,13 +324,14 @@ pub(crate) fn MenuBarView(
                         // create_reference + offset-move under ONE snapshot
                         // = a single undo step (offset rides on the new
                         // reference's common.transform via move_selection).
-                        tab.model.snapshot();
-                        Controller::create_reference(
-                            &mut tab.model, &target_path, &target_id, &ref_id,
-                        );
-                        Controller::move_selection(
-                            &mut tab.model, PASTE_OFFSET, PASTE_OFFSET,
-                        );
+                        tab.model.with_txn(|m| {
+                            Controller::create_reference(
+                                m, &target_path, &target_id, &ref_id,
+                            );
+                            Controller::move_selection(
+                                m, PASTE_OFFSET, PASTE_OFFSET,
+                            );
+                        });
                     }));
                 }
                 "simplify" => {
