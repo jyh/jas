@@ -139,11 +139,26 @@ fn walk(
 /// no document state is mutated. See the module docs for the locked semantics.
 pub fn dependency_index(doc: &Document) -> DependencyIndex {
     // Phase 1: gather the node set (targetable ids) and raw out-edges by
-    // walking layers + Group/Layer children (operands stay opaque).
+    // walking layers + Group/Layer children (operands stay opaque), THEN the
+    // master store (SYMBOLS.md §6). Including doc.symbols puts master ids in
+    // the targetable set so an instance -> master is not dangling, and
+    // rdeps[master] lists the master's instances. Masters are walked with the
+    // SAME operands-opaque discipline as layers; their OWN id is targetable
+    // (a master is reached only through a reference). Sorted by id first for
+    // deterministic first-occurrence-wins on the (well-formed: impossible)
+    // duplicate-id case.
     let mut targetable: BTreeSet<String> = BTreeSet::new();
     let mut out_edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for layer in &doc.layers {
         walk(layer, &mut targetable, &mut out_edges);
+    }
+    let mut sorted_masters: Vec<&Element> = doc.symbols.iter().collect();
+    sorted_masters.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    for master in sorted_masters {
+        walk(master, &mut targetable, &mut out_edges);
     }
 
     // Phase 2: build `deps` (sorted out-edges) and `rdeps` (reverse), and
@@ -463,6 +478,7 @@ mod tests {
     fn doc_with_layer(children: Vec<Rc<Element>>) -> Document {
         Document {
             layers: vec![layer(children)],
+            symbols: Vec::new(),
             selected_layer: 0,
             selection: Vec::new(),
             artboards: Vec::new(),
@@ -610,6 +626,30 @@ mod tests {
         // The compound IS targetable (top-level layer child) but unreferenced,
         // so it has no rdeps entry either.
         assert!(idx.rdeps.get("cs").is_none());
+    }
+
+    #[test]
+    fn symbols_master_is_targetable_and_instance_resolves() {
+        // SYMBOLS.md §6: an instance (a reference) in `layers` targeting a
+        // master in `doc.symbols`. The targetable-set walk includes symbols,
+        // so the instance is NOT dangling and rdeps[master] lists the instance.
+        let master = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 30.0, height: 40.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("m1".to_string()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut doc = doc_with_layer(vec![reference("i1", "m1")]);
+        doc.symbols = vec![master];
+
+        let idx = dependency_index(&doc);
+        // The instance's edge resolves to a targetable master -> not dangling.
+        assert!(idx.dangling.is_empty(), "instance -> master must not be dangling");
+        // rdeps[m1] is exactly the instance i1.
+        assert_eq!(idx.rdeps.get("m1"), Some(&vec!["i1".to_string()]));
+        // The instance's out-edge is recorded; no cycles.
+        assert_eq!(idx.deps.get("i1"), Some(&vec!["m1".to_string()]));
+        assert!(idx.cycles.is_empty());
     }
 
     #[test]

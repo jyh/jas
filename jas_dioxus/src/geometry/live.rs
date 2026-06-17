@@ -969,4 +969,59 @@ mod tests {
         assert_eq!(reference.dependencies(), vec![ElementRef("t".into())]);
         assert!(reference.children().is_empty());
     }
+
+    // --- Symbols P1: an instance resolves a master from doc.symbols ----------
+
+    #[test]
+    fn instance_resolves_to_master_geometry_from_symbols() {
+        // SYMBOLS.md §10 RESOLVE gate: the symbols_basic doc — ONE master rect
+        // (id "m1") in doc.symbols and ONE instance (a ReferenceElem id "i1"
+        // targeting "m1") in a layer. A resolver that indexes doc.symbols (as
+        // canvas::render::register_ref_index does) makes the instance evaluate
+        // to the master's geometry — non-empty and equal to the rect's polygon
+        // set. This is the whole point of the off-canvas store: masters are
+        // resolvable but never in `layers`.
+        use crate::document::document::Document;
+        use crate::geometry::element::RectElem;
+
+        let master_rect = RectElem {
+            x: 9.0, y: 18.0, width: 27.0, height: 36.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("m1".into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        };
+        let mut doc = Document::default();
+        doc.symbols = vec![Element::Rect(master_rect.clone())];
+        // The instance lives in a layer, off the master.
+        doc.layers[0].children_mut().unwrap().push(Rc::new(Element::Live(
+            LiveVariant::Reference(ReferenceElem::new(
+                ElementRef("m1".into()),
+                CommonProps { id: Some("i1".into()), ..Default::default() },
+            )),
+        )));
+
+        // Build an id->element index over doc.symbols (the symbols half of
+        // register_ref_index): a master's OWN id is the target.
+        let mut map = std::collections::HashMap::new();
+        for m in &doc.symbols {
+            if let Some(id) = &m.common().id {
+                map.insert(id.clone(), Rc::new(m.clone()));
+            }
+        }
+        let resolver = MapResolver(map);
+
+        // Pull the instance out of the layer and evaluate it.
+        let instance = doc.layers[0].children().unwrap().last().unwrap().clone();
+        let mut visiting = VisitSet::new();
+        let resolved = element_to_polygon_set_with(
+            &instance, DEFAULT_PRECISION, &resolver, &mut visiting);
+
+        // Non-empty, and equal to evaluating the master rect directly.
+        assert!(!resolved.is_empty(), "instance must resolve to the master geometry");
+        let master_ps = element_to_polygon_set(
+            &Element::Rect(master_rect), DEFAULT_PRECISION);
+        assert_eq!(resolved, master_ps,
+            "resolved instance geometry must equal the master rect's polygon set");
+        assert!(visiting.is_empty(), "cycle-guard set restored after resolve");
+    }
 }

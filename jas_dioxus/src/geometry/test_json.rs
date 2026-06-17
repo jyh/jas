@@ -793,7 +793,27 @@ pub fn document_to_test_json(doc: &Document) -> String {
     }
     o.int("selected_layer", doc.selected_layer);
     o.raw("selection", selection_json(&doc.selection));
+    // Symbols (master store, SYMBOLS.md §5): emit only when non-empty so
+    // existing fixtures stay byte-identical, mirroring print_preferences /
+    // artboards. Masters are sorted by common.id (the §2 deterministic-order
+    // rule); an id-less master sorts as the empty string.
+    if !doc.symbols.is_empty() {
+        o.raw("symbols", symbols_json(&doc.symbols));
+    }
     o.build()
+}
+
+/// Serialize the master store as a sorted-by-id JSON array of element JSON.
+/// Sorting is on `common.id` (id-less masters sort as the empty string) so
+/// the output is deterministic regardless of storage order (SYMBOLS.md §2).
+fn symbols_json(symbols: &[Element]) -> String {
+    let mut sorted: Vec<&Element> = symbols.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.common().id.as_deref().unwrap_or("")
+            .cmp(b.common().id.as_deref().unwrap_or(""))
+    });
+    let items: Vec<String> = sorted.iter().map(|m| element_json(m)).collect();
+    json_array(&items)
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,8 +1448,15 @@ pub fn test_json_to_document(json: &str) -> Document {
     let artboard_options = parse_artboard_options(&v["artboard_options"]);
     let document_setup = parse_document_setup(&v["document_setup"]);
     let print_preferences = parse_print_preferences(&v["print_preferences"]);
+    // Symbols (master store): absent key → empty (legacy fixtures predate
+    // symbols and stay byte-identical). Masters parse with the same
+    // parse_element as layer content.
+    let symbols: Vec<Element> = v["symbols"].as_array()
+        .map(|arr| arr.iter().map(parse_element).collect())
+        .unwrap_or_default();
     let doc = Document {
         layers,
+        symbols,
         selected_layer,
         selection,
         artboards,
