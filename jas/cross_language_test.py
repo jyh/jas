@@ -439,6 +439,33 @@ class CrossLanguageTest(absltest.TestCase):
             "dependency_index cross-language test failed: "
             "canonical JSON mismatch")
 
+    def test_dependency_index_chain_cross_language(self):
+        # Cross-language pin for the chain/diamond graph (REFERENCE_GRAPH.md §8
+        # Phase 4a): read the shared input document, build the index, serialize
+        # it, and assert byte-equality with the shared chain fixture. Exercises
+        # multi-level topological ordering that the primary fixture cannot.
+        from document.dependency_index import (
+            dependency_index, dependency_index_to_test_json,
+        )
+        input_json = _read_fixture("expected/dependency_index_chain_input.json")
+        doc = test_json_to_document(input_json)
+        # Sanity: the parsed input must re-serialize to itself (it is canonical).
+        self.assertEqual(
+            document_to_test_json(doc), input_json,
+            "dependency_index_chain_input.json is not canonical: "
+            "parse->serialize changed it")
+        actual = dependency_index_to_test_json(dependency_index(doc))
+        expected = _read_fixture("expected/dependency_index_chain.json")
+        if actual != expected:
+            print("=== EXPECTED (dependency_index_chain) ===")
+            print(expected)
+            print("=== ACTUAL (dependency_index_chain) ===")
+            print(actual)
+        self.assertEqual(
+            actual, expected,
+            "dependency_index_chain cross-language test failed: "
+            "canonical JSON mismatch")
+
     def test_orphaned_references_cross_language(self):
         # Cross-language pin (REFERENCE_GRAPH.md): parse the shared input
         # document, read the shared orphaned-references fixture, and for each

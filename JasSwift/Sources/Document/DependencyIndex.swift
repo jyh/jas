@@ -10,11 +10,13 @@ import Foundation
 ///
 /// It exposes, for the **by-id reference graph only**:
 ///
-/// - `deps`     — `id -> sorted list of target ids it directly references`
-/// - `rdeps`    — `id -> sorted list of ids that reference it` (reverse of deps)
-/// - `dangling` — sorted list of *referencing* ids whose target id is not
-///                present/targetable
-/// - `cycles`   — sorted list of ids that participate in a cycle
+/// - `deps`      — `id -> sorted list of target ids it directly references`
+/// - `rdeps`     — `id -> sorted list of ids that reference it` (reverse of deps)
+/// - `dangling`  — sorted list of *referencing* ids whose target id is not
+///                 present/targetable
+/// - `cycles`    — sorted list of ids that participate in a cycle
+/// - `topoOrder` — a deterministic topological ordering (dependencies-first) of
+///                 the by-id graph; the only intentionally-non-sorted output
 ///
 /// ## Operands are OPAQUE to the by-id graph (locked design)
 ///
@@ -37,11 +39,18 @@ import Foundation
 /// output relies on hash-iteration order. Mirrors Rust's `BTreeMap`/sorted-`Vec`
 /// structure, which is inherently ordered.
 ///
+/// ## `topoOrder` (Phase 4a — REFERENCE_GRAPH.md §8)
+///
+/// A deterministic, dependencies-first topological ordering of the by-id graph,
+/// computed by Kahn's algorithm with sorted-id tie-breaking (see
+/// ``computeTopoOrder(_:_:_:)``). It is the recompute schedule a future incremental
+/// phase (P4c) will walk. The ordering is the *only* intentionally-non-sorted
+/// output: its sequence IS the data. The ALGORITHM IS LOCKED and must be
+/// byte-identical across all four apps — it is the highest cross-language desync
+/// risk here.
+///
 /// ## Deferred (NOT implemented here)
 ///
-/// - **`topoOrder`** — the Phase 4 recompute ordering (a topological sort of
-///   the deps DAG, with cycles broken). Deferred until a consumer needs a
-///   recompute schedule; it would live alongside `deps`/`rdeps` here.
 /// - **Write-time cycle rejection** — no authoring op can form a cycle yet
 ///   (`Controller.createReference` only links to an existing target), and the
 ///   eval-time cycle-break (the threaded `VisitSet` in `LiveElement.swift`)
@@ -70,15 +79,25 @@ public struct DependencyIndex: Equatable {
     /// Sorted, de-duplicated list of ids that lie on a cycle in the `deps`
     /// graph (a node that can reach itself). A self-target (`R -> R`) is a cycle.
     public let cycles: [String]
+    /// A deterministic topological ordering of the by-id graph,
+    /// **dependencies-first** (a reference's target precedes the reference).
+    /// Computed by Kahn's algorithm with sorted-id tie-breaking; cycle members
+    /// (== `cycles`) are appended at the end in sorted-id order. This is the
+    /// ONLY field whose order is NOT alphabetical — its sequence IS the data
+    /// (the recompute schedule). The algorithm is LOCKED; see
+    /// ``computeTopoOrder(_:_:_:)``.
+    public let topoOrder: [String]
 
     public init(deps: [String: [String]] = [:],
                 rdeps: [String: [String]] = [:],
                 dangling: [String] = [],
-                cycles: [String] = []) {
+                cycles: [String] = [],
+                topoOrder: [String] = []) {
         self.deps = deps
         self.rdeps = rdeps
         self.dangling = dangling
         self.cycles = cycles
+        self.topoOrder = topoOrder
     }
 
     /// Build the dependency index for `doc`. A pure, allocation-only function;
@@ -140,11 +159,17 @@ public struct DependencyIndex: Equatable {
         // Phase 3: cycles — every id that can reach itself in the `deps` graph.
         let cycles = findCycleMembers(deps)
 
+        // Phase 4a: the dependencies-first topological ordering (recompute
+        // schedule). Computed from the same `deps`/`rdeps` graph; cycle members
+        // trail in sorted order. The algorithm is LOCKED across all four apps.
+        let topo = computeTopoOrder(deps, rdeps, cycles)
+
         return DependencyIndex(
             deps: deps,
             rdeps: rdeps,
             dangling: dangling.sorted(),
-            cycles: cycles
+            cycles: cycles,
+            topoOrder: topo
         )
     }
 }
@@ -284,6 +309,120 @@ private func walk(_ elem: Element,
     }
 }
 
+// MARK: - Topological ordering (Phase 4a — LOCKED)
+
+/// Compute the deterministic, **dependencies-first** topological ordering of the
+/// by-id reference graph (REFERENCE_GRAPH.md §8 Phase 4a). The recompute
+/// schedule a future incremental phase walks: a reference's target always
+/// precedes the reference.
+///
+/// **This algorithm is LOCKED and must be byte-identical across all four apps.**
+/// It is the highest cross-language desync risk in this module.
+///
+/// Kahn's algorithm with SORTED-ID tie-breaking, processed LEVEL-BY-LEVEL:
+///
+/// - **NODES** = the sorted set of all ids that are a `deps`-key OR an
+///   `rdeps`-key (every id that is a source or a *present* target of an edge).
+///   Dangling / operand-opaque targets (referenced but not present/targetable,
+///   i.e. they appear in `deps` values but are not nodes) are NOT nodes and
+///   create NO topo edge.
+/// - Each node's **dependency count** = the number of its `deps` targets that
+///   ARE nodes (present). Edges to non-node targets are ignored.
+/// - Take the WHOLE current ready set (every un-emitted node whose remaining
+///   dependency count is 0), emit it in sorted-id order, and decrement the
+///   remaining count of every node that depends on an emitted node (its
+///   `rdeps`). Nodes freed during this level become ready only for the NEXT
+///   level — a node freed by emitting `a` is NOT eligible to slot in before
+///   the rest of `a`'s level. (This is what the LOCKED worked example pins:
+///   emitting {a,r3,r4} as one level frees r1,r2 for the next level, so the
+///   order is a,r3,r4,r1,r2 — NOT a,r1,r2,r3,r4.) Ties ALWAYS by sorted id.
+/// - **Cycle remnants:** any nodes that never reach dependency-count 0 are
+///   appended at the END in sorted-id order. These are the nodes blocked by a
+///   cycle: every cycle member (the `cycles` set) PLUS any node that
+///   transitively depends on a cycle (e.g. `tail -> c1` where c1<->c2 — `tail`
+///   never frees). `cycles` is therefore a SUBSET of the remnants, not the whole
+///   set; the operational rule is "any node that never reaches count 0".
+///
+/// Result: dependencies before dependents, fully deterministic.
+///
+/// `deps`/`rdeps`/`cycles` are the already-built (sorted) members of the index.
+/// `cycles` is passed (and asserted as a subset of the remnants) for parity with
+/// the sibling apps; the remnants themselves are derived from the un-emitted
+/// nodes, not from `cycles`.
+private func computeTopoOrder(_ deps: [String: [String]],
+                              _ rdeps: [String: [String]],
+                              _ cycles: [String]) -> [String] {
+    // NODES: sorted union of deps-keys and rdeps-keys. A Set de-duplicates;
+    // sorting it gives the deterministic node order used throughout.
+    var nodeSet = Set<String>()
+    for k in deps.keys { nodeSet.insert(k) }
+    for k in rdeps.keys { nodeSet.insert(k) }
+    let nodes = nodeSet.sorted()
+
+    // Remaining dependency count per node: number of its deps targets that are
+    // themselves nodes (present). Non-node (dangling/opaque) targets are ignored.
+    var remaining: [String: Int] = [:]
+    for node in nodes {
+        let count = (deps[node] ?? []).filter { nodeSet.contains($0) }.count
+        remaining[node] = count
+    }
+
+    var emitted = Set<String>()
+    var order: [String] = []
+    order.reserveCapacity(nodes.count)
+
+    // Level-by-level Kahn loop. Each pass snapshots the CURRENT ready set (all
+    // un-emitted nodes with remaining count 0), emits it in sorted-id order, and
+    // only then applies the decrements its emissions cause — so newly-freed
+    // nodes wait for the next level. Iterating the sorted `nodes` array yields
+    // the ready set already in sorted order. A node blocked by a cycle never
+    // reaches count 0, so the loop terminates when no node is ready.
+    while true {
+        // Snapshot this level's ready set (sorted, since `nodes` is sorted).
+        let level = nodes.filter { !emitted.contains($0) && remaining[$0] == 0 }
+        if level.isEmpty {
+            break  // no node ready -> remaining un-emitted are cyclic
+        }
+        // Emit the whole level in sorted order, marking each emitted first so
+        // decrements below cannot re-add a same-level node.
+        for node in level {
+            order.append(node)
+            emitted.insert(node)
+        }
+        // Apply this level's decrements AFTER emitting the level, so a node
+        // freed now only becomes ready on the NEXT iteration.
+        for node in level {
+            if let dependents = rdeps[node] {
+                for dep in dependents {
+                    if let c = remaining[dep] {
+                        // Saturating guard: a present dependent always had this
+                        // node counted, so c > 0 here; the max(0,...) keeps it
+                        // sound even on an (impossible) double-count.
+                        remaining[dep] = max(0, c - 1)
+                    }
+                }
+            }
+        }
+    }
+
+    // Remnants: any node never emitted is blocked by a cycle — either it is ON
+    // a cycle (it is in `cycles`) OR it transitively DEPENDS on a cycle and so
+    // can never reach count 0 (e.g. `tail -> c1` where c1<->c2). Both kinds are
+    // appended at the END in sorted-id order. `cycles` is a SUBSET of these
+    // remnants, not necessarily the whole set; we therefore derive the remnants
+    // from the un-emitted nodes directly (the operational rule "any node that
+    // never reaches dependency-count 0"), which keeps the order deterministic
+    // and dependencies-first for the entire acyclic prefix. Iterating the sorted
+    // `nodes` array yields the remnants already in sorted-id order.
+    assert(cycles.allSatisfy { !emitted.contains($0) },
+           "every cycle member must remain un-emitted (a subset of the remnants)")
+    for node in nodes where !emitted.contains(node) {
+        order.append(node)
+    }
+
+    return order
+}
+
 // MARK: - Cycle detection
 
 /// Drop adjacent duplicates from a SORTED array.
@@ -349,21 +488,28 @@ private func dfsCycles(_ node: String,
 // MARK: - Canonical JSON serializer
 
 /// Serialize a ``DependencyIndex`` to canonical JSON: an object with the sorted
-/// keys `cycles`, `dangling`, `deps`, `rdeps`; `deps`/`rdeps` as objects of
-/// sorted id keys to sorted id arrays; `cycles`/`dangling` as sorted arrays.
+/// keys `cycles`, `dangling`, `deps`, `rdeps`, `topo_order`; `deps`/`rdeps` as
+/// objects of sorted id keys to sorted id arrays; `cycles`/`dangling` as sorted
+/// arrays; `topo_order` as an array IN TOPOLOGICAL ORDER (NOT sorted — its order
+/// is the data).
 ///
 /// Byte-identical to what the sibling apps hand-roll (and the
-/// `dependency_index.json` fixture). Deliberately hand-rolled, not
-/// `JSONSerialization`: the four sibling apps emit the identical shape and the
-/// output must be byte-identical. Mirrors the sorted-keys / sorted-arrays /
-/// `\\`-then-`"` escaping convention of the `JsonObj` builder in
+/// `dependency_index.json` fixture). The top-level KEYS appear in alphabetical
+/// order (`cycles` < `dangling` < `deps` < `rdeps` < `topo_order`) to match the
+/// `JsonObj` sorted-key convention; only the `topo_order` VALUE is unsorted.
+/// Deliberately hand-rolled, not `JSONSerialization`: the four sibling apps emit
+/// the identical shape and the output must be byte-identical. Mirrors the
+/// sorted-keys / `\\`-then-`"` escaping convention of the `JsonObj` builder in
 /// `WorkspaceTestJson.swift` (the same pattern as `menuStructureJson`).
 public func dependencyIndexToTestJson(_ idx: DependencyIndex) -> String {
-    // Keys emitted in sorted (alphabetical) order: cycles, dangling, deps, rdeps.
+    // Keys emitted in sorted (alphabetical) order: cycles, dangling, deps,
+    // rdeps, topo_order. Only topo_order's array value is non-sorted (it is the
+    // topological sequence itself).
     "{\"cycles\":\(arrayJson(idx.cycles)),"
         + "\"dangling\":\(arrayJson(idx.dangling)),"
         + "\"deps\":\(mapJson(idx.deps)),"
-        + "\"rdeps\":\(mapJson(idx.rdeps))}"
+        + "\"rdeps\":\(mapJson(idx.rdeps)),"
+        + "\"topo_order\":\(arrayJson(idx.topoOrder))}"
 }
 
 /// Escape a string for embedding in a canonical-JSON string literal. Matches
@@ -373,7 +519,10 @@ private func escapeJson(_ s: String) -> String {
      .replacingOccurrences(of: "\"", with: "\\\"")
 }
 
-/// Render a sorted string array (the input is already sorted).
+/// Render a string array verbatim (preserving the input's order). Used for the
+/// already-sorted `cycles`/`dangling` arrays AND for `topoOrder`, whose order is
+/// deliberately the topological sequence (NOT sorted) — its order is the data,
+/// so it must be rendered as-is.
 private func arrayJson(_ v: [String]) -> String {
     let items = v.map { "\"\(escapeJson($0))\"" }
     return "[\(items.joined(separator: ","))]"
