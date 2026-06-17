@@ -41,6 +41,7 @@ public func buildActiveDocumentView(
             "current_artboard_id": NSNull(),
             "current_artboard": [:] as [String: Any],
             "artboards_panel_selection_ids": artboardsPanelSelection,
+            "symbols": [] as [Any],
         ]
     }
     var topLevelLayers: [[String: Any]] = []
@@ -120,6 +121,28 @@ public func buildActiveDocumentView(
         currentArtboardId = NSNull()
     }
     let nextArtboardName_ = nextArtboardName(m.document.artboards)
+    // Symbols view (SYMBOLS.md §8). One row per master in the off-canvas
+    // store. `name` is the master's common.name, falling back to a
+    // positional "Symbol N" label so every row shows something readable.
+    // `usage_count` is the number of live instances of the master — the
+    // length of its reverse-dependency list (rdeps) in the dependency
+    // index, the same signal that gates the reference-aware delete.
+    let depIndex = DependencyIndex.build(m.document)
+    let symbolsView: [[String: Any]] = m.document.symbols.enumerated().map { (i, master) in
+        let id = master.id ?? ""
+        let name: String
+        if let n = master.name, !n.isEmpty {
+            name = n
+        } else {
+            name = "Symbol \(i + 1)"
+        }
+        let usageCount = depIndex.rdeps[id]?.count ?? 0
+        return [
+            "id": id,
+            "name": name,
+            "usage_count": usageCount,
+        ]
+    }
     return [
         "top_level_layers": topLevelLayers,
         "top_level_layer_paths": topLevelLayerPaths,
@@ -152,6 +175,7 @@ public func buildActiveDocumentView(
         "current_artboard_id": currentArtboardId,
         "current_artboard": currentArtboardJson,
         "artboards_panel_selection_ids": artboardsPanelSelection,
+        "symbols": symbolsView,
     ]
 }
 

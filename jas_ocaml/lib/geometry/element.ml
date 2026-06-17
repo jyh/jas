@@ -1526,6 +1526,24 @@ let with_name elem (n : string option) =
   | Layer r      -> Layer { r with name = n }
   | Live _       -> elem
 
+(* Read the user-visible name on any element. [None] for an element
+   with no name. [Live] variants (compound shapes / references) carry no
+   name field, so they read as [None]. Mirrors the Rust common().name
+   accessor. *)
+let name_of = function
+  | Line r       -> r.name
+  | Rect r       -> r.name
+  | Circle r     -> r.name
+  | Ellipse r    -> r.name
+  | Polyline r   -> r.name
+  | Polygon r    -> r.name
+  | Path r       -> r.name
+  | Text r       -> r.name
+  | Text_path r  -> r.name
+  | Group r      -> r.name
+  | Layer r      -> r.name
+  | Live _       -> None
+
 (* Read the stable, opaque element id. [None] for an element that has
    no id yet. See the doc on [type element] in element.mli. *)
 let id_of = function

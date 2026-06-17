@@ -87,6 +87,68 @@ class TestBuildActiveDocumentView:
         assert view["new_layer_insert_index"] == 2
 
 
+class TestSymbolsView:
+    """SYMBOLS.md §8 — active_document.symbols exposes one row per master
+    (name + usage_count), mirroring active_document.artboards."""
+
+    def _model_with_symbols(self, masters, layer_children=()):
+        from document.document import Document
+        from document.model import Model
+        from geometry.element import Layer
+        layer = Layer(name="L", children=tuple(layer_children))
+        doc = Document(layers=(layer,), selected_layer=0,
+                       symbols=tuple(masters))
+        return Model(document=doc)
+
+    def test_no_model_yields_empty_symbols(self):
+        view = build_active_document_view(None)
+        assert view["symbols"] == []
+
+    def test_empty_store_yields_empty_symbols(self):
+        model = _make_model(["A"])
+        view = build_active_document_view(model)
+        assert view["symbols"] == []
+
+    def test_named_master_keeps_its_name(self):
+        from geometry.element import Rect
+        master = Rect(x=0.0, y=0.0, width=1.0, height=1.0,
+                      name="Star", id="m1")
+        model = self._model_with_symbols([master])
+        view = build_active_document_view(model)
+        assert view["symbols"][0]["name"] == "Star"
+        assert view["symbols"][0]["id"] == "m1"
+
+    def test_unnamed_master_falls_back_to_positional_label(self):
+        from geometry.element import Rect
+        masters = [
+            Rect(x=0.0, y=0.0, width=1.0, height=1.0, id="m1"),
+            Rect(x=0.0, y=0.0, width=1.0, height=1.0, id="m2"),
+        ]
+        model = self._model_with_symbols(masters)
+        view = build_active_document_view(model)
+        # 1-based positional fallback.
+        assert view["symbols"][0]["name"] == "Symbol 1"
+        assert view["symbols"][1]["name"] == "Symbol 2"
+
+    def test_usage_count_is_len_rdeps(self):
+        from geometry.element import Rect, ReferenceElem
+        master = Rect(x=0.0, y=0.0, width=1.0, height=1.0, id="m1")
+        instances = [
+            ReferenceElem(target="m1", id="r1"),
+            ReferenceElem(target="m1", id="r2"),
+        ]
+        model = self._model_with_symbols([master], layer_children=instances)
+        view = build_active_document_view(model)
+        assert view["symbols"][0]["usage_count"] == 2
+
+    def test_usage_count_zero_when_no_instances(self):
+        from geometry.element import Rect
+        master = Rect(x=0.0, y=0.0, width=1.0, height=1.0, id="m1")
+        model = self._model_with_symbols([master])
+        view = build_active_document_view(model)
+        assert view["symbols"][0]["usage_count"] == 0
+
+
 class TestSyncDocumentToStore:
     """Phase F — sync_document_to_store mirrors jas model.document
     onto the store's ``_document`` dict so dialog cross-scope

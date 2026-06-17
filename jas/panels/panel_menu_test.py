@@ -172,7 +172,7 @@ def test_panel_label_all_kinds():
 
 
 def test_all_panel_kinds_count():
-    assert len(ALL_PANEL_KINDS) == 12
+    assert len(ALL_PANEL_KINDS) == 13
 
 
 def test_all_panel_kinds_contains_all():
@@ -188,6 +188,7 @@ def test_all_panel_kinds_contains_all():
     assert PanelKind.BOOLEAN in ALL_PANEL_KINDS
     assert PanelKind.OPACITY in ALL_PANEL_KINDS
     assert PanelKind.MAGIC_WAND in ALL_PANEL_KINDS
+    assert PanelKind.SYMBOLS in ALL_PANEL_KINDS
 
 
 def test_panel_label_opacity():

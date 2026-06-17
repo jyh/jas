@@ -29,6 +29,7 @@ PANEL_KIND_TO_CONTENT_ID = {
     PanelKind.BOOLEAN: "boolean_panel_content",
     PanelKind.OPACITY: "opacity_panel_content",
     PanelKind.MAGIC_WAND: "magic_wand_panel_content",
+    PanelKind.SYMBOLS: "symbols_panel_content",
 }
 
 # Module-level cache for loaded panel specs

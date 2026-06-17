@@ -61,6 +61,14 @@ val panel_menu : panel_kind -> panel_menu_item list
     installs the handler at startup. *)
 val register_dialog_opener : (string -> unit) -> unit
 
+(** Hook for the reference-aware Symbols-panel Delete confirm fired from
+    the panel hamburger menu (SYMBOLS.md section 8). Given the count
+    [n] (> 0) of live instances the panel-selected master still has,
+    returns [true] to proceed (delete) and [false] to abort. Wired by
+    [Menubar.create] to the same modal the layers delete confirm uses;
+    defaults to proceeding unconditionally (headless / before wiring). *)
+val symbols_confirm_delete_hook : (int -> bool) ref
+
 (* ── Recent colors bridge ─────────────────────────────────── *)
 
 (** Register a callback fired after [push_recent_color] commits. The

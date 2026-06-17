@@ -961,6 +961,16 @@ struct YamlElementView: View {
                 }
             }
             return
+        case "new_symbol", "place_instance", "delete_symbol_action":
+            // Symbols panel footer buttons. Native intercept: mint ids by
+            // the value-in-op rule and call the shared symbol Controller
+            // ops (the YAML actions are `log` stubs). Mirrors the Rust
+            // `dispatch_action` symbol arms; the reference-aware delete
+            // confirm is a synchronous native modal. The panel's
+            // `selected_symbol` is already pinned in the store as the
+            // active panel, so SymbolsPanel reads / writes it directly.
+            SymbolsPanel.dispatchSymbolAction(name, model: model)
+            return
         default:
             break
         }
