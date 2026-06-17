@@ -461,9 +461,14 @@ fn pack_element(elem: &Element) -> Value {
             }
             crate::geometry::live::LiveVariant::Reference(r) => {
                 let (locked, opacity, vis, xform, name, id) = pack_common(&r.common);
-                // [tag, common(1..6), kind(7), target(8)]
+                // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
+                // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
+                // (distinct from common.transform packed at slot 4) rides slot 9
+                // via pack_transform; Nil when None. Old 9-element .bin (no slot
+                // 9) still decode TOLERANTLY to None on the read side.
                 Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
-                                  vstr("reference"), vstr(&r.target.0)])
+                                  vstr("reference"), vstr(&r.target.0),
+                                  pack_transform(&r.transform)])
             }
         },
     }
@@ -862,9 +867,14 @@ fn unpack_element(v: &Value) -> Element {
                 }
                 "reference" => {
                     let target = crate::geometry::live::ElementRef(as_str(&arr[8]).to_string());
-                    Element::Live(crate::geometry::live::LiveVariant::Reference(
-                        crate::geometry::live::ReferenceElem::new(target, common),
-                    ))
+                    let mut re = crate::geometry::live::ReferenceElem::new(target, common);
+                    // Symbols P4: the instance `transform` rides slot 9, read
+                    // TOLERANTLY so existing 9-element .bin (no slot 9) decode
+                    // to None (SYMBOLS.md §4 / Fork F2).
+                    if let Some(v) = arr.get(9) {
+                        re.transform = unpack_transform(v);
+                    }
+                    Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
                 other => panic!("unknown live kind: {}", other),
             }

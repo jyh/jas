@@ -364,10 +364,18 @@ impl Controller {
         let mut copy = target;
         crate::geometry::element::clear_ids(&mut copy);
 
-        // Apply the instance's transform override. Compose if the copy already
-        // carries one (instance transform applied on top of the copy's),
-        // otherwise just set it.
-        if let Some(inst_t) = instance.common.transform {
+        // Apply the instance's transform overrides. The render composition is
+        // common.transform (CTM) ∘ instance.transform (Symbols P4 / Fork F2);
+        // detach must fold BOTH onto the copy so neither is dropped. Build the
+        // instance-side transform first (common.transform ∘ instance field),
+        // then compose onto any transform the copy already carries.
+        let inst_combined = match (instance.common.transform, instance.transform) {
+            (Some(ct), Some(it)) => Some(ct.multiply(&it)),
+            (Some(ct), None) => Some(ct),
+            (None, Some(it)) => Some(it),
+            (None, None) => None,
+        };
+        if let Some(inst_t) = inst_combined {
             let composed = match copy.common().transform {
                 Some(copy_t) => inst_t.multiply(&copy_t),
                 None => inst_t,
@@ -383,6 +391,33 @@ impl Controller {
         }
 
         model.set_document(doc.replace_element(path, copy));
+    }
+
+    /// Set the instance `transform` of the `ReferenceElem` at `path` (Symbols
+    /// P4, SYMBOLS.md §4 / Fork F2). Value-in-op: the `transform` is carried in
+    /// the payload (not minted), letting an instance be mirrored/scaled relative
+    /// to its master. This is the instance transform, distinct from
+    /// `common.transform` (the render CTM); the render composition is
+    /// `common.transform` ∘ instance `transform`. No-op when `path` is invalid
+    /// or the element there is not a reference.
+    pub fn set_instance_transform(
+        model: &mut Model,
+        path: &ElementPath,
+        transform: crate::geometry::element::Transform,
+    ) {
+        let doc = model.document().clone();
+        let Some(elem) = doc.get_element(path) else { return };
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Reference(instance),
+        ) = elem else { return };
+        // Rebuild the reference with the instance transform set, preserving the
+        // target, paint overrides, and common props.
+        let mut updated = instance.clone();
+        updated.transform = Some(transform);
+        let new_elem = crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Reference(updated),
+        );
+        model.set_document(doc.replace_element(path, new_elem));
     }
 
     /// Redefine: replace the master with id `master_id` in `doc.symbols` with a
@@ -3626,6 +3661,42 @@ mod tests {
     }
 
     #[test]
+    fn set_instance_transform_sets_the_field() {
+        // Symbols P4 (SYMBOLS.md §4 / Fork F2): set_instance_transform writes
+        // the given Transform into the instance's `transform` field, leaving
+        // common.transform untouched (the two are independent).
+        use crate::geometry::element::Transform;
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        // Precondition: a fresh instance has no instance transform.
+        assert!(as_reference(model.document(), &vec![0, 0]).transform.is_none());
+
+        Controller::set_instance_transform(&mut model, &vec![0, 0], Transform::scale(2.0, 2.0));
+        let re = as_reference(model.document(), &vec![0, 0]);
+        let t = re.transform.expect("instance transform set");
+        assert_eq!((t.a, t.d), (2.0, 2.0));
+        assert!((t.b, t.c, t.e, t.f) == (0.0, 0.0, 0.0, 0.0));
+        // common.transform is left alone (still None for a fresh instance).
+        assert!(re.common.transform.is_none(),
+            "set_instance_transform must not touch common.transform");
+    }
+
+    #[test]
+    fn set_instance_transform_non_reference_is_noop() {
+        // The element at `path` is a plain rect, not a reference → no-op
+        // (no panic, the rect is unchanged).
+        use crate::geometry::element::Transform;
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::set_instance_transform(&mut model, &vec![0, 0], Transform::scale(2.0, 2.0));
+        assert!(matches!(
+            model.document().get_element(&vec![0, 0]).unwrap(),
+            Element::Rect(_)
+        ));
+    }
+
+    #[test]
     fn detach_replaces_instance_with_idless_copy() {
         // make_symbol then detach the instance → the path holds an id-less copy
         // of the master geometry (NOT a reference); the master is untouched.
@@ -3663,6 +3734,39 @@ mod tests {
         let t = copy.common().transform.expect("instance transform applied to copy");
         assert_eq!((t.e, t.f), (24.0, 24.0));
         let _ = Transform::IDENTITY;
+    }
+
+    #[test]
+    fn detach_composes_instance_transform_field() {
+        // Symbols P4 (SYMBOLS.md §4 / Fork F2): an instance carrying BOTH a
+        // common.transform (a translate) AND a non-None instance `transform`
+        // field (a scale) → the detached copy composes both, in render order
+        // (common.transform ∘ instance.transform), so detach drops neither.
+        use crate::geometry::element::Transform;
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        // common.transform = translate(24, 24).
+        Controller::select_element(&mut model, &vec![0, 0]);
+        Controller::move_selection(&mut model, 24.0, 24.0);
+        // instance.transform = scale(2, 2).
+        Controller::set_instance_transform(&mut model, &vec![0, 0], Transform::scale(2.0, 2.0));
+        Controller::detach(&mut model, &vec![0, 0]);
+
+        let copy = model.document().get_element(&vec![0, 0]).unwrap();
+        let t = copy.common().transform.expect("composed transform on copy");
+        // Expected = translate(24,24) ∘ scale(2,2) (the master copy has no own
+        // transform, so the composition is exactly common.transform * instance).
+        let expected = Transform::translate(24.0, 24.0).multiply(&Transform::scale(2.0, 2.0));
+        assert!((t.a - expected.a).abs() < 1e-9);
+        assert!((t.b - expected.b).abs() < 1e-9);
+        assert!((t.c - expected.c).abs() < 1e-9);
+        assert!((t.d - expected.d).abs() < 1e-9);
+        assert!((t.e - expected.e).abs() < 1e-9);
+        assert!((t.f - expected.f).abs() < 1e-9);
+        // Concretely: scale 2, then translate 24.
+        assert_eq!((t.a, t.d), (2.0, 2.0));
+        assert_eq!((t.e, t.f), (24.0, 24.0));
     }
 
     #[test]
