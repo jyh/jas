@@ -163,7 +163,8 @@ clean operation-API boundary must be held; depends on 6.2.
 ### 6.2 Stable identity + the live relationship graph — the keystone
 Generalize liveness from owned-children to elements referenced by stable id, anywhere in the
 document; build the dependency DAG with incremental recompute. **Today (SHIPPED 2026-06, all
-5 apps — see `REFERENCE_GRAPH.md` / `SYMBOLS.md`):** an additive `common.id` exists on every
+four native apps — see `REFERENCE_GRAPH.md` / `SYMBOLS.md`; `jas_flask`'s JS engine is a
+separate port outside this rollout):** an additive `common.id` exists on every
 element (tree-paths kept for the UI); `LiveVariant` now has two arms (`CompoundShape` +
 `Reference`), where a `Reference` names its target by id and resolves through an
 `ElementResolver` seam; a derived `DependencyIndex` (`deps`/`rdeps`/`dangling`/`cycles`/
@@ -324,7 +325,7 @@ tracks periodically) so heavy testing never fights iteration speed.
 
 Everything stands on three things — build them first:
 
-1. **Stable element identity** — ✅ **SHIPPED** (additive `common.id` in all 5 apps; coexists
+1. **Stable element identity** — ✅ **SHIPPED** (additive `common.id` in all four native apps; coexists
    with tree-paths; round-trips via SVG `id`; duplicate clears id, undo/redo preserve it).
 2. **The operation / transaction log** — ⬜ **not started.** Still to be formalized as the
    atomic, reversible, summarizable unit (generalizing today's boolean+simplify undo grouping,

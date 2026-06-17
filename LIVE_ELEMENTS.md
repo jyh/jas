@@ -122,7 +122,7 @@ from.** Four provenances:
 
 | Provenance | Generator is… | Authored by | Parameters | Deterministic at runtime? |
 |---|---|---|---|---|
-| **Native** | hand-coded function, in all four native apps (Flask has no geometry/live core) | the core team | fixed struct fields | yes |
+| **Native** | hand-coded function, in all four native apps (Flask's JS engine has a geometry core but no live/boolean/reference subsystem) | the core team | fixed struct fields | yes |
 | **Recorded** | a captured op-segment, replayed | demonstration ("watch what I do") | the trace's free variables | yes — *if* replay outputs are id-stable and the op subset is side-effect-free (§4) |
 | **Declared** | a parametric recipe in the expression language | a concept pack (team / community / AI) | a declared, named param list | yes |
 | **Inferred** | *not a runtime kind* — see §5 | the AI **fitter** | inferred | the fitter is offline; its **output** is one of the three above |
@@ -217,7 +217,7 @@ recipes are the frontier** and define the natural v1 boundary.
 The four provenances split across two layers:
 
 ```
-AUTHORING (how a Live element is born)        RUNTIME (in the 4 native apps; Flask has no geometry core)
+AUTHORING (how a Live element is born)        RUNTIME (in the 4 native apps; Flask's engine has no live subsystem)
   fitter:                                       Live element = inputs + params + generator → output
     deterministic  (compound make,                generator ∈ { native | recorded | declared }
        trace capture, curve-fit, repeat        ─►  one eval signature · one dependency graph
@@ -292,9 +292,9 @@ this model.
 This model is a destination; it lands in dependency order on foundations, some
 shipped and some not:
 
-1. **Stable identity** — ✅ shipped (`common.id`, all four native apps; Flask has no
-   element model). Prerequisite for both recorded recipes (rebind by id) and any
-   cross-tree liveness.
+1. **Stable identity** — ✅ shipped (`common.id`, all four native apps; Flask's JS
+   engine is a separate port outside the reference-graph rollout). Prerequisite for both
+   recorded recipes (rebind by id) and any cross-tree liveness.
 2. **The live dependency graph** — ✅ shipped (`REFERENCE_GRAPH.md`:
    deps/rdeps/dangling/cycles/topo_order, incremental + cached recompute). The
    evaluation/graph substrate every kind rides.
@@ -322,7 +322,7 @@ shipped and some not:
   **native** kinds (CompoundShape, Reference), the dependency graph, incremental +
   cached recompute, `expand`/`release` (CompoundShape only), and stable identity —
   pinned across the four native apps via shared `live_compound` / `live_reference` /
-  `dependency_index` fixtures (Flask has no geometry/live core).
+  `dependency_index` fixtures (Flask's JS engine has no live/boolean/reference subsystem).
 - **Not built:** a generic named-parameter bag; the **recorded** provenance (needs
   the op-log spine); the **declared** provenance and concept-pack runtime (needs the
   expression-language extension); the **fitter** beyond the existing deterministic
