@@ -424,6 +424,23 @@ impl Controller {
         model.set_document(new_doc);
     }
 
+    /// Delete Symbol: remove the master whose `common.id == master_id` from
+    /// `doc.symbols` (SYMBOLS.md §7). No-op when no master carries that id.
+    /// The instances (`ReferenceElem`s targeting `master_id`) are left
+    /// untouched — they simply become dangling and resolve to empty until the
+    /// master returns (recoverable via undo, since the caller owns the
+    /// snapshot). The Symbols-panel confirm-before-delete warning is a UI
+    /// concern, not part of this op.
+    pub fn delete_symbol(model: &mut Model, master_id: &str) {
+        let doc = model.document().clone();
+        let Some(idx) = doc.symbols.iter().position(|m| {
+            m.common().id.as_deref() == Some(master_id)
+        }) else { return };
+        let mut new_doc = doc;
+        new_doc.symbols.remove(idx);
+        model.set_document(new_doc);
+    }
+
     /// Append ``element`` to the mask subtree of the element at
     /// ``path`` and move the selection onto the new element inside
     /// the subtree. Returns ``true`` when the append succeeded,
@@ -3733,6 +3750,44 @@ mod tests {
             model.document().get_element(&vec![0, 0]).unwrap(),
             Element::Rect(_)
         ));
+    }
+
+    #[test]
+    fn delete_symbol_removes_master() {
+        // make_symbol a rect (m1), then delete_symbol m1 → doc.symbols is empty.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        assert_eq!(model.document().symbols.len(), 1);
+        Controller::delete_symbol(&mut model, "m1");
+        assert!(model.document().symbols.is_empty());
+    }
+
+    #[test]
+    fn delete_symbol_unknown_id_noop() {
+        // Deleting an id that is not a master leaves doc.symbols untouched.
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        Controller::delete_symbol(&mut model, "ghost");
+        assert_eq!(model.document().symbols.len(), 1);
+        assert_eq!(model.document().symbols[0].common().id.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn delete_symbol_leaves_instances_dangling() {
+        // The instances are NOT removed; they stay in the layer, still
+        // targeting the now-absent master id (dangling → resolves to empty).
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+        Controller::delete_symbol(&mut model, "m1");
+        let doc = model.document();
+        assert!(doc.symbols.is_empty());
+        // The instance is still present, still targeting the absent master.
+        let re = as_reference(doc, &vec![0, 0]);
+        assert_eq!(re.target.0, "m1");
+        assert_eq!(re.common.id.as_deref(), Some("i1"));
     }
 
     #[test]
