@@ -8,7 +8,7 @@
 //! manual callbacks. The Model still owns undo/redo stacks and filename state.
 
 use super::document::Document;
-use crate::canvas::render::{rebuild_id_index, IdIndex};
+use crate::canvas::render::{incremental_update_index, rebuild_id_index, IdIndex};
 use crate::geometry::element::{Color, Fill, Stroke};
 
 const MAX_UNDO: usize = 100;
@@ -193,19 +193,6 @@ impl Model {
         &self.id_index
     }
 
-    /// Recompute the id->element index from the current document. Called
-    /// after any path that mutates `self.document` without going through
-    /// `set_document` (notably when the [`DocumentMutGuard`] returned by
-    /// [`document_mut`] is dropped). The debug-assert gate confirms the
-    /// stored index never diverges from a from-scratch rebuild.
-    fn refresh_id_index(&mut self) {
-        self.id_index = rebuild_id_index(&self.document);
-        debug_assert!(
-            self.id_index == rebuild_id_index(&self.document),
-            "id index diverged from rebuild after refresh",
-        );
-    }
-
     /// Monotonically increasing counter bumped on every document mutation.
     pub fn generation(&self) -> u64 {
         self.generation
@@ -222,16 +209,32 @@ impl Model {
     /// edit the Model could not otherwise observe (REFERENCE_GRAPH.md §2.4).
     pub fn document_mut(&mut self) -> DocumentMutGuard<'_> {
         self.generation += 1;
-        DocumentMutGuard { model: self }
+        // Snapshot the document as it is BEFORE the in-place edit; the guard's
+        // Drop diffs this against the mutated document to update the index
+        // incrementally. Cloning a Document is cheap — its layer/symbol
+        // subtrees are `Rc`-held, so the clone shares structure (O(top-level)).
+        let old_doc = self.document.clone();
+        DocumentMutGuard { model: self, old_doc }
     }
 
-    /// Replace the current document, rebuild the paired id->element index,
-    /// and bump the modification generation. Callers that want this change
-    /// to be undoable should call [`snapshot`] first; `set_document` itself
-    /// does not push onto the undo stack.
+    /// Replace the current document, update the paired id->element index
+    /// incrementally (O(changed)), and bump the modification generation.
+    /// Callers that want this change to be undoable should call [`snapshot`]
+    /// first; `set_document` itself does not push onto the undo stack.
     pub fn set_document(&mut self, doc: Document) {
+        // Incrementally bring the index from the OLD document to the new one
+        // (O(changed) via CoW `Rc::ptr_eq` diffing), instead of a full rebuild.
+        // Capture the old document before overwriting it.
+        self.id_index = incremental_update_index(
+            std::mem::take(&mut self.id_index),
+            &self.document, // old
+            &doc,           // new
+        );
         self.document = doc;
-        self.refresh_id_index();
+        debug_assert!(
+            self.id_index == rebuild_id_index(&self.document),
+            "id index diverged from rebuild after set_document",
+        );
         self.generation += 1;
     }
 
@@ -250,8 +253,19 @@ impl Model {
     /// No-op when no snapshot is captured.
     pub fn restore_preview_snapshot(&mut self) {
         if let Some(doc) = self.preview_doc_snapshot.clone() {
+            // Incremental update from the current document to the restored
+            // snapshot (same O(changed) diff as `set_document`); capture the
+            // old document before overwriting.
+            self.id_index = incremental_update_index(
+                std::mem::take(&mut self.id_index),
+                &self.document, // old (current)
+                &doc,           // new (restored snapshot)
+            );
             self.document = doc;
-            self.refresh_id_index();
+            debug_assert!(
+                self.id_index == rebuild_id_index(&self.document),
+                "id index diverged from rebuild after restore_preview_snapshot",
+            );
             self.generation += 1;
         }
     }
@@ -340,14 +354,18 @@ impl Model {
 
 /// Drop-guard returned by [`Model::document_mut`]. Derefs to the underlying
 /// `Document` so callers use it exactly like the old `&mut Document`; when it
-/// drops (the borrow ends) it rebuilds the Model's paired id->element index,
-/// because the Model cannot otherwise observe edits made through the raw
-/// `&mut Document` (REFERENCE_GRAPH.md §2.4). Rebuilding on every
-/// `document_mut` drop is intentionally defensive for this first increment:
-/// O(depth) incremental maintenance is a clean follow-on. The debug-assert
-/// gate in `refresh_id_index` catches any staleness in tests.
+/// drops (the borrow ends) it updates the Model's paired id->element index
+/// incrementally, because the Model cannot otherwise observe edits made through
+/// the raw `&mut Document` (REFERENCE_GRAPH.md §2.4). The guard captures the
+/// pre-edit document (`old_doc`) at creation and diffs it against the mutated
+/// document on Drop ([`incremental_update_index`], O(changed) via CoW
+/// `Rc::ptr_eq`). The debug-assert gate confirms the result equals a
+/// from-scratch rebuild.
 pub struct DocumentMutGuard<'a> {
     model: &'a mut Model,
+    /// The document as it was when the guard was created, used as the diff
+    /// baseline on Drop.
+    old_doc: Document,
 }
 
 impl std::ops::Deref for DocumentMutGuard<'_> {
@@ -365,7 +383,15 @@ impl std::ops::DerefMut for DocumentMutGuard<'_> {
 
 impl Drop for DocumentMutGuard<'_> {
     fn drop(&mut self) {
-        self.model.refresh_id_index();
+        self.model.id_index = incremental_update_index(
+            std::mem::take(&mut self.model.id_index),
+            &self.old_doc,         // old (pre-edit baseline)
+            &self.model.document,  // new (mutated in place)
+        );
+        debug_assert!(
+            self.model.id_index == rebuild_id_index(&self.model.document),
+            "id index diverged from rebuild after document_mut drop",
+        );
     }
 }
 
@@ -640,5 +666,177 @@ mod tests {
         model.redo();
         assert!(model.id_index().get("r2").is_some(), "redo restores r2");
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+    }
+
+    // ── Phase 4b: incremental index maintenance wiring ──────────────────
+    //
+    // The Model now maintains `id_index` incrementally (O(changed)) at the
+    // set_document / document_mut chokepoints instead of full rebuilds. Each
+    // test asserts `id_index() == rebuild_id_index(document())` explicitly
+    // after the edit (beyond the always-on debug_assert gate) and that an
+    // affected reference still resolves.
+
+    // Resolver reading the Model's persistent index, shared by the tests.
+    struct IxResolver<'a>(&'a IdIndex);
+    impl crate::geometry::live::ElementResolver for IxResolver<'_> {
+        fn resolve(
+            &self,
+            id: &crate::geometry::live::ElementRef,
+        ) -> Option<std::rc::Rc<Element>> {
+            self.0.get(&id.0).cloned()
+        }
+    }
+
+    fn resolves(model: &Model, id: &str) -> bool {
+        use crate::geometry::live::{
+            ReferenceElem, ElementRef, VisitSet, DEFAULT_PRECISION,
+        };
+        let resolver = IxResolver(model.id_index());
+        let reference = ReferenceElem::new(ElementRef(id.into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        !reference
+            .evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting)
+            .is_empty()
+    }
+
+    #[test]
+    fn incremental_set_document_leaf_insert_matches_rebuild() {
+        let mut model = Model::default();
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("ins")));
+        model.set_document(doc);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(resolves(&model, "ins"), "inserted target resolves");
+    }
+
+    #[test]
+    fn incremental_document_mut_guard_matches_rebuild() {
+        let mut model = Model::default();
+        {
+            let mut d = model.document_mut();
+            d.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("gm")));
+        }
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(resolves(&model, "gm"));
+        // A second in-place edit (delete) through the guard also stays consistent.
+        {
+            let mut d = model.document_mut();
+            d.layers[0].children_mut().unwrap().clear();
+        }
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(!resolves(&model, "gm"), "deleted target no longer resolves");
+    }
+
+    #[test]
+    fn incremental_subtree_replace_matches_rebuild() {
+        let mut model = Model::default();
+        // Seed a group with two ided descendants.
+        let mut doc = model.document().clone();
+        let g = Element::Group(GroupElem {
+            children: vec![
+                std::rc::Rc::new(id_rect("a")),
+                std::rc::Rc::new(id_rect("b")),
+            ],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("g".into()), ..Default::default() },
+        });
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(g));
+        model.set_document(doc);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+
+        // Replace the group wholesale via a CoW edit.
+        let mut doc2 = model.document().clone();
+        let g2 = Element::Group(GroupElem {
+            children: vec![std::rc::Rc::new(id_rect("c"))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("g2".into()), ..Default::default() },
+        });
+        doc2.layers[0].children_mut().unwrap()[0] = std::rc::Rc::new(g2);
+        model.set_document(doc2);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(resolves(&model, "c"));
+        assert!(!resolves(&model, "a") && !resolves(&model, "b"), "old subtree gone");
+    }
+
+    #[test]
+    fn incremental_delete_selection_multi_matches_rebuild() {
+        use crate::document::document::ElementSelection;
+        let mut model = Model::default();
+        let mut doc = model.document().clone();
+        for id in ["d1", "d2", "d3"] {
+            doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect(id)));
+        }
+        model.set_document(doc);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+
+        // Select d1 and d3 (paths [0,0] and [0,2]) and delete them together.
+        let mut doc2 = model.document().clone();
+        doc2.selection = vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection::all(vec![0, 2]),
+        ];
+        let after = doc2.delete_selection();
+        model.set_document(after);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(!resolves(&model, "d1") && !resolves(&model, "d3"), "both deleted");
+        assert!(resolves(&model, "d2"), "untouched sibling survives");
+    }
+
+    #[test]
+    fn incremental_make_and_delete_symbol_matches_rebuild() {
+        use crate::document::controller::Controller;
+        let mut model = Model::default();
+        // Place an ided rect, then promote it to a master.
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("sym")));
+        model.set_document(doc);
+
+        Controller::make_symbol(&mut model, &vec![0, 0], "sym", "inst1");
+        assert_eq!(
+            model.id_index(), &rebuild_id_index(model.document()),
+            "make_symbol leaves index consistent",
+        );
+        assert!(resolves(&model, "sym"), "master resolves from doc.symbols");
+
+        Controller::delete_symbol(&mut model, "sym");
+        assert_eq!(
+            model.id_index(), &rebuild_id_index(model.document()),
+            "delete_symbol leaves index consistent",
+        );
+        assert!(!resolves(&model, "sym"), "deleted master no longer resolves");
+    }
+
+    #[test]
+    fn incremental_undo_redo_matches_rebuild_and_resolves() {
+        let mut model = Model::default();
+        model.snapshot();
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("u1")));
+        model.set_document(doc);
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(resolves(&model, "u1"));
+
+        model.undo();
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(!resolves(&model, "u1"), "undo removes the target");
+
+        model.redo();
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(resolves(&model, "u1"), "redo restores the target");
+    }
+
+    #[test]
+    fn incremental_restore_preview_snapshot_matches_rebuild() {
+        let mut model = Model::default();
+        // Capture a baseline, edit, then restore the snapshot.
+        model.capture_preview_snapshot();
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("pv")));
+        model.set_document(doc);
+        assert!(resolves(&model, "pv"));
+
+        model.restore_preview_snapshot();
+        assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
+        assert!(!resolves(&model, "pv"), "preview edit reverted");
     }
 }

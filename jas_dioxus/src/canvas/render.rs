@@ -141,6 +141,115 @@ pub fn rebuild_id_index(doc: &Document) -> IdIndex {
     index
 }
 
+/// Remove every id contributed by `elem`'s subtree from `idx` (the inverse of
+/// [`collect_ref_ids`]). Walks Group/Layer children only, exactly mirroring the
+/// builder's descent so the set of touched ids matches. Under the unique-id
+/// invariant each id is owned by a single live node, so removing the ids of a
+/// vanished subtree never drops an id another live node still owns.
+fn remove_ref_ids(elem: &std::rc::Rc<Element>, idx: &mut IdIndex) {
+    if let Some(id) = &elem.common().id {
+        idx.remove_mut(id);
+    }
+    if let Some(children) = elem.children() {
+        for child in children {
+            remove_ref_ids(child, idx);
+        }
+    }
+}
+
+/// Incrementally bring `idx` (the index paired with `old_doc`) into agreement
+/// with `new_doc`, walking only the regions that changed — O(changed) rather
+/// than the O(N) full [`rebuild_id_index`]. The result is value-equal to
+/// `rebuild_id_index(new_doc)`; the Model's debug-assert gate enforces this on
+/// every edit, which is the correctness proof (REFERENCE_GRAPH.md §2.4).
+///
+/// The key is CoW structure sharing: a deep edit clones (via `Rc::make_mut`)
+/// only the root-to-edit path, so untouched sibling subtrees keep their `Rc`
+/// pointer. Diffing each child list by `Rc::ptr_eq` therefore isolates the
+/// edit: a child `Rc` present (pointer-identical) in BOTH old and new is a
+/// fully-unchanged subtree and is skipped; a child only in OLD is removed
+/// (walk-remove its ids); a child only in NEW is added (walk-add its ids). A
+/// modified node appears as both old-only and new-only, so its ids are removed
+/// then re-added against the new value (net: re-pointed, or removed+added if
+/// the id changed). Removals run before additions so that when a node is
+/// modified, the new value wins (matching rebuild's first-occurrence-wins
+/// discipline reached via `collect_ref_ids`).
+///
+/// Top-level `layers` and `symbols` are owned `Vec<Element>` (no `Rc` at the
+/// top), so structure sharing lives in their children. Layers' own ids are not
+/// resolution targets, so only their child `Rc` lists are diffed (across all
+/// layers as one pool — order is irrelevant under the unique-id invariant).
+/// Symbols' OWN ids ARE targets and each master is re-cloned into a fresh `Rc`
+/// by the builder, so masters are diffed by value (their subtrees are small);
+/// removed masters walk-remove and added masters walk-add through the same
+/// `collect_ref_ids` used by rebuild, preserving identical values and the
+/// sorted-order / first-occurrence discipline.
+pub fn incremental_update_index(mut idx: IdIndex, old_doc: &Document, new_doc: &Document) -> IdIndex {
+    use std::collections::HashSet;
+
+    // --- Layers: diff the combined pool of all top-level layers' child Rcs. ---
+    let old_layer_children: Vec<&std::rc::Rc<Element>> = old_doc
+        .layers
+        .iter()
+        .filter_map(|l| l.children())
+        .flatten()
+        .collect();
+    let new_layer_children: Vec<&std::rc::Rc<Element>> = new_doc
+        .layers
+        .iter()
+        .filter_map(|l| l.children())
+        .flatten()
+        .collect();
+    let new_ptrs: HashSet<*const Element> =
+        new_layer_children.iter().map(|c| std::rc::Rc::as_ptr(c)).collect();
+    let old_ptrs: HashSet<*const Element> =
+        old_layer_children.iter().map(|c| std::rc::Rc::as_ptr(c)).collect();
+    // Removals first (old-only subtrees), then additions (new-only subtrees).
+    for c in &old_layer_children {
+        if !new_ptrs.contains(&std::rc::Rc::as_ptr(c)) {
+            remove_ref_ids(c, &mut idx);
+        }
+    }
+    for c in &new_layer_children {
+        if !old_ptrs.contains(&std::rc::Rc::as_ptr(c)) {
+            collect_ref_ids(c, &mut idx);
+        }
+    }
+
+    // --- Symbols: owned masters re-cloned by the builder; diff by value. ---
+    // Masters whose value is unchanged contribute identically (skip). The
+    // symbols set is small, so the O(symbols) value diff is negligible and
+    // mirrors rebuild's per-master `collect_ref_ids(Rc::new(clone))`.
+    let symbols_changed = old_doc.symbols != new_doc.symbols;
+    if symbols_changed {
+        // Remove the contribution of masters that are gone (value not present
+        // in new), then add the contribution of masters that are new (value
+        // not present in old). Value-equal masters in both are left untouched.
+        let mut new_remaining: Vec<&Element> = new_doc.symbols.iter().collect();
+        for master in &old_doc.symbols {
+            if let Some(pos) = new_remaining.iter().position(|m| *m == master) {
+                // Unchanged master: keep its existing index entries.
+                new_remaining.remove(pos);
+            } else {
+                remove_ref_ids(&std::rc::Rc::new(master.clone()), &mut idx);
+            }
+        }
+        // Whatever remains in `new_remaining` is genuinely new; add it.
+        // Sorted-by-id add to mirror rebuild's deterministic order (matters
+        // only if duplicate ids ever appear, which the invariant forbids).
+        let mut additions = new_remaining;
+        additions.sort_by(|a, b| {
+            a.common().id.as_deref().unwrap_or("")
+                .cmp(b.common().id.as_deref().unwrap_or(""))
+        });
+        for master in additions {
+            collect_ref_ids(&std::rc::Rc::new(master.clone()), &mut idx);
+        }
+    }
+
+    idx
+}
+
 /// Install an already-built `index` for this render and return a guard that
 /// restores the prior index on drop (so nested renders nest safely). This is
 /// the Phase-4b paint entry: the caller passes the Model's persistent index
@@ -2444,6 +2553,141 @@ mod tests {
         use crate::geometry::live::ElementRef;
         assert!(RenderResolver.resolve(&ElementRef("r1".into())).is_some());
         assert!(RenderResolver.resolve(&ElementRef("m1".into())).is_some());
+    }
+
+    // --- Phase 4b incremental maintenance (REFERENCE_GRAPH.md §2.4) ---
+    //
+    // `incremental_update_index` must produce a map that is value-equal to a
+    // from-scratch `rebuild_id_index` of the new document, for any edit. These
+    // tests assert that equality directly (the same property the Model's
+    // debug-assert gate enforces on every edit), exercising each diff arm:
+    // unchanged-subtree skip, old-only remove, new-only add, plus the symbols
+    // and structural cases.
+
+    #[cfg(test)]
+    fn ix_rect(id: &str) -> std::rc::Rc<Element> {
+        use crate::geometry::element::{RectElem, CommonProps};
+        std::rc::Rc::new(Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some(id.into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        }))
+    }
+
+    #[cfg(test)]
+    fn ix_group(id: &str, children: Vec<std::rc::Rc<Element>>) -> std::rc::Rc<Element> {
+        use crate::geometry::element::{GroupElem, CommonProps};
+        std::rc::Rc::new(Element::Group(GroupElem {
+            children,
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some(id.into()), ..Default::default() },
+        }))
+    }
+
+    #[test]
+    fn incremental_leaf_value_edit_equals_rebuild() {
+        // A deep CoW edit: one shared sibling stays Rc-identical (skipped),
+        // the edited node appears as old-only (removed) + new-only (added).
+        let mut old = Document::default();
+        let shared = ix_rect("shared");
+        let before = ix_rect("edited");
+        old.layers[0].children_mut().unwrap().push(shared.clone());
+        old.layers[0].children_mut().unwrap().push(before);
+
+        let mut new = old.clone();
+        // Replace "edited" in place with a NEW Rc (different pointer); "shared"
+        // keeps its original Rc pointer (structure sharing).
+        new.layers[0].children_mut().unwrap()[1] = ix_rect("edited_v2");
+
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "leaf edit matches rebuild");
+        assert!(updated.get("edited").is_none(), "old id removed");
+        assert!(updated.get("edited_v2").is_some(), "new id added");
+        assert!(updated.get("shared").is_some(), "unchanged sibling retained");
+    }
+
+    #[test]
+    fn incremental_subtree_replace_equals_rebuild() {
+        // Replace a whole group subtree (with descendants) by a new group.
+        let mut old = Document::default();
+        old.layers[0].children_mut().unwrap()
+            .push(ix_group("g", vec![ix_rect("a"), ix_rect("b")]));
+        let mut new = old.clone();
+        new.layers[0].children_mut().unwrap()[0] =
+            ix_group("g2", vec![ix_rect("c"), ix_rect("d")]);
+
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "subtree replace matches rebuild");
+        for gone in ["g", "a", "b"] {
+            assert!(updated.get(gone).is_none(), "{gone} removed with old subtree");
+        }
+        for added in ["g2", "c", "d"] {
+            assert!(updated.get(added).is_some(), "{added} added with new subtree");
+        }
+    }
+
+    #[test]
+    fn incremental_insert_equals_rebuild() {
+        let mut old = Document::default();
+        old.layers[0].children_mut().unwrap().push(ix_rect("a"));
+        let mut new = old.clone();
+        new.layers[0].children_mut().unwrap().push(ix_rect("b"));
+
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "insert matches rebuild");
+        assert!(updated.get("a").is_some());
+        assert!(updated.get("b").is_some());
+    }
+
+    #[test]
+    fn incremental_delete_equals_rebuild() {
+        let mut old = Document::default();
+        old.layers[0].children_mut().unwrap().push(ix_rect("a"));
+        old.layers[0].children_mut().unwrap().push(ix_rect("b"));
+        let mut new = old.clone();
+        new.layers[0].children_mut().unwrap().remove(0); // delete "a"
+
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "delete matches rebuild");
+        assert!(updated.get("a").is_none(), "deleted id removed");
+        assert!(updated.get("b").is_some(), "survivor retained");
+    }
+
+    #[test]
+    fn incremental_symbols_add_and_remove_equals_rebuild() {
+        use crate::geometry::element::{RectElem, CommonProps};
+        let master = |id: &str| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 1.0, height: 1.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some(id.into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut old = Document::default();
+        old.symbols = vec![master("m1")];
+        // Add a master and remove the existing one.
+        let mut new = old.clone();
+        new.symbols = vec![master("m2")];
+
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "symbols edit matches rebuild");
+        assert!(updated.get("m1").is_none(), "removed master gone");
+        assert!(updated.get("m2").is_some(), "added master indexed");
+    }
+
+    #[test]
+    fn incremental_no_change_is_identity_against_rebuild() {
+        let mut old = Document::default();
+        old.layers[0].children_mut().unwrap().push(ix_rect("a"));
+        let new = old.clone(); // every Rc pointer-identical
+        let idx = rebuild_id_index(&old);
+        let updated = incremental_update_index(idx, &old, &new);
+        assert_eq!(updated, rebuild_id_index(&new), "no-op matches rebuild");
     }
 
     #[test]
