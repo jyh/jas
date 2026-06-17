@@ -1,16 +1,23 @@
 # Jas Architecture
 
-Jas is a vector drawing application with four parallel implementations sharing
-the same architecture:
+Jas is a vector illustration application with **five** parallel implementations
+sharing the same observable semantics (same element tree, state transitions, and
+algorithm results — not the same pixels):
 
-| Implementation | UI Framework | Directory      |
-|----------------|-------------|----------------|
-| Python         | Qt/PySide6  | `jas/`         |
-| OCaml          | GTK/lablgtk | `jas_ocaml/`   |
-| Rust           | Dioxus/WASM | `jas_dioxus/`  |
-| Swift          | AppKit      | `JasSwift/`    |
+| Implementation | UI Framework | Directory      | Shape |
+|----------------|-------------|----------------|-------|
+| Python         | Qt/PySide6  | `jas/`         | native MVC |
+| OCaml          | GTK/lablgtk | `jas_ocaml/`   | native MVC |
+| Rust           | Dioxus/WASM | `jas_dioxus/`  | native MVC |
+| Swift          | AppKit      | `JasSwift/`    | native MVC |
+| Flask          | server-side | `jas_flask/`   | generic YAML reference renderer |
 
-All four follow an MVC pattern built around an **immutable document model**.
+The **four native apps** follow the MVC pattern below, built around an
+**immutable document model**. `jas_flask` is the generic reference renderer:
+it interprets `workspace/*.yaml` server-side and does **not** carry the native
+tree-path MVC document model — it exists to pin the generic spec behavior the
+other four must match. Behavior is authored once in `workspace/*.yaml` and
+interpreted by all apps; native code is discouraged.
 
 ---
 
@@ -45,27 +52,45 @@ All four follow an MVC pattern built around an **immutable document model**.
 ## Document
 
 A Document is an immutable value consisting of an ordered list of Layers, an
-active layer index, and a selection state.
+active layer index, a selection state, and an off-canvas store of reusable
+master elements (Symbols).
 
 ```
 Document
   layers:          [Layer, ...]     # ordered back-to-front
   selected_layer:  int              # index of active layer for new elements
   selection:       Selection        # set of ElementSelection entries
+  symbols:         [Element, ...]   # off-canvas master store, keyed by common.id
+                                    #   (SYMBOLS.md); resolvable but never painted
+                                    #   in document order. Iterated sorted-by-id.
 ```
 
-### Element paths
+(Other document-level fields exist — artboards, print preferences, document
+setup — described in their own docs.)
 
-Elements are addressed by position, not by identity. An **ElementPath** is a
-tuple of integer indices tracing the route through the tree:
+### Element paths and identity
 
-```
-(0,)      -> layers[0]                     (a Layer)
-(0, 2)    -> layers[0].children[2]         (an element)
-(0, 2, 1) -> layers[0].children[2].children[1]  (inside a Group)
-```
+Elements have **two** complementary handles:
 
-This avoids the need for element IDs and enables cheap structural operations.
+- **Position** — the **ElementPath**, a tuple of integer indices tracing the
+  route through the tree. This is the UI address ("where"):
+
+  ```
+  (0,)      -> layers[0]                     (a Layer)
+  (0, 2)    -> layers[0].children[2]         (an element)
+  (0, 2, 1) -> layers[0].children[2].children[1]  (inside a Group)
+  ```
+
+  Paths enable cheap structural operations and remain the primary addressing
+  scheme for tools, selection, and rendering.
+
+- **Identity** — an **additive `common.id`** (`Option<String>`) present on every
+  element ("which"). It is `None` until something needs a stable handle (a
+  reference target, a symbol master), so existing documents stay valid and
+  byte-identical. Identity round-trips via the SVG `id` attribute; duplication
+  clears ids; undo/redo preserve them. Identity is what makes liveness work
+  across the tree (a `Reference` names its target by id, not by path) — see
+  **Live elements** below and `REFERENCE_GRAPH.md`.
 
 ### Selection
 
@@ -119,7 +144,32 @@ Text        x, y, content, font_family, font_size, ...
 TextPath    d: [PathCommand, ...], content, start_offset, font_family, ...
 Group       children: [Element, ...]
 Layer       name, children: [Element, ...]    (extends Group)
+Live        LiveVariant — a source-evaluated element (see below)
 ```
+
+### Live elements
+
+A **Live** element stores a *source description* and evaluates it to geometry on
+demand, rather than holding baked geometry — the discipline that makes liveness
+and equivalence possible. `LiveVariant` is a closed enum with two arms today:
+
+```
+CompoundShape   operation, operands: [Element, ...]   # boolean/pathfinder result
+Reference       target: ElementRef(id), instance_transform?, paint overrides
+```
+
+- **CompoundShape** owns its inputs (containment-based liveness) and evaluates
+  them through the boolean algorithm; `release`/`expand` are its inverse verbs.
+- **Reference** names its target by stable `common.id` (reference-based,
+  many-to-many liveness) and resolves it through an `ElementResolver` seam at
+  eval time; a dangling target or a cycle breaks to empty (never a panic). A
+  Symbol instance *is* a `Reference` to an off-canvas master.
+
+Evaluation, the dependency graph (`deps`/`rdeps`/`dangling`/`cycles`/
+`topo_order`), the persistent id→element index, and the recompute cache are
+documented in `REFERENCE_GRAPH.md` and `SYMBOLS.md`. Per-app strategy may
+diverge (e.g. the index/cache implementation); equivalence is pinned on
+`resolve()` *results*, not the cache internals.
 
 ### Common properties
 
@@ -327,15 +377,31 @@ POLYGON_SIDES       = 5         default sides for polygon tool
 | **Type on a Path** | Drag a curve to create a TextPath; click on an existing Path to convert it. Editing happens in place along the path. |
 | **Line** | Press-drag-release to create a Line element. |
 | **Rect** | Press-drag-release to create a Rect element. Coordinates normalized for any drag direction. |
+| **Ellipse** | Press-drag-release to create an Ellipse element (overlay preview, commit on mouse-up). |
 | **Polygon** | Press-drag-release to create a regular polygon. First edge defined by drag vector. |
+| **Paintbrush / Blob Brush** | Freehand brush strokes; commit through the shared point-buffer → curve-fit pipeline. |
+| **Magic Wand** | Select elements by similarity. |
+| **Eyedropper** | Sample and apply appearance from one element to another. |
+| **Transform (Scale / Rotate / Shear / Reflect)** | Direct-manipulation transform tools with overlay preview, on_change, and apply-to-strokes/corners. |
+| **Zoom / Hand** | View navigation (zoom to point/marquee; pan). |
 
-Drawing tools (Line, Rect, Polygon) share a common base that handles the
-press/move/release state machine and overlay drawing. Subclasses override
-`create_element()` and `draw_preview()`.
+Additional non-tool interaction surfaces (Boolean, Brushes, Gradient, Align,
+Color, Swatches, Layers, …) are **panels** defined in `workspace/*.yaml`, not
+`CanvasTool` state machines.
 
-Selection tools share a common base with states `Idle`, `Marquee`, and
-`Moving`. Subclasses override `select_rect()` to call the appropriate
-Controller method.
+Drawing tools share a common base that handles the press/move/release state
+machine and overlay drawing. Selection tools share a base with states `Idle`,
+`Marquee`, and `Moving`.
+
+**Tool runtime (YAML-driven).** The interaction logic for most tools is now
+authored once in `workspace/*.yaml` and interpreted by a thin per-app tool
+runtime, rather than re-implemented natively in each app — the migration is
+complete across all four native apps (see `RUST_TOOL_RUNTIME.md` /
+`SWIFT_TOOL_RUNTIME.md` / `OCAML_TOOL_RUNTIME.md` / `PYTHON_TOOL_RUNTIME.md`).
+Only **Type** and **Type on a Path** remain permanently native (per
+`NATIVE_BOUNDARY.md` §6), because in-place text editing needs the platform text
+stack. The `CanvasTool` interface above is the native seam the YAML runtime and
+the two permanent-native tools both implement.
 
 ---
 
@@ -391,37 +457,42 @@ Cut, Copy, Paste, Delete, Select All, Group, Ungroup, Lock, Unlock All.
 
 Each implementation mirrors this structure:
 
+The four native apps mirror this structure (names vary slightly per language):
+
 ```
 document/
-  document     # Document, ElementPath, ElementSelection, Selection
-  model        # Model with undo/redo stacks
-  controller   # Controller with selection and mutation operations
+  document          # Document (layers, selection, symbols store), ElementPath
+  model             # Model with undo/redo stacks (each paired with its id_index)
+  controller        # Controller: selection, mutation, reference/symbol operations
+  id_index          # Persistent id->element index + builders (core; REFERENCE_GRAPH.md §2.4)
+  dependency_index  # Derived deps/rdeps/dangling/cycles/topo_order graph
+  artboard          # Artboard model + current artboard
+  print_preferences # Print/document-setup state
 geometry/
-  element           # Element types, PathCommand, bounds, control points
+  element           # Element types (incl. Live/LiveVariant), PathCommand, bounds, control points
+  live              # LiveElement framework: CompoundShape + Reference eval, resolver seam, recompute cache
   hit_test          # Pure geometric query functions
-  svg               # SVG import/export (text y converts ascent <-> top)
+  svg               # SVG import/export (id/<use>/<defs> round-trip)
   measure           # Unit types and text-on-path measurement
   text_layout       # Pure word-wrap layout, glyph index, hit-test (UTF-8)
   path_text_layout  # Arc-length glyph placement for text-on-path
-  fit_curve         # Bezier curve fitting (used by Pencil)
+  fit_curve         # Bezier curve fitting (used by freehand brushes)
 tools/
-  tool              # CanvasTool interface, ToolContext, constants
-  selection         # Selection, Interior Selection, Partial Selection tools
-  drawing           # Line, Rect, Polygon, Star, Rounded-Rect, Ellipse
-  pen               # Pen tool (Bezier path creation)
-  pencil            # Pencil tool (freehand with curve fitting)
-  path_eraser       # Path Eraser tool
-  smooth            # Smooth tool
-  add_anchor_point  # Add Anchor Point tool
-  delete_anchor_point  # Delete Anchor Point tool
-  anchor_point      # Anchor Point tool (convert smooth/corner/cusp)
+  tool              # CanvasTool interface, ToolContext, constants (the native seam)
+  <tool runtime>    # Generic YAML tool interpreter (drives most tools from workspace/*.yaml)
+  type_tool         # Type tool — permanently native (in-place text editing)
+  type_on_path      # Type on a Path tool — permanently native
   text_edit         # Shared in-place edit session, undo/redo, blink clock
-  text_measure      # Real-font measurer used by renderer + editor
-  type_tool         # Type tool with in-place editing session
-  type_on_path      # Type on a Path tool with in-place editing session
 canvas/
-  canvas       # Canvas view, rendering, hit-test callbacks, tool dispatch
-  toolbar      # Tool selection UI
+  canvas / render   # Canvas view, rendering, hit-test callbacks, tool dispatch;
+                    #   render-scoped reference resolver installation
+  toolbar           # Tool selection UI
+interpreter/        # Generic workspace YAML interpreter: expr language, effects,
+                    #   state store, panel/widget rendering
 menu/
-  menubar      # Menu definitions and command dispatch
+  menubar           # Menu definitions and command dispatch
 ```
+
+`jas_flask/` does not follow this layout — it is a Flask server that renders
+`workspace/*.yaml` generically (see `FLASK_INTEGRATION_GAPS.md` /
+`FLASK_PARITY.md`).
