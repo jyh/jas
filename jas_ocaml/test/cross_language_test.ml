@@ -160,6 +160,26 @@ let run_operation_fixture fixture_name =
         let target_id = op |> member "target_id" |> to_string in
         let ref_id = op |> member "ref_id" |> to_string in
         ctrl#create_reference target_path target_id ref_id
+      (* Symbols P2 operations (SYMBOLS.md section 7). Value-in-op: the ids and
+         paths are read literally from the fixture payload, exactly like the
+         create_reference arm. *)
+      | "make_symbol" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let master_id = op |> member "master_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#make_symbol path master_id ref_id
+      | "place_instance" ->
+        let master_id = op |> member "master_id" |> to_string in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#place_instance master_id ref_id
+      | "detach" ->
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        ctrl#detach path
+      | "redefine" ->
+        let master_id = op |> member "master_id" |> to_string in
+        let path = op |> member "path" |> to_list |> List.map to_int in
+        let ref_id = op |> member "ref_id" |> to_string in
+        ctrl#redefine master_id path ref_id
       | "delete_selection" ->
         let new_doc = Jas.Document.delete_selection model#document in
         model#set_document new_doc
@@ -922,6 +942,12 @@ let () =
         run_operation_fixture "undo_redo_laws.json");
       Alcotest.test_case "controller_ops operations" `Quick (fun () ->
         run_operation_fixture "controller_ops.json");
+      (* Symbols P2 operation fixtures (SYMBOLS.md section 7): make_symbol,
+         place_instance, detach, redefine. Each setup parses through the P1 SVG
+         <defs> codec, runs the op, and pins the canonical JSON all apps must
+         reproduce. *)
+      Alcotest.test_case "symbols_ops operations" `Quick (fun () ->
+        run_operation_fixture "symbols_ops.json");
     ];
 
     (* Workspace layout tests *)

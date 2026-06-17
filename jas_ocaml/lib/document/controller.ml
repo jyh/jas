@@ -46,6 +46,49 @@ let move_kind elem (kind : Document.selection_kind) dx dy =
     let indices = Document.SortedCps.to_list s in
     Element.move_control_points elem indices dx dy
 
+(** Find the first id-bearing element named [id], searching [doc.symbols]
+    (sorted-by-id for determinism, matching every order-dependent symbols
+    site) then [doc.layers] in pre-order. A pure lookup — no entropy — used by
+    [detach] to resolve an instance target across both the off-canvas master
+    store and the canvas tree (SYMBOLS.md section 7). Returns an owned copy so
+    callers can mutate it independently. *)
+let find_element_by_id (doc : Document.document) (id : string) :
+    Element.element option =
+  let rec walk elem =
+    if Element.id_of elem = Some id then Some elem
+    else
+      (* Recurse into container children only (Group / Layer), mirroring the
+         Rust [Element::children] which is [None] for every leaf kind. *)
+      match elem with
+      | Element.Group { children; _ } | Element.Layer { children; _ } ->
+        let n = Array.length children in
+        let rec loop i =
+          if i >= n then None
+          else match walk children.(i) with
+            | Some _ as found -> found
+            | None -> loop (i + 1)
+        in
+        loop 0
+      | _ -> None
+  in
+  (* Symbols first, in sorted-by-id order (the section 2 deterministic-order
+     rule). *)
+  let sorted_masters = Array.copy doc.Document.symbols in
+  Array.sort (fun a b ->
+    let key e = match Element.id_of e with Some s -> s | None -> "" in
+    String.compare (key a) (key b)) sorted_masters;
+  let from_masters =
+    Array.fold_left (fun acc master ->
+      match acc with Some _ -> acc | None -> walk master)
+      None sorted_masters
+  in
+  match from_masters with
+  | Some _ as found -> found
+  | None ->
+    Array.fold_left (fun acc layer ->
+      match acc with Some _ -> acc | None -> walk layer)
+      None doc.Document.layers
+
 class controller ?(model = Model.create ()) () =
   object (self)
     method model = model
@@ -137,6 +180,153 @@ class controller ?(model = Model.create ()) () =
         in
         let reference = Element.make_reference ~id:(Some ref_id) resolved_id in
         self#add_element reference
+
+    (* ── Symbols P2 — operations (SYMBOLS.md section 7) ────────
+       Value-in-op: every id is minted by the initiator/UI and carried in the
+       op payload, never minted inside the Controller (same rule as
+       create_reference / assign_id), so all apps apply identical values. Each
+       clones the doc, mutates, and set_document — no internal snapshot; the
+       caller owns undo. *)
+
+    (** Make Symbol (promote): move the element at [path] into [doc.symbols] as
+        a master and leave a reference instance in its place (SYMBOLS.md
+        section 7, Fork S6 — the dual of Detach). Assign-on-create: if the
+        element already has a [common] id, that id is KEPT as the master key
+        and [master_id] is ignored (mirrors create_reference target rule);
+        otherwise [master_id] is stamped. The instance carries id [ref_id] and
+        targets the master id. Net: the master lives off-canvas in [symbols],
+        an instance sits where the element was, so the canvas looks unchanged
+        (the instance resolves to the master geometry). No-op on an invalid
+        path. *)
+    method make_symbol (path : Document.element_path)
+        (master_id : string) (ref_id : string) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some target ->
+        (* Resolve the master id: keep the element own id if it has one, else
+           stamp the carried master_id (assign-on-create). *)
+        let resolved_id =
+          match Element.id_of target with
+          | Some existing -> existing
+          | None -> master_id
+        in
+        (* The master carries the resolved id. *)
+        let master = Element.with_id target (Some resolved_id) in
+        (* The in-place instance targets the master id, with its own ref_id. *)
+        let reference =
+          Element.make_reference ~id:(Some ref_id) resolved_id in
+        (* Replace the element in place with the instance, then push the
+           master into the off-canvas store. *)
+        let new_doc = Document.replace_element doc path reference in
+        let new_symbols =
+          Array.append new_doc.Document.symbols [| master |] in
+        model#set_document
+          { new_doc with Document.symbols = new_symbols }
+
+    (** Place Instance: append a reference targeting an existing master
+        ([master_id]) to the active layer via [add_element] (which auto-selects
+        it) — exactly like create_reference final step (SYMBOLS.md section 7).
+        No offset: placement offset is a UI concern. It is fine if [master_id]
+        does not currently exist; the instance simply renders empty until the
+        master appears (dangling is already handled by the resolver). The
+        instance carries id [ref_id], minted by the initiator. *)
+    method place_instance (master_id : string) (ref_id : string) =
+      let reference =
+        Element.make_reference ~id:(Some ref_id) master_id in
+      self#add_element reference
+
+    (** Detach (break the link / expand): replace the reference instance at
+        [path] with an INDEPENDENT copy of its resolved target (SYMBOLS.md
+        section 7, Fork S6 — the inverse of Make Symbol). The target id is
+        resolved by a pure lookup over ALL id-bearing elements ([doc.symbols]
+        AND [layers]; deterministic, no entropy). The copy is born id-less
+        ([clear_ids], per the duplication rule) and the instance own overrides
+        are applied onto it: its [common] transform (set, or compose if the
+        copy already has one) and its paint (fill / stroke applied only when
+        Some). The master and every other instance are untouched, and nothing
+        is minted. No-op when the path is invalid, not a reference, or the
+        target is unresolvable. *)
+    method detach (path : Document.element_path) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some elem ->
+        (* Must be a reference instance. *)
+        match elem with
+        | Element.Live (Element.Reference instance) ->
+          (* Resolve the target id over symbols + layers (a pure
+             id->element map). *)
+          (match find_element_by_id doc instance.Element.ref_target with
+           | None -> ()
+           | Some target ->
+             (* Independent copy of the resolved target, born id-less. *)
+             let copy = Element.clear_ids target in
+             (* Apply the instance transform override. Compose if the copy
+                already carries one (instance transform applied on top of the
+                copy one), otherwise just set it. *)
+             let copy =
+               match instance.Element.ref_transform with
+               | None -> copy
+               | Some inst_t ->
+                 let composed =
+                   match Element.get_transform copy with
+                   | Some copy_t -> Element.multiply inst_t copy_t
+                   | None -> inst_t
+                 in
+                 Element.set_transform (Some composed) copy
+             in
+             (* Apply the instance paint overrides (only when Some). *)
+             let copy =
+               match instance.Element.ref_fill with
+               | Some _ as f -> Element.with_fill copy f
+               | None -> copy
+             in
+             let copy =
+               match instance.Element.ref_stroke with
+               | Some _ as s -> Element.with_stroke copy s
+               | None -> copy
+             in
+             model#set_document (Document.replace_element doc path copy))
+        | _ -> ()
+
+    (** Redefine: replace the master with id [master_id] in [doc.symbols] with
+        a clone of the element at [path] (re-id the clone to [master_id]), then
+        replace the element at [path] in place with a reference instance (id
+        [ref_id], targeting [master_id]) — the selection becomes an instance of
+        the redefined master (SYMBOLS.md section 7, Fork S2). All other
+        instances of [master_id] re-resolve to the new definition on the next
+        paint. No-op when [master_id] is not in [symbols] or [path] is
+        invalid. *)
+    method redefine (master_id : string)
+        (path : Document.element_path) (ref_id : string) =
+      let doc = model#document in
+      (* The master must already exist. *)
+      let master_idx =
+        let rec find i =
+          if i >= Array.length doc.Document.symbols then None
+          else if Element.id_of doc.Document.symbols.(i) = Some master_id
+          then Some i
+          else find (i + 1)
+        in
+        find 0
+      in
+      match master_idx with
+      | None -> ()
+      | Some master_idx ->
+        match (try Some (Document.get_element doc path) with _ -> None) with
+        | None -> ()
+        | Some source ->
+          (* New master = clone of the selection, re-id to master_id. *)
+          let new_master = Element.with_id source (Some master_id) in
+          (* The selection becomes an instance of the redefined master. *)
+          let reference =
+            Element.make_reference ~id:(Some ref_id) master_id in
+          let new_doc = Document.replace_element doc path reference in
+          let new_symbols = Array.copy new_doc.Document.symbols in
+          new_symbols.(master_idx) <- new_master;
+          model#set_document
+            { new_doc with Document.symbols = new_symbols }
 
     (** Append [elem] to the mask subtree of the element at [path].
         Returns [true] on success, [false] when the target has no

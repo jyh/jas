@@ -301,6 +301,19 @@ class CrossLanguageTest(absltest.TestCase):
                     ctrl.create_reference(
                         tuple(op["target_path"]),
                         op["target_id"], op["ref_id"])
+                # Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids
+                # and paths are read literally from the fixture payload,
+                # exactly like the create_reference arm.
+                elif op_name == "make_symbol":
+                    ctrl.make_symbol(
+                        tuple(op["path"]), op["master_id"], op["ref_id"])
+                elif op_name == "place_instance":
+                    ctrl.place_instance(op["master_id"], op["ref_id"])
+                elif op_name == "detach":
+                    ctrl.detach(tuple(op["path"]))
+                elif op_name == "redefine":
+                    ctrl.redefine(
+                        op["master_id"], tuple(op["path"]), op["ref_id"])
                 elif op_name == "delete_selection":
                     model.document = model.document.delete_selection()
                 elif op_name == "lock_selection":
@@ -332,6 +345,13 @@ class CrossLanguageTest(absltest.TestCase):
 
     def test_operation_controller_ops(self):
         self._run_operation_fixture("controller_ops.json")
+
+    def test_operation_symbols_ops(self):
+        # Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol,
+        # place_instance, detach, redefine. Each setup parses through the P1
+        # SVG <defs> codec, runs the op, and pins the canonical JSON all four
+        # apps must reproduce.
+        self._run_operation_fixture("symbols_ops.json")
 
     def test_assign_id_on_compound(self):
         # Regression for the reachable equivalence bug: assign_id does

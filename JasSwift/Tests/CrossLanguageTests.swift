@@ -413,6 +413,28 @@ private func runOperationFixture(_ fixture: String) throws {
                     targetPath,
                     targetId: op["target_id"] as! String,
                     refId: op["ref_id"] as! String)
+            // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
+            // paths are read literally from the fixture payload, exactly like
+            // the create_reference case.
+            case "make_symbol":
+                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.makeSymbol(
+                    path,
+                    masterId: op["master_id"] as! String,
+                    refId: op["ref_id"] as! String)
+            case "place_instance":
+                controller.placeInstance(
+                    masterId: op["master_id"] as! String,
+                    refId: op["ref_id"] as! String)
+            case "detach":
+                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.detach(path)
+            case "redefine":
+                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+                controller.redefine(
+                    masterId: op["master_id"] as! String,
+                    path,
+                    refId: op["ref_id"] as! String)
             case "delete_selection":
                 model.document = model.document.deleteSelection()
             case "lock_selection":
@@ -449,6 +471,13 @@ private func runOperationFixture(_ fixture: String) throws {
 
 @Test func operationControllerOps() throws {
     try runOperationFixture("controller_ops.json")
+}
+
+/// Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol, place_instance,
+/// detach, redefine. Each setup parses through the P1 SVG <defs> codec, runs
+/// the op, and pins the canonical JSON all apps must reproduce.
+@Test func operationSymbolsOps() throws {
+    try runOperationFixture("symbols_ops.json")
 }
 
 // MARK: - Workspace layout equivalence tests
