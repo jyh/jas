@@ -66,6 +66,43 @@ def selection_has_mask(document) -> bool:
     return True
 
 
+# ── Symbols helpers (SYMBOLS.md §7) ──────────────────────────
+
+def _find_element_by_id(document, id: str) -> Element | None:
+    """Find the first id-bearing element named ``id``, searching
+    ``document.symbols`` (sorted-by-id for determinism, matching every
+    order-dependent symbols site) then ``document.layers`` in pre-order. A
+    pure lookup — no entropy — used by ``Controller.detach`` to resolve an
+    instance's target across both the off-canvas master store and the canvas
+    tree (SYMBOLS.md §7). Returns the element it finds (frozen dataclasses are
+    immutable, so callers copy via ``dataclasses.replace``). Mirrors the Rust
+    ``find_element_by_id``.
+    """
+    def walk(elem: Element) -> Element | None:
+        if getattr(elem, "id", None) == id:
+            return elem
+        if isinstance(elem, Group):  # Group/Layer carry children
+            for child in elem.children:
+                found = walk(child)
+                if found is not None:
+                    return found
+        return None
+
+    # Symbols first, in sorted-by-id order (the §2 deterministic-order rule).
+    sorted_masters = sorted(
+        document.symbols, key=lambda m: getattr(m, "id", None) or "")
+    for master in sorted_masters:
+        found = walk(master)
+        if found is not None:
+            return found
+    # Then the layer tree.
+    for layer in document.layers:
+        found = walk(layer)
+        if found is not None:
+            return found
+    return None
+
+
 class Controller:
     """Mediates between user actions and the document model."""
 
@@ -177,6 +214,141 @@ class Controller:
                 target_path, replace(target, id=target_id))
         reference = ReferenceElem(target=resolved_id, id=ref_id)
         self.add_element(reference)
+
+    # ── Symbols P2 — operations (SYMBOLS.md §7) ──────────────────
+    # Value-in-op: every id is minted by the initiator/UI and carried in the
+    # op payload, never minted inside the Controller (same rule as
+    # create_reference / assign_id), so all apps apply identical values. Each
+    # produces a new document and sets it directly — no internal snapshot;
+    # the caller owns undo.
+
+    def make_symbol(self, path: ElementPath, master_id: str,
+                    ref_id: str) -> None:
+        """Make Symbol (promote): move the element at ``path`` into
+        ``doc.symbols`` as a master and leave a ``ReferenceElem`` instance in
+        its place (SYMBOLS.md §7, Fork S6 — the dual of Detach).
+        Assign-on-create: if the element already has an ``id``, that id is KEPT
+        as the master key and ``master_id`` is ignored (mirrors
+        create_reference's target rule); otherwise ``master_id`` is stamped.
+        The instance carries ``id = ref_id`` and targets the master id. Net:
+        the master lives off-canvas in ``symbols``, an instance sits where the
+        element was, so the canvas looks unchanged (the instance resolves to
+        the master geometry). No-op on an invalid path. Mirrors the Rust
+        ``Controller::make_symbol``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        try:
+            target = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        # Resolve the master id: keep the element's own id if it has one,
+        # else stamp the carried master_id (assign-on-create).
+        resolved_id = target.id if target.id is not None else master_id
+        # The master carries the resolved id.
+        master = replace(target, id=resolved_id)
+        # The in-place instance targets the master id, with its own ref_id.
+        reference = ReferenceElem(target=resolved_id, id=ref_id)
+        # Replace the element in place with the instance, then push the master
+        # into the off-canvas store.
+        new_doc = doc.replace_element(path, reference)
+        self._model.document = replace(
+            new_doc, symbols=new_doc.symbols + (master,))
+
+    def place_instance(self, master_id: str, ref_id: str) -> None:
+        """Place Instance: append a ``ReferenceElem`` targeting an existing
+        master (``master_id``) to the active layer via ``add_element`` (which
+        auto-selects it) — exactly like create_reference's final step
+        (SYMBOLS.md §7). No offset: placement offset is a UI concern. It is
+        fine if ``master_id`` does not currently exist; the instance simply
+        renders empty until the master appears (dangling is already handled by
+        the resolver). The instance carries ``id = ref_id``, minted by the
+        initiator. Mirrors the Rust ``Controller::place_instance``.
+        """
+        from geometry.element import ReferenceElem
+        self.add_element(ReferenceElem(target=master_id, id=ref_id))
+
+    def detach(self, path: ElementPath) -> None:
+        """Detach (break the link / expand): replace the ``ReferenceElem``
+        instance at ``path`` with an INDEPENDENT copy of its resolved target
+        (SYMBOLS.md §7, Fork S6 — the inverse of Make Symbol). The target id is
+        resolved by a pure lookup over ALL id-bearing elements
+        (``doc.symbols`` AND ``layers``; deterministic, no entropy). The copy
+        is born id-less (``clear_ids``, per the duplication rule) and the
+        instance's own overrides are applied onto it: its ``transform`` (set,
+        or compose if the copy already has one) and its paint (``fill`` /
+        ``stroke`` applied only when not None). The master and every other
+        instance are untouched, and nothing is minted. No-op when the path is
+        invalid, not a reference, or the target is unresolvable. Mirrors the
+        Rust ``Controller::detach``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        # Must be a reference instance.
+        if not isinstance(elem, ReferenceElem):
+            return
+        # Resolve the target id over symbols + layers (a pure id->element map).
+        target = _find_element_by_id(doc, elem.target)
+        if target is None:
+            return
+
+        # Independent copy of the resolved target, born id-less.
+        copy = clear_ids(target)
+
+        # Apply the instance's transform override. Compose if the copy already
+        # carries one (instance transform applied on top of the copy's),
+        # otherwise just set it.
+        if elem.transform is not None:
+            copy_t = getattr(copy, "transform", None)
+            composed = elem.transform.multiply(copy_t) \
+                if copy_t is not None else elem.transform
+            copy = replace(copy, transform=composed)
+        # Apply the instance's paint overrides (only when not None).
+        if elem.fill is not None:
+            copy = _with_fill(copy, elem.fill)
+        if elem.stroke is not None:
+            copy = _with_stroke(copy, elem.stroke)
+
+        self._model.document = doc.replace_element(path, copy)
+
+    def redefine(self, master_id: str, path: ElementPath,
+                 ref_id: str) -> None:
+        """Redefine: replace the master with id ``master_id`` in
+        ``doc.symbols`` with a clone of the element at ``path`` (re-id the
+        clone to ``master_id``), then replace the element at ``path`` in place
+        with a ``ReferenceElem`` instance (``id = ref_id``, targeting
+        ``master_id``) — the selection becomes an instance of the redefined
+        master (SYMBOLS.md §7, Fork S2). All other instances of ``master_id``
+        re-resolve to the new definition on the next paint. No-op when
+        ``master_id`` is not in ``symbols`` or ``path`` is invalid. Mirrors the
+        Rust ``Controller::redefine``.
+        """
+        from geometry.element import ReferenceElem
+        doc = self._model.document
+        # The master must already exist.
+        master_idx = next(
+            (i for i, m in enumerate(doc.symbols)
+             if getattr(m, "id", None) == master_id),
+            None)
+        if master_idx is None:
+            return
+        try:
+            source = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+
+        # New master = clone of the selection, re-id'd to master_id.
+        new_master = replace(source, id=master_id)
+        # The selection becomes an instance of the redefined master.
+        reference = ReferenceElem(target=master_id, id=ref_id)
+        new_doc = doc.replace_element(path, reference)
+        new_symbols = (new_doc.symbols[:master_idx] + (new_master,)
+                       + new_doc.symbols[master_idx + 1:])
+        self._model.document = replace(new_doc, symbols=new_symbols)
 
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:

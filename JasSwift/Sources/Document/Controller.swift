@@ -71,11 +71,14 @@ public class Controller {
         layers[idx] = newLayer
         let es = ElementSelection.all([idx, childIdx])
         // Preserve every non-layer document field — Document's default
-        // initializer zeros artboards / artboardOptions / documentSetup
-        // / printPreferences if they aren't passed, so the prior
+        // initializer zeros symbols / artboards / artboardOptions /
+        // documentSetup / printPreferences if they aren't passed, so a
         // shorter call wiped the artboard out from under the user the
-        // moment they drew their first shape.
-        model.document = Document(layers: layers, selectedLayer: idx,
+        // moment they drew their first shape. The off-canvas master store
+        // (SYMBOLS.md §6) must survive the same way, so placeInstance /
+        // makeSymbol / createReference don't drop the masters.
+        model.document = Document(layers: layers, symbols: doc.symbols,
+                                  selectedLayer: idx,
                                   selection: [es],
                                   artboards: doc.artboards,
                                   artboardOptions: doc.artboardOptions,
@@ -118,6 +121,122 @@ public class Controller {
         let reference = Element.live(.reference(ReferenceElem(
             target: ElementRef(resolvedId), id: refId)))
         addElement(reference)
+    }
+
+    // MARK: - Symbols P2 — operations (SYMBOLS.md §7)
+    //
+    // Value-in-op: every id is minted by the initiator/UI and carried in the
+    // op payload, never minted inside the Controller (same rule as
+    // createReference / assignId), so all apps apply identical values. Each
+    // clones the doc, mutates, and setDocument — no internal snapshot; the
+    // caller owns undo.
+
+    /// Make Symbol (promote): move the element at `path` into `doc.symbols` as
+    /// a master and leave a `ReferenceElem` instance in its place (SYMBOLS.md
+    /// §7, Fork S6 — the dual of Detach). Assign-on-create: if the element
+    /// already has an id, that id is KEPT as the master key and `masterId` is
+    /// ignored (mirrors createReference's target rule); otherwise `masterId`
+    /// is stamped. The instance carries `id = refId` and targets the master
+    /// id. Net: the master lives off-canvas in `symbols`, an instance sits
+    /// where the element was, so the canvas looks unchanged (the instance
+    /// resolves to the master geometry). A no-op on an invalid path. Mirrors
+    /// Rust `Controller::make_symbol`.
+    public func makeSymbol(_ path: ElementPath, masterId: String, refId: String) {
+        let doc = model.document
+        guard let target = doc.tryGetElement(path) else { return }
+        // Resolve the master id: keep the element's own id if it has one, else
+        // stamp the carried masterId (assign-on-create).
+        let resolvedId = target.id ?? masterId
+        // The master carries the resolved id.
+        let master = target.withId(resolvedId)
+        // The in-place instance targets the master id, with its own refId.
+        let reference = Element.live(.reference(ReferenceElem(
+            target: ElementRef(resolvedId), id: refId)))
+        // Replace the element in place with the instance, then push the master
+        // into the off-canvas store.
+        let newDoc = doc.replaceElement(path, with: reference)
+        model.document = newDoc.replacing(symbols: newDoc.symbols + [master])
+    }
+
+    /// Place Instance: append a `ReferenceElem` targeting an existing master
+    /// (`masterId`) to the active layer via ``addElement`` (which auto-selects
+    /// it) — exactly like createReference's final step (SYMBOLS.md §7). No
+    /// offset: placement offset is a UI concern. It is fine if `masterId` does
+    /// not currently exist; the instance simply renders empty until the master
+    /// appears (dangling is already handled by the resolver). The instance
+    /// carries `id = refId`, minted by the initiator. Mirrors Rust
+    /// `Controller::place_instance`.
+    public func placeInstance(masterId: String, refId: String) {
+        let reference = Element.live(.reference(ReferenceElem(
+            target: ElementRef(masterId), id: refId)))
+        addElement(reference)
+    }
+
+    /// Detach (break the link / expand): replace the `ReferenceElem` instance
+    /// at `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md
+    /// §7, Fork S6 — the inverse of Make Symbol). The target id is resolved by
+    /// a pure lookup over ALL id-bearing elements (`doc.symbols` AND `layers`;
+    /// deterministic, no entropy). The copy is born id-less (``clearingIds``,
+    /// per the duplication rule) and the instance's own overrides are applied
+    /// onto it: its `transform` (set, or compose if the copy already has one)
+    /// and its paint (`fill`/`stroke` applied only when non-nil). The master
+    /// and every other instance are untouched, and nothing is minted. A no-op
+    /// when the path is invalid, not a reference, or the target is
+    /// unresolvable. Mirrors Rust `Controller::detach`.
+    public func detach(_ path: ElementPath) {
+        let doc = model.document
+        guard let elem = doc.tryGetElement(path) else { return }
+        // Must be a reference instance.
+        guard case .live(.reference(let instance)) = elem else { return }
+        // Resolve the target id over symbols + layers (a pure id->element map).
+        guard let target = findElementById(doc, instance.target.id) else { return }
+
+        // Independent copy of the resolved target, born id-less.
+        var copy = target.clearingIds()
+
+        // Apply the instance's transform override. Compose if the copy already
+        // carries one (instance transform applied on top of the copy's),
+        // otherwise just set it — withTransformPremultiplied computes
+        // instT * (copy.transform ?? identity), matching the reference.
+        if let instT = instance.transform {
+            copy = copy.withTransformPremultiplied(instT)
+        }
+        // Apply the instance's paint overrides (only when non-nil).
+        if instance.fill != nil {
+            copy = withFill(copy, fill: instance.fill)
+        }
+        if instance.stroke != nil {
+            copy = withStroke(copy, stroke: instance.stroke)
+        }
+
+        model.document = doc.replaceElement(path, with: copy)
+    }
+
+    /// Redefine: replace the master with id `masterId` in `doc.symbols` with a
+    /// clone of the element at `path` (re-id the clone to `masterId`), then
+    /// replace the element at `path` in place with a `ReferenceElem` instance
+    /// (`id = refId`, targeting `masterId`) — the selection becomes an
+    /// instance of the redefined master (SYMBOLS.md §7, Fork S2). All other
+    /// instances of `masterId` re-resolve to the new definition on the next
+    /// paint. A no-op when `masterId` is not in `symbols` or `path` is
+    /// invalid. Mirrors Rust `Controller::redefine`.
+    public func redefine(masterId: String, _ path: ElementPath, refId: String) {
+        let doc = model.document
+        // The master must already exist.
+        guard let masterIdx = doc.symbols.firstIndex(where: { $0.id == masterId })
+        else { return }
+        guard let source = doc.tryGetElement(path) else { return }
+
+        // New master = clone of the selection, re-id'd to masterId.
+        let newMaster = source.withId(masterId)
+
+        // The selection becomes an instance of the redefined master.
+        let reference = Element.live(.reference(ReferenceElem(
+            target: ElementRef(masterId), id: refId)))
+        let newDoc = doc.replaceElement(path, with: reference)
+        var newSymbols = newDoc.symbols
+        newSymbols[masterIdx] = newMaster
+        model.document = newDoc.replacing(symbols: newSymbols)
     }
 
     /// Append ``element`` to the mask subtree of the element at
@@ -1312,4 +1431,42 @@ public func selectionStrokeSummary(_ doc: Document) -> StrokeSummary {
     }
     if first { return .noSelection }
     return .uniform(value)
+}
+
+/// Find the first id-bearing element named `id`, searching `doc.symbols`
+/// (sorted-by-id for determinism, matching every order-dependent symbols site)
+/// then `doc.layers` in pre-order. A pure lookup — no entropy — used by
+/// ``Controller/detach(_:)`` to resolve an instance's target across both the
+/// off-canvas master store and the canvas tree (SYMBOLS.md §7). Returns an
+/// owned copy so callers can mutate it independently. Mirrors Rust
+/// `find_element_by_id`.
+private func findElementById(_ doc: Document, _ id: String) -> Element? {
+    func walk(_ elem: Element) -> Element? {
+        if elem.id == id { return elem }
+        // Recurse into Group / Layer children only, mirroring the reference's
+        // `Element::children` (None for every leaf and Live kind).
+        switch elem {
+        case .group(let g):
+            for child in g.children {
+                if let found = walk(child) { return found }
+            }
+        case .layer(let l):
+            for child in l.children {
+                if let found = walk(child) { return found }
+            }
+        default:
+            break
+        }
+        return nil
+    }
+    // Symbols first, in sorted-by-id order (the §2 deterministic-order rule).
+    let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+    for master in sortedMasters {
+        if let found = walk(master) { return found }
+    }
+    // Then the layer tree.
+    for layer in doc.layers {
+        if let found = walk(.layer(layer)) { return found }
+    }
+    return nil
 }

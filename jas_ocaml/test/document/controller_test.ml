@@ -615,6 +615,206 @@ let () =
          | _ -> assert false));
     ];
 
+    (* ── Symbols P2 — operations (SYMBOLS.md section 7) ──────── *)
+    "symbols", [
+      (* Helper: pull a Reference out of the element at [path] or fail. *)
+      Alcotest.test_case "make_symbol promotes and leaves instance" `Quick
+        (fun () ->
+        (* An id-less element -> make_symbol stamps master_id, moves the element
+           into doc.symbols as a master, and replaces it in place with an
+           instance (ref_id, target = master_id). *)
+        let ms_ctrl = Jas.Controller.create () in
+        ms_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        ms_ctrl#make_symbol [0; 0] "m1" "i1";
+        let doc = ms_ctrl#document in
+        (* The master lives off-canvas in symbols, carrying master_id. *)
+        assert (Array.length doc.Jas.Document.symbols = 1);
+        assert (id_of doc.Jas.Document.symbols.(0) = Some "m1");
+        (match doc.Jas.Document.symbols.(0) with
+         | Rect _ -> () | _ -> assert false);
+        (* The in-place element is now an instance targeting the master. *)
+        (match Jas.Document.get_element doc [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_id = Some "i1");
+           assert (re.Jas.Element.ref_target = "m1")
+         | _ -> assert false));
+
+      Alcotest.test_case "make_symbol keeps existing id as master key" `Quick
+        (fun () ->
+        (* If the element already carries an id, that id is KEPT as the master
+           key and master_id is ignored (assign-on-create). *)
+        let mk_ctrl = Jas.Controller.create () in
+        let rect = with_id (make_rect 0.0 0.0 10.0 10.0) (Some "existing") in
+        mk_ctrl#add_element rect;
+        mk_ctrl#make_symbol [0; 0] "m1-ignored" "i1";
+        let doc = mk_ctrl#document in
+        assert (id_of doc.Jas.Document.symbols.(0) = Some "existing");
+        (match Jas.Document.get_element doc [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "existing");
+           assert (re.Jas.Element.ref_id = Some "i1")
+         | _ -> assert false));
+
+      Alcotest.test_case "make_symbol invalid path is noop" `Quick (fun () ->
+        let mi_ctrl = Jas.Controller.create () in
+        mi_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        mi_ctrl#make_symbol [0; 9] "m1" "i1";
+        (* Symbols untouched, element unchanged. *)
+        assert (Array.length mi_ctrl#document.Jas.Document.symbols = 0);
+        (match Jas.Document.get_element mi_ctrl#document [0; 0] with
+         | Rect _ -> () | _ -> assert false));
+
+      Alcotest.test_case "place_instance appends and selects" `Quick (fun () ->
+        (* place_instance appends a reference to the active layer and selects
+           it. *)
+        let pi_master = with_id (make_rect 0.0 0.0 10.0 10.0) (Some "m1") in
+        let pi_layer = make_layer ~name:"L0" [||] in
+        let pi_doc =
+          Jas.Document.make_document ~symbols:[|pi_master|] [|pi_layer|] in
+        let pi_ctrl =
+          Jas.Controller.create ~model:(Jas.Model.create ~document:pi_doc ()) () in
+        pi_ctrl#place_instance "m1" "i2";
+        let doc = pi_ctrl#document in
+        (* Appended as the only layer child (index 0). *)
+        (match Jas.Document.get_element doc [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "m1");
+           assert (re.Jas.Element.ref_id = Some "i2")
+         | _ -> assert false);
+        (* The new instance is the selection (auto-select via add_element). *)
+        let paths = sel_paths doc.Jas.Document.selection in
+        assert (Jas.Document.PathSet.cardinal paths = 1);
+        assert (Jas.Document.PathSet.mem [0; 0] paths));
+
+      Alcotest.test_case "place_instance dangling master ok" `Quick (fun () ->
+        (* It is fine if the master does not exist; the instance still appears
+           (renders empty until the master exists — dangling is handled). *)
+        let pd_ctrl = Jas.Controller.create () in
+        pd_ctrl#place_instance "ghost" "i9";
+        (match Jas.Document.get_element pd_ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "ghost");
+           assert (re.Jas.Element.ref_id = Some "i9")
+         | _ -> assert false));
+
+      Alcotest.test_case "detach replaces instance with idless copy" `Quick
+        (fun () ->
+        (* make_symbol then detach the instance -> the path holds an id-less
+           copy of the master geometry (NOT a reference); the master is
+           untouched. *)
+        let dt_ctrl = Jas.Controller.create () in
+        dt_ctrl#add_element (make_rect 3.0 4.0 10.0 10.0);
+        dt_ctrl#make_symbol [0; 0] "m1" "i1";
+        dt_ctrl#detach [0; 0];
+        let doc = dt_ctrl#document in
+        (* No longer a reference: an independent rect copy. *)
+        (match Jas.Document.get_element doc [0; 0] with
+         | Rect r ->
+           assert (r.x = 3.0 && r.y = 4.0);
+           assert (r.id = None)
+         | _ -> assert false);
+        (* The master still exists. *)
+        assert (Array.length doc.Jas.Document.symbols = 1);
+        assert (id_of doc.Jas.Document.symbols.(0) = Some "m1"));
+
+      Alcotest.test_case "detach applies instance transform override" `Quick
+        (fun () ->
+        (* An instance with a common transform offset -> the detached copy
+           carries that transform composed onto the master geometry. *)
+        let dx_ctrl = Jas.Controller.create () in
+        dx_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dx_ctrl#make_symbol [0; 0] "m1" "i1";
+        (* Move the instance (rides on common transform). *)
+        dx_ctrl#select_element [0; 0];
+        dx_ctrl#move_selection 24.0 24.0;
+        dx_ctrl#detach [0; 0];
+        let copy = Jas.Document.get_element dx_ctrl#document [0; 0] in
+        (match Jas.Element.get_transform copy with
+         | Some t -> assert (t.e = 24.0 && t.f = 24.0)
+         | None -> assert false));
+
+      Alcotest.test_case "detach applies instance paint override" `Quick
+        (fun () ->
+        (* An instance with its own fill -> the detached copy adopts that
+           fill. *)
+        let dp_ctrl = Jas.Controller.create () in
+        dp_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dp_ctrl#make_symbol [0; 0] "m1" "i1";
+        (* Override the instance fill. *)
+        let red = Some (Jas.Element.make_fill (color_rgb 1.0 0.0 0.0)) in
+        let instance = Jas.Document.get_element dp_ctrl#document [0; 0] in
+        let new_ref = Jas.Element.with_fill instance red in
+        dp_ctrl#set_document
+          (Jas.Document.replace_element dp_ctrl#document [0; 0] new_ref);
+        dp_ctrl#detach [0; 0];
+        (match Jas.Document.get_element dp_ctrl#document [0; 0] with
+         | Rect { fill = Some { fill_color; _ }; _ } ->
+           let (r, _, _, _) = color_to_rgba fill_color in
+           assert (r = 1.0)
+         | _ -> assert false));
+
+      Alcotest.test_case "detach non reference is noop" `Quick (fun () ->
+        (* A plain element (not a reference) -> detach is a no-op. *)
+        let dn_ctrl = Jas.Controller.create () in
+        dn_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        dn_ctrl#detach [0; 0];
+        (match Jas.Document.get_element dn_ctrl#document [0; 0] with
+         | Rect _ -> () | _ -> assert false));
+
+      Alcotest.test_case "detach unresolvable target is noop" `Quick (fun () ->
+        (* An instance whose target is missing -> detach leaves it as-is. *)
+        let du_ctrl = Jas.Controller.create () in
+        du_ctrl#place_instance "ghost" "i1";
+        du_ctrl#detach [0; 0];
+        (* Still a reference. *)
+        (match Jas.Document.get_element du_ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "ghost")
+         | _ -> assert false));
+
+      Alcotest.test_case "redefine swaps master and makes instance" `Quick
+        (fun () ->
+        (* make_symbol a rect (m1), add a separate circle, then redefine m1 from
+           the circle -> doc.symbols[m1] becomes the circle, and the circle path
+           holds a new instance (ref_id) targeting m1. *)
+        let rd_ctrl = Jas.Controller.create () in
+        rd_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        rd_ctrl#make_symbol [0; 0] "m1" "i1";
+        (* Add a circle at [0,1]. *)
+        rd_ctrl#add_element
+          (make_circle ~fill:(Some (Jas.Element.make_fill (color_rgb 0.0 0.0 0.0)))
+             50.0 50.0 20.0);
+        rd_ctrl#redefine "m1" [0; 1] "i2";
+        let doc = rd_ctrl#document in
+        (* The master is now the circle, keyed by m1. *)
+        assert (Array.length doc.Jas.Document.symbols = 1);
+        (match doc.Jas.Document.symbols.(0) with
+         | Circle _ -> () | _ -> assert false);
+        assert (id_of doc.Jas.Document.symbols.(0) = Some "m1");
+        (* The selection path is now an instance of m1. *)
+        (match Jas.Document.get_element doc [0; 1] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "m1");
+           assert (re.Jas.Element.ref_id = Some "i2")
+         | _ -> assert false);
+        (* The original instance still targets m1 (now resolves to the
+           circle). *)
+        (match Jas.Document.get_element doc [0; 0] with
+         | Jas.Element.Live (Jas.Element.Reference re) ->
+           assert (re.Jas.Element.ref_target = "m1");
+           assert (re.Jas.Element.ref_id = Some "i1")
+         | _ -> assert false));
+
+      Alcotest.test_case "redefine unknown master is noop" `Quick (fun () ->
+        let ru_ctrl = Jas.Controller.create () in
+        ru_ctrl#add_element (make_rect 0.0 0.0 10.0 10.0);
+        ru_ctrl#redefine "nope" [0; 0] "i1";
+        (* No symbols created, element unchanged. *)
+        assert (Array.length ru_ctrl#document.Jas.Document.symbols = 0);
+        (match Jas.Document.get_element ru_ctrl#document [0; 0] with
+         | Rect _ -> () | _ -> assert false));
+    ];
+
     "delete selection", [
       Alcotest.test_case "delete element from inside a group" `Quick (fun () ->
         let ds_l1 = make_line 0.0 0.0 1.0 1.0 in

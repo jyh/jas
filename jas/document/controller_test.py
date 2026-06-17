@@ -4,7 +4,7 @@ from absl.testing import absltest
 
 from document.controller import Controller, first_mask, selection_has_mask
 from document.document import Document, ElementSelection
-from geometry.element import Circle, Ellipse, Fill, Group, Layer, Line, Mask, Polygon, ReferenceElem, RgbColor, Rect, Stroke, control_points, control_point_count, move_control_points
+from geometry.element import Circle, Ellipse, Fill, Group, Layer, Line, Mask, Polygon, ReferenceElem, RgbColor, Rect, Stroke, Transform, control_points, control_point_count, move_control_points, with_fill
 from document.model import Model
 
 
@@ -849,6 +849,186 @@ class CreateReferenceTest(absltest.TestCase):
         before = ctrl.document
         ctrl.create_reference((0, 5), "tgt-1", "ref-1")
         self.assertIs(ctrl.document, before)
+
+
+class SymbolOpsTest(absltest.TestCase):
+    """Symbols P2 operations (SYMBOLS.md §7): make_symbol, place_instance,
+    detach, redefine. Value-in-op: every id is minted by the initiator and
+    carried in the op, never minted inside the Controller. Mirrors the Rust
+    Controller unit tests."""
+
+    @staticmethod
+    def _as_reference(ctrl, path) -> ReferenceElem:
+        elem = ctrl.document.get_element(path)
+        assert isinstance(elem, ReferenceElem), \
+            f"expected a Reference at {path}, got {type(elem).__name__}"
+        return elem
+
+    # ── make_symbol ────────────────────────────────────────────
+
+    def test_make_symbol_promotes_and_leaves_instance(self):
+        # An id-less element → make_symbol stamps master_id, moves the element
+        # into doc.symbols as a master, and replaces it in place with an
+        # instance (ref_id, target = master_id).
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        doc = ctrl.document
+        # The master lives off-canvas in symbols, carrying master_id.
+        self.assertEqual(len(doc.symbols), 1)
+        self.assertEqual(doc.symbols[0].id, "m1")
+        self.assertIsInstance(doc.symbols[0], Rect)
+        # The in-place element is now an instance targeting the master.
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.id, "i1")
+        self.assertEqual(ref.target, "m1")
+
+    def test_make_symbol_keeps_existing_id_as_master_key(self):
+        # If the element already carries an id, that id is KEPT as the master
+        # key and master_id is ignored (assign-on-create, like create_reference).
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10, id="existing"))
+        ctrl.make_symbol((0, 0), "m1-ignored", "i1")
+        doc = ctrl.document
+        self.assertEqual(doc.symbols[0].id, "existing")
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.target, "existing")
+        self.assertEqual(ref.id, "i1")
+
+    def test_make_symbol_invalid_path_is_noop(self):
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 9), "m1", "i1")
+        # Symbols untouched, element unchanged.
+        self.assertEqual(ctrl.document.symbols, ())
+        self.assertIsInstance(ctrl.document.get_element((0, 0)), Rect)
+
+    # ── place_instance ─────────────────────────────────────────
+
+    def test_place_instance_appends_and_selects(self):
+        # place_instance appends a reference to the active layer and selects it.
+        ctrl = Controller(model=Model())
+        # Pre-seed a master so the doc has one; not strictly required.
+        master = Rect(x=0, y=0, width=10, height=10, id="m1")
+        ctrl.set_document(dataclasses.replace(
+            ctrl.document, symbols=(master,)))
+        ctrl.place_instance("m1", "i2")
+        doc = ctrl.document
+        # Appended as the only layer child (index 0).
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.target, "m1")
+        self.assertEqual(ref.id, "i2")
+        # The new instance is the selection (auto-select via add_element).
+        self.assertEqual(len(doc.selection), 1)
+        self.assertEqual(next(iter(doc.selection)).path, (0, 0))
+
+    def test_place_instance_dangling_master_ok(self):
+        # It is fine if the master does not exist; the instance still appears
+        # (renders empty until the master exists — dangling is handled).
+        ctrl = Controller(model=Model())
+        ctrl.place_instance("ghost", "i9")
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.target, "ghost")
+        self.assertEqual(ref.id, "i9")
+
+    # ── detach ─────────────────────────────────────────────────
+
+    def test_detach_replaces_instance_with_idless_copy(self):
+        # make_symbol then detach the instance → the path holds an id-less copy
+        # of the master geometry (NOT a reference); the master is untouched.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=3, y=4, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        ctrl.detach((0, 0))
+        doc = ctrl.document
+        # No longer a reference: an independent rect copy.
+        copy = doc.get_element((0, 0))
+        self.assertIsInstance(copy, Rect)
+        self.assertEqual((copy.x, copy.y), (3, 4))
+        self.assertIsNone(copy.id, "detached copy is born id-less")
+        # The master still exists.
+        self.assertEqual(len(doc.symbols), 1)
+        self.assertEqual(doc.symbols[0].id, "m1")
+
+    def test_detach_applies_instance_transform_override(self):
+        # An instance with a transform offset → the detached copy carries that
+        # transform composed onto the master geometry.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        # Move the instance (rides on transform).
+        ctrl.select_element((0, 0))
+        ctrl.move_selection(24, 24)
+        ctrl.detach((0, 0))
+        copy = ctrl.document.get_element((0, 0))
+        self.assertIsNotNone(copy.transform,
+            "instance transform applied to copy")
+        self.assertEqual((copy.transform.e, copy.transform.f), (24, 24))
+
+    def test_detach_applies_instance_paint_override(self):
+        # An instance with its own fill → the detached copy adopts that fill.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        # Override the instance's fill.
+        red = Fill(color=RgbColor(1, 0, 0))
+        new_ref = with_fill(ctrl.document.get_element((0, 0)), red)
+        ctrl.set_document(ctrl.document.replace_element((0, 0), new_ref))
+        ctrl.detach((0, 0))
+        copy = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(copy, Rect)
+        self.assertEqual(copy.fill, red)
+
+    def test_detach_non_reference_is_noop(self):
+        # A plain element (not a reference) → detach is a no-op.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.detach((0, 0))
+        self.assertIsInstance(ctrl.document.get_element((0, 0)), Rect)
+
+    def test_detach_unresolvable_target_is_noop(self):
+        # An instance whose target is missing → detach leaves it as-is.
+        ctrl = Controller(model=Model())
+        ctrl.place_instance("ghost", "i1")
+        ctrl.detach((0, 0))
+        # Still a reference.
+        ref = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref.target, "ghost")
+
+    # ── redefine ───────────────────────────────────────────────
+
+    def test_redefine_swaps_master_and_makes_instance(self):
+        # make_symbol a rect (m1), add a separate circle, then redefine m1 from
+        # the circle → doc.symbols[m1] becomes the circle, and the circle's path
+        # holds a new instance (ref_id) targeting m1.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.make_symbol((0, 0), "m1", "i1")
+        # Add a circle at [0,1].
+        ctrl.add_element(Circle(cx=50, cy=50, r=20,
+                                fill=Fill(color=RgbColor(0, 0, 0))))
+        ctrl.redefine("m1", (0, 1), "i2")
+        doc = ctrl.document
+        # The master is now the circle, keyed by m1.
+        self.assertEqual(len(doc.symbols), 1)
+        self.assertIsInstance(doc.symbols[0], Circle)
+        self.assertEqual(doc.symbols[0].id, "m1")
+        # The selection's path is now an instance of m1.
+        ref = self._as_reference(ctrl, (0, 1))
+        self.assertEqual(ref.target, "m1")
+        self.assertEqual(ref.id, "i2")
+        # The original instance still targets m1 (now resolves to the circle).
+        ref0 = self._as_reference(ctrl, (0, 0))
+        self.assertEqual(ref0.target, "m1")
+        self.assertEqual(ref0.id, "i1")
+
+    def test_redefine_unknown_master_is_noop(self):
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.redefine("nope", (0, 0), "i1")
+        # No symbols created, element unchanged.
+        self.assertEqual(ctrl.document.symbols, ())
+        self.assertIsInstance(ctrl.document.get_element((0, 0)), Rect)
 
 
 class DeleteSelectionNestedTest(absltest.TestCase):
