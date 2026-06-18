@@ -16,6 +16,7 @@ from algorithms.hit_test import (
 )
 from document.controller import Controller
 from document.model import Model
+from document.op_log import PrimitiveOp
 from geometry.svg import document_to_svg, svg_to_document
 from geometry.binary import document_to_binary, binary_to_document
 from geometry.test_json import document_to_test_json, test_json_to_document
@@ -306,14 +307,20 @@ class CrossLanguageTest(absltest.TestCase):
             ctrl = Controller(model=model)
 
             # Two fixture shapes (OP_LOG.md §5): the journal-native `txns` form
-            # (snapshot before each transaction's ops, then a `history`
-            # directive of undo/redo positions the cursor; snapshot/undo/redo
-            # are NOT ops here) and the legacy flat `ops` form.
+            # (each transaction commits explicitly via begin_txn/commit_txn,
+            # then a `history` directive of undo/redo positions the cursor;
+            # snapshot/undo/redo are NOT ops here) and the legacy flat `ops`
+            # form (one implicit outer transaction, so non-undoable ops like
+            # select_rect are captured into the journal).
             if "txns" in tc:
                 for txn in tc["txns"]:
-                    model.snapshot()
+                    model.begin_txn()
+                    if "name" in txn:
+                        model.name_txn(txn["name"])
                     for op in txn["ops"]:
                         self._apply_op(model, ctrl, op)
+                        model.record_op(PrimitiveOp(op=op["op"], params=op))
+                    model.commit_txn()
                 for h in tc.get("history", []):
                     if h == "undo":
                         model.undo()
@@ -322,12 +329,32 @@ class CrossLanguageTest(absltest.TestCase):
                     else:
                         self.fail(f"Unknown history directive: {h}")
             else:
+                model.begin_txn()
                 for op in tc["ops"]:
                     self._apply_op(model, ctrl, op)
+                    model.record_op(PrimitiveOp(op=op["op"], params=op))
+                model.commit_txn()
 
             actual = document_to_test_json(model.document)
             self.assertEqual(actual, expected,
                 f"Operation test '{name}' failed")
+
+            # checkpoint_equivalence gate (OP_LOG.md §6): the journal must
+            # replay to the same document as the snapshot path.
+            replayed = self._replay_journal(
+                svg, model.journal, model.journal_head)
+            self.assertEqual(replayed, actual,
+                f"checkpoint_equivalence gate failed for '{name}': "
+                "journal replay != snapshot path")
+
+    def _replay_journal(self, svg, journal, head):
+        doc = svg_to_document(svg)
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        for txn in journal[:head]:
+            for op in txn.ops:
+                self._apply_op(model, ctrl, op.params)
+        return document_to_test_json(model.document)
 
     def _apply_op(self, model, ctrl, op):
         op_name = op["op"]
