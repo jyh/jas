@@ -5,10 +5,23 @@ whenever the document is replaced.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from document.document import Document
+from document.op_log import ACTOR_ARTIST, PrimitiveOp, Transaction
 from geometry.element import Fill, RgbColor, Stroke
+# OP_LOG.md Increment 2: the canonical "net document change is byte-identical"
+# comparison for the commit no-op rule (the same canonicalization the
+# cross-language gate uses).
+from geometry.test_json import document_to_test_json
+
+
+@dataclass
+class _PendingTxn:
+    """The transaction being accumulated between begin_txn and commit_txn."""
+    name: str | None = None
+    ops: list[PrimitiveOp] = field(default_factory=list)
+    doc_at_begin: Document | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +86,14 @@ class Model:
         # existing snapshot/undo/redo mechanism, not a transaction bracket.)
         self._journal_head: int = 0
         self._saved_journal_head: int = 0
+        # OP_LOG.md Increment 2 (full journal): the typed Transaction journal
+        # layered on the snapshot stacks. Built via begin_txn/commit_txn/record_op
+        # (the op_apply / harness path); production snapshot() edits advance the
+        # journal_head cursor but record no Transaction (opaque). See op_log.py.
+        self._op_journal: list[Transaction] = []
+        self._pending_txn: _PendingTxn | None = None
+        self._in_txn: bool = False
+        self._next_txn_counter: int = 0
         self.default_fill: Fill | None = None
         self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
         self.fill_on_top: bool = True
@@ -240,6 +261,93 @@ class Model:
     @property
     def can_redo(self) -> bool:
         return len(self._redo_stack) > 0
+
+    # ── Transaction journal (OP_LOG.md Increment 2, full journal) ──────────
+    #
+    # begin_txn / commit_txn build the typed Transaction journal (the op_apply /
+    # harness path). They sit alongside snapshot() (the production undoable-edit
+    # boundary, which advances the journal_head cursor but records no
+    # Transaction). Both advance journal_head; a given flow uses one path or the
+    # other. record_op / name_txn populate the open transaction.
+
+    @property
+    def journal(self) -> list[Transaction]:
+        return self._op_journal
+
+    @property
+    def journal_head(self) -> int:
+        return self._journal_head
+
+    def begin_txn(self) -> None:
+        """Open an undoable transaction: push the pre-edit checkpoint (no
+        redo-clear — that moves to commit_txn). Idempotent while already open."""
+        if self._in_txn:
+            return
+        self._undo_stack.append(self._document)
+        if len(self._undo_stack) > _MAX_UNDO:
+            self._undo_stack.pop(0)
+        self._in_txn = True
+        self._pending_txn = _PendingTxn(doc_at_begin=self._document)
+
+    def commit_txn(self) -> None:
+        """Finalize the open transaction. No-op rule (OP_LOG.md §5/§9): a
+        zero-net-change transaction is not journaled and its undo checkpoint is
+        dropped. Otherwise append one Transaction (deterministic txn-N id),
+        truncating the journal's redo tail at journal_head, and clear redo."""
+        if not self._in_txn:
+            return
+        self._in_txn = False
+        pending = self._pending_txn
+        self._pending_txn = None
+        checkpoint = self._undo_stack[-1] if self._undo_stack else None
+        no_net_change = checkpoint is not None and (
+            self._document is checkpoint
+            or document_to_test_json(self._document) == document_to_test_json(checkpoint)
+        )
+        if no_net_change:
+            if self._undo_stack:
+                self._undo_stack.pop()
+            return
+        self._redo_stack.clear()
+        del self._op_journal[self._journal_head:]
+        parent = self._op_journal[-1].txn_id if self._op_journal else None
+        self._op_journal.append(Transaction(
+            txn_id=f"txn-{self._next_txn_counter}",
+            ops=list(pending.ops) if pending else [],
+            name=pending.name if pending else None,
+            actor=ACTOR_ARTIST,
+            parent=parent,
+            lamport=self._next_txn_counter,
+        ))
+        self._next_txn_counter += 1
+        self._journal_head = len(self._op_journal)
+
+    def abort_txn(self) -> None:
+        """Roll back the open transaction to its checkpoint, discarding it (no
+        redo entry, no journal entry, no cursor move)."""
+        if not self._in_txn:
+            return
+        self._in_txn = False
+        self._pending_txn = None
+        if self._undo_stack:
+            self._document = self._undo_stack.pop()
+            self._notify()
+
+    def with_txn(self, body: Callable[[], None]) -> None:
+        """Scoped bracket: begin_txn, run body, commit_txn."""
+        self.begin_txn()
+        body()
+        self.commit_txn()
+
+    def record_op(self, op: PrimitiveOp) -> None:
+        """Append a primitive op to the open transaction (no-op when none open)."""
+        if self._pending_txn is not None:
+            self._pending_txn.ops.append(op)
+
+    def name_txn(self, name: str) -> None:
+        """Set the open transaction's legible name (no-op when none open)."""
+        if self._pending_txn is not None:
+            self._pending_txn.name = name
 
     def on_document_changed(self, callback: Callable[[Document], None]) -> None:
         """Register a callback invoked whenever the document changes."""

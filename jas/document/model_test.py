@@ -126,6 +126,39 @@ class ModelTest(absltest.TestCase):
         model.mark_saved()
         self.assertFalse(model.is_modified)
 
+    # OP_LOG.md Increment 2 (full journal): begin_txn/commit_txn build the
+    # typed Transaction journal with deterministic txn-N ids + the no-op rule.
+
+    def test_commit_journals_one_transaction_per_net_change(self):
+        model = Model()
+        model.with_txn(lambda: setattr(model, "document", Document(layers=())))
+        self.assertEqual(len(model.journal), 1)
+        self.assertEqual(model.journal_head, 1)
+        self.assertEqual(model.journal[0].txn_id, "txn-0")
+
+    def test_no_op_transaction_is_not_journaled(self):
+        model = Model()
+        model.begin_txn()
+        model.commit_txn()  # no edit
+        self.assertEqual(len(model.journal), 0)
+        self.assertEqual(model.journal_head, 0)
+        self.assertFalse(model.can_undo)
+
+    def test_journal_cursor_and_redo_tail_drop(self):
+        model = Model()
+        l = Layer(children=(), name="L1")
+        model.with_txn(lambda: setattr(model, "document", Document(layers=(l,))))   # txn-0
+        model.with_txn(lambda: setattr(model, "document", Document(layers=(l, l))))  # txn-1
+        self.assertEqual([t.txn_id for t in model.journal], ["txn-0", "txn-1"])
+        self.assertEqual(model.journal[1].parent, "txn-0")
+        model.undo()
+        self.assertEqual(model.journal_head, 1)
+        # New commit after undo drops the redo tail and appends.
+        model.with_txn(lambda: setattr(model, "document", Document(layers=())))
+        self.assertEqual(len(model.journal), 2)
+        self.assertEqual(model.journal[1].txn_id, "txn-2")
+        self.assertFalse(model.can_redo)
+
 
 class EditingTargetTest(absltest.TestCase):
     """Test the mask-editor UI state on Model (OPACITY.md §Preview
