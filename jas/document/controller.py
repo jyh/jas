@@ -15,7 +15,8 @@ from document.document import (
     selection_all, selection_partial,
 )
 from geometry.element import (
-    Element, Fill, Gradient, Group, Layer, Mask, Path, Stroke, StrokeWidthPoint, Transform, Visibility,
+    ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
+    Path, PathCommand, Polygon, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
@@ -672,6 +673,90 @@ class Controller:
             elem = doc.get_element(es.path)
             new_elem = move_control_points(elem, es.kind, dx, dy)
             new_doc = new_doc.replace_element(es.path, new_elem)
+        self._model.document = new_doc
+
+    def simplify_selection(self, precision: float) -> None:
+        """Simplify the geometry of each selected Polygon / Path element
+        by running the Schneider curve fit
+        (:func:`algorithms.simplify.simplify_polyline`) on its vertices.
+        Other element kinds are left alone. Used by Object -> Simplify
+        and (in future) other refit entry points. ``precision`` is the
+        Schneider max-error tolerance in points.
+
+        Polygons are replaced with Paths that carry the refitted CurveTo
+        / LineTo commands; existing Paths are re-issued with refitted
+        geometry. Selection is preserved.
+
+        Like the other controller mutators (e.g. :meth:`move_selection`)
+        this does NOT snapshot internally -- the caller/harness owns the
+        undo bracket. It only mutates ``self._model.document``.
+        Mirrors ``Controller::simplify_selection`` in
+        ``jas_dioxus/src/document/controller.rs``.
+        """
+        from algorithms.simplify import simplify_polyline
+
+        doc = self._model.document
+        if not doc.selection:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            if isinstance(elem, Polygon):
+                pts = [(p[0], p[1]) for p in elem.points]
+                cmds = simplify_polyline(pts, precision, True)
+                if not cmds:
+                    continue
+                new_path = Path(
+                    d=tuple(cmds),
+                    fill=elem.fill,
+                    stroke=elem.stroke,
+                    opacity=elem.opacity,
+                    transform=elem.transform,
+                    locked=elem.locked,
+                    visibility=elem.visibility,
+                    blend_mode=elem.blend_mode,
+                    mask=elem.mask,
+                    fill_gradient=elem.fill_gradient,
+                    stroke_gradient=elem.stroke_gradient,
+                    name=elem.name,
+                )
+                new_doc = new_doc.replace_element(es.path, new_path)
+            elif isinstance(elem, Path):
+                # Walk the path command list, splitting at every MoveTo /
+                # ClosePath into subpaths of 2D points. Each subpath is
+                # refit independently; other command kinds (CurveTo,
+                # ArcTo, ...) are passed through as-is.
+                new_cmds: list[PathCommand] = []
+                buf: list[tuple[float, float]] = []
+                state = {"closed": False}
+
+                def flush() -> None:
+                    if len(buf) >= 2:
+                        new_cmds.extend(
+                            simplify_polyline(buf, precision, state["closed"]))
+                    buf.clear()
+                    state["closed"] = False
+
+                for c in elem.d:
+                    if isinstance(c, MoveTo):
+                        flush()
+                        buf.append((c.x, c.y))
+                    elif isinstance(c, LineTo):
+                        buf.append((c.x, c.y))
+                    elif isinstance(c, ClosePath):
+                        state["closed"] = True
+                        flush()
+                    else:
+                        # Already-curved commands stay verbatim; splice
+                        # the buffered run before emitting them so refit
+                        # and pre-existing curves sit in order.
+                        flush()
+                        new_cmds.append(c)
+                flush()
+                if not new_cmds:
+                    continue
+                new_path = replace(elem, d=tuple(new_cmds))
+                new_doc = new_doc.replace_element(es.path, new_path)
         self._model.document = new_doc
 
     def copy_selection(self, dx: float, dy: float) -> None:

@@ -67,3 +67,8 @@
  (name dash_renderer_test)
  (modules dash_renderer_test)
  (libraries jas alcotest))
+
+(test
+ (name simplify_test)
+ (modules simplify_test)
+ (libraries jas alcotest))

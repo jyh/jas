@@ -737,6 +737,93 @@ class controller ?(model = Model.create ()) () =
       ) (doc, Document.PathMap.empty) sorted_sels in
       model#set_document { new_doc with Document.selection = new_sel }
 
+    (** Simplify the geometry of each selected Polygon / Path element in
+        place by running the Schneider curve fit
+        ([Simplify.simplify_polyline]) on its vertices. Other element
+        kinds are left alone. [precision] is the Schneider max-error
+        tolerance in points.
+
+        Polygons are replaced with Paths carrying the refitted CurveTo /
+        LineTo commands; existing Paths are re-issued with refitted
+        geometry. Selection is preserved (the tree paths are unchanged).
+
+        Like the other controller mutators this does NOT push an undo
+        snapshot — the caller/harness brackets the transaction. Mirrors
+        jas_dioxus controller.rs simplify_selection. *)
+    method simplify_selection (precision : float) =
+      let doc = model#document in
+      if Document.PathMap.is_empty doc.Document.selection then ()
+      else begin
+        (* Flush a buffered run of straight-line points into [new_cmds],
+           refitting via Simplify when it has at least two points. *)
+        let flush new_cmds buf closed =
+          (if List.length !buf >= 2 then
+             let sub = Simplify.simplify_polyline (List.rev !buf) precision !closed in
+             (* [new_cmds] accumulates in reverse; [List.rev_append sub acc]
+                prepends [sub] (forward order) so the final [List.rev] yields
+                the commands in order. *)
+             new_cmds := List.rev_append sub !new_cmds);
+          buf := [];
+          closed := false
+        in
+        let new_doc = Document.PathMap.fold (fun path _ acc ->
+          match (try Some (Document.get_element acc path) with _ -> None) with
+          | None -> acc
+          | Some elem ->
+            (match elem with
+             | Element.Polygon p ->
+               let cmds = Simplify.simplify_polyline p.points precision true in
+               if cmds = [] then acc
+               else
+                 let new_path = Element.Path {
+                   name = p.name; id = p.id;
+                   d = cmds;
+                   fill = p.fill; stroke = p.stroke;
+                   width_points = [];
+                   opacity = p.opacity; transform = p.transform;
+                   locked = p.locked; visibility = p.visibility;
+                   blend_mode = p.blend_mode; mask = p.mask;
+                   fill_gradient = p.fill_gradient;
+                   stroke_gradient = p.stroke_gradient;
+                   stroke_brush = None;
+                   stroke_brush_overrides = None;
+                   tool_origin = None;
+                 } in
+                 Document.replace_element acc path new_path
+             | Element.Path p ->
+               (* Walk the path command list, splitting at every MoveTo /
+                  ClosePath into subpaths of 2D points. Each subpath is
+                  refit independently; already-curved commands (CurveTo,
+                  ArcTo, ...) are passed through verbatim, with the
+                  buffered run spliced in before them so refit and
+                  pre-existing curves sit in order. *)
+               let new_cmds = ref [] in
+               let buf = ref [] in
+               let closed = ref false in
+               List.iter (fun (c : Element.path_command) ->
+                 match c with
+                 | Element.MoveTo (x, y) ->
+                   flush new_cmds buf closed;
+                   buf := (x, y) :: !buf
+                 | Element.LineTo (x, y) -> buf := (x, y) :: !buf
+                 | Element.ClosePath ->
+                   closed := true;
+                   flush new_cmds buf closed
+                 | other ->
+                   flush new_cmds buf closed;
+                   new_cmds := other :: !new_cmds
+               ) p.d;
+               flush new_cmds buf closed;
+               let cmds = List.rev !new_cmds in
+               if cmds = [] then acc
+               else
+                 let new_path = Element.Path { p with d = cmds } in
+                 Document.replace_element acc path new_path
+             | _ -> acc)
+        ) doc.Document.selection doc in
+        model#set_document new_doc
+      end
+
     method set_selection_fill (f : Element.fill option) =
       let doc = model#document in
       let new_doc = Document.PathMap.fold (fun path _ acc ->
