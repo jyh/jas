@@ -527,6 +527,109 @@ public class Controller {
         model.document = doc
     }
 
+    /// Simplify the geometry of each selected Polygon / Path element in
+    /// place by running the Schneider curve fit (`simplifyPolyline`) on
+    /// its vertices. Other element kinds are left alone. Used by
+    /// Object → Simplify and (in future) other refit entry points.
+    /// `precision` is the Schneider max-error tolerance in points.
+    ///
+    /// Polygons are replaced with Paths carrying the refitted CurveTo /
+    /// LineTo commands; existing Paths are re-issued with refitted
+    /// geometry. Selection is preserved.
+    ///
+    /// Faithful port of jas_dioxus controller.rs `simplify_selection`.
+    /// Like `moveSelection`, this mutates `model.document` directly and
+    /// does not push its own undo snapshot — the caller/harness brackets.
+    public func simplifySelection(precision: Double) {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        var newDoc = doc
+        for es in doc.selection {
+            let elem = newDoc.getElement(es.path)
+            switch elem {
+            case .polygon(let p):
+                let cmds = simplifyPolyline(p.points, precision: precision, closed: true)
+                if cmds.isEmpty { continue }
+                let newPath = Element.path(Path(
+                    d: cmds,
+                    fill: p.fill,
+                    stroke: p.stroke,
+                    widthPoints: [],
+                    opacity: p.opacity,
+                    transform: p.transform,
+                    locked: p.locked,
+                    visibility: p.visibility,
+                    blendMode: p.blendMode,
+                    mask: p.mask,
+                    fillGradient: p.fillGradient,
+                    strokeGradient: p.strokeGradient,
+                    name: p.name,
+                    id: p.id
+                ))
+                newDoc = newDoc.replaceElement(es.path, with: newPath)
+            case .path(let p):
+                // Walk the path command list, splitting at every moveTo /
+                // closePath into subpaths of 2D points. Each subpath is
+                // refit independently; other command kinds (curveTo,
+                // arcTo, ...) are passed through as-is.
+                var newCmds: [PathCommand] = []
+                var buf: [(Double, Double)] = []
+                var closed = false
+                func flush() {
+                    if buf.count >= 2 {
+                        let sub = simplifyPolyline(buf, precision: precision, closed: closed)
+                        newCmds.append(contentsOf: sub)
+                    }
+                    buf.removeAll(keepingCapacity: true)
+                    closed = false
+                }
+                for c in p.d {
+                    switch c {
+                    case .moveTo(let x, let y):
+                        flush()
+                        buf.append((x, y))
+                    case .lineTo(let x, let y):
+                        buf.append((x, y))
+                    case .closePath:
+                        closed = true
+                        flush()
+                    default:
+                        // Already-curved commands stay verbatim; splice
+                        // the buffered run before emitting them so refit
+                        // and pre-existing curves sit in order.
+                        flush()
+                        newCmds.append(c)
+                    }
+                }
+                flush()
+                if newCmds.isEmpty { continue }
+                let newPath = Element.path(Path(
+                    d: newCmds,
+                    fill: p.fill,
+                    stroke: p.stroke,
+                    widthPoints: p.widthPoints,
+                    opacity: p.opacity,
+                    transform: p.transform,
+                    locked: p.locked,
+                    visibility: p.visibility,
+                    blendMode: p.blendMode,
+                    mask: p.mask,
+                    fillGradient: p.fillGradient,
+                    strokeGradient: p.strokeGradient,
+                    strokeBrush: p.strokeBrush,
+                    strokeBrushOverrides: p.strokeBrushOverrides,
+                    toolOrigin: p.toolOrigin,
+                    name: p.name,
+                    id: p.id
+                ))
+                newDoc = newDoc.replaceElement(es.path, with: newPath)
+            default:
+                break
+            }
+        }
+        model.document = newDoc
+    }
+
     public func lockSelection() {
         func lockRecursive(_ elem: Element) -> Element {
             switch elem {

@@ -37,6 +37,7 @@ class controller : ?model:Model.model -> unit -> object
   method show_all : unit
   method move_selection : float -> float -> unit
   method copy_selection : float -> float -> unit
+  method simplify_selection : float -> unit
   method set_selection_fill : Element.fill option -> unit
   method set_selection_stroke : Element.stroke option -> unit
   method set_selection_stroke_brush : string option -> unit
