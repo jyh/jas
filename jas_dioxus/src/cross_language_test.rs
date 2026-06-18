@@ -461,6 +461,28 @@ mod tests {
 
     fn apply_op(model: &mut Model, op: &serde_json::Value) {
         let name = op["op"].as_str().unwrap();
+        // History-navigation ops (OP_LOG.md §5): they manage transaction
+        // boundaries / the journal cursor and are NOT primitive ops, so they
+        // are never journaled. `snapshot` commits the prior action's
+        // transaction (relocated redo-clear) and opens a new one, so the
+        // mutator ops that follow JOIN one checkpoint; undo/redo end the open
+        // context and move the cursor.
+        match name {
+            "snapshot" => {
+                model.commit_txn();
+                model.begin_txn();
+                return;
+            }
+            "undo" => {
+                model.undo();
+                return;
+            }
+            "redo" => {
+                model.redo();
+                return;
+            }
+            _ => {}
+        }
         match name {
             "select_rect" => {
                 Controller::select_rect(
@@ -615,38 +637,60 @@ mod tests {
                     op["value"].as_str().unwrap(),
                 );
             }
-            // OP_LOG.md Increment 1: the fixture op model marks undo boundaries
-            // with `snapshot`. Map it onto the transaction bracket: commit the
-            // prior action's transaction (relocated redo-clear) and open a new
-            // one, so the mutator ops that follow JOIN one checkpoint (not
-            // self-bracket into separate ones). undo/redo end the open context
-            // (they set in_txn=false), and run_operation_test commits any
-            // trailing open transaction.
-            "snapshot" => {
-                model.commit_txn();
-                model.begin_txn();
-            }
-            "undo" => {
-                model.undo();
-            }
-            "redo" => {
-                model.redo();
-            }
             _ => panic!("Unknown op: {}", name),
         }
+        // Capture the op into the open transaction so the journal replays to
+        // the same document — the checkpoint_equivalence gate (OP_LOG.md §5-6).
+        // `targets` (Fork 4) is populated in a later sub-step; empty here is
+        // fine, as the gate compares documents, not metadata. record_op is a
+        // no-op when no transaction is open.
+        model.record_op(crate::document::op_log::PrimitiveOp {
+            op: name.to_string(),
+            params: op.clone(),
+            targets: Vec::new(),
+        });
     }
 
-    fn run_operation_test(tc: &serde_json::Value) -> String {
+    /// Run a fixture's op stream and return the resulting Model (with its
+    /// journal). The op stream is wrapped in one implicit outer transaction
+    /// (OP_LOG.md §5 legacy rule) so non-undoable ops (e.g. `select_rect`) are
+    /// captured into the journal; an embedded `snapshot` op commits this outer
+    /// transaction (eliding it when empty) and opens its own boundaries.
+    fn run_operation_model(tc: &serde_json::Value) -> Model {
         let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
         let doc = svg_to_document(&setup_svg);
         let mut model = Model::new(doc, None);
 
+        model.begin_txn();
         for op in tc["ops"].as_array().unwrap() {
             apply_op(&mut model, op);
         }
-        // Commit any transaction left open by a trailing `snapshot` op.
+        // Commit the implicit outer transaction (or any transaction left open
+        // by a trailing `snapshot` op).
         model.commit_txn();
+        model
+    }
 
+    fn run_operation_test(tc: &serde_json::Value) -> String {
+        document_to_test_json(run_operation_model(tc).document())
+    }
+
+    /// `checkpoint_equivalence` gate (OP_LOG.md §6): replay the applied prefix
+    /// of the journal from `setup_svg` and return its canonical JSON. Must be
+    /// byte-identical to the snapshot-path document.
+    fn replay_journal(
+        setup_svg_name: &str,
+        journal: &[crate::document::op_log::Transaction],
+        head: usize,
+    ) -> String {
+        let setup_svg = read_fixture(&format!("svg/{}", setup_svg_name));
+        let doc = svg_to_document(&setup_svg);
+        let mut model = Model::new(doc, None);
+        for txn in &journal[0..head] {
+            for op in &txn.ops {
+                apply_op(&mut model, &op.params);
+            }
+        }
         document_to_test_json(model.document())
     }
 
@@ -655,7 +699,8 @@ mod tests {
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("operations/{}", expected_file));
         let expected = expected.trim();
-        let actual = run_operation_test(tc);
+        let model = run_operation_model(tc);
+        let actual = document_to_test_json(model.document());
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -663,6 +708,30 @@ mod tests {
             eprintln!("=== ACTUAL ({}) ===", name);
             eprintln!("{}", actual);
             panic!("Operation test '{}' failed: canonical JSON mismatch", name);
+        }
+
+        // checkpoint_equivalence gate (OP_LOG.md §6): the journal must replay to
+        // the same document as the snapshot path. Deferred for fixtures that
+        // embed the flat snapshot/undo/redo history ops — those map cleanly to
+        // the journal cursor only after the undo-law reshape (a later sub-step);
+        // replaying a transaction that was opened-then-undone before commit is
+        // exactly the case the reshape fixes.
+        let has_history = tc["ops"].as_array().unwrap().iter().any(|o| {
+            matches!(o["op"].as_str(), Some("snapshot") | Some("undo") | Some("redo"))
+        });
+        if !has_history {
+            let setup = tc["setup_svg"].as_str().unwrap();
+            let replayed = replay_journal(setup, model.journal(), model.journal_head());
+            if replayed != actual {
+                eprintln!("=== checkpoint_equivalence GATE FAILED ({}) ===", name);
+                eprintln!("--- snapshot path ---\n{}", actual);
+                eprintln!("--- journal replay ---\n{}", replayed);
+                panic!(
+                    "checkpoint_equivalence gate failed for '{}': \
+                     journal replay != snapshot path",
+                    name
+                );
+            }
         }
     }
 

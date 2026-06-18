@@ -16,7 +16,7 @@ use crate::document::id_index::{incremental_update_index, rebuild_id_index, IdIn
 // OP_LOG.md Increment 2: the typed Transaction journal layered on the snapshot
 // stacks. `document_to_test_json` (core, not test-gated) gives the canonical
 // "net document change is byte-identical" comparison for the commit no-op rule.
-use crate::document::op_log::Transaction;
+use crate::document::op_log::{PrimitiveOp, Transaction};
 use crate::geometry::element::{Color, Fill, Stroke};
 use crate::geometry::test_json::document_to_test_json;
 
@@ -479,6 +479,28 @@ impl Model {
     /// The Transaction journal (OP_LOG.md §5). Test/inspection accessor.
     pub fn journal(&self) -> &[Transaction] {
         &self.op_journal
+    }
+
+    /// Append a primitive op to the open transaction's record (OP_LOG.md §5):
+    /// the `op_apply` path calls this as each op is applied, so `commit_txn`
+    /// finalizes a transaction whose `ops` replay to the same document — the
+    /// `checkpoint_equivalence` gate (§6). No-op when no transaction is open
+    /// (an op applied outside any bracket is not journaled), so this is safe to
+    /// call unconditionally from the dispatcher.
+    pub fn record_op(&mut self, op: PrimitiveOp) {
+        if let Some(p) = self.pending_txn.as_mut() {
+            p.ops.push(op);
+        }
+    }
+
+    /// Set the open transaction's artist/AI-legible name (an `actions.yaml`
+    /// verb). No-op when no transaction is open. Used by the `op_apply` path /
+    /// action dispatch to label the transaction for the semantic-summary
+    /// surface (OP_LOG.md §5).
+    pub fn name_txn(&mut self, name: &str) {
+        if let Some(p) = self.pending_txn.as_mut() {
+            p.name = Some(name.to_string());
+        }
     }
 
     // --- Transaction bracket (OP_LOG.md Increment 1) ----------------------
