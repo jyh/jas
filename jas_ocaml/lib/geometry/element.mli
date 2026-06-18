@@ -538,6 +538,10 @@ and live_variant =
   (** A by-id reference to another element, resolved at evaluate time.
       See [reference_elem] and REFERENCE_GRAPH.md section 1.1. *)
   | Reference of reference_elem
+  (** A recorded (history-based) live element: a normalized,
+      input-addressed op-segment replayed against the current inputs.
+      See [recorded_elem] and RECORDED_ELEMENTS.md. *)
+  | Recorded of recorded_elem
 
 (** Which boolean operation a compound shape evaluates to. Only the
     four Shape Mode operations can be compound. *)
@@ -585,6 +589,41 @@ and reference_elem = {
   ref_visibility : visibility;
   ref_blend_mode : blend_mode;
   ref_mask : mask option;
+}
+
+(** A recorded (history-based) live element (RECORDED_ELEMENTS.md): a
+    normalized, input-addressed op-segment captured from the journal,
+    replayed against the current inputs to produce derived geometry.
+    Edit a source input and the derivative re-derives live. Its inputs are
+    named by stable id (a dependency edge, like [reference_elem]), not
+    embedded. Common props are flattened in-line, matching the other live
+    variants. [rec_ops] are [Op_log.primitive_op] entries; [rec_inputs]
+    are the source element ids the recipe rebinds against. *)
+and recorded_elem = {
+  rec_ops : recorded_op list;
+  rec_inputs : element_ref list;
+  rec_id : string option;
+  rec_fill : fill option;
+  rec_stroke : stroke option;
+  rec_opacity : float;
+  (** Common-props transform — the one [get_transform] reads and the
+      one [common_fields] serializes. *)
+  rec_transform : transform option;
+  rec_locked : bool;
+  rec_visibility : visibility;
+  rec_blend_mode : blend_mode;
+  rec_mask : mask option;
+}
+
+(** One normalized recipe op (RECORDED_ELEMENTS.md): the verb, its flat
+    params (JSON), and the resolved targets. Structurally identical to
+    [Op_log.primitive_op]; declared here so the [element] type does not
+    depend on [Op_log] (the [Live] / harness layers convert between the
+    two). *)
+and recorded_op = {
+  rop_op : string;
+  rop_params : Yojson.Safe.t;
+  rop_targets : string list;
 }
 
 (** A by-id reference to the stable id of another element. Stable across
@@ -680,6 +719,14 @@ val make_layer : ?name:string -> ?opacity:float -> ?transform:transform option -
 val make_reference :
   ?id:string option -> ?opacity:float -> ?transform:transform option ->
   ?locked:bool -> element_ref -> element
+
+(** Build a recorded (history-based) live element from its normalized
+    recipe [ops] and source [inputs] (by stable id), with no paint or
+    transform overrides. Mirrors Rust [RecordedElem::new]. See
+    RECORDED_ELEMENTS.md. *)
+val make_recorded :
+  ?id:string option -> ?opacity:float -> ?transform:transform option ->
+  ?locked:bool -> recorded_op list -> element_ref list -> element
 
 (** {2 Lock state} *)
 

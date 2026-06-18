@@ -407,6 +407,26 @@ let rec pack_element = function
              ~name:None ~id:r.ref_id @
            [vstr "reference"; vstr r.ref_target;
             pack_transform r.ref_instance_transform])
+  | Live (Recorded rec_) ->
+    (* [tag, common(1..6), kind(7), inputs-json(8), ops-json(9)]. The recipe
+       (inputs + ops) rides slots 8/9 as JSON strings (RECORDED_ELEMENTS.md),
+       mirroring the Rust binary codec. *)
+    let inputs_json =
+      Yojson.Safe.to_string (`List (List.map (fun s -> `String s) rec_.rec_inputs))
+    in
+    let ops_json =
+      Yojson.Safe.to_string (`List (List.map (fun (op : Element.recorded_op) ->
+        `Assoc [ ("op", `String op.rop_op);
+                 ("params", op.rop_params);
+                 ("targets",
+                  `List (List.map (fun s -> `String s) op.rop_targets)) ])
+        rec_.rec_ops))
+    in
+    vlist (vint tag_live ::
+           pack_common ~locked:rec_.rec_locked ~opacity:rec_.rec_opacity
+             ~visibility:rec_.rec_visibility ~transform:rec_.rec_transform
+             ~name:None ~id:rec_.rec_id @
+           [vstr "recorded"; vstr inputs_json; vstr ops_json])
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -745,6 +765,47 @@ let rec unpack_element v =
         ref_visibility = visibility;
         ref_blend_mode = Element.Normal;
         ref_mask = None })
+    else if kind = "recorded" then
+      (* The recipe (inputs + ops) rides slots 8/9 as JSON strings, mirroring
+         the Rust binary codec. *)
+      let inputs =
+        match Yojson.Safe.from_string (as_str (List.nth arr 8)) with
+        | `List items ->
+          List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      let ops =
+        match Yojson.Safe.from_string (as_str (List.nth arr 9)) with
+        | `List items ->
+          List.map (fun op ->
+            let field k = match op with
+              | `Assoc fields -> List.assoc_opt k fields
+              | _ -> None
+            in
+            { Element.rop_op =
+                (match field "op" with Some (`String s) -> s | _ -> "");
+              rop_params =
+                (match field "params" with Some v -> v | None -> `Null);
+              rop_targets =
+                (match field "targets" with
+                 | Some (`List ts) ->
+                   List.filter_map (function `String s -> Some s | _ -> None) ts
+                 | _ -> []) }
+          ) items
+        | _ -> []
+      in
+      Live (Recorded {
+        rec_ops = ops;
+        rec_inputs = inputs;
+        rec_id = id;
+        rec_fill = None;
+        rec_stroke = None;
+        rec_opacity = opacity;
+        rec_transform = transform;
+        rec_locked = locked;
+        rec_visibility = visibility;
+        rec_blend_mode = Element.Normal;
+        rec_mask = None })
     else failwith (Printf.sprintf "unknown live kind: %s" kind)
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 

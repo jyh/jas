@@ -21,7 +21,7 @@
 (test
  (name live_test)
  (modules live_test)
- (libraries jas alcotest))
+ (libraries jas yojson alcotest))
 
 (test
  (name normalize_test)
