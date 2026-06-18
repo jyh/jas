@@ -1710,31 +1710,19 @@ impl Controller {
     /// PolygonElems are replaced with PathElems that carry the
     /// refitted CurveTo / LineTo commands; existing PathElems are
     /// re-issued with refitted geometry. Selection is preserved.
+    /// Refit the selected paths/polygons to simplified curves. Self-bracketing
+    /// (OP_LOG.md Increment 2): a standalone call opens + commits its own undo
+    /// transaction; called as the boolean post-op auto-simplify it runs inside
+    /// `apply_boolean_operation`'s `with_txn`, so `edit_document` joins that
+    /// transaction and the boolean + refit collapse into a single undo entry.
+    /// (Replaces the Increment-1 `take_snapshot` parameter, now deleted.)
     pub fn simplify_selection(model: &mut Model, precision: f64) {
-        Self::simplify_selection_with_snapshot(model, precision, true);
-    }
-
-    /// As `simplify_selection` but lets the caller skip the
-    /// `model.snapshot()` step. Used by the apply-simplify-after-op
-    /// boolean post-step (which already snapshotted) so the boolean
-    /// and the refit collapse into a single undo entry.
-    pub fn simplify_selection_with_snapshot(
-        model: &mut Model,
-        precision: f64,
-        take_snapshot: bool,
-    ) {
         use crate::algorithms::simplify::simplify_polyline;
         use crate::geometry::element::{PathCommand, PathElem};
         let doc = model.document().clone();
         if doc.selection.is_empty() {
             return;
         }
-        // OP_LOG.md Increment 1: open the undo transaction here only when this is
-        // a standalone simplify (take_snapshot). When called as the boolean
-        // post-step (take_snapshot=false) the caller already opened the
-        // transaction, so the refit joins it (one undo entry). The take_snapshot
-        // param is retained for Increment 1; its removal is Increment 2.
-        if take_snapshot { model.begin_txn(); }
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             let Some(elem) = new_doc.get_element(&es.path).cloned() else { continue; };
@@ -1813,8 +1801,7 @@ impl Controller {
                 _ => {}
             }
         }
-        model.set_document(new_doc);
-        if take_snapshot { model.commit_txn(); }
+        model.edit_document(new_doc);
     }
 
     pub fn lock_selection(model: &mut Model) {
