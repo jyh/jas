@@ -583,8 +583,12 @@ impl RecordedElem {
                 None => return PolygonSet::new(),
             }
         }
-        // Replay. Output ids are derived deterministically: `<own_id>/<n>`.
-        let own_id = self.common.id.clone().unwrap_or_default();
+        // Replay. Derived (produced) elements are keyed by a capture-stable
+        // production-index handle `$n`, so the recipe is independent of this
+        // element's own id (the recipe is portable across re-id). When a
+        // recorded element later EXPANDS to concrete elements, those carry ids
+        // derived from (own_id + n) — RECORDED_ELEMENTS.md §5; geometry replay
+        // here needs only the internal handle.
         let mut output_ids: Vec<String> = Vec::new();
         let mut counter: usize = 0;
         let str_ids = |v: Option<&serde_json::Value>| -> Vec<String> {
@@ -599,7 +603,7 @@ impl RecordedElem {
                     let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
                     for src in str_ids(op.params.get("from")) {
                         if let Some(el) = working.get(&src) {
-                            let derived_id = format!("{own_id}/{counter}");
+                            let derived_id = format!("${counter}");
                             counter += 1;
                             let copy = translate_element(el, dx, dy);
                             working.insert(derived_id.clone(), copy);
@@ -649,6 +653,73 @@ impl LiveElement for RecordedElem {
     /// (mirrors ReferenceElem — a recorded element owns no static source tree).
     fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
     fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
+}
+
+/// Normalize a captured journal op-segment into a recorded recipe
+/// (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
+/// input-addressed form by tracking the working selection as recipe refs.
+///
+/// - A select op (`select_rect`/`select`) establishes the working selection from
+///   its resolved `targets` (the ids it selected); it is NOT emitted — selection
+///   becomes input-addressing.
+/// - `copy_selection` emits `copy{from, dx, dy}` (source = the working selection)
+///   and rebinds the selection to the produced `$n` handles.
+/// - `move_selection` emits `translate{ids, dx, dy}` on the working selection.
+/// - Ops outside the replay-safe subset are dropped from the recipe.
+///
+/// The recipe's non-`$` refs are the **inputs** — the elements it rebinds by
+/// stable id (the deterministic "everything that traces to a read input rebinds;
+/// produced elements are `$n` handles" MVP rule; no AI fitter). Returns
+/// `(recipe, input_ids)`; the caller wraps them in a `RecordedElem`.
+pub fn capture_recipe(segment: &[PrimitiveOp]) -> (Vec<PrimitiveOp>, Vec<String>) {
+    let num = |p: &serde_json::Value, k: &str| p.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let mut working: Vec<String> = Vec::new();
+    let mut recipe: Vec<PrimitiveOp> = Vec::new();
+    let mut counter = 0usize;
+    for op in segment {
+        match op.op.as_str() {
+            "select_rect" | "select" => {
+                working = op.targets.clone();
+            }
+            "copy_selection" => {
+                let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                recipe.push(PrimitiveOp {
+                    op: "copy".into(),
+                    params: serde_json::json!({ "from": working, "dx": dx, "dy": dy }),
+                    targets: Vec::new(),
+                });
+                let mut produced = Vec::new();
+                for _ in &working {
+                    produced.push(format!("${counter}"));
+                    counter += 1;
+                }
+                working = produced;
+            }
+            "move_selection" => {
+                let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                recipe.push(PrimitiveOp {
+                    op: "translate".into(),
+                    params: serde_json::json!({ "ids": working, "dx": dx, "dy": dy }),
+                    targets: Vec::new(),
+                });
+            }
+            _ => {}
+        }
+    }
+    // Inputs = the distinct non-`$` refs the recipe rebinds, in first-seen order.
+    let mut inputs: Vec<String> = Vec::new();
+    for op in &recipe {
+        for key in ["from", "ids"] {
+            if let Some(arr) = op.params.get(key).and_then(|v| v.as_array()) {
+                for r in arr.iter().filter_map(|v| v.as_str()) {
+                    if !r.starts_with('$') && !inputs.iter().any(|x| x == r) {
+                        inputs.push(r.to_string());
+                    }
+                }
+            }
+        }
+    }
+    (recipe, inputs)
 }
 
 // ---------------------------------------------------------------------------
@@ -1314,7 +1385,7 @@ mod tests {
         // eye must re-derive it live.
         let recipe = vec![
             recorded_op("copy", serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0})),
-            recorded_op("translate", serde_json::json!({"ids": ["rec/0"], "dx": 50.0, "dy": 0.0})),
+            recorded_op("translate", serde_json::json!({"ids": ["$0"], "dx": 50.0, "dy": 0.0})),
         ];
         let mut common = CommonProps::default();
         common.id = Some("rec".into());
@@ -1360,7 +1431,7 @@ mod tests {
 
         let recipe = vec![
             recorded_op("copy", serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0})),
-            recorded_op("translate", serde_json::json!({"ids": ["rec/0"], "dx": 50.0, "dy": 0.0})),
+            recorded_op("translate", serde_json::json!({"ids": ["$0"], "dx": 50.0, "dy": 0.0})),
         ];
         let mut common = CommonProps::default();
         common.id = Some("rec".into());
@@ -1384,6 +1455,42 @@ mod tests {
         let back = binary_to_document(&bytes).unwrap();
         assert_eq!(document_to_test_json(&back), json,
             "recorded element survives the binary round-trip");
+    }
+
+    #[test]
+    fn capture_recipe_normalizes_select_copy_move_to_input_addressed() {
+        // A captured journal segment ("watch what I did"): select the eye, copy
+        // it, move the copy. select_rect carries its resolved targets (the
+        // selected ids), as the op-capture path will populate.
+        let segment = vec![
+            PrimitiveOp { op: "select_rect".into(), params: serde_json::json!({}), targets: vec!["eye".into()] },
+            recorded_op("copy_selection", serde_json::json!({"dx": 0.0, "dy": 0.0})),
+            recorded_op("move_selection", serde_json::json!({"dx": 50.0, "dy": 0.0})),
+        ];
+        let (recipe, inputs) = capture_recipe(&segment);
+
+        // Normalized to the input-addressed recipe; the read element is the input.
+        assert_eq!(inputs, vec!["eye".to_string()]);
+        assert_eq!(recipe.len(), 2);
+        assert_eq!(recipe[0].op, "copy");
+        assert_eq!(recipe[0].params["from"], serde_json::json!(["eye"]));
+        assert_eq!(recipe[1].op, "translate");
+        assert_eq!(recipe[1].params["ids"], serde_json::json!(["$0"]),
+            "the move targets the produced copy, not the input");
+
+        // The captured recipe replays + re-derives like the hand-built one.
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let recorded = RecordedElem::new(
+            recipe, inputs.into_iter().map(ElementRef).collect(), common);
+        let mut map = std::collections::HashMap::new();
+        map.insert("eye".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let mut visiting = VisitSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &MapResolver(map), &mut visiting);
+        assert_eq!(ps.len(), 1);
+        let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 50.0).abs() < 1e-6 && (max_x - 60.0).abs() < 1e-6,
+            "the captured recipe replays to the demonstrated output");
     }
 
     #[test]
