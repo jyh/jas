@@ -2199,6 +2199,7 @@ _TYPE_LABELS = {
     "Path": "Path", "Text": "Text", "TextPath": "Text Path",
     "Group": "Group", "Layer": "Layer",
     "CompoundShape": "Compound Shape", "ReferenceElem": "Reference",
+    "RecordedElem": "Recorded",
 }
 
 def _element_type_label(elem):

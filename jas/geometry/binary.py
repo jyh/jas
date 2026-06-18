@@ -7,6 +7,7 @@ Format:
     Payload: MessagePack-encoded document using positional arrays.
 """
 
+import json
 import struct
 import zlib
 
@@ -25,7 +26,7 @@ from geometry.element import (
     StrokeWidthPoint,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
-    CompoundOperation, CompoundShape, ReferenceElem,
+    CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -404,6 +405,18 @@ def _pack_element(elem: Element) -> list:
         operands = [_pack_element(c) for c in elem.operands]
         return [_TAG_LIVE, *common,
                 "compound_shape", elem.operation.value, operands]
+    elif isinstance(elem, RecordedElem):
+        # [tag, common(1..6), kind(7), inputs-json(8), ops-json(9)]. The recipe
+        # rides slots 8/9 as canonical JSON strings, matching the Rust reference
+        # (serde_json::to_string of the inputs list and the ops list) so the
+        # binary representation is byte-identical across apps. sort_keys mirrors
+        # serde_json's BTreeMap key ordering; compact separators drop spaces.
+        inputs_json = json.dumps(list(elem.inputs), separators=(",", ":"))
+        ops_json = json.dumps(
+            [{"op": o.op, "params": o.params, "targets": list(o.targets)}
+             for o in elem.ops],
+            sort_keys=True, separators=(",", ":"))
+        return [_TAG_LIVE, *common, "recorded", inputs_json, ops_json]
     raise ValueError(f"Unknown element type: {type(elem)}")
 
 
@@ -634,6 +647,19 @@ def _unpack_element(arr: list) -> Element:
             operands = tuple(_unpack_element(c) for c in arr[9])
             return CompoundShape(operation=op, operands=operands,
                                  fill=None, stroke=None, **live_common)
+        elif kind == "recorded":
+            # RecordedElem is a first-class element with its own id / name, so
+            # it takes the full common kwargs. Inverse of the packer: slot 8 is
+            # a JSON string of the input id list, slot 9 a JSON string of the
+            # ops (each {op, params, targets}), matching the Rust reference's
+            # serde_json strings (RECORDED_ELEMENTS.md).
+            from document.op_log import PrimitiveOp
+            inputs = tuple(json.loads(arr[8]))
+            ops = tuple(
+                PrimitiveOp(op=o["op"], params=dict(o["params"]),
+                            targets=list(o.get("targets", [])))
+                for o in json.loads(arr[9]))
+            return RecordedElem(ops=ops, inputs=inputs, **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element tag: {tag}")
 

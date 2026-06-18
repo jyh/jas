@@ -84,6 +84,7 @@ def element_to_polygon_set_with(
         Polygon,
         Polyline,
         Rect,
+        RecordedElem,
         ReferenceElem,
         Text,
         TextPath,
@@ -116,6 +117,10 @@ def element_to_polygon_set_with(
     # so order is not strictly required, but the explicit case keeps the
     # dispatch parallel to the Rust LiveVariant match.)
     if isinstance(elem, ReferenceElem):
+        return elem.evaluate_with(precision, resolver, visiting)
+    # RecordedElem (RECORDED_ELEMENTS.md): replays its recipe against the
+    # resolved inputs. A by-id LiveElement, like a reference.
+    if isinstance(elem, RecordedElem):
         return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, CompoundShape):
         return elem.evaluate_with(precision, resolver, visiting)
@@ -262,6 +267,74 @@ def resolver_from_document(doc: "Document") -> DictResolver:
     for master in sorted_masters:
         _collect_ref_ids(master, index)
     return DictResolver(index)
+
+
+# ── Recorded recipe capture (RECORDED_ELEMENTS.md §1/§4) ──────────
+
+
+def capture_recipe(segment):
+    """Normalize a captured journal op-segment into a recorded recipe
+    (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
+    input-addressed form by tracking the working selection as recipe refs.
+
+    - A select op (``select_rect`` / ``select``) establishes the working
+      selection from its resolved ``targets`` (the ids it selected); it is
+      NOT emitted — selection becomes input-addressing.
+    - ``copy_selection`` emits ``copy{from, dx, dy}`` (source = the working
+      selection) and rebinds the selection to the produced ``$n`` handles.
+    - ``move_selection`` emits ``translate{ids, dx, dy}`` on the working
+      selection.
+    - Ops outside the replay-safe subset are dropped from the recipe.
+
+    The recipe's non-``$`` refs are the **inputs** — the elements it rebinds
+    by stable id (the deterministic "everything that traces to a read input
+    rebinds; produced elements are ``$n`` handles" MVP rule; no AI fitter).
+    Returns ``(recipe, input_ids)`` as a (list[PrimitiveOp], list[str]); the
+    caller wraps them in a ``RecordedElem``. Mirrors the Rust
+    ``capture_recipe``.
+    """
+    from document.op_log import PrimitiveOp
+
+    def _num(params: dict, k: str) -> float:
+        val = params.get(k)
+        return float(val) if isinstance(val, (int, float)) else 0.0
+
+    working: list[str] = []
+    recipe: list[PrimitiveOp] = []
+    counter = 0
+    for op in segment:
+        if op.op in ("select_rect", "select"):
+            working = list(op.targets)
+        elif op.op == "copy_selection":
+            dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+            recipe.append(PrimitiveOp(
+                op="copy",
+                params={"from": list(working), "dx": dx, "dy": dy},
+                targets=[]))
+            produced = []
+            for _ in working:
+                produced.append(f"${counter}")
+                counter += 1
+            working = produced
+        elif op.op == "move_selection":
+            dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+            recipe.append(PrimitiveOp(
+                op="translate",
+                params={"ids": list(working), "dx": dx, "dy": dy},
+                targets=[]))
+        # Else: outside the replay-safe subset — dropped.
+
+    # Inputs = the distinct non-``$`` refs the recipe rebinds, first-seen order.
+    inputs: list[str] = []
+    for op in recipe:
+        for key in ("from", "ids"):
+            arr = op.params.get(key)
+            if isinstance(arr, list):
+                for r in arr:
+                    if (isinstance(r, str) and not r.startswith("$")
+                            and r not in inputs):
+                        inputs.append(r)
+    return recipe, inputs
 
 
 # ── Internal helpers ──────────────────────────────────────────────
