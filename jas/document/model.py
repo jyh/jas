@@ -24,6 +24,18 @@ class _PendingTxn:
     doc_at_begin: Document | None = None
 
 
+@dataclass
+class Version:
+    """A named version point (OP_LOG.md Increment 3a / VISION.md §6.9). Stores
+    the document at a labeled journal cursor position so ``restore_version`` is
+    O(1) and sound regardless of whether the intervening transactions carry
+    replayable ops. Mirrors ``Version`` in ``jas_dioxus`` (without the paired
+    id_index, which this app does not maintain on the Model)."""
+    label: str
+    journal_head: int
+    document: Document
+
+
 @dataclass(frozen=True)
 class EditingTarget:
     """The target that drawing tools operate on. The default is the
@@ -94,6 +106,14 @@ class Model:
         self._pending_txn: _PendingTxn | None = None
         self._in_txn: bool = False
         self._next_txn_counter: int = 0
+        # OP_LOG.md Increment 3a: named version points (VISION.md §6.9). Each
+        # labels a journal cursor position and stores the document at that
+        # point, so restore_version is O(1) and sound even though production
+        # transactions are opaque (no op replay needed). The label is also
+        # written onto the journal's transaction at that head (the `label`
+        # field reserved in Increment 2) so it serializes into the journal
+        # artifact.
+        self._versions: list[Version] = []
         self.default_fill: Fill | None = None
         self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
         self.fill_on_top: bool = True
@@ -348,6 +368,54 @@ class Model:
         """Set the open transaction's legible name (no-op when none open)."""
         if self._pending_txn is not None:
             self._pending_txn.name = name
+
+    # ── Versioning labels (OP_LOG.md Increment 3a / VISION.md §6.9) ─────────
+
+    @property
+    def versions(self) -> list[Version]:
+        """The named version points, in creation order. Test/inspection."""
+        return self._versions
+
+    def label_version(self, name: str) -> None:
+        """Mark the current document state as a named version point. Stores the
+        document (so restore_version is O(1) and sound even though production
+        transactions are opaque) and writes ``label`` onto the journal's
+        transaction at the current head (the field reserved in Increment 2), so
+        the label serializes into the journal artifact. Naming is idempotent:
+        re-labeling an existing name re-points it here."""
+        # Stamp the label onto the most-recent committed transaction, if any
+        # (a version at the origin labels no transaction).
+        if self._journal_head > 0 and self._journal_head <= len(self._op_journal):
+            self._op_journal[self._journal_head - 1].label = name
+        version = Version(
+            label=name,
+            journal_head=self._journal_head,
+            document=self._document,
+        )
+        for i, existing in enumerate(self._versions):
+            if existing.label == name:
+                self._versions[i] = version
+                return
+        self._versions.append(version)
+
+    def restore_version(self, name: str) -> bool:
+        """Restore the document to a named version. This is an ordinary
+        undoable edit (one transaction "restore version N"), so it stays on the
+        linear undo/redo timeline rather than jumping the cursor non-linearly;
+        the no-op rule makes restoring to the already-current state a no-op.
+        Returns False if no such version exists."""
+        version = next(
+            (v for v in self._versions if v.label == name), None)
+        if version is None:
+            return False
+        doc = version.document
+
+        def body() -> None:
+            self.name_txn(f"restore version {name}")
+            self.document = doc
+
+        self.with_txn(body)
+        return True
 
     def on_document_changed(self, callback: Callable[[Document], None]) -> None:
         """Register a callback invoked whenever the document changes."""

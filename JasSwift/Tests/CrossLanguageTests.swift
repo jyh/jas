@@ -565,6 +565,12 @@ private func runOperationFixture(_ fixture: String) throws {
                     model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
                 }
                 model.commitTxn()
+                // OP_LOG.md Increment 3a: a `label` on a transaction marks a
+                // version point — labelVersion stamps it onto the committed
+                // transaction so it serializes into the journal artifact.
+                if let label = txn["label"] as? String {
+                    model.labelVersion(label)
+                }
             }
             for h in (tc["history"] as? [String] ?? []) {
                 switch h {
@@ -639,26 +645,35 @@ private func journalToTestJson(_ journal: [Transaction]) -> String {
 
 /// OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
 /// byte-identically across apps (deterministic txn-N counter + parent edge).
+/// Runs BOTH the base txn_metadata fixture and the txn_labels fixture
+/// (OP_LOG.md Increment 3a: a transaction `label` stamps a version onto the
+/// committed txn so the label serializes into the journal artifact).
 @Test func journalTxnMetadata() throws {
-    let json = readFixture("operations/txn_metadata.json")
-    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
-    for tc in tests {
-        let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
-        let model = Model(document: svgToDocument(svg))
-        let controller = Controller(model: model)
-        for txn in (tc["txns"] as! [[String: Any]]) {
-            model.beginTxn()
-            if let n = txn["name"] as? String { model.nameTxn(n) }
-            for op in (txn["ops"] as! [[String: Any]]) {
-                applyFixtureOp(model, controller, op)
-                model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
+    for fixture in ["operations/txn_metadata.json", "operations/txn_labels.json"] {
+        let json = readFixture(fixture)
+        let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+        for tc in tests {
+            let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+            let model = Model(document: svgToDocument(svg))
+            let controller = Controller(model: model)
+            for txn in (tc["txns"] as! [[String: Any]]) {
+                model.beginTxn()
+                if let n = txn["name"] as? String { model.nameTxn(n) }
+                for op in (txn["ops"] as! [[String: Any]]) {
+                    applyFixtureOp(model, controller, op)
+                    model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
+                }
+                model.commitTxn()
+                // Increment 3a: stamp the label onto the committed transaction.
+                if let label = txn["label"] as? String {
+                    model.labelVersion(label)
+                }
             }
-            model.commitTxn()
+            let actual = journalToTestJson(model.journal)
+            let expected = readFixture("operations/\(tc["expected_journal_json"] as! String)")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            #expect(actual == expected, "journal JSON mismatch for \(fixture)")
         }
-        let actual = journalToTestJson(model.journal)
-        let expected = readFixture("operations/\(tc["expected_journal_json"] as! String)")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(actual == expected, "txn_metadata journal JSON mismatch")
     }
 }
 

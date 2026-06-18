@@ -18,6 +18,24 @@ public enum EditingTarget: Equatable {
 
 private var nextUntitled = 1
 
+/// A named version point (OP_LOG.md Increment 3a / VISION.md §6.9). Stores the
+/// document + paired index at a labeled journal cursor position so
+/// ``Model/restoreVersion(_:)`` is O(1) and sound regardless of whether the
+/// intervening transactions carry replayable ops. Mirrors Rust's `Version`.
+public struct Version {
+    public var label: String
+    public var journalHead: Int
+    public var document: Document
+    public var idIndex: IdIndex
+
+    public init(label: String, journalHead: Int, document: Document, idIndex: IdIndex) {
+        self.label = label
+        self.journalHead = journalHead
+        self.document = document
+        self.idIndex = idIndex
+    }
+}
+
 private func freshFilename() -> String {
     let name = "Untitled-\(nextUntitled)"
     nextUntitled += 1
@@ -171,6 +189,14 @@ public class Model: ObservableObject {
     /// discipline element ids use, so the journal file is byte-shareable across
     /// apps. Mirrors Rust's `next_txn_counter`.
     private var nextTxnCounter: UInt64 = 0
+    /// OP_LOG.md Increment 3a: named version points (VISION.md §6.9). Each labels
+    /// a journal cursor position and stores the document + paired index at that
+    /// point, so ``restoreVersion(_:)`` is O(1) and sound even though production
+    /// transactions are opaque (no op replay needed). The label is also written
+    /// onto the journal's transaction at that head (the `label` field reserved in
+    /// Increment 2) so it serializes into the journal artifact. Mirrors Rust's
+    /// `versions`.
+    private var versionsStore: [Version] = []
 
     /// True if the document has unsaved committed edits. The unified OP_LOG.md
     /// §5/§9 semantics: `journalHead != savedJournalHead`, the journal CURSOR
@@ -517,6 +543,55 @@ public class Model: ObservableObject {
     /// transaction is open. Mirrors Rust's `name_txn`.
     public func nameTxn(_ name: String) {
         pendingTxn?.name = name
+    }
+
+    // MARK: - Versioning labels (OP_LOG.md Increment 3a / VISION.md §6.9)
+
+    /// The named version points, in creation order. Test/inspection accessor.
+    /// Mirrors Rust's `versions`.
+    public var versions: [Version] { versionsStore }
+
+    /// Mark the current document state as a named version point. Stores the
+    /// document + paired index (so ``restoreVersion(_:)`` is O(1) and sound even
+    /// though production transactions are opaque) and writes `label` onto the
+    /// journal's transaction at the current head (the field reserved in
+    /// Increment 2), so the label serializes into the journal artifact. Naming
+    /// is idempotent: re-labeling an existing name re-points it here. Mirrors
+    /// Rust's `label_version`.
+    public func labelVersion(_ name: String) {
+        // Stamp the label onto the most-recent committed transaction, if any
+        // (a version at the origin labels no transaction).
+        if journalHead > 0, journalHead - 1 < opJournal.count {
+            opJournal[journalHead - 1].label = name
+        }
+        let version = Version(
+            label: name,
+            journalHead: journalHead,
+            document: document,
+            idIndex: idIndex)
+        if let i = versionsStore.firstIndex(where: { $0.label == name }) {
+            versionsStore[i] = version
+        } else {
+            versionsStore.append(version)
+        }
+    }
+
+    /// Restore the document to a named version. This is an ordinary undoable
+    /// edit (one transaction "restore version N"), so it stays on the linear
+    /// undo/redo timeline rather than jumping the cursor non-linearly; the
+    /// no-op rule makes restoring to the already-current state a no-op. Returns
+    /// false if no such version exists. Mirrors Rust's `restore_version`.
+    @discardableResult
+    public func restoreVersion(_ name: String) -> Bool {
+        guard let version = versionsStore.first(where: { $0.label == name }) else {
+            return false
+        }
+        let doc = version.document
+        withTxn {
+            nameTxn("restore version \(name)")
+            document = doc
+        }
+        return true
     }
 
     private func notify() {
