@@ -470,6 +470,18 @@ fn pack_element(elem: &Element) -> Value {
                                   vstr("reference"), vstr(&r.target.0),
                                   pack_transform(&r.transform)])
             }
+            crate::geometry::live::LiveVariant::Recorded(rec) => {
+                let (locked, opacity, vis, xform, name, id) = pack_common(&rec.common);
+                // The recipe (inputs + ops) rides slots 8/9 as canonical JSON
+                // strings (RECORDED_ELEMENTS.md). [tag, common(1..6), kind(7),
+                // inputs-json(8), ops-json(9)].
+                let inputs_json = serde_json::to_string(
+                    &rec.inputs.iter().map(|i| i.0.clone()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let ops_json = serde_json::to_string(&rec.ops).unwrap_or_default();
+                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("recorded"), vstr(&inputs_json), vstr(&ops_json)])
+            }
         },
     }
 }
@@ -875,6 +887,17 @@ fn unpack_element(v: &Value) -> Element {
                         re.transform = unpack_transform(v);
                     }
                     Element::Live(crate::geometry::live::LiveVariant::Reference(re))
+                }
+                "recorded" => {
+                    let inputs: Vec<String> =
+                        serde_json::from_str(as_str(&arr[8])).unwrap_or_default();
+                    let inputs = inputs.into_iter()
+                        .map(crate::geometry::live::ElementRef)
+                        .collect();
+                    let ops = serde_json::from_str(as_str(&arr[9])).unwrap_or_default();
+                    Element::Live(crate::geometry::live::LiveVariant::Recorded(
+                        crate::geometry::live::RecordedElem::new(ops, inputs, common),
+                    ))
                 }
                 other => panic!("unknown live kind: {}", other),
             }

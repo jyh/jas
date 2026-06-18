@@ -111,7 +111,9 @@ fn element_dependencies(elem: &Element) -> Vec<ElementRef> {
         Element::Live(v) => match v {
             // Be explicit about both arms so a future LiveVariant forces a
             // decision here rather than silently defaulting to no edges.
-            LiveVariant::Reference(_) | LiveVariant::CompoundShape(_) => v.dependencies(),
+            // Recorded joins Reference here: its dependencies() are the recipe's
+            // input ids (by-id edges), so the reference graph tracks them.
+            LiveVariant::Reference(_) | LiveVariant::CompoundShape(_) | LiveVariant::Recorded(_) => v.dependencies(),
         },
         _ => Vec::new(),
     }

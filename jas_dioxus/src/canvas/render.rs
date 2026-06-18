@@ -1640,6 +1640,13 @@ fn draw_element_body(
                         .or_else(|| target.as_ref().and_then(|t| t.stroke().cloned()));
                     (ps, fill, stroke)
                 }
+                // A recorded element renders its replayed (derived) geometry,
+                // resolved against its inputs (RECORDED_ELEMENTS.md).
+                crate::geometry::live::LiveVariant::Recorded(rec) => (
+                    rec.evaluate_with(precision, &RenderResolver, &mut visiting),
+                    rec.fill.clone(),
+                    rec.stroke.clone(),
+                ),
             };
             let (mut fill_op, mut stroke_op, mut stroke_align) =
                 (1.0, 1.0, StrokeAlign::Center);
@@ -1902,6 +1909,8 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
                 crate::geometry::live::LiveVariant::CompoundShape(cs) => cs.evaluate_with(
                     crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
                 crate::geometry::live::LiveVariant::Reference(r) => r.evaluate_with(
+                    crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
+                crate::geometry::live::LiveVariant::Recorded(rec) => rec.evaluate_with(
                     crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
             };
             for ring in &ps {
