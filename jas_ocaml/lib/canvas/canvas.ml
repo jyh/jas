@@ -657,4 +657,4 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
     refresh_all ()
   ));
 
-  (window, toolbar_fixed, notebook, dock_box)
+  (window, toolbar_fixed, notebook, dock_box, workspace_layout, (fun () -> !dock_refresh ()))

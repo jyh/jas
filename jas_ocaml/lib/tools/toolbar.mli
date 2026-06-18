@@ -11,7 +11,14 @@ val tool_yaml_id : tool -> string option
     the toolbar-slot double-click handlers. *)
 val tool_options_dialog_id : tool -> string option
 
-class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> object
+(** Look up a tool's [tool_options_panel] field in workspace.json.
+    Returns the panel id when set, [None] otherwise. *)
+val tool_options_panel_id : tool -> string option
+
+(** Map a panel YAML id to a {!Workspace_layout.panel_kind}. *)
+val panel_id_to_kind : string -> Workspace_layout.panel_kind option
+
+class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> ?workspace_layout:Workspace_layout.workspace_layout -> ?refresh_dock:(unit -> unit) -> GPack.fixed -> object
   method current_tool : tool
   method widget : GObj.widget
   method x : int
@@ -25,4 +32,4 @@ class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.mode
   method redraw_fill_stroke : unit
 end
 
-val create : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> toolbar
+val create : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> ?workspace_layout:Workspace_layout.workspace_layout -> ?refresh_dock:(unit -> unit) -> GPack.fixed -> toolbar
