@@ -1994,10 +1994,10 @@ impl AppState {
         let precision = options.simplify_precision;
         if let Some(tab) = self.tab_mut() {
             // One transaction wraps the boolean op and its optional post-op
-            // auto-simplify so the pair is a single undo entry (OP_LOG.md
-            // Increment 1). apply_destructive_boolean's edit_document joins
-            // this txn (rather than self-bracketing), and the simplify step
-            // runs with take_snapshot=false so it joins it too.
+            // auto-simplify so the pair is a single undo entry — one journaled
+            // Transaction (OP_LOG.md §5). apply_destructive_boolean's
+            // edit_document and simplify_selection's edit_document both join
+            // this with_txn rather than self-bracketing.
             tab.model.with_txn(|m| {
                 crate::document::controller::Controller::apply_destructive_boolean(
                     m, op, &options,
@@ -2007,8 +2007,8 @@ impl AppState {
                 // selected) so curve recovery is consistent with the menu
                 // command. No-op when the boolean op left no selection.
                 if apply_simplify {
-                    crate::document::controller::Controller::simplify_selection_with_snapshot(
-                        m, precision, false,
+                    crate::document::controller::Controller::simplify_selection(
+                        m, precision,
                     );
                 }
             });
@@ -4175,10 +4175,10 @@ mod oplog_bracket_tests {
 
     #[test]
     fn boolean_union_with_auto_simplify_is_one_undo_step() {
-        // The post-op auto-simplify runs with take_snapshot=false, expecting
-        // to join the boolean op's transaction. Both must sit in one bracket
-        // — otherwise the simplify write hits set_document outside a
-        // transaction (panic) and/or lands a second undo entry.
+        // The boolean op and its post-op auto-simplify both join the
+        // apply_boolean_operation with_txn (OP_LOG.md §5/§9): one undo step and
+        // one journaled Transaction. (Previously this rode the deleted
+        // take_snapshot parameter.)
         let mut st = state_with_layer(
             vec![rect(0.0, 0.0, 20.0, 20.0), rect(10.0, 10.0, 20.0, 20.0)],
             vec![vec![0, 0], vec![0, 1]],
@@ -4194,11 +4194,18 @@ mod oplog_bracket_tests {
             .children().map(|c| c.len()).unwrap_or(0);
         assert_eq!(n_after, 1, "union leaves one output path");
 
+        // Boolean + simplify is exactly one journaled transaction (OP_LOG.md §9).
+        assert_eq!(
+            st.tab().unwrap().model.journal().len(), 1,
+            "boolean + auto-simplify is one transaction",
+        );
+
         // Exactly one undo step restores the two original rects.
         let m = &mut st.tabs[st.active_tab].model;
         assert!(m.can_undo(), "boolean+simplify pushed a checkpoint");
         m.undo();
         assert!(!m.can_undo(), "boolean+simplify is a single undo step");
+        assert_eq!(m.journal_head(), 0, "undo moved the journal cursor back");
         let n_restored = m.document().layers[0]
             .children().map(|c| c.len()).unwrap_or(0);
         assert_eq!(n_restored, 2, "undo restored both rects");
