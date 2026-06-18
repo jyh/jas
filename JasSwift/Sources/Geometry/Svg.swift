@@ -445,6 +445,16 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             return "\(indent)<use href=\"#\(escapeXml(r.target.id))\"" +
                 "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))" +
                 "\(instanceTransformAttr(r.instanceTransform))/>"
+        case .recorded(let rec):
+            // RECORDED_ELEMENTS.md §8: a recorded element exports as a
+            // data-jas-live group carrying the recipe's input ids. Full SVG
+            // round-trip (the ops) is deferred; no current fixture exercises
+            // it. Mirrors Rust's element_svg recorded arm (common_attrs_no_name
+            // = opacity + transform + id, never name).
+            let inputs = rec.inputs.map { $0.id }.joined(separator: ",")
+            return "\(indent)<g data-jas-live=\"recorded\"" +
+                " data-jas-inputs=\"\(escapeXml(inputs))\"" +
+                "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idAttr(rec.id))></g>"
         }
     }
 }

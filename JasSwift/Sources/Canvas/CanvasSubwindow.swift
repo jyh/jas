@@ -1626,6 +1626,14 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             let target = _currentRefResolver.resolve(r.target)
             liveFill = r.fill ?? target?.fill
             liveStroke = r.stroke ?? target?.stroke
+        case .recorded(let rec):
+            // A recorded element renders its replayed (derived) geometry,
+            // resolved against its inputs (RECORDED_ELEMENTS.md). Mirrors the
+            // Rust render arm.
+            ps = rec.evaluateWith(precision: DEFAULT_PRECISION,
+                                  resolver: _currentRefResolver, visiting: &visiting)
+            liveFill = rec.fill
+            liveStroke = rec.stroke
         }
         var fillOp = 1.0
         var strokeOp = 1.0
@@ -1780,6 +1788,9 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         case .reference(let r):
             ps = r.evaluateWith(precision: DEFAULT_PRECISION,
                                 resolver: _currentRefResolver, visiting: &visiting)
+        case .recorded(let rec):
+            ps = rec.evaluateWith(precision: DEFAULT_PRECISION,
+                                  resolver: _currentRefResolver, visiting: &visiting)
         }
         for ring in ps where ring.count >= 2 {
             ctx.move(to: CGPoint(x: ring[0].0, y: ring[0].1))

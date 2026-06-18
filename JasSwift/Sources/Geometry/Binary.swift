@@ -680,6 +680,19 @@ private func packElement(_ elem: Element) -> MsgValue {
             return .array([vint(tagLive)] + common +
                           [vstr("reference"), vstr(r.target.id),
                            packTransform(r.instanceTransform)])
+        case .recorded(let rec):
+            // RecordedElem has its own id but no name field (name packs nil).
+            let common = packCommon(locked: rec.locked, opacity: rec.opacity,
+                                    visibility: rec.visibility, transform: rec.transform,
+                                    name: nil, id: rec.id)
+            // The recipe (inputs + ops) rides slots 8/9 as canonical JSON
+            // strings (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
+            // [tag, common(1..6), kind(7), inputs-json(8), ops-json(9)].
+            let inputsJson = "[" +
+                rec.inputs.map { "\"\($0.id)\"" }.joined(separator: ",") + "]"
+            let opsJson = recordedOpsCanonical(rec.ops)
+            return .array([vint(tagLive)] + common +
+                          [vstr("recorded"), vstr(inputsJson), vstr(opsJson)])
         }
     }
 }
@@ -940,9 +953,46 @@ private func unpackElement(_ v: MsgValue) -> Element {
                 transform: xform,
                 instanceTransform: instanceXform,
                 opacity: opacity, locked: locked, visibility: vis)))
+        case "recorded":
+            // Decode the recipe from the two JSON strings packed at slots 8/9
+            // (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
+            let inputsJson = asStr(arr[8])
+            let opsJson = asStr(arr[9])
+            let inputs = decodeRecordedInputs(inputsJson)
+            let ops = decodeRecordedOps(opsJson)
+            return .live(.recorded(RecordedElem(
+                ops: ops, inputs: inputs, id: id,
+                transform: xform, opacity: opacity,
+                locked: locked, visibility: vis)))
         default: fatalError("unknown live kind: \(kind)")
         }
     default: fatalError("unknown element tag: \(tag)")
+    }
+}
+
+/// Decode a recorded element's input ids from the canonical JSON-string slot.
+/// Mirrors the Rust `serde_json::from_str` on the inputs slot.
+private func decodeRecordedInputs(_ json: String) -> [ElementRef] {
+    guard let data = json.data(using: .utf8),
+          let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+        return []
+    }
+    return arr.compactMap { $0 as? String }.map { ElementRef($0) }
+}
+
+/// Decode a recorded element's recipe ops from the canonical JSON-string slot.
+/// Each op is {op, params, targets}; params is kept verbatim as [String: Any].
+/// Mirrors the Rust `serde_json::from_str` on the ops slot.
+private func decodeRecordedOps(_ json: String) -> [PrimitiveOp] {
+    guard let data = json.data(using: .utf8),
+          let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        return []
+    }
+    return arr.map { d in
+        PrimitiveOp(
+            op: d["op"] as? String ?? "",
+            params: d["params"] as? [String: Any] ?? [:],
+            targets: (d["targets"] as? [Any] ?? []).compactMap { $0 as? String })
     }
 }
 

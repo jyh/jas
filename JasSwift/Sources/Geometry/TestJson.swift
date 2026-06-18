@@ -479,6 +479,16 @@ package func elementJson(_ elem: Element) -> String {
             if let it = r.instanceTransform {
                 o.raw("instance_transform", transformJson(it))
             }
+        case .recorded(let rec):
+            // RECORDED_ELEMENTS.md §8: a recorded element serializes its
+            // common props (id only when set, name nil), plus the input ids
+            // and the normalized recipe ops, canonicalized so the recorded
+            // element serializes byte-identically across apps.
+            commonFields(o, rec.opacity, rec.transform, rec.locked, rec.visibility, nil, rec.id)
+            let inputs = rec.inputs.map { "\"\($0.id)\"" }
+            o.raw("inputs", jsonArray(inputs))
+            let ops = rec.ops.map { canonicalRecordedOp($0) }
+            o.raw("ops", jsonArray(ops))
         }
     }
     return o.build()
@@ -899,6 +909,16 @@ private func parseTextDecorationField(_ v: Any?) -> String {
     return "none"
 }
 
+/// Parse a single recipe op dict ({op, params, targets}) back into a
+/// PrimitiveOp. `params` is kept verbatim as [String: Any] (the same shape the
+/// harness builds and replay reads); `targets` is a string array.
+private func parseRecordedOp(_ d: [String: Any]) -> PrimitiveOp {
+    let op = d["op"] as? String ?? ""
+    let params = d["params"] as? [String: Any] ?? [:]
+    let targets = (d["targets"] as? [Any] ?? []).compactMap { $0 as? String }
+    return PrimitiveOp(op: op, params: params, targets: targets)
+}
+
 package func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
     let typ = d["type"] as? String ?? ""
@@ -1023,6 +1043,19 @@ package func parseElement(_ v: Any?) -> Element {
                 transform: transform,
                 instanceTransform: parseTransform(d["instance_transform"]),
                 opacity: opacity, locked: locked, visibility: visibility)))
+        case "recorded":
+            // RECORDED_ELEMENTS.md §8: read the input ids and the recipe ops
+            // back into a RecordedElem. The recipe ops parse {op, params,
+            // targets}; params is held as [String: Any] (the same shape the
+            // harness builds), routed straight back into evaluate / replay.
+            let inputs = (d["inputs"] as? [Any] ?? [])
+                .compactMap { $0 as? String }
+                .map { ElementRef($0) }
+            let ops = (d["ops"] as? [[String: Any]] ?? []).map { parseRecordedOp($0) }
+            return .live(.recorded(RecordedElem(
+                ops: ops, inputs: inputs, id: id,
+                transform: transform, opacity: opacity,
+                locked: locked, visibility: visibility)))
         default:
             fatalError("Unknown live kind: \(kind)")
         }
