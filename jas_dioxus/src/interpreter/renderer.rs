@@ -9602,7 +9602,7 @@ mod tests {
         }).collect();
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = doc_layers;
-        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
         st
     }
 
@@ -9785,7 +9785,11 @@ mod tests {
             ("C".into(), Visibility::Preview, false),
         ]);
         let eval_ctx = serde_json::json!({});
-        let effects = vec![serde_json::json!({"doc.delete_at": "path(1)"})];
+        // Mirror real actions: a doc.* mutation rides a `snapshot` txn.
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({"doc.delete_at": "path(1)"}),
+        ];
         run_yaml_effects(&effects, &eval_ctx, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
@@ -9801,6 +9805,7 @@ mod tests {
         ]);
         let eval_ctx = serde_json::json!({});
         let effects = vec![
+            serde_json::json!("snapshot"),
             serde_json::json!({"doc.clone_at": "path(0)", "as": "clone"}),
             serde_json::json!({"doc.insert_after": {"path": "path(0)", "element": "clone"}}),
         ];
@@ -9862,7 +9867,7 @@ mod tests {
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = vec![layer_a, group, layer_b];
-        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
         st.layers_panel_selection = vec![vec![1]];
         let params = serde_json::Map::new();
         dispatch_action("flatten_artwork", &params, &mut st);
@@ -10117,10 +10122,13 @@ mod tests {
             ("D".into(), Visibility::Preview, false),
         ]);
         let eval_ctx = serde_json::json!({});
-        let effects = vec![serde_json::json!({
-            "foreach": {"source": "[path(2), path(0)]", "as": "p"},
-            "do": [{"doc.delete_at": "p"}]
-        })];
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "foreach": {"source": "[path(2), path(0)]", "as": "p"},
+                "do": [{"doc.delete_at": "p"}]
+            }),
+        ];
         run_yaml_effects(&effects, &eval_ctx, &mut st);
         let layers = &st.tabs[st.active_tab].model.document().layers;
         assert_eq!(layers.len(), 2);
@@ -10216,7 +10224,7 @@ mod tests {
             layer.children = vec![std::rc::Rc::new(text_with_tspans)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
     }
 
     #[test]
@@ -10321,7 +10329,7 @@ mod tests {
             layer.children = vec![std::rc::Rc::new(r)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
     }
 
     #[test]
@@ -10472,7 +10480,7 @@ mod tests {
             Element::Text(new_t)
         } else { panic!() };
         let new_doc = doc.replace_element(&path, new_elem);
-        st.tabs[st.active_tab].model.set_document(new_doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
         st.sync_paragraph_panel_from_selection();
         assert_eq!(st.paragraph_panel.left_indent, 36.0);
         assert!(st.paragraph_panel.justify_right);
@@ -10655,7 +10663,7 @@ mod tests {
             ElementSelection::all(vec![0, 1]),
             ElementSelection::all(vec![0, 2]),
         ];
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
         let view = build_active_document_view(&st);
         assert_eq!(view["has_selection"], serde_json::json!(true));
         assert_eq!(view["selection_count"], serde_json::json!(3));
@@ -10669,7 +10677,7 @@ mod tests {
             ElementSelection::all(vec![0]),
             ElementSelection::all(vec![0, 2]),
         ];
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
         let view = build_active_document_view(&st);
         let expected = serde_json::json!([
             {"__path__": [0]},
@@ -10706,7 +10714,7 @@ mod tests {
                 a
             })
             .collect();
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
         st
     }
 

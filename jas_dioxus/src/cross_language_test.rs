@@ -585,7 +585,7 @@ mod tests {
             }
             "delete_selection" => {
                 let new_doc = model.document().delete_selection();
-                model.set_document(new_doc);
+                model.edit_document(new_doc);
             }
             "lock_selection" => {
                 Controller::lock_selection(model);
@@ -615,8 +615,16 @@ mod tests {
                     op["value"].as_str().unwrap(),
                 );
             }
+            // OP_LOG.md Increment 1: the fixture op model marks undo boundaries
+            // with `snapshot`. Map it onto the transaction bracket: commit the
+            // prior action's transaction (relocated redo-clear) and open a new
+            // one, so the mutator ops that follow JOIN one checkpoint (not
+            // self-bracket into separate ones). undo/redo end the open context
+            // (they set in_txn=false), and run_operation_test commits any
+            // trailing open transaction.
             "snapshot" => {
-                model.snapshot();
+                model.commit_txn();
+                model.begin_txn();
             }
             "undo" => {
                 model.undo();
@@ -636,6 +644,8 @@ mod tests {
         for op in tc["ops"].as_array().unwrap() {
             apply_op(&mut model, op);
         }
+        // Commit any transaction left open by a trailing `snapshot` op.
+        model.commit_txn();
 
         document_to_test_json(model.document())
     }

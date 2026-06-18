@@ -831,7 +831,7 @@ mod tests {
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(path));
         }
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         model
     }
 
@@ -857,7 +857,7 @@ mod tests {
         if let Some(children) = doc.layers[0].children_mut() {
             children.push(Rc::new(tp));
         }
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         model
     }
 
