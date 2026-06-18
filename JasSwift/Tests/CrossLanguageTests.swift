@@ -496,6 +496,10 @@ private func applyFixtureOp(_ model: Model, _ controller: Controller, _ op: [Str
         controller.hideSelection()
     case "show_all":
         controller.showAll()
+    case "boolean_union":
+        controller.applyDestructiveBoolean("union")
+    case "simplify":
+        controller.simplifySelection(precision: (op["precision"] as? Double) ?? 0.5)
     case "snapshot":
         model.snapshot()
     case "undo":
@@ -607,6 +611,12 @@ private func runOperationFixture(_ fixture: String) throws {
 /// the op, and pins the canonical JSON all apps must reproduce.
 @Test func operationSymbolsOps() throws {
     try runOperationFixture("symbols_ops.json")
+}
+
+/// Boolean grouping (OP_LOG.md §10 item 3): boolean_union + post-op simplify are
+/// one transaction; the gate pins the journal replays to the snapshot-path doc.
+@Test func operationBooleanOps() throws {
+    try runOperationFixture("boolean_ops.json")
 }
 
 // MARK: - Workspace layout equivalence tests

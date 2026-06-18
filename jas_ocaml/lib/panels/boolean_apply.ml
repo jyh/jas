@@ -439,17 +439,17 @@ let apply_destructive_boolean ?(options = default_boolean_options)
           let child_idx = match insert_path with _ :: i :: _ -> i | _ -> 0 in
           let new_doc = insert_many_at_layer new_doc layer_idx child_idx
             (Array.of_list new_elements) in
-          (* Build selection of the inserted polygons. *)
+          (* Select each inserted output element WHOLE (SelKindAll), matching
+             the Rust / Python boolean output selection (cross-language
+             equivalence — OP_LOG.md boolean_union fixture). Previously this
+             selected all control points (a partial selection), which diverged
+             from the other apps. *)
           let new_sel = ref Document.PathMap.empty in
           List.iteri (fun j _ ->
             let path = [layer_idx; child_idx + j] in
-            try
-              let e = Document.get_element new_doc path in
-              let k = Element.control_point_count e in
-              new_sel := Document.PathMap.add path
-                (Document.make_element_selection ~control_points:(List.init k Fun.id) path)
-                !new_sel
-            with _ -> ()
+            new_sel := Document.PathMap.add path
+              (Document.element_selection_all path)
+              !new_sel
           ) new_elements;
           model#set_document { new_doc with Document.selection = !new_sel }
       end

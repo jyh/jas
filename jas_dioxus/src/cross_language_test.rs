@@ -637,6 +637,21 @@ mod tests {
                     op["value"].as_str().unwrap(),
                 );
             }
+            // Boolean ops (OP_LOG.md §9 trap: these were NOT in apply_op — added
+            // for the boolean_union_simplify_grouping pin). The destructive
+            // boolean combines the ≥2 selected sibling paths; `simplify` refits
+            // the (now-selected) output. Both write via edit_document, joining
+            // the harness transaction so the pair is one journaled Transaction.
+            "boolean_union" => {
+                Controller::apply_destructive_boolean(
+                    model, "union",
+                    &crate::document::controller::BooleanOptions::default(),
+                );
+            }
+            "simplify" => {
+                let precision = op["precision"].as_f64().unwrap_or(0.5);
+                Controller::simplify_selection(model, precision);
+            }
             _ => panic!("Unknown op: {}", name),
         }
         // Capture the op into the open transaction so the journal replays to
@@ -1233,6 +1248,14 @@ mod tests {
     #[test]
     fn operation_symbols_ops() {
         run_operation_fixture("operations/symbols_ops.json");
+    }
+
+    /// Boolean grouping (OP_LOG.md §10 item 3): boolean_union + post-op simplify
+    /// are one transaction with two child ops; the gate pins that the journal
+    /// replays to the snapshot-path document.
+    #[test]
+    fn operation_boolean_ops() {
+        run_operation_fixture("operations/boolean_ops.json");
     }
 
     // ---------------------------------------------------------------
