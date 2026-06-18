@@ -600,6 +600,37 @@ private func runOperationFixture(_ fixture: String) throws {
     }
 }
 
+/// The canonical recorded-live-element document (RECORDED_ELEMENTS.md): a
+/// recorded element whose recipe copies its input "eye" and translates the copy
+/// +50x. Built identically in every app's harness, so its documentToTestJson
+/// serialization (the recipe + inputs) is the cross-language pin. Mirrors Rust
+/// `recorded_canonical_document`.
+private func recordedCanonicalDocument() -> Document {
+    let recipe = [
+        PrimitiveOp(op: "copy", params: ["from": ["eye"], "dx": 0.0, "dy": 0.0], targets: []),
+        PrimitiveOp(op: "translate", params: ["ids": ["$0"], "dx": 50.0, "dy": 0.0], targets: []),
+    ]
+    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let layer = Layer(children: [.live(.recorded(rec))])
+    return Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
+}
+
+/// Cross-language pin (RECORDED_ELEMENTS.md §8): a recorded element's recipe +
+/// inputs serialize byte-identically across the four native apps. Mirrors Rust
+/// `recorded_cross_language`.
+@Test func recordedCrossLanguage() {
+    let actual = documentToTestJson(recordedCanonicalDocument())
+    let expected = readFixture("operations/recorded_eye.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if actual != expected {
+        print("=== EXPECTED (recorded_eye) ===")
+        print(expected)
+        print("=== ACTUAL (recorded_eye) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "recorded cross-language serialization mismatch")
+}
+
 @Test func operationSelectAndMove() throws {
     try runOperationFixture("select_and_move.json")
 }

@@ -608,3 +608,113 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     #expect(recomputeCacheStateForTest("p4c_c1", coarse) == .pure)
     #expect(recomputeCacheStateForTest("p4c_c1", fine) == .pure)
 }
+
+// MARK: - RecordedElem (RECORDED_ELEMENTS.md — history-based provenance)
+
+private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
+    PrimitiveOp(op: op, params: params, targets: [])
+}
+
+@Test func recordedReplaysCopyTranslateAndReDerivesWhenInputChanges() {
+    // Recipe: copy the input "eye", then translate that derived copy +50x.
+    // The derived copy is the recorded element's output; editing the source
+    // eye must re-derive it live. Mirrors the Rust unit test.
+    let recipe = [
+        recordedOp("copy", ["from": ["eye"], "dx": 0.0, "dy": 0.0]),
+        recordedOp("translate", ["ids": ["$0"], "dx": 50.0, "dy": 0.0]),
+    ]
+    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+
+    // Source eye at (0,0,10,10) → derived copy translated +50 → bbox [50,60].
+    let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
+    var visiting = VisitSet()
+    let ps = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)  // one derived output element
+    let (minX, _, maxX, _) = bboxOfRing(ps[0])
+    #expect(abs(minX - 50.0) < 1e-6 && abs(maxX - 60.0) < 1e-6)
+
+    // Edit the source eye (move to x=100) → the derived copy follows.
+    let resolver2 = MapResolver(map: ["eye": rectAt(100, 0)])
+    var visiting2 = VisitSet()
+    let ps2 = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver2, visiting: &visiting2)
+    let (minX2, _, maxX2, _) = bboxOfRing(ps2[0])
+    #expect(abs(minX2 - 150.0) < 1e-6 && abs(maxX2 - 160.0) < 1e-6,
+            "derived copy re-derived against the edited source")
+}
+
+@Test func recordedDanglingInputEvaluatesEmpty() {
+    let recipe = [recordedOp("copy", ["from": ["x"], "dx": 0.0, "dy": 0.0])]
+    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("x")])
+    var visiting = VisitSet()
+    let ps = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: NullResolver(), visiting: &visiting)
+    #expect(ps.isEmpty)  // dangling input evaluates empty, never traps
+}
+
+@Test func recordedReportsItsInputsAsDependencies() {
+    let recorded = RecordedElem(ops: [], inputs: [ElementRef("eye")], id: "rec")
+    #expect(recorded.dependencies == [ElementRef("eye")])
+    let lv = LiveVariant.recorded(recorded)
+    #expect(lv.dependencies == [ElementRef("eye")])
+    #expect(lv.operands.isEmpty)
+}
+
+@Test func recordedLiveVariantRoundTripsAndSerializes() {
+    // RecordedElem as a real LiveVariant in a document: it survives the binary
+    // codec round-trip and serializes the recorded kind + recipe via test_json.
+    // Mirrors the Rust unit test (Document not comparable by value here either,
+    // so compare the canonical JSON).
+    let recipe = [
+        recordedOp("copy", ["from": ["eye"], "dx": 0.0, "dy": 0.0]),
+        recordedOp("translate", ["ids": ["$0"], "dx": 50.0, "dy": 0.0]),
+    ]
+    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let layer = Layer(children: [.live(.recorded(rec))])
+    // No artboards, so the round-trip comparison isolates the recorded element.
+    let doc = Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
+
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"kind\":\"recorded\""), "serializes kind=recorded")
+    #expect(json.contains("\"inputs\":[\"eye\"]"), "serializes the input ids")
+    #expect(json.contains("\"op\":\"copy\""), "serializes the recipe ops")
+
+    let bytes = documentToBinary(doc)
+    let back = try! binaryToDocument(bytes)
+    #expect(documentToTestJson(back) == json,
+            "recorded element survives the binary round-trip")
+}
+
+@Test func captureRecipeNormalizesSelectCopyMoveToInputAddressed() {
+    // A captured journal segment ("watch what I did"): select the eye, copy it,
+    // move the copy. select_rect carries its resolved targets (the selected
+    // ids), as the op-capture path will populate. Mirrors the Rust unit test.
+    let segment = [
+        PrimitiveOp(op: "select_rect", params: [:], targets: ["eye"]),
+        recordedOp("copy_selection", ["dx": 0.0, "dy": 0.0]),
+        recordedOp("move_selection", ["dx": 50.0, "dy": 0.0]),
+    ]
+    let (recipe, inputs) = captureRecipe(segment)
+
+    // Normalized to the input-addressed recipe; the read element is the input.
+    #expect(inputs == ["eye"])
+    #expect(recipe.count == 2)
+    #expect(recipe[0].op == "copy")
+    #expect(recordedStrIds(recipe[0].params, "from") == ["eye"])
+    #expect(recipe[1].op == "translate")
+    #expect(recordedStrIds(recipe[1].params, "ids") == ["$0"],
+            "the move targets the produced copy, not the input")
+
+    // The captured recipe replays + re-derives like the hand-built one.
+    let recorded = RecordedElem(
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+    let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
+    var visiting = VisitSet()
+    let ps = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)
+    let (minX, _, maxX, _) = bboxOfRing(ps[0])
+    #expect(abs(minX - 50.0) < 1e-6 && abs(maxX - 60.0) < 1e-6,
+            "the captured recipe replays to the demonstrated output")
+}

@@ -2682,6 +2682,7 @@ private func elementTypeLabel(_ elem: Element) -> String {
         switch v {
         case .compoundShape: return "Compound Shape"
         case .reference: return "Reference"
+        case .recorded: return "Recorded"
         }
     }
 }

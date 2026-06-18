@@ -328,6 +328,315 @@ public struct ReferenceElem: Equatable {
     }
 }
 
+// MARK: - RecordedElem — history-based (recorded) LiveKind (RECORDED_ELEMENTS.md)
+
+/// A recorded (history-based) live element (RECORDED_ELEMENTS.md): a normalized,
+/// input-addressed op-segment captured from the journal, replayed against the
+/// *current* inputs to produce derived geometry. Edit a source input and the
+/// derivative re-derives live. Output ids are derived deterministically from
+/// (this element's own id + a position-in-trace counter), never minted, so
+/// replay keeps stable output identity (OP_LOG.md §7 / RECORDED_ELEMENTS.md §5).
+/// Mirrors Rust `RecordedElem`.
+///
+/// The recipe draws from a replay-safe subset of the op vocabulary (input-
+/// addressed, side-effect-free). 3b-A.1 supports `copy` (clone inputs at an
+/// offset, producing the output) and `translate` (move named working elements);
+/// further verbs (reflect/transform) extend the same replay.
+///
+/// Common props are carried inline (id/opacity/transform/locked/visibility/...),
+/// matching ``ReferenceElem``'s layout, since `.live` has no flat `Element.id`
+/// slot.
+public struct RecordedElem: Equatable {
+    /// The normalized, input-addressed recipe ops, replayed verbatim in order.
+    public var ops: [PrimitiveOp]
+    /// Source element ids the recipe rebinds against (by stable id).
+    public var inputs: [ElementRef]
+    /// Own paint; `nil` inherits nothing (a recorded element derives its own
+    /// geometry, so paint is its own — like a compound, not a reference).
+    public var fill: Fill?
+    public var stroke: Stroke?
+    // Common props carried inline, mirroring ReferenceElem's layout.
+    public var id: String?
+    public var transform: Transform?
+    public var opacity: Double
+    public var locked: Bool
+    public var visibility: Visibility
+    public var blendMode: BlendMode
+    public var mask: Mask?
+
+    public init(
+        ops: [PrimitiveOp],
+        inputs: [ElementRef],
+        fill: Fill? = nil,
+        stroke: Stroke? = nil,
+        id: String? = nil,
+        transform: Transform? = nil,
+        opacity: Double = 1.0,
+        locked: Bool = false,
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal,
+        mask: Mask? = nil
+    ) {
+        self.ops = ops
+        self.inputs = inputs
+        self.fill = fill
+        self.stroke = stroke
+        self.id = id
+        self.transform = transform
+        self.opacity = opacity
+        self.locked = locked
+        self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
+    }
+
+    /// Stable-id inputs reached by reference rather than containment, in
+    /// deterministic order — the recipe's input ids (by-id edges), like a
+    /// reference's target. Mirrors Rust `dependencies()`.
+    public var dependencies: [ElementRef] { inputs }
+
+    /// Manual `Equatable`: `PrimitiveOp.params` is `[String: Any]` (not
+    /// `Equatable`), so the recipe ops are compared by their canonical JSON
+    /// (the same deterministic serialization the test_json codec emits), and
+    /// every other field structurally. Lets `RecordedElem` / `LiveVariant` /
+    /// `Element` stay `Equatable` like the other live kinds.
+    public static func == (lhs: RecordedElem, rhs: RecordedElem) -> Bool {
+        lhs.inputs == rhs.inputs
+            && lhs.fill == rhs.fill
+            && lhs.stroke == rhs.stroke
+            && lhs.id == rhs.id
+            && lhs.transform == rhs.transform
+            && lhs.opacity == rhs.opacity
+            && lhs.locked == rhs.locked
+            && lhs.visibility == rhs.visibility
+            && lhs.blendMode == rhs.blendMode
+            && lhs.mask == rhs.mask
+            && recordedOpsCanonical(lhs.ops) == recordedOpsCanonical(rhs.ops)
+    }
+
+    /// Replay the recipe against the resolved inputs and return the derived
+    /// output geometry. A dangling input or a cycle (an input already being
+    /// visited) yields an empty set — never a trap (REFERENCE_GRAPH.md §3).
+    /// Replay is a pure, deterministic function of the inputs (OP_LOG.md §7).
+    /// Mirrors Rust `RecordedElem::evaluate_with`.
+    public func evaluateWith(
+        precision: Double, resolver: ElementResolver, visiting: inout VisitSet
+    ) -> BoolPolygonSet {
+        // Resolve inputs into a working set keyed by stable id. A cycle breaks
+        // to empty at the re-entry edge; a dangling input yields empty.
+        var working: [String: Element] = [:]
+        for input in inputs {
+            if visiting.contains(input) {
+                return []
+            }
+            guard let el = resolver.resolve(input) else {
+                return []  // dangling: input not found
+            }
+            working[input.id] = el
+        }
+        // Replay. Derived (produced) elements are keyed by a capture-stable
+        // production-index handle `$n`, so the recipe is independent of this
+        // element's own id (the recipe is portable across re-id). Geometry
+        // replay here needs only the internal handle.
+        var outputIds: [String] = []
+        var counter = 0
+        for op in ops {
+            switch op.op {
+            case "copy":
+                let dx = recordedNum(op.params, "dx")
+                let dy = recordedNum(op.params, "dy")
+                for src in recordedStrIds(op.params, "from") {
+                    if let el = working[src] {
+                        let derivedId = "$\(counter)"
+                        counter += 1
+                        let copy = el.translated(dx: dx, dy: dy)
+                        working[derivedId] = copy
+                        outputIds.append(derivedId)
+                    }
+                }
+            case "translate":
+                let dx = recordedNum(op.params, "dx")
+                let dy = recordedNum(op.params, "dy")
+                for elemId in recordedStrIds(op.params, "ids") {
+                    if let el = working[elemId] {
+                        working[elemId] = el.translated(dx: dx, dy: dy)
+                    }
+                }
+            default:
+                break  // outside the replay-safe subset: skip
+            }
+        }
+        // Output = the derived elements' geometry, in derivation order.
+        var out: BoolPolygonSet = []
+        for elemId in outputIds {
+            if let el = working[elemId] {
+                out.append(contentsOf: elementToPolygonSet(el, precision: precision))
+            }
+        }
+        return out
+    }
+}
+
+/// Read a numeric recipe-param value (`dx` / `dy`) from a `[String: Any]`
+/// op-params dict, defaulting to 0. Mirrors the Rust `num` closure in
+/// `evaluate_with` / `capture_recipe`.
+func recordedNum(_ params: [String: Any], _ key: String) -> Double {
+    if let n = params[key] as? NSNumber { return n.doubleValue }
+    if let d = params[key] as? Double { return d }
+    if let i = params[key] as? Int { return Double(i) }
+    return 0.0
+}
+
+/// Read a string-id array recipe-param (`from` / `ids`) from a `[String: Any]`
+/// op-params dict. Mirrors the Rust `str_ids` closure in `evaluate_with`.
+func recordedStrIds(_ params: [String: Any], _ key: String) -> [String] {
+    guard let arr = params[key] as? [Any] else { return [] }
+    return arr.compactMap { $0 as? String }
+}
+
+/// Canonical-JSON float formatting for recorded recipes: 4-decimal rounding,
+/// always a decimal point, trailing zeros stripped. Mirrors the `fmt` used by
+/// the test_json codec so a recorded element's recipe `params` serialize
+/// byte-identically (RECORDED_ELEMENTS.md §8 / OP_LOG.md §5 canonicalization).
+private func recordedFmt(_ v: Double) -> String {
+    let rounded = (v * 10000.0).rounded() / 10000.0
+    if rounded == rounded.rounded(.towardZero) && rounded.truncatingRemainder(dividingBy: 1) == 0 {
+        return String(format: "%.1f", rounded)
+    }
+    var s = String(format: "%.4f", rounded)
+    while s.hasSuffix("0") && !s.hasSuffix(".0") {
+        s.removeLast()
+    }
+    return s
+}
+
+/// Canonical JSON of an arbitrary recipe-param value (sorted object keys, fixed
+/// floats, quoted strings), so a recorded element's recipe `params` serialize
+/// byte-identically across the four native apps. Mirrors Rust `canonical_value`
+/// in `test_json.rs`. `[String: Any]` params come from the harness / fixtures;
+/// the value subset is null / bool / number / string / array / object.
+func canonicalRecordedValue(_ v: Any) -> String {
+    switch v {
+    case is NSNull:
+        return "null"
+    case let b as Bool where (v as? NSNumber)?.isBool == true:
+        return b ? "true" : "false"
+    case let n as NSNumber:
+        // NSNumber backs Bool, Int, and Double from JSONSerialization /
+        // dictionary literals; route booleans first (above), the rest as floats.
+        if n.isBool { return n.boolValue ? "true" : "false" }
+        return recordedFmt(n.doubleValue)
+    case let d as Double:
+        return recordedFmt(d)
+    case let i as Int:
+        return recordedFmt(Double(i))
+    case let s as String:
+        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
+                       .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    case let arr as [Any]:
+        return "[\(arr.map(canonicalRecordedValue).joined(separator: ","))]"
+    case let obj as [String: Any]:
+        let keys = obj.keys.sorted()
+        let entries = keys.map { k -> String in
+            let escaped = k.replacingOccurrences(of: "\\", with: "\\\\")
+                           .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\":\(canonicalRecordedValue(obj[k]!))"
+        }
+        return "{\(entries.joined(separator: ","))}"
+    default:
+        return "null"
+    }
+}
+
+/// Canonical JSON of a single recipe op: `{op, params, targets}` with sorted
+/// params keys. Mirrors the Rust op emitter in `element_json`.
+func canonicalRecordedOp(_ op: PrimitiveOp) -> String {
+    let targets = op.targets.map { "\"\($0)\"" }.joined(separator: ",")
+    let opEscaped = op.op.replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "\"", with: "\\\"")
+    return "{\"op\":\"\(opEscaped)\",\"params\":\(canonicalRecordedValue(op.params))," +
+        "\"targets\":[\(targets)]}"
+}
+
+/// Canonical JSON array of a recipe op list (used by serialization + the
+/// `RecordedElem` `==`).
+func recordedOpsCanonical(_ ops: [PrimitiveOp]) -> String {
+    "[\(ops.map(canonicalRecordedOp).joined(separator: ","))]"
+}
+
+/// True iff this `NSNumber` actually backs a `Bool` (so `1` is not mistaken for
+/// `true`). `JSONSerialization` boxes JSON booleans as the tagged
+/// `__NSCFBoolean`, whose `objCType` is `c`; numeric values use other tags.
+extension NSNumber {
+    var isBool: Bool {
+        CFGetTypeID(self) == CFBooleanGetTypeID()
+    }
+}
+
+/// Normalize a captured journal op-segment into a recorded recipe
+/// (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
+/// input-addressed form by tracking the working selection as recipe refs.
+/// Mirrors Rust `capture_recipe`.
+///
+/// - A select op (`select_rect`/`select`) establishes the working selection from
+///   its resolved `targets` (the ids it selected); it is NOT emitted — selection
+///   becomes input-addressing.
+/// - `copy_selection` emits `copy{from, dx, dy}` (source = the working selection)
+///   and rebinds the selection to the produced `$n` handles.
+/// - `move_selection` emits `translate{ids, dx, dy}` on the working selection.
+/// - Ops outside the replay-safe subset are dropped from the recipe.
+///
+/// The recipe's non-`$` refs are the **inputs** — the elements it rebinds by
+/// stable id (the deterministic "everything that traces to a read input rebinds;
+/// produced elements are `$n` handles" MVP rule; no AI fitter). Returns
+/// `(recipe, inputIds)`; the caller wraps them in a ``RecordedElem``.
+public func captureRecipe(_ segment: [PrimitiveOp]) -> (recipe: [PrimitiveOp], inputs: [String]) {
+    var working: [String] = []
+    var recipe: [PrimitiveOp] = []
+    var counter = 0
+    for op in segment {
+        switch op.op {
+        case "select_rect", "select":
+            working = op.targets
+        case "copy_selection":
+            let dx = recordedNum(op.params, "dx")
+            let dy = recordedNum(op.params, "dy")
+            recipe.append(PrimitiveOp(
+                op: "copy",
+                params: ["from": working, "dx": dx, "dy": dy],
+                targets: []))
+            var produced: [String] = []
+            for _ in working {
+                produced.append("$\(counter)")
+                counter += 1
+            }
+            working = produced
+        case "move_selection":
+            let dx = recordedNum(op.params, "dx")
+            let dy = recordedNum(op.params, "dy")
+            recipe.append(PrimitiveOp(
+                op: "translate",
+                params: ["ids": working, "dx": dx, "dy": dy],
+                targets: []))
+        default:
+            break
+        }
+    }
+    // Inputs = the distinct non-`$` refs the recipe rebinds, in first-seen order.
+    var inputs: [String] = []
+    for op in recipe {
+        for key in ["from", "ids"] {
+            for r in recordedStrIds(op.params, key) {
+                if !r.hasPrefix("$") && !inputs.contains(r) {
+                    inputs.append(r)
+                }
+            }
+        }
+    }
+    return (recipe, inputs)
+}
+
 // MARK: - Reference-geometry recompute cache (REFERENCE_GRAPH.md §2.4 Phase 4c)
 //
 // PER-APP PERF CACHE. §2.3 lets the cache strategy differ per app; equivalence
@@ -559,6 +868,8 @@ public func elementToPolygonSetWith(
             return cs.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         case .reference(let r):
             return r.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
+        case .recorded(let rec):
+            return rec.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
     case .path(let p):
         return flattenPathToRings(p.d)
@@ -701,11 +1012,13 @@ public func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
 public enum LiveVariant: Equatable {
     case compoundShape(CompoundShape)
     case reference(ReferenceElem)
+    case recorded(RecordedElem)
 
     public var kind: String {
         switch self {
         case .compoundShape: return "compound_shape"
         case .reference: return "reference"
+        case .recorded: return "recorded"
         }
     }
 
@@ -713,6 +1026,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape: return 1
         case .reference: return 1
+        case .recorded: return 1
         }
     }
 
@@ -724,6 +1038,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.id
         case .reference(let r): return r.id
+        case .recorded(let rec): return rec.id
         }
     }
 
@@ -731,6 +1046,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.fill
         case .reference(let r): return r.fill
+        case .recorded(let rec): return rec.fill
         }
     }
 
@@ -738,6 +1054,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.stroke
         case .reference(let r): return r.stroke
+        case .recorded(let rec): return rec.stroke
         }
     }
 
@@ -745,6 +1062,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.opacity
         case .reference(let r): return r.opacity
+        case .recorded(let rec): return rec.opacity
         }
     }
 
@@ -752,6 +1070,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.transform
         case .reference(let r): return r.transform
+        case .recorded(let rec): return rec.transform
         }
     }
 
@@ -759,6 +1078,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.locked
         case .reference(let r): return r.locked
+        case .recorded(let rec): return rec.locked
         }
     }
 
@@ -766,6 +1086,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.visibility
         case .reference(let r): return r.visibility
+        case .recorded(let rec): return rec.visibility
         }
     }
 
@@ -773,6 +1094,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.blendMode
         case .reference(let r): return r.blendMode
+        case .recorded(let rec): return rec.blendMode
         }
     }
 
@@ -780,6 +1102,7 @@ public enum LiveVariant: Equatable {
         switch self {
         case .compoundShape(let cs): return cs.mask
         case .reference(let r): return r.mask
+        case .recorded(let rec): return rec.mask
         }
     }
 
@@ -788,17 +1111,21 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.operands
         // A reference owns no children; its target is a dependency edge.
         case .reference: return []
+        // A recorded element owns no children; its inputs are by-id edges.
+        case .recorded: return []
         }
     }
 
     /// Stable-id inputs reached by reference rather than containment, in
     /// deterministic order. Default empty for containment kinds (compound
-    /// shape owns its operands); the reference reports its target. Mirrors
-    /// Rust `LiveElement::dependencies`.
+    /// shape owns its operands); the reference reports its target, the
+    /// recorded element its recipe inputs. Mirrors Rust
+    /// `LiveElement::dependencies`.
     public var dependencies: [ElementRef] {
         switch self {
         case .compoundShape: return []
         case .reference(let r): return r.dependencies
+        case .recorded(let rec): return rec.dependencies
         }
     }
 
@@ -808,6 +1135,9 @@ public enum LiveVariant: Equatable {
         // Resolver-free bounds are degenerate for a reference (its geometry
         // lives elsewhere); resolver-aware bounds land with render wiring (1b).
         case .reference: return (0, 0, 0, 0)
+        // Likewise degenerate for a recorded element — its geometry is
+        // replayed from inputs (mirrors ReferenceElem; Rust stubs the same).
+        case .recorded: return (0, 0, 0, 0)
         }
     }
 
@@ -823,6 +1153,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.locked = locked
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.locked = locked
+            return .recorded(updated)
         }
     }
 
@@ -836,6 +1170,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.visibility = visibility
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.visibility = visibility
+            return .recorded(updated)
         }
     }
 
@@ -849,6 +1187,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.transform = transform
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.transform = transform
+            return .recorded(updated)
         }
     }
 
@@ -862,6 +1204,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.fill = fill
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.fill = fill
+            return .recorded(updated)
         }
     }
 
@@ -875,6 +1221,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.stroke = stroke
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.stroke = stroke
+            return .recorded(updated)
         }
     }
 
@@ -888,14 +1238,19 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.mask = mask
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.mask = mask
+            return .recorded(updated)
         }
     }
 
     /// Return a copy with the live element's own stable `id` replaced
-    /// (pass `nil` to clear). Both conformers stamp their inline id,
-    /// so `Controller.assignId` / `clearingIds` work over a compound or
-    /// reference exactly as over any other id-bearing element — matching
-    /// the reference implementations' generic `common_mut().id = ...`.
+    /// (pass `nil` to clear). Every conformer stamps its inline id,
+    /// so `Controller.assignId` / `clearingIds` work over a compound,
+    /// reference, or recorded element exactly as over any other id-bearing
+    /// element — matching the reference implementations' generic
+    /// `common_mut().id = ...`.
     public func withId(_ id: String?) -> LiveVariant {
         switch self {
         case .compoundShape(let cs):
@@ -906,6 +1261,10 @@ public enum LiveVariant: Equatable {
             var updated = r
             updated.id = id
             return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.id = id
+            return .recorded(updated)
         }
     }
 }
