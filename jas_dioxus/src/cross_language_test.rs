@@ -1295,6 +1295,51 @@ mod tests {
         }
     }
 
+    /// The canonical recorded-live-element document (RECORDED_ELEMENTS.md): a
+    /// recorded element whose recipe copies its input "eye" and translates the
+    /// copy +50x. Built identically in every app's harness, so its
+    /// document_to_test_json serialization (the recipe + inputs) is the
+    /// cross-language pin.
+    fn recorded_canonical_document() -> crate::document::document::Document {
+        use crate::document::op_log::PrimitiveOp;
+        use crate::geometry::element::{CommonProps, Element, LayerElem};
+        use crate::geometry::live::{ElementRef, LiveVariant, RecordedElem};
+        use std::rc::Rc;
+        let recipe = vec![
+            PrimitiveOp { op: "copy".into(),
+                params: serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0}),
+                targets: vec![] },
+            PrimitiveOp { op: "translate".into(),
+                params: serde_json::json!({"ids": ["$0"], "dx": 50.0, "dy": 0.0}),
+                targets: vec![] },
+        ];
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let rec = RecordedElem::new(recipe, vec![ElementRef("eye".into())], common);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Recorded(rec)))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        crate::document::document::Document {
+            layers: vec![layer], artboards: vec![], ..Default::default()
+        }
+    }
+
+    /// Cross-language pin (RECORDED_ELEMENTS.md §8): a recorded element's recipe
+    /// + inputs serialize byte-identically across the four native apps.
+    #[test]
+    fn recorded_cross_language() {
+        let actual = document_to_test_json(&recorded_canonical_document());
+        let expected = read_fixture("operations/recorded_eye.json");
+        let expected = expected.trim();
+        if actual != expected {
+            eprintln!("=== EXPECTED ===\n{expected}\n=== ACTUAL ===\n{actual}");
+            panic!("recorded cross-language serialization mismatch");
+        }
+    }
+
     #[test]
     fn operation_select_and_move() {
         run_operation_fixture("operations/select_and_move.json");
