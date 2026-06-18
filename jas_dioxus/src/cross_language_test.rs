@@ -690,6 +690,12 @@ mod tests {
                     apply_op(&mut model, op);
                 }
                 model.commit_txn();
+                // OP_LOG.md Increment 3a: a `label` on a transaction marks a
+                // version point — label_version stamps it onto the committed
+                // transaction so it serializes into the journal artifact.
+                if let Some(label) = txn.get("label").and_then(|v| v.as_str()) {
+                    model.label_version(label);
+                }
             }
             if let Some(history) = tc.get("history").and_then(|v| v.as_array()) {
                 for h in history {
@@ -1280,10 +1286,12 @@ mod tests {
     /// byte-identically across apps (deterministic txn-N counter + parent edge).
     #[test]
     fn journal_txn_metadata() {
-        let json_str = read_fixture("operations/txn_metadata.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        for tc in tests.as_array().unwrap() {
-            assert_journal_metadata(tc);
+        for fixture in ["operations/txn_metadata.json", "operations/txn_labels.json"] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                assert_journal_metadata(tc);
+            }
         }
     }
 

@@ -1,0 +1,24 @@
+[
+  {
+    "name": "txn_labels",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "move1",
+        "label": "v1",
+        "ops": [
+          {"op": "select_rect", "x": 0, "y": 0, "width": 80, "height": 80, "extend": false},
+          {"op": "move_selection", "dx": 10, "dy": 20}
+        ]
+      },
+      {
+        "name": "move2",
+        "ops": [
+          {"op": "select_rect", "x": 0, "y": 0, "width": 80, "height": 80, "extend": false},
+          {"op": "move_selection", "dx": 5, "dy": 5}
+        ]
+      }
+    ],
+    "expected_journal_json": "txn_labels_golden.json"
+  }
+]

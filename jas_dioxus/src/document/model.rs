@@ -53,6 +53,18 @@ struct PendingTxn {
     gen_at_open: u64,
 }
 
+/// A named version point (OP_LOG.md Increment 3a / `VISION.md` §6.9). Stores the
+/// document + paired index at a labeled journal cursor position so
+/// `restore_version` is O(1) and sound regardless of whether the intervening
+/// transactions carry replayable ops.
+#[derive(Debug, Clone)]
+pub struct Version {
+    pub label: String,
+    pub journal_head: usize,
+    pub document: Document,
+    pub id_index: IdIndex,
+}
+
 /// Holds an immutable Document with undo/redo support.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -98,6 +110,13 @@ pub struct Model {
     /// discipline `element_ids.json` uses for element ids, so the journal file is
     /// byte-shareable across apps.
     next_txn_counter: u64,
+    /// OP_LOG.md Increment 3a: named version points (`VISION.md` §6.9). Each
+    /// labels a journal cursor position and stores the document + paired index
+    /// at that point, so `restore_version` is O(1) and sound even though
+    /// production transactions are opaque (no op replay needed). The label is
+    /// also written onto the journal's transaction at that head (the `label`
+    /// field reserved in Increment 2) so it serializes into the journal artifact.
+    versions: Vec<Version>,
     /// Default fill for newly created elements.
     pub default_fill: Option<Fill>,
     /// Default stroke for newly created elements.
@@ -154,6 +173,7 @@ impl Default for Model {
             saved_journal_head: 0,
             pending_txn: None,
             next_txn_counter: 0,
+            versions: Vec::new(),
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -189,6 +209,7 @@ impl Model {
             saved_journal_head: 0,
             pending_txn: None,
             next_txn_counter: 0,
+            versions: Vec::new(),
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -501,6 +522,57 @@ impl Model {
         if let Some(p) = self.pending_txn.as_mut() {
             p.name = Some(name.to_string());
         }
+    }
+
+    // --- Versioning labels (OP_LOG.md Increment 3a / VISION.md §6.9) -------
+
+    /// Mark the current document state as a named version point. Stores the
+    /// document + paired index (so `restore_version` is O(1) and sound even
+    /// though production transactions are opaque) and writes `label` onto the
+    /// journal's transaction at the current head (the field reserved in
+    /// Increment 2), so the label serializes into the journal artifact. Naming
+    /// is idempotent: re-labeling an existing name re-points it here.
+    pub fn label_version(&mut self, name: &str) {
+        // Stamp the label onto the most-recent committed transaction, if any
+        // (a version at the origin labels no transaction).
+        if self.journal_head > 0 {
+            if let Some(t) = self.op_journal.get_mut(self.journal_head - 1) {
+                t.label = Some(name.to_string());
+            }
+        }
+        let version = Version {
+            label: name.to_string(),
+            journal_head: self.journal_head,
+            document: self.document.clone(),
+            id_index: self.id_index.clone(),
+        };
+        if let Some(existing) = self.versions.iter_mut().find(|v| v.label == name) {
+            *existing = version;
+        } else {
+            self.versions.push(version);
+        }
+    }
+
+    /// The named version points, in creation order. Test/inspection accessor.
+    pub fn versions(&self) -> &[Version] {
+        &self.versions
+    }
+
+    /// Restore the document to a named version. This is an ordinary undoable
+    /// edit (one transaction "restore version N"), so it stays on the linear
+    /// undo/redo timeline rather than jumping the cursor non-linearly; the
+    /// no-op rule makes restoring to the already-current state a no-op. Returns
+    /// false if no such version exists.
+    pub fn restore_version(&mut self, name: &str) -> bool {
+        let Some(version) = self.versions.iter().find(|v| v.label == name) else {
+            return false;
+        };
+        let doc = version.document.clone();
+        self.with_txn(|m| {
+            m.name_txn(&format!("restore version {}", name));
+            m.set_document(doc);
+        });
+        true
     }
 
     // --- Transaction bracket (OP_LOG.md Increment 1) ----------------------
@@ -1340,5 +1412,62 @@ mod tests {
         assert_eq!(model.journal().len(), len, "aborted transaction is not journaled");
         assert_eq!(model.journal_head(), head, "cursor unmoved by abort");
         assert_eq!(model.document().layers.len(), 0, "abort rolled back the edit");
+    }
+
+    // --- Versioning labels (OP_LOG.md Increment 3a) -----------------------
+
+    #[test]
+    fn label_version_stores_a_version_and_stamps_the_transaction() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        model.label_version("v1");
+
+        assert_eq!(model.versions().len(), 1);
+        assert_eq!(model.versions()[0].label, "v1");
+        assert_eq!(model.versions()[0].journal_head, 1);
+        // The label is stamped onto the committed transaction (serializes into
+        // the journal artifact).
+        assert_eq!(model.journal()[0].label.as_deref(), Some("v1"));
+    }
+
+    #[test]
+    fn restore_version_is_an_undoable_edit_back_to_the_labeled_state() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        model.label_version("v1");
+        // Edit past the version.
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A"), make_layer("B")], ..Document::default() }));
+        assert_eq!(model.document().layers.len(), 2);
+
+        assert!(model.restore_version("v1"));
+        assert_eq!(model.document().layers.len(), 1, "restored the labeled document");
+        // Restore is an ordinary transaction on the linear timeline — undoable.
+        assert!(model.can_undo());
+        model.undo();
+        assert_eq!(model.document().layers.len(), 2, "undo reverts the restore");
+    }
+
+    #[test]
+    fn restore_version_to_current_state_is_a_noop() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        model.label_version("v1");
+        let head = model.journal_head();
+        // Already at v1's state — restoring is a no-op (not journaled).
+        assert!(model.restore_version("v1"));
+        assert_eq!(model.journal_head(), head, "no transaction for a no-op restore");
+    }
+
+    #[test]
+    fn label_version_relabel_repoints_and_unknown_restore_returns_false() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        model.label_version("v1");
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A"), make_layer("B")], ..Document::default() }));
+        model.label_version("v1"); // re-point to the new state
+
+        assert_eq!(model.versions().len(), 1, "re-label re-points, no duplicate");
+        assert_eq!(model.versions()[0].journal_head, 2);
+        assert!(!model.restore_version("nope"), "unknown version restore is a no-op false");
     }
 }

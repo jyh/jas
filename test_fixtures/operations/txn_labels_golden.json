@@ -1,0 +1,1 @@
+[{"actor":"artist","label":"v1","lamport":0,"name":"move1","ops":[{"op":"select_rect","targets":[]},{"op":"move_selection","targets":[]}],"parent":null,"txn_id":"txn-0"},{"actor":"artist","label":null,"lamport":1,"name":"move2","ops":[{"op":"select_rect","targets":[]},{"op":"move_selection","targets":[]}],"parent":"txn-0","txn_id":"txn-1"}]
