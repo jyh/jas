@@ -75,7 +75,14 @@ class model ?(document = Document.default_document ()) ?filename () =
        any edit changes the generation and drops the cache. Mirrors the Rust
        [Model.generation]. *)
     val mutable generation = 0
-    val mutable saved_doc = document
+    (* OP_LOG.md Increment 2: the journal-head cursor. An uncapped count of
+       undoable edits applied (snapshot increments it, undo/redo move it), so
+       is_modified is journal_head <> saved_journal_head — undo back to the
+       saved point reads as not-modified. Replaces the old identity compare
+       against a saved-document reference. Cursor-only port: tied to the
+       existing snapshot/undo/redo mechanism, not a transaction bracket. *)
+    val mutable journal_head = 0
+    val mutable saved_journal_head = 0
     val mutable current_filename = filename
     val mutable listeners : (Document.document -> unit) list = []
     val mutable filename_listeners : (string -> unit) list = []
@@ -166,7 +173,11 @@ class model ?(document = Document.default_document ()) ?filename () =
       undo_stack <- (doc, id_index) :: undo_stack;
       if List.length undo_stack > max_undo then
         undo_stack <- List.filteri (fun i _ -> i < max_undo) undo_stack;
-      redo_stack <- []
+      redo_stack <- [];
+      (* Advance the journal cursor: one undoable edit (OP_LOG.md §5). Uncapped,
+         unlike the max_undo-capped stack, so is_modified stays correct past the
+         cap. *)
+      journal_head <- journal_head + 1
 
     (* Out-of-band document snapshot for dialog Preview flows
        (Scale Options, Rotate Options, Shear Options). Captured at
@@ -209,6 +220,7 @@ class model ?(document = Document.default_document ()) ?filename () =
         doc <- prev_doc;
         id_index <- prev_index;
         generation <- generation + 1;
+        if journal_head > 0 then journal_head <- journal_head - 1;
         _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 
@@ -221,13 +233,17 @@ class model ?(document = Document.default_document ()) ?filename () =
         doc <- next_doc;
         id_index <- next_index;
         generation <- generation + 1;
+        journal_head <- journal_head + 1;
         _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
 
-    method is_modified = doc != saved_doc
+    (* OP_LOG.md \167 9 unified semantics: the journal-head cursor, so undo back
+       to the saved point reads as not-modified (and a non-undoable write that
+       does not snapshot does not mark the document modified). *)
+    method is_modified = journal_head <> saved_journal_head
 
     method mark_saved =
-      saved_doc <- doc;
+      saved_journal_head <- journal_head;
       List.iter (fun f -> f doc) listeners
 
     method can_undo = undo_stack <> []

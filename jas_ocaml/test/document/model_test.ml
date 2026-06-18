@@ -75,6 +75,22 @@ let () =
         model8#redo;
         assert (Array.length model8#document.Jas.Document.layers = 1));
 
+      (* OP_LOG.md Increment 2: is_modified is the journal-head cursor, so undo
+         back to the saved point reads as not-modified. *)
+      Alcotest.test_case "is_modified is the journal-head cursor" `Quick (fun () ->
+        let m = Jas.Model.create () in
+        assert (not m#is_modified);
+        m#mark_saved;  (* saved at journal_head 0 *)
+        m#snapshot;
+        m#set_document (Jas.Document.make_document [||]);
+        assert m#is_modified;
+        m#undo;
+        assert (not m#is_modified);  (* undo back to the saved point *)
+        m#redo;
+        assert m#is_modified;  (* redo past the saved point *)
+        m#mark_saved;
+        assert (not m#is_modified));
+
       (* ── EditingTarget (Mask editor UI) ─────────────────
          OPACITY.md section Preview interactions. *)
 

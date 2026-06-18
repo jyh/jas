@@ -92,6 +92,40 @@ class ModelTest(absltest.TestCase):
         model.redo()
         self.assertEqual(len(model.document.layers), 1)
 
+    # OP_LOG.md Increment 2: is_modified is the journal-head cursor
+    # (journal_head != saved_journal_head), so undo back to the saved
+    # point reads as not-modified.
+
+    def test_is_modified_default_false(self):
+        self.assertFalse(Model().is_modified)
+
+    def test_is_modified_after_committed_edit(self):
+        model = Model()
+        model.snapshot()
+        model.document = Document(layers=())
+        self.assertTrue(model.is_modified)
+
+    def test_is_modified_false_after_undo_back_to_saved(self):
+        model = Model()
+        model.mark_saved()  # saved at journal_head 0
+        model.snapshot()
+        model.document = Document(layers=())
+        self.assertTrue(model.is_modified)
+        model.undo()
+        self.assertFalse(
+            model.is_modified, "undo back to the saved point is not modified")
+        model.redo()
+        self.assertTrue(
+            model.is_modified, "redo past the saved point is modified again")
+
+    def test_is_modified_false_after_mark_saved(self):
+        model = Model()
+        model.snapshot()
+        model.document = Document(layers=())
+        self.assertTrue(model.is_modified)
+        model.mark_saved()
+        self.assertFalse(model.is_modified)
+
 
 class EditingTargetTest(absltest.TestCase):
     """Test the mask-editor UI state on Model (OPACITY.md §Preview
