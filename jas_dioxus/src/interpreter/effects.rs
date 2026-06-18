@@ -6058,7 +6058,31 @@ mod tests {
     }
 
     #[test]
-    fn doc_snapshot_pushes_undo() {
+    fn doc_snapshot_then_edit_is_one_undo_step() {
+        // doc.snapshot opens the undo transaction (begin_txn); a following edit
+        // joins it, so the whole action is exactly one undo step.
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &vec![0, 0]);
+        assert!(!model.can_undo(), "selection alone is not undoable");
+        let effects = vec![
+            serde_json::json!({"doc.snapshot": {}}),
+            serde_json::json!({"doc.translate_selection": {"dx": 5, "dy": 7}}),
+        ];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None);
+        assert!(model.can_undo(), "snapshot + edit is one undoable step");
+        assert!(model.is_modified());
+        model.undo();
+        assert!(!model.can_undo(), "exactly one undo step");
+    }
+
+    #[test]
+    fn doc_snapshot_alone_is_a_noop() {
+        // OP_LOG.md Increment 2 no-op rule: a doc.snapshot with no following
+        // edit opens then commits an empty transaction, which is NOT journaled
+        // and leaves no undo step (its checkpoint is dropped).
         let mut store = StateStore::new();
         let mut model = Model::default();
         assert!(!model.can_undo());
@@ -6066,7 +6090,8 @@ mod tests {
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
             Some(&mut model), None, None);
-        assert!(model.can_undo());
+        assert!(!model.can_undo(), "empty transaction leaves no undo step");
+        assert!(!model.is_modified());
     }
 
     #[test]

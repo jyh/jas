@@ -13,7 +13,12 @@ use super::document::Document;
 // Model — which is core — compiles under `--no-default-features` and the
 // web-decoupled cross-language harness driver builds again.
 use crate::document::id_index::{incremental_update_index, rebuild_id_index, IdIndex};
+// OP_LOG.md Increment 2: the typed Transaction journal layered on the snapshot
+// stacks. `document_to_test_json` (core, not test-gated) gives the canonical
+// "net document change is byte-identical" comparison for the commit no-op rule.
+use crate::document::op_log::Transaction;
 use crate::geometry::element::{Color, Fill, Stroke};
+use crate::geometry::test_json::document_to_test_json;
 
 const MAX_UNDO: usize = 100;
 
@@ -36,6 +41,18 @@ pub enum EditingTarget {
     Mask(Vec<usize>),
 }
 
+/// The transaction being accumulated between `begin_txn` and `commit_txn`
+/// (OP_LOG.md Increment 2). `name`/`ops` are populated by the `op_apply` path
+/// (sub-step 2.2); `gen_at_open` snapshots the generation at the owning
+/// `begin_txn` so `commit_txn` can detect a zero-write transaction without
+/// serializing.
+#[derive(Debug, Clone)]
+struct PendingTxn {
+    name: Option<String>,
+    ops: Vec<crate::document::op_log::PrimitiveOp>,
+    gen_at_open: u64,
+}
+
 /// Holds an immutable Document with undo/redo support.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -53,14 +70,34 @@ pub struct Model {
     undo_stack: Vec<(Document, IdIndex)>,
     redo_stack: Vec<(Document, IdIndex)>,
     generation: u64,
-    saved_generation: u64,
     /// True while an undoable transaction is open (between `begin_txn` and
-    /// `commit_txn`). OP_LOG.md Increment 1: the operation-log spine consolidates
-    /// every undoable mutation through one bracket. In this first sub-step the
-    /// flag is wired but nothing opens a transaction yet (call sites migrate in
-    /// later sub-steps); it exists so a future `debug_assert!(self.in_txn)` on the
-    /// committing write can prove "no undoable edit bypasses the bracket."
+    /// `commit_txn`). OP_LOG.md Increment 1 consolidates every undoable mutation
+    /// through this one bracket; `set_document` debug-asserts it so no undoable
+    /// edit bypasses the bracket.
     in_txn: bool,
+    // --- OP_LOG.md Increment 2: the typed Transaction journal -------------
+    /// The ordered Transaction journal, layered on top of the snapshot stacks
+    /// (which remain the O(1) undo/redo mechanism — OP_LOG.md §4). The journal
+    /// is the legible / replayable / mergeable artifact.
+    op_journal: Vec<Transaction>,
+    /// Cursor into `op_journal` — the count of transactions currently applied
+    /// (0..=op_journal.len()). NOT a high-water mark: `commit_txn` truncates the
+    /// journal here and appends (a new edit after undo drops the redo tail);
+    /// `undo` decrements it, `redo` increments it. Kept in lock-step with the
+    /// undo-stack depth (modulo the MAX_UNDO cap on the snapshot stack).
+    journal_head: usize,
+    /// The `journal_head` captured at the last save; `is_modified` is exactly
+    /// `journal_head != saved_journal_head`, so undo back to the saved point
+    /// reads as not-modified (OP_LOG.md §5/§9).
+    saved_journal_head: usize,
+    /// The transaction being accumulated between `begin_txn` and `commit_txn`.
+    /// `gen_at_open` lets `commit_txn` cheaply detect a zero-write (no-op)
+    /// transaction without serializing.
+    pending_txn: Option<PendingTxn>,
+    /// Deterministic txn-id counter: `txn-0`, `txn-1`, … (OP_LOG.md §7), the same
+    /// discipline `element_ids.json` uses for element ids, so the journal file is
+    /// byte-shareable across apps.
+    next_txn_counter: u64,
     /// Default fill for newly created elements.
     pub default_fill: Option<Fill>,
     /// Default stroke for newly created elements.
@@ -111,8 +148,12 @@ impl Default for Model {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             generation: 0,
-            saved_generation: 0,
             in_txn: false,
+            op_journal: Vec::new(),
+            journal_head: 0,
+            saved_journal_head: 0,
+            pending_txn: None,
+            next_txn_counter: 0,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -142,8 +183,12 @@ impl Model {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             generation: 0,
-            saved_generation: 0,
             in_txn: false,
+            op_journal: Vec::new(),
+            journal_head: 0,
+            saved_journal_head: 0,
+            pending_txn: None,
+            next_txn_counter: 0,
             default_fill: None,
             default_stroke: Some(Stroke::new(Color::BLACK, 1.0)),
             recent_colors: Vec::new(),
@@ -356,6 +401,7 @@ impl Model {
         // self-brackets fresh (OP_LOG.md Increment 1: keeps in_txn honest after
         // undo, so a post-undo edit clears redo via its own commit).
         self.in_txn = false;
+        self.pending_txn = None;
         if let Some((prev_doc, prev_index)) = self.undo_stack.pop() {
             self.redo_stack.push((self.document.clone(), self.id_index.clone()));
             self.document = prev_doc;
@@ -365,6 +411,12 @@ impl Model {
                 "id index diverged from rebuild after undo",
             );
             self.generation += 1;
+            // Move the journal cursor back one transaction (OP_LOG.md §5). Only
+            // when a checkpoint was actually popped, so a no-op undo at the
+            // stack floor does not desync the cursor.
+            if self.journal_head > 0 {
+                self.journal_head -= 1;
+            }
         }
     }
 
@@ -373,6 +425,7 @@ impl Model {
     /// empty (e.g. after any new edit, which clears redo).
     pub fn redo(&mut self) {
         self.in_txn = false;
+        self.pending_txn = None;
         if let Some((next_doc, next_index)) = self.redo_stack.pop() {
             self.undo_stack.push((self.document.clone(), self.id_index.clone()));
             self.document = next_doc;
@@ -382,6 +435,11 @@ impl Model {
                 "id index diverged from rebuild after redo",
             );
             self.generation += 1;
+            // Advance the journal cursor one transaction (OP_LOG.md §5), bounded
+            // by the journal length so a no-op redo cannot overrun.
+            if self.journal_head < self.op_journal.len() {
+                self.journal_head += 1;
+            }
         }
     }
 
@@ -395,19 +453,32 @@ impl Model {
         !self.redo_stack.is_empty()
     }
 
-    /// True if the document has been mutated since the last [`mark_saved`]
-    /// call (or since model construction, whichever is later). Compares
-    /// generations rather than document contents, so an undo back to the
-    /// saved state still reads as modified.
+    /// True if the document has unsaved committed edits. The unified
+    /// OP_LOG.md §5/§9 semantics: `journal_head != saved_journal_head`, the
+    /// journal **cursor** rather than a monotonic counter — so an undo back to
+    /// the saved point reads as not-modified, and a non-undoable write
+    /// (selection / preview / live-drag, via `set_document_unbracketed`) does
+    /// not mark the document modified (it moves no transaction).
     pub fn is_modified(&self) -> bool {
-        self.generation != self.saved_generation
+        self.journal_head != self.saved_journal_head
     }
 
-    /// Snapshot the current document as the on-disk baseline, after
-    /// which [`is_modified`] will return `false` until the next edit.
-    /// Call this after a successful save.
+    /// Record the current journal cursor as the on-disk baseline, after which
+    /// [`is_modified`] returns `false` until the next committed edit (or until
+    /// undo/redo move the cursor off this point). Call after a successful save.
     pub fn mark_saved(&mut self) {
-        self.saved_generation = self.generation;
+        self.saved_journal_head = self.journal_head;
+    }
+
+    /// The journal cursor — the number of transactions currently applied
+    /// (0..=journal length). Test/inspection accessor.
+    pub fn journal_head(&self) -> usize {
+        self.journal_head
+    }
+
+    /// The Transaction journal (OP_LOG.md §5). Test/inspection accessor.
+    pub fn journal(&self) -> &[Transaction] {
+        &self.op_journal
     }
 
     // --- Transaction bracket (OP_LOG.md Increment 1) ----------------------
@@ -440,6 +511,14 @@ impl Model {
             self.undo_stack.remove(0);
         }
         self.in_txn = true;
+        // Start accumulating the transaction (OP_LOG.md Increment 2). `ops` is
+        // populated by the `op_apply` path (sub-step 2.2); `gen_at_open` lets
+        // `commit_txn` detect a zero-write no-op without serializing.
+        self.pending_txn = Some(PendingTxn {
+            name: None,
+            ops: Vec::new(),
+            gen_at_open: self.generation,
+        });
     }
 
     /// Finalize the open transaction: clear the redo stack (the relocated
@@ -452,8 +531,50 @@ impl Model {
         if !self.in_txn {
             return;
         }
-        self.redo_stack.clear();
         self.in_txn = false;
+        let pending = self.pending_txn.take();
+
+        // No-op rule (OP_LOG.md §5/§9): a transaction whose net document change
+        // is byte-identical is NOT journaled, and its undo checkpoint is dropped
+        // so it leaves no undo step (keeping the undo stack and the journal
+        // cursor in lock-step). Fast path: if no write happened at all
+        // (generation unchanged since the owning begin_txn) it is definitely a
+        // no-op; otherwise fall back to the canonical `document_to_test_json`
+        // byte-compare against the checkpoint (the same canonicalization the
+        // cross-language gate uses).
+        let gen_at_open = pending
+            .as_ref()
+            .map(|p| p.gen_at_open)
+            .unwrap_or(self.generation);
+        let no_net_change = self.generation == gen_at_open
+            || self.undo_stack.last().is_some_and(|(chk, _)| {
+                document_to_test_json(chk) == document_to_test_json(&self.document)
+            });
+        if no_net_change {
+            // Drop the no-op checkpoint; leave redo and the journal untouched.
+            self.undo_stack.pop();
+            return;
+        }
+
+        // A real edit invalidates redo on BOTH representations: clear the redo
+        // snapshot stack and truncate the journal's redo tail (the relocated
+        // "new edit invalidates redo" semantics — OP_LOG.md §5).
+        self.redo_stack.clear();
+        self.op_journal.truncate(self.journal_head);
+        let parent = self.op_journal.last().map(|t| t.txn_id.clone());
+        let txn = Transaction {
+            txn_id: format!("txn-{}", self.next_txn_counter),
+            name: pending.as_ref().and_then(|p| p.name.clone()),
+            ops: pending.map(|p| p.ops).unwrap_or_default(),
+            summary: None,
+            actor: Transaction::ACTOR_ARTIST.to_string(),
+            parent,
+            lamport: self.next_txn_counter,
+            label: None,
+        };
+        self.next_txn_counter += 1;
+        self.op_journal.push(txn);
+        self.journal_head = self.op_journal.len();
     }
 
     /// Abandon the open transaction, rolling the document and index back to the
@@ -468,6 +589,9 @@ impl Model {
                 self.id_index = index;
             }
             self.in_txn = false;
+            // An aborted transaction was never journaled, so the journal and its
+            // cursor are untouched (OP_LOG.md §5).
+            self.pending_txn = None;
         }
     }
 
@@ -597,32 +721,54 @@ mod tests {
     }
 
     #[test]
-    fn is_modified_after_set_document() {
+    fn is_modified_after_committed_edit() {
+        // OP_LOG.md §9: is_modified tracks the journal cursor, so a committed
+        // (undoable) transaction marks the document modified.
         let mut model = Model::default();
-        model.set_document_unbracketed(Document::default());
+        model.with_txn(|m| m.set_document(Document::default()));
         assert!(model.is_modified());
+    }
+
+    #[test]
+    fn is_modified_unbracketed_write_does_not_modify() {
+        // OP_LOG.md §9 unified semantics: a non-undoable write (selection /
+        // preview / live-drag, via set_document_unbracketed) moves no
+        // transaction, so it does NOT mark the document modified. This is the
+        // observable flip from the old generation/identity semantics, and the
+        // correct behavior — selecting something should not dirty the file.
+        let mut model = Model::default();
+        model.set_document_unbracketed(Document {
+            layers: vec![make_layer("L")],
+            ..Document::default()
+        });
+        assert!(!model.is_modified());
     }
 
     #[test]
     fn is_modified_false_after_mark_saved() {
         let mut model = Model::default();
-        model.set_document_unbracketed(Document::default());
+        model.with_txn(|m| m.set_document(Document::default()));
         assert!(model.is_modified());
         model.mark_saved();
         assert!(!model.is_modified());
     }
 
     #[test]
-    fn is_modified_after_undo() {
+    fn is_modified_false_after_undo_back_to_saved() {
+        // OP_LOG.md §9 headline change: with the journal-head cursor, undo back
+        // to the saved point reads as NOT modified (the generation/identity
+        // semantics reported modified here, because every write — including
+        // undo — bumped the generation). This is the 4-way observable flip.
         let mut model = Model::default();
-        model.mark_saved();
-        model.begin_txn();
-        model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
-        model.commit_txn();
-        assert!(model.is_modified());
+        model.mark_saved(); // saved at journal_head 0
+        model.with_txn(|m| {
+            m.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
+        });
+        assert!(model.is_modified(), "a committed edit is modified");
         model.undo();
-        // After undo, generation differs from saved — still modified
-        assert!(model.is_modified());
+        assert!(!model.is_modified(), "undo back to the saved point is not modified");
+        model.redo();
+        assert!(model.is_modified(), "redo past the saved point is modified again");
     }
 
     #[test]
@@ -1059,5 +1205,118 @@ mod tests {
         assert_eq!(b.id_index(), &rebuild_id_index(b.document()));
         assert!(!b.can_undo(), "unbracketed write pushes no checkpoint");
         assert!(a.can_undo(), "bracketed write pushes a checkpoint");
+    }
+
+    // --- Transaction journal (OP_LOG.md Increment 2, sub-step 2.1) ---------
+    //
+    // These pin the journal as a cursor: commit appends one Transaction per
+    // net-change transaction, undo/redo move the cursor, the redo tail is
+    // dropped on a new commit, no-op transactions are not journaled, and the
+    // txn ids are a deterministic counter. The ops list is populated in a later
+    // sub-step; here the journal's transaction COUNT + cursor are what matter.
+
+    #[test]
+    fn commit_journals_one_transaction_per_net_change_edit() {
+        let mut model = Model::default();
+        assert_eq!(model.journal().len(), 0);
+        assert_eq!(model.journal_head(), 0);
+
+        model.with_txn(|m| m.set_document(empty_doc()));
+        assert_eq!(model.journal().len(), 1, "one committed edit = one transaction");
+        assert_eq!(model.journal_head(), 1, "cursor advanced to the new transaction");
+
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        assert_eq!(model.journal().len(), 2);
+        assert_eq!(model.journal_head(), 2);
+    }
+
+    #[test]
+    fn txn_ids_are_a_deterministic_counter() {
+        // OP_LOG.md §7: txn-0, txn-1, … so the journal file is byte-shareable.
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(empty_doc()));
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        assert_eq!(model.journal()[0].txn_id, "txn-0");
+        assert_eq!(model.journal()[1].txn_id, "txn-1");
+        // The causal parent edge points at the prior transaction.
+        assert_eq!(model.journal()[0].parent, None);
+        assert_eq!(model.journal()[1].parent.as_deref(), Some("txn-0"));
+    }
+
+    #[test]
+    fn no_op_transaction_is_not_journaled_and_leaves_no_undo_step() {
+        // OP_LOG.md §5/§9: an empty / zero-net-change transaction is elided from
+        // BOTH the journal and the undo stack.
+        let mut model = Model::default();
+        model.with_txn(|_m| { /* no edit */ });
+        assert_eq!(model.journal().len(), 0, "no-op is not journaled");
+        assert_eq!(model.journal_head(), 0);
+        assert!(!model.can_undo(), "no-op leaves no undo step");
+
+        // A write that nets back to the checkpoint document is also a no-op
+        // (compared via document_to_test_json — the canonical byte form).
+        let checkpoint = model.document().clone();
+        model.with_txn(|m| {
+            m.set_document(empty_doc());
+            m.set_document(checkpoint.clone()); // back to the exact checkpoint
+        });
+        assert_eq!(model.journal().len(), 0, "net-identical transaction is not journaled");
+        assert!(!model.can_undo());
+        assert!(!model.is_modified());
+    }
+
+    #[test]
+    fn undo_and_redo_move_the_journal_cursor() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(empty_doc()));
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() }));
+        assert_eq!(model.journal_head(), 2);
+
+        model.undo();
+        assert_eq!(model.journal_head(), 1, "undo moves the cursor back");
+        model.undo();
+        assert_eq!(model.journal_head(), 0);
+        // The journal itself is retained across undo (it is a cursor, not a high-water mark).
+        assert_eq!(model.journal().len(), 2);
+
+        model.redo();
+        assert_eq!(model.journal_head(), 1, "redo moves the cursor forward");
+        model.redo();
+        assert_eq!(model.journal_head(), 2);
+    }
+
+    #[test]
+    fn new_commit_after_undo_drops_the_redo_tail_of_the_journal() {
+        // OP_LOG.md §5: commit truncates the journal at journal_head and appends,
+        // so a new edit after undo drops the undone (redo) transactions.
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(empty_doc()));                       // txn-0
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("A")], ..Document::default() })); // txn-1
+        assert_eq!(model.journal().len(), 2);
+
+        model.undo(); // cursor at 1, txn-1 is now the redo tail
+        assert_eq!(model.journal_head(), 1);
+
+        model.with_txn(|m| m.set_document(Document { layers: vec![make_layer("B")], ..Document::default() })); // new txn
+        assert_eq!(model.journal().len(), 2, "redo tail dropped, new txn appended");
+        assert_eq!(model.journal_head(), 2);
+        assert_eq!(model.journal()[1].txn_id, "txn-2", "counter keeps advancing");
+        assert!(!model.can_redo(), "redo cleared on the new edit");
+    }
+
+    #[test]
+    fn abort_does_not_journal_or_move_the_cursor() {
+        let mut model = Model::default();
+        model.with_txn(|m| m.set_document(empty_doc())); // txn-0
+        let head = model.journal_head();
+        let len = model.journal().len();
+
+        model.begin_txn();
+        model.set_document(Document { layers: vec![make_layer("Z")], ..Document::default() });
+        model.abort_txn();
+
+        assert_eq!(model.journal().len(), len, "aborted transaction is not journaled");
+        assert_eq!(model.journal_head(), head, "cursor unmoved by abort");
+        assert_eq!(model.document().layers.len(), 0, "abort rolled back the edit");
     }
 }
