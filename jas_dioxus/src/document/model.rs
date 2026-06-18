@@ -231,7 +231,34 @@ impl Model {
     /// non-undoable writes use [`set_document_unbracketed`] instead, which never
     /// asserts. In this sub-step the two are behavior-identical.
     pub fn set_document(&mut self, doc: Document) {
+        debug_assert!(
+            self.in_txn,
+            "set_document outside a transaction: undoable edits use begin_txn/\
+             commit_txn or with_txn; Controller mutators use edit_document; \
+             non-undoable writes (selection, preview, live-drag, test setup) use \
+             set_document_unbracketed.",
+        );
         self.write_document(doc);
+    }
+
+    /// Self-bracketing undoable write: if no transaction is open, wrap this edit
+    /// in its own begin/commit (one undo step); if one is already open, just
+    /// write (joining the caller's transaction). This is what `Controller`
+    /// mutators use, so a standalone call (e.g. a unit test, or a direct
+    /// Controller call) is a complete one-step undo, while the same method
+    /// called inside a UI `with_txn`/`begin_txn` joins that action — production
+    /// behavior is unchanged, and no test needs an explicit bracket. Distinct
+    /// from `set_document` (which asserts a transaction is already open, for the
+    /// direct UI write paths) and `set_document_unbracketed` (non-undoable).
+    pub fn edit_document(&mut self, doc: Document) {
+        let opened = !self.in_txn;
+        if opened {
+            self.begin_txn();
+        }
+        self.write_document(doc);
+        if opened {
+            self.commit_txn();
+        }
     }
 
     /// Committing write for sanctioned NON-undoable mutations — selection-only
@@ -325,6 +352,10 @@ impl Model {
     /// Restore the most recently snapshotted document, moving the current
     /// document onto the redo stack. No-op if the undo stack is empty.
     pub fn undo(&mut self) {
+        // History navigation ends any open edit context, so the next edit
+        // self-brackets fresh (OP_LOG.md Increment 1: keeps in_txn honest after
+        // undo, so a post-undo edit clears redo via its own commit).
+        self.in_txn = false;
         if let Some((prev_doc, prev_index)) = self.undo_stack.pop() {
             self.redo_stack.push((self.document.clone(), self.id_index.clone()));
             self.document = prev_doc;
@@ -341,6 +372,7 @@ impl Model {
     /// document back onto the undo stack. No-op if the redo stack is
     /// empty (e.g. after any new edit, which clears redo).
     pub fn redo(&mut self) {
+        self.in_txn = false;
         if let Some((next_doc, next_index)) = self.redo_stack.pop() {
             self.undo_stack.push((self.document.clone(), self.id_index.clone()));
             self.document = next_doc;
@@ -489,7 +521,7 @@ mod tests {
     fn set_document() {
         let mut model = Model::default();
         let doc = Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() };
-        model.set_document(doc);
+        model.with_txn(|m| m.set_document(doc));
         assert_eq!(model.document().layers.len(), 0);
     }
 
@@ -498,8 +530,9 @@ mod tests {
         let mut model = Model::default();
         assert!(!model.can_undo());
 
-        model.snapshot();
+        model.begin_txn();
         model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
+        model.commit_txn();
         assert!(model.can_undo());
         assert!(!model.can_redo());
 
@@ -516,17 +549,20 @@ mod tests {
         let mut model = Model::default();
         let layer = make_layer("L1");
 
-        model.snapshot();
+        model.begin_txn();
         model.set_document(Document { layers: vec![layer.clone()], selected_layer: 0, selection: vec![], ..Document::default() });
-        model.snapshot();
+        model.commit_txn();
+        model.begin_txn();
         model.set_document(Document { layers: vec![layer.clone(), layer.clone()], selected_layer: 0, selection: vec![], ..Document::default() });
+        model.commit_txn();
 
         model.undo();
         assert_eq!(model.document().layers.len(), 1);
         assert!(model.can_redo());
 
-        model.snapshot();
+        model.begin_txn();
         model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
+        model.commit_txn();
         assert!(!model.can_redo());
     }
 
@@ -563,14 +599,14 @@ mod tests {
     #[test]
     fn is_modified_after_set_document() {
         let mut model = Model::default();
-        model.set_document(Document::default());
+        model.set_document_unbracketed(Document::default());
         assert!(model.is_modified());
     }
 
     #[test]
     fn is_modified_false_after_mark_saved() {
         let mut model = Model::default();
-        model.set_document(Document::default());
+        model.set_document_unbracketed(Document::default());
         assert!(model.is_modified());
         model.mark_saved();
         assert!(!model.is_modified());
@@ -580,8 +616,9 @@ mod tests {
     fn is_modified_after_undo() {
         let mut model = Model::default();
         model.mark_saved();
-        model.snapshot();
+        model.begin_txn();
         model.set_document(Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() });
+        model.commit_txn();
         assert!(model.is_modified());
         model.undo();
         // After undo, generation differs from saved — still modified
@@ -658,14 +695,14 @@ mod tests {
         // set_document refreshes the index incrementally.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("a")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert!(model.id_index().get("a").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // A second clone -> mutate -> set_document keeps the index consistent.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("b")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert!(model.id_index().get("b").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
     }
@@ -759,7 +796,7 @@ mod tests {
         let mut model = Model::default();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("ins")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "ins"), "inserted target resolves");
     }
@@ -769,13 +806,13 @@ mod tests {
         let mut model = Model::default();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("gm")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "gm"));
         // A second edit (delete) through set_document also stays consistent.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().clear();
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "gm"), "deleted target no longer resolves");
     }
@@ -794,7 +831,7 @@ mod tests {
             common: CommonProps { id: Some("g".into()), ..Default::default() },
         });
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(g));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // Replace the group wholesale via a CoW edit.
@@ -805,7 +842,7 @@ mod tests {
             common: CommonProps { id: Some("g2".into()), ..Default::default() },
         });
         doc2.layers[0].children_mut().unwrap()[0] = std::rc::Rc::new(g2);
-        model.set_document(doc2);
+        model.set_document_unbracketed(doc2);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "c"));
         assert!(!resolves(&model, "a") && !resolves(&model, "b"), "old subtree gone");
@@ -819,7 +856,7 @@ mod tests {
         for id in ["d1", "d2", "d3"] {
             doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect(id)));
         }
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // Select d1 and d3 (paths [0,0] and [0,2]) and delete them together.
@@ -829,7 +866,7 @@ mod tests {
             ElementSelection::all(vec![0, 2]),
         ];
         let after = doc2.delete_selection();
-        model.set_document(after);
+        model.set_document_unbracketed(after);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "d1") && !resolves(&model, "d3"), "both deleted");
         assert!(resolves(&model, "d2"), "untouched sibling survives");
@@ -842,7 +879,7 @@ mod tests {
         // Place an ided rect, then promote it to a master.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("sym")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
 
         Controller::make_symbol(&mut model, &vec![0, 0], "sym", "inst1");
         assert_eq!(
@@ -862,10 +899,11 @@ mod tests {
     #[test]
     fn incremental_undo_redo_matches_rebuild_and_resolves() {
         let mut model = Model::default();
-        model.snapshot();
+        model.begin_txn();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("u1")));
         model.set_document(doc);
+        model.commit_txn();
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "u1"));
 
@@ -885,7 +923,7 @@ mod tests {
         model.capture_preview_snapshot();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("pv")));
-        model.set_document(doc);
+        model.set_document_unbracketed(doc);
         assert!(resolves(&model, "pv"));
 
         model.restore_preview_snapshot();
@@ -1013,12 +1051,13 @@ mod tests {
         let g_a = a.generation();
         let g_b = b.generation();
 
-        a.set_document(empty_doc());
+        a.with_txn(|m| m.set_document(empty_doc()));
         b.set_document_unbracketed(empty_doc());
 
         assert_eq!(a.document().layers.len(), b.document().layers.len());
         assert_eq!(a.generation() - g_a, b.generation() - g_b, "both bump generation by one");
         assert_eq!(b.id_index(), &rebuild_id_index(b.document()));
         assert!(!b.can_undo(), "unbracketed write pushes no checkpoint");
+        assert!(a.can_undo(), "bracketed write pushes a checkpoint");
     }
 }

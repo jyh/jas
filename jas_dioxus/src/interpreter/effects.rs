@@ -3092,7 +3092,7 @@ fn artboard_translate_from_preview(
         }
     }
 
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// True iff `inner` (an element's axis-aligned bounding box) is
@@ -3427,7 +3427,7 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
         ..source
     };
     new_doc.artboards.push(dup);
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 
     // Retarget translate ops at the duplicate, and stash the
     // duplicated element paths for the move-translation path.
@@ -3686,7 +3686,7 @@ fn artboard_resize_apply(
         ab.width = nw;
         ab.height = nh;
     }
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Drag-to-resize commit. Re-applies the resize with integer-pt
@@ -3733,7 +3733,7 @@ fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
         ab.width = nw.round().max(1.0);
         ab.height = nh.round().max(1.0);
     }
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 /// Implementation of doc.artboard.create_commit per ARTBOARD_TOOL.md
@@ -3777,7 +3777,7 @@ fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64)
     // Transparent and all display toggles off.
 
     new_doc.artboards.push(ab);
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 /// Implementation of doc.artboard.probe_hit per ARTBOARD_TOOL.md
@@ -4257,7 +4257,7 @@ fn path_erase_at_rect(
     }
     if changed {
         new_doc.selection.clear();
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 }
 
@@ -4494,7 +4494,7 @@ fn path_paintbrush_edit_commit(
         fill_rule: crate::geometry::element::FillRule::NonZero,
     });
     let new_doc = doc.replace_element(&target_path, new_elem);
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 // ── Blob Brush commit helpers + effects ──────────────────────
@@ -4790,7 +4790,7 @@ fn blob_brush_commit_painting(
         vec![insert_layer, child_count]
     };
     new_doc = new_doc.insert_element_at(&insert_path, new_elem);
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 /// Implementation of doc.blob_brush.commit_erasing.
@@ -4853,7 +4853,7 @@ fn blob_brush_commit_erasing(
             }
         }
     }
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 // ── Magic Wand effect ─────────────────────────────────────
@@ -4999,7 +4999,7 @@ fn eyedropper_sample(
         for path in &selection_paths {
             new_doc = apply_to_target_recursive(&new_doc, path, &appearance, &cfg);
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 }
 
@@ -5035,7 +5035,7 @@ fn eyedropper_apply_loaded(
     let new_doc = apply_to_target_recursive(
         &doc, &target_path.to_vec(), &appearance, &cfg,
     );
-    model.set_document(new_doc);
+    model.edit_document(new_doc);
 }
 
 /// Walk the document at `path`. If the element is a Group or Layer,
@@ -5285,7 +5285,7 @@ fn path_smooth_at_cursor(
         changed = true;
     }
     if changed {
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 }
 
@@ -5648,7 +5648,7 @@ fn scale_apply(
             }
         }
     }
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Rotate apply implementation. Mirrors scale_apply with a rotation
@@ -5682,7 +5682,7 @@ fn rotate_apply(
             elem.common_mut().transform = Some(matrix.multiply(&current));
         }
     }
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Shear apply implementation. Pure shear has determinant 1 so
@@ -5718,7 +5718,7 @@ fn shear_apply(
             elem.common_mut().transform = Some(matrix.multiply(&current));
         }
     }
-    model.set_document(new_doc);
+    model.set_document_unbracketed(new_doc);
 }
 
 /// Multiply the element's stroke-width by `factor` in place.

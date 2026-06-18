@@ -1054,7 +1054,7 @@ impl AppState {
                 let new_fill = Some(Fill::new(color));
                 tab.model.default_fill = new_fill;
                 if !tab.model.document().selection.is_empty() {
-                    crate::document::controller::Controller::set_selection_fill(
+                    crate::document::controller::Controller::set_selection_fill_live(
                         &mut tab.model, new_fill);
                 }
             } else {
@@ -1062,7 +1062,7 @@ impl AppState {
                 let new_stroke = Some(Stroke::new(color, width));
                 tab.model.default_stroke = new_stroke;
                 if !tab.model.document().selection.is_empty() {
-                    crate::document::controller::Controller::set_selection_stroke(
+                    crate::document::controller::Controller::set_selection_stroke_live(
                         &mut tab.model, new_stroke);
                 }
             }
@@ -1738,10 +1738,8 @@ impl AppState {
                     _ => None,
                 };
                 if let Some(new_elem) = new_elem {
-                    tab.model.begin_txn();
                     let new_doc = doc.replace_element(&path, new_elem);
-                    tab.model.set_document(new_doc);
-                    tab.model.commit_txn();
+                    tab.model.edit_document(new_doc);
                 }
             }
             return;
@@ -1760,9 +1758,10 @@ impl AppState {
                 })
                 .collect()
         };
+        let mut acc_doc = tab.model.document().clone();
+        let mut changed = false;
         for path in target_paths {
-            let doc = tab.model.document().clone();
-            let new_elem = match doc.get_element(&path) {
+            let new_elem = match acc_doc.get_element(&path) {
                 Some(Element::Text(t)) => {
                     let mut new_t = t.clone();
                     new_t.font_family = cp.font_family.clone();
@@ -1810,9 +1809,15 @@ impl AppState {
                 _ => None,
             };
             if let Some(elem) = new_elem {
-                let new_doc = doc.replace_element(&path, elem);
-                tab.model.set_document(new_doc);
+                acc_doc = acc_doc.replace_element(&path, elem);
+                changed = true;
             }
+        }
+        // Self-bracketing single write so a multi-element font change is one
+        // undo step (OP_LOG.md Increment 1). edit_document opens+commits its
+        // own txn when called standalone (the panel handler does not bracket).
+        if changed {
+            tab.model.edit_document(acc_doc);
         }
     }
 
@@ -1988,21 +1993,25 @@ impl AppState {
         let apply_simplify = options.apply_simplify_after_op;
         let precision = options.simplify_precision;
         if let Some(tab) = self.tab_mut() {
-            crate::document::controller::Controller::apply_destructive_boolean(
-                &mut tab.model, op, &options,
-            );
-            // Post-op auto-simplify — same code path as Object → Simplify.
-            // Runs on the new selection (boolean op leaves output paths
-            // selected) so curve recovery is consistent with the menu
-            // command. No-op when the boolean op left no selection.
-            // take_snapshot=false because apply_destructive_boolean
-            // already snapshotted; without this the boolean + simplify
-            // pair lands two undo entries instead of one.
-            if apply_simplify {
-                crate::document::controller::Controller::simplify_selection_with_snapshot(
-                    &mut tab.model, precision, false,
+            // One transaction wraps the boolean op and its optional post-op
+            // auto-simplify so the pair is a single undo entry (OP_LOG.md
+            // Increment 1). apply_destructive_boolean's edit_document joins
+            // this txn (rather than self-bracketing), and the simplify step
+            // runs with take_snapshot=false so it joins it too.
+            tab.model.with_txn(|m| {
+                crate::document::controller::Controller::apply_destructive_boolean(
+                    m, op, &options,
                 );
-            }
+                // Post-op auto-simplify — same code path as Object → Simplify.
+                // Runs on the new selection (boolean op leaves output paths
+                // selected) so curve recovery is consistent with the menu
+                // command. No-op when the boolean op left no selection.
+                if apply_simplify {
+                    crate::document::controller::Controller::simplify_selection_with_snapshot(
+                        m, precision, false,
+                    );
+                }
+            });
         }
     }
 
@@ -2176,7 +2185,10 @@ impl AppState {
                 *elem = translated;
             }
         }
-        tab.model.set_document(new_doc);
+        // Self-bracketing (OP_LOG.md Increment 1): a direct call (tests) opens
+        // and commits its own undo step; in production the align YAML action's
+        // `snapshot` effect already opened the txn, so this joins it.
+        tab.model.edit_document(new_doc);
     }
 
     /// Distribute Spacing explicit gap: `Some(gap)` when the panel
@@ -3612,10 +3624,10 @@ mod align_panel_state_tests {
             .map(ElementSelection::all)
             .collect();
         let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
         // These tests pass screen coordinates equal to document
-        // coordinates, so pin an identity view transform. set_document
-        // otherwise applies fit-to-artboard centering (a non-zero
+        // coordinates, so pin an identity view transform. The document
+        // write otherwise applies fit-to-artboard centering (a non-zero
         // view_offset), which would shift the hit-test off the rects.
         st.tabs[st.active_tab].model.zoom_level = 1.0;
         st.tabs[st.active_tab].model.view_offset_x = 0.0;
@@ -3979,7 +3991,7 @@ mod ensure_paragraph_wrapper_tests {
             selection: vec![ElementSelection::all(vec![0, 0])],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
         // Default panel state has align_left = true — matches the
         // post-click steady state. The apply must still produce a
         // segment covering every char regardless.
@@ -4046,7 +4058,7 @@ mod ensure_paragraph_wrapper_tests {
             selection: vec![ElementSelection::all(vec![0, 0])],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document(doc);
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
 
         // Mimic the dispatch sequence the toggle handler runs for a
         // click on justify_left:
@@ -4081,5 +4093,114 @@ mod ensure_paragraph_wrapper_tests {
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].text_align, TextAlign::Justify,
                    "segment must be TextAlign::Justify so layout justifies");
+    }
+}
+
+// OP_LOG.md Increment 1: regression guards for self-bracketing panel/menu
+// mutators that are invoked directly (not via the `snapshot` YAML effect).
+// Each must open + commit exactly one undo transaction so the committing
+// write never trips the `set_document outside a transaction` assert and the
+// whole operation is a single undo step.
+#[cfg(test)]
+mod oplog_bracket_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem, TextElem,
+    };
+
+    fn state_with_layer(children: Vec<Element>, selection: Vec<Vec<usize>>) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(super::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            children: children.into_iter().map(std::rc::Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: selection.into_iter().map(ElementSelection::all).collect(),
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    #[test]
+    fn character_panel_whole_element_write_is_one_undo_step() {
+        // Applying the Character panel to a whole selected text element (no
+        // active edit session) routes through the whole-element loop, which
+        // the panel handler does NOT bracket. It must self-bracket: one
+        // committing write, one undo step, no out-of-transaction panic.
+        let text = TextElem::from_string(
+            0.0, 0.0, "Hello", "sans-serif", 16.0,
+            "normal", "normal", "none", 300.0, 200.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let mut st = state_with_layer(vec![Element::Text(text)], vec![vec![0, 0]]);
+        assert!(!st.tabs[st.active_tab].model.can_undo());
+
+        st.character_panel.font_size = 48.0;
+        st.apply_character_panel_to_selection();
+
+        // Change landed.
+        match st.tab().unwrap().model.document().get_element(&vec![0, 0]).unwrap() {
+            Element::Text(t) => assert_eq!(t.font_size, 48.0),
+            other => panic!("expected Text, got {other:?}"),
+        }
+        // Exactly one undo step restores the original font size.
+        let m = &mut st.tabs[st.active_tab].model;
+        assert!(m.can_undo(), "the whole-element write pushed a checkpoint");
+        m.undo();
+        assert!(!m.can_undo(), "it was a single undo step");
+        match m.document().get_element(&vec![0, 0]).unwrap() {
+            Element::Text(t) => assert_eq!(t.font_size, 16.0, "undo restored the font size"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn boolean_union_with_auto_simplify_is_one_undo_step() {
+        // The post-op auto-simplify runs with take_snapshot=false, expecting
+        // to join the boolean op's transaction. Both must sit in one bracket
+        // — otherwise the simplify write hits set_document outside a
+        // transaction (panic) and/or lands a second undo entry.
+        let mut st = state_with_layer(
+            vec![rect(0.0, 0.0, 20.0, 20.0), rect(10.0, 10.0, 20.0, 20.0)],
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        st.boolean_panel.apply_simplify_after_op = true;
+        st.boolean_panel.simplify_precision = 0.1;
+        assert!(!st.tabs[st.active_tab].model.can_undo());
+
+        st.apply_boolean_operation("union");
+
+        // Union collapsed the two siblings into a single output child.
+        let n_after = st.tab().unwrap().model.document().layers[0]
+            .children().map(|c| c.len()).unwrap_or(0);
+        assert_eq!(n_after, 1, "union leaves one output path");
+
+        // Exactly one undo step restores the two original rects.
+        let m = &mut st.tabs[st.active_tab].model;
+        assert!(m.can_undo(), "boolean+simplify pushed a checkpoint");
+        m.undo();
+        assert!(!m.can_undo(), "boolean+simplify is a single undo step");
+        let n_restored = m.document().layers[0]
+            .children().map(|c| c.len()).unwrap_or(0);
+        assert_eq!(n_restored, 2, "undo restored both rects");
     }
 }

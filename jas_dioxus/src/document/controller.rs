@@ -211,11 +211,11 @@ impl Controller {
             children.push(Rc::new(element));
             ci
         } else {
-            model.set_document(new_doc);
+            model.edit_document(new_doc);
             return;
         };
         new_doc.selection = vec![ElementSelection::all(vec![idx, child_idx])];
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Stamp a stable `id` onto the element at `path` — the lazy
@@ -229,7 +229,7 @@ impl Controller {
         let mut new_doc = model.document().clone();
         if let Some(elem) = new_doc.get_element_mut(path) {
             elem.common_mut().id = Some(id.to_string());
-            model.set_document(new_doc);
+            model.edit_document(new_doc);
         }
     }
 
@@ -253,7 +253,7 @@ impl Controller {
             None => {
                 let mut t = target.clone();
                 t.common_mut().id = Some(target_id.to_string());
-                model.set_document(doc.replace_element(target_path, t));
+                model.edit_document(doc.replace_element(target_path, t));
                 target_id.to_string()
             }
         };
@@ -315,7 +315,7 @@ impl Controller {
         // into the off-canvas store.
         let mut new_doc = doc.replace_element(path, reference);
         new_doc.symbols.push(master);
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Place Instance: append a `ReferenceElem` targeting an existing master
@@ -390,7 +390,7 @@ impl Controller {
             copy = crate::geometry::element::with_stroke(&copy, instance.stroke.clone());
         }
 
-        model.set_document(doc.replace_element(path, copy));
+        model.edit_document(doc.replace_element(path, copy));
     }
 
     /// Set the instance `transform` of the `ReferenceElem` at `path` (Symbols
@@ -417,7 +417,7 @@ impl Controller {
         let new_elem = crate::geometry::element::Element::Live(
             crate::geometry::live::LiveVariant::Reference(updated),
         );
-        model.set_document(doc.replace_element(path, new_elem));
+        model.edit_document(doc.replace_element(path, new_elem));
     }
 
     /// Redefine: replace the master with id `master_id` in `doc.symbols` with a
@@ -456,7 +456,7 @@ impl Controller {
         ));
         let mut new_doc = doc.replace_element(path, reference);
         new_doc.symbols[master_idx] = new_master;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Delete Symbol: remove the master whose `common.id == master_id` from
@@ -473,7 +473,7 @@ impl Controller {
         }) else { return };
         let mut new_doc = doc;
         new_doc.symbols.remove(idx);
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Append ``element`` to the mask subtree of the element at
@@ -511,7 +511,7 @@ impl Controller {
         // so for selection purposes we select the mask-target
         // element itself — good enough for phase 1.
         new_doc.selection = vec![ElementSelection::all(path.to_vec())];
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
         true
     }
 
@@ -697,7 +697,7 @@ impl Controller {
                 new_doc = new_doc.replace_element(&es.path, new_elem);
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set stroke_brush on all selected elements (paths only).
@@ -713,7 +713,7 @@ impl Controller {
                 );
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set stroke_brush_overrides on all selected elements (paths only).
@@ -730,31 +730,54 @@ impl Controller {
                 );
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
-    /// Set the fill of all selected elements.
-    pub fn set_selection_fill(model: &mut Model, fill: Option<Fill>) {
-        let doc = model.document().clone();
+    fn fill_applied(doc: &Document, fill: Option<Fill>) -> Document {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(&es.path, with_fill(elem, fill));
             }
         }
-        model.set_document(new_doc);
+        new_doc
     }
 
-    /// Set the stroke of all selected elements.
-    pub fn set_selection_stroke(model: &mut Model, stroke: Option<Stroke>) {
-        let doc = model.document().clone();
+    fn stroke_applied(doc: &Document, stroke: Option<Stroke>) -> Document {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
             }
         }
-        model.set_document(new_doc);
+        new_doc
+    }
+
+    /// Set the fill of all selected elements (undoable, self-bracketing).
+    pub fn set_selection_fill(model: &mut Model, fill: Option<Fill>) {
+        let new_doc = Self::fill_applied(model.document(), fill);
+        model.edit_document(new_doc);
+    }
+
+    /// Live, NON-undoable fill set for per-tick color-slider drag
+    /// (`set_active_color_live`). Undo is captured once on pointer-up by
+    /// `set_active_color`, so the drag must not push checkpoints.
+    pub fn set_selection_fill_live(model: &mut Model, fill: Option<Fill>) {
+        let new_doc = Self::fill_applied(model.document(), fill);
+        model.set_document_unbracketed(new_doc);
+    }
+
+    /// Set the stroke of all selected elements (undoable, self-bracketing).
+    pub fn set_selection_stroke(model: &mut Model, stroke: Option<Stroke>) {
+        let new_doc = Self::stroke_applied(model.document(), stroke);
+        model.edit_document(new_doc);
+    }
+
+    /// Live, NON-undoable stroke set for per-tick color drag (see
+    /// `set_selection_fill_live`).
+    pub fn set_selection_stroke_live(model: &mut Model, stroke: Option<Stroke>) {
+        let new_doc = Self::stroke_applied(model.document(), stroke);
+        model.set_document_unbracketed(new_doc);
     }
 
     /// Set the `fill_gradient` field of every selected element to the
@@ -774,7 +797,7 @@ impl Controller {
                 );
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set the `stroke_gradient` field of every selected element.
@@ -790,7 +813,7 @@ impl Controller {
                 );
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
@@ -823,7 +846,7 @@ impl Controller {
                 new_doc = new_doc.replace_element(&es.path, new_elem);
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Remove the opacity mask from every selected element.
@@ -842,7 +865,7 @@ impl Controller {
                 new_doc = new_doc.replace_element(&es.path, new_elem);
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set ``mask.clip`` on every selected element that has a mask.
@@ -893,7 +916,7 @@ impl Controller {
             }
             new_doc = new_doc.replace_element(&es.path, new_elem);
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Internal helper: apply `f` to every selected element's mask.
@@ -912,7 +935,7 @@ impl Controller {
             }
             new_doc = new_doc.replace_element(&es.path, new_elem);
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set width profile points on selected Path and Line elements.
@@ -924,7 +947,7 @@ impl Controller {
                 new_doc = new_doc.replace_element(&es.path, with_width_points(elem, width_points.clone()));
             }
         }
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Duplicate selected elements, offset by (dx, dy).
@@ -948,7 +971,7 @@ impl Controller {
             }
         }
         new_doc.selection = new_selection;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Group selected elements into a single Group.
@@ -993,7 +1016,7 @@ impl Controller {
         let n = control_point_count(&group);
         let _ = n;
         new_doc.selection = vec![ElementSelection::all(insert_path)];
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Ungroup all selected Group elements, replacing each with its children.
@@ -1064,7 +1087,7 @@ impl Controller {
             offset += n_children as i64 - 1;
         }
         new_doc.selection = new_selection;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Make a compound shape from the current selection using UNION.
@@ -1130,7 +1153,7 @@ impl Controller {
         let insert_path = paths[0].clone();
         new_doc = new_doc.insert_element_at(&insert_path, compound);
         new_doc.selection = vec![ElementSelection::all(insert_path)];
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Release every selected compound shape: replace it in place with
@@ -1213,7 +1236,7 @@ impl Controller {
             offset += n as i64 - 1;
         }
         new_doc.selection = new_selection;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Expand every selected compound shape into static Polygon
@@ -1295,7 +1318,7 @@ impl Controller {
             offset += n as i64 - 1;
         }
         new_doc.selection = new_selection;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Destructively apply one of the six implemented boolean ops to
@@ -1622,7 +1645,7 @@ impl Controller {
             }
         }
         new_doc.selection = new_selection;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Ungroup all unlocked Group elements in the entire document.
@@ -1673,7 +1696,7 @@ impl Controller {
         let mut new_doc = doc;
         new_doc.layers = new_layers;
         new_doc.selection.clear();
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Lock all selected elements.
@@ -1807,7 +1830,7 @@ impl Controller {
             }
         }
         new_doc.selection.clear();
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Move a Bezier handle of a path element.
@@ -1823,7 +1846,7 @@ impl Controller {
         if let Some(Element::Path(pe)) = doc.get_element(path) {
             let new_pe = move_path_handle(pe, anchor_idx, handle_type, dx, dy);
             let new_doc = doc.replace_element(path, Element::Path(new_pe));
-            model.set_document(new_doc);
+            model.edit_document(new_doc);
         }
     }
 
@@ -1834,7 +1857,7 @@ impl Controller {
         let mut new_doc = doc;
         new_doc.layers = new_layers;
         new_doc.selection.clear();
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Set every element in the current selection to
@@ -1858,7 +1881,7 @@ impl Controller {
             }
         }
         new_doc.selection.clear();
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Traverse the document, set every element whose own
@@ -1887,7 +1910,7 @@ impl Controller {
         // Suppress the unused `Visibility` warning when compiled in
         // configurations that optimise the helper away.
         let _ = Visibility::Preview;
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 
     /// Apply the TSPAN.md "Character attribute writes" algorithm to the
@@ -1963,7 +1986,7 @@ impl Controller {
             _ => return,
         };
         let new_doc = doc.replace_element(path, new_elem);
-        model.set_document(new_doc);
+        model.edit_document(new_doc);
     }
 }
 
@@ -3513,9 +3536,13 @@ mod tests {
         let mut model = Model::default();
         Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
         // The just-added element is selected at [0,0] (kind=All).
-        model.snapshot();
-        Controller::create_reference(&mut model, &vec![0, 0], "tgt-1", "ref-1");
-        Controller::move_selection(&mut model, PASTE_OFFSET, PASTE_OFFSET);
+        // Make Instance = create_reference + offset-move under ONE
+        // transaction (mirrors the Object-menu handler), so the whole
+        // composition is a single undo step.
+        model.with_txn(|m| {
+            Controller::create_reference(m, &vec![0, 0], "tgt-1", "ref-1");
+            Controller::move_selection(m, PASTE_OFFSET, PASTE_OFFSET);
+        });
         let doc = model.document();
         // Source rect untouched.
         if let Element::Rect(r) = doc.get_element(&vec![0, 0]).unwrap() {
@@ -3644,7 +3671,7 @@ mod tests {
         master.common_mut().id = Some("m1".into());
         let mut seed = model.document().clone();
         seed.symbols.push(master);
-        model.set_document(seed);
+        model.set_document_unbracketed(seed);
 
         Controller::place_instance(&mut model, "m1", "i2");
         let doc = model.document();
@@ -3789,7 +3816,7 @@ mod tests {
             model.document().get_element(&vec![0, 0]).unwrap(),
             red.clone(),
         );
-        model.set_document(model.document().replace_element(&vec![0, 0], new_ref));
+        model.set_document_unbracketed(model.document().replace_element(&vec![0, 0], new_ref));
         Controller::detach(&mut model, &vec![0, 0]);
         if let Element::Rect(r) = model.document().get_element(&vec![0, 0]).unwrap() {
             assert_eq!(r.fill, red);
@@ -4271,7 +4298,7 @@ mod tests {
             new_elem.common_mut().mask = None;
             new_doc = new_doc.replace_element(&first_path, new_elem);
         }
-        model.set_document(new_doc);
+        model.set_document_unbracketed(new_doc);
         assert!(first_mask(model.document()).is_none());
         assert!(!selection_has_mask(model.document()),
                 "mixed selection counts as no-mask");
