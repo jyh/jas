@@ -133,6 +133,25 @@ val reference_evaluate :
   Element.reference_elem -> float -> element_resolver ->
   VisitSet.t ref -> Boolean.polygon_set
 
+(** Resolver-aware replay of a recorded element: resolve each input by
+    stable id, replay the recipe (copy / translate) against them, and
+    return the derived output geometry. A dangling input or a cycle yields
+    an empty set — never a failure (RECORDED_ELEMENTS.md). Mirrors Rust
+    [RecordedElem::evaluate_with]. *)
+val recorded_evaluate :
+  Element.recorded_elem -> float -> element_resolver ->
+  VisitSet.t ref -> Boolean.polygon_set
+
+(** Normalize a captured journal op-segment into a recorded recipe
+    (RECORDED_ELEMENTS.md section 1 / section 4): rewrite selection-relative
+    ops (select_rect / copy_selection / move_selection) into the
+    input-addressed form, tracking the working selection. Returns
+    [(recipe, input_ids)] — the normalized ops and the distinct non-[$]
+    refs the recipe rebinds, in first-seen order. Mirrors Rust
+    [capture_recipe]. *)
+val capture_recipe :
+  Element.recorded_op list -> Element.recorded_op list * string list
+
 (** Phase 4c reference-geometry recompute cache (REFERENCE_GRAPH.md section
     2.3 — a PER-APP perf cache; equivalence is pinned on resolve() RESULTS,
     which it never alters, gated by an [assert (cached = fresh)] on every hit).

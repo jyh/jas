@@ -34,6 +34,9 @@ let dependencies (lv : live_variant) : element_ref list =
   match lv with
   | Compound_shape _ -> []
   | Reference r -> [ r.ref_target ]
+  (* A recorded element rebinds its inputs by stable id (by-id edges), so
+     the reference graph tracks them — like a reference. *)
+  | Recorded rec_ -> rec_.rec_inputs
 
 (* ------------------------------------------------------------------ *)
 (* Render-scoped resolver (REFERENCE_GRAPH.md Phase 1b)               *)
@@ -63,6 +66,7 @@ let resolver_id (elem : element) : element_ref option =
   | Group { id; _ } | Layer { id; _ } -> id
   | Live (Compound_shape cs) -> cs.id
   | Live (Reference r) -> r.ref_id
+  | Live (Recorded rec_) -> rec_.rec_id
 
 (* Persistent id->element index (REFERENCE_GRAPH.md section 2.4, Phase 4b).
    [Map.Make(String)] gives O(log n) lookup/insert, O(1) structure-sharing
@@ -358,6 +362,7 @@ let rec element_to_polygon_set_with elem precision resolver visiting =
     ) [] children
   | Live (Compound_shape cs) -> evaluate_with cs precision resolver visiting
   | Live (Reference r) -> reference_evaluate_with r precision resolver visiting
+  | Live (Recorded rec_) -> recorded_evaluate_with rec_ precision resolver visiting
   | Path { d; _ } | Text_path { d; _ } -> flatten_path_to_rings d
   (* Line has zero area; Text glyph flattening deferred. *)
   | Line _ | Text _ -> []
@@ -451,6 +456,118 @@ and cached_target_geometry target_id target precision resolver visiting =
     Hashtbl.replace recompute_cache key entry;
     fresh
 
+(* Whole-element translate by [(dx, dy)]. A leaf primitive offsets its
+   geometry; a Group / Layer translates each child; a reference / recorded
+   element has no geometry of its own, so its move rides on common.transform
+   via the [is_all] arm of [Element.move_control_points]. Mirrors the Rust
+   [translate_element] used by recorded replay. *)
+and recorded_translate_element elem dx dy =
+  if dx = 0.0 && dy = 0.0 then elem
+  else
+    match elem with
+    | Group { id; children; opacity; transform; locked; visibility; blend_mode;
+              isolated_blending; knockout_group; _ } ->
+      Group { name = None; id;
+              children = Array.map (fun c -> recorded_translate_element c dx dy) children;
+              opacity; transform; locked; visibility; blend_mode;
+              mask = None; isolated_blending; knockout_group }
+    | Layer { name; id; children; opacity; transform; locked; visibility; blend_mode;
+              isolated_blending; knockout_group; _ } ->
+      Layer { name; id;
+              children = Array.map (fun c -> recorded_translate_element c dx dy) children;
+              opacity; transform; locked; visibility; blend_mode;
+              mask = None; isolated_blending; knockout_group }
+    | Live (Reference _) | Live (Recorded _) ->
+      (* No geometry of its own; the whole-element move rides on
+         common.transform via the [is_all] arm in move_control_points. *)
+      Element.move_control_points ~is_all:true elem [] dx dy
+    | _ ->
+      let n = Element.control_point_count elem in
+      let indices = List.init n Fun.id in
+      Element.move_control_points elem indices dx dy
+
+(* Replay a recorded element's recipe against the resolved inputs and return
+   the derived output geometry. A dangling input or a cycle (an input already
+   being visited) yields an empty set — never a failure (REFERENCE_GRAPH.md
+   section 3). Replay is a pure, deterministic function of the inputs
+   (OP_LOG.md section 7). Mirrors the Rust RecordedElem::evaluate_with. *)
+and recorded_evaluate_with (rec_ : recorded_elem) precision _resolver visiting =
+  (* JSON param helpers (params is a Yojson object): a float at [k], or the
+     string array at [k]. *)
+  let num params k =
+    match params with
+    | `Assoc fields ->
+      (match List.assoc_opt k fields with
+       | Some (`Float f) -> f
+       | Some (`Int i) -> float_of_int i
+       | _ -> 0.0)
+    | _ -> 0.0
+  in
+  let str_ids params k =
+    match params with
+    | `Assoc fields ->
+      (match List.assoc_opt k fields with
+       | Some (`List items) ->
+         List.filter_map (function `String s -> Some s | _ -> None) items
+       | _ -> [])
+    | _ -> []
+  in
+  (* Resolve inputs into a working set keyed by stable id. A cycle breaks to
+     empty at the re-entry edge; a dangling input yields empty. *)
+  let working : (string, element) Hashtbl.t = Hashtbl.create 8 in
+  let dangling = ref false in
+  List.iter (fun input ->
+    if not !dangling then begin
+      if VisitSet.mem input !visiting then dangling := true
+      else match _resolver input with
+        | Some el -> Hashtbl.replace working input el
+        | None -> dangling := true
+    end
+  ) rec_.rec_inputs;
+  if !dangling then []
+  else begin
+    (* Replay. Derived (produced) elements are keyed by a capture-stable
+       production-index handle [$n], so the recipe is independent of this
+       element's own id. *)
+    let output_ids = ref [] in
+    let counter = ref 0 in
+    List.iter (fun (op : recorded_op) ->
+      match op.rop_op with
+      | "copy" ->
+        let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+        List.iter (fun src ->
+          match Hashtbl.find_opt working src with
+          | Some el ->
+            let derived_id = Printf.sprintf "$%d" !counter in
+            incr counter;
+            let copy = recorded_translate_element el dx dy in
+            Hashtbl.replace working derived_id copy;
+            output_ids := derived_id :: !output_ids
+          | None -> ()
+        ) (str_ids op.rop_params "from")
+      | "translate" ->
+        let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+        List.iter (fun id ->
+          match Hashtbl.find_opt working id with
+          | Some el ->
+            let moved = recorded_translate_element el dx dy in
+            Hashtbl.replace working id moved
+          | None -> ()
+        ) (str_ids op.rop_params "ids")
+      | _ -> () (* outside the replay-safe subset: skip *)
+    ) rec_.rec_ops;
+    (* Output = the derived elements' geometry, in derivation order. The
+       produced elements are concrete; flatten them with no resolver. *)
+    let ordered = List.rev !output_ids in
+    List.fold_left (fun acc id ->
+      match Hashtbl.find_opt working id with
+      | Some el ->
+        acc @ element_to_polygon_set_with el precision null_resolver
+                (ref VisitSet.empty)
+      | None -> acc
+    ) [] ordered
+  end
+
 (* Convenience wrapper that resolves no references — see
    [element_to_polygon_set_with] for the resolver-aware form used when a
    subtree may contain by-id references. *)
@@ -468,6 +585,87 @@ let evaluate cs precision =
    wiring. Mirrors Rust ReferenceElem::evaluate_with. *)
 let reference_evaluate r precision resolver visiting =
   reference_evaluate_with r precision resolver visiting
+
+(* Resolver-aware recorded-element evaluation, exposed for tests / future
+   render wiring. Mirrors Rust RecordedElem::evaluate_with. *)
+let recorded_evaluate rec_ precision resolver visiting =
+  recorded_evaluate_with rec_ precision resolver visiting
+
+(* Normalize a captured journal op-segment into a recorded recipe
+   (RECORDED_ELEMENTS.md section 1 / section 4): rewrite selection-relative
+   ops into the input-addressed form by tracking the working selection as
+   recipe refs.
+
+   - A select op (select_rect / select) establishes the working selection from
+     its resolved targets (the ids it selected); it is NOT emitted — selection
+     becomes input-addressing.
+   - copy_selection emits copy{from, dx, dy} (source = the working selection)
+     and rebinds the selection to the produced [$n] handles.
+   - move_selection emits translate{ids, dx, dy} on the working selection.
+   - Ops outside the replay-safe subset are dropped from the recipe.
+
+   The recipe's non-[$] refs are the inputs — the elements it rebinds by
+   stable id (the deterministic mark-input MVP rule; no AI fitter). Returns
+   [(recipe, input_ids)]; the caller wraps them in a recorded element.
+   Mirrors the Rust [capture_recipe]. *)
+let capture_recipe (segment : recorded_op list) : recorded_op list * string list =
+  let num params k =
+    match params with
+    | `Assoc fields ->
+      (match List.assoc_opt k fields with
+       | Some (`Float f) -> f
+       | Some (`Int i) -> float_of_int i
+       | _ -> 0.0)
+    | _ -> 0.0
+  in
+  let working = ref [] in
+  let recipe = ref [] in
+  let counter = ref 0 in
+  List.iter (fun (op : recorded_op) ->
+    match op.rop_op with
+    | "select_rect" | "select" ->
+      working := op.rop_targets
+    | "copy_selection" ->
+      let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+      let from_arr = `List (List.map (fun s -> `String s) !working) in
+      recipe := { rop_op = "copy";
+                  rop_params =
+                    `Assoc [ ("from", from_arr);
+                             ("dx", `Float dx); ("dy", `Float dy) ];
+                  rop_targets = [] } :: !recipe;
+      let produced = List.map (fun _ ->
+        let h = Printf.sprintf "$%d" !counter in incr counter; h) !working in
+      working := produced
+    | "move_selection" ->
+      let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+      let ids_arr = `List (List.map (fun s -> `String s) !working) in
+      recipe := { rop_op = "translate";
+                  rop_params =
+                    `Assoc [ ("ids", ids_arr);
+                             ("dx", `Float dx); ("dy", `Float dy) ];
+                  rop_targets = [] } :: !recipe
+    | _ -> ()
+  ) segment;
+  let recipe = List.rev !recipe in
+  (* Inputs = the distinct non-[$] refs the recipe rebinds, in first-seen
+     order. *)
+  let inputs = ref [] in
+  let consider r =
+    if String.length r > 0 && r.[0] <> '$'
+       && not (List.mem r !inputs) then inputs := r :: !inputs
+  in
+  List.iter (fun (op : recorded_op) ->
+    List.iter (fun key ->
+      match op.rop_params with
+      | `Assoc fields ->
+        (match List.assoc_opt key fields with
+         | Some (`List items) ->
+           List.iter (function `String s -> consider s | _ -> ()) items
+         | _ -> ())
+      | _ -> ()
+    ) [ "from"; "ids" ]
+  ) recipe;
+  (recipe, List.rev !inputs)
 
 (** Replace a compound shape with one Polygon per ring of the
     evaluated geometry. Each output polygon carries the compound
@@ -525,4 +723,8 @@ let () =
     (* Resolver-free bounds are degenerate for a reference (its geometry
        lives elsewhere); the resolver-aware bounds lands with the render
        wiring (Phase 1b). *)
-    | Reference _ -> (0.0, 0.0, 0.0, 0.0))
+    | Reference _ -> (0.0, 0.0, 0.0, 0.0)
+    (* Resolver-free bounds are degenerate for a recorded element too — its
+       geometry is replayed from inputs; resolver-aware bounds land with the
+       render wiring, like Reference. *)
+    | Recorded _ -> (0.0, 0.0, 0.0, 0.0))

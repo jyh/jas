@@ -536,6 +536,39 @@ let dep_rect ?id () : Jas.Element.element =
 let dep_reference ~id ~target : Jas.Element.element =
   Jas.Element.make_reference ~id:(Some id) target
 
+(* The canonical recorded-live-element document (RECORDED_ELEMENTS.md): a
+   recorded element whose recipe copies its input "eye" and translates the
+   copy +50x. Built identically in every app's harness, so its
+   document_to_test_json serialization (the recipe + inputs) is the
+   cross-language pin. Mirrors the Rust [recorded_canonical_document]. *)
+let recorded_canonical_document () : Jas.Document.document =
+  let open Jas.Element in
+  let ops = [
+    { rop_op = "copy";
+      rop_params = `Assoc [ ("from", `List [ `String "eye" ]);
+                            ("dx", `Float 0.0); ("dy", `Float 0.0) ];
+      rop_targets = [] };
+    { rop_op = "translate";
+      rop_params = `Assoc [ ("ids", `List [ `String "$0" ]);
+                            ("dx", `Float 50.0); ("dy", `Float 0.0) ];
+      rop_targets = [] };
+  ] in
+  let rec_ = make_recorded ~id:(Some "rec") ops [ "eye" ] in
+  let layer = make_layer [| rec_ |] in
+  Jas.Document.make_document ~artboards:[] [| layer |]
+
+(* Cross-language pin (RECORDED_ELEMENTS.md section 8): a recorded element's
+   recipe + inputs serialize byte-identically across the four native apps.
+   Mirrors the Rust [recorded_cross_language]. *)
+let recorded_cross_language () =
+  let actual =
+    Jas.Test_json.document_to_test_json (recorded_canonical_document ()) in
+  let expected = read_fixture "operations/recorded_eye.json" in
+  if actual <> expected then begin
+    Printf.eprintf "=== EXPECTED ===\n%s\n=== ACTUAL ===\n%s\n" expected actual;
+    assert false
+  end
+
 let dependency_index_cross_language () =
   (* Parse the shared input document. *)
   let input = read_fixture "expected/dependency_index_input.json" in
@@ -1342,6 +1375,10 @@ let () =
         run_journal_metadata "txn_metadata.json");
       Alcotest.test_case "txn_labels journal" `Quick (fun () ->
         run_journal_metadata "txn_labels.json");
+      (* OP_LOG Increment 3b (RECORDED_ELEMENTS.md section 8): the recorded
+         live element's recipe + inputs serialize byte-identically across the
+         four native apps, pinned to operations/recorded_eye.json. *)
+      Alcotest.test_case "recorded cross-language" `Quick recorded_cross_language;
     ];
 
     (* Workspace layout tests *)

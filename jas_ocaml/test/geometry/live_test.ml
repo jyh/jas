@@ -561,6 +561,142 @@ let test_cache_keys_on_precision () =
   Alcotest.(check bool) "fine key Pure" true
     (Live.recompute_cache_state_for_test "c1" fine = Some Live.Pure_state)
 
+(* --- RecordedElem (RECORDED_ELEMENTS.md — history-based provenance) ----- *)
+
+let recorded_op op params : recorded_op =
+  { rop_op = op; rop_params = params; rop_targets = [] }
+
+(* A recorded element whose recipe copies its input "eye", then translates
+   the derived copy +50x. *)
+let recorded_eye () : recorded_elem =
+  let ops = [
+    recorded_op "copy" (`Assoc [ ("from", `List [ `String "eye" ]);
+                                 ("dx", `Float 0.0); ("dy", `Float 0.0) ]);
+    recorded_op "translate" (`Assoc [ ("ids", `List [ `String "$0" ]);
+                                      ("dx", `Float 50.0); ("dy", `Float 0.0) ]);
+  ] in
+  { rec_ops = ops;
+    rec_inputs = [ "eye" ];
+    rec_id = Some "rec";
+    rec_fill = None; rec_stroke = None; rec_opacity = 1.0;
+    rec_transform = None; rec_locked = false;
+    rec_visibility = Preview; rec_blend_mode = Normal; rec_mask = None }
+
+let test_recorded_replays_copy_translate_and_re_derives () =
+  let rec_ = recorded_eye () in
+  (* Source eye at (0,0,10,10) -> derived copy translated +50 -> bbox [50,60]. *)
+  let resolver = map_resolver [ ("eye", rect_at 0.0 0.0) ] in
+  let visiting = ref Live.VisitSet.empty in
+  let ps = Live.recorded_evaluate rec_ Live.default_precision resolver visiting in
+  Alcotest.(check int) "one derived output element" 1 (List.length ps);
+  let (min_x, _, max_x, _) = bbox_of_ring (List.hd ps) in
+  Alcotest.(check bool) "min_x = 50" true (approx_equal min_x 50.0);
+  Alcotest.(check bool) "max_x = 60" true (approx_equal max_x 60.0);
+  (* Edit the source eye (move to x=100) -> the derived copy follows. *)
+  let resolver2 = map_resolver [ ("eye", rect_at 100.0 0.0) ] in
+  let visiting2 = ref Live.VisitSet.empty in
+  let ps2 = Live.recorded_evaluate rec_ Live.default_precision resolver2 visiting2 in
+  let (min_x2, _, max_x2, _) = bbox_of_ring (List.hd ps2) in
+  Alcotest.(check bool) "derived copy re-derived min_x = 150" true
+    (approx_equal min_x2 150.0);
+  Alcotest.(check bool) "derived copy re-derived max_x = 160" true
+    (approx_equal max_x2 160.0)
+
+let test_recorded_dangling_input_evaluates_empty () =
+  let ops = [ recorded_op "copy"
+                (`Assoc [ ("from", `List [ `String "x" ]);
+                          ("dx", `Float 0.0); ("dy", `Float 0.0) ]) ] in
+  let rec_ : recorded_elem =
+    { rec_ops = ops; rec_inputs = [ "x" ]; rec_id = None;
+      rec_fill = None; rec_stroke = None; rec_opacity = 1.0;
+      rec_transform = None; rec_locked = false;
+      rec_visibility = Preview; rec_blend_mode = Normal; rec_mask = None } in
+  let visiting = ref Live.VisitSet.empty in
+  let ps = Live.recorded_evaluate rec_ Live.default_precision
+             Live.null_resolver visiting in
+  Alcotest.(check bool) "dangling input evaluates empty, never fails" true
+    (ps = [])
+
+let test_recorded_reports_inputs_as_dependencies () =
+  let rec_ = recorded_eye () in
+  Alcotest.(check (list string)) "dependencies are the inputs" ["eye"]
+    (Live.dependencies (Recorded rec_))
+
+let test_recorded_round_trips_and_serializes () =
+  (* RecordedElem as a real live variant in a document: it survives the
+     binary codec round-trip and serializes the recorded kind + recipe via
+     test_json. *)
+  let rec_ = recorded_eye () in
+  let layer = Layer { name = None; id = None;
+    children = [| Live (Recorded rec_) |];
+    opacity = 1.0; transform = None; locked = false; visibility = Preview;
+    blend_mode = Normal; mask = None;
+    isolated_blending = false; knockout_group = false } in
+  let doc = Jas.Document.make_document ~artboards:[] [| layer |] in
+  let json = Jas.Test_json.document_to_test_json doc in
+  let contains needle =
+    let nl = String.length needle and hl = String.length json in
+    let rec go i = i + nl <= hl
+      && (String.sub json i nl = needle || go (i + 1)) in
+    go 0 in
+  Alcotest.(check bool) "serializes kind=recorded" true
+    (contains "\"kind\":\"recorded\"");
+  Alcotest.(check bool) "serializes the input ids" true
+    (contains "\"inputs\":[\"eye\"]");
+  Alcotest.(check bool) "serializes the recipe ops" true
+    (contains "\"op\":\"copy\"");
+  (* Binary round-trip preserves the recorded element (compare canonical JSON,
+     since Document has no structural equality across the codec). *)
+  let bytes = Jas.Binary.document_to_binary ~compress:false doc in
+  let back = Jas.Binary.binary_to_document bytes in
+  Alcotest.(check string) "recorded element survives the binary round-trip"
+    json (Jas.Test_json.document_to_test_json back)
+
+let test_capture_recipe_normalizes_select_copy_move () =
+  (* A captured journal segment ("watch what I did"): select the eye, copy
+     it, move the copy. select_rect carries its resolved targets. *)
+  let segment = [
+    { rop_op = "select_rect"; rop_params = `Assoc []; rop_targets = ["eye"] };
+    recorded_op "copy_selection" (`Assoc [ ("dx", `Float 0.0); ("dy", `Float 0.0) ]);
+    recorded_op "move_selection" (`Assoc [ ("dx", `Float 50.0); ("dy", `Float 0.0) ]);
+  ] in
+  let (recipe, inputs) = Live.capture_recipe segment in
+  Alcotest.(check (list string)) "the read element is the input" ["eye"] inputs;
+  Alcotest.(check int) "recipe has two ops" 2 (List.length recipe);
+  let op0 = List.nth recipe 0 and op1 = List.nth recipe 1 in
+  Alcotest.(check string) "first op is copy" "copy" op0.rop_op;
+  Alcotest.(check string) "second op is translate" "translate" op1.rop_op;
+  let from_of op = match op.rop_params with
+    | `Assoc fields -> (match List.assoc_opt "from" fields with
+        | Some (`List items) ->
+          List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> [])
+    | _ -> [] in
+  let ids_of op = match op.rop_params with
+    | `Assoc fields -> (match List.assoc_opt "ids" fields with
+        | Some (`List items) ->
+          List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> [])
+    | _ -> [] in
+  Alcotest.(check (list string)) "copy from = [eye]" ["eye"] (from_of op0);
+  Alcotest.(check (list string)) "translate targets the produced copy"
+    ["$0"] (ids_of op1);
+  (* The captured recipe replays + re-derives like the hand-built one. *)
+  let rec_ : recorded_elem =
+    { rec_ops = recipe; rec_inputs = inputs; rec_id = Some "rec";
+      rec_fill = None; rec_stroke = None; rec_opacity = 1.0;
+      rec_transform = None; rec_locked = false;
+      rec_visibility = Preview; rec_blend_mode = Normal; rec_mask = None } in
+  let resolver = map_resolver [ ("eye", rect_at 0.0 0.0) ] in
+  let visiting = ref Live.VisitSet.empty in
+  let ps = Live.recorded_evaluate rec_ Live.default_precision resolver visiting in
+  Alcotest.(check int) "one ring" 1 (List.length ps);
+  let (min_x, _, max_x, _) = bbox_of_ring (List.hd ps) in
+  Alcotest.(check bool) "captured recipe replays to demonstrated output min_x = 50"
+    true (approx_equal min_x 50.0);
+  Alcotest.(check bool) "captured recipe replays to demonstrated output max_x = 60"
+    true (approx_equal max_x 60.0)
+
 let () =
   Alcotest.run "Live"
     [ "compound shape", [
@@ -618,5 +754,17 @@ let () =
           `Quick test_instance_transform_composes_on_cached_pure_geometry;
         Alcotest.test_case "cache keys on precision"
           `Quick test_cache_keys_on_precision;
+      ];
+      "recorded (RECORDED_ELEMENTS.md)", [
+        Alcotest.test_case "replays copy+translate and re-derives on input edit"
+          `Quick test_recorded_replays_copy_translate_and_re_derives;
+        Alcotest.test_case "dangling input evaluates empty"
+          `Quick test_recorded_dangling_input_evaluates_empty;
+        Alcotest.test_case "reports its inputs as dependencies"
+          `Quick test_recorded_reports_inputs_as_dependencies;
+        Alcotest.test_case "round-trips through binary codec and serializes"
+          `Quick test_recorded_round_trips_and_serializes;
+        Alcotest.test_case "capture_recipe normalizes select->copy->move"
+          `Quick test_capture_recipe_normalizes_select_copy_move;
       ]
     ]

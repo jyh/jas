@@ -56,6 +56,7 @@ let _element_fill (elem : Element.element) : Element.fill option =
   | Text { fill; _ } | Text_path { fill; _ } -> fill
   | Live (Compound_shape cs) -> cs.fill
   | Live (Reference r) -> r.ref_fill
+  | Live (Recorded rec_) -> rec_.rec_fill
   | Line _ | Group _ | Layer _ -> None
 
 (* Extract an element's stroke; companion to [_element_fill]. *)
@@ -66,6 +67,7 @@ let _element_stroke (elem : Element.element) : Element.stroke option =
   | Path { stroke; _ } | Text { stroke; _ } | Text_path { stroke; _ } -> stroke
   | Live (Compound_shape cs) -> cs.stroke
   | Live (Reference r) -> r.ref_stroke
+  | Live (Recorded rec_) -> rec_.rec_stroke
   | Group _ | Layer _ -> None
 
 (* Look up a brush by "<library>/<brush>" slug. Returns None for
@@ -1247,6 +1249,11 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
           | Some _ as s -> s
           | None -> (match target with Some t -> _element_stroke t | None -> None) in
         (ps, fill, stroke, r.ref_opacity, r.ref_transform)
+      | Recorded rec_ ->
+        (* A recorded element renders its replayed (derived) geometry,
+           resolved against its inputs (RECORDED_ELEMENTS.md). *)
+        (Live.recorded_evaluate rec_ Live.default_precision resolver visiting,
+         rec_.rec_fill, rec_.rec_stroke, rec_.rec_opacity, rec_.rec_transform)
     in
     Cairo.Group.push cr;
     apply_transform cr live_transform;
@@ -1900,7 +1907,8 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Element.Text_path { transform; _ }
         | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
         | Element.Live (Element.Compound_shape cs) -> cs.transform
-        | Element.Live (Element.Reference r) -> r.Element.ref_transform);
+        | Element.Live (Element.Reference r) -> r.Element.ref_transform
+        | Element.Live (Element.Recorded rec_) -> rec_.Element.rec_transform);
       let n = Element.control_point_count !node in
       let cps = Document.selection_kind_to_sorted es.es_kind ~total:n in
       let is_partial = match es.es_kind with

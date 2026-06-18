@@ -82,6 +82,37 @@ let json_build o =
 let json_array items =
   Printf.sprintf "[%s]" (String.concat "," items)
 
+(** Canonical JSON of an arbitrary Yojson value (sorted object keys, fixed
+    floats via [fmt]), so a recorded element's recipe [params] serialize
+    byte-identically (RECORDED_ELEMENTS.md section 8 / OP_LOG.md section 5
+    canonicalization). Mirrors the Rust [canonical_value]. *)
+let rec canonical_value (v : Yojson.Safe.t) : string =
+  match v with
+  | `Null -> "null"
+  | `Bool b -> if b then "true" else "false"
+  | `Int i -> fmt (float_of_int i)
+  | `Float f -> fmt f
+  | `Intlit s -> s
+  | `String s ->
+    let escaped =
+      s |> String.to_seq
+        |> Seq.flat_map (fun c ->
+          match c with
+          | '\\' -> String.to_seq "\\\\"
+          | '"'  -> String.to_seq "\\\""
+          | c    -> Seq.return c)
+        |> String.of_seq
+    in
+    Printf.sprintf "\"%s\"" escaped
+  | `List items -> json_array (List.map canonical_value items)
+  | `Assoc fields ->
+    let sorted =
+      List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
+    let entries =
+      List.map (fun (k, v) ->
+        Printf.sprintf "\"%s\":%s" k (canonical_value v)) sorted in
+    Printf.sprintf "{%s}" (String.concat "," entries)
+
 (* ------------------------------------------------------------------ *)
 (* Type serializers                                                   *)
 (* ------------------------------------------------------------------ *)
@@ -477,6 +508,25 @@ let rec element_json = function
      | Some _ -> json_raw o "instance_transform"
                    (transform_json r.ref_instance_transform)
      | None -> ());
+    json_build o
+  | Live (Recorded rec_) ->
+    let o = json_obj () in
+    json_str o "type" "live";
+    json_str o "kind" "recorded";
+    common_fields o ~opacity:rec_.rec_opacity ~transform:rec_.rec_transform
+      ~locked:rec_.rec_locked ~visibility:rec_.rec_visibility
+      ~name:None ~id:rec_.rec_id ();
+    (* Inputs (by id) and the normalized recipe ops, canonicalized so the
+       recorded element serializes byte-identically across apps. *)
+    let inputs = List.map (fun s -> Printf.sprintf "\"%s\"" s) rec_.rec_inputs in
+    json_raw o "inputs" (json_array inputs);
+    let ops = List.map (fun (op : recorded_op) ->
+      let targets =
+        List.map (fun t -> Printf.sprintf "\"%s\"" t) op.rop_targets in
+      Printf.sprintf "{\"op\":\"%s\",\"params\":%s,\"targets\":%s}"
+        op.rop_op (canonical_value op.rop_params) (json_array targets)
+    ) rec_.rec_ops in
+    json_raw o "ops" (json_array ops);
     json_build o
 
 (* ------------------------------------------------------------------ *)
@@ -1054,6 +1104,26 @@ let rec parse_element j =
          ref_visibility = visibility;
          ref_blend_mode = Normal;
          ref_mask = None;
+       })
+     | "recorded" ->
+       let inputs = j |> member "inputs" |> to_list |> List.map to_string in
+       let ops = j |> member "ops" |> to_list |> List.map (fun op ->
+         { rop_op = op |> member "op" |> to_string;
+           rop_params = op |> member "params";
+           rop_targets = op |> member "targets" |> to_list |> List.map to_string })
+       in
+       Live (Recorded {
+         rec_ops = ops;
+         rec_inputs = inputs;
+         rec_id = id;
+         rec_fill = None;
+         rec_stroke = None;
+         rec_opacity = opacity;
+         rec_transform = transform;
+         rec_locked = locked;
+         rec_visibility = visibility;
+         rec_blend_mode = Normal;
+         rec_mask = None;
        })
      | other -> failwith (Printf.sprintf "Unknown live kind: %s" other))
   | _ -> failwith (Printf.sprintf "Unknown element type: %s" typ)

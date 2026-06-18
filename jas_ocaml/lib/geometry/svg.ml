@@ -379,6 +379,16 @@ let rec element_svg indent (elem : Element.element) =
       indent (escape_xml r.ref_target) (id_attr r.ref_id)
       (opacity_attr r.ref_opacity) (transform_attr r.ref_transform)
       inst_xform
+  | Live (Recorded rec_) ->
+    (* A recorded element exports as a data-jas-live group carrying the
+       recipe's input ids. Full SVG round-trip (the ops) is deferred
+       (RECORDED_ELEMENTS.md section 8); no current fixture exercises it.
+       Mirrors the Rust svg recorded arm. *)
+    let inputs = String.concat "," rec_.rec_inputs in
+    Printf.sprintf
+      "%s<g data-jas-live=\"recorded\" data-jas-inputs=\"%s\"%s%s%s></g>"
+      indent (escape_xml inputs) (id_attr rec_.rec_id)
+      (opacity_attr rec_.rec_opacity) (transform_attr rec_.rec_transform)
 
 (* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
    Stored as <jas:document-setup> and <jas:print-preferences> children

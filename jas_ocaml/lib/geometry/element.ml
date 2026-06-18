@@ -799,6 +799,7 @@ type element =
 and live_variant =
   | Compound_shape of compound_shape
   | Reference of reference_elem
+  | Recorded of recorded_elem
 
 and compound_operation =
   | Op_union
@@ -843,6 +844,37 @@ and reference_elem = {
   ref_visibility : visibility;
   ref_blend_mode : blend_mode;
   ref_mask : mask option;
+}
+
+(* A recorded (history-based) live element (RECORDED_ELEMENTS.md): a
+   normalized, input-addressed op-segment replayed against the current
+   inputs to produce derived geometry. Its inputs are named by stable id
+   (a dependency edge, like [reference_elem]), not embedded. Common props
+   are flattened in-line, matching the other live variants. The recipe
+   [rec_ops] are [recorded_op] entries (structurally identical to
+   [Op_log.primitive_op], declared here so [element] does not depend on
+   [Op_log]); [rec_inputs] are the source element ids the recipe rebinds. *)
+and recorded_elem = {
+  rec_ops : recorded_op list;
+  rec_inputs : element_ref list;
+  rec_id : string option;
+  rec_fill : fill option;
+  rec_stroke : stroke option;
+  rec_opacity : float;
+  rec_transform : transform option;
+  rec_locked : bool;
+  rec_visibility : visibility;
+  rec_blend_mode : blend_mode;
+  rec_mask : mask option;
+}
+
+(* One normalized recipe op: the verb, its flat params (JSON), and the
+   resolved targets. Structurally identical to [Op_log.primitive_op];
+   declared here so [element] stays free of an [Op_log] dependency. *)
+and recorded_op = {
+  rop_op : string;
+  rop_params : Yojson.Safe.t;
+  rop_targets : string list;
 }
 
 (* A by-id reference to the stable id of another element. Stable across
@@ -1175,6 +1207,7 @@ let transform_of elem =
   | Group r -> r.transform | Layer r -> r.transform
   | Live (Compound_shape cs) -> cs.transform
   | Live (Reference r) -> r.ref_transform
+  | Live (Recorded rec_) -> rec_.rec_transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
   Line { name = None; id = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
@@ -1298,6 +1331,22 @@ let make_reference ?(id = None) ?(opacity = 1.0) ?(transform = None)
     ref_mask = None;
   })
 
+let make_recorded ?(id = None) ?(opacity = 1.0) ?(transform = None)
+    ?(locked = false) ops inputs =
+  Live (Recorded {
+    rec_ops = ops;
+    rec_inputs = inputs;
+    rec_id = id;
+    rec_fill = None;
+    rec_stroke = None;
+    rec_opacity = opacity;
+    rec_transform = transform;
+    rec_locked = locked;
+    rec_visibility = Preview;
+    rec_blend_mode = Normal;
+    rec_mask = None;
+  })
+
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
   | Ellipse { locked; _ } | Polyline { locked; _ } | Polygon { locked; _ }
@@ -1305,6 +1354,7 @@ let is_locked = function
   | Group { locked; _ } | Layer { locked; _ } -> locked
   | Live (Compound_shape cs) -> cs.locked
   | Live (Reference r) -> r.ref_locked
+  | Live (Recorded rec_) -> rec_.rec_locked
 
 let set_locked v = function
   | Line r -> Line { r with locked = v }
@@ -1320,6 +1370,7 @@ let set_locked v = function
   | Layer r -> Layer { r with locked = v }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with locked = v })
   | Live (Reference r) -> Live (Reference { r with ref_locked = v })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_locked = v })
 
 let get_visibility = function
   | Line { visibility; _ } | Rect { visibility; _ } | Circle { visibility; _ }
@@ -1329,6 +1380,7 @@ let get_visibility = function
   | Layer { visibility; _ } -> visibility
   | Live (Compound_shape cs) -> cs.visibility
   | Live (Reference r) -> r.ref_visibility
+  | Live (Recorded rec_) -> rec_.rec_visibility
 
 let get_blend_mode = function
   | Line { blend_mode; _ } | Rect { blend_mode; _ } | Circle { blend_mode; _ }
@@ -1338,6 +1390,7 @@ let get_blend_mode = function
   | Layer { blend_mode; _ } -> blend_mode
   | Live (Compound_shape cs) -> cs.blend_mode
   | Live (Reference r) -> r.ref_blend_mode
+  | Live (Recorded rec_) -> rec_.rec_blend_mode
 
 let set_visibility v = function
   | Line r -> Line { r with visibility = v }
@@ -1353,6 +1406,7 @@ let set_visibility v = function
   | Layer r -> Layer { r with visibility = v }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with visibility = v })
   | Live (Reference r) -> Live (Reference { r with ref_visibility = v })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_visibility = v })
 
 let get_transform = function
   | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
@@ -1362,6 +1416,7 @@ let get_transform = function
   | Layer { transform; _ } -> transform
   | Live (Compound_shape cs) -> cs.transform
   | Live (Reference r) -> r.ref_transform
+  | Live (Recorded rec_) -> rec_.rec_transform
 
 let set_transform t = function
   | Line r -> Line { r with transform = t }
@@ -1377,6 +1432,7 @@ let set_transform t = function
   | Layer r -> Layer { r with transform = t }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with transform = t })
   | Live (Reference r) -> Live (Reference { r with ref_transform = t })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_transform = t })
 
 (** Pre-pend a world-space [translate(dx, dy)] to an existing
     transform matrix. If the element has no current transform,
@@ -1416,6 +1472,7 @@ let with_fill elem f =
   | Text_path r -> Text_path { r with fill = f }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with fill = f })
   | Live (Reference r) -> Live (Reference { r with ref_fill = f })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_fill = f })
   | Line _ | Group _ | Layer _ -> elem
 
 let with_stroke elem s =
@@ -1431,6 +1488,7 @@ let with_stroke elem s =
   | Text_path r -> Text_path { r with stroke = s }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Live (Reference r) -> Live (Reference { r with ref_stroke = s })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_stroke = s })
   | Group _ | Layer _ -> elem
 
 (* Path-only — Phase 1 brush model lives on PathElem alone. Other
@@ -1490,6 +1548,7 @@ let with_mask elem (m : mask option) =
   | Layer r -> Layer { r with mask = m }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with mask = m })
   | Live (Reference r) -> Live (Reference { r with ref_mask = m })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_mask = m })
 
 (** Return the opacity mask attached to [elem], if any. *)
 let get_mask elem : mask option =
@@ -1500,6 +1559,7 @@ let get_mask elem : mask option =
   | Group { mask; _ } | Layer { mask; _ } -> mask
   | Live (Compound_shape cs) -> cs.mask
   | Live (Reference r) -> r.ref_mask
+  | Live (Recorded rec_) -> rec_.rec_mask
 
 let with_width_points elem wp =
   match elem with
@@ -1560,6 +1620,7 @@ let id_of = function
   | Layer r      -> r.id
   | Live (Compound_shape cs) -> cs.id
   | Live (Reference r) -> r.ref_id
+  | Live (Recorded rec_) -> rec_.rec_id
 
 (* Return a copy of [elem] with its id set (additive identity). *)
 let with_id elem (i : string option) =
@@ -1577,6 +1638,7 @@ let with_id elem (i : string option) =
   | Layer r      -> Layer { r with id = i }
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with id = i })
   | Live (Reference r) -> Live (Reference { r with ref_id = i })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_id = i })
 
 (* Recursively clear the stable id on [elem] and all of its descendants,
    returning a fresh element. A DUPLICATED element must not inherit the
