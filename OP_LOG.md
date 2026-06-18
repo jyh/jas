@@ -1,6 +1,8 @@
 # Operation Log — the transaction spine
 
-**Status:** design locked (2026-06-17), unbuilt · **Implements:** `VISION.md` §10
+**Status:** design locked (2026-06-17); Increments 1, 2, 3a, and 3b-A **built + merged
+to main** (recorded live elements at cross-language parity across all four native apps);
+Increment 3b-B (production op-capture) in progress (§9). · **Implements:** `VISION.md` §10
 critical-path item 2 ("the operation/transaction log formalized as the atomic,
 reversible, summarizable unit") · **Relationship to other docs:** it is the `VISION.md`
 §5 item 5 "operation log is the spine" foundation; it generalizes today's boolean+simplify undo
@@ -287,6 +289,61 @@ Each increment is independently CI-green; write tests first (CLAUDE.md).
 - **Increment 3+ — the dependents.** Capture/replay sessions → versioning labels →
   **recorded live elements** (`LIVE_ELEMENTS.md`) → the deferred id-primary flip +
   collaboration → fold the layout-op vocabulary under one `Op` trait.
+
+### Increment 3b-B — production op-capture (scope decided 2026-06-18)
+
+3b-A (the `Recorded` mechanism + `capture_recipe` + `evaluate_with`) is merged to
+main across all four native apps. 3b-B closes the last gap: today PRODUCTION
+transactions are **opaque** (`name=None, ops=[]`) — only the `#[cfg(test)]`
+`apply_op` path records ops — so a recipe can't be captured from a real
+demonstration. 3b-B makes production edits journal real ops + a name.
+
+**Decision (Pragmatic Hybrid):** promote `apply_op` out of `#[cfg(test)]` into a
+shared runtime `op_apply` module (the §4 single-path end-state, in the increment
+that needs it; harden its param `unwrap`s so production can't panic), then adopt
+it from the production effect path for **exactly the three replay-safe verbs**
+`capture_recipe` consumes — and name every gesture.
+
+**v1 IN SCOPE (Rust first, then Swift → OCaml → Python):**
+- `select_rect` (from `doc.select_in_rect`) — records `targets:[common.id]` of the
+  resolved selection (the keystone: `capture_recipe` seeds its working set from
+  `op.targets`, so empty targets ⇒ empty recipe — **`targets` is load-bearing
+  here, not deferrable metadata**). Param-shape note: translate the YAML marquee's
+  `x1/y1/x2/y2/additive` into the harness `x/y/width/height/extend` so replay is
+  byte-identical.
+- `copy_selection` (from `doc.copy_selection`) — `targets` = **pre-mutation** source
+  ids.
+- `move_selection` (from `doc.translate_selection`) — `targets` = pre-mutation moved
+  ids.
+- **`name_txn` at the action layer** — every production transaction gets its
+  `actions.yaml` verb name (fixes the `name=None` legibility hole for *all* actions,
+  not just the three), via one `name_txn` call when `owns_txn`.
+- Reuse the locked `checkpoint_equivalence` gate verbatim + a **scoped, per-fixture**
+  completeness assert (non-empty ops on the production path) — NOT a global
+  `commit_txn` invariant (the other ~30 verbs legitimately still emit empty ops).
+- The end-to-end payoff pin: production journal segment → `capture_recipe` →
+  `RecordedElem` → edit source → `evaluate_with` → byte-pin the re-derived output
+  (the eye demo on the real path).
+
+**v1 DEFERRED follow-ons (this is their tracking home):**
+- **Layers-panel "Duplicate"** (`duplicate_layer_selection` → `doc.clone_at` +
+  `doc.insert_after`) and **"Duplicate Artboard"** (`doc.duplicate_artboard`) — both
+  live in the *other* runner (`renderer.rs::run_yaml_effect`, AppState-level, with a
+  throwaway `StateStore`) and journal nothing in v1. So the same logical "duplicate
+  then move" is captured via canvas drag but NOT via the menu/panel — a known
+  asymmetry. Fold in when the `renderer.rs` handlers are next consolidated.
+- The other ~30 `doc.*` verbs (`set`/`rotate`/`scale`/`shear`, all artboard/layer/
+  print-config setters, `wrap`/`unpack`/`delete_*`/`insert_*`/`create_*`) stay
+  named-but-op-less. **The journal is not a complete canonical history yet.**
+- **Per-frame drag coalescing** — `on_mousemove` fires one `translate_selection` per
+  frame, so a captured drag is many composing `move_selection` ops (byte-correct,
+  verbose). Coalescing deferred.
+- `common.id` is `Option`; `selection_to_ids` drops id-less elements, so a recorded
+  source must carry a `common.id` (assign-on-demand) — a documented prerequisite,
+  not a bug.
+- The full 33-verb `actions.yaml`↔`op_apply` unification, the ~148 `set_document`
+  consolidation tail, control-point granularity, and the Fork-4 id-primary rewrite
+  remain separate later projects. Flask is forward-replay-only (no live canvas).
 
 ---
 

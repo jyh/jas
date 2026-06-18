@@ -124,6 +124,11 @@ real ops, which is the deferred `apply_op`↔`actions.yaml` unification. Chosen 
 - **3b-B — production op-capture (follow-on).** Make production edits journal real ops
   (at least the replay-safe subset), so "watch what I do" and "watch what I did" become
   real-edit features wired to the live UI. Larger; the shared unblocker for both modes.
+  **Concrete v1 scope + deferred follow-ons live in `OP_LOG.md` §9 (Increment 3b-B):**
+  promote `apply_op` → a shared runtime `op_apply`, adopt it from production for the
+  three replay-safe verbs (`select_rect`/`copy_selection`/`move_selection`) with
+  `targets:[common.id]` + `name_txn`; the Layers-panel and artboard "Duplicate" gestures
+  and the other ~30 `doc.*` verbs are explicitly postponed there.
 
 ---
 
