@@ -1,1 +1,39 @@
-[{"expected_json":"undo_redo_equals_op.json","name":"undo_redo_identity: snapshot+op+undo+redo = op","ops":[{"op":"snapshot"},{"extend":false,"height":50,"op":"select_rect","width":50,"x":0,"y":0},{"dx":10,"dy":20,"op":"move_selection"},{"op":"undo"},{"op":"redo"}],"setup_svg":"two_rects.svg"},{"expected_json":"double_undo_equals_op1.json","name":"double_undo: snapshot+op1+snapshot+op2+undo = op1","ops":[{"op":"snapshot"},{"extend":false,"height":50,"op":"select_rect","width":50,"x":0,"y":0},{"dx":10,"dy":20,"op":"move_selection"},{"op":"snapshot"},{"extend":false,"height":200,"op":"select_rect","width":200,"x":0,"y":0},{"dx":-5,"dy":-5,"op":"move_selection"},{"op":"undo"}],"setup_svg":"two_rects.svg"}]
+[
+  {
+    "name": "undo_redo_identity: txn + undo + redo = txn",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "move",
+        "ops": [
+          {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+          {"op": "move_selection", "dx": 10, "dy": 20}
+        ]
+      }
+    ],
+    "history": ["undo", "redo"],
+    "expected_json": "undo_redo_equals_op.json"
+  },
+  {
+    "name": "double_undo: txn1 + txn2 + undo = txn1",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "move1",
+        "ops": [
+          {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+          {"op": "move_selection", "dx": 10, "dy": 20}
+        ]
+      },
+      {
+        "name": "move2",
+        "ops": [
+          {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false},
+          {"op": "move_selection", "dx": -5, "dy": -5}
+        ]
+      }
+    ],
+    "history": ["undo"],
+    "expected_json": "double_undo_equals_op1.json"
+  }
+]

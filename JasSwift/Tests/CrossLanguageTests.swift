@@ -423,7 +423,6 @@ private func runOperationFixture(_ fixture: String) throws {
         let name = tc["name"] as! String
         let setupSvg = tc["setup_svg"] as! String
         let expectedFile = tc["expected_json"] as! String
-        let ops = tc["ops"] as! [[String: Any]]
 
         let svg = readFixture("svg/\(setupSvg)")
         let expected = readFixture("operations/\(expectedFile)").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -432,7 +431,7 @@ private func runOperationFixture(_ fixture: String) throws {
         let model = Model(document: doc)
         let controller = Controller(model: model)
 
-        for op in ops {
+        func applyFixtureOp(_ op: [String: Any]) {
             let opName = op["op"] as! String
             switch opName {
             case "select_rect":
@@ -516,6 +515,30 @@ private func runOperationFixture(_ fixture: String) throws {
                 model.redo()
             default:
                 Issue.record("Unknown op: \(opName)")
+            }
+        }
+
+        // Two fixture shapes (OP_LOG.md §5): the journal-native `txns` form
+        // (snapshot before each transaction's ops, then a `history` directive of
+        // undo/redo positions the cursor; snapshot/undo/redo are NOT ops here)
+        // and the legacy flat `ops` form.
+        if let txns = tc["txns"] as? [[String: Any]] {
+            for txn in txns {
+                model.snapshot()
+                for op in (txn["ops"] as! [[String: Any]]) {
+                    applyFixtureOp(op)
+                }
+            }
+            for h in (tc["history"] as? [String] ?? []) {
+                switch h {
+                case "undo": model.undo()
+                case "redo": model.redo()
+                default: Issue.record("Unknown history directive: \(h)")
+                }
+            }
+        } else {
+            for op in (tc["ops"] as! [[String: Any]]) {
+                applyFixtureOp(op)
             }
         }
 

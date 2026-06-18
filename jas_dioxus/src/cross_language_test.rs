@@ -651,23 +651,47 @@ mod tests {
         });
     }
 
-    /// Run a fixture's op stream and return the resulting Model (with its
-    /// journal). The op stream is wrapped in one implicit outer transaction
-    /// (OP_LOG.md §5 legacy rule) so non-undoable ops (e.g. `select_rect`) are
-    /// captured into the journal; an embedded `snapshot` op commits this outer
-    /// transaction (eliding it when empty) and opens its own boundaries.
+    /// Run a fixture and return the resulting Model (with its journal). Two
+    /// fixture shapes (OP_LOG.md §5):
+    ///   - `txns: [{name?, ops:[...]}, ...]` + optional `history: ["undo"|"redo"]`
+    ///     — the journal-native form: each transaction commits explicitly, then
+    ///     history navigation positions the cursor. `snapshot`/`undo`/`redo` are
+    ///     NOT ops here (history navigation, not the op vocabulary).
+    ///   - legacy `ops: [...]` — one implicit outer transaction (so non-undoable
+    ///     ops like `select_rect`, whose selection IS serialized state per §7,
+    ///     are captured); an embedded `snapshot` op opens its own boundaries.
     fn run_operation_model(tc: &serde_json::Value) -> Model {
         let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
         let doc = svg_to_document(&setup_svg);
         let mut model = Model::new(doc, None);
 
-        model.begin_txn();
-        for op in tc["ops"].as_array().unwrap() {
-            apply_op(&mut model, op);
+        if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
+            for txn in txns {
+                model.begin_txn();
+                if let Some(name) = txn.get("name").and_then(|v| v.as_str()) {
+                    model.name_txn(name);
+                }
+                for op in txn["ops"].as_array().unwrap() {
+                    apply_op(&mut model, op);
+                }
+                model.commit_txn();
+            }
+            if let Some(history) = tc.get("history").and_then(|v| v.as_array()) {
+                for h in history {
+                    match h.as_str() {
+                        Some("undo") => model.undo(),
+                        Some("redo") => model.redo(),
+                        other => panic!("unknown history directive: {other:?}"),
+                    }
+                }
+            }
+        } else {
+            model.begin_txn();
+            for op in tc["ops"].as_array().unwrap() {
+                apply_op(&mut model, op);
+            }
+            model.commit_txn();
         }
-        // Commit the implicit outer transaction (or any transaction left open
-        // by a trailing `snapshot` op).
-        model.commit_txn();
         model
     }
 
@@ -711,15 +735,20 @@ mod tests {
         }
 
         // checkpoint_equivalence gate (OP_LOG.md §6): the journal must replay to
-        // the same document as the snapshot path. Deferred for fixtures that
-        // embed the flat snapshot/undo/redo history ops — those map cleanly to
-        // the journal cursor only after the undo-law reshape (a later sub-step);
-        // replaying a transaction that was opened-then-undone before commit is
-        // exactly the case the reshape fixes.
-        let has_history = tc["ops"].as_array().unwrap().iter().any(|o| {
-            matches!(o["op"].as_str(), Some("snapshot") | Some("undo") | Some("redo"))
-        });
-        if !has_history {
+        // the same document as the snapshot path. Applies to the journal-native
+        // `txns` form (the cursor is correct after history navigation) and to
+        // legacy `ops` fixtures — except any that still embed the flat
+        // snapshot/undo/redo history ops, whose open-then-undone transactions
+        // the reshape exists to fix (none remain after the undo-law reshape, but
+        // the guard stays).
+        let gate_applies = if tc.get("txns").is_some() {
+            true
+        } else {
+            !tc["ops"].as_array().unwrap().iter().any(|o| {
+                matches!(o["op"].as_str(), Some("snapshot") | Some("undo") | Some("redo"))
+            })
+        };
+        if gate_applies {
             let setup = tc["setup_svg"].as_str().unwrap();
             let replayed = replay_journal(setup, model.journal(), model.journal_head());
             if replayed != actual {
