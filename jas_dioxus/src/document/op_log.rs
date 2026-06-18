@@ -22,7 +22,7 @@
 /// fixture payload verbatim (`dx`/`dy`, `path:[..]`, `transform:{a..f}`, `id`,
 /// `char_start`/`char_end`, …) so the existing operations fixtures keep
 /// replaying unchanged.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PrimitiveOp {
     /// The `apply_op` verb, verbatim (e.g. `move_selection`, `select_rect`).
     pub op: String,

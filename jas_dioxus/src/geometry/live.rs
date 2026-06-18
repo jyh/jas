@@ -20,7 +20,9 @@ use crate::algorithms::boolean::{
     self, PolygonSet,
 };
 
-use super::element::{Bounds, CommonProps, Element, Fill, Stroke};
+use super::element::{translate_element, Bounds, CommonProps, Element, Fill, Stroke};
+// RECORDED_ELEMENTS.md: the recipe is a normalized op-segment from the journal.
+use crate::document::op_log::PrimitiveOp;
 
 /// Default geometric tolerance in points. Matches the `Precision`
 /// default in the Boolean Options dialog (BOOLEAN.md § Boolean
@@ -521,6 +523,111 @@ impl LiveElement for ReferenceElem {
     /// the resolver-aware expand path lands.
     fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
     fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
+}
+
+// ---------------------------------------------------------------------------
+// RecordedElem — history-based (recorded) LiveKind (RECORDED_ELEMENTS.md)
+// ---------------------------------------------------------------------------
+
+/// A recorded (history-based) live element (RECORDED_ELEMENTS.md): a normalized,
+/// input-addressed op-segment captured from the journal, replayed against the
+/// *current* inputs to produce derived geometry. Edit a source input and the
+/// derivative re-derives live. Output ids are derived deterministically from
+/// (this element's own id + a position-in-trace counter), never minted, so
+/// replay keeps stable output identity (OP_LOG.md §7 / RECORDED_ELEMENTS.md §5).
+///
+/// The recipe draws from a replay-safe subset of the op vocabulary (input-
+/// addressed, side-effect-free). 3b-A.1 supports `copy` (clone inputs at an
+/// offset, producing the output) and `translate` (move named working elements);
+/// further verbs (reflect/transform) extend the same replay.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RecordedElem {
+    /// The normalized, input-addressed recipe ops, replayed verbatim in order.
+    pub ops: Vec<PrimitiveOp>,
+    /// Source element ids the recipe rebinds against (by stable `common.id`).
+    pub inputs: Vec<ElementRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Fill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Stroke>,
+    pub common: CommonProps,
+}
+
+impl RecordedElem {
+    pub fn new(ops: Vec<PrimitiveOp>, inputs: Vec<ElementRef>, common: CommonProps) -> Self {
+        Self { ops, inputs, fill: None, stroke: None, common }
+    }
+
+    /// Replay the recipe against the resolved inputs and return the derived
+    /// output geometry. A dangling input or a cycle (an input already being
+    /// visited) yields an empty set — never a panic (REFERENCE_GRAPH.md §3).
+    /// Replay is a pure, deterministic function of the inputs (OP_LOG.md §7).
+    pub fn evaluate_with(
+        &self,
+        precision: f64,
+        resolver: &dyn ElementResolver,
+        visiting: &mut VisitSet,
+    ) -> PolygonSet {
+        // Resolve inputs into a working set keyed by stable id. A cycle breaks
+        // to empty at the re-entry edge; a dangling input yields empty.
+        let mut working: std::collections::HashMap<String, Element> =
+            std::collections::HashMap::new();
+        for input in &self.inputs {
+            if visiting.contains(input) {
+                return PolygonSet::new();
+            }
+            match resolver.resolve(input) {
+                Some(el) => {
+                    working.insert(input.0.clone(), (*el).clone());
+                }
+                None => return PolygonSet::new(),
+            }
+        }
+        // Replay. Output ids are derived deterministically: `<own_id>/<n>`.
+        let own_id = self.common.id.clone().unwrap_or_default();
+        let mut output_ids: Vec<String> = Vec::new();
+        let mut counter: usize = 0;
+        let str_ids = |v: Option<&serde_json::Value>| -> Vec<String> {
+            v.and_then(|x| x.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        };
+        let num = |p: &serde_json::Value, k: &str| p.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        for op in &self.ops {
+            match op.op.as_str() {
+                "copy" => {
+                    let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                    for src in str_ids(op.params.get("from")) {
+                        if let Some(el) = working.get(&src) {
+                            let derived_id = format!("{own_id}/{counter}");
+                            counter += 1;
+                            let copy = translate_element(el, dx, dy);
+                            working.insert(derived_id.clone(), copy);
+                            output_ids.push(derived_id);
+                        }
+                    }
+                }
+                "translate" => {
+                    let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                    for id in str_ids(op.params.get("ids")) {
+                        if let Some(el) = working.get(&id) {
+                            let moved = translate_element(el, dx, dy);
+                            working.insert(id, moved);
+                        }
+                    }
+                }
+                _ => {} // outside the replay-safe subset: skip
+            }
+        }
+        // Output = the derived elements' geometry, in derivation order.
+        let mut out = PolygonSet::new();
+        for id in &output_ids {
+            if let Some(el) = working.get(id) {
+                out.extend(element_to_polygon_set(el, precision));
+            }
+        }
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,6 +1263,53 @@ mod tests {
         let mut visiting = VisitSet::new();
         let ps = reference.evaluate_with(DEFAULT_PRECISION, &NullResolver, &mut visiting);
         assert!(ps.is_empty(), "dangling reference evaluates to empty, never panics");
+    }
+
+    // --- RecordedElem (RECORDED_ELEMENTS.md — history-based provenance) ------
+
+    fn recorded_op(op: &str, params: serde_json::Value) -> PrimitiveOp {
+        PrimitiveOp { op: op.to_string(), params, targets: Vec::new() }
+    }
+
+    #[test]
+    fn recorded_replays_copy_translate_and_re_derives_when_input_changes() {
+        // Recipe: copy the input "eye", then translate that derived copy +50x.
+        // The derived copy is the recorded element's output; editing the source
+        // eye must re-derive it live.
+        let recipe = vec![
+            recorded_op("copy", serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0})),
+            recorded_op("translate", serde_json::json!({"ids": ["rec/0"], "dx": 50.0, "dy": 0.0})),
+        ];
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let recorded = RecordedElem::new(recipe, vec![ElementRef("eye".into())], common);
+
+        // Source eye at (0,0,10,10) → derived copy translated +50 → bbox [50,60].
+        let mut map = std::collections::HashMap::new();
+        map.insert("eye".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let mut visiting = VisitSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &MapResolver(map), &mut visiting);
+        assert_eq!(ps.len(), 1, "one derived output element");
+        let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 50.0).abs() < 1e-6 && (max_x - 60.0).abs() < 1e-6);
+
+        // Edit the source eye (move to x=100) → the derived copy follows.
+        let mut map2 = std::collections::HashMap::new();
+        map2.insert("eye".to_string(), rc_rect(100.0, 0.0, 10.0, 10.0));
+        let mut visiting2 = VisitSet::new();
+        let ps2 = recorded.evaluate_with(DEFAULT_PRECISION, &MapResolver(map2), &mut visiting2);
+        let (min_x2, _, max_x2, _) = bbox_of_ring(&ps2[0]);
+        assert!((min_x2 - 150.0).abs() < 1e-6 && (max_x2 - 160.0).abs() < 1e-6,
+            "derived copy re-derived against the edited source");
+    }
+
+    #[test]
+    fn recorded_dangling_input_evaluates_empty() {
+        let recipe = vec![recorded_op("copy", serde_json::json!({"from": ["x"], "dx": 0.0, "dy": 0.0}))];
+        let recorded = RecordedElem::new(recipe, vec![ElementRef("x".into())], CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &NullResolver, &mut visiting);
+        assert!(ps.is_empty(), "dangling input evaluates empty, never panics");
     }
 
     #[test]
