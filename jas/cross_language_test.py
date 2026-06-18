@@ -321,6 +321,10 @@ class CrossLanguageTest(absltest.TestCase):
                         self._apply_op(model, ctrl, op)
                         model.record_op(PrimitiveOp(op=op["op"], params=op))
                     model.commit_txn()
+                    # OP_LOG.md Increment 3a: a txn carrying a `label` stamps a
+                    # named version point onto the just-committed transaction.
+                    if "label" in txn:
+                        model.label_version(txn["label"])
                 for h in tc.get("history", []):
                     if h == "undo":
                         model.undo()
@@ -466,23 +470,30 @@ class CrossLanguageTest(absltest.TestCase):
     def test_journal_txn_metadata(self):
         # OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
         # byte-identically across apps (deterministic txn-N counter + parent).
-        for tc in json.loads(_read_fixture("operations/txn_metadata.json")):
-            svg = _read_fixture(f"svg/{tc['setup_svg']}")
-            model = Model(document=svg_to_document(svg))
-            ctrl = Controller(model=model)
-            for txn in tc["txns"]:
-                model.begin_txn()
-                if "name" in txn:
-                    model.name_txn(txn["name"])
-                for op in txn["ops"]:
-                    self._apply_op(model, ctrl, op)
-                    model.record_op(PrimitiveOp(op=op["op"], params=op))
-                model.commit_txn()
-            actual = self._journal_to_test_json(model.journal)
-            expected = _read_fixture(
-                f"operations/{tc['expected_journal_json']}").strip()
-            self.assertEqual(actual, expected,
-                f"txn_metadata journal JSON mismatch for '{tc['name']}'")
+        # OP_LOG.md Increment 3a adds txn_labels.json: a txn carrying a `label`
+        # stamps a named version onto the committed transaction, which surfaces
+        # in the serialized journal's `label` field.
+        fixtures = ["txn_metadata.json", "txn_labels.json"]
+        for fixture in fixtures:
+            for tc in json.loads(_read_fixture(f"operations/{fixture}")):
+                svg = _read_fixture(f"svg/{tc['setup_svg']}")
+                model = Model(document=svg_to_document(svg))
+                ctrl = Controller(model=model)
+                for txn in tc["txns"]:
+                    model.begin_txn()
+                    if "name" in txn:
+                        model.name_txn(txn["name"])
+                    for op in txn["ops"]:
+                        self._apply_op(model, ctrl, op)
+                        model.record_op(PrimitiveOp(op=op["op"], params=op))
+                    model.commit_txn()
+                    if "label" in txn:
+                        model.label_version(txn["label"])
+                actual = self._journal_to_test_json(model.journal)
+                expected = _read_fixture(
+                    f"operations/{tc['expected_journal_json']}").strip()
+                self.assertEqual(actual, expected,
+                    f"journal JSON mismatch for '{tc['name']}'")
 
     def test_assign_id_on_compound(self):
         # Regression for the reachable equivalence bug: assign_id does

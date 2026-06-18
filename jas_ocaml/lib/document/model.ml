@@ -27,6 +27,17 @@ type editing_target =
   | Content
   | Mask of int list
 
+(** A named version point (OP_LOG.md Increment 3a / VISION.md section 6.9).
+    Stores the document + paired index at a labeled journal cursor position so
+    restore_version is O(1) and sound regardless of whether the intervening
+    transactions carry replayable ops. Mirrors the Rust [Version] struct. *)
+type version = {
+  label : string;
+  journal_head : int;
+  document : Document.document;
+  id_index : Live.id_index;
+}
+
 let max_undo = 100
 
 let next_untitled = ref 1
@@ -103,6 +114,15 @@ class model ?(document = Document.default_document ()) ?filename () =
       (string option * Op_log.primitive_op list * Document.document) option = None
     val mutable in_txn = false
     val mutable next_txn_counter = 0
+    (* OP_LOG.md Increment 3a: named version points (VISION.md section 6.9).
+       Each labels a journal cursor position and stores the document + paired
+       index at that point, so restore_version is O(1) and sound even though
+       production transactions are opaque (no op replay needed). The label is
+       also written onto the journal's transaction at that head (the [label]
+       field reserved in Increment 2) so it serializes into the journal
+       artifact. Stored newest-last in creation order. Mirrors the Rust
+       [Model.versions]. *)
+    val mutable versions : version list = []
     val mutable current_filename = filename
     val mutable listeners : (Document.document -> unit) list = []
     val mutable filename_listeners : (string -> unit) list = []
@@ -420,6 +440,57 @@ class model ?(document = Document.default_document ()) ?filename () =
       match pending_txn with
       | Some (_, ops_rev, chk) -> pending_txn <- Some (Some name, ops_rev, chk)
       | None -> ()
+
+    (* ── Versioning labels (OP_LOG.md Increment 3a / VISION.md 6.9) ─────────
+
+       label_version marks the current document state as a named version point.
+       It stamps [name] onto the journal's transaction at the current head (the
+       [label] field reserved in Increment 2) so the label serializes into the
+       journal artifact, and stores the document + paired index (so
+       restore_version is O(1) and sound even though production transactions are
+       opaque). Naming is idempotent: re-labeling an existing name re-points it
+       here. restore_version restores the document to a named version as an
+       ordinary undoable edit (one transaction), so it stays on the linear
+       undo/redo timeline rather than jumping the cursor non-linearly; the no-op
+       rule makes restoring to the already-current state a no-op. Mirrors the
+       Rust [label_version] / [restore_version] / [versions]. *)
+
+    (* The named version points, in creation order. Test/inspection accessor. *)
+    method versions : version list = versions
+
+    method label_version (name : string) =
+      (* Stamp the label onto the most-recent committed transaction, if any
+         (a version at the origin labels no transaction). The journal is stored
+         oldest-first, so the transaction at the current head is index
+         [journal_head - 1]. *)
+      if journal_head > 0 then
+        op_journal <- List.mapi (fun i (t : Op_log.transaction) ->
+          if i = journal_head - 1 then { t with Op_log.label = Some name }
+          else t
+        ) op_journal;
+      let version = {
+        label = name;
+        journal_head;
+        document = doc;
+        id_index;
+      } in
+      (* Re-labeling an existing name re-points it; otherwise append in
+         creation order (newest last). *)
+      if List.exists (fun v -> v.label = name) versions then
+        versions <- List.map (fun v ->
+          if v.label = name then version else v) versions
+      else
+        versions <- versions @ [version]
+
+    method restore_version (name : string) : bool =
+      match List.find_opt (fun v -> v.label = name) versions with
+      | None -> false
+      | Some version ->
+        let target_doc = version.document in
+        _self#with_txn (fun () ->
+          _self#name_txn (Printf.sprintf "restore version %s" name);
+          _self#set_document target_doc);
+        true
 
     method default_fill = default_fill
     method set_default_fill (f : Element.fill option) = default_fill <- f

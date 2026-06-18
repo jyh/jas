@@ -271,6 +271,70 @@ import Testing
     #expect(model.journal[0].actor == "artist")
 }
 
+// MARK: - Versioning labels (OP_LOG.md Increment 3a / VISION.md §6.9)
+//
+// labelVersion stamps the committed transaction AND stores the doc+index;
+// restoreVersion is an ordinary undoable edit (linear timeline, not a cursor
+// jump); restoring to the current state is a no-op; re-label re-points and an
+// unknown name returns false. Mirrors the Rust model versioning tests.
+
+@Test func modelLabelVersionStoresAVersionAndStampsTheTransaction() {
+    let model = Model()
+    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.labelVersion("v1")
+
+    #expect(model.versions.count == 1)
+    #expect(model.versions[0].label == "v1")
+    #expect(model.versions[0].journalHead == 1)
+    // The label is stamped onto the committed transaction (serializes into the
+    // journal artifact).
+    #expect(model.journal[0].label == "v1")
+}
+
+@Test func modelRestoreVersionIsAnUndoableEditBackToTheLabeledState() {
+    let model = Model()
+    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.labelVersion("v1")
+    // Edit past the version.
+    model.withTxn {
+        model.document = Document(layers: [Layer(name: "A", children: []),
+                                           Layer(name: "B", children: [])])
+    }
+    #expect(model.document.layers.count == 2)
+
+    #expect(model.restoreVersion("v1"))
+    #expect(model.document.layers.count == 1, "restored the labeled document")
+    // Restore is an ordinary transaction on the linear timeline — undoable.
+    #expect(model.canUndo)
+    model.undo()
+    #expect(model.document.layers.count == 2, "undo reverts the restore")
+}
+
+@Test func modelRestoreVersionToCurrentStateIsANoop() {
+    let model = Model()
+    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.labelVersion("v1")
+    let head = model.journalHeadValue
+    // Already at v1's state — restoring is a no-op (not journaled).
+    #expect(model.restoreVersion("v1"))
+    #expect(model.journalHeadValue == head, "no transaction for a no-op restore")
+}
+
+@Test func modelLabelVersionRelabelRepointsAndUnknownRestoreReturnsFalse() {
+    let model = Model()
+    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.labelVersion("v1")
+    model.withTxn {
+        model.document = Document(layers: [Layer(name: "A", children: []),
+                                           Layer(name: "B", children: [])])
+    }
+    model.labelVersion("v1")  // re-point to the new state
+
+    #expect(model.versions.count == 1, "re-label re-points, no duplicate")
+    #expect(model.versions[0].journalHead == 2)
+    #expect(!model.restoreVersion("nope"), "unknown version restore is a no-op false")
+}
+
 // MARK: - EditingTarget (Mask editor UI — OPACITY.md §Preview interactions)
 
 @Test func modelDefaultsToContentEditingTarget() {

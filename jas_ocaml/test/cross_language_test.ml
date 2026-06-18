@@ -356,7 +356,13 @@ let run_journal_metadata fixture_name =
           (Jas.Op_log.make_primitive_op
              ~op:(op |> member "op" |> to_string) ~params:op ())
       ) (txn |> member "ops" |> to_list);
-      model#commit_txn
+      model#commit_txn;
+      (* OP_LOG.md Increment 3a: a [label] on a transaction marks a version
+         point — label_version stamps it onto the committed transaction so it
+         serializes into the journal artifact. *)
+      (match txn |> member "label" with
+       | `Null -> ()
+       | l -> model#label_version (to_string l))
     ) (tc |> member "txns" |> to_list);
     let actual = journal_to_test_json model#journal in
     let expected =
@@ -1329,9 +1335,13 @@ let () =
       Alcotest.test_case "boolean_ops operations" `Quick (fun () ->
         run_operation_fixture "boolean_ops.json");
       (* OP_LOG.md section 10 item 4: the journal metadata serializes
-         byte-identically across apps. *)
+         byte-identically across apps. Both the base metadata fixture and the
+         Increment 3a versioning-labels fixture (a [label] on a transaction
+         stamps the journal txn via label_version) byte-match their goldens. *)
       Alcotest.test_case "txn_metadata journal" `Quick (fun () ->
         run_journal_metadata "txn_metadata.json");
+      Alcotest.test_case "txn_labels journal" `Quick (fun () ->
+        run_journal_metadata "txn_labels.json");
     ];
 
     (* Workspace layout tests *)

@@ -160,6 +160,74 @@ class ModelTest(absltest.TestCase):
         self.assertFalse(model.can_redo)
 
 
+class VersioningTest(absltest.TestCase):
+    """Versioning labels (OP_LOG.md Increment 3a / VISION.md §6.9). Mirrors the
+    four Rust Model versioning tests in jas_dioxus."""
+
+    def test_label_version_stores_a_version_and_stamps_the_transaction(self):
+        model = Model()
+        a = Layer(children=(), name="A")
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a,))))
+        model.label_version("v1")
+
+        self.assertEqual(len(model.versions), 1)
+        self.assertEqual(model.versions[0].label, "v1")
+        self.assertEqual(model.versions[0].journal_head, 1)
+        # The label is stamped onto the committed transaction (serializes into
+        # the journal artifact).
+        self.assertEqual(model.journal[0].label, "v1")
+
+    def test_restore_version_is_undoable_back_to_the_labeled_state(self):
+        model = Model()
+        a = Layer(children=(), name="A")
+        b = Layer(children=(), name="B")
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a,))))
+        model.label_version("v1")
+        # Edit past the version.
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a, b))))
+        self.assertEqual(len(model.document.layers), 2)
+
+        self.assertTrue(model.restore_version("v1"))
+        self.assertEqual(len(model.document.layers), 1,
+                         "restored the labeled document")
+        # Restore is an ordinary transaction on the linear timeline — undoable.
+        self.assertTrue(model.can_undo)
+        model.undo()
+        self.assertEqual(len(model.document.layers), 2, "undo reverts restore")
+
+    def test_restore_version_to_current_state_is_a_noop(self):
+        model = Model()
+        a = Layer(children=(), name="A")
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a,))))
+        model.label_version("v1")
+        head = model.journal_head
+        # Already at v1's state — restoring is a no-op (not journaled).
+        self.assertTrue(model.restore_version("v1"))
+        self.assertEqual(model.journal_head, head,
+                         "no transaction for a no-op restore")
+
+    def test_relabel_repoints_and_unknown_restore_returns_false(self):
+        model = Model()
+        a = Layer(children=(), name="A")
+        b = Layer(children=(), name="B")
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a,))))
+        model.label_version("v1")
+        model.with_txn(
+            lambda: setattr(model, "document", Document(layers=(a, b))))
+        model.label_version("v1")  # re-point to the new state
+
+        self.assertEqual(len(model.versions), 1,
+                         "re-label re-points, no duplicate")
+        self.assertEqual(model.versions[0].journal_head, 2)
+        self.assertFalse(model.restore_version("nope"),
+                         "unknown version restore is a no-op false")
+
+
 class EditingTargetTest(absltest.TestCase):
     """Test the mask-editor UI state on Model (OPACITY.md §Preview
     interactions)."""

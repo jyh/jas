@@ -372,4 +372,92 @@ let () =
           assert (ops.(0).Jas.Op_log.op = "select_rect");
           assert (ops.(1).Jas.Op_log.op = "move_selection"));
     ];
+
+    (* ── Versioning labels (OP_LOG.md Increment 3a / VISION.md 6.9) ─────────
+       These mirror the Rust jas_dioxus/src/document/model.rs versioning tests:
+       label stores a version and stamps the committed transaction; restore is
+       an undoable edit back to the labeled state; restore-to-current is a no-op
+       (no new transaction); re-label re-points (no duplicate) and an
+       unknown-name restore returns false. *)
+    "versioning", [
+      (* Named layers (not the default empty layer) so each edit is a genuine
+         net change — an unnamed empty layer is byte-identical to the default
+         document, which the commit no-op rule would elide. Mirrors the Rust
+         make_layer("A") helper. *)
+      Alcotest.test_case
+        "label_version stores a version and stamps the transaction" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||] |]));
+          m#label_version "v1";
+          let vs = Array.of_list m#versions in
+          assert (Array.length vs = 1);
+          assert (vs.(0).Jas.Model.label = "v1");
+          assert (vs.(0).Jas.Model.journal_head = 1);
+          (* The label is stamped onto the committed transaction (serializes
+             into the journal artifact). *)
+          let j = Array.of_list m#journal in
+          assert (j.(0).Jas.Op_log.label = Some "v1"));
+
+      Alcotest.test_case
+        "restore_version is an undoable edit back to the labeled state" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||] |]));
+          m#label_version "v1";
+          (* Edit past the version. *)
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||];
+                    Jas.Element.make_layer ~name:"B" [||] |]));
+          assert (Array.length m#document.Jas.Document.layers = 2);
+          assert (m#restore_version "v1");
+          assert (Array.length m#document.Jas.Document.layers = 1);
+          (* Restore is an ordinary transaction on the linear timeline —
+             undoable. *)
+          assert m#can_undo;
+          m#undo;
+          assert (Array.length m#document.Jas.Document.layers = 2));
+
+      Alcotest.test_case "restore_version to current state is a no-op" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||] |]));
+          m#label_version "v1";
+          let head = m#journal_head in
+          (* Already at v1's state — restoring is a no-op (not journaled). *)
+          assert (m#restore_version "v1");
+          assert (m#journal_head = head));
+
+      Alcotest.test_case
+        "label_version re-label re-points and unknown restore returns false"
+        `Quick (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||] |]));
+          m#label_version "v1";
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer ~name:"A" [||];
+                    Jas.Element.make_layer ~name:"B" [||] |]));
+          m#label_version "v1";  (* re-point to the new state *)
+          let vs = Array.of_list m#versions in
+          assert (Array.length vs = 1);  (* re-label re-points, no duplicate *)
+          assert (vs.(0).Jas.Model.journal_head = 2);
+          (* Unknown version restore is a no-op false. *)
+          assert (not (m#restore_version "nope")));
+    ];
   ]

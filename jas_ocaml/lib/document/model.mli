@@ -26,6 +26,17 @@ type editing_target =
   | Content
   | Mask of int list
 
+(** A named version point (OP_LOG.md Increment 3a / VISION.md section 6.9).
+    Stores the document + paired index at a labeled journal cursor position so
+    {!model.restore_version} is O(1) and sound regardless of whether the
+    intervening transactions carry replayable ops. *)
+type version = {
+  label : string;
+  journal_head : int;
+  document : Document.document;
+  id_index : Live.id_index;
+}
+
 class model : ?document:Document.document -> ?filename:string -> unit -> object
   method document : Document.document
 
@@ -94,6 +105,23 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   (** Set the open transaction's artist/AI-legible name (an actions.yaml
       verb). No-op when no transaction is open. *)
   method name_txn : string -> unit
+
+  (** The named version points, in creation order (newest last). OP_LOG.md
+      Increment 3a. Test/inspection accessor. *)
+  method versions : version list
+
+  (** Mark the current document state as a named version point (OP_LOG.md
+      Increment 3a / VISION.md section 6.9). Stamps the label onto the journal's
+      transaction at the current head (so it serializes into the journal
+      artifact) and stores the document + paired index. Re-labeling an existing
+      name re-points it. *)
+  method label_version : string -> unit
+
+  (** Restore the document to a named version as an ordinary undoable edit (one
+      transaction), so it stays on the linear undo/redo timeline; restoring to
+      the already-current state is a no-op. Returns [false] if no such version
+      exists. *)
+  method restore_version : string -> bool
   method default_fill : Element.fill option
   method set_default_fill : Element.fill option -> unit
   method default_stroke : Element.stroke option
