@@ -407,6 +407,11 @@ class CrossLanguageTest(absltest.TestCase):
             ctrl.hide_selection()
         elif op_name == "show_all":
             ctrl.show_all()
+        elif op_name == "boolean_union":
+            from panels.boolean_apply import apply_destructive_boolean
+            apply_destructive_boolean(model, "union")
+        elif op_name == "simplify":
+            ctrl.simplify_selection(op.get("precision", 0.5))
         elif op_name == "snapshot":
             model.snapshot()
         elif op_name == "undo":
@@ -431,6 +436,12 @@ class CrossLanguageTest(absltest.TestCase):
         # SVG <defs> codec, runs the op, and pins the canonical JSON all four
         # apps must reproduce.
         self._run_operation_fixture("symbols_ops.json")
+
+    def test_operation_boolean_ops(self):
+        # Boolean grouping (OP_LOG.md §10 item 3): boolean_union + post-op
+        # simplify are one transaction; the gate pins that the journal replays
+        # to the snapshot-path document.
+        self._run_operation_fixture("boolean_ops.json")
 
     def test_assign_id_on_compound(self):
         # Regression for the reachable equivalence bug: assign_id does

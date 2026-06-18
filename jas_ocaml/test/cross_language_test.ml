@@ -213,6 +213,11 @@ let apply_op (model : Jas.Model.model) (ctrl : Jas.Controller.controller) op =
       | "unlock_all" -> ctrl#unlock_all
       | "hide_selection" -> ctrl#hide_selection
       | "show_all" -> ctrl#show_all
+      | "boolean_union" ->
+        Jas.Boolean_apply.apply_destructive_boolean model "union"
+      | "simplify" ->
+        let precision = try op |> member "precision" |> to_num with _ -> 0.5 in
+        ctrl#simplify_selection precision
   | "snapshot" -> model#snapshot
   | "undo" -> model#undo
   | "redo" -> model#redo
@@ -1263,6 +1268,11 @@ let () =
          reproduce. *)
       Alcotest.test_case "symbols_ops operations" `Quick (fun () ->
         run_operation_fixture "symbols_ops.json");
+      (* Boolean grouping (OP_LOG.md section 10 item 3): boolean_union +
+         post-op simplify are one transaction; the gate pins the journal
+         replays to the snapshot-path document. *)
+      Alcotest.test_case "boolean_ops operations" `Quick (fun () ->
+        run_operation_fixture "boolean_ops.json");
     ];
 
     (* Workspace layout tests *)

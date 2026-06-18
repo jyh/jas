@@ -1,0 +1,29 @@
+[
+  {
+    "name": "boolean_union_simplify_grouping",
+    "setup_svg": "overlapping_rects.svg",
+    "txns": [
+      {
+        "name": "boolean_union",
+        "ops": [
+          {
+            "op": "select_rect",
+            "x": 0,
+            "y": 0,
+            "width": 160,
+            "height": 160,
+            "extend": false
+          },
+          {
+            "op": "boolean_union"
+          },
+          {
+            "op": "simplify",
+            "precision": 0.5
+          }
+        ]
+      }
+    ],
+    "expected_json": "boolean_union_simplify.json"
+  }
+]
