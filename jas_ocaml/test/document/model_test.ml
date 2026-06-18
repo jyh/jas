@@ -194,4 +194,182 @@ let () =
             m#document.Jas.Document.layers m#document.Jas.Document.symbols in
         assert (Jas.Live.Id_map.equal ( = ) m#id_index expect_after_redo));
     ];
+
+    (* ── Transaction journal (OP_LOG.md Increment 2, full journal) ─────────
+       These mirror the Python jas/document/model.py journal tests and the
+       Rust jas_dioxus/src/document/model.rs ones: commit appends one
+       transaction per net-change transaction, undo/redo move the cursor, the
+       redo tail is dropped on a new commit, no-op transactions are not
+       journaled (and leave no undo step), the txn ids are a deterministic
+       counter with a parent edge, and abort journals nothing. *)
+    "journal", [
+      Alcotest.test_case "commit journals one transaction per net-change edit"
+        `Quick (fun () ->
+          let m = Jas.Model.create () in
+          assert (List.length m#journal = 0);
+          assert (m#journal_head = 0);
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]));
+          assert (List.length m#journal = 1);
+          assert (m#journal_head = 1);
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document [| Jas.Element.make_layer [||] |]));
+          assert (List.length m#journal = 2);
+          assert (m#journal_head = 2));
+
+      Alcotest.test_case "txn ids are a deterministic counter with parent edge"
+        `Quick (fun () ->
+          (* OP_LOG.md section 7: txn-0, txn-1, … so the journal is
+             byte-shareable; the causal parent edge points at the prior
+             transaction. *)
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]));
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document [| Jas.Element.make_layer [||] |]));
+          let j = Array.of_list m#journal in
+          assert (j.(0).Jas.Op_log.txn_id = "txn-0");
+          assert (j.(1).Jas.Op_log.txn_id = "txn-1");
+          assert (j.(0).Jas.Op_log.parent = None);
+          assert (j.(1).Jas.Op_log.parent = Some "txn-0");
+          (* The lamport clock mirrors the counter. *)
+          assert (j.(0).Jas.Op_log.lamport = 0);
+          assert (j.(1).Jas.Op_log.lamport = 1);
+          (* The default actor is "artist". *)
+          assert (j.(0).Jas.Op_log.actor = "artist"));
+
+      Alcotest.test_case
+        "no-op transaction is not journaled and leaves no undo step"
+        `Quick (fun () ->
+          (* OP_LOG.md section 5/9: an empty / zero-net-change transaction is
+             elided from BOTH the journal and the undo stack. *)
+          let m = Jas.Model.create () in
+          m#with_txn (fun () -> ());  (* no edit *)
+          assert (List.length m#journal = 0);
+          assert (m#journal_head = 0);
+          assert (not m#can_undo);
+          (* A write that nets back to the checkpoint document is also a no-op
+             (compared via document_to_test_json — the canonical byte form). *)
+          let checkpoint = m#document in
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]);
+            m#set_document checkpoint);  (* back to the exact checkpoint *)
+          assert (List.length m#journal = 0);
+          assert (not m#can_undo);
+          assert (not m#is_modified));
+
+      Alcotest.test_case "undo and redo move the journal cursor" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]));
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document [| Jas.Element.make_layer [||] |]));
+          assert (m#journal_head = 2);
+          m#undo;
+          assert (m#journal_head = 1);
+          m#undo;
+          assert (m#journal_head = 0);
+          (* The journal itself is retained across undo (it is a cursor, not a
+             high-water mark). *)
+          assert (List.length m#journal = 2);
+          m#redo;
+          assert (m#journal_head = 1);
+          m#redo;
+          assert (m#journal_head = 2));
+
+      Alcotest.test_case
+        "new commit after undo drops the redo tail of the journal" `Quick
+        (fun () ->
+          (* OP_LOG.md section 5: commit truncates the journal at journal_head
+             and appends, so a new edit after undo drops the undone (redo)
+             transactions. *)
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]));  (* txn-0 *)
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer [||] |]));  (* txn-1 *)
+          assert (List.length m#journal = 2);
+          m#undo;  (* cursor at 1, txn-1 is now the redo tail *)
+          assert (m#journal_head = 1);
+          m#with_txn (fun () ->
+            m#set_document
+              (Jas.Document.make_document
+                 [| Jas.Element.make_layer [||];
+                    Jas.Element.make_layer [||] |]));  (* new txn *)
+          assert (List.length m#journal = 2);  (* redo tail dropped, appended *)
+          assert (m#journal_head = 2);
+          let j = Array.of_list m#journal in
+          assert (j.(1).Jas.Op_log.txn_id = "txn-2");  (* counter advances *)
+          assert (not m#can_redo));  (* redo cleared on the new edit *)
+
+      Alcotest.test_case "abort does not journal or move the cursor" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#with_txn (fun () ->
+            m#set_document (Jas.Document.make_document [||]));  (* txn-0 *)
+          let head = m#journal_head in
+          let len = List.length m#journal in
+          m#begin_txn;
+          m#set_document
+            (Jas.Document.make_document [| Jas.Element.make_layer [||] |]);
+          m#abort_txn;
+          assert (List.length m#journal = len);  (* not journaled *)
+          assert (m#journal_head = head);        (* cursor unmoved *)
+          assert (Array.length m#document.Jas.Document.layers = 0));
+
+      Alcotest.test_case "begin_txn is idempotent while open" `Quick
+        (fun () ->
+          (* A session that calls begin_txn repeatedly pushes exactly ONE
+             checkpoint and undoes in one step (the type-tool lazy-session
+             shape). *)
+          let m = Jas.Model.create () in
+          (* The default document is one empty layer; end the session with a
+             genuinely different document (two layers) so the net change is
+             real and the session journals exactly one transaction. *)
+          m#begin_txn;
+          m#set_document (Jas.Document.make_document [||]);
+          m#begin_txn;  (* nested / repeated — no-op while open *)
+          m#set_document
+            (Jas.Document.make_document
+               [| Jas.Element.make_layer [||]; Jas.Element.make_layer [||] |]);
+          m#commit_txn;
+          assert (List.length m#journal = 1);  (* one transaction *)
+          m#undo;
+          (* One undo step reverts the whole session to the pre-begin doc
+             (the default one-layer document). *)
+          assert (Array.length m#document.Jas.Document.layers = 1));
+
+      Alcotest.test_case "record_op accumulates ops in apply order" `Quick
+        (fun () ->
+          (* The op_apply path records each op; commit_txn finalizes a
+             transaction whose [ops] preserve apply order, and name_txn labels
+             it. No-op when no transaction is open. *)
+          let m = Jas.Model.create () in
+          (* record_op / name_txn outside any bracket are no-ops. *)
+          m#record_op (Jas.Op_log.make_primitive_op ~op:"stray"
+                         ~params:(`Assoc []) ());
+          m#name_txn "stray";
+          assert (List.length m#journal = 0);
+          m#begin_txn;
+          m#name_txn "move things";
+          m#record_op (Jas.Op_log.make_primitive_op ~op:"select_rect"
+                         ~params:(`Assoc ["op", `String "select_rect"]) ());
+          m#record_op (Jas.Op_log.make_primitive_op ~op:"move_selection"
+                         ~params:(`Assoc ["op", `String "move_selection"]) ());
+          m#set_document (Jas.Document.make_document [||]);
+          m#commit_txn;
+          let j = Array.of_list m#journal in
+          assert (Array.length j = 1);
+          assert (j.(0).Jas.Op_log.name = Some "move things");
+          let ops = Array.of_list j.(0).Jas.Op_log.ops in
+          assert (Array.length ops = 2);
+          assert (ops.(0).Jas.Op_log.op = "select_rect");
+          assert (ops.(1).Jas.Op_log.op = "move_selection"));
+    ];
   ]

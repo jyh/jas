@@ -24,6 +24,17 @@ private func freshFilename() -> String {
     return name
 }
 
+/// The transaction being accumulated between ``Model/beginTxn()`` and
+/// ``Model/commitTxn()`` (OP_LOG.md Increment 2). ``name`` / ``ops`` are
+/// populated by the op-apply path; ``genAtBegin`` snapshots the generation at
+/// the owning ``beginTxn`` so ``commitTxn`` can detect a zero-write
+/// transaction without serializing. Mirrors Rust's `PendingTxn`.
+private struct PendingTxn {
+    var name: String? = nil
+    var ops: [PrimitiveOp] = []
+    var genAtBegin: UInt64
+}
+
 /// Observable model that holds the current document.
 ///
 /// Views register callbacks via onDocumentChanged to be notified
@@ -129,7 +140,45 @@ public class Model: ObservableObject {
     private var redoStack: [(Document, IdIndex)] = []
     private let maxUndo = 100
 
-    public var isModified: Bool { document != savedDocument }
+    // MARK: - Transaction journal (OP_LOG.md Increment 2, full journal)
+    //
+    // The journal-head cursor + the typed Transaction journal, layered on the
+    // snapshot stacks (which remain the undo/redo mechanism — OP_LOG.md §4).
+    // `snapshot()` (the production undoable-edit boundary) advances the cursor
+    // but records NO Transaction; `beginTxn`/`commitTxn` build the typed journal
+    // (the op-apply / harness path). Both advance `journalHead`; a given flow
+    // uses one path or the other.
+
+    /// The journal cursor — the count of transactions currently applied
+    /// (0...op_journal length). NOT a high-water mark: `commitTxn` truncates the
+    /// journal here and appends (a new edit after undo drops the redo tail);
+    /// `undo` decrements it, `redo` increments it. `snapshot()` increments it
+    /// (an uncapped count of undoable edits, unlike the MAX_UNDO-capped stack).
+    /// Mirrors Rust's `journal_head`.
+    private var journalHead: Int = 0
+    /// The `journalHead` captured at the last save; `isModified` is exactly
+    /// `journalHead != savedJournalHead`, so undo back to the saved point reads
+    /// as not-modified (OP_LOG.md §5/§9). Mirrors Rust's `saved_journal_head`.
+    private var savedJournalHead: Int = 0
+    /// The ordered Transaction journal (OP_LOG.md §5). The legible / replayable /
+    /// mergeable artifact. Mirrors Rust's `op_journal`.
+    private var opJournal: [Transaction] = []
+    /// The transaction being accumulated between `beginTxn` and `commitTxn`.
+    private var pendingTxn: PendingTxn? = nil
+    /// True while an undoable transaction is open (OP_LOG.md Increment 1).
+    private var inTxn: Bool = false
+    /// Deterministic txn-id counter: txn-0, txn-1, … (OP_LOG.md §7), the same
+    /// discipline element ids use, so the journal file is byte-shareable across
+    /// apps. Mirrors Rust's `next_txn_counter`.
+    private var nextTxnCounter: UInt64 = 0
+
+    /// True if the document has unsaved committed edits. The unified OP_LOG.md
+    /// §5/§9 semantics: `journalHead != savedJournalHead`, the journal CURSOR
+    /// rather than a document-identity compare — so an undo back to the saved
+    /// point reads as not-modified, and a non-undoable selection-only write that
+    /// does not snapshot does not mark the document modified. Mirrors Rust's
+    /// `is_modified`.
+    public var isModified: Bool { journalHead != savedJournalHead }
 
     public init(document: Document = Document(), filename: String? = nil) {
         // Build the companion index BEFORE assigning `document`, because the
@@ -180,6 +229,10 @@ public class Model: ObservableObject {
     }
 
     public func markSaved() {
+        // OP_LOG.md §9: record the current journal cursor as the on-disk
+        // baseline, after which `isModified` returns false until the next
+        // committed edit (or until undo/redo move the cursor off this point).
+        savedJournalHead = journalHead
         savedDocument = document
         objectWillChange.send()
     }
@@ -251,6 +304,12 @@ public class Model: ObservableObject {
             undoStack.removeFirst()
         }
         redoStack.removeAll()
+        // Advance the journal cursor: one undoable edit (OP_LOG.md §5). The
+        // counter is uncapped, unlike the MAX_UNDO-capped stack, so isModified
+        // stays correct past the cap. snapshot() is the production boundary —
+        // it advances the cursor but records NO Transaction (production edits
+        // are opaque), matching Rust.
+        journalHead += 1
     }
 
     /// Rebuild the id->element index from the current document and assert it
@@ -292,6 +351,11 @@ public class Model: ObservableObject {
     public var hasPreviewSnapshot: Bool { previewDocSnapshot != nil }
 
     public func undo() {
+        // History navigation ends any open edit context, so the next edit
+        // self-brackets fresh (OP_LOG.md Increment 1: keeps inTxn honest after
+        // undo). Mirrors Rust `undo` clearing in_txn / pending_txn.
+        inTxn = false
+        pendingTxn = nil
         guard let (prevDoc, prevIndex) = undoStack.popLast() else { return }
         redoStack.append((document, idIndex))
         // Hand the snapshot-carried index to the setter so its didSet adopts
@@ -301,19 +365,159 @@ public class Model: ObservableObject {
         document = prevDoc
         assert(idIndex == rebuildIdIndex(document),
                "id index diverged from rebuild after undo")
+        // Move the journal cursor back one transaction (OP_LOG.md §5). Only
+        // when a checkpoint was actually popped, so a no-op undo at the stack
+        // floor does not desync the cursor.
+        if journalHead > 0 {
+            journalHead -= 1
+        }
     }
 
     public func redo() {
+        inTxn = false
+        pendingTxn = nil
         guard let (nextDoc, nextIndex) = redoStack.popLast() else { return }
         undoStack.append((document, idIndex))
         restoringIndex = nextIndex
         document = nextDoc
         assert(idIndex == rebuildIdIndex(document),
                "id index diverged from rebuild after redo")
+        // Advance the journal cursor one transaction (OP_LOG.md §5). On a
+        // successful redo-stack pop the cursor always moves forward, including
+        // the snapshot-driven flow (which advances the cursor without growing
+        // the typed journal). Mirrors Python's unconditional redo increment.
+        journalHead += 1
     }
 
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
+
+    // MARK: - Transaction journal (OP_LOG.md Increment 2, full journal)
+    //
+    // beginTxn / commitTxn build the typed Transaction journal (the op-apply /
+    // harness path). They sit alongside snapshot() (the production undoable-edit
+    // boundary, which advances the journal cursor but records no Transaction).
+    // record_op / name_txn populate the open transaction.
+
+    /// The Transaction journal (OP_LOG.md §5). Test/inspection accessor.
+    public var journal: [Transaction] { opJournal }
+
+    /// The journal cursor — the number of transactions currently applied
+    /// (0...journal length). Test/inspection accessor.
+    public var journalHeadValue: Int { journalHead }
+
+    /// True while an undoable transaction is open (between `beginTxn` and
+    /// `commitTxn`). Lets a reentrant caller decide whether IT opened the
+    /// transaction (and so should commit it) versus running nested inside an
+    /// already-open one. Mirrors Rust's `in_txn`.
+    public var isInTxn: Bool { inTxn }
+
+    /// Open an undoable transaction: push the pre-edit checkpoint (the document
+    /// and its paired index) onto the undo stack, exactly like ``snapshot()``
+    /// but WITHOUT clearing the redo stack — the redo-clear happens at
+    /// ``commitTxn()``, so a new edit clears redo only once the edit commits.
+    /// Idempotent while a transaction is already open (a nested `beginTxn` is a
+    /// no-op), so many edits can ride one checkpoint. Mirrors Rust's `begin_txn`.
+    public func beginTxn() {
+        if inTxn { return }
+        undoStack.append((document, idIndex))
+        if undoStack.count > maxUndo {
+            undoStack.removeFirst()
+        }
+        inTxn = true
+        // Start accumulating the transaction (OP_LOG.md Increment 2). `ops` is
+        // populated by the op-apply path; `genAtBegin` lets `commitTxn` detect
+        // a zero-write no-op without serializing.
+        pendingTxn = PendingTxn(genAtBegin: generation)
+    }
+
+    /// Finalize the open transaction. No-op rule (OP_LOG.md §5/§9): a
+    /// zero-net-change transaction is NOT journaled and its undo checkpoint is
+    /// dropped (keeping the undo stack and the journal cursor in lock-step).
+    /// Otherwise append one Transaction (deterministic txn-N id), truncating the
+    /// journal's redo tail at `journalHead`, and clear redo. **No-op when no
+    /// transaction is open**, so a caller that commits unconditionally at the end
+    /// of a possibly-no-edit session does not spuriously clear redo. Mirrors
+    /// Rust's `commit_txn`.
+    public func commitTxn() {
+        if !inTxn { return }
+        inTxn = false
+        let pending = pendingTxn
+        pendingTxn = nil
+
+        // No-op rule (OP_LOG.md §5/§9). Fast path: if no write happened at all
+        // (generation unchanged since the owning beginTxn) it is definitely a
+        // no-op. Otherwise fall back to the canonical `documentToTestJson`
+        // byte-compare against the checkpoint (the same canonicalization the
+        // cross-language gate uses).
+        let genAtBegin = pending?.genAtBegin ?? generation
+        let checkpoint = undoStack.last?.0
+        let noNetChange = generation == genAtBegin
+            || (checkpoint.map { documentToTestJson($0) == documentToTestJson(document) } ?? false)
+        if noNetChange {
+            // Drop the no-op checkpoint; leave redo and the journal untouched.
+            if !undoStack.isEmpty { undoStack.removeLast() }
+            return
+        }
+
+        // A real edit invalidates redo on BOTH representations: clear the redo
+        // snapshot stack and truncate the journal's redo tail (the relocated
+        // "new edit invalidates redo" semantics — OP_LOG.md §5).
+        redoStack.removeAll()
+        if journalHead < opJournal.count {
+            opJournal.removeLast(opJournal.count - journalHead)
+        }
+        let parent = opJournal.last?.txnId
+        let txn = Transaction(
+            txnId: "txn-\(nextTxnCounter)",
+            ops: pending?.ops ?? [],
+            name: pending?.name,
+            actor: actorArtist,
+            parent: parent,
+            lamport: nextTxnCounter)
+        nextTxnCounter += 1
+        opJournal.append(txn)
+        journalHead = opJournal.count
+    }
+
+    /// Abandon the open transaction, rolling the document and index back to the
+    /// pre-edit checkpoint and discarding it (no redo entry, no journal entry,
+    /// no cursor move). A `beginTxn` immediately followed by `abortTxn` is a
+    /// no-op. Mirrors Rust's `abort_txn`.
+    public func abortTxn() {
+        if !inTxn { return }
+        inTxn = false
+        pendingTxn = nil
+        if let (doc, index) = undoStack.popLast() {
+            restoringIndex = index
+            document = doc
+        }
+    }
+
+    /// Run `body` inside a transaction: ``beginTxn()``, then `body()`, then
+    /// ``commitTxn()``. The scoped one-shot form of the bracket. Mirrors Rust's
+    /// `with_txn`.
+    public func withTxn(_ body: () -> Void) {
+        beginTxn()
+        body()
+        commitTxn()
+    }
+
+    /// Append a primitive op to the open transaction's record (OP_LOG.md §5):
+    /// the op-apply path calls this as each op is applied, so ``commitTxn()``
+    /// finalizes a transaction whose `ops` replay to the same document — the
+    /// checkpoint_equivalence gate (§6). No-op when no transaction is open (an
+    /// op applied outside any bracket is not journaled). Mirrors Rust's
+    /// `record_op`.
+    public func recordOp(_ op: PrimitiveOp) {
+        pendingTxn?.ops.append(op)
+    }
+
+    /// Set the open transaction's artist/AI-legible name. No-op when no
+    /// transaction is open. Mirrors Rust's `name_txn`.
+    public func nameTxn(_ name: String) {
+        pendingTxn?.name = name
+    }
 
     private func notify() {
         for listener in listeners {

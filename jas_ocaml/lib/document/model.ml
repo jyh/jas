@@ -79,10 +79,30 @@ class model ?(document = Document.default_document ()) ?filename () =
        undoable edits applied (snapshot increments it, undo/redo move it), so
        is_modified is journal_head <> saved_journal_head — undo back to the
        saved point reads as not-modified. Replaces the old identity compare
-       against a saved-document reference. Cursor-only port: tied to the
-       existing snapshot/undo/redo mechanism, not a transaction bracket. *)
+       against a saved-document reference. Both the production snapshot() path
+       and the begin_txn/commit_txn bracket advance this cursor; a given flow
+       uses one path or the other. *)
     val mutable journal_head = 0
     val mutable saved_journal_head = 0
+    (* OP_LOG.md Increment 2 (full journal): the typed Transaction journal
+       layered on the snapshot stacks. Built via begin_txn/commit_txn/record_op
+       (the op_apply / harness path); production snapshot() edits advance the
+       journal_head cursor but record no transaction (opaque). See op_log.ml.
+       op_journal is the ordered transaction list; pending_txn accumulates the
+       transaction being built between begin_txn and commit_txn; in_txn is true
+       while a transaction is open; next_txn_counter drives the deterministic
+       [txn-N] ids (the same discipline element_ids.json uses for element ids,
+       so the journal file is byte-shareable across apps). *)
+    val mutable op_journal : Op_log.transaction list = []
+    (* The pending transaction, captured as (name, accumulated-ops-reversed,
+       doc_at_begin). [doc_at_begin] is the pre-edit checkpoint document, used
+       by commit_txn's no-op rule (physical-eq fast path, else a canonical
+       document_to_test_json byte compare). The ops are accumulated reversed
+       and flipped at commit so the journal preserves apply order. *)
+    val mutable pending_txn :
+      (string option * Op_log.primitive_op list * Document.document) option = None
+    val mutable in_txn = false
+    val mutable next_txn_counter = 0
     val mutable current_filename = filename
     val mutable listeners : (Document.document -> unit) list = []
     val mutable filename_listeners : (string -> unit) list = []
@@ -208,6 +228,11 @@ class model ?(document = Document.default_document ()) ?filename () =
     method has_preview_snapshot = preview_doc_snapshot <> None
 
     method undo =
+      (* History navigation ends any open edit context, so the next edit
+         self-brackets fresh (OP_LOG.md Increment 1: keeps in_txn honest after
+         undo, so a post-undo edit clears redo via its own commit). *)
+      in_txn <- false;
+      pending_txn <- None;
       match undo_stack with
       | [] -> ()
       | (prev_doc, prev_index) :: rest ->
@@ -225,6 +250,8 @@ class model ?(document = Document.default_document ()) ?filename () =
         List.iter (fun f -> f doc) listeners
 
     method redo =
+      in_txn <- false;
+      pending_txn <- None;
       match redo_stack with
       | [] -> ()
       | (next_doc, next_index) :: rest ->
@@ -233,6 +260,12 @@ class model ?(document = Document.default_document ()) ?filename () =
         doc <- next_doc;
         id_index <- next_index;
         generation <- generation + 1;
+        (* Advance the journal cursor one transaction (OP_LOG.md section 5).
+           Unbounded, because the production snapshot() path advances the
+           cursor without appending to op_journal (an opaque edit), so the
+           cursor can legitimately exceed the journal length; redo only runs
+           when redo_stack is non-empty (a prior undo decremented), keeping it
+           in lock-step with the snapshot stacks. Mirrors the Python redo. *)
         journal_head <- journal_head + 1;
         _self#assert_index_matches_rebuild;
         List.iter (fun f -> f doc) listeners
@@ -248,6 +281,145 @@ class model ?(document = Document.default_document ()) ?filename () =
 
     method can_undo = undo_stack <> []
     method can_redo = redo_stack <> []
+
+    (* ── Transaction journal (OP_LOG.md Increment 2, full journal) ──────────
+
+       begin_txn / commit_txn build the typed Transaction journal (the
+       op_apply / harness path). They sit alongside snapshot (the production
+       undoable-edit boundary, which advances the journal_head cursor but
+       records no transaction). Both advance journal_head; a given flow uses
+       one path or the other. record_op / name_txn populate the open
+       transaction. *)
+
+    (* The Transaction journal (OP_LOG.md section 5). Test/inspection
+       accessor; mirrors the Rust [journal] / Python [journal]. *)
+    method journal : Op_log.transaction list = op_journal
+
+    (* The journal cursor — the count of transactions currently applied
+       (0..=journal length). Test/inspection accessor. *)
+    method journal_head : int = journal_head
+
+    (* Open an undoable transaction: push the pre-edit checkpoint (the document
+       and its paired index) onto the undo stack, exactly like snapshot but
+       WITHOUT clearing the redo stack — the redo-clear happens at commit_txn,
+       so a new edit clears redo only once the edit commits. Idempotent while a
+       transaction is already open (a nested begin_txn is a no-op), so many
+       edits can ride one checkpoint. *)
+    method begin_txn =
+      if not in_txn then begin
+        undo_stack <- (doc, id_index) :: undo_stack;
+        if List.length undo_stack > max_undo then
+          undo_stack <- List.filteri (fun i _ -> i < max_undo) undo_stack;
+        in_txn <- true;
+        (* Capture the current document as the pre-edit checkpoint so commit_txn
+           can detect a zero-net-change transaction. *)
+        pending_txn <- Some (None, [], doc)
+      end
+
+    (* Finalize the open transaction. No-op rule (OP_LOG.md section 5/9): a
+       zero-net-change transaction is not journaled and its undo checkpoint is
+       dropped (so it leaves no undo step, keeping the undo stack and the
+       journal cursor in lock-step). Fast path: physical identity of the
+       current document against the checkpoint; else a canonical
+       document_to_test_json byte compare (the same canonicalization the
+       cross-language gate uses). Otherwise append one transaction (the
+       deterministic [txn-N] id), truncating the journal's redo tail at
+       journal_head, and clear redo. No-op when no transaction is open. *)
+    method commit_txn =
+      if in_txn then begin
+        in_txn <- false;
+        let pending = pending_txn in
+        pending_txn <- None;
+        let checkpoint = match pending with
+          | Some (_, _, chk) -> Some chk
+          | None ->
+            (match undo_stack with (chk, _) :: _ -> Some chk | [] -> None)
+        in
+        let no_net_change =
+          match checkpoint with
+          | None -> false
+          | Some chk ->
+            chk == doc
+            || Test_json.document_to_test_json chk
+               = Test_json.document_to_test_json doc
+        in
+        if no_net_change then begin
+          (* Drop the no-op checkpoint; leave redo and the journal untouched. *)
+          (match undo_stack with _ :: rest -> undo_stack <- rest | [] -> ())
+        end else begin
+          (* A real edit invalidates redo on BOTH representations: clear the
+             redo snapshot stack and truncate the journal's redo tail at
+             journal_head (the relocated "new edit invalidates redo"
+             semantics — OP_LOG.md section 5). *)
+          redo_stack <- [];
+          op_journal <- List.filteri (fun i _ -> i < journal_head) op_journal;
+          let parent = match List.rev op_journal with
+            | last :: _ -> Some last.Op_log.txn_id
+            | [] -> None
+          in
+          let name, ops_rev = match pending with
+            | Some (n, ops_rev, _) -> n, ops_rev
+            | None -> None, []
+          in
+          let txn = {
+            Op_log.txn_id = Printf.sprintf "txn-%d" next_txn_counter;
+            ops = List.rev ops_rev;
+            name;
+            summary = None;
+            actor = Op_log.actor_artist;
+            parent;
+            lamport = next_txn_counter;
+            label = None;
+          } in
+          next_txn_counter <- next_txn_counter + 1;
+          op_journal <- op_journal @ [txn];
+          journal_head <- List.length op_journal
+        end
+      end
+
+    (* Roll back the open transaction to its checkpoint, discarding it (no redo
+       entry, no journal entry, no cursor move). A begin_txn immediately
+       followed by abort_txn is a no-op. *)
+    method abort_txn =
+      if in_txn then begin
+        in_txn <- false;
+        pending_txn <- None;
+        (match undo_stack with
+         | (prev_doc, prev_index) :: rest ->
+           undo_stack <- rest;
+           doc <- prev_doc;
+           id_index <- prev_index;
+           generation <- generation + 1;
+           _self#assert_index_matches_rebuild;
+           List.iter (fun f -> f doc) listeners
+         | [] -> ())
+      end
+
+    (* Run [body] inside a transaction: begin_txn, [body ()], commit_txn. The
+       scoped one-shot form of the bracket. *)
+    method with_txn (body : unit -> unit) =
+      _self#begin_txn;
+      body ();
+      _self#commit_txn
+
+    (* Append a primitive op to the open transaction's record (OP_LOG.md
+       section 5): the op_apply path calls this as each op is applied, so
+       commit_txn finalizes a transaction whose [ops] replay to the same
+       document — the checkpoint_equivalence gate (section 6). No-op when no
+       transaction is open (an op applied outside any bracket is not
+       journaled), so this is safe to call unconditionally from the
+       dispatcher. The ops are accumulated reversed and flipped at commit. *)
+    method record_op (op : Op_log.primitive_op) =
+      match pending_txn with
+      | Some (n, ops_rev, chk) -> pending_txn <- Some (n, op :: ops_rev, chk)
+      | None -> ()
+
+    (* Set the open transaction's artist/AI-legible name (an actions.yaml
+       verb). No-op when no transaction is open. *)
+    method name_txn (name : string) =
+      match pending_txn with
+      | Some (_, ops_rev, chk) -> pending_txn <- Some (Some name, ops_rev, chk)
+      | None -> ()
 
     method default_fill = default_fill
     method set_default_fill (f : Element.fill option) = default_fill <- f

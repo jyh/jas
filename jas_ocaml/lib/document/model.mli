@@ -57,6 +57,43 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
   method mark_saved : unit
   method can_undo : bool
   method can_redo : bool
+
+  (** The Transaction journal (OP_LOG.md Increment 2, full journal). The
+      ordered transaction list, built by {!begin_txn} / {!commit_txn} /
+      {!record_op} (the op_apply / harness path). Test/inspection accessor. *)
+  method journal : Op_log.transaction list
+
+  (** The journal cursor — the count of transactions currently applied
+      (0..=journal length). {!commit_txn} truncates the journal here and
+      appends; {!undo} / {!redo} move it. Drives {!is_modified}. *)
+  method journal_head : int
+
+  (** Open an undoable transaction: push the pre-edit checkpoint onto the undo
+      stack (like {!snapshot} but WITHOUT clearing redo — that moves to
+      {!commit_txn}). Idempotent while a transaction is already open. *)
+  method begin_txn : unit
+
+  (** Finalize the open transaction. No-op rule (OP_LOG.md section 5/9): a
+      zero-net-change transaction is not journaled and its undo checkpoint is
+      dropped. Otherwise append one transaction (the deterministic [txn-N]
+      id), truncating the journal's redo tail at {!journal_head}, and clear
+      redo. No-op when no transaction is open. *)
+  method commit_txn : unit
+
+  (** Roll back the open transaction to its checkpoint, discarding it (no redo
+      entry, no journal entry, no cursor move). *)
+  method abort_txn : unit
+
+  (** Run the body inside a transaction: {!begin_txn}, body, {!commit_txn}. *)
+  method with_txn : (unit -> unit) -> unit
+
+  (** Append a primitive op to the open transaction's record (OP_LOG.md
+      section 5). No-op when no transaction is open. *)
+  method record_op : Op_log.primitive_op -> unit
+
+  (** Set the open transaction's artist/AI-legible name (an actions.yaml
+      verb). No-op when no transaction is open. *)
+  method name_txn : string -> unit
   method default_fill : Element.fill option
   method set_default_fill : Element.fill option -> unit
   method default_stroke : Element.stroke option
