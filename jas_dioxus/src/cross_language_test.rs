@@ -1222,6 +1222,71 @@ mod tests {
         }
     }
 
+    /// Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4): pins
+    /// the reserved causal/merge metadata (txn_id/name/actor/parent/lamport/
+    /// label) + each op's verb and targets across apps. Fixed key order (sorted)
+    /// + deterministic `txn-N` ids make it byte-shareable. ops carry the verb +
+    /// targets only (not the flat params, which the operations fixtures already
+    /// pin via the document gate).
+    fn journal_to_test_json(journal: &[crate::document::op_log::Transaction]) -> String {
+        fn opt(s: &Option<String>) -> String {
+            match s {
+                Some(v) => format!("\"{v}\""),
+                None => "null".to_string(),
+            }
+        }
+        let txns: Vec<String> = journal
+            .iter()
+            .map(|t| {
+                let ops: Vec<String> = t
+                    .ops
+                    .iter()
+                    .map(|o| {
+                        let targets: Vec<String> =
+                            o.targets.iter().map(|x| format!("\"{x}\"")).collect();
+                        format!("{{\"op\":\"{}\",\"targets\":[{}]}}", o.op, targets.join(","))
+                    })
+                    .collect();
+                format!(
+                    "{{\"actor\":\"{}\",\"label\":{},\"lamport\":{},\"name\":{},\
+                     \"ops\":[{}],\"parent\":{},\"txn_id\":\"{}\"}}",
+                    t.actor,
+                    opt(&t.label),
+                    t.lamport,
+                    opt(&t.name),
+                    ops.join(","),
+                    opt(&t.parent),
+                    t.txn_id,
+                )
+            })
+            .collect();
+        format!("[{}]", txns.join(","))
+    }
+
+    fn assert_journal_metadata(tc: &serde_json::Value) {
+        let model = run_operation_model(tc);
+        let actual = journal_to_test_json(model.journal());
+        let expected_file = tc["expected_journal_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("operations/{expected_file}"));
+        let expected = expected.trim();
+        if actual != expected {
+            eprintln!("=== EXPECTED journal ===\n{expected}");
+            eprintln!("=== ACTUAL journal ===\n{actual}");
+            panic!("txn_metadata journal JSON mismatch");
+        }
+    }
+
+    /// OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
+    /// byte-identically across apps (deterministic txn-N counter + parent edge).
+    #[test]
+    fn journal_txn_metadata() {
+        let json_str = read_fixture("operations/txn_metadata.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        for tc in tests.as_array().unwrap() {
+            assert_journal_metadata(tc);
+        }
+    }
+
     #[test]
     fn operation_select_and_move() {
         run_operation_fixture("operations/select_and_move.json");

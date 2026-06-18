@@ -619,6 +619,49 @@ private func runOperationFixture(_ fixture: String) throws {
     try runOperationFixture("boolean_ops.json")
 }
 
+/// Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4): pins the
+/// reserved causal/merge metadata + each op's verb and targets across apps.
+/// Fixed key order + deterministic txn-N ids make it byte-shareable. Mirrors
+/// journal_to_test_json in the other apps' harnesses.
+private func journalToTestJson(_ journal: [Transaction]) -> String {
+    func opt(_ s: String?) -> String { s.map { "\"\($0)\"" } ?? "null" }
+    let txns = journal.map { (t: Transaction) -> String in
+        let ops = t.ops.map { (o: PrimitiveOp) -> String in
+            let targets = o.targets.map { "\"\($0)\"" }.joined(separator: ",")
+            return "{\"op\":\"\(o.op)\",\"targets\":[\(targets)]}"
+        }.joined(separator: ",")
+        return "{\"actor\":\"\(t.actor)\",\"label\":\(opt(t.label)),"
+            + "\"lamport\":\(t.lamport),\"name\":\(opt(t.name)),"
+            + "\"ops\":[\(ops)],\"parent\":\(opt(t.parent)),\"txn_id\":\"\(t.txnId)\"}"
+    }.joined(separator: ",")
+    return "[\(txns)]"
+}
+
+/// OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
+/// byte-identically across apps (deterministic txn-N counter + parent edge).
+@Test func journalTxnMetadata() throws {
+    let json = readFixture("operations/txn_metadata.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    for tc in tests {
+        let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+        let model = Model(document: svgToDocument(svg))
+        let controller = Controller(model: model)
+        for txn in (tc["txns"] as! [[String: Any]]) {
+            model.beginTxn()
+            if let n = txn["name"] as? String { model.nameTxn(n) }
+            for op in (txn["ops"] as! [[String: Any]]) {
+                applyFixtureOp(model, controller, op)
+                model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
+            }
+            model.commitTxn()
+        }
+        let actual = journalToTestJson(model.journal)
+        let expected = readFixture("operations/\(tc["expected_journal_json"] as! String)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(actual == expected, "txn_metadata journal JSON mismatch")
+    }
+}
+
 // MARK: - Workspace layout equivalence tests
 
 private func assertWorkspaceFixture(_ name: String, _ json: String) {

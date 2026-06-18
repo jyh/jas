@@ -443,6 +443,47 @@ class CrossLanguageTest(absltest.TestCase):
         # to the snapshot-path document.
         self._run_operation_fixture("boolean_ops.json")
 
+    @staticmethod
+    def _journal_to_test_json(journal):
+        # Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4):
+        # fixed (sorted) key order + deterministic txn-N ids -> byte-shareable.
+        # Mirrors journal_to_test_json in the other apps' harnesses.
+        def opt(s):
+            return f'"{s}"' if s is not None else "null"
+        txns = []
+        for t in journal:
+            ops = []
+            for o in t.ops:
+                targets = ",".join(f'"{x}"' for x in o.targets)
+                ops.append(f'{{"op":"{o.op}","targets":[{targets}]}}')
+            txns.append(
+                f'{{"actor":"{t.actor}","label":{opt(t.label)},'
+                f'"lamport":{t.lamport},"name":{opt(t.name)},'
+                f'"ops":[{",".join(ops)}],"parent":{opt(t.parent)},'
+                f'"txn_id":"{t.txn_id}"}}')
+        return "[" + ",".join(txns) + "]"
+
+    def test_journal_txn_metadata(self):
+        # OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
+        # byte-identically across apps (deterministic txn-N counter + parent).
+        for tc in json.loads(_read_fixture("operations/txn_metadata.json")):
+            svg = _read_fixture(f"svg/{tc['setup_svg']}")
+            model = Model(document=svg_to_document(svg))
+            ctrl = Controller(model=model)
+            for txn in tc["txns"]:
+                model.begin_txn()
+                if "name" in txn:
+                    model.name_txn(txn["name"])
+                for op in txn["ops"]:
+                    self._apply_op(model, ctrl, op)
+                    model.record_op(PrimitiveOp(op=op["op"], params=op))
+                model.commit_txn()
+            actual = self._journal_to_test_json(model.journal)
+            expected = _read_fixture(
+                f"operations/{tc['expected_journal_json']}").strip()
+            self.assertEqual(actual, expected,
+                f"txn_metadata journal JSON mismatch for '{tc['name']}'")
+
     def test_assign_id_on_compound(self):
         # Regression for the reachable equivalence bug: assign_id does
         # replace(elem, id=id), which on a CompoundShape used to raise
