@@ -1532,6 +1532,197 @@ class ReferenceElem(LiveElement):
         return (0.0, 0.0, 0.0, 0.0)
 
 
+@dataclass(frozen=True)
+class RecordedElem(LiveElement):
+    """A recorded (history-based) live element (RECORDED_ELEMENTS.md): a
+    normalized, input-addressed op-segment captured from the journal,
+    replayed against the *current* inputs to produce derived geometry.
+    Edit a source input and the derivative re-derives live. This is the
+    op-log spine made visible (RECORDED_ELEMENTS.md §intro).
+
+    It stores ``ops`` (the normalized recipe, replayed verbatim in order)
+    and ``inputs`` (the source element ids the recipe rebinds against, by
+    stable id), like a reference's by-id ``dependencies()`` edges rather
+    than owned operands. Output (produced) elements are keyed by capture-
+    stable ``$0``, ``$1``, … handles in production order, so the recipe is
+    independent of this element's own id (portable across re-id).
+
+    The recipe draws from a replay-safe subset of the op vocabulary
+    (input-addressed, side-effect-free). 3b-A.1 supports ``copy`` (clone
+    inputs at an offset, producing the output) and ``translate`` (move
+    named working elements). Mirrors the Rust ``RecordedElem``.
+    """
+    # The normalized, input-addressed recipe ops, replayed verbatim in order.
+    ops: tuple["PrimitiveOp", ...] = ()
+    # Source element ids the recipe rebinds against (by stable id). These are
+    # the by-id ``dependencies()`` edges, like a reference's target.
+    inputs: tuple[ElementRef, ...] = ()
+    # Own paint. None until the paint forks wire it, like a reference.
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    # Common props, mirroring the Rust RecordedElem's ``common``. A recorded
+    # element is a first-class element that can itself be a reference target
+    # (REFERENCE_GRAPH.md §4), so it needs its own id.
+    id: str | None = None
+    name: str | None = None
+    opacity: float = 1.0
+    transform: Transform | None = None
+    locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
+
+    def evaluate_with(self, precision: float, resolver: ElementResolver,
+                      visiting: set):
+        """Replay the recipe against the resolved inputs and return the
+        derived output geometry. A dangling input or a cycle (an input
+        already being visited) yields an empty set — never an error
+        (REFERENCE_GRAPH.md §3). Replay is a pure, deterministic function
+        of the inputs (OP_LOG.md §7). Mirrors the Rust
+        ``RecordedElem::evaluate_with``.
+        """
+        from geometry.live import element_to_polygon_set
+
+        # Resolve inputs into a working set keyed by stable id. A cycle breaks
+        # to empty at the re-entry edge; a dangling input yields empty.
+        working: dict[str, Element] = {}
+        for ref in self.inputs:
+            if ref in visiting:
+                return []  # cycle: break at the re-entry edge
+            el = resolver.resolve(ref)
+            if el is None:
+                return []  # dangling: input not found
+            working[ref] = el
+
+        # Replay. Derived (produced) elements are keyed by a capture-stable
+        # production-index handle ``$n``, so the recipe is independent of this
+        # element's own id. Geometry replay here needs only the internal handle.
+        output_ids: list[str] = []
+        counter = 0
+
+        def _str_ids(v) -> list[str]:
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, str)]
+            return []
+
+        def _num(params: dict, k: str) -> float:
+            val = params.get(k)
+            return float(val) if isinstance(val, (int, float)) else 0.0
+
+        for op in self.ops:
+            if op.op == "copy":
+                dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+                for src in _str_ids(op.params.get("from")):
+                    el = working.get(src)
+                    if el is not None:
+                        derived_id = f"${counter}"
+                        counter += 1
+                        working[derived_id] = translate_element(el, dx, dy)
+                        output_ids.append(derived_id)
+            elif op.op == "translate":
+                dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+                for eid in _str_ids(op.params.get("ids")):
+                    el = working.get(eid)
+                    if el is not None:
+                        working[eid] = translate_element(el, dx, dy)
+            # Else: outside the replay-safe subset — skip.
+
+        # Output = the derived elements' geometry, in derivation order.
+        # Flatten each produced element through the NullResolver / fresh-visiting
+        # form (Rust uses element_to_polygon_set(el, precision)), NOT the live
+        # resolver/visiting: the recipe already resolved every input by id above,
+        # so an input that itself resolved to a live element stays unexpanded on
+        # replay — matching the Rust reference exactly (live.rs evaluate_with).
+        out: list = []
+        for eid in output_ids:
+            el = working.get(eid)
+            if el is not None:
+                out.extend(element_to_polygon_set(el, precision))
+        return out
+
+    def dependencies(self) -> list[ElementRef]:
+        """A recorded element's by-id inputs are the recipe's source ids."""
+        return list(self.inputs)
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Resolver-free bounds are degenerate (geometry is replayed from
+        inputs); resolver-aware bounds land with the render wiring, like a
+        reference. Mirrors the Rust placeholder."""
+        return (0.0, 0.0, 0.0, 0.0)
+
+
+def translate_element(elem: Element, dx: float, dy: float) -> Element:
+    """Translate a whole element by (dx, dy), recursing into Group/Layer
+    children and CompoundShape operands. A reference / recorded element has
+    no geometry of its own to translate; its move rides on ``transform``.
+    Mirrors the Rust ``translate_element``.
+    """
+    from dataclasses import replace
+    if isinstance(elem, Line):
+        return replace(elem, x1=elem.x1 + dx, y1=elem.y1 + dy,
+                       x2=elem.x2 + dx, y2=elem.y2 + dy)
+    if isinstance(elem, Rect):
+        return replace(elem, x=elem.x + dx, y=elem.y + dy)
+    if isinstance(elem, Circle):
+        return replace(elem, cx=elem.cx + dx, cy=elem.cy + dy)
+    if isinstance(elem, Ellipse):
+        return replace(elem, cx=elem.cx + dx, cy=elem.cy + dy)
+    if isinstance(elem, Polyline):
+        return replace(elem,
+                       points=tuple((x + dx, y + dy) for x, y in elem.points))
+    if isinstance(elem, Polygon):
+        return replace(elem,
+                       points=tuple((x + dx, y + dy) for x, y in elem.points))
+    if isinstance(elem, (Path, TextPath)):
+        return replace(elem, d=_translate_path_commands(elem.d, dx, dy))
+    if isinstance(elem, Text):
+        return replace(elem, x=elem.x + dx, y=elem.y + dy)
+    if isinstance(elem, (Group, Layer)):  # Layer is a Group subclass
+        return replace(elem,
+                       children=tuple(translate_element(c, dx, dy)
+                                      for c in elem.children))
+    if isinstance(elem, CompoundShape):
+        return replace(elem,
+                       operands=tuple(translate_element(c, dx, dy)
+                                      for c in elem.operands))
+    if isinstance(elem, (ReferenceElem, RecordedElem)):
+        existing = elem.transform if elem.transform is not None else Transform()
+        return replace(elem, transform=replace(
+            existing, e=existing.e + dx, f=existing.f + dy))
+    return elem
+
+
+def _translate_path_commands(d, dx: float, dy: float):
+    """Offset every coordinate in a path-command tuple by (dx, dy). Arc
+    radii / flags are unchanged; only the endpoint moves (matching the Rust
+    ``translate_path_commands``)."""
+    out = []
+    for cmd in d:
+        if isinstance(cmd, MoveTo):
+            out.append(MoveTo(cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, LineTo):
+            out.append(LineTo(cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, CurveTo):
+            out.append(CurveTo(cmd.x1 + dx, cmd.y1 + dy,
+                               cmd.x2 + dx, cmd.y2 + dy,
+                               cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, SmoothCurveTo):
+            out.append(SmoothCurveTo(cmd.x2 + dx, cmd.y2 + dy,
+                                     cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, QuadTo):
+            out.append(QuadTo(cmd.x1 + dx, cmd.y1 + dy,
+                              cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, SmoothQuadTo):
+            out.append(SmoothQuadTo(cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, ArcTo):
+            out.append(ArcTo(cmd.rx, cmd.ry, cmd.x_rotation,
+                             cmd.large_arc, cmd.sweep,
+                             cmd.x + dx, cmd.y + dy))
+        elif isinstance(cmd, ClosePath):
+            out.append(ClosePath())
+    return tuple(out)
+
+
 def sync_tspans_from_content(element: Element) -> Element:
     """Rebuild a Text / TextPath element's ``tspans`` field from its
     ``content`` field. The resulting tuple has a single entry with

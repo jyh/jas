@@ -16,7 +16,8 @@ from geometry.element import (
     ArcTo, Circle, ClosePath, Color, RgbColor, CompoundOperation,
     CompoundShape, CurveTo, Element,
     Ellipse, Fill, Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
-    PathCommand, Polygon, Polyline, QuadTo, Rect, ReferenceElem, SmoothCurveTo,
+    PathCommand, Polygon, Polyline, QuadTo, Rect, RecordedElem, ReferenceElem,
+    SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
 
@@ -462,6 +463,19 @@ def _element_svg(elem: Element, indent: str) -> str:
                      f'{_id_attr(eid)}'
                      f'{_instance_transform_attr(instance_transform)}')
             return f'{indent}<use href="#{escape(target)}"{attrs}/>'
+
+        case RecordedElem(inputs=inputs, opacity=opacity,
+                          transform=transform, id=eid):
+            # A recorded element exports as a data-jas-live group carrying the
+            # recipe's input ids. Full SVG round-trip (the ops) is deferred
+            # (RECORDED_ELEMENTS.md §8); no current fixture exercises it.
+            # Mirror Rust common_attrs_no_name: opacity + transform + id, no
+            # name (live elements never emit inkscape:label).
+            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                     f'{_id_attr(eid)}')
+            joined = ",".join(inputs)
+            return (f'{indent}<g data-jas-live="recorded"'
+                    f' data-jas-inputs="{escape(joined)}"{attrs}></g>')
 
     return ""
 

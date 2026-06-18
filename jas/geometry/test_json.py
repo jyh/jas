@@ -21,7 +21,7 @@ from geometry.element import (
     LineCap, LineJoin,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
-    CompoundOperation, CompoundShape, ReferenceElem,
+    CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -86,6 +86,30 @@ class _JsonObj:
 
 def _json_array(items: list[str]) -> str:
     return "[" + ",".join(items) + "]"
+
+
+def _canonical_value(v) -> str:
+    """Canonical JSON of an arbitrary JSON-ish value (sorted object keys,
+    fixed floats via ``_fmt``), so a recorded element's recipe ``params``
+    serialize byte-identically (RECORDED_ELEMENTS.md §8 / OP_LOG.md §5
+    canonicalization). Mirrors the Rust ``canonical_value``."""
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return _fmt(float(v))
+    if isinstance(v, str):
+        escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(v, (list, tuple)):
+        return _json_array([_canonical_value(x) for x in v])
+    if isinstance(v, dict):
+        keys = sorted(v.keys())
+        entries = [f'{_canonical_value(k)}:{_canonical_value(v[k])}'
+                   for k in keys]
+        return "{" + ",".join(entries) + "}"
+    raise ValueError(f"Uncanonicalizable value: {v!r}")
 
 
 # ------------------------------------------------------------------ #
@@ -482,6 +506,23 @@ def _element_json(elem: Element) -> str:
         _common_fields(o, elem)
         children = [_element_json(c) for c in elem.operands]
         o.raw("children", _json_array(children))
+    elif isinstance(elem, RecordedElem):
+        # RECORDED_ELEMENTS.md §8: type=live + kind=recorded, plus the
+        # by-id inputs and the normalized recipe ops, canonicalized so the
+        # recorded element serializes byte-identically across apps.
+        o.str("type", "live")
+        o.str("kind", "recorded")
+        _common_fields(o, elem)
+        inputs = [_canonical_value(i) for i in elem.inputs]
+        o.raw("inputs", _json_array(inputs))
+        ops = []
+        for op in elem.ops:
+            targets = _json_array([_canonical_value(t) for t in op.targets])
+            ops.append(
+                f'{{"op":{_canonical_value(op.op)},'
+                f'"params":{_canonical_value(op.params)},'
+                f'"targets":{targets}}}')
+        o.raw("ops", _json_array(ops))
     return o.build()
 
 
@@ -992,6 +1033,17 @@ def _parse_element(d: dict) -> Element:
                 target=d.get("target", ""),
                 instance_transform=_parse_transform(d.get("instance_transform")),
                 **common)
+        elif kind == "recorded":
+            # RecordedElem is a first-class element with its own id / name,
+            # so it accepts the full common kwargs (RECORDED_ELEMENTS.md §8).
+            from document.op_log import PrimitiveOp
+            ops = tuple(
+                PrimitiveOp(op=o["op"],
+                            params=dict(o.get("params", {})),
+                            targets=list(o.get("targets", [])))
+                for o in d.get("ops", []))
+            inputs = tuple(d.get("inputs", []))
+            return RecordedElem(ops=ops, inputs=inputs, **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 

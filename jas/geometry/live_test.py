@@ -173,6 +173,121 @@ class _MapResolver:
         return self._mapping.get(ref)
 
 
+def test_recorded_replays_copy_translate_and_re_derives_when_input_changes():
+    # Recipe: copy the input "eye", then translate that derived copy +50x.
+    # The derived copy is the recorded element's output; editing the source
+    # eye must re-derive it live. Mirrors the Rust live.rs test.
+    from document.op_log import PrimitiveOp
+    from geometry.element import RecordedElem
+    from geometry.live import DEFAULT_PRECISION
+    recipe = (
+        PrimitiveOp(op="copy", params={"from": ["eye"], "dx": 0.0, "dy": 0.0}),
+        PrimitiveOp(op="translate", params={"ids": ["$0"], "dx": 50.0, "dy": 0.0}),
+    )
+    recorded = RecordedElem(ops=recipe, inputs=("eye",), id="rec")
+
+    # Source eye at (0,0,10,10) → derived copy translated +50 → bbox [50,60].
+    resolver = _MapResolver({"eye": _rect_at(0, 0)})
+    visiting = set()
+    ps = recorded.evaluate_with(DEFAULT_PRECISION, resolver, visiting)
+    assert len(ps) == 1, "one derived output element"
+    min_x, _, max_x, _ = _bbox(ps[0])
+    assert abs(min_x - 50.0) < 1e-6 and abs(max_x - 60.0) < 1e-6
+    assert visiting == set()
+
+    # Edit the source eye (move to x=100) → the derived copy follows.
+    resolver2 = _MapResolver({"eye": _rect_at(100, 0)})
+    ps2 = recorded.evaluate_with(DEFAULT_PRECISION, resolver2, set())
+    min_x2, _, max_x2, _ = _bbox(ps2[0])
+    assert abs(min_x2 - 150.0) < 1e-6 and abs(max_x2 - 160.0) < 1e-6, (
+        "derived copy re-derived against the edited source")
+
+
+def test_recorded_dangling_input_evaluates_empty():
+    from document.op_log import PrimitiveOp
+    from geometry.element import NullResolver, RecordedElem
+    from geometry.live import DEFAULT_PRECISION
+    recipe = (
+        PrimitiveOp(op="copy", params={"from": ["x"], "dx": 0.0, "dy": 0.0}),
+    )
+    recorded = RecordedElem(ops=recipe, inputs=("x",))
+    ps = recorded.evaluate_with(DEFAULT_PRECISION, NullResolver(), set())
+    assert ps == []  # dangling input evaluates empty, never errors
+
+
+def test_recorded_reports_its_inputs_as_dependencies():
+    from document.op_log import PrimitiveOp
+    from geometry.element import RecordedElem
+    recipe = (
+        PrimitiveOp(op="copy", params={"from": ["eye"], "dx": 0.0, "dy": 0.0}),
+    )
+    recorded = RecordedElem(ops=recipe, inputs=("eye",))
+    assert recorded.dependencies() == ["eye"]
+
+
+def test_recorded_live_round_trips_and_serializes():
+    # A RecordedElem in a document survives the binary codec round-trip and
+    # serializes the recorded kind + recipe via test_json. Mirrors the Rust
+    # live.rs round-trip test.
+    from document.document import Document
+    from document.op_log import PrimitiveOp
+    from geometry.binary import binary_to_document, document_to_binary
+    from geometry.element import Layer, RecordedElem
+    from geometry.test_json import document_to_test_json
+    recipe = (
+        PrimitiveOp(op="copy", params={"from": ["eye"], "dx": 0.0, "dy": 0.0}),
+        PrimitiveOp(op="translate", params={"ids": ["$0"], "dx": 50.0, "dy": 0.0}),
+    )
+    rec = RecordedElem(ops=recipe, inputs=("eye",), id="rec")
+    layer = Layer(name=None, children=(rec,))
+    # No artboards, so the round-trip comparison isolates the recorded element.
+    doc = Document(layers=(layer,), artboards=())
+
+    json = document_to_test_json(doc)
+    assert '"kind":"recorded"' in json, "serializes kind=recorded"
+    assert '"inputs":["eye"]' in json, "serializes the input ids"
+    assert '"op":"copy"' in json, "serializes the recipe ops"
+
+    bytes_ = document_to_binary(doc, compress=False)
+    back = binary_to_document(bytes_)
+    assert document_to_test_json(back) == json, (
+        "recorded element survives the binary round-trip")
+
+
+def test_capture_recipe_normalizes_select_copy_move_to_input_addressed():
+    # A captured journal segment ("watch what I did"): select the eye, copy
+    # it, move the copy. select_rect carries its resolved targets (the
+    # selected ids), as the op-capture path will populate. Mirrors the Rust
+    # live.rs capture_recipe test.
+    from document.op_log import PrimitiveOp
+    from geometry.element import RecordedElem
+    from geometry.live import DEFAULT_PRECISION, capture_recipe
+    segment = [
+        PrimitiveOp(op="select_rect", params={}, targets=["eye"]),
+        PrimitiveOp(op="copy_selection", params={"dx": 0.0, "dy": 0.0}),
+        PrimitiveOp(op="move_selection", params={"dx": 50.0, "dy": 0.0}),
+    ]
+    recipe, inputs = capture_recipe(segment)
+
+    # Normalized to the input-addressed recipe; the read element is the input.
+    assert inputs == ["eye"]
+    assert len(recipe) == 2
+    assert recipe[0].op == "copy"
+    assert recipe[0].params["from"] == ["eye"]
+    assert recipe[1].op == "translate"
+    assert recipe[1].params["ids"] == ["$0"], (
+        "the move targets the produced copy, not the input")
+
+    # The captured recipe replays + re-derives like the hand-built one.
+    recorded = RecordedElem(ops=tuple(recipe), inputs=tuple(inputs), id="rec")
+    resolver = _MapResolver({"eye": _rect_at(0, 0)})
+    ps = recorded.evaluate_with(DEFAULT_PRECISION, resolver, set())
+    assert len(ps) == 1
+    min_x, _, max_x, _ = _bbox(ps[0])
+    assert abs(min_x - 50.0) < 1e-6 and abs(max_x - 60.0) < 1e-6, (
+        "the captured recipe replays to the demonstrated output")
+
+
 def test_reference_evaluates_to_target_geometry():
     from geometry.element import ReferenceElem
     from geometry.live import DEFAULT_PRECISION

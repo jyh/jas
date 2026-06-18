@@ -441,6 +441,40 @@ class CrossLanguageTest(absltest.TestCase):
         # apps must reproduce.
         self._run_operation_fixture("symbols_ops.json")
 
+    @staticmethod
+    def _recorded_canonical_document():
+        # The canonical recorded-live-element document (RECORDED_ELEMENTS.md):
+        # a recorded element whose recipe copies its input "eye" and translates
+        # the copy +50x. Built identically in every app's harness, so its
+        # document_to_test_json serialization (the recipe + inputs) is the
+        # cross-language pin.
+        from document.document import Document
+        from geometry.element import Layer, RecordedElem
+        recipe = (
+            PrimitiveOp(op="copy",
+                        params={"from": ["eye"], "dx": 0.0, "dy": 0.0},
+                        targets=[]),
+            PrimitiveOp(op="translate",
+                        params={"ids": ["$0"], "dx": 50.0, "dy": 0.0},
+                        targets=[]),
+        )
+        rec = RecordedElem(ops=recipe, inputs=("eye",), id="rec")
+        layer = Layer(name=None, children=(rec,))
+        return Document(layers=(layer,), artboards=())
+
+    def test_recorded_cross_language(self):
+        # Cross-language pin (RECORDED_ELEMENTS.md §8): a recorded element's
+        # recipe + inputs serialize byte-identically across the native apps.
+        actual = document_to_test_json(self._recorded_canonical_document())
+        expected = _read_fixture("operations/recorded_eye.json")
+        if actual != expected:
+            print("=== EXPECTED (recorded_eye) ===")
+            print(expected)
+            print("=== ACTUAL (recorded_eye) ===")
+            print(actual)
+        self.assertEqual(actual, expected,
+            "recorded cross-language serialization mismatch")
+
     def test_operation_boolean_ops(self):
         # Boolean grouping (OP_LOG.md §10 item 3): boolean_union + post-op
         # simplify are one transaction; the gate pins that the journal replays
