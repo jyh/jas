@@ -542,6 +542,19 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     inst_xform,
                 )
             }
+            crate::geometry::live::LiveVariant::Recorded(rec) => {
+                // Recorded elements export as a data-jas-live group carrying the
+                // recipe's input ids. Full SVG round-trip (the ops) is deferred
+                // (RECORDED_ELEMENTS.md §8); no current fixture exercises it.
+                let inputs = rec.inputs.iter()
+                    .map(|i| i.0.as_str()).collect::<Vec<_>>().join(",");
+                format!(
+                    "{}<g data-jas-live=\"recorded\" data-jas-inputs=\"{}\"{}></g>",
+                    indent,
+                    escape_xml(&inputs),
+                    common_attrs_no_name(&rec.common),
+                )
+            }
         },
     }
 }

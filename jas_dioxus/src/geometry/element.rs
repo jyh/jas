@@ -2778,6 +2778,14 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
                 new_r.common.transform = Some(existing.translated(dx, dy));
                 Element::Live(super::live::LiveVariant::Reference(new_r))
             }
+            // A recorded element's geometry is replayed from its inputs; its
+            // own move rides on common.transform, like a reference.
+            super::live::LiveVariant::Recorded(rec) => {
+                let mut new_rec = rec.clone();
+                let existing = new_rec.common.transform.unwrap_or_default();
+                new_rec.common.transform = Some(existing.translated(dx, dy));
+                Element::Live(super::live::LiveVariant::Recorded(new_rec))
+            }
         },
     }
 }
@@ -2839,6 +2847,12 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
                     ..r.clone()
                 }),
             ),
+            super::live::LiveVariant::Recorded(rec) => Element::Live(
+                super::live::LiveVariant::Recorded(super::live::RecordedElem {
+                    fill,
+                    ..rec.clone()
+                }),
+            ),
         },
     }
 }
@@ -2887,6 +2901,12 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
                 super::live::LiveVariant::Reference(super::live::ReferenceElem {
                     stroke,
                     ..r.clone()
+                }),
+            ),
+            super::live::LiveVariant::Recorded(rec) => Element::Live(
+                super::live::LiveVariant::Recorded(super::live::RecordedElem {
+                    stroke,
+                    ..rec.clone()
                 }),
             ),
         },

@@ -630,6 +630,27 @@ impl RecordedElem {
     }
 }
 
+impl LiveElement for RecordedElem {
+    fn kind(&self) -> &'static str { "recorded" }
+    fn kind_schema_version(&self) -> u32 { 1 }
+    fn common(&self) -> &CommonProps { &self.common }
+    fn common_mut(&mut self) -> &mut CommonProps { &mut self.common }
+    fn fill(&self) -> Option<&Fill> { self.fill.as_ref() }
+    fn stroke(&self) -> Option<&Stroke> { self.stroke.as_ref() }
+    /// A recorded element owns no children — its inputs are by-id edges (see
+    /// `dependencies`), like a reference.
+    fn children(&self) -> &[Rc<Element>] { &[] }
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> { None }
+    fn dependencies(&self) -> Vec<ElementRef> { self.inputs.clone() }
+    /// Resolver-free bounds are degenerate (geometry is replayed from inputs);
+    /// resolver-aware bounds land with the render wiring, like ReferenceElem.
+    fn bounds(&self) -> Bounds { (0.0, 0.0, 0.0, 0.0) }
+    /// Expand/release are no-ops until the resolver-aware expand path lands
+    /// (mirrors ReferenceElem — a recorded element owns no static source tree).
+    fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
+    fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
+}
+
 // ---------------------------------------------------------------------------
 // LiveVariant — closed-world enum over the known LiveKinds
 // ---------------------------------------------------------------------------
@@ -642,6 +663,7 @@ impl RecordedElem {
 pub enum LiveVariant {
     CompoundShape(CompoundShape),
     Reference(ReferenceElem),
+    Recorded(RecordedElem),
 }
 
 impl LiveElement for LiveVariant {
@@ -649,78 +671,91 @@ impl LiveElement for LiveVariant {
         match self {
             LiveVariant::CompoundShape(cs) => cs.kind(),
             LiveVariant::Reference(r) => r.kind(),
+            LiveVariant::Recorded(rec) => rec.kind(),
         }
     }
     fn kind_schema_version(&self) -> u32 {
         match self {
             LiveVariant::CompoundShape(cs) => cs.kind_schema_version(),
             LiveVariant::Reference(r) => r.kind_schema_version(),
+            LiveVariant::Recorded(rec) => rec.kind_schema_version(),
         }
     }
     fn common(&self) -> &CommonProps {
         match self {
             LiveVariant::CompoundShape(cs) => cs.common(),
             LiveVariant::Reference(r) => r.common(),
+            LiveVariant::Recorded(rec) => rec.common(),
         }
     }
     fn common_mut(&mut self) -> &mut CommonProps {
         match self {
             LiveVariant::CompoundShape(cs) => cs.common_mut(),
             LiveVariant::Reference(r) => r.common_mut(),
+            LiveVariant::Recorded(rec) => rec.common_mut(),
         }
     }
     fn fill(&self) -> Option<&Fill> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.fill(),
             LiveVariant::Reference(r) => r.fill(),
+            LiveVariant::Recorded(rec) => rec.fill(),
         }
     }
     fn stroke(&self) -> Option<&Stroke> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.stroke(),
             LiveVariant::Reference(r) => r.stroke(),
+            LiveVariant::Recorded(rec) => rec.stroke(),
         }
     }
     fn children(&self) -> &[Rc<Element>] {
         match self {
             LiveVariant::CompoundShape(cs) => cs.children(),
             LiveVariant::Reference(r) => r.children(),
+            LiveVariant::Recorded(rec) => rec.children(),
         }
     }
     fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.children_mut(),
             LiveVariant::Reference(r) => r.children_mut(),
+            LiveVariant::Recorded(rec) => rec.children_mut(),
         }
     }
     fn dependencies(&self) -> Vec<ElementRef> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.dependencies(),
             LiveVariant::Reference(r) => r.dependencies(),
+            LiveVariant::Recorded(rec) => rec.dependencies(),
         }
     }
     fn bounds(&self) -> Bounds {
         match self {
             LiveVariant::CompoundShape(cs) => cs.bounds(),
             LiveVariant::Reference(r) => r.bounds(),
+            LiveVariant::Recorded(rec) => rec.bounds(),
         }
     }
     fn invalidate(&mut self) {
         match self {
             LiveVariant::CompoundShape(cs) => cs.invalidate(),
             LiveVariant::Reference(r) => r.invalidate(),
+            LiveVariant::Recorded(rec) => rec.invalidate(),
         }
     }
     fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.expand(precision),
             LiveVariant::Reference(r) => r.expand(precision),
+            LiveVariant::Recorded(rec) => rec.expand(precision),
         }
     }
     fn release(&self) -> Vec<Rc<Element>> {
         match self {
             LiveVariant::CompoundShape(cs) => cs.release(),
             LiveVariant::Reference(r) => r.release(),
+            LiveVariant::Recorded(rec) => rec.release(),
         }
     }
 }
@@ -786,6 +821,7 @@ pub(crate) fn element_to_polygon_set_with(
         Element::Live(v) => match v {
             LiveVariant::CompoundShape(cs) => cs.evaluate_with(precision, resolver, visiting),
             LiveVariant::Reference(r) => r.evaluate_with(precision, resolver, visiting),
+            LiveVariant::Recorded(rec) => rec.evaluate_with(precision, resolver, visiting),
         },
         Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
         Element::TextPath(tp) => {
@@ -1310,6 +1346,44 @@ mod tests {
         let mut visiting = VisitSet::new();
         let ps = recorded.evaluate_with(DEFAULT_PRECISION, &NullResolver, &mut visiting);
         assert!(ps.is_empty(), "dangling input evaluates empty, never panics");
+    }
+
+    #[test]
+    fn recorded_live_variant_round_trips_and_serializes() {
+        // RecordedElem as a real LiveVariant in a document: it survives the
+        // binary codec round-trip and serializes the recorded kind + recipe via
+        // test_json (Document is not PartialEq, so compare the canonical JSON).
+        use crate::document::document::Document;
+        use crate::geometry::binary::{binary_to_document, document_to_binary};
+        use crate::geometry::element::LayerElem;
+        use crate::geometry::test_json::document_to_test_json;
+
+        let recipe = vec![
+            recorded_op("copy", serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0})),
+            recorded_op("translate", serde_json::json!({"ids": ["rec/0"], "dx": 50.0, "dy": 0.0})),
+        ];
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let rec = RecordedElem::new(recipe, vec![ElementRef("eye".into())], common);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Recorded(rec)))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        // No artboards, so the round-trip comparison isolates the recorded
+        // element (the default artboard's minted id is unrelated noise here).
+        let doc = Document { layers: vec![layer], artboards: vec![], ..Document::default() };
+
+        let json = document_to_test_json(&doc);
+        assert!(json.contains("\"kind\":\"recorded\""), "serializes kind=recorded");
+        assert!(json.contains("\"inputs\":[\"eye\"]"), "serializes the input ids");
+        assert!(json.contains("\"op\":\"copy\""), "serializes the recipe ops");
+
+        let bytes = document_to_binary(&doc, false);
+        let back = binary_to_document(&bytes).unwrap();
+        assert_eq!(document_to_test_json(&back), json,
+            "recorded element survives the binary round-trip");
     }
 
     #[test]

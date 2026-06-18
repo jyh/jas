@@ -148,6 +148,30 @@ fn json_array(items: &[String]) -> String {
     format!("[{}]", items.join(","))
 }
 
+/// Canonical JSON of an arbitrary serde_json value (sorted object keys, fixed
+/// floats via `fmt`), so a recorded element's recipe `params` serialize
+/// byte-identically (RECORDED_ELEMENTS.md §8 / OP_LOG.md §5 canonicalization).
+fn canonical_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => fmt(n.as_f64().unwrap_or(0.0)),
+        serde_json::Value::String(s) => format!("{s:?}"),
+        serde_json::Value::Array(a) => {
+            json_array(&a.iter().map(canonical_value).collect::<Vec<_>>())
+        }
+        serde_json::Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
+            let entries: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{:?}:{}", k, canonical_value(&m[*k])))
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Type serializers
 // ---------------------------------------------------------------------------
@@ -576,6 +600,25 @@ fn element_json(elem: &Element) -> String {
                 if r.transform.is_some() {
                     o.raw("instance_transform", transform_json(&r.transform));
                 }
+            }
+            crate::geometry::live::LiveVariant::Recorded(rec) => {
+                o.str_val("type", "live");
+                o.str_val("kind", "recorded");
+                common_fields(&mut o, &rec.common);
+                // Inputs (by id) and the normalized recipe ops, canonicalized so
+                // the recorded element serializes byte-identically across apps.
+                let inputs: Vec<String> =
+                    rec.inputs.iter().map(|i| format!("{:?}", i.0)).collect();
+                o.raw("inputs", json_array(&inputs));
+                let ops: Vec<String> = rec.ops.iter().map(|op| {
+                    let targets: Vec<String> =
+                        op.targets.iter().map(|t| format!("{t:?}")).collect();
+                    format!(
+                        "{{\"op\":{:?},\"params\":{},\"targets\":{}}}",
+                        op.op, canonical_value(&op.params), json_array(&targets)
+                    )
+                }).collect();
+                o.raw("ops", json_array(&ops));
             }
         },
     }
