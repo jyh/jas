@@ -98,6 +98,179 @@ import Testing
     #expect(model.document.layers.count == 1)
 }
 
+// MARK: - is_modified journal-head semantics (OP_LOG.md Increment 2 §5/§9)
+//
+// isModified is the journal-head cursor (journalHead != savedJournalHead), so
+// undo back to the saved point reads as not-modified. Mirrors the Python /
+// Rust model journal tests.
+
+@Test func modelIsModifiedDefaultFalse() {
+    #expect(!Model().isModified)
+}
+
+@Test func modelIsModifiedAfterCommittedEdit() {
+    let model = Model()
+    model.snapshot()
+    model.document = Document(layers: [])
+    #expect(model.isModified)
+}
+
+@Test func modelIsModifiedFalseAfterUndoBackToSaved() {
+    let model = Model()
+    model.markSaved()  // saved at journalHead 0
+    model.snapshot()
+    model.document = Document(layers: [])
+    #expect(model.isModified)
+    model.undo()
+    #expect(!model.isModified, "undo back to the saved point is not modified")
+    model.redo()
+    #expect(model.isModified, "redo past the saved point is modified again")
+}
+
+@Test func modelIsModifiedFalseAfterMarkSaved() {
+    let model = Model()
+    model.snapshot()
+    model.document = Document(layers: [])
+    #expect(model.isModified)
+    model.markSaved()
+    #expect(!model.isModified)
+}
+
+// MARK: - Transaction journal (OP_LOG.md Increment 2, full journal)
+//
+// beginTxn/commitTxn build the typed Transaction journal with deterministic
+// txn-N ids + the no-op rule. Mirrors the Python / Rust model journal tests:
+// per-net-change journaling, no-op not journaled, cursor + redo-tail drop,
+// txn-N ids + parent.
+
+@Test func modelCommitJournalsOneTransactionPerNetChange() {
+    let model = Model()
+    model.withTxn { model.document = Document(layers: []) }
+    #expect(model.journal.count == 1, "one committed edit = one transaction")
+    #expect(model.journalHeadValue == 1, "cursor advanced to the new transaction")
+    #expect(model.journal[0].txnId == "txn-0")
+}
+
+@Test func modelNoOpTransactionIsNotJournaled() {
+    let model = Model()
+    model.beginTxn()
+    model.commitTxn()  // no edit
+    #expect(model.journal.count == 0, "no-op is not journaled")
+    #expect(model.journalHeadValue == 0)
+    #expect(!model.canUndo, "no-op leaves no undo step")
+}
+
+@Test func modelNoOpTransactionNetIdenticalIsNotJournaled() {
+    // A write that nets back to the checkpoint document is also a no-op
+    // (compared via documentToTestJson — the canonical byte form).
+    let model = Model()
+    let checkpoint = model.document
+    model.withTxn {
+        model.document = Document(layers: [])
+        model.document = checkpoint  // back to the exact checkpoint
+    }
+    #expect(model.journal.count == 0, "net-identical transaction is not journaled")
+    #expect(!model.canUndo)
+    #expect(!model.isModified)
+}
+
+@Test func modelJournalCursorAndRedoTailDrop() {
+    let model = Model()
+    let l = Layer(name: "L1", children: [])
+    model.withTxn { model.document = Document(layers: [l]) }       // txn-0
+    model.withTxn { model.document = Document(layers: [l, l]) }    // txn-1
+    #expect(model.journal.map { $0.txnId } == ["txn-0", "txn-1"])
+    #expect(model.journal[0].parent == nil)
+    #expect(model.journal[1].parent == "txn-0")
+    model.undo()
+    #expect(model.journalHeadValue == 1)
+    // New commit after undo drops the redo tail and appends.
+    model.withTxn { model.document = Document(layers: []) }
+    #expect(model.journal.count == 2, "redo tail dropped, new txn appended")
+    #expect(model.journal[1].txnId == "txn-2", "counter keeps advancing")
+    #expect(!model.canRedo, "redo cleared on the new edit")
+}
+
+@Test func modelUndoAndRedoMoveTheJournalCursor() {
+    let model = Model()
+    let l = Layer(name: "A", children: [])
+    model.withTxn { model.document = Document(layers: []) }
+    model.withTxn { model.document = Document(layers: [l]) }
+    #expect(model.journalHeadValue == 2)
+    model.undo()
+    #expect(model.journalHeadValue == 1, "undo moves the cursor back")
+    model.undo()
+    #expect(model.journalHeadValue == 0)
+    // The journal itself is retained across undo (it is a cursor, not a
+    // high-water mark).
+    #expect(model.journal.count == 2)
+    model.redo()
+    #expect(model.journalHeadValue == 1, "redo moves the cursor forward")
+    model.redo()
+    #expect(model.journalHeadValue == 2)
+}
+
+@Test func modelBeginTxnIsIdempotentWhileOpen() {
+    // A session that calls beginTxn repeatedly pushes exactly ONE checkpoint
+    // and undoes in one step. Mirrors Rust `begin_txn_is_idempotent_while_open`.
+    let model = Model()
+    model.beginTxn()
+    model.document = Document(layers: [])
+    model.beginTxn()  // nested / repeated — no-op while open
+    model.document = Document(layers: [Layer(name: "L", children: [])])
+    model.commitTxn()
+    model.undo()
+    #expect(model.document.layers.count == 1,
+        "one undo step reverts the whole session")
+}
+
+@Test func modelRedoClearsAtCommitNotBegin() {
+    // The redo-clear lives in commitTxn(), not beginTxn(). Mirrors Rust
+    // `redo_clears_at_commit_not_begin`.
+    let model = Model()
+    model.withTxn { model.document = Document(layers: []) }
+    model.undo()
+    #expect(model.canRedo, "undo populates redo")
+    model.beginTxn()
+    #expect(model.canRedo, "beginTxn does NOT clear redo")
+    model.document = Document(layers: [])
+    model.commitTxn()
+    #expect(!model.canRedo, "commitTxn clears redo (new edit invalidates redo)")
+}
+
+@Test func modelAbortTxnRollsBackAndDoesNotJournal() {
+    // abortTxn rolls back to the checkpoint, discards the pending txn, and does
+    // not journal or move the cursor. Mirrors Rust `abort_*` tests.
+    let model = Model()
+    model.withTxn { model.document = Document(layers: []) }  // txn-0
+    let head = model.journalHeadValue
+    let len = model.journal.count
+    model.beginTxn()
+    model.document = Document(layers: [Layer(name: "Z", children: [])])
+    model.abortTxn()
+    #expect(model.journal.count == len, "aborted transaction is not journaled")
+    #expect(model.journalHeadValue == head, "cursor unmoved by abort")
+    #expect(model.document.layers.count == 0, "abort rolled back the edit")
+}
+
+@Test func modelRecordOpAndNameTxnPopulateTheTransaction() {
+    // recordOp appends to the open transaction; nameTxn names it. Both are
+    // no-ops outside a bracket. The recorded ops carry the raw params dict.
+    let model = Model()
+    model.beginTxn()
+    model.nameTxn("move")
+    model.document = Document(layers: [])
+    model.recordOp(PrimitiveOp(op: "select_rect",
+        params: ["op": "select_rect", "x": 0.0]))
+    model.recordOp(PrimitiveOp(op: "move_selection",
+        params: ["op": "move_selection", "dx": 10.0]))
+    model.commitTxn()
+    #expect(model.journal.count == 1)
+    #expect(model.journal[0].name == "move")
+    #expect(model.journal[0].ops.map { $0.op } == ["select_rect", "move_selection"])
+    #expect(model.journal[0].actor == "artist")
+}
+
 // MARK: - EditingTarget (Mask editor UI — OPACITY.md §Preview interactions)
 
 @Test func modelDefaultsToContentEditingTarget() {

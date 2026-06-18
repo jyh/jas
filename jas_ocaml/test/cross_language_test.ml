@@ -134,24 +134,15 @@ let assert_json_roundtrip name =
     assert false
   end
 
-let run_operation_fixture fixture_name =
-  let json_str = read_fixture (Printf.sprintf "operations/%s" fixture_name) in
-  let json = Yojson.Safe.from_string json_str in
-  let tests = Yojson.Safe.Util.to_list json in
-  List.iter (fun tc ->
-    let open Yojson.Safe.Util in
-    let name = tc |> member "name" |> to_string in
-    let setup_svg_file = tc |> member "setup_svg" |> to_string in
-    let expected_file = tc |> member "expected_json" |> to_string in
-    let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
-    let expected = read_fixture (Printf.sprintf "operations/%s" expected_file) in
-    let doc = Jas.Svg.svg_to_document svg in
-    let model = Jas.Model.create ~document:doc () in
-    let ctrl = Jas.Controller.create ~model () in
-    let apply_op op =
-      let to_num j = try to_float j with _ -> float_of_int (to_int j) in
-      let op_name = op |> member "op" |> to_string in
-      match op_name with
+(* Apply one fixture op to [model] / [ctrl]. Top-level (taking the model and
+   controller explicitly) so the checkpoint_equivalence gate can replay a
+   transaction's recorded ops into a FRESH model with the identical dispatch.
+   OP_LOG.md section 6. *)
+let apply_op (model : Jas.Model.model) (ctrl : Jas.Controller.controller) op =
+  let open Yojson.Safe.Util in
+  let to_num j = try to_float j with _ -> float_of_int (to_int j) in
+  let op_name = op |> member "op" |> to_string in
+  match op_name with
       | "select_rect" ->
         let x = op |> member "x" |> to_num in
         let y = op |> member "y" |> to_num in
@@ -222,22 +213,73 @@ let run_operation_fixture fixture_name =
       | "unlock_all" -> ctrl#unlock_all
       | "hide_selection" -> ctrl#hide_selection
       | "show_all" -> ctrl#show_all
-      | "snapshot" -> model#snapshot
-      | "undo" -> model#undo
-      | "redo" -> model#redo
-      | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
-    in
+  | "snapshot" -> model#snapshot
+  | "undo" -> model#undo
+  | "redo" -> model#redo
+  | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
+
+(* checkpoint_equivalence gate (OP_LOG.md section 6): replay the ops recorded
+   in [journal.(0..head)] from the setup SVG into a FRESH model and serialize.
+   The harness then asserts this equals the snapshot-path document, so a
+   committed journal always replays to the same document the production
+   undo/redo path produced. *)
+let replay_journal svg (journal : Jas.Op_log.transaction list) head =
+  let doc = Jas.Svg.svg_to_document svg in
+  let model = Jas.Model.create ~document:doc () in
+  let ctrl = Jas.Controller.create ~model () in
+  List.iteri (fun i (txn : Jas.Op_log.transaction) ->
+    if i < head then
+      List.iter (fun (op : Jas.Op_log.primitive_op) ->
+        apply_op model ctrl op.Jas.Op_log.params
+      ) txn.Jas.Op_log.ops
+  ) journal;
+  Jas.Test_json.document_to_test_json model#document
+
+let run_operation_fixture fixture_name =
+  let json_str = read_fixture (Printf.sprintf "operations/%s" fixture_name) in
+  let json = Yojson.Safe.from_string json_str in
+  let tests = Yojson.Safe.Util.to_list json in
+  List.iter (fun tc ->
+    let open Yojson.Safe.Util in
+    let name = tc |> member "name" |> to_string in
+    let setup_svg_file = tc |> member "setup_svg" |> to_string in
+    let expected_file = tc |> member "expected_json" |> to_string in
+    let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+    let expected = read_fixture (Printf.sprintf "operations/%s" expected_file) in
+    let doc = Jas.Svg.svg_to_document svg in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
     (* Two fixture shapes (OP_LOG.md section 5): the journal-native [txns] form
-       (snapshot before each transaction's ops, then a [history] directive of
-       undo/redo positions the cursor; snapshot/undo/redo are NOT ops here) and
-       the legacy flat [ops] form. *)
+       (each transaction commits explicitly via begin_txn/commit_txn, then a
+       [history] directive of undo/redo positions the cursor; snapshot/undo/redo
+       are NOT ops here) and the legacy flat [ops] form (one implicit outer
+       transaction, so non-undoable ops like select_rect are captured into the
+       journal). In both forms each op is recorded as a PrimitiveOp carrying the
+       op verb + its verbatim payload, so the checkpoint_equivalence gate can
+       replay them. *)
     (match tc |> member "txns" with
      | `Null ->
-       List.iter apply_op (tc |> member "ops" |> to_list)
+       model#begin_txn;
+       List.iter (fun op ->
+         apply_op model ctrl op;
+         model#record_op
+           (Jas.Op_log.make_primitive_op
+              ~op:(op |> member "op" |> to_string) ~params:op ())
+       ) (tc |> member "ops" |> to_list);
+       model#commit_txn
      | txns ->
        List.iter (fun txn ->
-         model#snapshot;
-         List.iter apply_op (txn |> member "ops" |> to_list)
+         model#begin_txn;
+         (match txn |> member "name" with
+          | `Null -> ()
+          | n -> model#name_txn (to_string n));
+         List.iter (fun op ->
+           apply_op model ctrl op;
+           model#record_op
+             (Jas.Op_log.make_primitive_op
+                ~op:(op |> member "op" |> to_string) ~params:op ())
+         ) (txn |> member "ops" |> to_list);
+         model#commit_txn
        ) (to_list txns);
        (match tc |> member "history" with
         | `Null -> ()
@@ -252,6 +294,16 @@ let run_operation_fixture fixture_name =
     if actual <> expected then begin
       Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
       Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+      assert false
+    end;
+    (* checkpoint_equivalence gate (OP_LOG.md section 6): the journal must
+       replay to the same document as the snapshot path. *)
+    let replayed = replay_journal svg model#journal model#journal_head in
+    if replayed <> actual then begin
+      Printf.eprintf
+        "=== checkpoint_equivalence gate failed for '%s' ===\n" name;
+      Printf.eprintf "=== SNAPSHOT PATH ===\n%s\n" actual;
+      Printf.eprintf "=== JOURNAL REPLAY ===\n%s\n" replayed;
       assert false
     end
   ) tests

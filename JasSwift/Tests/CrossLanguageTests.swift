@@ -414,6 +414,117 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
     }
 }
 
+/// Apply one fixture op to `model` via `controller`, exactly as the legacy
+/// harness did. Hoisted to module scope (out of `runOperationFixture`) so BOTH
+/// the snapshot path and the journal-replay gate (`replayJournal`) drive the
+/// identical dispatcher. The `op` dictionary is the raw fixture payload —
+/// `PrimitiveOp.params` carries the same dictionary, so a recorded op replays
+/// by feeding `op.params` straight back here.
+private func applyFixtureOp(_ model: Model, _ controller: Controller, _ op: [String: Any]) {
+    let opName = op["op"] as! String
+    switch opName {
+    case "select_rect":
+        controller.selectRect(
+            x: op["x"] as! Double,
+            y: op["y"] as! Double,
+            width: op["width"] as! Double,
+            height: op["height"] as! Double,
+            extend: op["extend"] as? Bool ?? false)
+    case "move_selection":
+        controller.moveSelection(
+            dx: op["dx"] as! Double,
+            dy: op["dy"] as! Double)
+    case "copy_selection":
+        controller.copySelection(
+            dx: op["dx"] as! Double,
+            dy: op["dy"] as! Double)
+    case "assign_id":
+        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        controller.assignId(path, id: op["id"] as! String)
+    case "create_reference":
+        let targetPath = (op["target_path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        controller.createReference(
+            targetPath,
+            targetId: op["target_id"] as! String,
+            refId: op["ref_id"] as! String)
+    // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
+    // paths are read literally from the fixture payload, exactly like
+    // the create_reference case.
+    case "make_symbol":
+        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        controller.makeSymbol(
+            path,
+            masterId: op["master_id"] as! String,
+            refId: op["ref_id"] as! String)
+    case "place_instance":
+        controller.placeInstance(
+            masterId: op["master_id"] as! String,
+            refId: op["ref_id"] as! String)
+    case "detach":
+        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        controller.detach(path)
+    case "redefine":
+        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        controller.redefine(
+            masterId: op["master_id"] as! String,
+            path,
+            refId: op["ref_id"] as! String)
+    case "delete_symbol":
+        controller.deleteSymbol(
+            masterId: op["master_id"] as! String)
+    // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
+    // transform is carried in the payload as {a,b,c,d,e,f} (the same
+    // matrix shape parsed elsewhere) and applied verbatim.
+    case "set_instance_transform":
+        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        let t = op["transform"] as! [String: Any]
+        let transform = Transform(
+            a: (t["a"] as! NSNumber).doubleValue,
+            b: (t["b"] as! NSNumber).doubleValue,
+            c: (t["c"] as! NSNumber).doubleValue,
+            d: (t["d"] as! NSNumber).doubleValue,
+            e: (t["e"] as! NSNumber).doubleValue,
+            f: (t["f"] as! NSNumber).doubleValue)
+        controller.setInstanceTransform(path, transform: transform)
+    case "delete_selection":
+        model.document = model.document.deleteSelection()
+    case "lock_selection":
+        controller.lockSelection()
+    case "unlock_all":
+        controller.unlockAll()
+    case "hide_selection":
+        controller.hideSelection()
+    case "show_all":
+        controller.showAll()
+    case "snapshot":
+        model.snapshot()
+    case "undo":
+        model.undo()
+    case "redo":
+        model.redo()
+    default:
+        Issue.record("Unknown op: \(opName)")
+    }
+}
+
+/// checkpoint_equivalence gate (OP_LOG.md §6): replay the committed-and-applied
+/// prefix of the journal (`journal[0..<head]`) from the SAME setup SVG into a
+/// fresh model and return its canonical JSON. The caller asserts this equals
+/// the snapshot-path document, so the typed journal is proven to replay to the
+/// same document the production undo/redo path produced. Mirrors Python's
+/// `_replay_journal` / the Rust gate.
+private func replayJournal(_ svg: String, _ journal: [Transaction], _ head: Int) -> String {
+    let doc = svgToDocument(svg)
+    let model = Model(document: doc)
+    let controller = Controller(model: model)
+    for txn in journal[0..<head] {
+        for op in txn.ops {
+            applyFixtureOp(model, controller, op.params)
+        }
+    }
+    return documentToTestJson(model.document)
+}
+
 private func runOperationFixture(_ fixture: String) throws {
     let json = readFixture("operations/\(fixture)")
     let data = json.data(using: .utf8)!
@@ -431,103 +542,25 @@ private func runOperationFixture(_ fixture: String) throws {
         let model = Model(document: doc)
         let controller = Controller(model: model)
 
-        func applyFixtureOp(_ op: [String: Any]) {
-            let opName = op["op"] as! String
-            switch opName {
-            case "select_rect":
-                controller.selectRect(
-                    x: op["x"] as! Double,
-                    y: op["y"] as! Double,
-                    width: op["width"] as! Double,
-                    height: op["height"] as! Double,
-                    extend: op["extend"] as? Bool ?? false)
-            case "move_selection":
-                controller.moveSelection(
-                    dx: op["dx"] as! Double,
-                    dy: op["dy"] as! Double)
-            case "copy_selection":
-                controller.copySelection(
-                    dx: op["dx"] as! Double,
-                    dy: op["dy"] as! Double)
-            case "assign_id":
-                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                controller.assignId(path, id: op["id"] as! String)
-            case "create_reference":
-                let targetPath = (op["target_path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                controller.createReference(
-                    targetPath,
-                    targetId: op["target_id"] as! String,
-                    refId: op["ref_id"] as! String)
-            // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
-            // paths are read literally from the fixture payload, exactly like
-            // the create_reference case.
-            case "make_symbol":
-                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                controller.makeSymbol(
-                    path,
-                    masterId: op["master_id"] as! String,
-                    refId: op["ref_id"] as! String)
-            case "place_instance":
-                controller.placeInstance(
-                    masterId: op["master_id"] as! String,
-                    refId: op["ref_id"] as! String)
-            case "detach":
-                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                controller.detach(path)
-            case "redefine":
-                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                controller.redefine(
-                    masterId: op["master_id"] as! String,
-                    path,
-                    refId: op["ref_id"] as! String)
-            case "delete_symbol":
-                controller.deleteSymbol(
-                    masterId: op["master_id"] as! String)
-            // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
-            // transform is carried in the payload as {a,b,c,d,e,f} (the same
-            // matrix shape parsed elsewhere) and applied verbatim.
-            case "set_instance_transform":
-                let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-                let t = op["transform"] as! [String: Any]
-                let transform = Transform(
-                    a: (t["a"] as! NSNumber).doubleValue,
-                    b: (t["b"] as! NSNumber).doubleValue,
-                    c: (t["c"] as! NSNumber).doubleValue,
-                    d: (t["d"] as! NSNumber).doubleValue,
-                    e: (t["e"] as! NSNumber).doubleValue,
-                    f: (t["f"] as! NSNumber).doubleValue)
-                controller.setInstanceTransform(path, transform: transform)
-            case "delete_selection":
-                model.document = model.document.deleteSelection()
-            case "lock_selection":
-                controller.lockSelection()
-            case "unlock_all":
-                controller.unlockAll()
-            case "hide_selection":
-                controller.hideSelection()
-            case "show_all":
-                controller.showAll()
-            case "snapshot":
-                model.snapshot()
-            case "undo":
-                model.undo()
-            case "redo":
-                model.redo()
-            default:
-                Issue.record("Unknown op: \(opName)")
-            }
-        }
-
         // Two fixture shapes (OP_LOG.md §5): the journal-native `txns` form
-        // (snapshot before each transaction's ops, then a `history` directive of
-        // undo/redo positions the cursor; snapshot/undo/redo are NOT ops here)
-        // and the legacy flat `ops` form.
+        // (each transaction commits explicitly via beginTxn/commitTxn, then a
+        // `history` directive of undo/redo positions the cursor; snapshot/undo/
+        // redo are NOT ops here) and the legacy flat `ops` form (one implicit
+        // outer transaction, so non-undoable ops like select_rect are captured
+        // into the journal). Each applied op is recorded into the open
+        // transaction via recordOp(PrimitiveOp(op:, params: op)) so commitTxn
+        // finalizes a transaction whose ops replay to the same document.
         if let txns = tc["txns"] as? [[String: Any]] {
             for txn in txns {
-                model.snapshot()
-                for op in (txn["ops"] as! [[String: Any]]) {
-                    applyFixtureOp(op)
+                model.beginTxn()
+                if let txnName = txn["name"] as? String {
+                    model.nameTxn(txnName)
                 }
+                for op in (txn["ops"] as! [[String: Any]]) {
+                    applyFixtureOp(model, controller, op)
+                    model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
+                }
+                model.commitTxn()
             }
             for h in (tc["history"] as? [String] ?? []) {
                 switch h {
@@ -537,13 +570,23 @@ private func runOperationFixture(_ fixture: String) throws {
                 }
             }
         } else {
+            model.beginTxn()
             for op in (tc["ops"] as! [[String: Any]]) {
-                applyFixtureOp(op)
+                applyFixtureOp(model, controller, op)
+                model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
             }
+            model.commitTxn()
         }
 
         let actual = documentToTestJson(model.document)
         #expect(actual == expected, "Operation test '\(name)' failed")
+
+        // checkpoint_equivalence gate (OP_LOG.md §6): the journal must replay to
+        // the same document as the snapshot path. Runs on EVERY operations
+        // fixture.
+        let replayed = replayJournal(svg, model.journal, model.journalHeadValue)
+        #expect(replayed == actual,
+            "checkpoint_equivalence gate failed for '\(name)': journal replay != snapshot path")
     }
 }
 
