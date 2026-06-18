@@ -22,7 +22,14 @@ export class Model {
     this._undoStack = [];
     this._redoStack = [];
     this._generation = 0;
-    this._savedGeneration = 0;
+    // OP_LOG.md Increment 2: the journal-head cursor drives isModified. An
+    // uncapped count of undoable edits applied (snapshot increments it,
+    // undo/redo move it), so isModified is journalHead !== savedJournalHead —
+    // undo back to the saved point reads as not-modified. `generation` is kept
+    // separately, as the monotonic counter that drives UI re-render. Cursor-only
+    // port: tied to the existing snapshot/undo/redo mechanism.
+    this._journalHead = 0;
+    this._savedJournalHead = 0;
     this._listeners = [];
   }
 
@@ -72,6 +79,9 @@ export class Model {
       this._undoStack.shift();
     }
     this._redoStack.length = 0;
+    // Advance the journal cursor: one undoable edit (OP_LOG.md §5). Uncapped,
+    // unlike the MAX_UNDO-capped stack, so isModified stays correct past the cap.
+    this._journalHead += 1;
   }
 
   /**
@@ -83,6 +93,7 @@ export class Model {
     this._redoStack.push(cloneDocument(this._document));
     this._document = this._undoStack.pop();
     this._generation += 1;
+    if (this._journalHead > 0) this._journalHead -= 1;
     this._notify();
   }
 
@@ -95,6 +106,7 @@ export class Model {
     this._undoStack.push(cloneDocument(this._document));
     this._document = this._redoStack.pop();
     this._generation += 1;
+    this._journalHead += 1;
     this._notify();
   }
 
@@ -102,21 +114,22 @@ export class Model {
   get canRedo() { return this._redoStack.length > 0; }
 
   /**
-   * True if the document has changed since the last markSaved(). Uses
-   * generation counters rather than content comparison — an undo back
-   * to the saved state still reads as modified. Matches the native
-   * apps' post-cleanup semantics.
+   * True if the document has unsaved committed edits. OP_LOG.md §9 unified
+   * semantics: the journal-head cursor (journalHead !== savedJournalHead), so
+   * undo back to the saved point reads as not-modified (and a non-undoable
+   * write that does not snapshot does not mark the document modified). Matches
+   * the native apps' Increment-2 cursor.
    */
   get isModified() {
-    return this._generation !== this._savedGeneration;
+    return this._journalHead !== this._savedJournalHead;
   }
 
   /**
-   * Record the current state as the on-disk baseline. Call after a
+   * Record the current journal cursor as the on-disk baseline. Call after a
    * successful save so `isModified` flips back to false.
    */
   markSaved() {
-    this._savedGeneration = this._generation;
+    this._savedJournalHead = this._journalHead;
   }
 
   /** Register a listener invoked with (model) on every change. */

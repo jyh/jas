@@ -299,16 +299,20 @@ describe("Model", () => {
     assert.equal(m.generation, 0);
   });
 
-  it("setDocument bumps generation and marks modified", () => {
+  it("setDocument bumps generation; a non-undoable write does not mark modified", () => {
     const m = new Model();
     m.setDocument(emptyDocument());
     assert.equal(m.generation, 1);
-    assert.ok(m.isModified);
+    // OP_LOG.md Increment 2: isModified is the journal cursor, so a write that
+    // did not snapshot (non-undoable) does not mark the document modified.
+    assert.ok(!m.isModified);
   });
 
-  it("markSaved clears modified flag", () => {
+  it("markSaved clears modified flag after a committed edit", () => {
     const m = new Model();
+    m.snapshot();
     m.setDocument(emptyDocument());
+    assert.ok(m.isModified);
     m.markSaved();
     assert.ok(!m.isModified);
   });
@@ -368,17 +372,18 @@ describe("Model", () => {
     assert.equal(count, 2); // unsubscribed
   });
 
-  it("isModified matches generation-counter semantics", () => {
-    // Matches the post-saved_document cleanup behavior: is_modified
-    // compares generation counters, so undo back to the saved state
-    // still reads as modified (the user moved *through* the saved
-    // state; they may want to redo).
+  it("isModified is the journal-head cursor (undo to saved = not modified)", () => {
+    // OP_LOG.md Increment 2 / §9: isModified tracks the journal cursor, so undo
+    // back to the saved point reads as not-modified — the 4-way observable flip
+    // from the old generation/identity semantics (which reported modified here).
     const m = new Model();
+    m.markSaved(); // saved at journalHead 0
     m.snapshot();
     m.mutate((d) => d);
-    m.markSaved();
-    assert.ok(!m.isModified);
+    assert.ok(m.isModified);
     m.undo();
-    assert.ok(m.isModified); // because generation != savedGeneration
+    assert.ok(!m.isModified); // undo back to the saved point
+    m.redo();
+    assert.ok(m.isModified); // redo past the saved point
   });
 });

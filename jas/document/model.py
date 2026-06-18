@@ -60,12 +60,19 @@ class Model:
         if filename is None:
             filename = _fresh_filename()
         self._document = document
-        self._saved_document = document
         self._filename = filename
         self._listeners: list[Callable[[Document], None]] = []
         self._filename_listeners: list[Callable[[str], None]] = []
         self._undo_stack: list[Document] = []
         self._redo_stack: list[Document] = []
+        # OP_LOG.md Increment 2: the journal-head cursor. An uncapped count of
+        # undoable edits applied (snapshot increments it, undo/redo move it),
+        # so is_modified is journal_head != saved_journal_head — undo back to the
+        # saved point reads as not-modified. Replaces the old identity compare
+        # against a saved-document reference. (Cursor-only port: tied to the
+        # existing snapshot/undo/redo mechanism, not a transaction bracket.)
+        self._journal_head: int = 0
+        self._saved_journal_head: int = 0
         self.default_fill: Fill | None = None
         self.default_stroke: Stroke | None = Stroke(color=RgbColor(0, 0, 0))
         self.fill_on_top: bool = True
@@ -167,6 +174,10 @@ class Model:
         if len(self._undo_stack) > _MAX_UNDO:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
+        # Advance the journal cursor: one undoable edit (OP_LOG.md §5). The
+        # counter is uncapped, unlike the MAX_UNDO-capped stack, so is_modified
+        # stays correct past the cap.
+        self._journal_head += 1
 
     # ── Preview snapshot (dialog Preview flows) ────────────────
     # Out-of-band snapshot used by the Scale / Rotate / Shear
@@ -197,6 +208,8 @@ class Model:
             return
         self._redo_stack.append(self._document)
         self._document = self._undo_stack.pop()
+        if self._journal_head > 0:
+            self._journal_head -= 1
         self._notify()
 
     def redo(self) -> None:
@@ -205,15 +218,19 @@ class Model:
             return
         self._undo_stack.append(self._document)
         self._document = self._redo_stack.pop()
+        self._journal_head += 1
         self._notify()
 
     @property
     def is_modified(self) -> bool:
-        return self._document is not self._saved_document
+        # OP_LOG.md §9 unified semantics: the journal-head cursor, so undo back
+        # to the saved point reads as not-modified (and a non-undoable write
+        # that does not snapshot does not mark the document modified).
+        return self._journal_head != self._saved_journal_head
 
     def mark_saved(self) -> None:
-        """Mark the current document as the saved version."""
-        self._saved_document = self._document
+        """Mark the current journal cursor as the saved version."""
+        self._saved_journal_head = self._journal_head
         self._notify()
 
     @property
