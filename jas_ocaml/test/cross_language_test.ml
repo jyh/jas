@@ -143,13 +143,12 @@ let run_operation_fixture fixture_name =
     let name = tc |> member "name" |> to_string in
     let setup_svg_file = tc |> member "setup_svg" |> to_string in
     let expected_file = tc |> member "expected_json" |> to_string in
-    let ops = tc |> member "ops" |> to_list in
     let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
     let expected = read_fixture (Printf.sprintf "operations/%s" expected_file) in
     let doc = Jas.Svg.svg_to_document svg in
     let model = Jas.Model.create ~document:doc () in
     let ctrl = Jas.Controller.create ~model () in
-    List.iter (fun op ->
+    let apply_op op =
       let to_num j = try to_float j with _ -> float_of_int (to_int j) in
       let op_name = op |> member "op" |> to_string in
       match op_name with
@@ -227,7 +226,28 @@ let run_operation_fixture fixture_name =
       | "undo" -> model#undo
       | "redo" -> model#redo
       | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
-    ) ops;
+    in
+    (* Two fixture shapes (OP_LOG.md section 5): the journal-native [txns] form
+       (snapshot before each transaction's ops, then a [history] directive of
+       undo/redo positions the cursor; snapshot/undo/redo are NOT ops here) and
+       the legacy flat [ops] form. *)
+    (match tc |> member "txns" with
+     | `Null ->
+       List.iter apply_op (tc |> member "ops" |> to_list)
+     | txns ->
+       List.iter (fun txn ->
+         model#snapshot;
+         List.iter apply_op (txn |> member "ops" |> to_list)
+       ) (to_list txns);
+       (match tc |> member "history" with
+        | `Null -> ()
+        | history ->
+          List.iter (fun h ->
+            match to_string h with
+            | "undo" -> model#undo
+            | "redo" -> model#redo
+            | other -> failwith (Printf.sprintf "Unknown history directive: %s" other)
+          ) (to_list history)));
     let actual = Jas.Test_json.document_to_test_json model#document in
     if actual <> expected then begin
       Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;

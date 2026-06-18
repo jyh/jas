@@ -305,69 +305,89 @@ class CrossLanguageTest(absltest.TestCase):
             model = Model(document=doc)
             ctrl = Controller(model=model)
 
-            for op in tc["ops"]:
-                op_name = op["op"]
-                if op_name == "select_rect":
-                    ctrl.select_rect(
-                        op["x"], op["y"], op["width"], op["height"],
-                        extend=op.get("extend", False))
-                elif op_name == "move_selection":
-                    ctrl.move_selection(op["dx"], op["dy"])
-                elif op_name == "copy_selection":
-                    ctrl.copy_selection(op["dx"], op["dy"])
-                elif op_name == "assign_id":
-                    ctrl.assign_id(tuple(op["path"]), op["id"])
-                elif op_name == "create_reference":
-                    ctrl.create_reference(
-                        tuple(op["target_path"]),
-                        op["target_id"], op["ref_id"])
-                # Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids
-                # and paths are read literally from the fixture payload,
-                # exactly like the create_reference arm.
-                elif op_name == "make_symbol":
-                    ctrl.make_symbol(
-                        tuple(op["path"]), op["master_id"], op["ref_id"])
-                elif op_name == "place_instance":
-                    ctrl.place_instance(op["master_id"], op["ref_id"])
-                elif op_name == "detach":
-                    ctrl.detach(tuple(op["path"]))
-                elif op_name == "redefine":
-                    ctrl.redefine(
-                        op["master_id"], tuple(op["path"]), op["ref_id"])
-                elif op_name == "delete_symbol":
-                    ctrl.delete_symbol(op["master_id"])
-                # Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the
-                # instance transform is carried in the payload as {a,b,c,d,e,f}
-                # (the same matrix shape parsed elsewhere) and applied verbatim.
-                elif op_name == "set_instance_transform":
-                    from geometry.element import Transform
-                    t = op["transform"]
-                    ctrl.set_instance_transform(
-                        tuple(op["path"]),
-                        Transform(a=t["a"], b=t["b"], c=t["c"],
-                                  d=t["d"], e=t["e"], f=t["f"]))
-                elif op_name == "delete_selection":
-                    model.document = model.document.delete_selection()
-                elif op_name == "lock_selection":
-                    ctrl.lock_selection()
-                elif op_name == "unlock_all":
-                    ctrl.unlock_all()
-                elif op_name == "hide_selection":
-                    ctrl.hide_selection()
-                elif op_name == "show_all":
-                    ctrl.show_all()
-                elif op_name == "snapshot":
+            # Two fixture shapes (OP_LOG.md §5): the journal-native `txns` form
+            # (snapshot before each transaction's ops, then a `history`
+            # directive of undo/redo positions the cursor; snapshot/undo/redo
+            # are NOT ops here) and the legacy flat `ops` form.
+            if "txns" in tc:
+                for txn in tc["txns"]:
                     model.snapshot()
-                elif op_name == "undo":
-                    model.undo()
-                elif op_name == "redo":
-                    model.redo()
-                else:
-                    self.fail(f"Unknown op: {op_name}")
+                    for op in txn["ops"]:
+                        self._apply_op(model, ctrl, op)
+                for h in tc.get("history", []):
+                    if h == "undo":
+                        model.undo()
+                    elif h == "redo":
+                        model.redo()
+                    else:
+                        self.fail(f"Unknown history directive: {h}")
+            else:
+                for op in tc["ops"]:
+                    self._apply_op(model, ctrl, op)
 
             actual = document_to_test_json(model.document)
             self.assertEqual(actual, expected,
                 f"Operation test '{name}' failed")
+
+    def _apply_op(self, model, ctrl, op):
+        op_name = op["op"]
+        if op_name == "select_rect":
+            ctrl.select_rect(
+                op["x"], op["y"], op["width"], op["height"],
+                extend=op.get("extend", False))
+        elif op_name == "move_selection":
+            ctrl.move_selection(op["dx"], op["dy"])
+        elif op_name == "copy_selection":
+            ctrl.copy_selection(op["dx"], op["dy"])
+        elif op_name == "assign_id":
+            ctrl.assign_id(tuple(op["path"]), op["id"])
+        elif op_name == "create_reference":
+            ctrl.create_reference(
+                tuple(op["target_path"]),
+                op["target_id"], op["ref_id"])
+        # Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids
+        # and paths are read literally from the fixture payload,
+        # exactly like the create_reference arm.
+        elif op_name == "make_symbol":
+            ctrl.make_symbol(
+                tuple(op["path"]), op["master_id"], op["ref_id"])
+        elif op_name == "place_instance":
+            ctrl.place_instance(op["master_id"], op["ref_id"])
+        elif op_name == "detach":
+            ctrl.detach(tuple(op["path"]))
+        elif op_name == "redefine":
+            ctrl.redefine(
+                op["master_id"], tuple(op["path"]), op["ref_id"])
+        elif op_name == "delete_symbol":
+            ctrl.delete_symbol(op["master_id"])
+        # Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the
+        # instance transform is carried in the payload as {a,b,c,d,e,f}
+        # (the same matrix shape parsed elsewhere) and applied verbatim.
+        elif op_name == "set_instance_transform":
+            from geometry.element import Transform
+            t = op["transform"]
+            ctrl.set_instance_transform(
+                tuple(op["path"]),
+                Transform(a=t["a"], b=t["b"], c=t["c"],
+                          d=t["d"], e=t["e"], f=t["f"]))
+        elif op_name == "delete_selection":
+            model.document = model.document.delete_selection()
+        elif op_name == "lock_selection":
+            ctrl.lock_selection()
+        elif op_name == "unlock_all":
+            ctrl.unlock_all()
+        elif op_name == "hide_selection":
+            ctrl.hide_selection()
+        elif op_name == "show_all":
+            ctrl.show_all()
+        elif op_name == "snapshot":
+            model.snapshot()
+        elif op_name == "undo":
+            model.undo()
+        elif op_name == "redo":
+            model.redo()
+        else:
+            self.fail(f"Unknown op: {op_name}")
 
     def test_operation_select_and_move(self):
         self._run_operation_fixture("select_and_move.json")
