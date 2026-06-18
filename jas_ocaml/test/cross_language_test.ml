@@ -313,6 +313,61 @@ let run_operation_fixture fixture_name =
     end
   ) tests
 
+(* Canonical JSON of the Transaction journal (OP_LOG.md section 10 item 4):
+   pins the reserved causal/merge metadata + each op's verb and targets across
+   apps. Fixed key order + deterministic txn-N ids make it byte-shareable.
+   Mirrors journal_to_test_json in the other apps' harnesses. *)
+let journal_to_test_json (journal : Jas.Op_log.transaction list) : string =
+  let opt = function Some v -> Printf.sprintf "\"%s\"" v | None -> "null" in
+  let op_json (o : Jas.Op_log.primitive_op) =
+    let targets =
+      String.concat ","
+        (List.map (fun x -> Printf.sprintf "\"%s\"" x) o.Jas.Op_log.targets) in
+    Printf.sprintf "{\"op\":\"%s\",\"targets\":[%s]}" o.Jas.Op_log.op targets
+  in
+  let txn_json (t : Jas.Op_log.transaction) =
+    let ops = String.concat "," (List.map op_json t.Jas.Op_log.ops) in
+    Printf.sprintf
+      "{\"actor\":\"%s\",\"label\":%s,\"lamport\":%d,\"name\":%s,\"ops\":[%s],\"parent\":%s,\"txn_id\":\"%s\"}"
+      t.Jas.Op_log.actor (opt t.Jas.Op_log.label) t.Jas.Op_log.lamport
+      (opt t.Jas.Op_log.name) ops (opt t.Jas.Op_log.parent) t.Jas.Op_log.txn_id
+  in
+  "[" ^ String.concat "," (List.map txn_json journal) ^ "]"
+
+(* OP_LOG.md section 10 item 4: the journal's causal/merge metadata serializes
+   byte-identically across apps (deterministic txn-N counter + parent edge). *)
+let run_journal_metadata fixture_name =
+  let json_str = read_fixture (Printf.sprintf "operations/%s" fixture_name) in
+  let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+  List.iter (fun tc ->
+    let open Yojson.Safe.Util in
+    let setup_svg_file = tc |> member "setup_svg" |> to_string in
+    let expected_file = tc |> member "expected_journal_json" |> to_string in
+    let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+    let doc = Jas.Svg.svg_to_document svg in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    List.iter (fun txn ->
+      model#begin_txn;
+      (match txn |> member "name" with `Null -> () | n -> model#name_txn (to_string n));
+      List.iter (fun op ->
+        apply_op model ctrl op;
+        model#record_op
+          (Jas.Op_log.make_primitive_op
+             ~op:(op |> member "op" |> to_string) ~params:op ())
+      ) (txn |> member "ops" |> to_list);
+      model#commit_txn
+    ) (tc |> member "txns" |> to_list);
+    let actual = journal_to_test_json model#journal in
+    let expected =
+      String.trim (read_fixture (Printf.sprintf "operations/%s" expected_file)) in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED journal ===\n%s\n=== ACTUAL journal ===\n%s\n"
+        expected actual;
+      assert false
+    end
+  ) tests
+
 let apply_workspace_op layout op =
   let open Yojson.Safe.Util in
   let to_num j = try to_float j with _ -> float_of_int (to_int j) in
@@ -1273,6 +1328,10 @@ let () =
          replays to the snapshot-path document. *)
       Alcotest.test_case "boolean_ops operations" `Quick (fun () ->
         run_operation_fixture "boolean_ops.json");
+      (* OP_LOG.md section 10 item 4: the journal metadata serializes
+         byte-identically across apps. *)
+      Alcotest.test_case "txn_metadata journal" `Quick (fun () ->
+        run_journal_metadata "txn_metadata.json");
     ];
 
     (* Workspace layout tests *)
