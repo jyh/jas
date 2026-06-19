@@ -596,7 +596,10 @@ mod tests {
                          "operations/controller_ops.json",
                          "operations/tspan_ops.json",
                          "operations/symbols_ops.json",
-                         "operations/print_config_setters.json"] {
+                         "operations/print_config_setters.json",
+                         "operations/artboard_set_field_batch.json",
+                         "operations/artboard_reorder.json",
+                         "operations/artboard_delete.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1563,6 +1566,37 @@ mod tests {
     #[test]
     fn operation_print_config_setters() {
         run_operation_fixture("operations/print_config_setters.json");
+    }
+
+    /// Artboard doc.* setters (OP_LOG.md §9 Phase P2): the five no-id-minting
+    /// artboard verbs journal real ops through `op_apply`. `set_artboard_field`
+    /// targets one artboard by id and applies one field per op — the batch
+    /// fixture proves the ten field-call action (artboard_options_confirm) lands
+    /// as TEN distinct ops inside ONE transaction (one-op-per-field-call
+    /// granularity) plus the two document-global `set_artboard_options_field`
+    /// ops. A type-mismatch / missing-id case proves the skip records nothing.
+    /// The checkpoint_equivalence gate (run by `assert_operation_test`) proves
+    /// each journaled op replays byte-identically to the snapshot-path document.
+    #[test]
+    fn operation_artboard_set_field_batch() {
+        run_operation_fixture("operations/artboard_set_field_batch.json");
+    }
+
+    /// Artboard reorder (OP_LOG.md §9 Phase P2): `move_artboards_up` /
+    /// `move_artboards_down` swap each selected artboard with its unselected
+    /// neighbor. Includes a no-op-at-the-boundary case (a top artboard moved up
+    /// journals nothing). targets carry the moved ids.
+    #[test]
+    fn operation_artboard_reorder() {
+        run_operation_fixture("operations/artboard_reorder.json");
+    }
+
+    /// Artboard delete (OP_LOG.md §9 Phase P2): `delete_artboard_by_id` retains
+    /// the artboards whose id differs from the target; a missing-id delete
+    /// journals nothing (no effective change). targets carry the deleted id.
+    #[test]
+    fn operation_artboard_delete() {
+        run_operation_fixture("operations/artboard_delete.json");
     }
 
     // ---------------------------------------------------------------

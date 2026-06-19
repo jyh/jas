@@ -1,0 +1,41 @@
+[
+  {
+    "name": "artboard_move_up",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "move_artboards_up",
+        "ops": [
+          { "op": "move_artboards_up", "ids": ["ab2"] }
+        ]
+      }
+    ],
+    "expected_json": "artboard_move_up_expected.json"
+  },
+  {
+    "name": "artboard_move_down",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "move_artboards_down",
+        "ops": [
+          { "op": "move_artboards_down", "ids": ["ab1"] }
+        ]
+      }
+    ],
+    "expected_json": "artboard_move_down_expected.json"
+  },
+  {
+    "name": "artboard_move_up_noop_top",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "move_artboards_up",
+        "ops": [
+          { "op": "move_artboards_up", "ids": ["ab1"] }
+        ]
+      }
+    ],
+    "expected_json": "artboard_move_up_noop_top_expected.json"
+  }
+]

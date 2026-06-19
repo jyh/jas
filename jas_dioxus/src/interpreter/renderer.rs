@@ -2474,7 +2474,11 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.delete_artboard_by_id: id_expr
+    // doc.delete_artboard_by_id: id_expr  — OP_LOG.md §9 Phase P2.
+    // Resolves the id expr to a literal, then routes through the SHARED
+    // `op_apply` dispatcher so the deletion JOURNALS as a real op (replays
+    // byte-identically; targets carry the deleted id). The transaction is
+    // already owned/named/committed by `run_yaml_effects_named`.
     if let Some(id_expr_v) = eff.get("doc.delete_artboard_by_id") {
         let id_expr = id_expr_v.as_str().unwrap_or("");
         let val = super::expr::eval(id_expr, &*eval_ctx);
@@ -2482,12 +2486,9 @@ fn run_yaml_effect(
             super::expr_types::Value::Str(s) => s,
             _ => return deferred,
         };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        let before = new_doc.artboards.len();
-        new_doc.artboards.retain(|a| a.id != target);
-        if new_doc.artboards.len() < before {
-            tab.model.set_document(new_doc);
+        let op = serde_json::json!({ "op": "delete_artboard_by_id", "id": target });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -2543,7 +2544,14 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.set_artboard_field: { id, field, value }
+    // doc.set_artboard_field: { id, field, value }  — OP_LOG.md §9 Phase P2.
+    // Resolves the id + value exprs to literals, builds a `{op, id, field,
+    // value}` op JSON, and routes through the SHARED `op_apply` dispatcher (which
+    // calls `apply_set_artboard_field`). Routing through op_apply JOURNALS the
+    // edit as a real op, so artboard_options_confirm — which chains ten of these
+    // in one action — lands as ten distinct ops inside its single transaction
+    // (one-op-per-field-call granularity), and each replays byte-identically.
+    // targets carry the written artboard id.
     if let Some(spec) = eff.get("doc.set_artboard_field").and_then(|v| v.as_object()) {
         let id_expr = spec.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let field = match spec.get("field").and_then(|v| v.as_str()) {
@@ -2560,16 +2568,22 @@ fn run_yaml_effect(
             super::expr_types::Value::Str(s) => s,
             _ => return deferred,
         };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        if let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == target) {
-            apply_artboard_override(ab, &field, &value_val);
-            tab.model.set_document(new_doc);
+        let value_json = super::effects::value_to_json(&value_val);
+        let op = serde_json::json!({
+            "op": "set_artboard_field",
+            "id": target,
+            "field": field,
+            "value": value_json,
+        });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
 
-    // doc.set_artboard_options_field: { field, value }
+    // doc.set_artboard_options_field: { field, value }  — OP_LOG.md §9 Phase P2.
+    // Document-global artboard options (bool fields). Routes through op_apply
+    // (`apply_set_artboard_options_field`); journaled with EMPTY targets.
     if let Some(spec) = eff.get("doc.set_artboard_options_field").and_then(|v| v.as_object()) {
         let field = match spec.get("field").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -2580,22 +2594,15 @@ fn run_yaml_effect(
             Some(v) => super::expr_types::Value::from_json(v),
             None => return deferred,
         };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        let flag = match value_val {
-            super::expr_types::Value::Bool(b) => b,
-            _ => return deferred,
-        };
-        match field.as_str() {
-            "fade_region_outside_artboard" => {
-                new_doc.artboard_options.fade_region_outside_artboard = flag;
-            }
-            "update_while_dragging" => {
-                new_doc.artboard_options.update_while_dragging = flag;
-            }
-            _ => return deferred,
+        let value_json = super::effects::value_to_json(&value_val);
+        let op = serde_json::json!({
+            "op": "set_artboard_options_field",
+            "field": field,
+            "value": value_json,
+        });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
-        tab.model.set_document(new_doc);
         return deferred;
     }
 
@@ -2678,28 +2685,29 @@ fn run_yaml_effect(
         }
     }
 
-    // doc.move_artboards_up: ids_expr
+    // doc.move_artboards_up: ids_expr  — OP_LOG.md §9 Phase P2.
+    // Resolves the ids list expr, builds a `{op, ids}` op JSON, and routes
+    // through op_apply (`apply_move_artboards_up`). Journaled with targets =
+    // the moved ids; a boundary no-op (top artboard) journals nothing.
     if let Some(ids_expr_v) = eff.get("doc.move_artboards_up") {
         let ids_expr = ids_expr_v.as_str().unwrap_or("");
         let val = super::expr::eval(ids_expr, &*eval_ctx);
         let ids = extract_id_list(&val);
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        if move_artboards_up(&mut new_doc.artboards, &ids) {
-            tab.model.set_document(new_doc);
+        let op = serde_json::json!({ "op": "move_artboards_up", "ids": ids });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
 
-    // doc.move_artboards_down: ids_expr
+    // doc.move_artboards_down: ids_expr  — OP_LOG.md §9 Phase P2 (symmetric).
     if let Some(ids_expr_v) = eff.get("doc.move_artboards_down") {
         let ids_expr = ids_expr_v.as_str().unwrap_or("");
         let val = super::expr::eval(ids_expr, &*eval_ctx);
         let ids = extract_id_list(&val);
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        if move_artboards_down(&mut new_doc.artboards, &ids) {
-            tab.model.set_document(new_doc);
+        let op = serde_json::json!({ "op": "move_artboards_down", "ids": ids });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3419,54 +3427,10 @@ fn extract_id_list(val: &super::expr_types::Value) -> Vec<String> {
     }
 }
 
-/// Swap-with-neighbor-skipping-selected for Move Up
-/// (ARTBOARDS.md §Reordering). Returns true if any swap occurred.
-fn move_artboards_up(
-    artboards: &mut Vec<crate::document::artboard::Artboard>,
-    selected_ids: &[String],
-) -> bool {
-    let selected: std::collections::HashSet<&str> =
-        selected_ids.iter().map(|s| s.as_str()).collect();
-    let mut changed = false;
-    for i in 0..artboards.len() {
-        if !selected.contains(artboards[i].id.as_str()) {
-            continue;
-        }
-        if i == 0 {
-            continue;
-        }
-        if selected.contains(artboards[i - 1].id.as_str()) {
-            continue;
-        }
-        artboards.swap(i - 1, i);
-        changed = true;
-    }
-    changed
-}
-
-fn move_artboards_down(
-    artboards: &mut Vec<crate::document::artboard::Artboard>,
-    selected_ids: &[String],
-) -> bool {
-    let selected: std::collections::HashSet<&str> =
-        selected_ids.iter().map(|s| s.as_str()).collect();
-    let mut changed = false;
-    let n = artboards.len();
-    for i in (0..n).rev() {
-        if !selected.contains(artboards[i].id.as_str()) {
-            continue;
-        }
-        if i + 1 >= n {
-            continue;
-        }
-        if selected.contains(artboards[i + 1].id.as_str()) {
-            continue;
-        }
-        artboards.swap(i, i + 1);
-        changed = true;
-    }
-    changed
-}
+// move_artboards_up / move_artboards_down moved to op_apply.rs (OP_LOG.md §9
+// Phase P2) as `move_artboards_up_in_place` / `move_artboards_down_in_place`
+// (pure) + `apply_move_artboards_up` / `apply_move_artboards_down` (Model), so
+// the production handler routes through op_apply and the harness shares the body.
 
 fn delete_element_at(
     path: &[usize],
@@ -9627,6 +9591,160 @@ mod tests {
             "checkpoint_equivalence: journal replay == snapshot path");
     }
 
+    // OP_LOG.md §9 Phase P2 — production-route proofs for the artboard doc.*
+    // setters. These drive the REAL renderer.rs production handler
+    // (`run_yaml_effects_named`) for representative artboard verbs against a real
+    // AppState/Model carrying two known-id artboards, and assert (per verb):
+    //   (1) the committed Transaction journals the verb op with the RESOLVED
+    //       params (the production eval → literal path, NOT the YAML expr string)
+    //       and the ARTBOARD-ID targets (set_artboard_field → [id];
+    //       delete_artboard_by_id → [deleted id]);
+    //   (2) checkpoint_equivalence: replaying the journaled op via `op_apply`
+    //       from a fresh copy of the pre-edit document is byte-identical to the
+    //       live snapshot-path document.
+    // Counterpart to the operations-fixture proof in cross_language_test.rs
+    // (which drives op_apply directly via the harness).
+
+    /// Build an AppState whose active document carries two artboards with known
+    /// ids ("ab1", "ab2"), so the production artboard verbs have something to
+    /// write. Re-uses make_state_with_layers for the tab/layer scaffolding.
+    fn make_state_with_two_artboards() -> AppState {
+        use crate::document::artboard::Artboard;
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        new_doc.artboards = vec![
+            Artboard::default_with_id("ab1".into()),
+            Artboard::default_with_id("ab2".into()),
+        ];
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st
+    }
+
+    /// Replay the whole journal onto a fresh model seeded from `pre_doc` and
+    /// byte-compare to the live document — the checkpoint_equivalence gate.
+    fn assert_artboard_checkpoint_equivalence(
+        st: &AppState,
+        pre_doc: crate::document::document::Document,
+    ) {
+        use crate::geometry::test_json::document_to_test_json;
+        let model = &st.tabs[st.active_tab].model;
+        let snapshot_doc = document_to_test_json(model.document());
+        let mut replay = crate::document::model::Model::new(pre_doc, None);
+        for t in model.journal() {
+            for o in &t.ops {
+                crate::document::op_apply::op_apply(&mut replay, &o.params);
+            }
+        }
+        let replay_doc = document_to_test_json(replay.document());
+        assert_eq!(replay_doc, snapshot_doc,
+            "checkpoint_equivalence: journal replay == snapshot path");
+    }
+
+    #[test]
+    fn production_route_journals_set_artboard_field() {
+        let mut st = make_state_with_two_artboards();
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        // Mirror artboard_options_confirm: a `snapshot` opens the txn, then the
+        // field setter runs through the production handler. The YAML `value` and
+        // `id` are STRING exprs (the production eval resolves them to literals).
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "doc.set_artboard_field": { "id": "'ab2'", "field": "x", "value": "100" }
+            }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("artboard_options_confirm"));
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1,
+            "the artboard action commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("artboard_options_confirm"));
+        assert_eq!(txn.ops.len(), 1, "exactly one artboard op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "set_artboard_field");
+        assert_eq!(op.params["id"], serde_json::json!("ab2"),
+            "the resolved artboard id (not the expr string)");
+        assert_eq!(op.params["field"], serde_json::json!("x"));
+        // "100" is a STRING expr; production evals it to the number 100 and
+        // journals that RESOLVED literal (replay has no eval context).
+        assert_eq!(op.params["value"], serde_json::json!(100),
+            "the journaled value is the RESOLVED literal, not the YAML expr");
+        // P2 targets model: the artboard id(s) written.
+        assert_eq!(op.targets, vec!["ab2".to_string()],
+            "set_artboard_field targets carry the written artboard id");
+        // The mutation landed on the right artboard.
+        let ab2 = model.document().artboards.iter().find(|a| a.id == "ab2").unwrap();
+        assert_eq!(ab2.x, 100.0);
+
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    #[test]
+    fn production_route_journals_delete_artboard_by_id() {
+        let mut st = make_state_with_two_artboards();
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({ "doc.delete_artboard_by_id": "'ab1'" }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("delete_artboard_from_dialog"));
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1);
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.ops.len(), 1, "exactly one delete op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "delete_artboard_by_id");
+        assert_eq!(op.params["id"], serde_json::json!("ab1"),
+            "the resolved artboard id");
+        assert_eq!(op.targets, vec!["ab1".to_string()],
+            "delete targets carry the deleted artboard id");
+        assert_eq!(model.document().artboards.len(), 1);
+        assert_eq!(model.document().artboards[0].id, "ab2");
+
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    #[test]
+    fn production_route_set_artboard_options_field_empty_targets() {
+        let mut st = make_state_with_two_artboards();
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+
+        // The default is `true`; set `false` so the edit is a real change (a
+        // no-net-change txn would be dropped by the commit-time no-op rule).
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "doc.set_artboard_options_field": { "field": "fade_region_outside_artboard", "value": "false" }
+            }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("artboard_options_confirm"));
+
+        let model = &st.tabs[st.active_tab].model;
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.ops.len(), 1);
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "set_artboard_options_field");
+        assert_eq!(op.params["value"], serde_json::json!(false),
+            "the resolved bool literal");
+        // Document-global config ⇒ empty targets.
+        assert!(op.targets.is_empty(),
+            "set_artboard_options_field carries empty targets (document-global)");
+        assert!(!model.document().artboard_options.fade_region_outside_artboard);
+
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
     // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after
 
     #[test]
@@ -10703,7 +10821,7 @@ mod tests {
             Artboard::default_with_id("a5".into()),
         ];
         let selected = vec!["a1".into(), "a3".into(), "a5".into()];
-        let changed = super::move_artboards_up(&mut abs, &selected);
+        let changed = crate::document::op_apply::move_artboards_up_in_place(&mut abs, &selected);
         assert!(changed);
         let ids: Vec<&str> = abs.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["a1", "a3", "a2", "a5", "a4"]);

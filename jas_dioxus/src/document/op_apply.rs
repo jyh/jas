@@ -252,6 +252,180 @@ pub fn apply_print_config_field(
     applied
 }
 
+// ── Artboard doc.* setters (OP_LOG.md §9 Phase P2) ────────────────────────────
+//
+// The five no-id-minting artboard verbs journal real ops through `op_apply`, so
+// the renderer.rs production handler and the replay harness share ONE mutation
+// body (the P1 print-config pattern, applied to artboards). Each op carries
+// RESOLVED literals (the renderer evals the YAML exprs before building the op;
+// replay has no eval context). Hardened reads: a malformed payload SKIPS rather
+// than panicking, and a no-op edit (type mismatch / missing id / boundary swap /
+// missing delete) journals nothing — the caller records only on an effective
+// change. `create_artboard` / `duplicate_artboard` are NOT here: they mint ids
+// (Phase P3). Artboards live in `document.artboards` (String ids), NOT the
+// element tree, so `targets` carries the written artboard id(s) (delete → the
+// deleted id; set_artboard_field → the written id; move → the moved ids), and
+// `set_artboard_options_field` carries [] (document-global). The byte-gate
+// ignores `targets`; this is best-effort merge metadata.
+
+/// Apply one field of one artboard (by id) to `model`, self-bracketing through
+/// `edit_document`. `value` is a RESOLVED literal. Returns `true` iff the
+/// artboard exists AND the field matched AND the value coerced — the caller
+/// records the op only on `true`. Field types mirror renderer.rs's
+/// `apply_artboard_override` (the create/duplicate path), kept at the document
+/// layer here so `op_apply` does not reach up into the interpreter layer.
+pub fn apply_set_artboard_field(
+    model: &mut Model,
+    id: &str,
+    field: &str,
+    value: &serde_json::Value,
+) -> bool {
+    use crate::document::artboard::ArtboardFill;
+    let as_num = value.as_f64();
+    let as_bool = value.as_bool();
+    let as_str = value.as_str();
+    let mut new_doc = model.document().clone();
+    let Some(ab) = new_doc.artboards.iter_mut().find(|a| a.id == id) else {
+        return false;
+    };
+    let applied = match field {
+        "name" => match as_str { Some(s) => { ab.name = s.to_string(); true } None => false },
+        "x" => match as_num { Some(n) => { ab.x = n; true } None => false },
+        "y" => match as_num { Some(n) => { ab.y = n; true } None => false },
+        "width" => match as_num { Some(n) => { ab.width = n; true } None => false },
+        "height" => match as_num { Some(n) => { ab.height = n; true } None => false },
+        // A hex color and a plain string both arrive here as a JSON string;
+        // ArtboardFill::from_canonical handles both (matching the renderer's
+        // Str/Color acceptance for create/duplicate).
+        "fill" => match as_str { Some(s) => { ab.fill = ArtboardFill::from_canonical(s); true } None => false },
+        "show_center_mark" => match as_bool { Some(b) => { ab.show_center_mark = b; true } None => false },
+        "show_cross_hairs" => match as_bool { Some(b) => { ab.show_cross_hairs = b; true } None => false },
+        "show_video_safe_areas" => match as_bool { Some(b) => { ab.show_video_safe_areas = b; true } None => false },
+        "video_ruler_pixel_aspect_ratio" => match as_num { Some(n) => { ab.video_ruler_pixel_aspect_ratio = n; true } None => false },
+        _ => false,
+    };
+    if applied {
+        model.edit_document(new_doc);
+    }
+    applied
+}
+
+/// Apply one document-global artboard-options field (PRINT-adjacent; bool only).
+/// Returns `true` iff the field matched and the value coerced to a bool.
+pub fn apply_set_artboard_options_field(
+    model: &mut Model,
+    field: &str,
+    value: &serde_json::Value,
+) -> bool {
+    let Some(flag) = value.as_bool() else { return false; };
+    let mut new_doc = model.document().clone();
+    let applied = match field {
+        "fade_region_outside_artboard" => { new_doc.artboard_options.fade_region_outside_artboard = flag; true }
+        "update_while_dragging" => { new_doc.artboard_options.update_while_dragging = flag; true }
+        _ => false,
+    };
+    if applied {
+        model.edit_document(new_doc);
+    }
+    applied
+}
+
+/// Delete the artboard whose id == `id`. Returns `true` iff an artboard was
+/// removed (a missing id is a no-op that journals nothing).
+pub fn apply_delete_artboard_by_id(model: &mut Model, id: &str) -> bool {
+    let mut new_doc = model.document().clone();
+    let before = new_doc.artboards.len();
+    new_doc.artboards.retain(|a| a.id != id);
+    if new_doc.artboards.len() < before {
+        model.edit_document(new_doc);
+        true
+    } else {
+        false
+    }
+}
+
+/// Swap-with-neighbor-skipping-selected for Move Up (ARTBOARDS.md §Reordering),
+/// in-place on `artboards`. Returns `true` iff any swap occurred. Pure helper
+/// (no Model) so renderer.rs's create-time path and the unit test can call it.
+pub fn move_artboards_up_in_place(
+    artboards: &mut [crate::document::artboard::Artboard],
+    selected_ids: &[String],
+) -> bool {
+    let selected: std::collections::HashSet<&str> =
+        selected_ids.iter().map(|s| s.as_str()).collect();
+    let mut changed = false;
+    for i in 0..artboards.len() {
+        if !selected.contains(artboards[i].id.as_str()) {
+            continue;
+        }
+        if i == 0 {
+            continue;
+        }
+        if selected.contains(artboards[i - 1].id.as_str()) {
+            continue;
+        }
+        artboards.swap(i - 1, i);
+        changed = true;
+    }
+    changed
+}
+
+/// Symmetric Move Down. Returns `true` iff any swap occurred.
+pub fn move_artboards_down_in_place(
+    artboards: &mut [crate::document::artboard::Artboard],
+    selected_ids: &[String],
+) -> bool {
+    let selected: std::collections::HashSet<&str> =
+        selected_ids.iter().map(|s| s.as_str()).collect();
+    let mut changed = false;
+    let n = artboards.len();
+    for i in (0..n).rev() {
+        if !selected.contains(artboards[i].id.as_str()) {
+            continue;
+        }
+        if i + 1 >= n {
+            continue;
+        }
+        if selected.contains(artboards[i + 1].id.as_str()) {
+            continue;
+        }
+        artboards.swap(i, i + 1);
+        changed = true;
+    }
+    changed
+}
+
+/// Apply Move Up to `model`'s artboards. Returns `true` iff any swap occurred.
+pub fn apply_move_artboards_up(model: &mut Model, ids: &[String]) -> bool {
+    let mut new_doc = model.document().clone();
+    if move_artboards_up_in_place(&mut new_doc.artboards, ids) {
+        model.edit_document(new_doc);
+        true
+    } else {
+        false
+    }
+}
+
+/// Apply Move Down to `model`'s artboards. Returns `true` iff any swap occurred.
+pub fn apply_move_artboards_down(model: &mut Model, ids: &[String]) -> bool {
+    let mut new_doc = model.document().clone();
+    if move_artboards_down_in_place(&mut new_doc.artboards, ids) {
+        model.edit_document(new_doc);
+        true
+    } else {
+        false
+    }
+}
+
+/// Read a JSON array-of-strings field (the `ids` payload for the move verbs).
+/// Non-string entries are dropped; a missing/non-array field yields `[]`.
+fn str_list_field(op: &serde_json::Value, key: &str) -> Vec<String> {
+    op.get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default()
+}
+
 /// Parse a JSON array of indices into an [`ElementPath`]. Returns `None` if the
 /// field is absent or not an array of non-negative integers (a malformed
 /// production payload skips the op rather than panicking).
@@ -513,6 +687,65 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
                 // only add noise).
                 return;
             }
+        }
+        // Artboard doc.* setters (OP_LOG.md §9 Phase P2). Each carries RESOLVED
+        // literals; the helper skips (returns false) on a malformed payload, a
+        // type mismatch, a missing id, or a no-op edit, in which case we journal
+        // nothing. `targets` carries the written artboard id(s); the
+        // document-global options setter keeps it empty.
+        "set_artboard_field" => {
+            let (Some(id), Some(field)) = (str_field(op, "id"), str_field(op, "field")) else {
+                return;
+            };
+            let Some(value) = op.get("value") else {
+                return;
+            };
+            let id = id.to_string();
+            let field = field.to_string();
+            let value = value.clone();
+            if !apply_set_artboard_field(model, &id, &field, &value) {
+                return;
+            }
+            targets = vec![id];
+        }
+        "set_artboard_options_field" => {
+            let Some(field) = str_field(op, "field") else {
+                return;
+            };
+            let Some(value) = op.get("value") else {
+                return;
+            };
+            let field = field.to_string();
+            let value = value.clone();
+            if !apply_set_artboard_options_field(model, &field, &value) {
+                return;
+            }
+            // Document-global config ⇒ empty targets (the gate compares
+            // documents, not metadata).
+        }
+        "delete_artboard_by_id" => {
+            let Some(id) = str_field(op, "id") else {
+                return;
+            };
+            let id = id.to_string();
+            if !apply_delete_artboard_by_id(model, &id) {
+                return;
+            }
+            targets = vec![id];
+        }
+        "move_artboards_up" => {
+            let ids = str_list_field(op, "ids");
+            if !apply_move_artboards_up(model, &ids) {
+                return;
+            }
+            targets = ids;
+        }
+        "move_artboards_down" => {
+            let ids = str_list_field(op, "ids");
+            if !apply_move_artboards_down(model, &ids) {
+                return;
+            }
+            targets = ids;
         }
         // Unknown verb: a malformed/unsupported production payload is skipped
         // rather than panicking. (The harness corpus only carries known verbs,

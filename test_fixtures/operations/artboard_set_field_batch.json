@@ -1,0 +1,43 @@
+[
+  {
+    "name": "artboard_set_field_batch",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "artboard_options_confirm",
+        "ops": [
+          { "op": "set_artboard_field", "id": "ab2", "field": "name",   "value": "Cover" },
+          { "op": "set_artboard_field", "id": "ab2", "field": "x",      "value": 100 },
+          { "op": "set_artboard_field", "id": "ab2", "field": "y",      "value": 200 },
+          { "op": "set_artboard_field", "id": "ab2", "field": "width",  "value": 400 },
+          { "op": "set_artboard_field", "id": "ab2", "field": "height", "value": 300 },
+          { "op": "set_artboard_field", "id": "ab2", "field": "fill",   "value": "#ff0000" },
+          { "op": "set_artboard_field", "id": "ab2", "field": "show_center_mark",      "value": true },
+          { "op": "set_artboard_field", "id": "ab2", "field": "show_cross_hairs",      "value": true },
+          { "op": "set_artboard_field", "id": "ab2", "field": "show_video_safe_areas", "value": true },
+          { "op": "set_artboard_field", "id": "ab2", "field": "video_ruler_pixel_aspect_ratio", "value": 1.5 },
+          { "op": "set_artboard_options_field", "field": "fade_region_outside_artboard", "value": false },
+          { "op": "set_artboard_options_field", "field": "update_while_dragging",        "value": false }
+        ]
+      }
+    ],
+    "expected_json": "artboard_set_field_batch_expected.json"
+  },
+  {
+    "name": "artboard_set_field_type_mismatch_skips",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "artboard_options_confirm",
+        "ops": [
+          { "op": "set_artboard_field", "id": "ab1", "field": "x",     "value": true },
+          { "op": "set_artboard_field", "id": "ab1", "field": "name",  "value": 7 },
+          { "op": "set_artboard_field", "id": "missing", "field": "x",  "value": 50 },
+          { "op": "set_artboard_field", "id": "ab1", "field": "width", "value": 250 },
+          { "op": "set_artboard_options_field", "field": "fade_region_outside_artboard", "value": "yes" }
+        ]
+      }
+    ],
+    "expected_json": "artboard_set_field_type_mismatch_skips_expected.json"
+  }
+]
