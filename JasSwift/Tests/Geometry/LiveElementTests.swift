@@ -718,3 +718,56 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
     #expect(abs(minX - 50.0) < 1e-6 && abs(maxX - 60.0) < 1e-6,
             "the captured recipe replays to the demonstrated output")
 }
+
+@Test func captureRecipePassesThroughIdPrimarySegmentNoSelectionDep() {
+    // OP_LOG.md §5 Fork 4 / 3c-1: an id-primary journal segment captures as a
+    // PASS-THROUGH — every operand id is read from the op PARAMS, never from a
+    // select op's selection-resolved `targets` (note targets is EMPTY here, so a
+    // capture that read targets would produce an empty recipe). select_by_ids
+    // sets the working set; copy_by_ids → copy{from}; move_by_ids → translate on
+    // the produced $0 handle. Mirrors the Rust unit test.
+    let segment = [
+        PrimitiveOp(op: "select_by_ids", params: ["ids": ["eye"]], targets: []),
+        recordedOp("copy_by_ids", ["from": ["eye"], "dx": 0.0, "dy": 0.0]),
+        recordedOp("move_by_ids", ["ids": [String](), "dx": 50.0, "dy": 0.0]),
+    ]
+    let (recipe, inputs) = captureRecipe(segment)
+
+    // Operands came from params (targets was empty), so the recipe is non-empty.
+    #expect(inputs == ["eye"])
+    #expect(recipe.count == 2)
+    #expect(recipe[0].op == "copy")
+    #expect(recordedStrIds(recipe[0].params, "from") == ["eye"])
+    #expect(recipe[1].op == "translate")
+    #expect(recordedStrIds(recipe[1].params, "ids") == ["$0"],
+            "the move targets the produced copy handle, not the id-less copy")
+
+    // The captured recipe replays + re-derives identically to the
+    // selection-relative capture (proving the two capture forms agree).
+    let recorded = RecordedElem(
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+    let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
+    var visiting = VisitSet()
+    let ps = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)
+    let (minX, _, maxX, _) = bboxOfRing(ps[0])
+    #expect(abs(minX - 50.0) < 1e-6 && abs(maxX - 60.0) < 1e-6,
+            "the id-primary captured recipe replays to the demonstrated output")
+}
+
+@Test func captureRecipeIdPrimaryBareMoveReadsIdsFromParams() {
+    // A bare id-primary move (no preceding copy): the working set is the op's own
+    // `ids` PARAM, so translate operates on the named input directly. Mirrors the
+    // Rust unit test.
+    let segment = [
+        PrimitiveOp(op: "select_by_ids", params: ["ids": ["eye"]], targets: []),
+        recordedOp("move_by_ids", ["ids": ["eye"], "dx": 50.0, "dy": 0.0]),
+    ]
+    let (recipe, inputs) = captureRecipe(segment)
+    #expect(inputs == ["eye"])
+    #expect(recipe.count == 1)
+    #expect(recipe[0].op == "translate")
+    #expect(recordedStrIds(recipe[0].params, "ids") == ["eye"],
+            "a bare id-primary move translates the named input directly")
+}

@@ -575,28 +575,83 @@ extension NSNumber {
 }
 
 /// Normalize a captured journal op-segment into a recorded recipe
-/// (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
-/// input-addressed form by tracking the working selection as recipe refs.
-/// Mirrors Rust `capture_recipe`.
+/// (RECORDED_ELEMENTS.md §1/§4): rewrite the captured ops into the
+/// input-addressed `copy`/`translate` form `evaluateWith` consumes, tracking the
+/// working set as recipe refs. Mirrors Rust `capture_recipe`.
 ///
-/// - A select op (`select_rect`/`select`) establishes the working selection from
-///   its resolved `targets` (the ids it selected); it is NOT emitted — selection
-///   becomes input-addressing.
-/// - `copy_selection` emits `copy{from, dx, dy}` (source = the working selection)
-///   and rebinds the selection to the produced `$n` handles.
-/// - `move_selection` emits `translate{ids, dx, dy}` on the working selection.
-/// - Ops outside the replay-safe subset are dropped from the recipe.
+/// Two captured shapes are accepted:
 ///
-/// The recipe's non-`$` refs are the **inputs** — the elements it rebinds by
-/// stable id (the deterministic "everything that traces to a read input rebinds;
-/// produced elements are `$n` handles" MVP rule; no AI fitter). Returns
-/// `(recipe, inputIds)`; the caller wraps them in a ``RecordedElem``.
+/// **The id-primary family (OP_LOG.md §5 Fork 4 — the 3c-1 form, NO selection
+/// dependency).** When the segment is already id-primary, this is a PASS-THROUGH:
+/// every operand id is read DIRECTLY from the op's OWN PARAMS, never from a
+/// select op's selection-resolved `targets`, so the recipe is independent of any
+/// document selection.
+///   - `select_by_ids{ids}` establishes the working set from its `ids` PARAM; it
+///     is NOT emitted (id-addressing replaces selection).
+///   - `copy_by_ids{from, dx, dy}` emits `copy{from, dx, dy}` (source = its
+///     `from` PARAM) and rebinds the working set to the produced `$n` handles.
+///   - `move_by_ids{ids, dx, dy}` emits `translate{ids, dx, dy}` on the working
+///     set (which, after a copy, is the produced `$n` handles — so a "copy then
+///     move the copy" demonstration replays without ever naming the id-less
+///     copy); a bare id-primary move reads its own `ids` PARAM directly.
+///
+/// **The legacy selection-relative family (OP_LOG.md §7 — kept verbatim).** A
+/// `select_rect`/`select` op establishes the working set from its resolved
+/// `targets`; `copy_selection`→`copy`, `move_selection`→`translate`. This bridge
+/// stays for the selection-relative corpus; the id-primary path does NOT route
+/// through it.
+///
+/// Ops outside the replay-safe subset are dropped. The recipe's non-`$` refs are
+/// the **inputs** — the elements it rebinds by stable id (the deterministic MVP
+/// rule; no AI fitter). Returns `(recipe, inputIds)`; the caller wraps them in a
+/// ``RecordedElem``.
 public func captureRecipe(_ segment: [PrimitiveOp]) -> (recipe: [PrimitiveOp], inputs: [String]) {
     var working: [String] = []
     var recipe: [PrimitiveOp] = []
     var counter = 0
     for op in segment {
         switch op.op {
+        // id-primary family: operands from PARAMS (no selection dep). When the
+        // segment is already id-primary this is a PASS-THROUGH — every operand
+        // id is read DIRECTLY from the op's OWN PARAMS, never from a select op's
+        // selection-resolved `targets`, so the recipe is independent of any
+        // document selection (OP_LOG.md §5 Fork 4 — the 3c-1 form).
+        case "select_by_ids":
+            // Establishes the working set from its `ids` PARAM; not emitted
+            // (id-addressing replaces selection).
+            working = recordedStrIds(op.params, "ids")
+        case "copy_by_ids":
+            // Emits `copy{from, dx, dy}` (source = its `from` PARAM) and rebinds
+            // the working set to the produced `$n` handles.
+            let dx = recordedNum(op.params, "dx")
+            let dy = recordedNum(op.params, "dy")
+            let from = recordedStrIds(op.params, "from")
+            recipe.append(PrimitiveOp(
+                op: "copy",
+                params: ["from": from, "dx": dx, "dy": dy],
+                targets: []))
+            var produced: [String] = []
+            for _ in from {
+                produced.append("$\(counter)")
+                counter += 1
+            }
+            working = produced
+        case "move_by_ids":
+            // Emits `translate{ids, dx, dy}` on the working set (which, after a
+            // copy, is the produced `$n` handles — so a "copy then move the
+            // copy" demonstration replays without ever naming the id-less copy).
+            // A bare id-primary move (no preceding copy) reads its own `ids`
+            // PARAM directly.
+            let dx = recordedNum(op.params, "dx")
+            let dy = recordedNum(op.params, "dy")
+            if working.isEmpty {
+                working = recordedStrIds(op.params, "ids")
+            }
+            recipe.append(PrimitiveOp(
+                op: "translate",
+                params: ["ids": working, "dx": dx, "dy": dy],
+                targets: []))
+        // legacy selection-relative family (kept verbatim).
         case "select_rect", "select":
             working = op.targets
         case "copy_selection":

@@ -621,6 +621,123 @@ private func recordedCanonicalDocument() -> Document {
 @Test func operationTransformShear() throws { try runOperationFixture("transform_shear.json") }
 @Test func operationTransformCopy() throws { try runOperationFixture("transform_copy.json") }
 
+// MARK: - OP_LOG 3c-1: id-primary op-addressing flip (move / copy / select)
+
+/// OP_LOG.md §5 Fork 4 / 3c-1 — the id-primary op-addressing flip. The fixture
+/// carries TWO cases on the SAME `eye.svg` pointing at the SAME golden:
+///   - `selrel_move_eye`   : `[select_rect, move_selection]` (selection-relative)
+///   - `id_primary_move_eye`: `[select_by_ids, move_by_ids]` (id-primary)
+/// Both must produce a BYTE-IDENTICAL document AND selection (the golden is
+/// shared), which proves the id-primary verbs replay to the same document+
+/// selection as the selection-relative pair — the byte-gate reconciliation. The
+/// unchanged `checkpoint_equivalence` gate (run per case by `runOperationFixture`)
+/// additionally proves each journals a replay-safe segment. The id-primary verb
+/// reads its operand ids from its OWN params, so snapshot and replay apply
+/// identical operands (the §7 determinism rule). Mirrors Rust
+/// `operation_id_primary_move`.
+@Test func operationIdPrimaryMove() throws { try runOperationFixture("id_primary_move.json") }
+
+/// OP_LOG.md §5 Fork 4 / 3c-1 — the id-primary copy verb. Same shared-golden
+/// shape as `operationIdPrimaryMove`: `[select_rect, copy_selection]` and
+/// `[select_by_ids, copy_by_ids]` produce a byte-identical document (the copy is
+/// born id-less on BOTH paths) AND selection. Mirrors Rust
+/// `operation_id_primary_copy`.
+@Test func operationIdPrimaryCopy() throws { try runOperationFixture("id_primary_copy.json") }
+
+/// 3c-1 determinism check (OP_LOG.md §7): an id-primary op reads its operand ids
+/// from its OWN params, NEVER from `doc.selection`, so it applies the SAME
+/// operands regardless of the ambient selection. Drive `move_by_ids{["eye"]}`
+/// with a DELIBERATELY WRONG ambient selection (the whole layer pre-selected)
+/// and confirm the result still equals the shared golden — i.e. the op ignored
+/// the ambient selection and moved exactly the operand named in its params.
+/// Mirrors Rust `id_primary_move_reads_operand_from_params_not_selection`.
+@Test func idPrimaryMoveReadsOperandFromParamsNotSelection() {
+    let svg = readFixture("svg/eye.svg")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    // Poison the ambient selection with an unrelated path — an op that inferred
+    // its operand from doc.selection would act on the wrong thing.
+    controller.setSelection([ElementSelection.all([0])])
+    model.beginTxn()
+    opApply(model, controller, ["op": "select_by_ids", "ids": ["eye"]])
+    opApply(model, controller, ["op": "move_by_ids", "ids": ["eye"], "dx": 50, "dy": 0])
+    model.commitTxn()
+    let actual = documentToTestJson(model.document)
+    let expected = readFixture("operations/id_primary_move_eye.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(actual == expected,
+        "id-primary move read its operand from params, not the ambient selection")
+
+    // Snapshot==replay even though the snapshot ran with a poisoned ambient
+    // selection: the journaled ops carry their own operands, so a fresh replay
+    // (no ambient selection) reproduces the document byte-identically.
+    let replayed = replayJournal(svg, model.journal, model.journalHeadValue)
+    #expect(replayed == actual,
+        "id-primary op applies identical operands on snapshot and replay")
+}
+
+/// 3c-1 EYE-DEMO RE-DERIVATION PIN (the load-bearing payoff): run a FAITHFUL
+/// id-primary journal segment `[select_by_ids, copy_by_ids]` through the SHARED
+/// dispatcher (so it is a real, byte-gated, replayable journal segment),
+/// normalize the committed segment to a `RecordedElem` via the now-pass-through
+/// `captureRecipe`, edit the SOURCE input, re-derive, and confirm the output
+/// TRACKS the edited source. The recipe survives source edits with NO selection
+/// dependency — the operand ids came from the op params (`from:["eye"]`), never
+/// from a select op's resolved selection. Reuses the existing eye-demo golden
+/// (`eye_demo_rederived.json`): `copy_by_ids{dx:50}` captures to `copy{dx:50}`,
+/// whose re-derivation against the edited source (eye→x=100px) is byte-identical
+/// to the selection-relative demo's copy(0)+translate(50) net offset. Mirrors
+/// Rust `id_primary_capture_recipe_rederives_on_source_edit`.
+@Test func idPrimaryCaptureRecipeRederivesOnSourceEdit() {
+    // A faithful id-primary demonstration: select the eye, copy it +50. This is
+    // a REAL journal segment opApply replays byte-identically (it is the
+    // id_primary_copy fixture's id-primary case).
+    let svg = readFixture("svg/eye.svg")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    model.beginTxn()
+    model.nameTxn("id-primary demo")
+    opApply(model, controller, ["op": "select_by_ids", "ids": ["eye"]])
+    opApply(model, controller, ["op": "copy_by_ids", "from": ["eye"], "dx": 50, "dy": 0])
+    model.commitTxn()
+
+    // captureRecipe is a PASS-THROUGH over the id-primary segment: it reads the
+    // operand id from the op's `from` PARAM (no selection dependency —
+    // select_by_ids' targets are NOT consulted).
+    let segment = model.journal.last!.ops
+    // Guard: the captured segment is purely id-primary (proves the brittle
+    // selection-relative bridge is NOT on this path).
+    for op in segment {
+        #expect(op.op == "select_by_ids" || op.op == "copy_by_ids",
+            "segment is id-primary, got \(op.op)")
+    }
+    let (recipe, inputs) = captureRecipe(segment)
+    #expect(inputs == ["eye"])
+    #expect(recipe.count == 1)
+    #expect(recipe[0].op == "copy")
+    #expect(recordedStrIds(recipe[0].params, "from") == ["eye"])
+
+    // Wrap + re-derive against the EDITED source (eye moved to x=100 px).
+    let recorded = RecordedElem(ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+    let editedSvg = svg.replacingOccurrences(of: "x=\"0\" y=\"0\"", with: "x=\"100\" y=\"0\"")
+    let editedEl = svgToDocument(editedSvg).getElement([0, 0])
+    struct OneResolver: ElementResolver {
+        let id: String
+        let el: Element
+        func resolve(_ ref: ElementRef) -> Element? { ref.id == id ? el : nil }
+    }
+    let resolver = OneResolver(id: "eye", el: editedEl)
+    var visiting: VisitSet = []
+    let ps = recorded.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    let actual = polygonSetToTestJson(ps)
+    // The re-derived output tracks the edited source — the SAME golden the
+    // selection-relative eye demo pins (the net offset is identical).
+    let expected = readFixture("production_capture/eye_demo_rederived.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(actual == expected,
+        "the id-primary recipe re-derived against the edited source, no selection dependency")
+}
+
 /// Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4): pins the
 /// reserved causal/merge metadata + each op's verb and targets across apps.
 /// Fixed key order + deterministic txn-N ids make it byte-shareable. Mirrors
