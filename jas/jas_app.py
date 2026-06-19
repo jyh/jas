@@ -533,11 +533,18 @@ class MainWindow(QMainWindow):
         return self._dock_frame
 
     def _hide_pane(self, kind):
-        self.workspace_layout.panes_mut(lambda pl: pl.hide_pane(kind))
+        # 3d-2: route through the runtime layout dispatcher; panes_mut owns the
+        # dirty signal (the pane mutators do not bump). layout_apply mutates the
+        # same pane_layout the lambda would have.
+        from workspace.layout_apply import layout_apply, op_hide_pane
+        layout = self.workspace_layout
+        layout.panes_mut(lambda pl: layout_apply(layout, op_hide_pane(kind)))
         self._refresh_pane_positions()
 
     def _toggle_canvas_maximized(self):
-        self.workspace_layout.panes_mut(lambda pl: pl.toggle_canvas_maximized())
+        from workspace.layout_apply import layout_apply, op_toggle_canvas_maximized
+        layout = self.workspace_layout
+        layout.panes_mut(lambda pl: layout_apply(layout, op_toggle_canvas_maximized()))
         self._refresh_pane_positions()
 
     def _start_pane_drag(self, pane_id, global_x, global_y):
@@ -549,7 +556,12 @@ class MainWindow(QMainWindow):
         if not p:
             return
         self._pane_drag = (pane_id, global_x - p.x, global_y - p.y)
-        self.workspace_layout.panes_mut(lambda pl: pl.bring_pane_to_front(pane_id))
+        # 3d-2: route the front-raise through the runtime dispatcher; panes_mut
+        # owns the dirty signal. (This is the drag START click, not the live
+        # mid-gesture move below — that stays direct, see _do_pane_drag.)
+        from workspace.layout_apply import layout_apply, op_bring_pane_to_front
+        layout = self.workspace_layout
+        layout.panes_mut(lambda pl: layout_apply(layout, op_bring_pane_to_front(pane_id)))
         self._refresh_pane_positions()
         self.grabMouse()
 
@@ -626,6 +638,11 @@ class MainWindow(QMainWindow):
             self._refresh_pane_positions()
 
     def _do_pane_drag(self, pl, pid, new_x, new_y):
+        # DEFERRED (3d-2): live pane-DRAG mid-gesture. set_pane_position is
+        # interleaved with snap detection/alignment on the live PaneLayout;
+        # re-borrowing the layout through the dispatcher mid-gesture would risk
+        # behavior change, so this stays direct (mirrors the Rust app.rs
+        # set_pane_position/resize_pane drag deferral).
         from workspace.pane import PaneLayout
         pl.set_pane_position(pid, new_x, new_y)
         preview = pl.detect_snaps(pid, pl.viewport_width, pl.viewport_height)
@@ -634,6 +651,11 @@ class MainWindow(QMainWindow):
         self._snap_preview = preview
 
     def _do_edge_drag(self, pl, pid, edge, dx, dy, start_w, start_h, start_x, start_y):
+        # DEFERRED (3d-2): live pane RESIZE mid-gesture (the resize_pane
+        # analogue). Width/height are computed against live snap targets and
+        # assigned directly; routing through the dispatcher mid-gesture would
+        # risk behavior change, so this stays direct (mirrors Rust resize_pane
+        # drag deferral).
         from workspace.pane import SNAP_DISTANCE, EdgeSide, WindowTarget, PaneTarget
         p = pl.find_pane(pid)
         if not p:
@@ -1249,7 +1271,10 @@ class MainWindow(QMainWindow):
         if panel_id:
             kind = self._panel_id_to_kind(panel_id)
             if kind is not None:
-                self.workspace_layout.show_panel(kind)
+                # 3d-2: route through the runtime dispatcher (show_panel bumps
+                # internally — dirty signal preserved).
+                from workspace.layout_apply import layout_apply, op_show_panel
+                layout_apply(self.workspace_layout, op_show_panel(kind))
                 if hasattr(self, "dock_panel"):
                     self.dock_panel.rebuild_all()
                 return

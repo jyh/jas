@@ -266,7 +266,12 @@ def create_menus(window: QMainWindow) -> None:
     def _tile_panes():
         if not hasattr(window, 'workspace_layout'):
             return
-        window.workspace_layout.panes_mut(lambda pl: pl.tile_panes())
+        # 3d-2: route through the runtime layout dispatcher. panes_mut still
+        # owns the dirty signal (the pane mutators do not bump themselves);
+        # layout_apply mutates the same pane_layout the lambda would have.
+        from workspace.layout_apply import layout_apply, op_tile_panes
+        layout = window.workspace_layout
+        layout.panes_mut(lambda pl: layout_apply(layout, op_tile_panes()))
         if hasattr(window, 'refresh_panes'):
             window.refresh_panes()
 
@@ -279,9 +284,13 @@ def create_menus(window: QMainWindow) -> None:
     def _toggle_pane(kind):
         if not hasattr(window, 'workspace_layout'):
             return
+        # 3d-2: route the resolved hide/show verb through the runtime
+        # dispatcher; panes_mut owns the dirty signal (one bump).
+        from workspace.layout_apply import layout_apply, op_hide_pane, op_show_pane
         layout = window.workspace_layout
-        layout.panes_mut(lambda pl: (
-            pl.hide_pane(kind) if pl.is_pane_visible(kind) else pl.show_pane(kind)))
+        layout.panes_mut(lambda pl: layout_apply(
+            layout,
+            op_hide_pane(kind) if pl.is_pane_visible(kind) else op_show_pane(kind)))
         if hasattr(window, 'refresh_panes'):
             window.refresh_panes()
 
@@ -298,6 +307,9 @@ def create_menus(window: QMainWindow) -> None:
         if not hasattr(window, 'workspace_layout'):
             return
         from workspace.workspace_layout import WorkspaceLayout, GroupAddr, PanelAddr
+        # 3d-2: route the resolved panel verbs through the runtime dispatcher
+        # (close_panel / show_panel bump internally — dirty signal preserved).
+        from workspace.layout_apply import layout_apply, op_close_panel, op_show_panel
         layout = window.workspace_layout
         if layout.is_panel_visible(kind):
             # Find and close
@@ -305,14 +317,15 @@ def create_menus(window: QMainWindow) -> None:
                 for gi, group in enumerate(dock.groups):
                     for pi, k in enumerate(group.panels):
                         if k == kind:
-                            layout.close_panel(PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi))
+                            layout_apply(layout, op_close_panel(
+                                PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi)))
                             if hasattr(window, 'dock_panel'):
                                 window.dock_panel.rebuild()
                             if hasattr(window, 'sync_panel_menu_checks'):
                                 window.sync_panel_menu_checks()
                             return
         else:
-            layout.show_panel(kind)
+            layout_apply(layout, op_show_panel(kind))
             if hasattr(window, 'dock_panel'):
                 window.dock_panel.rebuild()
         if hasattr(window, 'sync_panel_menu_checks'):
