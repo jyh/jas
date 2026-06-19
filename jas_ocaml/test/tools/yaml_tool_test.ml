@@ -236,7 +236,7 @@ let dispatch_tests = [
         visibility = Preview; blend_mode = Normal; mask = None;
         isolated_blending = false; knockout_group = false;
       } in
-      model#set_document (Document.make_document [| layer |]);
+      model#set_document_unbracketed (Document.make_document [| layer |]);
       let (ctx, _, _) = make_ctx ~model () in
       tool#on_press ctx 5.0 7.0 ~shift:false ~alt:false;
       (match model#document.layers.(0) with

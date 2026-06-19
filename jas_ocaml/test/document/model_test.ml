@@ -14,7 +14,9 @@ let () =
         let model3 = Jas.Model.create () in
         let received = ref [] in
         model3#on_document_changed (fun doc -> received := Array.length doc.Jas.Document.layers :: !received);
-        model3#set_document (Jas.Document.make_document [||]);
+        (* Test setup write (no undo intent) -> the sanctioned non-asserting
+           path (OP_LOG.md Increment 1). *)
+        model3#set_document_unbracketed (Jas.Document.make_document [||]);
         assert (!received = [0]));
 
       Alcotest.test_case "multiple listeners" `Quick (fun () ->
@@ -23,14 +25,14 @@ let () =
         let b = ref [] in
         model4#on_document_changed (fun doc -> a := Array.length doc.Jas.Document.layers :: !a);
         model4#on_document_changed (fun doc -> b := Array.length doc.Jas.Document.layers :: !b);
-        model4#set_document (Jas.Document.make_document [||]);
+        model4#set_document_unbracketed (Jas.Document.make_document [||]);
         assert (!a = [0]);
         assert (!b = [0]));
 
       Alcotest.test_case "immutability" `Quick (fun () ->
         let model5 = Jas.Model.create () in
         let before = model5#document in
-        model5#set_document (Jas.Document.make_document [||]);
+        model5#set_document_unbracketed (Jas.Document.make_document [||]);
         let after = model5#document in
         assert (Array.length before.Jas.Document.layers = 1);
         assert (Array.length after.Jas.Document.layers = 0));
@@ -44,8 +46,8 @@ let () =
       Alcotest.test_case "undo/redo" `Quick (fun () ->
         let model6 = Jas.Model.create () in
         assert (not model6#can_undo);
-        model6#snapshot;
-        model6#set_document (Jas.Document.make_document [||]);
+        (* An undoable edit through the self-bracketing chokepoint. *)
+        model6#edit_document (Jas.Document.make_document [||]);
         assert model6#can_undo;
         assert (not model6#can_redo);
         model6#undo;
@@ -57,15 +59,12 @@ let () =
       Alcotest.test_case "undo clears redo on new edit" `Quick (fun () ->
         let layer = Jas.Element.make_layer [||] in
         let model7 = Jas.Model.create () in
-        model7#snapshot;
-        model7#set_document (Jas.Document.make_document [|layer|]);
-        model7#snapshot;
-        model7#set_document (Jas.Document.make_document [|layer; layer|]);
+        model7#edit_document (Jas.Document.make_document [|layer|]);
+        model7#edit_document (Jas.Document.make_document [|layer; layer|]);
         model7#undo;
         assert (Array.length model7#document.Jas.Document.layers = 1);
         assert model7#can_redo;
-        model7#snapshot;
-        model7#set_document (Jas.Document.make_document [||]);
+        model7#edit_document (Jas.Document.make_document [||]);
         assert (not model7#can_redo));
 
       Alcotest.test_case "undo/redo on empty stacks" `Quick (fun () ->
@@ -81,8 +80,7 @@ let () =
         let m = Jas.Model.create () in
         assert (not m#is_modified);
         m#mark_saved;  (* saved at journal_head 0 *)
-        m#snapshot;
-        m#set_document (Jas.Document.make_document [||]);
+        m#edit_document (Jas.Document.make_document [||]);
         assert m#is_modified;
         m#undo;
         assert (not m#is_modified);  (* undo back to the saved point *)
@@ -144,7 +142,8 @@ let () =
             blend_mode = Jas.Element.Normal; mask = None;
             fill_gradient = None; stroke_gradient = None } in
         let layer = Jas.Element.make_layer [| id_rect "a" |] in
-        m#set_document (Jas.Document.make_document [| layer |]);
+        (* Test setup write -> the sanctioned non-asserting path. *)
+        m#set_document_unbracketed (Jas.Document.make_document [| layer |]);
         (* The chokepoint rebuilt the index: "a" resolves, and the stored
            index equals a from-scratch rebuild of the new document. *)
         assert (Jas.Live.Id_map.mem "a" m#id_index);
@@ -165,12 +164,10 @@ let () =
             fill_gradient = None; stroke_gradient = None } in
         let layer_with ids =
           Jas.Element.make_layer (Array.of_list (List.map id_rect ids)) in
-        (* Edit 1: add "r1" (undoable). *)
-        m#snapshot;
-        m#set_document (Jas.Document.make_document [| layer_with ["r1"] |]);
-        (* Edit 2: add "r2" (undoable). *)
-        m#snapshot;
-        m#set_document (Jas.Document.make_document [| layer_with ["r1"; "r2"] |]);
+        (* Edit 1: add "r1" (undoable, self-bracketing). *)
+        m#edit_document (Jas.Document.make_document [| layer_with ["r1"] |]);
+        (* Edit 2: add "r2" (undoable, self-bracketing). *)
+        m#edit_document (Jas.Document.make_document [| layer_with ["r1"; "r2"] |]);
         assert (Jas.Live.Id_map.mem "r1" m#id_index);
         assert (Jas.Live.Id_map.mem "r2" m#id_index);
         (* Undo edit 2: the carried (paired) index must equal a from-scratch
@@ -193,6 +190,73 @@ let () =
           Jas.Live.rebuild_id_index
             m#document.Jas.Document.layers m#document.Jas.Document.symbols in
         assert (Jas.Live.Id_map.equal ( = ) m#id_index expect_after_redo));
+    ];
+
+    (* ── Write chokepoint (OP_LOG.md Increment 1, enforced) ────────────────
+       Mirrors the Rust [set_document_outside_txn_panics] (jas_dioxus
+       [model.rs]) and the Python [WriteChokepointTest] (jas [model_test.py]):
+       the three-way split — [set_document] asserts a txn is open,
+       [edit_document] self-brackets, [set_document_unbracketed] never asserts. *)
+    "write_chokepoint", [
+      Alcotest.test_case "set_document outside a transaction raises" `Quick
+        (fun () ->
+          (* The oracle: an undoable write with no open transaction trips the
+             live [in_txn] assert. OCaml [assert] runs in release too (the suite
+             runs with it active), so this is the cross-language equivalent of
+             the Rust should-panic test. *)
+          let m = Jas.Model.create () in
+          (match
+             (try m#set_document (Jas.Document.make_document [||]); `No_raise
+              with Assert_failure _ -> `Raised)
+           with
+           | `Raised -> ()
+           | `No_raise ->
+             Alcotest.fail "set_document outside a transaction must assert"));
+
+      Alcotest.test_case "set_document inside a transaction succeeds" `Quick
+        (fun () ->
+          let m = Jas.Model.create () in
+          m#begin_txn;
+          m#set_document (Jas.Document.make_document [||]);  (* legal: in_txn *)
+          m#commit_txn;
+          assert (Array.length m#document.Jas.Document.layers = 0));
+
+      Alcotest.test_case "set_document_unbracketed never asserts" `Quick
+        (fun () ->
+          (* Sanctioned non-undoable write: legal with no open transaction and
+             it does NOT advance the journal cursor (no undo step). *)
+          let m = Jas.Model.create () in
+          let head = m#journal_head in
+          m#set_document_unbracketed (Jas.Document.make_document [||]);
+          assert (Array.length m#document.Jas.Document.layers = 0);
+          assert (m#journal_head = head);
+          assert (not m#can_undo));
+
+      Alcotest.test_case "edit_document self-brackets when no txn open" `Quick
+        (fun () ->
+          (* Standalone edit_document opens and commits its own one-step txn. *)
+          let m = Jas.Model.create () in
+          m#edit_document (Jas.Document.make_document [||]);
+          assert (List.length m#journal = 1);
+          assert (m#journal_head = 1);
+          assert m#can_undo;
+          m#undo;
+          assert (Array.length m#document.Jas.Document.layers = 1));
+
+      Alcotest.test_case "edit_document joins an already-open txn" `Quick
+        (fun () ->
+          (* Nested inside a caller bracket, edit_document does NOT open its own
+             txn — both writes land in the SAME single transaction (one undo
+             step). *)
+          let m = Jas.Model.create () in
+          let l = Jas.Element.make_layer [||] in
+          m#begin_txn;
+          m#edit_document (Jas.Document.make_document [| l |]);
+          m#edit_document (Jas.Document.make_document [| l; l |]);
+          m#commit_txn;
+          assert (List.length m#journal = 1);  (* one transaction, not two *)
+          m#undo;
+          assert (Array.length m#document.Jas.Document.layers = 1));
     ];
 
     (* ── Transaction journal (OP_LOG.md Increment 2, full journal) ─────────

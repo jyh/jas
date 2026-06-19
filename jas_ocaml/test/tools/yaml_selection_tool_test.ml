@@ -40,7 +40,7 @@ let two_rect_model () : Model.model =
     isolated_blending = false; knockout_group = false;
   } in
   let m = Model.create () in
-  m#set_document (Document.make_document [| layer |]);
+  m#set_document_unbracketed (Document.make_document [| layer |]);
   m
 
 let make_ctx model =

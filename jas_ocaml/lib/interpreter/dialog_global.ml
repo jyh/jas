@@ -125,7 +125,12 @@ let _platform_effects_for (ctrl : Controller.controller)
     (close_widget : unit -> unit) :
     (string * Effects.platform_effect) list =
   let snapshot_h : Effects.platform_effect = fun _ _ _ ->
-    ctrl#model#snapshot; `Null in
+    (* OP_LOG.md Increment 1: the dialog action [snapshot] effect OPENS the
+       undo transaction ([begin_txn]) so the subsequent doc.*-field setters (the
+       enforced [set_document] chokepoint) are legal; [Effects.run_effects] owns
+       the commit (one undo step). Mirrors the yaml_tool / Rust doc.snapshot ->
+       begin_txn path. *)
+    ctrl#model#begin_txn; `Null in
   let close_dialog_h : Effects.platform_effect = fun _ _ _ ->
     close_widget (); `Null in
   ("snapshot", snapshot_h)
@@ -230,7 +235,13 @@ let dispatch_action (action_name : string)
                  ("active_document", Active_document_view.build (Some c#model));
                ] in
                let store = State_store.create () in
-               Effects.run_effects ~platform_effects:pe effects ctx store
+               (* Thread the model as the transaction OWNER so the [snapshot]
+                  effect [begin_txn] is committed once at the end (one undo
+                  step), and the action name labels the journal transaction
+                  (OP_LOG.md Increment 1). *)
+               Effects.run_effects ~platform_effects:pe
+                 ~owner_model:(Some c#model) ~action_name:(Some action_name)
+                 effects ctx store
              | _ -> ())
           | _ -> ())
        | _ -> ())

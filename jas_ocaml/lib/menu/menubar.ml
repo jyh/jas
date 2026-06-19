@@ -33,7 +33,6 @@ let group_selection (model : Model.model) () =
       let first_parent = parent (List.hd sorted_paths) in
       if List.for_all (fun p -> parent p = first_parent) sorted_paths then begin
         let elements = List.map (fun p -> Document.get_element doc p) sorted_paths in
-        model#snapshot;
         (* Delete in reverse order *)
         let rev_paths = List.sort (fun a b -> compare b a) sorted_paths in
         let new_doc = List.fold_left Document.delete_element doc rev_paths in
@@ -55,7 +54,9 @@ let group_selection (model : Model.model) () =
         new_layers.(layer_idx) <- new_layer;
         let new_sel = Document.PathMap.singleton insert_path
           (Document.make_element_selection insert_path) in
-        model#set_document { new_doc with
+        (* Undoable edit (one self-bracketed undo step) via edit_document
+           (OP_LOG.md Increment 1). *)
+        model#edit_document { new_doc with
           Document.layers = new_layers;
           Document.selection = new_sel }
       end
@@ -110,12 +111,13 @@ let make_instance (model : Model.model) () =
        (match mint () with
         | None -> ()
         | Some ref_id ->
-          (* create_reference + offset-move under ONE snapshot = a single
-             undo step. *)
-          model#snapshot;
+          (* create_reference + offset-move under ONE transaction = a single
+             undo step: with_txn opens the bracket; the edit_document inside each
+             Controller mutator JOINS it (OP_LOG.md Increment 1). *)
           let ctrl = new Controller.controller ~model () in
-          ctrl#create_reference target_path target_id ref_id;
-          ctrl#move_selection Canvas_tool.paste_offset Canvas_tool.paste_offset))
+          model#with_txn (fun () ->
+            ctrl#create_reference target_path target_id ref_id;
+            ctrl#move_selection Canvas_tool.paste_offset Canvas_tool.paste_offset)))
   | _ -> ()
 
 let ungroup_selection (model : Model.model) () =
@@ -133,7 +135,6 @@ let ungroup_selection (model : Model.model) () =
     let sorted_paths = List.sort compare group_paths in
     if sorted_paths = [] then ()
     else begin
-      model#snapshot;
       (* Process in reverse order to preserve indices *)
       let new_doc = List.fold_left (fun doc gpath ->
         let group_elem = Document.get_element doc gpath in
@@ -175,7 +176,8 @@ let ungroup_selection (model : Model.model) () =
         done;
         offset := !offset + n_children - 1
       ) sorted_paths;
-      model#set_document { new_doc with Document.selection = !new_sel }
+      (* Undoable edit (one self-bracketed undo step) via edit_document. *)
+      model#edit_document { new_doc with Document.selection = !new_sel }
     end
   end
 
@@ -202,12 +204,11 @@ let ungroup_all (model : Model.model) () =
       Element.Layer { r with children = new_children }
     | _ -> layer
   ) doc.Document.layers in
-  if !changed then begin
-    model#snapshot;
-    model#set_document { doc with
+  if !changed then
+    (* Undoable edit (one self-bracketed undo step) via edit_document. *)
+    model#edit_document { doc with
       Document.layers = new_layers;
       Document.selection = Document.PathMap.empty }
-  end
 
 let copy_selection (model : Model.model) () =
   let doc = model#document in
@@ -300,9 +301,11 @@ let cut_selection (model : Model.model) (parent : GWindow.window) () =
       | _ -> confirm_cut_orphans (List.length orphaned) parent
     in
     if proceed then begin
-      model#snapshot;
+      (* Undoable edit (one self-bracketed undo step) via edit_document
+         (OP_LOG.md Increment 1). copy_selection only writes the system
+         clipboard, so it carries no document mutation to bracket. *)
       copy_selection model ();
-      model#set_document (Document.delete_selection model#document)
+      model#edit_document (Document.delete_selection model#document)
     end
   end
 
@@ -341,7 +344,11 @@ let is_svg text =
   starts_with "<?xml" || starts_with "<svg"
 
 let paste_clipboard (model : Model.model) offset () =
-  model#snapshot;
+  (* The document write happens later, in the async clipboard callback, so the
+     undo bracket must live there too: each branch ends with a single
+     edit_document (one self-bracketed undo step). A synchronous snapshot here
+     would push a checkpoint before the (possibly empty) clipboard arrives.
+     OP_LOG.md Increment 1. *)
   let clipboard = GtkBase.Clipboard.get Gdk.Atom.clipboard in
   GtkBase.Clipboard.request_text clipboard ~callback:(fun text_opt ->
     match text_opt with
@@ -401,7 +408,7 @@ let paste_clipboard (model : Model.model) offset () =
             | _ -> ()
           end
         ) pasted_doc.Document.layers;
-        model#set_document { doc with layers = new_layers;
+        model#edit_document { doc with layers = new_layers;
                                       selection = !new_sel }
       end else begin
         (* Plain text: create a Text element. Sanitize first so an
@@ -429,7 +436,7 @@ let paste_clipboard (model : Model.model) offset () =
             | _ -> l
           else l
         ) doc.Document.layers in
-        model#set_document { doc with layers = new_layers;
+        model#edit_document { doc with layers = new_layers;
                                       selection = !new_sel }
       end
   )
@@ -579,8 +586,8 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
       end else begin
         let svg = really_input_string ic n in
         close_in ic;
-        model#snapshot;
-        model#set_document (Svg.svg_to_document svg);
+        (* Reverting is an undoable edit (one self-bracketed undo step). *)
+        model#edit_document (Svg.svg_to_document svg);
         model#mark_saved
       end
     | _ -> ()
@@ -668,15 +675,17 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   ignore (object_factory#add_item "Ungroup" ~callback:(fun () -> ungroup_selection (m ()) ()));
   ignore (object_factory#add_item "Ungroup All" ~callback:(fun () -> ungroup_all (m ()) ()));
   ignore (object_factory#add_separator ());
+  (* The Controller mutators self-bracket via edit_document (one undo step);
+     no separate snapshot needed (OP_LOG.md Increment 1). *)
   ignore (object_factory#add_item "Lock" ~key:GdkKeysyms._2 ~callback:(fun () ->
-    let model = m () in model#snapshot; (new Controller.controller ~model ())#lock_selection));
+    let model = m () in (new Controller.controller ~model ())#lock_selection));
   ignore (object_factory#add_item "Unlock All" ~callback:(fun () ->
-    let model = m () in model#snapshot; (new Controller.controller ~model ())#unlock_all));
+    let model = m () in (new Controller.controller ~model ())#unlock_all));
   ignore (object_factory#add_separator ());
   ignore (object_factory#add_item "Hide" ~key:GdkKeysyms._3 ~callback:(fun () ->
-    let model = m () in model#snapshot; (new Controller.controller ~model ())#hide_selection));
+    let model = m () in (new Controller.controller ~model ())#hide_selection));
   ignore (object_factory#add_item "Show All" ~callback:(fun () ->
-    let model = m () in model#snapshot; (new Controller.controller ~model ())#show_all));
+    let model = m () in (new Controller.controller ~model ())#show_all));
   ignore (object_factory#add_separator ());
   ignore (object_factory#add_item "Make Instance" ~callback:(fun () ->
     make_instance (m ()) ()));

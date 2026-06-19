@@ -156,7 +156,11 @@ class type_tool = object (_self)
 
   method private ensure_snapshot (ctx : Canvas_tool.tool_context) =
     if not did_snapshot then begin
-      ctx.model#snapshot;
+      (* Open the undo transaction for the whole editing session (OP_LOG.md
+         Increment 1): the per-keystroke [set_document] writes (the enforced
+         chokepoint) JOIN one transaction; [end_session] closes it as one undo
+         step. [begin_txn] is idempotent while already open. *)
+      ctx.model#begin_txn;
       did_snapshot <- true
     end
 
@@ -213,7 +217,10 @@ class type_tool = object (_self)
     ctx.controller#select_element path
 
   method private begin_session_new (ctx : Canvas_tool.tool_context) x y w h =
-    ctx.model#snapshot;
+    (* Open the session transaction (OP_LOG.md Increment 1); the [add_element]
+       below and every subsequent keystroke write JOIN it (one undo step,
+       closed by [end_session]). *)
+    ctx.model#begin_txn;
     did_snapshot <- true;
     let elem = Text_edit.empty_text_elem x y w h in
     ctx.controller#add_element elem;
@@ -234,6 +241,12 @@ class type_tool = object (_self)
     end
 
   method private end_session ?ctx () =
+    (* Close the transaction opened by the session first [begin_txn]
+       (OP_LOG.md Increment 1): the whole editing session is one undo step.
+       [commit_txn] is a no-op when no transaction is open. *)
+    (match ctx with
+     | Some (c : Canvas_tool.tool_context) -> c.model#commit_txn
+     | None -> ());
     session <- None;
     did_snapshot <- false;
     drag_start <- None;

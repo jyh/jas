@@ -1590,7 +1590,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
           let elem = Document.get_element ctrl#document path in
           (match elem with
            | Element.Path { d; _ } ->
-             ctrl#model#snapshot;
+             ctrl#model#begin_txn;
              (match Path_ops.delete_anchor_from_path d anchor_idx with
               | Some new_cmds ->
                 let new_elem = path_with_commands elem new_cmds in
@@ -1690,7 +1690,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
           let elem = Document.get_element doc path in
           (match elem with
            | Element.Path { d; _ } ->
-             ctrl#model#snapshot;
+             ctrl#model#begin_txn;
              let ins = Path_ops.insert_point_in_path d seg_idx t in
              let new_elem = path_with_commands elem ins.commands in
              ctrl#set_document (Document.replace_element doc path new_elem)
@@ -2603,12 +2603,12 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
               in
               (match mode with
                | "pressed_smooth" ->
-                 ctrl#model#snapshot;
+                 ctrl#model#begin_txn;
                  apply (Element.convert_smooth_to_corner d ai)
                | "pressed_corner" ->
                  let moved = Float.hypot (tx -. ox) (ty -. oy) in
                  if moved > 1.0 then begin
-                   ctrl#model#snapshot;
+                   ctrl#model#begin_txn;
                    apply (Element.convert_corner_to_smooth d ai tx ty)
                  end
                | "pressed_handle" ->
@@ -2617,7 +2617,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
                  with `String s -> s | _ -> "" in
                  let dx = tx -. ox and dy = ty -. oy in
                  if Float.abs dx > 0.5 || Float.abs dy > 0.5 then begin
-                   ctrl#model#snapshot;
+                   ctrl#model#begin_txn;
                    apply (Element.move_path_handle_independent
                             d ai handle_type dx dy)
                  end
@@ -2739,7 +2739,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
                | None -> false
              in
              if not already_selected || shift then begin
-               ctrl#model#snapshot;
+               ctrl#model#begin_txn;
                if shift then begin
                  let sel = doc.selection in
                  match Document.PathMap.find_opt path sel with
@@ -2781,7 +2781,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
      | `Assoc args ->
        let (rx, ry, rw, rh, additive) = normalize_rect_args args store ctx in
        if rw > 1.0 || rh > 1.0 then begin
-         ctrl#model#snapshot;
+         ctrl#model#begin_txn;
          ctrl#partial_select_rect ~extend:additive rx ry rw rh
        end
        else if not additive then
@@ -3706,7 +3706,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
       let doc = ctrl#document in
       let total = List.length doc.artboards in
       if List.length target_ids < total then begin
-        ctrl#model#snapshot;
+        ctrl#model#begin_txn;
         let new_artboards = List.filter (fun (a : Artboard.artboard) ->
           not (List.mem a.id target_ids)
         ) doc.artboards in

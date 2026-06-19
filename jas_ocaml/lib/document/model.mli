@@ -52,7 +52,33 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
       replaces the document; read at the paint entry to epoch the
       reference-geometry recompute cache. Mirrors the Rust [Model.generation]. *)
   method generation : int
+
+  (** Replace the document — the committing write for UNDOABLE mutations
+      (OP_LOG.md Increment 1, enforced chokepoint). Asserts {!in_txn} is open;
+      the assert is LIVE (it runs in release too, consistent with the id-index
+      gate), so any undoable edit that skipped the transaction bracket fails the
+      suite and the journal cursor is complete by construction. Self-bracketing
+      mutators use {!edit_document}; sanctioned non-undoable writes use
+      {!set_document_unbracketed}. Mirrors the Rust [set_document]. *)
   method set_document : Document.document -> unit
+
+  (** Self-bracketing undoable write: opens and commits its own one-step
+      transaction when none is open, else joins the caller transaction (so a
+      standalone call is a complete one-step undo and a nested one joins the
+      owning action). This is what the {!Controller} mutators use. Distinct from
+      {!set_document} (asserts a transaction is open) and
+      {!set_document_unbracketed} (non-undoable). Mirrors the Rust
+      [edit_document]. *)
+  method edit_document : Document.document -> unit
+
+  (** Committing write for sanctioned NON-undoable mutations — selection-only
+      and pure view-state changes, dialog-preview re-apply, live drag, and test
+      setup (OP_LOG.md sections 7 and 8). Same effect as {!set_document} but
+      never asserts, which is what lets the live {!in_txn} guard in
+      {!set_document} tell a deliberate non-undoable write from a forgotten
+      transaction. Mirrors the Rust [set_document_unbracketed]. *)
+  method set_document_unbracketed : Document.document -> unit
+
   method filename : string
   method set_filename : string -> unit
   method on_document_changed : (Document.document -> unit) -> unit

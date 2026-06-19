@@ -189,16 +189,78 @@ class model ?(document = Document.default_document ()) ?filename () =
       current_filename <- f;
       List.iter (fun cb -> cb f) filename_listeners
 
-    method set_document (d : Document.document) =
-      (* The mutation chokepoint: all document edits funnel through here
-         (the controller always clones, mutates, and [set_document]s).
-         Rebuild the paired index here so paint never rebuilds it
-         (REFERENCE_GRAPH.md section 2.4 Phase 4b). *)
+    (* OP_LOG.md Increment 1 (enforced chokepoint, mirroring jas_dioxus
+       [model.rs] and jas [model.py]): three public writes funnel into one
+       private [write_document].
+
+       - [set_document]            — UNDOABLE write; asserts [in_txn] is open.
+       - [edit_document]           — SELF-BRACKETING undoable write (opens and
+                                     commits its own txn when none is open, else
+                                     joins the caller). This is what the
+                                     Controller mutators use, so a standalone
+                                     edit is a complete one-step undo and a
+                                     nested one joins the owning action.
+       - [set_document_unbracketed] — sanctioned NON-undoable write (selection /
+                                     preview re-apply / live drag / view-state /
+                                     undo-redo history-nav / test setup); never
+                                     asserts (OP_LOG.md sections 7 and 8).
+
+       The distinct names let the live [in_txn] guard in [set_document] tell
+       "deliberately not undoable" from "forgot to open a transaction": the
+       former says so by calling [set_document_unbracketed] directly. *)
+
+    (* The single committing write to [doc]: rebuild the paired index here so
+       paint never rebuilds it (REFERENCE_GRAPH.md section 2.4 Phase 4b), bump
+       the modification generation, gate the index against a fresh rebuild, and
+       notify listeners. All three public writes funnel here so there is exactly
+       one place document content is committed. Mirrors the Rust private
+       [write_document]. *)
+    method private write_document (d : Document.document) =
       doc <- d;
       id_index <- rebuild_index d;
       generation <- generation + 1;
       _self#assert_index_matches_rebuild;
       List.iter (fun f -> f doc) listeners
+
+    (* The committing write for UNDOABLE mutations. The [assert in_txn] is LIVE
+       (OP_LOG.md Increment 1, enforced chokepoint): any undoable edit that
+       skipped the transaction bracket fails the test suite, so the journal
+       cursor is complete by construction. OCaml [assert] runs in release too,
+       consistent with the id-index gate above (the existing release trust gate)
+       — so this guard is the app convention, not a debug-only check.
+       Self-bracketing mutators use [edit_document]; sanctioned non-undoable
+       writes use [set_document_unbracketed] (which never asserts). Mirrors the
+       Rust [set_document]. *)
+    method set_document (d : Document.document) =
+      assert in_txn;
+      _self#write_document d
+
+    (* Self-bracketing undoable write: if no transaction is open, wrap this edit
+       in its own begin/commit (one undo step); if one is already open, just
+       write (joining the caller transaction). This is what the [Controller]
+       mutators use, so a standalone call (a unit test, or a direct Controller
+       call) is a complete one-step undo, while the same method called inside a
+       UI [with_txn] / [begin_txn] joins that action — production behavior is
+       unchanged, and no test needs an explicit bracket. The begin/commit run
+       even if [write_document] raises is NOT required (writes here do not
+       raise; the body is total), so a plain try is unnecessary. Distinct from
+       [set_document] (asserts a transaction is open) and
+       [set_document_unbracketed] (non-undoable). Mirrors the Rust
+       [edit_document]. *)
+    method edit_document (d : Document.document) =
+      let opened = not in_txn in
+      if opened then _self#begin_txn;
+      _self#write_document d;
+      if opened then _self#commit_txn
+
+    (* Committing write for sanctioned NON-undoable mutations — selection-only
+       and pure view-state changes, dialog-preview re-apply, live drag, and test
+       setup (OP_LOG.md sections 7 and 8). Same effect as [set_document] but the
+       distinct name is what lets the live [in_txn] guard in [set_document] tell
+       "deliberately not undoable" from "forgot to open a transaction": this
+       path never asserts. Mirrors the Rust [set_document_unbracketed]. *)
+    method set_document_unbracketed (d : Document.document) =
+      _self#write_document d
 
     method on_document_changed (f : Document.document -> unit) =
       listeners <- f :: listeners

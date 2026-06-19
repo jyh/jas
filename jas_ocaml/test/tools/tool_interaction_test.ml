@@ -753,7 +753,7 @@ let () =
           0.0 0.0 "hello" in
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| existing |] in
-        model#set_document
+        model#set_document_unbracketed
           { Jas.Document.layers = [| layer |]; symbols = [||];
             selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
@@ -854,7 +854,7 @@ let () =
           [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
-        model#set_document
+        model#set_document_unbracketed
           { Jas.Document.layers = [| layer |]; symbols = [||];
             selected_layer = 0;
             selection = Jas.Document.PathMap.empty;
@@ -908,7 +908,7 @@ let () =
           [MoveTo (0.0, 0.0); LineTo (100.0, 0.0)] in
         let model = Jas.Model.create () in
         let layer = Jas.Element.make_layer ~name:"L" [| path_elem |] in
-        model#set_document
+        model#set_document_unbracketed
           { Jas.Document.layers = [| layer |]; symbols = [||];
             selected_layer = 0;
             selection = Jas.Document.PathMap.empty;

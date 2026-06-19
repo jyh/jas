@@ -247,7 +247,7 @@ let menu_tests = [
     let layer0 = Jas.Element.make_layer ~name:"Layer 0" [||] in
     let layer1 = Jas.Element.make_layer ~name:"Layer 1" [||] in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer0; layer1|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer0; layer1|] };
     panel_dispatch Layers "new_layer" addr l ~fill_on_top:true ~get_model:(fun () -> m)
       ~get_panel_selection:(fun () -> []) ();
     let layers = m#document.Jas.Document.layers in
@@ -264,7 +264,7 @@ let menu_tests = [
     let layer1 = Jas.Element.make_layer ~name:"Layer 1" [||] in
     let layer2 = Jas.Element.make_layer ~name:"Layer 2" [||] in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer0; layer1; layer2|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer0; layer1; layer2|] };
     (* Select layer at index 1 (Layer 1) *)
     panel_dispatch Layers "new_layer" addr l ~fill_on_top:true ~get_model:(fun () -> m)
       ~get_panel_selection:(fun () -> [[1]]) ();
@@ -290,7 +290,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer0|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer0|] };
     (* Run toggle_all_layers_visibility via YAML dispatch *)
     panel_dispatch Layers "toggle_all_layers_visibility" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
@@ -312,7 +312,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer0|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer0|] };
     panel_dispatch Layers "toggle_all_layers_lock" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
     let after = m#document.Jas.Document.layers.(0) in
@@ -329,7 +329,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer "Layer 1"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "Layer 1"|] };
     Jas.Panel_menu.dispatch_yaml_action "new_layer" m;
     let layers = m#document.Jas.Document.layers in
     assert (Array.length layers = 2);
@@ -347,7 +347,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers =
+    m#set_document_unbracketed { doc with Jas.Document.layers =
       [|layer "Layer 1"; layer "Layer 2"; layer "Layer 3"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[1]]
@@ -369,7 +369,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[0]; [2]]
       "delete_layer_selection" m;
@@ -388,7 +388,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[1]]
       "duplicate_layer_selection" m;
@@ -409,7 +409,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "A"; layer "B"; layer "C"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[0]; [2]]
       "new_group" m;
@@ -434,7 +434,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers =
+    m#set_document_unbracketed { doc with Jas.Document.layers =
       [|layer "Layer 1"; layer "Layer 2"; layer "Layer 3"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[0]; [2]]
@@ -470,7 +470,7 @@ let menu_tests = [
       mask = None;
       isolated_blending = false; knockout_group = false;
     } in
-    m#set_document { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "A"; group; layer "B"|] };
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[1]]
       "flatten_artwork" m;
@@ -484,7 +484,7 @@ let menu_tests = [
   Alcotest.test_case "layer_options_confirm_edit_mode" `Quick (fun () ->
     let m = Jas.Model.create () in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
         name = Some "Old"; id = None; children = [||];
         opacity = 1.0; transform = None;
@@ -513,7 +513,7 @@ let menu_tests = [
   Alcotest.test_case "layer_options_confirm_create_mode" `Quick (fun () ->
     let m = Jas.Model.create () in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
         name = Some "Existing"; id = None; children = [||];
         opacity = 1.0; transform = None;
@@ -543,7 +543,7 @@ let menu_tests = [
   Alcotest.test_case "layer_options_confirm_invokes_close_dialog_cb" `Quick (fun () ->
     let m = Jas.Model.create () in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|
       Jas.Element.Layer {
         name = Some "A"; id = None; children = [||];
         opacity = 1.0; transform = None;
@@ -578,7 +578,7 @@ let menu_tests = [
       isolated_blending = false; knockout_group = false;
     } in
     let doc = m#document in
-    m#set_document { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
+    m#set_document_unbracketed { doc with Jas.Document.layers = [|layer "A"; layer "B"|] };
     assert (Jas.Layers_panel_state.get_isolation_stack () = []);
     Jas.Panel_menu.dispatch_yaml_action
       ~panel_selection:[[1]]
@@ -649,7 +649,7 @@ let menu_tests = [
       selection = Jas.Document.PathMap.singleton [0;0]
         (Jas.Document.element_selection_all [0;0]);
     } in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     panel_dispatch Opacity "make_opacity_mask" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
     (* The new mask on the rect should have clip=false, invert=true
@@ -695,7 +695,7 @@ let menu_tests = [
       selection = Jas.Document.PathMap.singleton [0;0]
         (Jas.Document.element_selection_all [0;0]);
     } in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     panel_dispatch Character "toggle_all_caps" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
     assert (panel_is_checked Character "toggle_all_caps" l);
@@ -723,7 +723,7 @@ let menu_tests = [
       selection = Jas.Document.PathMap.singleton [0;0]
         (Jas.Document.element_selection_all [0;0]);
     } in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     panel_dispatch Character "toggle_all_caps" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
     assert (panel_is_checked Character "toggle_all_caps" l);
@@ -749,7 +749,7 @@ let menu_tests = [
       selection = Jas.Document.PathMap.singleton [0;0]
         (Jas.Document.element_selection_all [0;0]);
     } in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     panel_dispatch Character "toggle_superscript" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
     assert (panel_is_checked Character "toggle_superscript" l);
@@ -778,7 +778,7 @@ let menu_tests = [
       selection = Jas.Document.PathMap.singleton [0;0]
         (Jas.Document.element_selection_all [0;0]);
     } in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     let before = m#document in
     panel_dispatch Character "toggle_snap_to_glyph_visible" addr l
       ~fill_on_top:true ~get_model:(fun () -> m) ();
@@ -842,7 +842,7 @@ let delete_orphan_confirm_tests = [
      existing no-dialog behavior must be preserved exactly. *)
   Alcotest.test_case "panel_delete_no_orphan_skips_confirm" `Quick (fun () ->
     let m = Jas.Model.create () in
-    m#set_document (orphan_doc [ orphan_rect (); orphan_rect (); orphan_rect () ]);
+    m#set_document_unbracketed (orphan_doc [ orphan_rect (); orphan_rect (); orphan_rect () ]);
     (* Delete the second plain rect [1]: nothing points at it. *)
     let seen = run_panel_delete m ~paths:[[1]] ~confirm:false in
     assert (seen = []);                 (* hook never consulted *)
@@ -852,7 +852,7 @@ let delete_orphan_confirm_tests = [
      fires; Cancel (false) aborts entirely — no delete, doc unchanged. *)
   Alcotest.test_case "panel_delete_orphan_cancel_aborts" `Quick (fun () ->
     let m = Jas.Model.create () in
-    m#set_document
+    m#set_document_unbracketed
       (orphan_doc [ orphan_rect ~id:"a" (); orphan_ref ~id:"r1" ~target:"a";
                     orphan_rect () ]);
     let before = m#document in
@@ -865,7 +865,7 @@ let delete_orphan_confirm_tests = [
      undo step (the YAML action snapshots), restorable via undo. *)
   Alcotest.test_case "panel_delete_orphan_ok_deletes" `Quick (fun () ->
     let m = Jas.Model.create () in
-    m#set_document
+    m#set_document_unbracketed
       (orphan_doc [ orphan_rect ~id:"a" (); orphan_ref ~id:"r1" ~target:"a";
                     orphan_rect () ]);
     let seen = run_panel_delete m ~paths:[[0]] ~confirm:true in
@@ -879,7 +879,7 @@ let delete_orphan_confirm_tests = [
      (2), matching orphaned_references. *)
   Alcotest.test_case "panel_delete_orphan_count_plural" `Quick (fun () ->
     let m = Jas.Model.create () in
-    m#set_document
+    m#set_document_unbracketed
       (orphan_doc [ orphan_rect ~id:"a" ();
                     orphan_ref ~id:"r1" ~target:"a";
                     orphan_ref ~id:"r2" ~target:"a" ]);
@@ -893,7 +893,7 @@ let delete_orphan_confirm_tests = [
   Alcotest.test_case "panel_delete_orphan_excludes_deleted_referrer"
     `Quick (fun () ->
     let m = Jas.Model.create () in
-    m#set_document
+    m#set_document_unbracketed
       (orphan_doc [ orphan_rect ~id:"a" ();
                     orphan_ref ~id:"r1" ~target:"a";
                     orphan_ref ~id:"r2" ~target:"a" ]);

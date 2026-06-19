@@ -842,7 +842,9 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                   m#set_default_fill None;
                   if not (Document.PathMap.is_empty
                             m#document.Document.selection) then begin
-                    m#snapshot;
+                    (* The Controller mutator self-brackets via edit_document
+                       (one undo step); no separate snapshot needed (OP_LOG.md
+                       Increment 1). *)
                     let ctrl = Controller.create ~model:m () in
                     ctrl#set_selection_fill None
                   end
@@ -850,14 +852,13 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                   m#set_default_stroke None;
                   if not (Document.PathMap.is_empty
                             m#document.Document.selection) then begin
-                    m#snapshot;
                     let ctrl = Controller.create ~model:m () in
                     ctrl#set_selection_stroke None
                   end
                 end
               | "reset_fill_stroke" ->
                 (* Reset to workspace defaults: white fill + black
-                   stroke + fill_on_top. The YAML action's [set:]
+                   stroke + fill_on_top. The YAML action [set:]
                    effect writes to state.fill_color /
                    state.stroke_color, but subscribe_active_color
                    only propagates the side matching fill_on_top —
@@ -873,15 +874,18 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                  | None -> ());
                 if not (Document.PathMap.is_empty
                           m#document.Document.selection) then begin
-                  m#snapshot;
+                  (* Fill + stroke as ONE undo step: with_txn opens the bracket,
+                     the edit_document inside each Controller mutator JOINS it (OP_LOG.md
+                     Increment 1). *)
                   let ctrl = Controller.create ~model:m () in
-                  ctrl#set_selection_fill new_fill;
-                  ctrl#set_selection_stroke new_stroke
+                  m#with_txn (fun () ->
+                    ctrl#set_selection_fill new_fill;
+                    ctrl#set_selection_stroke new_stroke)
                 end;
                 update_color_panel_widgets ();
                 !fill_stroke_swap_hook ()
               | "swap_fill_stroke" ->
-                (* Direct route. The YAML action's [swap:] effect
+                (* Direct route. The YAML action [swap:] effect
                    only flips state.fill_color / state.stroke_color
                    in the store; subscribe_active_color then only
                    propagates the side matching fill_on_top to the
@@ -947,10 +951,13 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                 m#set_default_stroke new_stroke;
                 if not (Document.PathMap.is_empty
                           m#document.Document.selection) then begin
-                  m#snapshot;
+                  (* Fill + stroke as ONE undo step: with_txn opens the bracket,
+                     the edit_document inside each Controller mutator JOINS it (OP_LOG.md
+                     Increment 1). *)
                   let ctrl = Controller.create ~model:m () in
-                  ctrl#set_selection_fill new_fill;
-                  ctrl#set_selection_stroke new_stroke
+                  m#with_txn (fun () ->
+                    ctrl#set_selection_fill new_fill;
+                    ctrl#set_selection_stroke new_stroke)
                 end;
                 update_color_panel_widgets ()
               (* Symbols panel (SYMBOLS.md section 8). These are native,
@@ -1035,7 +1042,7 @@ let dispatch_double_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) :
              List.map (fun (k, v) -> (k, resolve_param v)) pairs
            | _ -> [] in
          (* open_color_picker → open the YAML-defined color_picker
-            dialog directly. The YAML action's [open_dialog:] effect
+            dialog directly. The YAML action [open_dialog:] effect
             only initializes state in the store; the actual GTK
             dialog window is created via [open_yaml_dialog_hook]
             (set by main.ml from Yaml_dialog_view — going through
@@ -1667,7 +1674,7 @@ and render_button ~packing ~ctx el =
                  [subscribe_active_color] which updates the default
                  fill/stroke and selection but does NOT push to
                  recent — that lives in [Panel_menu.push_recent_color]
-                 and is called by the panel's own commit paths.
+                 and is called by the panel own commit paths.
                  Without this, OK silently skips the recent strip.
                  Mirrors the Rust [renderer.rs] color picker OK
                  push_recent branch. *)
@@ -3449,12 +3456,12 @@ and handle_eye_click path evt =
           | Some (_, s) -> s
           | None -> []
         in
-        m#snapshot;
         let new_doc = List.fold_left (fun acc (sp, vis) ->
           let e = Document.get_element acc sp in
           Document.replace_element acc sp (Element.set_visibility vis e)
         ) d saved in
-        m#set_document new_doc;
+        (* Undoable edit (one self-bracketed undo step) via edit_document. *)
+        m#edit_document new_doc;
         Layers_panel_state.solo_state := None
       end else begin
         let saved = List.filter_map (fun sp ->
@@ -3463,7 +3470,6 @@ and handle_eye_click path evt =
             let e = Document.get_element d sp in
             Some (sp, Element.get_visibility e)
         ) sibling_paths in
-        m#snapshot;
         let new_doc = List.fold_left (fun acc sp ->
           if sp = path then
             let e = Document.get_element acc sp in
@@ -3474,7 +3480,8 @@ and handle_eye_click path evt =
             let e = Document.get_element acc sp in
             Document.replace_element acc sp (Element.set_visibility Element.Invisible e)
         ) d sibling_paths in
-        m#set_document new_doc;
+        (* Undoable edit (one self-bracketed undo step) via edit_document. *)
+        m#edit_document new_doc;
         Layers_panel_state.solo_state := Some (path, saved)
       end
     end else begin
@@ -3485,8 +3492,8 @@ and handle_eye_click path evt =
         | Element.Outline -> Element.Invisible
         | Element.Invisible -> Element.Preview
       in
-      m#snapshot;
-      m#set_document (Document.replace_element d path (Element.set_visibility new_vis e))
+      (* Undoable edit (one self-bracketed undo step) via edit_document. *)
+      m#edit_document (Document.replace_element d path (Element.set_visibility new_vis e))
     end
 
 (** Delete currently panel-selected elements via YAML dispatch (Phase 3).
@@ -4037,7 +4044,6 @@ and render_tree_view ~packing ~ctx:_ _el =
                 if is_cycle || parent_locked then ()
                 else begin
                 let moved = Document.get_element d src in
-                m2#snapshot;
                 let d1 = Document.delete_element d src in
                 (* Adjust target if src was at same level and before target *)
                 let target =
@@ -4055,7 +4061,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                   | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
                   | _ -> target  (* First-child: degrade to insert_after target *)
                 in
-                m2#set_document (Document.insert_element_after d1 insert_path moved)
+                m2#edit_document (Document.insert_element_after d1 insert_path moved)
                 end)
            | _ -> ());
           Layers_panel_state.drag_source := None;
@@ -4094,7 +4100,6 @@ and render_tree_view ~packing ~ctx:_ _el =
                let saved = Array.to_list (Array.map Element.is_locked children) in
                Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.add path saved !Layers_panel_state.saved_lock_states
              end;
-             m2#snapshot;
              let new_e = Element.set_locked was_unlocked e in
              let d1 = Document.replace_element d path new_e in
              (* When locking a container, also lock all direct children *)
@@ -4118,7 +4123,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                    Document.replace_element acc_doc child_path (Element.set_locked sl child)
                  ) d2 (List.mapi (fun i s -> (i, s)) saved)
              end else d2 in
-             m2#set_document d3);
+             m2#edit_document d3);
           true));
         (* Twirl or gap *)
         let is_collapsed = Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed in
@@ -4160,8 +4165,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                    let typed = entry#text in
                    let new_name = if typed = "" then None else Some typed in
                    let new_layer = Element.Layer { le with name = new_name } in
-                   m2#snapshot;
-                   m2#set_document (Document.replace_element d ep new_layer)
+                   m2#edit_document (Document.replace_element d ep new_layer)
                  | _ -> ()));
              Layers_panel_state.renaming := None;
              !Layers_panel_state.rerender ()));
@@ -4194,7 +4198,8 @@ and render_tree_view ~packing ~ctx:_ _el =
            | Some m2 ->
              let d = m2#document in
              let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
-             m2#set_document { d with Document.selection = new_sel });
+             (* Row select: selection-only, a non-undoable write (OP_LOG.md sections 7 and 8). *)
+             m2#set_document_unbracketed { d with Document.selection = new_sel });
           true));
         (* Recurse into children (skip if collapsed) *)
         if is_container && not is_collapsed then begin
@@ -4276,7 +4281,6 @@ and render_tree_view ~packing ~ctx:_ _el =
               if is_cycle || parent_locked then ()
               else begin
               let moved = Document.get_element d src in
-              m2#snapshot;
               let d1 = Document.delete_element d src in
               let target =
                 let slen = List.length src and tlen = List.length row_path in
@@ -4292,7 +4296,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                 | ti :: rest when ti > 0 -> List.rev (ti - 1 :: rest)
                 | _ -> target
               in
-              m2#set_document (Document.insert_element_after d1 insert_path moved)
+              m2#edit_document (Document.insert_element_after d1 insert_path moved)
               end)
          | _ -> ());
         Layers_panel_state.drag_source := None;
@@ -4326,7 +4330,6 @@ and render_tree_view ~packing ~ctx:_ _el =
              let saved = Array.to_list (Array.map Element.is_locked children) in
              Layers_panel_state.saved_lock_states := Layers_panel_state.PathMap.add path saved !Layers_panel_state.saved_lock_states
            end;
-           m2#snapshot;
            let new_e = Element.set_locked was_unlocked e in
            let d1 = Document.replace_element d path new_e in
            let d2 = if is_cont_elem && was_unlocked then begin
@@ -4348,7 +4351,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                  Document.replace_element acc_doc child_path (Element.set_locked sl child)
                ) d2 (List.mapi (fun i s -> (i, s)) saved)
            end else d2 in
-           m2#set_document d3);
+           m2#edit_document d3);
         true));
       (* Twirl or gap *)
       let is_collapsed = Layers_panel_state.PathSet.mem path !Layers_panel_state.collapsed in
@@ -4390,8 +4393,7 @@ and render_tree_view ~packing ~ctx:_ _el =
                  let typed = entry#text in
                  let new_name = if typed = "" then None else Some typed in
                  let new_layer = Element.Layer { le with name = new_name } in
-                 m2#snapshot;
-                 m2#set_document (Document.replace_element d ep new_layer)
+                 m2#edit_document (Document.replace_element d ep new_layer)
                | _ -> ()));
            Layers_panel_state.renaming := None;
            !Layers_panel_state.rerender ()));
@@ -4424,7 +4426,8 @@ and render_tree_view ~packing ~ctx:_ _el =
          | Some m2 ->
            let d = m2#document in
            let new_sel = Document.PathMap.singleton path (Document.element_selection_all path) in
-           m2#set_document { d with Document.selection = new_sel });
+           (* Row select: selection-only, a non-undoable write (OP_LOG.md sections 7 and 8). *)
+             m2#set_document_unbracketed { d with Document.selection = new_sel });
         true));
       (* Recurse (skip if collapsed) *)
       if is_container && not is_collapsed then begin
