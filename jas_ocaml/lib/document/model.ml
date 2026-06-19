@@ -454,6 +454,16 @@ class model ?(document = Document.default_document ()) ?filename () =
         if no_net_change then begin
           (* Drop the no-op checkpoint; leave redo and the journal untouched. *)
           (match undo_stack with _ :: rest -> undo_stack <- rest | [] -> ())
+        end else if _self#try_coalesce_drag_frame pending then begin
+          (* Per-frame drag coalescing (OP_LOG.md section 9 follow-up). The
+             just-finalized pending transaction was absorbed into the journal
+             tip in place (its summed delta) and its redundant per-frame undo
+             checkpoint was popped, so the undo stack and the journal cursor
+             stay in lock-step (one continuous drag == one undo step). Nothing
+             more to do here: no new journal entry, no cursor move. The no-op
+             rule above runs FIRST, so a zero-delta single frame is already
+             dropped before we ever reach coalescing. *)
+          ()
         end else begin
           (* A real edit invalidates redo on BOTH representations: clear the
              redo snapshot stack and truncate the journal's redo tail at
@@ -484,6 +494,174 @@ class model ?(document = Document.default_document ()) ?filename () =
           journal_head <- List.length op_journal
         end
       end
+
+    (* Per-frame drag coalescing (OP_LOG.md section 9 follow-up). Called by
+       [commit_txn] AFTER the no-op early-return and BEFORE the normal
+       truncate/append: try to merge the just-finalized pending transaction
+       [T_new] into the journal tip [T_prev = op_journal[journal_head - 1]] as a
+       summed-delta translate. Returns [true] iff it coalesced (the caller then
+       does nothing more — the pending txn was absorbed, no new journal entry,
+       and the redundant undo checkpoint was popped so the undo stack stays in
+       lock-step with the journal cursor: one continuous drag == one undo step).
+
+       A live drag commits ONE transaction PER FRAME: selection.yaml fires
+       doc.snapshot only on the first mousemove, and each subsequent
+       on_mousemove is its own run_effects batch that begin_txns + commits. So a
+       drag of N frames lands as N consecutive single-op move transactions in
+       the journal — verbose, and N separate undo steps. This is the ONLY
+       correct layer to merge them: record_op only ever sees the ops WITHIN one
+       pending transaction (a drag puts each frame move in a SEPARATE pending
+       txn), so the two consecutive drag moves only become adjacent HERE, where
+       the pending txn is finalized against the journal tip.
+
+       PREDICATE (all must hold):
+        (guard) we are at the journal TIP: [journal_head = List.length
+          op_journal]. If the user undid then dragged, [journal_head < len], and
+          the tail about to be truncated is NOT a valid merge target.
+        (a) [T_new] has EXACTLY ONE op whose verb is a coalescable translate
+            ([move_selection] or [move_by_ids]).
+        (b) [T_prev]'s last op exists and has the SAME verb.
+        (c) targets BYTE-EQUAL ([T_prev] last op targets = [T_new] op targets;
+            for [move_by_ids] the params ids array is also byte-equal, though
+            predicate e already covers it).
+        (d) SAME NAME ([T_prev].name = [T_new].name) — drag-scoped, so two
+            DELIBERATE separate same-target moves stay distinct undo steps.
+        (e) the ONLY params that differ are dx/dy (strip dx/dy from both param
+            objects and require the remainder byte-equal).
+
+       MERGE: sum [T_new]'s dx/dy into [T_prev]'s last op params in place and
+       drop [T_new]. POP the redundant per-frame undo checkpoint (the same
+       mechanism the no-op rule uses), so after the pop [undo_stack] head is
+       [T_prev]'s ORIGIN checkpoint and the undo stack stays in lock-step with
+       the unchanged journal length.
+
+       NET-ZERO WHOLE-DRAG: if the merged delta is exactly (0,0) AND the live
+       document now byte-matches [T_prev]'s origin checkpoint (the whole drag
+       round-tripped), drop [T_prev] too and pop its origin checkpoint — the
+       no-op rule extended across the coalesced run, leaving NO journal entry and
+       NO undo step. (The bare-frame case, where [T_prev] also carries a
+       select_rect that changed selection, does NOT match the origin, so it
+       stays coalesced to one txn rather than dropping.) COALESCABLE is EXACTLY
+       move_selection / move_by_ids; copy_selection / copy_by_ids NEVER coalesce
+       (a copy is non-additive); the selection-only verbs are run boundaries;
+       smooth / eraser / transform are out of scope. Mirrors the Rust
+       [Model::try_coalesce_drag_frame]. *)
+    method private try_coalesce_drag_frame pending : bool =
+      let coalescable v = v = "move_selection" || v = "move_by_ids" in
+      (* Strip dx/dy from a params object; the remainder must byte-equal. *)
+      let strip (p : Yojson.Safe.t) : Yojson.Safe.t =
+        match p with
+        | `Assoc fields ->
+          `Assoc (List.filter (fun (k, _) -> k <> "dx" && k <> "dy") fields)
+        | other -> other
+      in
+      let num (p : Yojson.Safe.t) (key : string) : float =
+        match p with
+        | `Assoc fields ->
+          (match List.assoc_opt key fields with
+           | Some (`Float f) -> f
+           | Some (`Int i) -> float_of_int i
+           | _ -> 0.0)
+        | _ -> 0.0
+      in
+      let ids_of (p : Yojson.Safe.t) : Yojson.Safe.t =
+        match p with
+        | `Assoc fields ->
+          (match List.assoc_opt "ids" fields with Some v -> v | None -> `Null)
+        | _ -> `Null
+      in
+      (* (guard) only at the journal tip; a post-undo drag must not merge into
+         the about-to-be-truncated redo tail. *)
+      if journal_head <> List.length op_journal then false
+      else
+        (* (a) T_new is exactly one coalescable move op. *)
+        let new_op = match pending with
+          | Some (_, [ op ], _) when coalescable op.Op_log.op -> Some op
+          | _ -> None
+        in
+        match new_op with
+        | None -> false
+        | Some new_op ->
+          let new_name = match pending with Some (n, _, _) -> n | None -> None in
+          (* T_prev = the journal tip; its LAST op is the merge target. *)
+          (match List.rev op_journal with
+           | [] -> false
+           | prev :: _ ->
+             (match List.rev prev.Op_log.ops with
+              | [] -> false
+              | prev_op :: _ ->
+                (* (d) same drag-scoped name; (b) same verb; (c) byte-equal
+                   targets (and, for move_by_ids, byte-equal ids); (e) only
+                   dx/dy differ. *)
+                if prev.Op_log.name <> new_name then false
+                else if prev_op.Op_log.op <> new_op.Op_log.op then false
+                else if prev_op.Op_log.targets <> new_op.Op_log.targets then false
+                else if new_op.Op_log.op = "move_by_ids"
+                        && ids_of prev_op.Op_log.params
+                           <> ids_of new_op.Op_log.params then false
+                else if strip prev_op.Op_log.params
+                        <> strip new_op.Op_log.params then false
+                else begin
+                  (* MERGE: sum dx/dy into T_prev's last op params in place. *)
+                  let new_dx = num new_op.Op_log.params "dx" in
+                  let new_dy = num new_op.Op_log.params "dy" in
+                  let merged_dx = num prev_op.Op_log.params "dx" +. new_dx in
+                  let merged_dy = num prev_op.Op_log.params "dy" +. new_dy in
+                  let merged_params = match prev_op.Op_log.params with
+                    | `Assoc fields ->
+                      `Assoc (List.map (fun (k, v) ->
+                        if k = "dx" then (k, `Float merged_dx)
+                        else if k = "dy" then (k, `Float merged_dy)
+                        else (k, v)) fields)
+                    | other -> other
+                  in
+                  let merged_op = { prev_op with Op_log.params = merged_params } in
+                  (* Rebuild the tip with its last op replaced (the rest
+                     unchanged), keeping the journal forward-ordered. *)
+                  let tip_idx = List.length op_journal - 1 in
+                  let n_prev_ops = List.length prev.Op_log.ops in
+                  let new_prev_ops =
+                    List.mapi (fun i o ->
+                      if i = n_prev_ops - 1 then merged_op else o)
+                      prev.Op_log.ops
+                  in
+                  let merged_prev =
+                    { prev with Op_log.ops = new_prev_ops } in
+                  op_journal <- List.mapi (fun i t ->
+                    if i = tip_idx then merged_prev else t) op_journal;
+                  (* Pop the redundant per-frame undo checkpoint (the same
+                     mechanism the no-op rule uses): this frame contributes no
+                     new undo step, so the undo stack stays in lock-step with the
+                     (unchanged) journal length. After this pop, [undo_stack]
+                     head is T_prev's ORIGIN checkpoint. *)
+                  (match undo_stack with _ :: rest -> undo_stack <- rest | [] -> ());
+                  (* NET-ZERO WHOLE-DRAG: the coalesced run round-tripped. If the
+                     merged delta is exactly (0,0) AND the live document now
+                     byte-matches T_prev's origin checkpoint, drop T_prev too and
+                     pop its origin checkpoint — a round-trip drag leaves NO
+                     journal entry and NO undo step. *)
+                  if merged_dx = 0.0 && merged_dy = 0.0 then begin
+                    let round_tripped = match undo_stack with
+                      | (chk, _) :: _ ->
+                        Test_json.document_to_test_json chk
+                        = Test_json.document_to_test_json doc
+                        && chk.Document.layers = doc.Document.layers
+                        && chk.Document.symbols = doc.Document.symbols
+                      | [] -> false
+                    in
+                    if round_tripped then begin
+                      (* Drop the now-empty tip txn and pop its origin
+                         checkpoint, keeping journal_head in lock-step. *)
+                      let drop_idx = List.length op_journal - 1 in
+                      op_journal <-
+                        List.filteri (fun i _ -> i <> drop_idx) op_journal;
+                      journal_head <- List.length op_journal;
+                      (match undo_stack with
+                       | _ :: rest -> undo_stack <- rest | [] -> ())
+                    end
+                  end;
+                  true
+                end))
 
     (* Roll back the open transaction to its checkpoint, discarding it (no redo
        entry, no journal entry, no cursor move). A begin_txn immediately
