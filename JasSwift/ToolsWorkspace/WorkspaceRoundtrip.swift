@@ -18,73 +18,13 @@ func readFile(_ path: String) -> String {
     return str.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-func parsePanelKind(_ s: String) -> PanelKind {
-    switch s {
-    case "color": return .color
-    case "stroke": return .stroke
-    case "properties": return .properties
-    default: return .layers
-    }
-}
-
-func parsePaneKind(_ s: String) -> PaneKind {
-    switch s {
-    case "toolbar": return .toolbar
-    case "dock": return .dock
-    default: return .canvas
-    }
-}
-
+/// OP_LOG 3d-2: this CLI round-trip tool no longer reimplements the 15 layout
+/// verbs — it delegates to the shared runtime dispatcher `layoutApply`
+/// (Sources/Workspace/LayoutApply.swift), the SAME dispatcher production and the
+/// cross-language harness use. Eliminates the third hand-rolled copy (mirrors
+/// the Rust `bin/workspace_roundtrip.rs::apply_op` delegation).
 func applyOp(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
-    guard let name = op["op"] as? String else { return }
-    switch name {
-    case "toggle_group_collapsed":
-        let addr = GroupAddr(dockId: DockId(op["dock_id"] as! Int), groupIdx: op["group_idx"] as! Int)
-        layout.toggleGroupCollapsed(addr)
-    case "set_active_panel":
-        let addr = PanelAddr(
-            group: GroupAddr(dockId: DockId(op["dock_id"] as! Int), groupIdx: op["group_idx"] as! Int),
-            panelIdx: op["panel_idx"] as! Int)
-        layout.setActivePanel(addr)
-    case "close_panel":
-        let addr = PanelAddr(
-            group: GroupAddr(dockId: DockId(op["dock_id"] as! Int), groupIdx: op["group_idx"] as! Int),
-            panelIdx: op["panel_idx"] as! Int)
-        layout.closePanel(addr)
-    case "show_panel":
-        layout.showPanel(parsePanelKind(op["kind"] as! String))
-    case "reorder_panel":
-        let addr = GroupAddr(dockId: DockId(op["dock_id"] as! Int), groupIdx: op["group_idx"] as! Int)
-        layout.reorderPanel(addr, from: op["from"] as! Int, to: op["to"] as! Int)
-    case "move_panel_to_group":
-        let from = PanelAddr(
-            group: GroupAddr(dockId: DockId(op["from_dock_id"] as! Int), groupIdx: op["from_group_idx"] as! Int),
-            panelIdx: op["from_panel_idx"] as! Int)
-        let to = GroupAddr(dockId: DockId(op["to_dock_id"] as! Int), groupIdx: op["to_group_idx"] as! Int)
-        layout.movePanelToGroup(from, to: to)
-    case "detach_group":
-        let addr = GroupAddr(dockId: DockId(op["dock_id"] as! Int), groupIdx: op["group_idx"] as! Int)
-        _ = layout.detachGroup(addr, x: op["x"] as! Double, y: op["y"] as! Double)
-    case "redock":
-        layout.redock(DockId(op["dock_id"] as! Int))
-    case "set_pane_position":
-        layout.paneLayout!.setPanePosition(PaneId(op["pane_id"] as! Int), x: op["x"] as! Double, y: op["y"] as! Double)
-    case "tile_panes":
-        layout.paneLayout!.tilePanes(collapsedOverride: nil)
-    case "toggle_canvas_maximized":
-        layout.paneLayout!.toggleCanvasMaximized()
-    case "resize_pane":
-        layout.paneLayout!.resizePane(PaneId(op["pane_id"] as! Int), width: op["width"] as! Double, height: op["height"] as! Double)
-    case "hide_pane":
-        layout.paneLayout!.hidePane(parsePaneKind(op["kind"] as! String))
-    case "show_pane":
-        layout.paneLayout!.showPane(parsePaneKind(op["kind"] as! String))
-    case "bring_pane_to_front":
-        layout.paneLayout!.bringPaneToFront(PaneId(op["pane_id"] as! Int))
-    default:
-        fputs("Unknown workspace op: \(name)\n", stderr)
-        exit(1)
-    }
+    layoutApply(&layout, op)
 }
 
 let args = CommandLine.arguments

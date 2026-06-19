@@ -236,9 +236,8 @@ struct PaneFrameView<Content: View>: View {
         .overlay { edgeHandles }
         .simultaneousGesture(
             TapGesture().onEnded {
-                workspace.workspaceLayout.panesMut { pl in
-                    pl.bringPaneToFront(geo.id)
-                }
+                // OP_LOG 3d-2: route through the shared layout-op runtime.
+                layoutApply(&workspace.workspaceLayout, opBringPaneToFront(geo.id))
             }
         )
     }
@@ -251,13 +250,18 @@ struct PaneFrameView<Content: View>: View {
                 let dockCollapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
                 Button(action: {
                     if let rightDock = workspace.workspaceLayout.anchoredDock(.right) {
+                        // toggleDockCollapsed is not a dispatcher verb, so it
+                        // stays direct; tile_panes (with the collapsed-dock
+                        // width override resolved here) routes through the shared
+                        // layout-op runtime (OP_LOG 3d-2). `setCanvasMaximized`
+                        // is omitted — this site never cleared canvas maximization.
                         workspace.workspaceLayout.toggleDockCollapsed(rightDock.id)
                         let collapsed = workspace.workspaceLayout.anchoredDock(.right)?.collapsed ?? false
                         let dockPaneId = geo.id
                         let cw = geo.config.collapsedWidth ?? 36
-                        workspace.workspaceLayout.panesMut { pl in
-                            pl.tilePanes(collapsedOverride: collapsed ? (dockPaneId, cw) : nil)
-                        }
+                        layoutApply(&workspace.workspaceLayout,
+                                    opTilePanes(setCanvasMaximized: nil,
+                                                overridePane: collapsed ? (dockPaneId, cw) : nil))
                     }
                 }) {
                     // Same right-edge convention as the per-group
@@ -273,9 +277,8 @@ struct PaneFrameView<Content: View>: View {
             }
 
             Button(action: {
-                workspace.workspaceLayout.panesMut { pl in
-                    pl.hidePane(geo.kind)
-                }
+                // OP_LOG 3d-2: route through the shared layout-op runtime.
+                layoutApply(&workspace.workspaceLayout, opHidePane(geo.kind))
             }) {
                 SwiftUI.Text("\u{00D7}")
                     .font(.system(size: 12))
@@ -290,9 +293,8 @@ struct PaneFrameView<Content: View>: View {
         .gesture(paneDragGesture)
         .if(geo.config.doubleClickAction == .maximize) { view in
             view.onTapGesture(count: 2) {
-                workspace.workspaceLayout.panesMut { pl in
-                    pl.toggleCanvasMaximized()
-                }
+                // OP_LOG 3d-2: route through the shared layout-op runtime.
+                layoutApply(&workspace.workspaceLayout, opToggleCanvasMaximized())
             }
         }
     }
@@ -309,6 +311,14 @@ struct PaneFrameView<Content: View>: View {
                 if let drag = paneDrag {
                     let newX = value.location.x - drag.offX
                     let newY = value.location.y - drag.offY
+                    // Deferred (OP_LOG 3d-2, mirrors the Rust drag deferral):
+                    // this live pane-DRAG `setPanePosition` stays direct. The
+                    // mid-gesture mutation interleaves snap detection/alignment
+                    // in the SAME `panesMut` borrow (`detectSnaps`/`alignToSnaps`
+                    // read and re-write the live pane), so routing each frame
+                    // through the dispatcher (a fresh borrow per op) would risk
+                    // behavior change. No-persist-on-drag is preserved (persist
+                    // happens in `.onEnded` via `saveIfNeeded`).
                     workspace.workspaceLayout.panesMut { pl in
                         pl.setPanePosition(geo.id, x: newX, y: newY)
                         let preview = pl.detectSnaps(dragged: geo.id,

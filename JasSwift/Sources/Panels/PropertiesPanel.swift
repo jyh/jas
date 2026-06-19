@@ -10,7 +10,7 @@ public enum PropertiesPanel {
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
         switch cmd {
-        case "close_panel": layout.closePanel(addr)
+        case "close_panel": layoutApply(&layout, opClosePanel(addr))
         default: break
         }
     }

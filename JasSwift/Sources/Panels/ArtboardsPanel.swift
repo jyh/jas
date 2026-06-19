@@ -27,7 +27,7 @@ public enum ArtboardsPanel {
                                  model: Model? = nil) {
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         default:
             guard let m = model else { return }
             let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?

@@ -15,7 +15,7 @@ public enum StrokePanel {
     public static func dispatch(_ cmd: String, addr: PanelAddr,
                                 layout: inout WorkspaceLayout,
                                 model: Model? = nil) {
-        if cmd == "close_panel" { layout.closePanel(addr); return }
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)); return }
         // Cap/join radios arrive param-folded from the generic menu
         // builder (`set_stroke_cap:round`); split the value back off and
         // route through the YAML action so both panel state (panel.cap)

@@ -82,11 +82,14 @@ public struct DockPanelView: View {
         let label = panelLabel(kind)
         let first = String(label.prefix(1))
         return Button(first) {
+            // toggleDockCollapsed is not in the 15-verb dispatcher vocabulary,
+            // so it stays direct; the set_active_panel verb routes through the
+            // shared layout-op runtime (OP_LOG 3d-2).
             workspaceLayout.toggleDockCollapsed(dockId)
-            workspaceLayout.setActivePanel(PanelAddr(
+            layoutApply(&workspaceLayout, opSetActivePanel(PanelAddr(
                 group: GroupAddr(dockId: dockId, groupIdx: gi),
                 panelIdx: pi
-            ))
+            )))
             workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 12, weight: .bold))
@@ -325,17 +328,23 @@ public struct PanelGroupView: View {
                 let targetGroup = GroupAddr(dockId: dockId, groupIdx: groupIdx)
                 switch decoded {
                 case .group(let from):
+                    // Deferred (OP_LOG 3d-2): the dock GROUP-MOVE verbs
+                    // (moveGroupWithinDock / moveGroupToDock) are NOT in the
+                    // 15-verb dispatcher vocabulary, so they stay direct.
                     if from.dockId == dockId {
                         workspaceLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
                     } else {
                         workspaceLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
                     }
                 case .panel(let from):
+                    // reorder_panel / move_panel_to_group ARE dispatcher verbs;
+                    // route through the shared layout-op runtime (OP_LOG 3d-2).
                     if from.group == targetGroup {
                         // Reorder within same group — drop at end
-                        workspaceLayout.reorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count)
+                        layoutApply(&workspaceLayout,
+                                    opReorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count))
                     } else {
-                        workspaceLayout.movePanelToGroup(from, to: targetGroup)
+                        layoutApply(&workspaceLayout, opMovePanelToGroup(from, to: targetGroup))
                     }
                 }
                 workspaceLayout.saveIfNeeded()
@@ -363,10 +372,11 @@ public struct PanelGroupView: View {
             .background(SwiftUI.Color(nsColor: bg))
             .contentShape(Rectangle())
             .onTapGesture {
-                workspaceLayout.setActivePanel(PanelAddr(
+                // OP_LOG 3d-2: route through the shared layout-op runtime.
+                layoutApply(&workspaceLayout, opSetActivePanel(PanelAddr(
                     group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
                     panelIdx: pi
-                ))
+                )))
                 workspaceLayout.saveIfNeeded()
             }
     }
@@ -378,7 +388,9 @@ public struct PanelGroupView: View {
         // inverted, so the arrow looked wrong.
         let label = group.collapsed ? "\u{00AB}" : "\u{00BB}"
         return Button(label) {
-            workspaceLayout.toggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx))
+            // OP_LOG 3d-2: route through the shared layout-op runtime.
+            layoutApply(&workspaceLayout,
+                        opToggleGroupCollapsed(GroupAddr(dockId: dockId, groupIdx: groupIdx)))
             workspaceLayout.saveIfNeeded()
         }
         .font(.system(size: 18))
@@ -572,7 +584,8 @@ public struct FloatingDockView: View {
                     }
             )
             .onTapGesture(count: 2) {
-                workspaceLayout.redock(fid)
+                // OP_LOG 3d-2: route through the shared layout-op runtime.
+                layoutApply(&workspaceLayout, opRedock(fid))
                 workspaceLayout.saveIfNeeded()
             }
 
@@ -671,6 +684,13 @@ struct DockDetachDropDelegate: DropDelegate {
             guard let payload = item as? String,
                   let decoded = decodeDrag(payload) else { return }
             DispatchQueue.main.async {
+                // Deferred (OP_LOG 3d-2, mirrors the Rust detach deferral): the
+                // detach verbs are NOT routed through `layoutApply` here.
+                // `detachGroup` returns the new floating-dock id (which the
+                // edge-snap path consumes in the Rust reference), and the
+                // dispatcher arm discards that return; promoting it would need an
+                // op-return pattern, so it stays direct with the drag sites.
+                // `detachPanel` is intentionally not a dispatcher verb at all.
                 switch decoded {
                 case .panel(let addr):
                     _ = layoutBinding.wrappedValue.detachPanel(

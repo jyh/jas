@@ -13,7 +13,7 @@ public enum BooleanPanel {
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
-        if cmd == "close_panel" { layout.closePanel(addr); return }
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)); return }
         guard let model = model else { return }
         // Route through runYamlActionByName so the action's
         // `- snapshot` step runs (registering an undo entry)

@@ -342,7 +342,10 @@ public struct ContentView: View {
                               let toolSpec = tools[yamlId] as? [String: Any] ?? [:]
                               if let panelId = toolSpec["tool_options_panel"] as? String,
                                  let kind = panelIdToKind(panelId) {
-                                  workspace.workspaceLayout.showPanel(kind)
+                                  // OP_LOG 3d-2: dispatch through the shared
+                                  // layout-op runtime (byte-identical to the
+                                  // prior direct `showPanel(kind)`).
+                                  layoutApply(&workspace.workspaceLayout, opShowPanel(kind))
                                   return
                               }
                               guard let dialogId = toolSpec["tool_options_dialog"] as? String else { return }

@@ -31,7 +31,7 @@ public enum CharacterPanel {
                                 model: Model? = nil) {
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         case "toggle_snap_to_glyph_visible":
             flipPanelBool(model: model, key: "snap_to_glyph_visible",
                           applyToSelection: false)
