@@ -1,0 +1,97 @@
+[
+  {
+    "name": "drag_coalesce_3frames",
+    "setup_svg": "eye.svg",
+    "comment": "Three same-name same-target move_selection frames (dx 5,7,3) coalesce into ONE txn whose move op is dx:15. The leading select_rect establishes (and pins) the byte-equal targets.",
+    "txns": [
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
+        { "op": "move_selection", "dx": 5, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_selection", "dx": 7, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_selection", "dx": 3, "dy": 0 }
+      ]}
+    ],
+    "expect_journal_txns": 1,
+    "expect_journal_ops": 2,
+    "expect_last_move_dx": 15.0,
+    "expect_last_move_dy": 0.0,
+    "expect_undo_steps": 1
+  },
+  {
+    "name": "drag_coalesce_3frames_by_ids",
+    "setup_svg": "two_ided_rects.svg",
+    "comment": "Id-primary twin: three same-name same-id move_by_ids frames (dx 4,6,2) coalesce into ONE txn whose move op is dx:12. Each move_by_ids re-selects from its own ids before translating.",
+    "txns": [
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_by_ids", "ids": ["a"], "dx": 4, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_by_ids", "ids": ["a"], "dx": 6, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_by_ids", "ids": ["a"], "dx": 2, "dy": 0 }
+      ]}
+    ],
+    "expect_journal_txns": 1,
+    "expect_journal_ops": 1,
+    "expect_last_move_dx": 12.0,
+    "expect_last_move_dy": 0.0,
+    "expect_undo_steps": 1
+  },
+  {
+    "name": "drag_coalesce_breaks_different_name",
+    "setup_svg": "eye.svg",
+    "comment": "A DIFFERENT transaction name between two same-target moves breaks the run: two deliberate separate gestures stay distinct undo steps.",
+    "txns": [
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
+        { "op": "move_selection", "dx": 5, "dy": 0 }
+      ]},
+      { "name": "nudge", "ops": [
+        { "op": "move_selection", "dx": 7, "dy": 0 }
+      ]}
+    ],
+    "expect_journal_txns": 2,
+    "expect_undo_steps": 2
+  },
+  {
+    "name": "drag_coalesce_breaks_different_target",
+    "setup_svg": "two_ided_rects.svg",
+    "comment": "An intervening select to a DIFFERENT element re-selects per frame, so each frame is a 2-op txn (select+move) on a different target set; the run never coalesces. The single-op different-target break (predicate c proper) is pinned in the Rust drag_coalesce_target_break test, which changes selection out-of-band between two single-op move frames.",
+    "txns": [
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "select_by_ids", "ids": ["a"] },
+        { "op": "move_selection", "dx": 5, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "select_by_ids", "ids": ["b"] },
+        { "op": "move_selection", "dx": 7, "dy": 0 }
+      ]}
+    ],
+    "expect_journal_txns": 2,
+    "expect_undo_steps": 2
+  },
+  {
+    "name": "drag_coalesce_breaks_copy_between",
+    "setup_svg": "eye.svg",
+    "comment": "A copy_selection between two moves breaks the run: copy is non-additive and never coalesces, and it changes the target set, so the trailing move stays its own txn.",
+    "txns": [
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
+        { "op": "move_selection", "dx": 5, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "copy_selection", "dx": 0, "dy": 0 }
+      ]},
+      { "name": "selection on_mousemove", "ops": [
+        { "op": "move_selection", "dx": 7, "dy": 0 }
+      ]}
+    ],
+    "expect_journal_txns": 3,
+    "expect_undo_steps": 3
+  }
+]
