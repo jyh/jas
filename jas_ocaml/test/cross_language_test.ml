@@ -293,96 +293,12 @@ let run_journal_metadata fixture_name =
     end
   ) tests
 
-let apply_workspace_op layout op =
-  let open Yojson.Safe.Util in
-  let to_num j = try to_float j with _ -> float_of_int (to_int j) in
-  let name = op |> member "op" |> to_string in
-  match name with
-  | "toggle_group_collapsed" ->
-    Jas.Workspace_layout.toggle_group_collapsed layout
-      { dock_id = op |> member "dock_id" |> to_int;
-        group_idx = op |> member "group_idx" |> to_int }
-  | "set_active_panel" ->
-    Jas.Workspace_layout.set_active_panel layout
-      { group = { dock_id = op |> member "dock_id" |> to_int;
-                  group_idx = op |> member "group_idx" |> to_int };
-        panel_idx = op |> member "panel_idx" |> to_int }
-  | "close_panel" ->
-    Jas.Workspace_layout.close_panel layout
-      { group = { dock_id = op |> member "dock_id" |> to_int;
-                  group_idx = op |> member "group_idx" |> to_int };
-        panel_idx = op |> member "panel_idx" |> to_int }
-  | "show_panel" ->
-    let kind = Jas.Workspace_test_json.parse_panel_kind_str
-      (op |> member "kind" |> to_string) in
-    Jas.Workspace_layout.show_panel layout kind
-  | "reorder_panel" ->
-    Jas.Workspace_layout.reorder_panel layout
-      ~group:{ dock_id = op |> member "dock_id" |> to_int;
-               group_idx = op |> member "group_idx" |> to_int }
-      ~from:(op |> member "from" |> to_int)
-      ~to_:(op |> member "to" |> to_int)
-  | "move_panel_to_group" ->
-    Jas.Workspace_layout.move_panel_to_group layout
-      ~from:{ group = { dock_id = op |> member "from_dock_id" |> to_int;
-                        group_idx = op |> member "from_group_idx" |> to_int };
-              panel_idx = op |> member "from_panel_idx" |> to_int }
-      ~to_:{ dock_id = op |> member "to_dock_id" |> to_int;
-             group_idx = op |> member "to_group_idx" |> to_int }
-  | "detach_group" ->
-    ignore (Jas.Workspace_layout.detach_group layout
-      ~from:{ dock_id = op |> member "dock_id" |> to_int;
-              group_idx = op |> member "group_idx" |> to_int }
-      ~x:(op |> member "x" |> to_num)
-      ~y:(op |> member "y" |> to_num))
-  | "redock" ->
-    Jas.Workspace_layout.redock layout
-      (op |> member "dock_id" |> to_int)
-  | "set_pane_position" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl ->
-       Jas.Pane.set_pane_position pl
-         (op |> member "pane_id" |> to_int)
-         ~x:(op |> member "x" |> to_num)
-         ~y:(op |> member "y" |> to_num)
-     | None -> ())
-  | "tile_panes" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl -> Jas.Pane.tile_panes pl ~collapsed_override:None
-     | None -> ())
-  | "toggle_canvas_maximized" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl -> Jas.Pane.toggle_canvas_maximized pl
-     | None -> ())
-  | "resize_pane" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl ->
-       Jas.Pane.resize_pane pl
-         (op |> member "pane_id" |> to_int)
-         ~width:(op |> member "width" |> to_num)
-         ~height:(op |> member "height" |> to_num)
-     | None -> ())
-  | "hide_pane" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl ->
-       let kind = Jas.Workspace_test_json.parse_pane_kind_str
-         (op |> member "kind" |> to_string) in
-       Jas.Pane.hide_pane pl kind
-     | None -> ())
-  | "show_pane" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl ->
-       let kind = Jas.Workspace_test_json.parse_pane_kind_str
-         (op |> member "kind" |> to_string) in
-       Jas.Pane.show_pane pl kind
-     | None -> ())
-  | "bring_pane_to_front" ->
-    (match layout.Jas.Workspace_layout.pane_layout with
-     | Some pl ->
-       Jas.Pane.bring_pane_to_front pl
-         (op |> member "pane_id" |> to_int)
-     | None -> ())
-  | _ -> failwith (Printf.sprintf "Unknown workspace op: %s" name)
+(* Thin shim over the RUNTIME layout-op dispatcher (OP_LOG.md section 12,
+   Increment 3d-2). The 15-verb dispatcher body was promoted out of this
+   harness into [Jas.Layout_apply.layout_apply] so production and the harness
+   share ONE dispatcher and ONE per-verb mutation body. The harness keeps this
+   one-line entry point so the corpus runner below is unchanged. *)
+let apply_workspace_op layout op = Jas.Layout_apply.layout_apply layout op
 
 let run_workspace_operation_fixture fixture_name =
   let json_str = read_fixture (Printf.sprintf "workspace_operations/%s" fixture_name) in
@@ -1807,6 +1723,74 @@ let () =
 
       Alcotest.test_case "workspace_pane_ops" `Quick (fun () ->
         run_workspace_operation_fixture "pane_ops.json");
+
+      (* OP_LOG 3d-2 production-route test: drive a REAL production layout
+         handler ([Panel_menu.panel_dispatch] with the hamburger "close_panel"
+         command) and assert it both (a) routes through the runtime dispatcher,
+         producing the byte-identical corpus serialization, and (b) fires the
+         dirty signal ([needs_save] flips). This proves production and the
+         harness share ONE dispatcher with no behavior drift. *)
+      Alcotest.test_case "production_route_close_panel" `Quick (fun () ->
+        let setup_json = read_fixture "expected/workspace_default.json" in
+        let layout = Jas.Workspace_test_json.test_json_to_workspace setup_json in
+        Jas.Workspace_layout.mark_saved layout;
+        assert (not (Jas.Workspace_layout.needs_save layout));
+        let model = Jas.Model.create ~document:(Jas.Document.default_document ()) () in
+        (* Close dock 0 / group 2 / panel 0 via the real panel-menu handler. *)
+        let addr : Jas.Workspace_layout.panel_addr =
+          { group = { dock_id = 0; group_idx = 2 }; panel_idx = 0 } in
+        Jas.Panel_menu.panel_dispatch Jas.Workspace_layout.Layers "close_panel"
+          addr layout ~fill_on_top:true ~get_model:(fun () -> model) ();
+        (* (a) byte-identical to the corpus golden for this op. *)
+        let actual = Jas.Workspace_test_json.workspace_to_test_json layout in
+        let expected =
+          read_fixture "workspace_operations/panel_close_layers.json" in
+        if actual <> expected then begin
+          Printf.eprintf "=== EXPECTED (production_route) ===\n%s\n" expected;
+          Printf.eprintf "=== ACTUAL (production_route) ===\n%s\n" actual;
+          assert false
+        end;
+        (* (b) the dirty signal fired. *)
+        assert (Jas.Workspace_layout.needs_save layout));
+
+      (* OP_LOG 3d-2 no-panic pin: the runtime dispatcher MUST tolerate
+         malformed / garbage ops without raising (production input is never
+         trusted). Missing [op], unknown verb, wrong-typed params, and missing
+         required [kind] must all SKIP. A well-formed op on a fresh layout must
+         still mutate (sanity) — confirming the dispatcher is live, not inert.
+         Mirrors the Rust [layout_apply_no_panic_on_malformed]. *)
+      Alcotest.test_case "dispatcher_no_panic_on_malformed" `Quick (fun () ->
+        let setup_json = read_fixture "expected/workspace_default.json" in
+        let layout = Jas.Workspace_test_json.test_json_to_workspace setup_json in
+        let malformed : Yojson.Safe.t list = [
+          `Assoc [];                                       (* no "op" *)
+          `Assoc [ "op", `Int 42 ];                        (* "op" not a string *)
+          `Assoc [ "op", `String "totally_unknown_verb" ]; (* unknown verb *)
+          `Assoc [ "op", `String "show_panel" ];           (* missing required "kind" *)
+          `Assoc [ "op", `String "show_panel"; "kind", `Int 7 ]; (* "kind" wrong type *)
+          `Assoc [ "op", `String "hide_pane" ];            (* missing required "kind" *)
+          `Assoc [ "op", `String "close_panel" ];          (* missing dock/group/panel *)
+          `Assoc [ "op", `String "set_pane_position";
+                   "pane_id", `String "x" ];               (* garbage param *)
+          `Assoc [ "op", `String "toggle_group_collapsed";
+                   "dock_id", `String "nope" ];            (* number wrong type *)
+          `Assoc [ "op", `String "redock"; "dock_id", `String "nope" ];
+          `String "not even an object";                    (* envelope not an assoc *)
+          `Null;                                           (* null op *)
+        ] in
+        (* Must not raise on any malformed op. *)
+        List.iter (fun op -> Jas.Layout_apply.layout_apply layout op) malformed;
+        (* The dispatcher is live, not inert: a well-formed op on a fresh layout
+           still mutates the serialization. *)
+        let fresh = Jas.Workspace_test_json.test_json_to_workspace setup_json in
+        let before = Jas.Workspace_test_json.workspace_to_test_json fresh in
+        Jas.Layout_apply.layout_apply fresh
+          (Jas.Layout_apply.op_toggle_group_collapsed { dock_id = 0; group_idx = 0 });
+        let after = Jas.Workspace_test_json.workspace_to_test_json fresh in
+        if before = after then begin
+          Printf.eprintf "=== a well-formed op did NOT mutate (dispatcher inert) ===\n";
+          assert false
+        end);
     ];
 
     (* Pane geometry algorithm tests *)

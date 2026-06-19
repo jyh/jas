@@ -847,8 +847,12 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
    | Some layout, Some refresh ->
      ignore (window_factory#add_separator ());
      ignore (window_factory#add_item "Tile" ~callback:(fun () ->
-       Workspace_layout.panes_mut layout (fun pl ->
-         Pane.tile_panes pl ~collapsed_override:None);
+       (* OP_LOG 3d-2: route the menu Tile through the shared runtime
+          dispatcher. [panes_mut] preserves the dirty signal (bumps after the
+          op), and the dispatcher re-guards [pane_layout] internally. The
+          corpus path is the no-override case. *)
+       Workspace_layout.panes_mut layout (fun _pl ->
+         Layout_apply.layout_apply layout (Layout_apply.op_tile_panes ()));
        refresh ()
      ));
      ignore (window_factory#add_separator ());
@@ -858,11 +862,15 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
          | None -> false in
        ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
          if !_suppress_check_callback then () else begin
+           (* OP_LOG 3d-2: route the pane visibility toggle through the shared
+              runtime dispatcher; [panes_mut] preserves the dirty signal. *)
            Workspace_layout.panes_mut layout (fun pl ->
-             if Pane.is_pane_visible pl kind then
-               Pane.hide_pane pl kind
-             else
-               Pane.show_pane pl kind);
+             let op =
+               if Pane.is_pane_visible pl kind
+               then Layout_apply.op_hide_pane kind
+               else Layout_apply.op_show_pane kind
+             in
+             Layout_apply.layout_apply layout op);
            refresh ()
          end
        ))
@@ -895,7 +903,10 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
             Array.iteri (fun gi (g : Workspace_layout.panel_group) ->
               Array.iteri (fun pi k ->
                 if k = kind && not !found then begin
-                  Workspace_layout.close_panel layout { group = { dock_id = d.id; group_idx = gi }; panel_idx = pi };
+                  (* OP_LOG 3d-2: route through the shared runtime dispatcher. *)
+                  Layout_apply.layout_apply layout
+                    (Layout_apply.op_close_panel
+                       { group = { dock_id = d.id; group_idx = gi }; panel_idx = pi });
                   found := true
                 end
               ) g.panels
@@ -905,14 +916,18 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
             Array.iteri (fun gi (g : Workspace_layout.panel_group) ->
               Array.iteri (fun pi k ->
                 if k = kind && not !found then begin
-                  Workspace_layout.close_panel layout { group = { dock_id = fd.dock.id; group_idx = gi }; panel_idx = pi };
+                  (* OP_LOG 3d-2: route through the shared runtime dispatcher. *)
+                  Layout_apply.layout_apply layout
+                    (Layout_apply.op_close_panel
+                       { group = { dock_id = fd.dock.id; group_idx = gi }; panel_idx = pi });
                   found := true
                 end
               ) g.panels
             ) fd.dock.groups
           ) layout.floating
         end else
-          Workspace_layout.show_panel layout kind;
+          (* OP_LOG 3d-2: route through the shared runtime dispatcher. *)
+          Layout_apply.layout_apply layout (Layout_apply.op_show_panel kind);
         refresh ()
       | _ -> ()
     ) in
