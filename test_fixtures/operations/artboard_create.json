@@ -1,0 +1,60 @@
+[
+  {
+    "name": "artboard_create_default",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "new_artboard",
+        "ops": [
+          { "op": "create_artboard", "id": "abZZ", "fields": {} }
+        ]
+      }
+    ],
+    "expected_json": "artboard_create_default_expected.json"
+  },
+  {
+    "name": "artboard_create_with_fields",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "new_artboard",
+        "ops": [
+          {
+            "op": "create_artboard",
+            "id": "abYY",
+            "fields": {
+              "name": "Cover",
+              "x": 500,
+              "y": 600,
+              "width": 400,
+              "height": 300,
+              "fill": "#ff0000",
+              "show_center_mark": true,
+              "show_cross_hairs": true,
+              "show_video_safe_areas": true,
+              "video_ruler_pixel_aspect_ratio": 1.5
+            }
+          }
+        ]
+      }
+    ],
+    "expected_json": "artboard_create_with_fields_expected.json"
+  },
+  {
+    "name": "artboard_create_type_mismatch_skips_field",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "new_artboard",
+        "ops": [
+          {
+            "op": "create_artboard",
+            "id": "abXX",
+            "fields": { "x": true, "name": 7, "width": 250 }
+          }
+        ]
+      }
+    ],
+    "expected_json": "artboard_create_type_mismatch_skips_field_expected.json"
+  }
+]

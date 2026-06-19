@@ -261,12 +261,14 @@ pub fn apply_print_config_field(
 // replay has no eval context). Hardened reads: a malformed payload SKIPS rather
 // than panicking, and a no-op edit (type mismatch / missing id / boundary swap /
 // missing delete) journals nothing — the caller records only on an effective
-// change. `create_artboard` / `duplicate_artboard` are NOT here: they mint ids
-// (Phase P3). Artboards live in `document.artboards` (String ids), NOT the
-// element tree, so `targets` carries the written artboard id(s) (delete → the
-// deleted id; set_artboard_field → the written id; move → the moved ids), and
-// `set_artboard_options_field` carries [] (document-global). The byte-gate
-// ignores `targets`; this is best-effort merge metadata.
+// change. The id-minting verbs `create_artboard` / `duplicate_artboard` are
+// handled separately below (Phase P3, VALUE-IN-OP id strategy): the id is minted
+// at production time and recorded as a LITERAL, so this layer NEVER mints on
+// replay. Artboards live in `document.artboards` (String ids), NOT the element
+// tree, so `targets` carries the written artboard id(s) (delete → the deleted id;
+// set_artboard_field → the written id; move → the moved ids; create/duplicate →
+// the new id), and `set_artboard_options_field` carries [] (document-global). The
+// byte-gate ignores `targets`; this is best-effort merge metadata.
 
 /// Apply one field of one artboard (by id) to `model`, self-bracketing through
 /// `edit_document`. `value` is a RESOLVED literal. Returns `true` iff the
@@ -414,6 +416,109 @@ pub fn apply_move_artboards_down(model: &mut Model, ids: &[String]) -> bool {
         true
     } else {
         false
+    }
+}
+
+// ── OP_LOG.md §9 Phase P3 — the TWO id-minting artboard verbs ──────────────
+//
+// `create_artboard` / `duplicate_artboard` are the first id-MINTING verbs to
+// journal through `op_apply`, under the VALUE-IN-OP id strategy (REFERENCE_GRAPH.md
+// §4 / OP_LOG.md §7): the id is minted ONCE at production capture time (the
+// renderer.rs handler keeps the entropic collision-retry mint), then written into
+// the op params as a LITERAL — `create_artboard.id` / `duplicate_artboard.new_id`.
+// These two Model-level helpers REPLAY from that recorded id and the other RESOLVED
+// params VERBATIM: they NEVER call generate_artboard_id, NEVER tap platform
+// entropy, and NEVER run the collision-retry, so replay is a pure deterministic
+// function of the journal even though the original mint was entropic. Both write
+// via `edit_document` (self-bracketing: joins an open transaction, opens its own
+// otherwise) so the renderer.rs handler (after it mints) and the op_apply arm share
+// ONE mutation body — the checkpoint_equivalence gate (OP_LOG.md §6) then proves the
+// captured-id replay reproduces the minted-id production byte-identically.
+
+/// Append a new artboard with the GIVEN (already-minted) `id`, applying the
+/// RESOLVED `fields` overrides on top of the canonical default. `id` is taken
+/// VERBATIM — no minting, no collision-retry, no entropy. Each field is a RESOLVED
+/// literal; a type mismatch on any field SKIPS that field (matching the renderer's
+/// create-path tolerance) without failing the create. The default name is the
+/// canonical `Artboard 1` from `Artboard::default_with_id`; a `name` override (if
+/// present and a string) replaces it. Always an effective change (an artboard is
+/// always appended), so this returns `()` — the caller always records the op.
+pub fn apply_create_artboard(
+    model: &mut Model,
+    id: &str,
+    fields: &serde_json::Value,
+) {
+    use crate::document::artboard::Artboard;
+    let mut new_doc = model.document().clone();
+    let mut ab = Artboard::default_with_id(id.to_string());
+    // Apply the RESOLVED field overrides (the same field set + types as
+    // `apply_set_artboard_field`, so the create-path and the set-path coerce a
+    // value identically). A non-object `fields` (or a missing one) leaves the
+    // default artboard untouched.
+    if let Some(map) = fields.as_object() {
+        for (field, value) in map {
+            apply_artboard_field_in_place(&mut ab, field, value);
+        }
+    }
+    new_doc.artboards.push(ab);
+    model.edit_document(new_doc);
+}
+
+/// Clone the artboard whose id == `source_id`, assign the GIVEN (already-minted)
+/// `new_id` and `name` VERBATIM, and offset its position by `(ox, oy)`. Returns
+/// `true` iff the source existed (a missing source is a no-op that journals
+/// nothing). No minting / no name-derivation / no entropy here — both the id and
+/// the name are recorded literals (the renderer derives the name via
+/// `next_artboard_name` at production time and journals the result).
+pub fn apply_duplicate_artboard(
+    model: &mut Model,
+    source_id: &str,
+    new_id: &str,
+    name: &str,
+    ox: f64,
+    oy: f64,
+) -> bool {
+    use crate::document::artboard::Artboard;
+    let mut new_doc = model.document().clone();
+    let Some(source) = new_doc.artboards.iter().find(|a| a.id == source_id).cloned() else {
+        return false;
+    };
+    let mut dup = Artboard { id: new_id.to_string(), ..source };
+    dup.name = name.to_string();
+    dup.x += ox;
+    dup.y += oy;
+    new_doc.artboards.push(dup);
+    model.edit_document(new_doc);
+    true
+}
+
+/// Apply one RESOLVED field literal to an in-flight `Artboard` (the create-path
+/// field application). Mirrors `apply_set_artboard_field`'s field set + type
+/// coercion exactly, but operates on a bare `Artboard` (no Model / no id lookup)
+/// because the create path is building a NOT-YET-INSERTED artboard. A type
+/// mismatch or unknown field is silently skipped (the field keeps its default),
+/// matching renderer.rs's `apply_artboard_override` tolerance.
+fn apply_artboard_field_in_place(
+    ab: &mut crate::document::artboard::Artboard,
+    field: &str,
+    value: &serde_json::Value,
+) {
+    use crate::document::artboard::ArtboardFill;
+    let as_num = value.as_f64();
+    let as_bool = value.as_bool();
+    let as_str = value.as_str();
+    match field {
+        "name" => if let Some(s) = as_str { ab.name = s.to_string(); },
+        "x" => if let Some(n) = as_num { ab.x = n; },
+        "y" => if let Some(n) = as_num { ab.y = n; },
+        "width" => if let Some(n) = as_num { ab.width = n; },
+        "height" => if let Some(n) = as_num { ab.height = n; },
+        "fill" => if let Some(s) = as_str { ab.fill = ArtboardFill::from_canonical(s); },
+        "show_center_mark" => if let Some(b) = as_bool { ab.show_center_mark = b; },
+        "show_cross_hairs" => if let Some(b) = as_bool { ab.show_cross_hairs = b; },
+        "show_video_safe_areas" => if let Some(b) = as_bool { ab.show_video_safe_areas = b; },
+        "video_ruler_pixel_aspect_ratio" => if let Some(n) = as_num { ab.video_ruler_pixel_aspect_ratio = n; },
+        _ => {}
     }
 }
 
@@ -746,6 +851,48 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
                 return;
             }
             targets = ids;
+        }
+        // Artboard id-minting verbs (OP_LOG.md §9 Phase P3). VALUE-IN-OP: the id
+        // was minted ONCE at production capture time and recorded as a LITERAL in
+        // the op params (`id` for create, `new_id` for duplicate); this arm reads
+        // it VERBATIM and NEVER mints / NEVER taps entropy / NEVER runs the
+        // collision-retry, so replay is a pure deterministic function of the
+        // journal. All other params (fields / name / offsets) are RESOLVED
+        // literals too (replay has no eval context). targets carry the new id.
+        "create_artboard" => {
+            // A missing/empty id is a malformed payload — skip rather than mint
+            // (this arm must NEVER mint). The harness + production always supply
+            // the literal minted id.
+            let Some(id) = str_field(op, "id").filter(|s| !s.is_empty()) else {
+                return;
+            };
+            let id = id.to_string();
+            // `fields` is an optional RESOLVED override object; absent ⇒ defaults.
+            let fields = op.get("fields").cloned().unwrap_or(serde_json::Value::Null);
+            apply_create_artboard(model, &id, &fields);
+            targets = vec![id];
+        }
+        "duplicate_artboard" => {
+            // Both the source id and the (already-minted) new_id are required
+            // literals; either missing ⇒ skip (never mint). A missing source
+            // artboard is a no-op that journals nothing.
+            let (Some(source_id), Some(new_id)) = (
+                str_field(op, "id").filter(|s| !s.is_empty()),
+                str_field(op, "new_id").filter(|s| !s.is_empty()),
+            ) else {
+                return;
+            };
+            let source_id = source_id.to_string();
+            let new_id = new_id.to_string();
+            // `name` is the RESOLVED next-artboard name (derived at production
+            // time, NOT re-derived on replay); offsets default to 0.0 if absent.
+            let name = str_field(op, "name").unwrap_or("").to_string();
+            let ox = num_field(op, "offset_x");
+            let oy = num_field(op, "offset_y");
+            if !apply_duplicate_artboard(model, &source_id, &new_id, &name, ox, oy) {
+                return;
+            }
+            targets = vec![new_id];
         }
         // Unknown verb: a malformed/unsupported production payload is skipped
         // rather than panicking. (The harness corpus only carries known verbs,
