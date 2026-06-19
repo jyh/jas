@@ -1,0 +1,66 @@
+[
+  {
+    "name": "unpack_group_at_nested",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "flatten_artwork",
+        "ops": [
+          {
+            "op": "unpack_group_at",
+            "path": [0, 0]
+          }
+        ]
+      }
+    ],
+    "expected_json": "unpack_group_at_nested_expected.json"
+  },
+  {
+    "name": "unpack_group_at_non_group_noop",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "flatten_artwork",
+        "ops": [
+          {
+            "op": "unpack_group_at",
+            "path": [0, 0]
+          }
+        ]
+      }
+    ],
+    "expected_json": "unpack_group_at_non_group_noop_expected.json"
+  },
+  {
+    "name": "unpack_group_at_missing_path_noop",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "flatten_artwork",
+        "ops": [
+          {
+            "op": "unpack_group_at",
+            "path": [0, 5]
+          }
+        ]
+      }
+    ],
+    "expected_json": "unpack_group_at_missing_path_noop_expected.json"
+  },
+  {
+    "name": "unpack_group_at_malformed_path_skips",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "flatten_artwork",
+        "ops": [
+          {
+            "op": "unpack_group_at",
+            "path": "nope"
+          }
+        ]
+      }
+    ],
+    "expected_json": "unpack_group_at_malformed_path_skips_expected.json"
+  }
+]

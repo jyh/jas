@@ -2916,47 +2916,36 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.unpack_group_at: path_expr — PHASE3 sub-tollgate 3
-    // Replace a Group at path with its children in place. Non-Group
-    // targets no-op.
+    // doc.unpack_group_at: path_expr — PHASE3 sub-tollgate 3 / OP_LOG.md §9 Phase
+    // P5. Replace a Group at path with its children in place (a non-Group target is
+    // a no-op). Routes through the SHARED `op_apply` dispatcher (which calls
+    // `apply_unpack_group_at`) so the multi-step extraction JOURNALS as ONE
+    // `unpack_group_at` op carrying the RESOLVED plain index path — it replays
+    // byte-identically (children keep their ids; no minting). The renderer resolves
+    // the path expr to plain indices FIRST so op_apply parses uniformly.
     if let Some(path_expr_v) = eff.get("doc.unpack_group_at") {
-        use crate::geometry::element::Element;
         let path_expr = path_expr_v.as_str().unwrap_or("");
         let path_val = super::expr::eval(path_expr, &*eval_ctx);
         let indices = match path_val {
             super::expr_types::Value::Path(p) => p,
             _ => return deferred,
         };
-        // Check the target is a Group
-        let group_children: Option<Vec<Element>> = {
-            let Some(tab) = st.tabs.get(st.active_tab) else { return deferred; };
-            match tab.model.document().get_element(&indices) {
-                Some(Element::Group(g)) => {
-                    Some(g.children.iter().map(|rc| (**rc).clone()).collect())
-                }
-                _ => None,
-            }
-        };
-        let Some(children) = group_children else { return deferred; };
-        {
-            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-            let mut new_doc = tab.model.document().clone();
-            new_doc = new_doc.delete_element(&indices);
-            // Insert children at the vacated position, ascending indices
-            let mut insert_path = indices.clone();
-            for child in children {
-                new_doc = new_doc.insert_element_at(&insert_path, child);
-                let last = insert_path.len() - 1;
-                insert_path[last] += 1;
-            }
-            tab.model.set_document(new_doc);
+        let op = serde_json::json!({ "op": "unpack_group_at", "path": indices });
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
 
-    // doc.wrap_in_layer: { paths, name } — PHASE3 sub-tollgate 3
-    // Parallel to wrap_in_group but always appends a new top-level Layer
-    // at the end of the document's layers array.
+    // doc.wrap_in_layer: { paths, name } — PHASE3 sub-tollgate 3 / OP_LOG.md §9
+    // Phase P5. Parallel to wrap_in_group but always appends a new top-level Layer.
+    // Routes through the SHARED `op_apply` dispatcher (which calls
+    // `apply_wrap_in_layer`) so the multi-step collect/reverse-delete/append
+    // JOURNALS as ONE `wrap_in_layer` op. CRITICAL: the renderer evaluates the
+    // `name` expr (e.g. `active_document.next_layer_name`) against the LIVE doc
+    // FIRST and journals the RESOLVED name LITERAL — replay must NOT re-derive a
+    // possibly-colliding name from the (now-mutated) tree. The `__path__` markers
+    // are normalized to plain index arrays for the op so op_apply parses uniformly.
     if let Some(spec) = eff.get("doc.wrap_in_layer").and_then(|v| v.as_object()) {
         let paths_expr = spec.get("paths").and_then(|v| v.as_str()).unwrap_or("[]");
         let paths_val = super::expr::eval(paths_expr, &*eval_ctx);
@@ -2964,68 +2953,42 @@ fn run_yaml_effect(
             super::expr_types::Value::List(items) => items,
             _ => return deferred,
         };
-        let mut normalized: Vec<Vec<usize>> = Vec::new();
-        for item in &raw_paths {
-            if let Some(obj) = item.as_object() {
-                if let Some(arr) = obj.get("__path__").and_then(|v| v.as_array()) {
-                    let idx: Option<Vec<usize>> = arr.iter()
-                        .map(|n| n.as_u64().map(|u| u as usize))
-                        .collect();
-                    if let Some(idx) = idx {
-                        normalized.push(idx);
-                    }
-                }
-            }
-        }
+        let normalized = normalize_path_markers(&raw_paths);
         if normalized.is_empty() {
             return deferred;
         }
-        normalized.sort();
-        // Name expression
+        // Resolve the name FIRST (against the live doc) and journal the LITERAL.
         let name_expr = spec.get("name").and_then(|v| v.as_str()).unwrap_or("'Layer'");
         let name_val = super::expr::eval(name_expr, &*eval_ctx);
         let name = match name_val {
             super::expr_types::Value::Str(s) => s,
             _ => "Layer".to_string(),
         };
-        use crate::geometry::element::{Element, LayerElem, CommonProps};
-        use std::rc::Rc;
-        let mut children: Vec<Rc<Element>> = Vec::new();
-        if let Some(tab) = st.tabs.get(st.active_tab) {
-            for p in &normalized {
-                if let Some(elem) = tab.model.document().get_element(p) {
-                    children.push(Rc::new(elem.clone()));
-                }
-            }
+        // Optional value-in-op container id: resolve to a literal if the action
+        // assigns one (the production actions do not, so this is normally absent).
+        let id = resolve_optional_id(spec.get("id"), &*eval_ctx);
+        let mut op = serde_json::json!({
+            "op": "wrap_in_layer",
+            "paths": normalized,
+            "name": name,
+        });
+        if let Some(id) = id {
+            op["id"] = serde_json::Value::String(id);
         }
-        if children.is_empty() {
-            return deferred;
-        }
-        {
-            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-            let mut new_doc = tab.model.document().clone();
-            for p in normalized.iter().rev() {
-                new_doc = new_doc.delete_element(p);
-            }
-            let new_layer = Element::Layer(LayerElem {
-                children,
-                common: CommonProps {
-                    name: Some(name),
-                    ..Default::default()
-                },
-                isolated_blending: false,
-                knockout_group: false,
-            });
-            new_doc.layers.push(new_layer);
-            tab.model.set_document(new_doc);
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
 
-    // doc.wrap_in_group: { paths } — PHASE3 sub-tollgate 3
-    // Wraps elements at the given paths in a new Group. Sorted in
-    // document order; deleted in reverse order; group inserted at the
-    // topmost-source position under the shared parent.
+    // doc.wrap_in_group: { paths } — PHASE3 sub-tollgate 3 / OP_LOG.md §9 Phase P5.
+    // Wraps elements at the given paths in a new Group: sorted in document order;
+    // deleted in reverse order; group inserted at the topmost-source position under
+    // the shared parent. Routes through the SHARED `op_apply` dispatcher (which
+    // calls `apply_wrap_in_group`) so the multi-step mutation JOURNALS as ONE
+    // `wrap_in_group` op carrying the RESOLVED plain index arrays — it replays
+    // byte-identically (child order + insertion index deterministic from the op).
+    // An optional value-in-op container id is journaled as a literal when assigned.
     if let Some(spec) = eff.get("doc.wrap_in_group").and_then(|v| v.as_object()) {
         let paths_expr = spec.get("paths").and_then(|v| v.as_str()).unwrap_or("[]");
         let paths_val = super::expr::eval(paths_expr, &*eval_ctx);
@@ -3033,61 +2996,21 @@ fn run_yaml_effect(
             super::expr_types::Value::List(items) => items,
             _ => return deferred,
         };
-        // Normalize: each item should be a __path__ marker JSON object
-        // (Value.PATH serialized). Decode to Vec<usize>.
-        let mut normalized: Vec<Vec<usize>> = Vec::new();
-        for item in &raw_paths {
-            if let Some(obj) = item.as_object() {
-                if let Some(arr) = obj.get("__path__").and_then(|v| v.as_array()) {
-                    let idx: Option<Vec<usize>> = arr.iter()
-                        .map(|n| n.as_u64().map(|u| u as usize))
-                        .collect();
-                    if let Some(idx) = idx {
-                        normalized.push(idx);
-                    }
-                }
-            }
-        }
+        let normalized = normalize_path_markers(&raw_paths);
         if normalized.is_empty() {
             return deferred;
         }
-        normalized.sort();
-        // Split the topmost path into parent + final index
-        let first = &normalized[0];
-        if first.is_empty() { return deferred; }
-        let insert_parent: Vec<usize> = first[..first.len() - 1].to_vec();
-        let insert_index = first[first.len() - 1];
-        // Collect clones in document order
-        use crate::geometry::element::{Element, GroupElem, CommonProps};
-        use std::rc::Rc;
-        let mut children: Vec<Rc<Element>> = Vec::new();
-        if let Some(tab) = st.tabs.get(st.active_tab) {
-            for p in &normalized {
-                if let Some(elem) = tab.model.document().get_element(p) {
-                    children.push(Rc::new(elem.clone()));
-                }
-            }
-        }
-        if children.is_empty() {
-            return deferred;
-        }
-        // Delete in reverse order
-        {
-            let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-            let mut new_doc = tab.model.document().clone();
-            for p in normalized.iter().rev() {
-                new_doc = new_doc.delete_element(p);
-            }
-            tab.model.set_document(new_doc);
-        }
-        // Build and insert group
-        let group = Element::Group(GroupElem {
-            children,
-            common: CommonProps::default(),
-            isolated_blending: false,
-            knockout_group: false,
+        let id = resolve_optional_id(spec.get("id"), &*eval_ctx);
+        let mut op = serde_json::json!({
+            "op": "wrap_in_group",
+            "paths": normalized,
         });
-        insert_element_at(&insert_parent, insert_index, group, st);
+        if let Some(id) = id {
+            op["id"] = serde_json::Value::String(id);
+        }
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
+        }
         return deferred;
     }
 
@@ -3500,12 +3423,13 @@ fn extract_id_list(val: &super::expr_types::Value) -> Vec<String> {
 // (pure) + `apply_move_artboards_up` / `apply_move_artboards_down` (Model), so
 // the production handler routes through op_apply and the harness shares the body.
 
-// delete_element_at / insert_element_after moved to op_apply.rs (OP_LOG.md §9
-// Phase P4) as `apply_delete_element_at` / `apply_insert_element_after`, so the
-// `doc.delete_at` / `doc.insert_after` production handlers route through op_apply
-// (journaling a real op) and the replay harness shares the same mutation body.
-// `insert_element_at` (below) is still used by the wrap_in_group path (P5,
-// deferred); `clone_element_at` stays here as the NON-JOURNALED ctx binder.
+// delete_element_at / insert_element_after / insert_element_at moved to
+// op_apply.rs (OP_LOG.md §9 Phase P4/P5) as `apply_delete_element_at` /
+// `apply_insert_element_after` / `apply_insert_element_at` (+ the P5 wrapping
+// helpers `apply_wrap_in_group` / `apply_wrap_in_layer` / `apply_unpack_group_at`),
+// so the structural production handlers route through op_apply (journaling a real
+// op) and the replay harness shares the same mutation body. `clone_element_at`
+// stays here as the NON-JOURNALED ctx binder.
 
 /// Deep-clone the element at path without mutating the document.
 fn clone_element_at(
@@ -3517,28 +3441,44 @@ fn clone_element_at(
     tab.model.document().get_element(&path_vec).cloned()
 }
 
-/// Insert element at a position under a parent path. Still used by the
-/// `wrap_in_group` / `new_group` path (OP_LOG.md §9 Phase P5, deferred); the
-/// `doc.insert_at` handler now routes through `op_apply::apply_insert_element_at`.
-fn insert_element_at(
-    parent_path: &[usize],
-    index: usize,
-    element: crate::geometry::element::Element,
-    st: &mut crate::workspace::app_state::AppState,
-) {
-    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return; };
-    let mut new_doc = tab.model.document().clone();
-    if parent_path.is_empty() {
-        // Top-level: insert into layers array at index
-        let idx = index.min(new_doc.layers.len());
-        new_doc.layers.insert(idx, element);
-    } else {
-        // Nested: build insertion path = parent_path + [index]
-        let mut insert_path = parent_path.to_vec();
-        insert_path.push(index);
-        new_doc = new_doc.insert_element_at(&insert_path, element);
+/// Normalize a list of `{__path__:[..]}` marker JSON values (the
+/// `Value::List`-of-`Value::Path` form the expression evaluator produces) into
+/// plain index arrays for a wrapping op (OP_LOG.md §9 Phase P5). Items that are
+/// not well-formed path markers are dropped; the result is sorted ascending so the
+/// op carries paths in document order (the order both the collect and the
+/// reverse-delete in op_apply depend on).
+fn normalize_path_markers(raw_paths: &[serde_json::Value]) -> Vec<Vec<usize>> {
+    let mut normalized: Vec<Vec<usize>> = Vec::new();
+    for item in raw_paths {
+        if let Some(obj) = item.as_object() {
+            if let Some(arr) = obj.get("__path__").and_then(|v| v.as_array()) {
+                let idx: Option<Vec<usize>> = arr
+                    .iter()
+                    .map(|n| n.as_u64().map(|u| u as usize))
+                    .collect();
+                if let Some(idx) = idx {
+                    normalized.push(idx);
+                }
+            }
+        }
     }
-    tab.model.set_document(new_doc);
+    normalized.sort();
+    normalized
+}
+
+/// Resolve an optional value-in-op container `id` expr to a literal string
+/// (OP_LOG.md §9 Phase P5). The production wrapping actions do not assign a
+/// container id, so this is normally `None`; when present, the expr is evaluated
+/// to a string literal that is journaled into the op (replay inserts the same id).
+fn resolve_optional_id(
+    id_spec: Option<&serde_json::Value>,
+    eval_ctx: &serde_json::Value,
+) -> Option<String> {
+    let expr = id_spec?.as_str()?;
+    match super::expr::eval(expr, eval_ctx) {
+        super::expr_types::Value::Str(s) => Some(s),
+        _ => None,
+    }
 }
 
 /// Write a dotted-field value to the element at the given path (Phase 3 §5.4).
@@ -10097,6 +10037,205 @@ mod tests {
         assert_eq!(tab_layer(&st, 0).name(), "A");
         assert_eq!(tab_layer(&st, 1).name(), "C");
         // checkpoint_equivalence.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    // OP_LOG.md §9 Phase P5 — production-route proofs for the THREE group/layer
+    // wrapping verbs. These drive the REAL renderer.rs production handler
+    // (`dispatch_action` → the composite action) against a real AppState/Model and
+    // assert (per verb): (1) exactly ONE op journaled with the RESOLVED flat params
+    // (plain `[[..],..]` paths; wrap_in_layer carrying the LITERAL resolved name —
+    // NOT the next_layer_name expr); (2) the live tree mutated correctly via the
+    // multi-step reconstruction; (3) targets; (4) checkpoint_equivalence — the
+    // journal replays byte-identically to the snapshot path, proving the multi-step
+    // reconstructs the EXACT tree (child order + insertion index) from the op alone.
+
+    /// `new_group` drives `doc.wrap_in_group` over the panel selection. Journals
+    /// exactly ONE `wrap_in_group` op carrying the RESOLVED plain index arrays; the
+    /// live tree gets a new Group at the topmost source index wrapping both
+    /// selections in document order.
+    #[test]
+    fn production_route_new_group_journals_one_wrap_in_group() {
+        use crate::geometry::element::Element;
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        // Select top-level layers 0 and 2 (paths [0] and [2]).
+        st.layers_panel_selection = vec![vec![0], vec![2]];
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let params = serde_json::Map::new();
+        dispatch_action("new_group", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1) exactly one named transaction journaling exactly ONE wrap_in_group op
+        // carrying the RESOLVED plain index arrays.
+        assert_eq!(model.journal().len(), before + 1,
+            "new_group commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("new_group"));
+        assert_eq!(txn.ops.len(), 1,
+            "exactly ONE op journaled (the multi-step wrap is ONE op)");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "wrap_in_group", "the journaled verb is wrap_in_group");
+        assert_eq!(op.params["paths"], serde_json::json!([[0], [2]]),
+            "the op carries the RESOLVED plain index arrays (sorted document order)");
+        // (2) the live doc: new Group at idx 0 (topmost source) wrapping A + C; B
+        // survives at idx 1.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 2);
+        match &layers[0] {
+            Element::Group(g) => {
+                assert_eq!(g.children.len(), 2, "the group wraps both selections");
+                assert_eq!(g.children[0].common().name.as_deref(), Some("A"));
+                assert_eq!(g.children[1].common().name.as_deref(), Some("C"));
+            }
+            other => panic!("expected Group at idx 0, got {other:?}"),
+        }
+        assert_eq!(tab_layer(&st, 1).name(), "B");
+        // (3) targets: A and C are id-less, no container id assigned ⇒ empty.
+        assert!(op.targets.is_empty(),
+            "id-less wrapped elements + no assigned id ⇒ empty targets");
+        // (4) checkpoint_equivalence.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    /// `collect_in_new_layer` drives `doc.wrap_in_layer` with
+    /// `name: active_document.next_layer_name`. The CRITICAL P5 proof: the renderer
+    /// evaluates `next_layer_name` against the LIVE doc FIRST and journals the
+    /// RESOLVED LITERAL — NOT the expr. The setup is rigged so re-deriving the name
+    /// on replay (from the mutated tree) would yield a DIFFERENT name: with two
+    /// existing layers "Layer 1"/"Layer 2", `next_layer_name` resolves to "Layer 3";
+    /// after both are wrapped, the only surviving layer is the new "Layer 3", so a
+    /// re-derivation would pick "Layer 1". Pinning the journaled literal to "Layer 3"
+    /// + the checkpoint_equivalence gate together prove replay reuses the literal.
+    #[test]
+    fn production_route_collect_in_new_layer_journals_resolved_name_literal() {
+        use crate::geometry::element::Element;
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+            ("Layer 2".into(), Visibility::Preview, false),
+        ]);
+        // Compute the name the renderer SHOULD resolve, BEFORE the mutation, the
+        // same way the eval ctx derives it (smallest "Layer N" not already taken).
+        let resolved_name_before = {
+            let existing: std::collections::HashSet<String> = st.tabs[st.active_tab]
+                .model.document().layers.iter()
+                .filter_map(|e| match e {
+                    Element::Layer(le) => Some(le.name().to_string()),
+                    _ => None,
+                })
+                .collect();
+            let mut n = 1usize;
+            loop {
+                let cand = format!("Layer {n}");
+                if !existing.contains(&cand) { break cand; }
+                n += 1;
+            }
+        };
+        assert_eq!(resolved_name_before, "Layer 3",
+            "with Layer 1 + Layer 2 present, next_layer_name resolves to Layer 3");
+
+        st.layers_panel_selection = vec![vec![0], vec![1]];
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let params = serde_json::Map::new();
+        dispatch_action("collect_in_new_layer", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1) exactly one wrap_in_layer op.
+        assert_eq!(model.journal().len(), before + 1,
+            "collect_in_new_layer commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("collect_in_new_layer"));
+        assert_eq!(txn.ops.len(), 1, "exactly ONE wrap_in_layer op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "wrap_in_layer");
+        assert_eq!(op.params["paths"], serde_json::json!([[0], [1]]),
+            "the op carries the RESOLVED plain index arrays");
+        // THE P5 CRUX: the op carries the RESOLVED name LITERAL — equal to what
+        // next_layer_name returned BEFORE the mutation ("Layer 3"), NOT the expr
+        // string "active_document.next_layer_name".
+        assert_eq!(op.params["name"], serde_json::json!(resolved_name_before),
+            "wrap_in_layer journals the RESOLVED name literal, not the expr");
+        assert_eq!(op.params["name"], serde_json::json!("Layer 3"));
+        assert_ne!(op.params["name"], serde_json::json!("active_document.next_layer_name"),
+            "the op must NOT carry the name expr (replay has no eval context)");
+        // (2) the live doc: both originals collected into ONE new top-level layer.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 1, "both layers collected into one new layer");
+        match &layers[0] {
+            Element::Layer(le) => {
+                assert_eq!(le.name(), "Layer 3", "the new layer carries the resolved name");
+                assert_eq!(le.children.len(), 2, "it wraps both collected layers");
+            }
+            other => panic!("expected Layer at idx 0, got {other:?}"),
+        }
+        // (3) targets: id-less collected layers + no assigned id ⇒ empty.
+        assert!(op.targets.is_empty());
+        // (4) checkpoint_equivalence: replay reuses the LITERAL "Layer 3" (a
+        // re-derivation would have produced "Layer 1" — the gate would catch it).
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    /// `flatten_artwork` drives `doc.unpack_group_at` per panel-selected path.
+    /// Journals exactly ONE `unpack_group_at` op (single selection) carrying the
+    /// RESOLVED plain index path; the live tree replaces the group with its
+    /// children at the vacated position, ascending. Children keep their identities.
+    #[test]
+    fn production_route_flatten_artwork_journals_one_unpack_group_at() {
+        use crate::geometry::element::{Element, GroupElem, LayerElem, CommonProps};
+        use std::rc::Rc;
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+        ]);
+        // Build [Layer A, Group(c1, c2), Layer B] at the top level.
+        let mk_layer = |name: &str| Element::Layer(LayerElem {
+            children: Vec::new(), isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some(name.into()), ..Default::default() },
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(mk_layer("c1")), Rc::new(mk_layer("c2"))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        {
+            let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+            new_doc.layers = vec![mk_layer("A"), group, mk_layer("B")];
+            st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        }
+        // Select the group (path [1]).
+        st.layers_panel_selection = vec![vec![1]];
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let params = serde_json::Map::new();
+        dispatch_action("flatten_artwork", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1) exactly one unpack_group_at op carrying the RESOLVED plain path.
+        assert_eq!(model.journal().len(), before + 1,
+            "flatten_artwork commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("flatten_artwork"));
+        assert_eq!(txn.ops.len(), 1, "exactly ONE unpack_group_at op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "unpack_group_at");
+        assert_eq!(op.params["path"], serde_json::json!([1]),
+            "the op carries the RESOLVED plain index path");
+        // (2) the live doc: group dissolved into c1, c2 at the vacated position.
+        let names: Vec<String> = model.document().layers.iter().map(|e| match e {
+            Element::Layer(le) => le.name().to_string(),
+            other => format!("{other:?}"),
+        }).collect();
+        assert_eq!(names, vec!["A", "c1", "c2", "B"]);
+        // (3) targets: the unpacked children are id-less ⇒ empty.
+        assert!(op.targets.is_empty());
+        // (4) checkpoint_equivalence.
         assert_artboard_checkpoint_equivalence(&st, pre_doc);
     }
 
