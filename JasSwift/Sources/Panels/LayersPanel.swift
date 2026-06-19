@@ -93,8 +93,14 @@ public enum LayersPanel {
         ]
 
         // Platform handlers
+        // OP_LOG.md Increment 1: the `snapshot` effect OPENS the undo
+        // transaction (beginTxn) rather than pushing a bare checkpoint, so the
+        // subsequent doc.* writes ride inside it via the enforced setDocument
+        // path; the runEffects owner (the dispatch at the end) commits it once
+        // (one undo step). Mirrors the Rust / Python / OCaml snapshot ->
+        // begin_txn routing. beginTxn is a no-op while one is already open.
         let snapshotHandler: PlatformEffect = { _, _, _ in
-            model.snapshot()
+            model.beginTxn()
             return nil
         }
         let docSetHandler: PlatformEffect = { value, callCtx, _ in
@@ -141,7 +147,7 @@ public enum LayersPanel {
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's
             // Print dialog state on every layer rename / lock toggle.
-            model.document = model.document.replacing(layers: newLayers)
+            model.editDocument(model.document.replacing(layers: newLayers))
             return nil
         }
         // Phase 3 Group B: delete/clone/insert. The returned Element (top-
@@ -163,11 +169,11 @@ public enum LayersPanel {
                 var newLayers = doc.layers
                 newLayers.remove(at: indices[0])
                 // See note above: use replacing() to preserve all Document fields.
-                model.document = doc.replacing(layers: newLayers)
+                model.editDocument(doc.replacing(layers: newLayers))
                 return removed
             }
             let removed = doc.getElement(indices)
-            model.document = doc.deleteElement(indices)
+            model.editDocument(doc.deleteElement(indices))
             return removed
         }
         let docCloneAtHandler: PlatformEffect = { value, callCtx, _ in
@@ -210,9 +216,9 @@ public enum LayersPanel {
                 var newLayers = doc.layers
                 newLayers.insert(layer, at: insertIdx)
                 // See note above: use replacing() to preserve all Document fields.
-                model.document = doc.replacing(layers: newLayers)
+                model.editDocument(doc.replacing(layers: newLayers))
             } else {
-                model.document = doc.insertElementAfter(indices, element: elem)
+                model.editDocument(doc.insertElementAfter(indices, element: elem))
             }
             return nil
         }
@@ -268,7 +274,7 @@ public enum LayersPanel {
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's
             // Print dialog state on every layer rename / lock toggle.
-            model.document = model.document.replacing(layers: newLayers)
+            model.editDocument(model.document.replacing(layers: newLayers))
             return nil
         }
 
@@ -308,7 +314,7 @@ public enum LayersPanel {
             }
             let newGroup = Element.group(Group(children: children))
             newDoc = newDoc.replaceElement(first, with: newGroup)
-            model.document = newDoc
+            model.editDocument(newDoc)
             return nil
         }
 
@@ -336,7 +342,7 @@ public enum LayersPanel {
                     insertAfter[insertAfter.count - 1] += 1
                 }
             }
-            model.document = newDoc
+            model.editDocument(newDoc)
             return nil
         }
 
@@ -382,7 +388,7 @@ public enum LayersPanel {
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's
             // Print dialog state on every layer rename / lock toggle.
-            model.document = model.document.replacing(layers: newLayers)
+            model.editDocument(model.document.replacing(layers: newLayers))
             return nil
         }
 
@@ -500,7 +506,7 @@ public enum LayersPanel {
                 artboards: doc.artboards + [ab],
                 artboardOptions: doc.artboardOptions
             )
-            model.document = doc
+            model.editDocument(doc)
             return ab.id
         }
 
@@ -511,13 +517,13 @@ public enum LayersPanel {
             let doc = model.document
             let newArtboards = doc.artboards.filter { $0.id != target }
             if newArtboards.count == doc.artboards.count { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
                 artboards: newArtboards,
                 artboardOptions: doc.artboardOptions
-            )
+            ))
             return nil
         }
 
@@ -560,13 +566,13 @@ public enum LayersPanel {
                 showVideoSafeAreas: source.showVideoSafeAreas,
                 videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio
             )
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
                 artboards: doc.artboards + [dup],
                 artboardOptions: doc.artboardOptions
-            )
+            ))
             return nil
         }
 
@@ -616,13 +622,13 @@ public enum LayersPanel {
                 }
                 return ab
             }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
                 artboards: newArtboards,
                 artboardOptions: doc.artboardOptions
-            )
+            ))
             return nil
         }
 
@@ -653,7 +659,7 @@ public enum LayersPanel {
                 )
             default: return nil
             }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -661,7 +667,7 @@ public enum LayersPanel {
                 artboardOptions: newOpts,
                 documentSetup: doc.documentSetup,
                 printPreferences: doc.printPreferences
-            )
+            ))
             return nil
         }
 
@@ -726,7 +732,7 @@ public enum LayersPanel {
                 newSetup = _withDocSetup(s, discardWhiteOverprint: b)
             default: return nil
             }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -734,7 +740,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: newSetup,
                 printPreferences: doc.printPreferences
-            )
+            ))
             return nil
         }
 
@@ -756,7 +762,7 @@ public enum LayersPanel {
             let p = doc.printPreferences
             let np = applyPrintPrefField(p, field: field, val: val)
             guard let updated = np else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -764,7 +770,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -789,7 +795,7 @@ public enum LayersPanel {
             let p = doc.printPreferences
             let np = applyMarksAndBleedField(p, field: field, val: val)
             guard let updated = np else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -797,7 +803,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -820,7 +826,7 @@ public enum LayersPanel {
             let doc = model.document
             let p = doc.printPreferences
             guard let updated = applyOutputField(p, field: field, val: val) else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -828,7 +834,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -852,7 +858,7 @@ public enum LayersPanel {
             let doc = model.document
             let p = doc.printPreferences
             guard let updated = applyOutputInkField(p, index: index, field: field, val: val) else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -860,7 +866,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -883,7 +889,7 @@ public enum LayersPanel {
             let doc = model.document
             let p = doc.printPreferences
             guard let updated = applyGraphicsField(p, field: field, val: val) else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -891,7 +897,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -913,7 +919,7 @@ public enum LayersPanel {
             let doc = model.document
             let p = doc.printPreferences
             guard let updated = applyColorManagementField(p, field: field, val: val) else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -921,7 +927,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -942,7 +948,7 @@ public enum LayersPanel {
             let doc = model.document
             let p = doc.printPreferences
             guard let updated = applyAdvancedField(p, field: field, val: val) else { return nil }
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
@@ -950,7 +956,7 @@ public enum LayersPanel {
                 artboardOptions: doc.artboardOptions,
                 documentSetup: doc.documentSetup,
                 printPreferences: updated
-            )
+            ))
             return nil
         }
 
@@ -1003,13 +1009,13 @@ public enum LayersPanel {
             }
             guard changed else { return }
             let doc = model.document
-            model.document = Document(
+            model.editDocument(Document(
                 layers: doc.layers,
                 selectedLayer: doc.selectedLayer,
                 selection: doc.selection,
                 artboards: abs,
                 artboardOptions: doc.artboardOptions
-            )
+            ))
         }
 
         let docMoveArtboardsUpHandler: PlatformEffect = { value, callCtx, _ in

@@ -815,12 +815,16 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
 
     controller.model.defaultStroke = newStroke
     if !doc.selection.isEmpty {
-        controller.model.snapshot()
-        controller.setSelectionStroke(newStroke)
+        // Stroke + width-profile as ONE undo step: withTxn opens the bracket,
+        // each Controller mutator's editDocument joins it. Mirrors Rust
+        // apply_stroke_panel_to_selection's with_txn.
         let profile = s["stroke_profile"] as? String ?? "uniform"
         let flipped = s["stroke_profile_flipped"] as? Bool ?? false
         let widthPts = profileToWidthPoints(profile: profile, width: width, flipped: flipped)
-        controller.setSelectionWidthProfile(widthPts)
+        controller.model.withTxn {
+            controller.setSelectionStroke(newStroke)
+            controller.setSelectionWidthProfile(widthPts)
+        }
     }
 }
 
@@ -1491,7 +1495,7 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
                 newElem = nil
             }
             if let ne = newElem {
-                controller.model.snapshot()
+                // controller.setDocument -> editDocument self-brackets one step.
                 controller.setDocument(doc.replaceElement(session.path, with: ne))
             }
             return
@@ -1595,9 +1599,9 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
         attrs["aa_mode"] = (v == "Sharp" || v.isEmpty) ? "" : v
     }
 
-    // Snapshot + apply. No-op when nothing in the selection is text.
+    // Apply. No-op when nothing in the selection is text. setSelectionText-
+    // Attributes -> editDocument self-brackets one undo step.
     if !controller.model.document.selection.isEmpty {
-        controller.model.snapshot()
         controller.setSelectionTextAttributes(attrs)
     }
 }
@@ -1661,7 +1665,7 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
         }
     }
     if targetPaths.isEmpty { return }
-    model.snapshot()
+    // controller.setDocument below -> editDocument self-brackets one undo step.
     var newDoc = doc
     for path in targetPaths {
         let elem = newDoc.getElement(path)
@@ -1810,7 +1814,7 @@ public func applyJustificationDialogToSelection(
         }
     }
     if targetPaths.isEmpty { return }
-    model.snapshot()
+    // controller.setDocument below -> editDocument self-brackets one undo step.
     var newDoc = doc
     for path in targetPaths {
         let elem = newDoc.getElement(path)
@@ -1912,7 +1916,7 @@ public func applyHyphenationDialogToSelection(
         }
     }
     if targetPaths.isEmpty { return }
-    model.snapshot()
+    // controller.setDocument below -> editDocument self-brackets one undo step.
     var newDoc = doc
     for path in targetPaths {
         let elem = newDoc.getElement(path)
@@ -2187,13 +2191,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
         if let hex = raw as? String, let color = Color.fromHex(hex) {
             model.defaultFill = Fill(color: color)
             if !model.document.selection.isEmpty {
-                model.snapshot()
                 ctrl.setSelectionFill(Fill(color: color))
             }
         } else if raw == nil || raw is NSNull {
             model.defaultFill = nil
             if !model.document.selection.isEmpty {
-                model.snapshot()
                 ctrl.setSelectionFill(nil)
             }
         }
@@ -2203,13 +2205,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
             let width = model.defaultStroke?.width ?? 1.0
             model.defaultStroke = Stroke(color: color, width: width)
             if !model.document.selection.isEmpty {
-                model.snapshot()
                 ctrl.setSelectionStroke(Stroke(color: color, width: width))
             }
         } else if raw == nil || raw is NSNull {
             model.defaultStroke = nil
             if !model.document.selection.isEmpty {
-                model.snapshot()
                 ctrl.setSelectionStroke(nil)
             }
         }
@@ -2355,7 +2355,10 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
         let moved = elem.translated(dx: t.dx, dy: t.dy)
         newDoc = newDoc.replaceElement(t.path, with: moved)
     }
-    model.document = newDoc
+    // Undoable align. The snapshot effect already opened the txn, so
+    // editDocument joins it (else it self-brackets one step). Mirrors Rust
+    // apply_align_operation's edit_document.
+    model.editDocument(newDoc)
 }
 
 /// Canvas-click intercept for key-object designation. Per
@@ -2445,7 +2448,13 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     ]
     var effects: [String: PlatformEffect] = [
         "snapshot": { _, _, _ in
-            model.snapshot()
+            // OP_LOG.md Increment 1: NO-OP on this map. These panel actions
+            // (align / boolean / swatch) are dispatched through `runEffects`
+            // WITHOUT a `model:`, so the owner-commit bracket is inert — a
+            // beginTxn here would never be committed (leaked-open txn). Instead
+            // each doc-mutating effect below self-brackets its own one undo step
+            // via the Controller's editDocument, so the explicit `- snapshot`
+            // YAML step is redundant and must not push a second checkpoint.
             return nil
         },
         "reset_align_panel": { _, _, store in

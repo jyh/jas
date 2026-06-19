@@ -57,7 +57,9 @@ class TypeOnPathTool: CanvasTool {
 
     private func ensureSnapshot(_ ctx: ToolContext) {
         if !didSnapshot {
-            ctx.snapshot()
+            // Open ONE session transaction lazily; endSession commits it
+            // (OP_LOG.md Increment 1). Mirrors Rust ensure_snapshot's begin_txn.
+            ctx.model.beginTxn()
             didSnapshot = true
         }
     }
@@ -81,6 +83,9 @@ class TypeOnPathTool: CanvasTool {
     }
 
     private func endSession(_ ctx: ToolContext? = nil) {
+        // Commit the session's transaction (no-op if none opened). Mirrors Rust
+        // type_on_path end_session's commit_txn.
+        ctx?.model.commitTxn()
         session = nil
         didSnapshot = false
         dragStart = nil
@@ -143,7 +148,9 @@ class TypeOnPathTool: CanvasTool {
                     ctx.requestUpdate()
                 }
             case .path(let v):
-                ctx.snapshot()
+                // Open the session txn; setDocument below joins it, endSession
+                // commits. Mirrors Rust begin_session_convert_path's begin_txn.
+                ctx.model.beginTxn()
                 didSnapshot = true
                 let startOff = pathClosestOffset(v.d, px: x, py: y)
                 let tp = TextPath(d: v.d, content: "", startOffset: startOff,
@@ -212,7 +219,9 @@ class TypeOnPathTool: CanvasTool {
         if offsetDragging {
             if let path = offsetDragPath, let newOffset = offsetPreview,
                pathIsValid(ctx.document, path) {
-                ctx.snapshot()
+                // Standalone undoable commit: controller.setDocument below
+                // self-brackets one undo step via editDocument (== Rust's
+                // begin_txn + set_document + commit_txn here). No snapshot.
                 if case .textPath(let tp) = ctx.document.getElement(path) {
                     let new = TextPath(d: tp.d, content: tp.content, startOffset: newOffset,
                                        fontFamily: tp.fontFamily, fontSize: tp.fontSize,
@@ -238,7 +247,9 @@ class TypeOnPathTool: CanvasTool {
             controlPt = nil
             return
         }
-        ctx.snapshot()
+        // Open the session txn; addElement joins it, endSession commits (one
+        // undo step for create + typing). Mirrors Rust begin_session's begin_txn.
+        ctx.model.beginTxn()
         didSnapshot = true
         let d: [PathCommand]
         if let (cx, cy) = controlPt {
@@ -326,7 +337,8 @@ class TypeOnPathTool: CanvasTool {
         case .textPath(let tp): newElem = .textPath(tp.withTspans(tspans))
         default: return
         }
-        ctx.model.document = ctx.model.document.replaceElement(path, with: newElem)
+        // Joins the session transaction (callers ensureSnapshot first).
+        ctx.model.setDocument(ctx.model.document.replaceElement(path, with: newElem))
     }
 
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool {

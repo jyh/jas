@@ -96,14 +96,16 @@ public enum ColorPanel {
         if model.fillOnTop {
             model.defaultFill = Fill(color: color)
             if !model.document.selection.isEmpty {
-                model.snapshot()
+                // editDocument self-brackets the apply into ONE undo step
+                // (OP_LOG.md Increment 1); no separate snapshot() — that would
+                // double-checkpoint. Mirrors Rust set_active_color's
+                // `with_txn { set_selection_fill }`.
                 ctrl.setSelectionFill(Fill(color: color))
             }
         } else {
             let width = model.defaultStroke?.width ?? 1.0
             model.defaultStroke = Stroke(color: color, width: width)
             if !model.document.selection.isEmpty {
-                model.snapshot()
                 ctrl.setSelectionStroke(Stroke(color: color, width: width))
             }
         }
@@ -125,13 +127,16 @@ public enum ColorPanel {
         if model.fillOnTop {
             model.defaultFill = Fill(color: color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionFill(Fill(color: color))
+                // Live, NON-undoable per-tick write (OP_LOG.md §7/§8); undo is
+                // captured once on release by setActiveColor. Mirrors Rust
+                // set_active_color_live's set_selection_fill_live.
+                ctrl.setSelectionFillLive(Fill(color: color))
             }
         } else {
             let width = model.defaultStroke?.width ?? 1.0
             model.defaultStroke = Stroke(color: color, width: width)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionStroke(Stroke(color: color, width: width))
+                ctrl.setSelectionStrokeLive(Stroke(color: color, width: width))
             }
         }
     }

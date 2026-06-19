@@ -138,7 +138,7 @@ public enum SymbolsPanel {
             guard let masterId = mint(existing) else { return }
             existing.insert(masterId)
             guard let refId = mint(existing) else { return }
-            model.snapshot()
+            // The Controller mutator self-brackets one undo step via editDocument.
             let controller = Controller(model: model)
             controller.makeSymbol(path, masterId: masterId, refId: refId)
             // Keep the new master panel-selected so Place / Delete target
@@ -155,7 +155,7 @@ public enum SymbolsPanel {
             guard let masterId = selectedSymbol(model) else { return }
             let existing = existingIds(model.document)
             guard let refId = mint(existing) else { return }
-            model.snapshot()
+            // The Controller mutator self-brackets one undo step via editDocument.
             let controller = Controller(model: model)
             controller.placeInstance(masterId: masterId, refId: refId)
 
@@ -171,7 +171,7 @@ public enum SymbolsPanel {
                 // does nothing (no snapshot, no delete).
                 if !confirmOrphaningDeleteSymbol(usage) { return }
             }
-            model.snapshot()
+            // The Controller mutator self-brackets one undo step via editDocument.
             let controller = Controller(model: model)
             controller.deleteSymbol(masterId: masterId)
             setSelectedSymbol(model, nil)

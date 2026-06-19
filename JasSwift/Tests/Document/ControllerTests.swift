@@ -761,9 +761,13 @@ private func makeMarqueeCtrl() -> Controller {
     let ctrl = Controller(model: model)
     ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
     // The just-added element is selected at [0,0] (kind=.all).
-    model.snapshot()
-    ctrl.createReference([0, 0], targetId: "tgt-1", refId: "ref-1")
-    ctrl.moveSelection(dx: pasteOffset, dy: pasteOffset)
+    // Make Instance = createReference + offset-move under ONE transaction
+    // (mirrors the Object-menu handler / Rust with_txn), so the whole
+    // composition is a single undo step.
+    model.withTxn {
+        ctrl.createReference([0, 0], targetId: "tgt-1", refId: "ref-1")
+        ctrl.moveSelection(dx: pasteOffset, dy: pasteOffset)
+    }
     var doc = model.document
     // Source rect untouched.
     if case .rect(let r) = doc.getElement([0, 0]) {
@@ -1409,7 +1413,7 @@ private func setupTwoRectSelection() -> Controller {
     let firstPath = doc.selection.first!.path
     let elem = doc.getElement(firstPath)
     doc = doc.replaceElement(firstPath, with: withMask(elem, mask: nil))
-    ctrl.model.document = doc
+    ctrl.model.setDocumentUnbracketed(doc)
     #expect(firstMask(ctrl.document) == nil)
     #expect(selectionHasMask(ctrl.document) == false)
 }

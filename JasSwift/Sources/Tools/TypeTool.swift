@@ -130,7 +130,12 @@ class TypeTool: CanvasTool {
 
     private func ensureSnapshot(_ ctx: ToolContext) {
         if !didSnapshot {
-            ctx.snapshot()
+            // OP_LOG.md Increment 1: open ONE transaction for the whole edit
+            // session (lazily, on the first content-modifying op). beginTxn is
+            // idempotent while open; the session's writes join it via
+            // editDocument/setDocument and endSession commits it once (one undo
+            // step). Mirrors the Rust TypeTool ensure_snapshot's begin_txn.
+            ctx.model.beginTxn()
             didSnapshot = true
         }
     }
@@ -164,7 +169,9 @@ class TypeTool: CanvasTool {
     }
 
     private func beginSessionNew(_ ctx: ToolContext, x: Double, y: Double, w: Double, h: Double) {
-        ctx.snapshot()
+        // Open the session's transaction; addElement joins it via editDocument
+        // (one undo step for the whole placement+typing session). Mirrors Rust.
+        ctx.model.beginTxn()
         didSnapshot = true
         let elem = Element.text(emptyTextElem(x: x, y: y, width: w, height: h))
         ctx.controller.addElement(elem)
@@ -180,6 +187,10 @@ class TypeTool: CanvasTool {
     }
 
     private func endSession(_ ctx: ToolContext? = nil) {
+        // Commit the session's transaction (opened by ensureSnapshot /
+        // beginSessionNew). No-op if none was opened (a click that typed
+        // nothing). Mirrors the Rust TypeTool end_session's commit_txn.
+        ctx?.model.commitTxn()
         session = nil
         didSnapshot = false
         state = .idle
@@ -270,7 +281,7 @@ class TypeTool: CanvasTool {
     }
 
     func deactivate(_ ctx: ToolContext) {
-        endSession()
+        endSession(ctx)
     }
 
     func capturesKeyboard() -> Bool { session != nil }
@@ -335,7 +346,8 @@ class TypeTool: CanvasTool {
         case .textPath(let tp): newElem = .textPath(tp.withTspans(tspans))
         default: return
         }
-        ctx.model.document = ctx.model.document.replaceElement(path, with: newElem)
+        // Joins the session transaction (callers ensureSnapshot first).
+        ctx.model.setDocument(ctx.model.document.replaceElement(path, with: newElem))
     }
 
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool {

@@ -539,8 +539,8 @@ public struct JasCommands: Commands {
             }
             let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
             let newDoc = svgToDocument(svg)
-            model.snapshot()
-            model.document = newDoc
+            // Undoable revert: editDocument self-brackets one undo step.
+            model.editDocument(newDoc)
             model.markSaved()
         } catch {
             let errAlert = NSAlert(error: error)
@@ -570,7 +570,6 @@ public struct JasCommands: Commands {
 
     private func pasteClipboard(offset: Double) {
         guard let model = model else { return }
-        model.snapshot()
         let pasteboard = NSPasteboard.general
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
         let doc = model.document
@@ -610,7 +609,8 @@ public struct JasCommands: Commands {
             // defaults silently drop unset fields — the comment on
             // `Document.replacing` calls this out as the bug that made
             // the artboard frame disappear after a selection mutation.
-            model.document = doc.replacing(layers: newLayers, selection: newSelection)
+            // Undoable paste: editDocument self-brackets one undo step.
+            model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
         } else {
             // Plain text: create a Text element
             let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
@@ -623,7 +623,7 @@ public struct JasCommands: Commands {
                                       opacity: newLayers[idx].opacity,
                                       transform: newLayers[idx].transform)
             // Same `replacing(...)` pattern — preserves artboards.
-            model.document = doc.replacing(layers: newLayers, selection: newSelection)
+            model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
         }
     }
 
@@ -631,9 +631,10 @@ public struct JasCommands: Commands {
         guard let model = model else { return }
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        model.snapshot()
+        // withTxn opens ONE bracket; the Controller mutator's editDocument joins
+        // it (one undo step). Mirrors Rust's with_txn { Controller::... }.
         let controller = Controller(model: model)
-        controller.groupSelection()
+        model.withTxn { controller.groupSelection() }
     }
 
     /// "Make Instance": the first user-facing way to create a live
@@ -684,19 +685,22 @@ public struct JasCommands: Commands {
         // createReference + offset-move under ONE snapshot = a single
         // undo step (offset rides on the new reference's transform via
         // moveSelection).
-        model.snapshot()
+        // Both ops join ONE withTxn bracket = a single undo step (each
+        // Controller mutator's editDocument joins it). Mirrors Rust's
+        // with_txn around make_instance's two ops.
         let controller = Controller(model: model)
-        controller.createReference(targetPath, targetId: targetId, refId: refId)
-        controller.moveSelection(dx: pasteOffset, dy: pasteOffset)
+        model.withTxn {
+            controller.createReference(targetPath, targetId: targetId, refId: refId)
+            controller.moveSelection(dx: pasteOffset, dy: pasteOffset)
+        }
     }
 
     private func ungroupSelection() {
         guard let model = model else { return }
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        model.snapshot()
         let controller = Controller(model: model)
-        controller.ungroupSelection()
+        model.withTxn { controller.ungroupSelection() }
     }
 
     private func ungroupAll() {
@@ -731,41 +735,37 @@ public struct JasCommands: Commands {
                          locked: layer.locked)
         }
         guard changed else { return }
-        model.snapshot()
-        model.document = Document(layers: newLayers,
-                                  selectedLayer: doc.selectedLayer, selection: [])
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(Document(layers: newLayers,
+                                  selectedLayer: doc.selectedLayer, selection: []))
     }
 
     private func lockSelection() {
         guard let model = model else { return }
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        model.snapshot()
         let controller = Controller(model: model)
-        controller.lockSelection()
+        model.withTxn { controller.lockSelection() }
     }
 
     private func unlockAll() {
         guard let model = model else { return }
-        model.snapshot()
         let controller = Controller(model: model)
-        controller.unlockAll()
+        model.withTxn { controller.unlockAll() }
     }
 
     private func hideSelection() {
         guard let model = model else { return }
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        model.snapshot()
         let controller = Controller(model: model)
-        controller.hideSelection()
+        model.withTxn { controller.hideSelection() }
     }
 
     private func showAll() {
         guard let model = model else { return }
-        model.snapshot()
         let controller = Controller(model: model)
-        controller.showAll()
+        model.withTxn { controller.showAll() }
     }
 
     private func deleteSelection() {
@@ -781,8 +781,8 @@ public struct JasCommands: Commands {
         if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
             return
         }
-        model.snapshot()
-        model.document = doc.deleteSelection()
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(doc.deleteSelection())
     }
 
     /// Present the synchronous warn-then-orphan confirm (mirrors `revert()`'s
@@ -839,9 +839,9 @@ public struct JasCommands: Commands {
         if !orphaned.isEmpty && !JasCommands.confirmOrphaningCut(orphaned.count) {
             return
         }
-        model.snapshot()
-        copySelection()
-        model.document = model.document.deleteSelection()
+        copySelection()  // clipboard only — no document write
+        // Undoable delete-half of the cut: editDocument self-brackets one step.
+        model.editDocument(model.document.deleteSelection())
     }
 
     private func copySelection() {

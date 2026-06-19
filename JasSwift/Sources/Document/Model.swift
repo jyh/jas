@@ -58,7 +58,20 @@ private struct PendingTxn {
 /// Views register callbacks via onDocumentChanged to be notified
 /// whenever the document is replaced.
 public class Model: ObservableObject {
-    @Published public var document: Document {
+    /// The current document. The setter is `private(set)`, so external code
+    /// CANNOT write `model.document = ...`; it must funnel through one of the
+    /// three intent methods (`setDocument` / `editDocument` /
+    /// `setDocumentUnbracketed`) below. That makes the transaction-bracket
+    /// enforcement in `setDocument` UNBYPASSABLE at compile time (a stray bare
+    /// undoable write is a compile error, not a runtime gamble) — the strongest
+    /// form of the OP_LOG.md Increment 1 enforced chokepoint, stronger than the
+    /// runtime-routed property setter Python/OCaml use because Swift can make the
+    /// write itself unreachable from outside. SwiftUI binding observation and
+    /// external READS still work (only the *setter* is restricted).
+    ///
+    /// The `didSet` remains the BYTE-LEVEL chokepoint (index refresh / generation
+    /// bump / notify); the three methods are the INTENT chokepoint layered on top.
+    @Published public private(set) var document: Document {
         didSet {
             // The document setter is the single mutation chokepoint
             // (every edit goes through `model.document = ...`), so refresh
@@ -80,6 +93,71 @@ public class Model: ObservableObject {
             generation &+= 1
             notify()
         }
+    }
+
+    // MARK: - Intent chokepoint (OP_LOG.md Increment 1, enforced)
+    //
+    // Three writes funnel into the `document` setter (the byte-level chokepoint),
+    // mirroring jas_dioxus `model.rs`, jas `model.py`, and jas_ocaml `model.ml`:
+    //   - `setDocument`            — UNDOABLE write; asserts `isInTxn` is open.
+    //   - `editDocument`           — SELF-BRACKETING undoable write (opens and
+    //                                commits its own txn when none is open, else
+    //                                joins the caller). What Controller mutators
+    //                                use, so a standalone edit is a complete
+    //                                one-step undo and a nested one joins the
+    //                                owning action.
+    //   - `setDocumentUnbracketed` — sanctioned NON-undoable write (selection /
+    //                                preview re-apply / live drag / view-state /
+    //                                undo-redo history-nav / test setup); never
+    //                                asserts (OP_LOG.md §7/§8).
+    // The distinct names let the live `isInTxn` guard in `setDocument` tell
+    // "deliberately not undoable" from "forgot to open a transaction": the former
+    // says so by calling `setDocumentUnbracketed` directly.
+
+    /// Replace the document — the committing write for UNDOABLE mutations. The
+    /// `assert(isInTxn)` is LIVE (OP_LOG.md Increment 1, enforced chokepoint):
+    /// any undoable edit that skipped the transaction bracket fails the test
+    /// suite, so the journal cursor is complete by construction. Active in the
+    /// debug/test build (the whole suite runs in debug, like the id-index gate)
+    /// and stripped under `-Ounchecked`, so it costs nothing in release.
+    /// Self-bracketing mutators use ``editDocument(_:)``; sanctioned non-undoable
+    /// writes use ``setDocumentUnbracketed(_:)`` (which never asserts). Mirrors
+    /// the Rust `set_document`.
+    public func setDocument(_ doc: Document) {
+        assert(isInTxn,
+            "setDocument outside a transaction: undoable edits use beginTxn/" +
+            "commitTxn or withTxn; Controller mutators use editDocument; " +
+            "non-undoable writes (selection, preview, live-drag, view-state, " +
+            "undo/redo, test setup) use setDocumentUnbracketed.")
+        document = doc
+    }
+
+    /// Self-bracketing undoable write: if no transaction is open, wrap this edit
+    /// in its own begin/commit (one undo step); if one is already open, just
+    /// write (joining the caller's transaction). This is what the ``Controller``
+    /// mutators use, so a standalone call (a unit test, or a direct Controller
+    /// call) is a complete one-step undo, while the same method called inside a
+    /// UI ``withTxn(_:)`` / ``beginTxn()`` joins that action — production behavior
+    /// is unchanged, and no test needs an explicit bracket. Distinct from
+    /// ``setDocument(_:)`` (asserts a transaction is open) and
+    /// ``setDocumentUnbracketed(_:)`` (non-undoable). Mirrors the Rust
+    /// `edit_document`.
+    public func editDocument(_ doc: Document) {
+        let opened = !isInTxn
+        if opened { beginTxn() }
+        document = doc
+        if opened { commitTxn() }
+    }
+
+    /// Committing write for sanctioned NON-undoable mutations — selection-only
+    /// and pure view-state changes, dialog-preview re-apply, live drag, undo/redo
+    /// history-nav, and test setup (OP_LOG.md §7/§8). Same effect as
+    /// ``setDocument(_:)`` but the distinct name is what lets the live `isInTxn`
+    /// guard in ``setDocument(_:)`` tell "deliberately not undoable" from "forgot
+    /// to open a transaction": this path never asserts. Mirrors the Rust
+    /// `set_document_unbracketed`.
+    public func setDocumentUnbracketed(_ doc: Document) {
+        document = doc
     }
     /// Monotonic modification generation (Phase 4c). Bumped in the `document`
     /// `didSet` chokepoint, so every document replacement advances it. Read at

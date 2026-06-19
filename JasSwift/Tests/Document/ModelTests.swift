@@ -16,7 +16,7 @@ import Testing
     let model = Model()
     var received: [Int] = []
     model.onDocumentChanged { doc in received.append(doc.layers.count) }
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(received == [0])
 }
 
@@ -26,7 +26,7 @@ import Testing
     var b: [Int] = []
     model.onDocumentChanged { doc in a.append(doc.layers.count) }
     model.onDocumentChanged { doc in b.append(doc.layers.count) }
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(a == [0])
     #expect(b == [0])
 }
@@ -36,15 +36,15 @@ import Testing
     var counts: [Int] = []
     model.onDocumentChanged { doc in counts.append(doc.layers.count) }
     let layer = Layer(name: "L1", children: [])
-    model.document = Document(layers: [layer])
-    model.document = Document(layers: [layer, layer])
+    model.setDocumentUnbracketed(Document(layers: [layer]))
+    model.setDocumentUnbracketed(Document(layers: [layer, layer]))
     #expect(counts == [1, 2])
 }
 
 @Test func modelImmutability() {
     let model = Model()
     let before = model.document
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     let after = model.document
     #expect(before.layers.count == 1)
     #expect(after.layers.count == 0)
@@ -61,7 +61,7 @@ import Testing
     let model = Model()
     #expect(!model.canUndo)
     model.snapshot()
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(model.canUndo)
     #expect(!model.canRedo)
     model.undo()
@@ -75,14 +75,14 @@ import Testing
     let layer = Layer(name: "L1", children: [])
     let model = Model()
     model.snapshot()
-    model.document = Document(layers: [layer])
+    model.setDocumentUnbracketed(Document(layers: [layer]))
     model.snapshot()
-    model.document = Document(layers: [layer, layer])
+    model.setDocumentUnbracketed(Document(layers: [layer, layer]))
     model.undo()
     #expect(model.document.layers.count == 1)
     #expect(model.canRedo)
     model.snapshot()
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(!model.canRedo)
 }
 
@@ -111,7 +111,7 @@ import Testing
 @Test func modelIsModifiedAfterCommittedEdit() {
     let model = Model()
     model.snapshot()
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(model.isModified)
 }
 
@@ -119,7 +119,7 @@ import Testing
     let model = Model()
     model.markSaved()  // saved at journalHead 0
     model.snapshot()
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(model.isModified)
     model.undo()
     #expect(!model.isModified, "undo back to the saved point is not modified")
@@ -130,7 +130,7 @@ import Testing
 @Test func modelIsModifiedFalseAfterMarkSaved() {
     let model = Model()
     model.snapshot()
-    model.document = Document(layers: [])
+    model.setDocumentUnbracketed(Document(layers: []))
     #expect(model.isModified)
     model.markSaved()
     #expect(!model.isModified)
@@ -145,7 +145,7 @@ import Testing
 
 @Test func modelCommitJournalsOneTransactionPerNetChange() {
     let model = Model()
-    model.withTxn { model.document = Document(layers: []) }
+    model.withTxn { model.setDocument(Document(layers: [])) }
     #expect(model.journal.count == 1, "one committed edit = one transaction")
     #expect(model.journalHeadValue == 1, "cursor advanced to the new transaction")
     #expect(model.journal[0].txnId == "txn-0")
@@ -166,8 +166,8 @@ import Testing
     let model = Model()
     let checkpoint = model.document
     model.withTxn {
-        model.document = Document(layers: [])
-        model.document = checkpoint  // back to the exact checkpoint
+        model.setDocument(Document(layers: []))
+        model.setDocument(checkpoint)  // back to the exact checkpoint
     }
     #expect(model.journal.count == 0, "net-identical transaction is not journaled")
     #expect(!model.canUndo)
@@ -177,15 +177,15 @@ import Testing
 @Test func modelJournalCursorAndRedoTailDrop() {
     let model = Model()
     let l = Layer(name: "L1", children: [])
-    model.withTxn { model.document = Document(layers: [l]) }       // txn-0
-    model.withTxn { model.document = Document(layers: [l, l]) }    // txn-1
+    model.withTxn { model.setDocument(Document(layers: [l])) }       // txn-0
+    model.withTxn { model.setDocument(Document(layers: [l, l])) }    // txn-1
     #expect(model.journal.map { $0.txnId } == ["txn-0", "txn-1"])
     #expect(model.journal[0].parent == nil)
     #expect(model.journal[1].parent == "txn-0")
     model.undo()
     #expect(model.journalHeadValue == 1)
     // New commit after undo drops the redo tail and appends.
-    model.withTxn { model.document = Document(layers: []) }
+    model.withTxn { model.setDocument(Document(layers: [])) }
     #expect(model.journal.count == 2, "redo tail dropped, new txn appended")
     #expect(model.journal[1].txnId == "txn-2", "counter keeps advancing")
     #expect(!model.canRedo, "redo cleared on the new edit")
@@ -194,8 +194,8 @@ import Testing
 @Test func modelUndoAndRedoMoveTheJournalCursor() {
     let model = Model()
     let l = Layer(name: "A", children: [])
-    model.withTxn { model.document = Document(layers: []) }
-    model.withTxn { model.document = Document(layers: [l]) }
+    model.withTxn { model.setDocument(Document(layers: [])) }
+    model.withTxn { model.setDocument(Document(layers: [l])) }
     #expect(model.journalHeadValue == 2)
     model.undo()
     #expect(model.journalHeadValue == 1, "undo moves the cursor back")
@@ -215,9 +215,9 @@ import Testing
     // and undoes in one step. Mirrors Rust `begin_txn_is_idempotent_while_open`.
     let model = Model()
     model.beginTxn()
-    model.document = Document(layers: [])
+    model.setDocument(Document(layers: []))
     model.beginTxn()  // nested / repeated — no-op while open
-    model.document = Document(layers: [Layer(name: "L", children: [])])
+    model.setDocument(Document(layers: [Layer(name: "L", children: [])]))
     model.commitTxn()
     model.undo()
     #expect(model.document.layers.count == 1,
@@ -228,12 +228,12 @@ import Testing
     // The redo-clear lives in commitTxn(), not beginTxn(). Mirrors Rust
     // `redo_clears_at_commit_not_begin`.
     let model = Model()
-    model.withTxn { model.document = Document(layers: []) }
+    model.withTxn { model.setDocument(Document(layers: [])) }
     model.undo()
     #expect(model.canRedo, "undo populates redo")
     model.beginTxn()
     #expect(model.canRedo, "beginTxn does NOT clear redo")
-    model.document = Document(layers: [])
+    model.setDocument(Document(layers: []))
     model.commitTxn()
     #expect(!model.canRedo, "commitTxn clears redo (new edit invalidates redo)")
 }
@@ -242,11 +242,11 @@ import Testing
     // abortTxn rolls back to the checkpoint, discards the pending txn, and does
     // not journal or move the cursor. Mirrors Rust `abort_*` tests.
     let model = Model()
-    model.withTxn { model.document = Document(layers: []) }  // txn-0
+    model.withTxn { model.setDocument(Document(layers: [])) }  // txn-0
     let head = model.journalHeadValue
     let len = model.journal.count
     model.beginTxn()
-    model.document = Document(layers: [Layer(name: "Z", children: [])])
+    model.setDocument(Document(layers: [Layer(name: "Z", children: [])]))
     model.abortTxn()
     #expect(model.journal.count == len, "aborted transaction is not journaled")
     #expect(model.journalHeadValue == head, "cursor unmoved by abort")
@@ -259,7 +259,7 @@ import Testing
     let model = Model()
     model.beginTxn()
     model.nameTxn("move")
-    model.document = Document(layers: [])
+    model.setDocument(Document(layers: []))
     model.recordOp(PrimitiveOp(op: "select_rect",
         params: ["op": "select_rect", "x": 0.0]))
     model.recordOp(PrimitiveOp(op: "move_selection",
@@ -280,7 +280,7 @@ import Testing
 
 @Test func modelLabelVersionStoresAVersionAndStampsTheTransaction() {
     let model = Model()
-    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.withTxn { model.setDocument(Document(layers: [Layer(name: "A", children: [])])) }
     model.labelVersion("v1")
 
     #expect(model.versions.count == 1)
@@ -293,12 +293,12 @@ import Testing
 
 @Test func modelRestoreVersionIsAnUndoableEditBackToTheLabeledState() {
     let model = Model()
-    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.withTxn { model.setDocument(Document(layers: [Layer(name: "A", children: [])])) }
     model.labelVersion("v1")
     // Edit past the version.
     model.withTxn {
-        model.document = Document(layers: [Layer(name: "A", children: []),
-                                           Layer(name: "B", children: [])])
+        model.setDocument(Document(layers: [Layer(name: "A", children: []),
+                                           Layer(name: "B", children: [])]))
     }
     #expect(model.document.layers.count == 2)
 
@@ -312,7 +312,7 @@ import Testing
 
 @Test func modelRestoreVersionToCurrentStateIsANoop() {
     let model = Model()
-    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.withTxn { model.setDocument(Document(layers: [Layer(name: "A", children: [])])) }
     model.labelVersion("v1")
     let head = model.journalHeadValue
     // Already at v1's state — restoring is a no-op (not journaled).
@@ -322,11 +322,11 @@ import Testing
 
 @Test func modelLabelVersionRelabelRepointsAndUnknownRestoreReturnsFalse() {
     let model = Model()
-    model.withTxn { model.document = Document(layers: [Layer(name: "A", children: [])]) }
+    model.withTxn { model.setDocument(Document(layers: [Layer(name: "A", children: [])])) }
     model.labelVersion("v1")
     model.withTxn {
-        model.document = Document(layers: [Layer(name: "A", children: []),
-                                           Layer(name: "B", children: [])])
+        model.setDocument(Document(layers: [Layer(name: "A", children: []),
+                                           Layer(name: "B", children: [])]))
     }
     model.labelVersion("v1")  // re-point to the new state
 
@@ -398,11 +398,11 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
     // didSet chokepoint, so the companion tracks set-document and controller
     // edits alike. Mirrors Rust set_document / document_mut tracking.
     let model = Model()
-    model.document = appendToLayer0(model.document, idRect("a"))
+    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("a")))
     #expect(model.idIndex["a"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))
 
-    model.document = appendToLayer0(model.document, idRect("b"))
+    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("b")))
     #expect(model.idIndex["b"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))
 }
@@ -416,10 +416,10 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
 
     // Edit 1: add id-bearing rect "r1" (undoable).
     model.snapshot()
-    model.document = appendToLayer0(model.document, idRect("r1"))
+    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("r1")))
     // Edit 2: add a second id-bearing rect "r2" (undoable).
     model.snapshot()
-    model.document = appendToLayer0(model.document, idRect("r2"))
+    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("r2")))
     #expect(model.idIndex["r1"] != nil)
     #expect(model.idIndex["r2"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))

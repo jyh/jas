@@ -953,7 +953,12 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         guard let args = spec as? [String: Any] else { return nil }
         let (rx, ry, rw, rh, additive) = normalizeRectArgs(args, store: store, ctx: ctx)
         if rw > 1.0 || rh > 1.0 {
-            model.snapshot()
+            // Marquee commit is selection-only (non-undoable). beginTxn mirrors
+            // Rust's commit_partial_marquee; directSelectRect writes unbracketed,
+            // so the txn nets no journaled change and commitTxn's no-op rule
+            // drops the checkpoint (no orphan undo step). The runEffects owner
+            // commits. Replaces the legacy snapshot() that left a stray step.
+            model.beginTxn()
             Controller(model: model).directSelectRect(
                 x: rx, y: ry, width: rw, height: rh, extend: additive)
         } else if !additive {
@@ -1291,12 +1296,14 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             id: newId, name: newName,
             x: rawX, y: rawY, width: rawW, height: rawH)
         let newAbs = doc.artboards + [ab]
-        model.document = Document(
+        // Undoable create: editDocument self-brackets (joins the owner txn if
+        // open). Mirrors Rust artboard_create_commit's edit_document.
+        model.editDocument(Document(
             layers: doc.layers,
             selectedLayer: doc.selectedLayer,
             selection: doc.selection,
             artboards: newAbs,
-            artboardOptions: doc.artboardOptions)
+            artboardOptions: doc.artboardOptions))
         return nil
     }
 
@@ -1544,7 +1551,9 @@ private func pathDeleteAnchorNear(
         model.document, x: x, y: y, radius: radius
     ) else { return }
     guard case .path(let pe) = model.document.getElement(path) else { return }
-    model.snapshot()
+    // Undoable edit: editDocument self-brackets one undo step (joins the
+    // runEffects owner txn when one is open). Mirrors Rust's doc.snapshot ->
+    // begin_txn pattern; replaces the legacy snapshot() + bare write.
     if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
         let newPe = pathWithCommands(pe, newCmds)
         var doc = model.document.replaceElement(path, with: .path(newPe))
@@ -1556,10 +1565,10 @@ private func pathDeleteAnchorNear(
                        selection: sel,
                        artboards: doc.artboards,
                        artboardOptions: doc.artboardOptions)
-        model.document = doc
+        model.editDocument(doc)
     } else {
         // Path too small — remove the element entirely.
-        model.document = model.document.deleteElement(path)
+        model.editDocument(model.document.deleteElement(path))
     }
 }
 
@@ -1590,10 +1599,10 @@ private func pathInsertAnchorOnSegmentNear(
     }
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
-    model.snapshot()
     let ins = insertPointInPath(pe.d, hit.1, hit.2)
     let newPe = pathWithCommands(pe, ins.commands)
-    model.document = model.document.replaceElement(hit.0, with: .path(newPe))
+    // Undoable edit (editDocument self-brackets; joins the owner txn if open).
+    model.editDocument(model.document.replaceElement(hit.0, with: .path(newPe)))
 }
 
 /// Re-project (x, y) onto the segment at `segIdx` to recover the
@@ -1683,12 +1692,14 @@ private func pathEraseAtRect(
     }
     if changed {
         let doc = model.document
-        model.document = Document(
+        // Undoable erase. editDocument joins the open drag txn (doc.snapshot at
+        // mousedown) or self-brackets standalone. Mirrors Rust path_erase_at_rect.
+        model.editDocument(Document(
             layers: newLayers, selectedLayer: doc.selectedLayer,
             selection: [],
             artboards: doc.artboards,
             artboardOptions: doc.artboardOptions
-        )
+        ))
     }
 }
 
@@ -1830,30 +1841,30 @@ private func pathCommitAnchorEdit(
         return 0
     }()
     guard case .path(let pe) = model.document.getElement(path) else { return }
+    // Each arm is one undoable anchor-point edit: editDocument self-brackets
+    // one undo step (joins the runEffects owner txn when open). Replaces the
+    // legacy snapshot() + bare write.
     switch mode {
     case "pressed_smooth":
-        model.snapshot()
         let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
-        model.document = model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds)))
+        model.editDocument(model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds))))
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
-        model.snapshot()
         let newCmds = convertCornerToSmooth(
             pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
-        model.document = model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds)))
+        model.editDocument(model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
         if abs(dx) <= 0.5 && abs(dy) <= 0.5 { return }
-        model.snapshot()
         let newCmds = movePathHandleIndependent(
             pe.d, anchorIdx: anchorIdx,
             handleType: handleType, dx: dx, dy: dy)
-        model.document = model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds)))
+        model.editDocument(model.document.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds))))
     default: break
     }
 }
@@ -1897,7 +1908,10 @@ private func pathProbePartialHit(
             es.path == path && es.kind.contains(cpIdx)
         }
         if !alreadySelected || shift {
-            model.snapshot()
+            // Selection-only: beginTxn mirrors Rust path_probe_partial_hit; the
+            // setSelection/selectControlPoint writes are unbracketed, so the txn
+            // nets no journaled change and commitTxn's no-op rule drops it.
+            model.beginTxn()
             if shift {
                 var sel = Array(model.document.selection)
                 if let pos = sel.firstIndex(where: { $0.path == path }) {
@@ -2067,7 +2081,7 @@ private func paintbrushEditCommit(
 
     let newDoc = model.document.replaceElement(
         targetPath, with: .path(pathWithCommands(targetPe, newCmds)))
-    model.document = newDoc
+    model.editDocument(newDoc)
 }
 
 /// Implementation of doc.path.smooth_at_cursor.
@@ -2118,7 +2132,7 @@ private func pathSmoothAtCursor(
         changed = true
     }
     if changed {
-        model.document = newDoc
+        model.editDocument(newDoc)
     }
 }
 
@@ -2457,7 +2471,7 @@ private func blobBrushCommitPainting(
             newDoc, layerIdx: insertLayer,
             childIdx: children.count, element: .path(newElem))
     }
-    model.document = newDoc
+    model.editDocument(newDoc)
 }
 
 /// Implementation of doc.blob_brush.commit_erasing.
@@ -2506,7 +2520,7 @@ private func blobBrushCommitErasing(
             }
         }
     }
-    model.document = newDoc
+    model.editDocument(newDoc)
 }
 
 /// Insert `element` at `doc.layers[layerIdx].children[childIdx]`,
@@ -2768,7 +2782,9 @@ private func scaleApply(
         }
         newDoc = newDoc.replaceElement(es.path, with: newElem)
     }
-    model.document = newDoc
+    // PREVIEW (out-of-band) write: non-undoable; the copySelection above
+    // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
+    model.setDocumentUnbracketed(newDoc)
 }
 
 /// Rotate apply. Rigid transform — no stroke / corner options.
@@ -2788,7 +2804,9 @@ private func rotateApply(
         let newElem = elem.withTransformPremultiplied(matrix)
         newDoc = newDoc.replaceElement(es.path, with: newElem)
     }
-    model.document = newDoc
+    // PREVIEW (out-of-band) write: non-undoable; the copySelection above
+    // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
+    model.setDocumentUnbracketed(newDoc)
 }
 
 /// Shear apply. Pure shear has determinant 1 — strokes preserved
@@ -2811,7 +2829,9 @@ private func shearApply(
         let newElem = elem.withTransformPremultiplied(matrix)
         newDoc = newDoc.replaceElement(es.path, with: newElem)
     }
-    model.document = newDoc
+    // PREVIEW (out-of-band) write: non-undoable; the copySelection above
+    // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
+    model.setDocumentUnbracketed(newDoc)
 }
 
 /// Multiply the element's stroke-width by `factor` if present.
@@ -3295,7 +3315,7 @@ private func eyedropperSample(
                 doc: newDoc, path: es.path,
                 appearance: appearance, config: cfg)
         }
-        model.document = newDoc
+        model.editDocument(newDoc)
     }
 }
 
@@ -3319,7 +3339,7 @@ private func eyedropperApplyLoaded(
     let newDoc = applyToTargetRecursive(
         doc: doc, path: targetPath,
         appearance: appearance, config: cfg)
-    model.document = newDoc
+    model.editDocument(newDoc)
 }
 
 /// Walk the document at `path`. If the element is a Group or Layer,
@@ -3703,12 +3723,14 @@ private func artboardTranslateFromPreview(
         }
     }
 
-    model.document = Document(
+    // PREVIEW (live-drag) re-apply off the restored snapshot: non-undoable.
+    // Mirrors Rust artboard_translate_from_preview's set_document_unbracketed.
+    model.setDocumentUnbracketed(Document(
         layers: newLayers,
         selectedLayer: doc.selectedLayer,
         selection: doc.selection,
         artboards: newAbs,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions))
 }
 
 /// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
@@ -3911,10 +3933,12 @@ private func artboardResizeApply(
             shiftHeld: shiftHeld, altHeld: altHeld)
         return ab.with(x: nx, y: ny, width: nw, height: nh)
     }
-    model.document = Document(
+    // PREVIEW (live-drag) resize off the restored snapshot: non-undoable.
+    // Mirrors Rust artboard_resize_apply's set_document_unbracketed.
+    model.setDocumentUnbracketed(Document(
         layers: doc.layers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions))
 }
 
 /// doc.artboard.resize_commit — integer-pt rounded final bounds.
@@ -3945,10 +3969,13 @@ private func artboardResizeCommit(model: Model, store: StateStore) {
             width: max(nw.rounded(), 1.0),
             height: max(nh.rounded(), 1.0))
     }
-    model.document = Document(
+    // COMMIT: undoable. editDocument self-brackets one undo step (joins the
+    // runEffects owner txn if open). Mirrors Rust artboard_resize_commit's
+    // edit_document.
+    model.editDocument(Document(
         layers: doc.layers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions))
 }
 
 /// doc.artboard.duplicate_init implementation per
@@ -4017,10 +4044,12 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
         videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio)
     let newAbs = doc.artboards + [dup]
 
-    model.document = Document(
+    // Undoable: editDocument self-brackets (joins the owner txn if open).
+    // Mirrors Rust artboard_duplicate_init's edit_document.
+    model.editDocument(Document(
         layers: newLayers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions))
 
     // Retarget tool state.
     store.setTool("artboard", "hit_artboard_id", newId)
@@ -4034,13 +4063,16 @@ private func artboardDeletePanelSelected(model: Model, store: StateStore) {
     if targetIds.isEmpty { return }
     let total = model.document.artboards.count
     if targetIds.count >= total { return }  // invariant block
-    model.snapshot()
+    // Undoable: beginTxn opens the bracket (no-op if the runEffects owner
+    // already did), setDocument writes into it, the owner commits. Mirrors Rust
+    // artboard_delete_panel_selected_with_ids (begin_txn + set_document).
+    model.beginTxn()
     let doc = model.document
     let newAbs = doc.artboards.filter { !targetIds.contains($0.id) }
-    model.document = Document(
+    model.setDocument(Document(
         layers: doc.layers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions))
 }
 
 /// doc.artboard.move_commit — re-applies translate with integer-pt

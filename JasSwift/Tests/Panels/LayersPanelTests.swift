@@ -72,9 +72,9 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
         let removed = model.document.layers[idx]
         var newLayers = model.document.layers
         newLayers.remove(at: idx)
-        model.document = Document(layers: newLayers,
+        model.setDocumentUnbracketed(Document(layers: newLayers,
                                    selectedLayer: model.document.selectedLayer,
-                                   selection: model.document.selection)
+                                   selection: model.document.selection))
         return removed
     }
     let docCloneAtHandler: PlatformEffect = { value, callCtx, _ in
@@ -102,9 +102,9 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
         let insertIdx = min(indices[0] + 1, model.document.layers.count)
         var newLayers = model.document.layers
         newLayers.insert(elem, at: insertIdx)
-        model.document = Document(layers: newLayers,
+        model.setDocumentUnbracketed(Document(layers: newLayers,
                                    selectedLayer: model.document.selectedLayer,
-                                   selection: model.document.selection)
+                                   selection: model.document.selection))
         return nil
     }
     let platformEffects: [String: PlatformEffect] = [
