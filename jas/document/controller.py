@@ -104,6 +104,31 @@ def _find_element_by_id(document, id: str) -> Element | None:
     return None
 
 
+def selection_to_ids(doc: Document) -> list[str]:
+    """Resolve the current selection to the stable ``id``s of the selected
+    elements, in document order (OP_LOG.md §9 / Fork 4: the ``targets`` of a
+    journaled op). Id-less selected elements are silently dropped (a recorded
+    source must carry an id — a documented prerequisite, not a bug).
+
+    The selection is a path-keyed ``frozenset`` here, so paths are sorted to
+    give a deterministic document order (matching the Rust selection-order
+    iteration, which for any real recorded source is single-element). One
+    definition reused by the production ``op_apply`` path and the harness so
+    both populate ``targets`` identically. Mirrors the Rust
+    ``controller::selection_to_ids``.
+    """
+    out: list[str] = []
+    for es in sorted(doc.selection, key=lambda e: e.path):
+        try:
+            elem = doc.get_element(es.path)
+        except Exception:
+            continue
+        eid = getattr(elem, "id", None)
+        if eid is not None:
+            out.append(eid)
+    return out
+
+
 class Controller:
     """Mediates between user actions and the document model."""
 

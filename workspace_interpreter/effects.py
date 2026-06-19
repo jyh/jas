@@ -49,7 +49,9 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
                 platform_effects: dict | None = None,
                 dialogs: dict | None = None,
                 schema=None,
-                diagnostics: list | None = None):
+                diagnostics: list | None = None,
+                model=None,
+                action_name: str | None = None):
     """Execute a list of effects.
 
     Args:
@@ -64,9 +66,33 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
             When None, set: uses the legacy untyped path.
         diagnostics: Mutable list to which diagnostic dicts are appended.
             Each dict has {level, key, reason}. Ignored when schema is None.
+        model: Optional document Model for transaction ownership (OP_LOG.md §9,
+            Increment 3b-B). When supplied, this run_effects call OWNS the undo
+            transaction iff none was open when it started — so a reentrant nested
+            run_effects (dispatch / on_change / let-in / if-then) does NOT commit
+            the outer's transaction. The owner commits once at the end, spanning
+            every effect in this batch into a single undo step. ``model`` carries
+            no platform-specific dependency here: the doc.* mutations reach the
+            document through the ``platform_effects`` closures; this thread is
+            ONLY for the begin/name/commit bracket the batch owner must run.
+            Nested run_effects calls pass model=None (the inner batch is not the
+            owner). When None (the Flask path and all non-doc callers), the
+            bracket is skipped and behavior is byte-unchanged.
+        action_name: Optional action/event verb naming the owning transaction
+            (OP_LOG.md §9). Stamped via ``model.name_txn`` just before commit, so
+            the journal's name-legibility hole is closed for the doc.* batch.
     """
-    if not effects:
+    if not effects and model is None:
         return
+    # OP_LOG.md §9, Increment 3b-B: this batch OWNS the transaction only if none
+    # was open when it started. ``begin_txn`` (lazily opened by op_apply for the
+    # mutating verbs) and ``commit_txn`` are no-ops when nothing opened one, so a
+    # no-edit gesture stays anonymous and commits nothing.
+    owns_txn = model is not None and not model.in_txn
+    if not effects:
+        # An empty batch with a model still respects ownership semantics (the
+        # bracket below is a clean no-op), so fall through to the owner commit.
+        effects = []
     # Thread ctx through the list: each `let:` produces a new ctx visible
     # to subsequent effects in this list only. Inner lists (then/else/do)
     # get their own threading in recursive calls.
@@ -99,14 +125,25 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
     # Re-entrancy guarded so the action's effects do not re-fire.
     # See SCALE_TOOL.md §Preview.
     if not store.is_firing_on_change() and store.take_dialog_dirty():
-        action_name = store.get_dialog_on_change()
-        if action_name:
+        on_change_action = store.get_dialog_on_change()
+        if on_change_action:
             store.set_firing_on_change(True)
             try:
-                _run_one({"dispatch": action_name}, ctx, store, actions,
+                _run_one({"dispatch": on_change_action}, ctx, store, actions,
                          platform_effects, dialogs, schema, diagnostics)
             finally:
                 store.set_firing_on_change(False)
+
+    # OP_LOG.md §9, Increment 3b-B: commit the transaction this batch opened (if
+    # any), making the whole action one undo step. Name it with the action/event
+    # verb so the journal's name-legibility hole is closed. name_txn/commit_txn
+    # are no-ops when nothing opened one or when this call is nested (owns_txn is
+    # False). Set the name just before commit, once this batch's lazily-opened
+    # transaction (if any) is live.
+    if owns_txn and model is not None:
+        if action_name is not None:
+            model.name_txn(action_name)
+        model.commit_txn()
 
 
 def _eval(expr, store: StateStore, ctx: dict):

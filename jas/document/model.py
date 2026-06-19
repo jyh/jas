@@ -298,6 +298,14 @@ class Model:
     def journal_head(self) -> int:
         return self._journal_head
 
+    @property
+    def in_txn(self) -> bool:
+        """True while a transaction is open (between begin_txn and
+        commit_txn/abort_txn). Read by ``op_apply``'s lazy begin_txn so a bare
+        drag frame opens (and the batch owner commits) exactly one transaction
+        (OP_LOG.md §9, Increment 3b-B)."""
+        return self._in_txn
+
     def begin_txn(self) -> None:
         """Open an undoable transaction: push the pre-edit checkpoint (no
         redo-clear — that moves to commit_txn). Idempotent while already open."""

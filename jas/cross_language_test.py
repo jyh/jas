@@ -14,8 +14,9 @@ from algorithms.hit_test import (
     rects_intersect, circle_intersects_rect, ellipse_intersects_rect,
     point_in_polygon,
 )
-from document.controller import Controller
+from document.controller import Controller, selection_to_ids
 from document.model import Model
+from document.op_apply import op_apply
 from document.op_log import PrimitiveOp
 from geometry.svg import document_to_svg, svg_to_document
 from geometry.binary import document_to_binary, binary_to_document
@@ -31,6 +32,8 @@ from workspace.workspace_test_json import (
     toolbar_structure_json, menu_structure_json,
     state_defaults_json, shortcut_structure_json,
 )
+from workspace_interpreter.effects import run_effects
+from workspace_interpreter.state_store import StateStore
 
 # Path to the shared test fixtures directory.
 _FIXTURES = os.path.join(os.path.dirname(__file__), "..", "test_fixtures")
@@ -319,7 +322,6 @@ class CrossLanguageTest(absltest.TestCase):
                         model.name_txn(txn["name"])
                     for op in txn["ops"]:
                         self._apply_op(model, ctrl, op)
-                        model.record_op(PrimitiveOp(op=op["op"], params=op))
                     model.commit_txn()
                     # OP_LOG.md Increment 3a: a txn carrying a `label` stamps a
                     # named version point onto the just-committed transaction.
@@ -336,7 +338,6 @@ class CrossLanguageTest(absltest.TestCase):
                 model.begin_txn()
                 for op in tc["ops"]:
                     self._apply_op(model, ctrl, op)
-                    model.record_op(PrimitiveOp(op=op["op"], params=op))
                 model.commit_txn()
 
             actual = document_to_test_json(model.document)
@@ -361,69 +362,14 @@ class CrossLanguageTest(absltest.TestCase):
         return document_to_test_json(model.document)
 
     def _apply_op(self, model, ctrl, op):
-        op_name = op["op"]
-        if op_name == "select_rect":
-            ctrl.select_rect(
-                op["x"], op["y"], op["width"], op["height"],
-                extend=op.get("extend", False))
-        elif op_name == "move_selection":
-            ctrl.move_selection(op["dx"], op["dy"])
-        elif op_name == "copy_selection":
-            ctrl.copy_selection(op["dx"], op["dy"])
-        elif op_name == "assign_id":
-            ctrl.assign_id(tuple(op["path"]), op["id"])
-        elif op_name == "create_reference":
-            ctrl.create_reference(
-                tuple(op["target_path"]),
-                op["target_id"], op["ref_id"])
-        # Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids
-        # and paths are read literally from the fixture payload,
-        # exactly like the create_reference arm.
-        elif op_name == "make_symbol":
-            ctrl.make_symbol(
-                tuple(op["path"]), op["master_id"], op["ref_id"])
-        elif op_name == "place_instance":
-            ctrl.place_instance(op["master_id"], op["ref_id"])
-        elif op_name == "detach":
-            ctrl.detach(tuple(op["path"]))
-        elif op_name == "redefine":
-            ctrl.redefine(
-                op["master_id"], tuple(op["path"]), op["ref_id"])
-        elif op_name == "delete_symbol":
-            ctrl.delete_symbol(op["master_id"])
-        # Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the
-        # instance transform is carried in the payload as {a,b,c,d,e,f}
-        # (the same matrix shape parsed elsewhere) and applied verbatim.
-        elif op_name == "set_instance_transform":
-            from geometry.element import Transform
-            t = op["transform"]
-            ctrl.set_instance_transform(
-                tuple(op["path"]),
-                Transform(a=t["a"], b=t["b"], c=t["c"],
-                          d=t["d"], e=t["e"], f=t["f"]))
-        elif op_name == "delete_selection":
-            model.document = model.document.delete_selection()
-        elif op_name == "lock_selection":
-            ctrl.lock_selection()
-        elif op_name == "unlock_all":
-            ctrl.unlock_all()
-        elif op_name == "hide_selection":
-            ctrl.hide_selection()
-        elif op_name == "show_all":
-            ctrl.show_all()
-        elif op_name == "boolean_union":
-            from panels.boolean_apply import apply_destructive_boolean
-            apply_destructive_boolean(model, "union")
-        elif op_name == "simplify":
-            ctrl.simplify_selection(op.get("precision", 0.5))
-        elif op_name == "snapshot":
-            model.snapshot()
-        elif op_name == "undo":
-            model.undo()
-        elif op_name == "redo":
-            model.redo()
-        else:
-            self.fail(f"Unknown op: {op_name}")
+        # Thin harness shim over the production dispatcher (OP_LOG.md §9,
+        # Increment 3b-B): both the cross-language harness and the production
+        # effect path go through the SAME op_apply module and the SAME record_op
+        # site, so this lift is behavior-preserving (the operations fixtures stay
+        # byte-green) and `targets` is recorded identically on both paths.
+        # Promoting the dispatcher also hardened its param parsing so production
+        # input can't raise. Mirrors the Rust harness apply_op shim.
+        op_apply(model, op)
 
     def test_operation_select_and_move(self):
         self._run_operation_fixture("select_and_move.json")
@@ -481,6 +427,224 @@ class CrossLanguageTest(absltest.TestCase):
         # to the snapshot-path document.
         self._run_operation_fixture("boolean_ops.json")
 
+    # ---------------------------------------------------------------
+    # Production op-capture cross-language fixture (OP_LOG.md §9,
+    # Increment 3b-B). Drives the REAL effect runner
+    # (workspace_interpreter.effects.run_effects with the jas
+    # yaml_tool_effects platform map, a Model, and the action_name) — NOT the
+    # hand-bracketed _apply_op operations path — against the SHARED
+    # test_fixtures/production_capture/*.json goldens, byte-for-byte. That is
+    # the whole point: it exercises the YAML->harness param translation (marquee
+    # corners x1/y1/x2/y2/additive -> x/y/width/height/extend), batch ownership /
+    # single named-transaction commit, and the lazy-begin drag-frame-hole fix.
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _production_journal_to_test_json(journal):
+        # Production-capture JOURNAL serializer VARIANT (OP_LOG.md §10 item 4).
+        # Distinct from _journal_to_test_json (which omits op params and pins
+        # txn_id/lamport/parent/actor). The production golden pins the
+        # PARAM-TRANSLATION result (the marquee corners normalize to
+        # x/y/width/height/extend), so this variant emits per transaction `name`,
+        # and per op `{op, params, targets}` with `params` sorted-key +
+        # fixed-float canonicalized exactly like document_to_test_json (via
+        # _canonical_value). The redundant top-level "op" key inside the recorded
+        # params is STRIPPED (the verb already lives in the op-level `op` field).
+        # txn_id/actor/parent/lamport are EXCLUDED (txn_id is a live-entropy seam,
+        # the causal metadata has its own golden). Mirrors the Rust
+        # production_journal_to_test_json.
+        from geometry.test_json import _canonical_value
+
+        def opt(s):
+            return _canonical_value(s) if s is not None else "null"
+        txns = []
+        for t in journal:
+            ops = []
+            for o in t.ops:
+                params = {k: v for k, v in o.params.items() if k != "op"}
+                targets = ",".join(_canonical_value(x) for x in o.targets)
+                ops.append(
+                    f'{{"op":{_canonical_value(o.op)},'
+                    f'"params":{_canonical_value(params)},'
+                    f'"targets":[{targets}]}}')
+            txns.append(f'{{"name":{opt(t.name)},"ops":[{",".join(ops)}]}}')
+        return "[" + ",".join(txns) + "]"
+
+    @staticmethod
+    def _polygon_set_to_test_json(ps):
+        # Canonical JSON of an evaluated PolygonSet (a list of rings, each a list
+        # of (x, y) points), using the SAME fixed-float canonicalization as
+        # document_to_test_json so the re-derived geometry golden is
+        # byte-shareable across apps. Mirrors the Rust polygon_set_to_test_json.
+        from geometry.test_json import _canonical_value
+        rings = []
+        for ring in ps:
+            pts = [f'[{_canonical_value(x)},{_canonical_value(y)}]'
+                   for (x, y) in ring]
+            rings.append("[" + ",".join(pts) + "]")
+        return "[" + ",".join(rings) + "]"
+
+    @staticmethod
+    def _production_model(fx):
+        # Build the fresh Model a production-capture fixture's setup_svg defines.
+        setup_svg = _read_fixture(fx["setup_svg"])
+        return Model(document=svg_to_document(setup_svg))
+
+    @staticmethod
+    def _run_production_batches(fx, model):
+        # Run every run_effects batch a production-capture fixture defines through
+        # the REAL production interpreter, stamping the fixture's action_name.
+        # Supports both fixture shapes:
+        #   - effect_batch: [...]   — ONE run_effects call (the eye_demo
+        #       select->copy->move demonstration, one named transaction).
+        #   - frames: [[...], [...]] — MULTIPLE separate run_effects calls (the
+        #       drag-frame-hole closure: frame 1 = snapshot+select+translate,
+        #       frame 2 = a BARE translate with NO snapshot). Each frame is a
+        #       distinct batch, so each commits its own named transaction — the
+        #       one scenario the test-path operations corpus cannot reach.
+        from tools import yaml_tool_effects
+        action_name = fx.get("action_name")
+        ctrl = Controller(model=model)
+        pe = yaml_tool_effects.build(ctrl)
+        store = StateStore()
+
+        def run_batch(batch):
+            run_effects(batch, {}, store, platform_effects=pe,
+                        model=model, action_name=action_name)
+
+        if "effect_batch" in fx:
+            run_batch(list(fx["effect_batch"]))
+        elif "frames" in fx:
+            for frame in fx["frames"]:
+                run_batch(list(frame))
+        else:
+            raise AssertionError(
+                "production-capture fixture has neither effect_batch nor frames")
+
+    def _rederive_recorded_output(self, fx, journal):
+        # Re-derive the recorded element's output against the EDITED source and
+        # return its canonical PolygonSet JSON. Lifts the LAST committed
+        # transaction's op segment, runs capture_recipe to normalize it into an
+        # input-addressed recipe, wraps it in a RecordedElem, then evaluate_with
+        # it over a resolver that returns the EDITED source (the fixture's
+        # recorded.edit_source applies set:{x:..} to the source SVG).
+        #
+        # NOTE — the SVG px->pt unit conversion (96/72 = x0.75) bakes into the
+        # re-derived bbox: editing the source eye to x=100 (px) maps to x=75 (pt)
+        # with w=10px->7.5pt; copy(dx=0)+translate(+50) -> the derived bbox spans
+        # x in [125, 132.5] (pt). The derivative FOLLOWED the edit — that is the
+        # whole point of liveness, and it is what this golden pins.
+        from geometry.element import RecordedElem
+        from geometry.live import capture_recipe, DEFAULT_PRECISION
+
+        segment = journal[-1].ops
+        recipe, inputs = capture_recipe(segment)
+        recorded = RecordedElem(ops=tuple(recipe), inputs=tuple(inputs), id="rec")
+
+        rec = fx["recorded"]
+        edit = rec["edit_source"]
+        edit_id = edit["id"]
+        setup_svg = _read_fixture(fx["setup_svg"])
+        new_x = int(edit["set"]["x"])
+        edited_svg = setup_svg.replace('x="0" y="0"', f'x="{new_x}" y="0"')
+        edited_doc = svg_to_document(edited_svg)
+        # The edited source is layers[0].children[0].
+        edited_el = edited_doc.get_element((0, 0))
+
+        class _OneResolver:
+            def resolve(self, ref):
+                return edited_el if ref == edit_id else None
+
+        ps = recorded.evaluate_with(DEFAULT_PRECISION, _OneResolver(), set())
+        return self._polygon_set_to_test_json(ps)
+
+    def _run_production_batch_fixture(self, fixture_path):
+        # Reusable production-capture harness (OP_LOG.md §9, Increment 3b-B).
+        # Loads the fixture, drives the REAL run_effects over setup_svg, then
+        # asserts:
+        #  (a) _production_journal_to_test_json == expected_journal_json;
+        #  (b) checkpoint_equivalence (OP_LOG.md §6): replaying the journal ops
+        #      via op_apply from setup_svg is byte-identical BOTH to
+        #      expected_document_json AND to the live snapshot-path document;
+        #  (c) the recorded re-derivation (when declared) == expected_output_json;
+        #  (d) a SCOPED completeness assert: EVERY committed production
+        #      transaction's ops is non-empty (the production path here MUST emit
+        #      ops — NOT a global commit_txn invariant).
+        fx = json.loads(_read_fixture(fixture_path))
+        name = fx.get("name", fixture_path)
+
+        # Drive the REAL production interpreter.
+        model = self._production_model(fx)
+        self._run_production_batches(fx, model)
+
+        # (a) journal serialization == golden.
+        actual_journal = self._production_journal_to_test_json(model.journal)
+        expected_journal = _read_fixture(fx["expected_journal_json"])
+        if actual_journal != expected_journal:
+            print(f"=== EXPECTED journal ({name}) ===\n{expected_journal}")
+            print(f"=== ACTUAL journal ({name}) ===\n{actual_journal}")
+        self.assertEqual(actual_journal, expected_journal,
+            f"production-capture journal JSON mismatch for '{name}'")
+
+        # Snapshot-path document (the live result of run_effects).
+        snapshot_doc = document_to_test_json(model.document)
+
+        # (b) checkpoint_equivalence: replay the WHOLE journal via op_apply from
+        # a fresh setup, byte-compare to BOTH the expected_document golden AND
+        # the live snapshot-path document.
+        replay = self._production_model(fx)
+        for txn in model.journal:
+            for op in txn.ops:
+                op_apply(replay, op.params)
+        replay_doc = document_to_test_json(replay.document)
+        expected_doc = _read_fixture(fx["expected_document_json"])
+        if replay_doc != snapshot_doc:
+            print(f"=== checkpoint_equivalence GATE FAILED ({name}) ===")
+            print(f"--- snapshot path ---\n{snapshot_doc}")
+            print(f"--- journal replay ---\n{replay_doc}")
+        self.assertEqual(replay_doc, snapshot_doc,
+            f"checkpoint_equivalence: journal replay != snapshot path "
+            f"for '{name}'")
+        if replay_doc != expected_doc:
+            print(f"=== EXPECTED doc ({name}) ===\n{expected_doc}")
+            print(f"=== ACTUAL doc ({name}) ===\n{replay_doc}")
+        self.assertEqual(replay_doc, expected_doc,
+            f"production-capture document JSON mismatch for '{name}'")
+
+        # (c) recorded re-derivation against the edited source == golden.
+        if "recorded" in fx:
+            actual_out = self._rederive_recorded_output(fx, model.journal)
+            expected_out = _read_fixture(fx["recorded"]["expected_output_json"])
+            if actual_out != expected_out:
+                print(f"=== EXPECTED rederived ({name}) ===\n{expected_out}")
+                print(f"=== ACTUAL rederived ({name}) ===\n{actual_out}")
+            self.assertEqual(actual_out, expected_out,
+                f"production-capture re-derivation mismatch for '{name}'")
+
+        # (d) scoped completeness assert: every committed production transaction
+        # emits ops (the production path here is NOT named-but-op-less).
+        self.assertTrue(len(model.journal) >= 1,
+            f"production batch committed at least one transaction ({name})")
+        for i, txn in enumerate(model.journal):
+            self.assertTrue(len(txn.ops) >= 1,
+                f"production txn {i} emits ops (3b-B completeness, {name})")
+
+    def test_production_capture_eye_demo(self):
+        # Production op-capture eye demo (OP_LOG.md §9): marquee-select -> copy
+        # -> move, driven through the REAL run_effects, pins the translated
+        # journal, the checkpoint-equivalent document, and the live
+        # re-derivation against the edited source.
+        self._run_production_batch_fixture("production_capture/eye_demo.json")
+
+    def test_production_capture_eye_demo_bare_frame(self):
+        # Production op-capture drag-frame-hole closure (OP_LOG.md §9): two
+        # SEPARATE run_effects batches — frame 1 (snapshot+select+translate) and
+        # a BARE frame 2 (translate, NO snapshot) — both commit NAMED
+        # transactions that journal their move_selection op. The one scenario the
+        # test-path operations corpus structurally cannot reach.
+        self._run_production_batch_fixture(
+            "production_capture/eye_demo_bare_frame.json")
+
     @staticmethod
     def _journal_to_test_json(journal):
         # Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4):
@@ -519,7 +683,6 @@ class CrossLanguageTest(absltest.TestCase):
                         model.name_txn(txn["name"])
                     for op in txn["ops"]:
                         self._apply_op(model, ctrl, op)
-                        model.record_op(PrimitiveOp(op=op["op"], params=op))
                     model.commit_txn()
                     if "label" in txn:
                         model.label_version(txn["label"])

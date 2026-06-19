@@ -16,6 +16,7 @@ from typing import Any, Callable, Sequence
 
 from algorithms.fit_curve import fit_curve
 from document.controller import Controller
+from document.op_apply import op_apply
 from document.document import (
     Document,
     ElementPath,
@@ -189,7 +190,14 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects: dict[str, PlatformEffect] = {}
 
     def doc_snapshot(_spec, _ctx, _store):
-        controller.model.snapshot()
+        # OP_LOG.md §9, Increment 3b-B: a YAML action opens its undo transaction
+        # via doc.snapshot (begin_txn), NOT the legacy opaque cursor-advance
+        # snapshot(). Opening the transaction here lets the subsequent op_apply
+        # verbs (select_rect, copy, move) record their ops into it, and the batch
+        # owner (run_effects with a model) names + commits it as one undo step.
+        # begin_txn is idempotent while one is already open. Mirrors the Rust
+        # run_doc_effect "doc.snapshot" => model.begin_txn().
+        controller.model.begin_txn()
         return None
 
     def doc_clear_selection(_spec, _ctx, _store):
@@ -234,13 +242,22 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         return None
 
     def doc_translate_selection(spec, ctx, store):
+        # OP_LOG.md §9 (Increment 3b-B): one of the THREE production-journaled
+        # verbs. Route through op_apply (which calls the SAME
+        # Controller.move_selection, so the document mutation is byte-identical)
+        # so the move is journaled as `move_selection` with pre-mutation
+        # `targets`. The zero-delta guard mirrors the Rust handler exactly: a
+        # bare zero-delta translate (a click with no drag) journals nothing.
+        # Every OTHER doc.* verb stays staged-opaque in 3b-B (named-but-op-less).
+        # See OP_LOG.md §9.
         if not isinstance(spec, dict):
             return None
         dx = eval_number(spec.get("dx"), store, ctx)
         dy = eval_number(spec.get("dy"), store, ctx)
-        if dx == 0.0 and dy == 0.0:
-            return None
-        controller.move_selection(dx, dy)
+        if dx != 0.0 or dy != 0.0:
+            op_apply(controller.model, {
+                "op": "move_selection", "dx": dx, "dy": dy,
+            })
         return None
 
     # ── brush.* library mutation helpers ─────────────────
@@ -549,18 +566,40 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         return None
 
     def doc_copy_selection(spec, ctx, store):
+        # OP_LOG.md §9 (Increment 3b-B): one of the THREE production-journaled
+        # verbs. Route through op_apply (same Controller.copy_selection,
+        # byte-identical mutation) so the copy is journaled as `copy_selection`
+        # with pre-mutation source `targets`. NO zero-delta guard: the eye-demo
+        # copy is dx=0,dy=0 yet MUST journal its op (and the resulting duplicate
+        # is born id-LESS, so the following move journals empty targets). See
+        # OP_LOG.md §9 / the eye_demo golden.
         if not isinstance(spec, dict):
             return None
         dx = eval_number(spec.get("dx"), store, ctx)
         dy = eval_number(spec.get("dy"), store, ctx)
-        controller.copy_selection(dx, dy)
+        op_apply(controller.model, {
+            "op": "copy_selection", "dx": dx, "dy": dy,
+        })
         return None
 
     def doc_select_in_rect(spec, ctx, store):
+        # OP_LOG.md §9 (Increment 3b-B): the keystone of the THREE
+        # production-journaled verbs — `select_rect` records `targets` (resolved
+        # AFTER the Controller call), which `capture_recipe` seeds its working
+        # set from (empty targets => empty recipe). CRITICAL PARAM-SHAPE
+        # TRANSLATION: the YAML marquee delivers corner coords x1/y1/x2/y2 +
+        # `additive`, but the harness `select_rect` verb (and thus replay /
+        # op_apply) expects x/y/width/height + `extend`. `normalize_rect_args`
+        # already does that translation, so the journaled op replays
+        # BYTE-IDENTICALLY through the same Controller.select_rect.
         if not isinstance(spec, dict):
             return None
         rx, ry, rw, rh, additive = normalize_rect_args(spec, store, ctx)
-        controller.select_rect(rx, ry, rw, rh, extend=additive)
+        op_apply(controller.model, {
+            "op": "select_rect",
+            "x": rx, "y": ry, "width": rw, "height": rh,
+            "extend": additive,
+        })
         return None
 
     def doc_partial_select_in_rect(spec, ctx, store):
