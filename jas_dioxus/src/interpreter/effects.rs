@@ -9235,6 +9235,14 @@ mod tests {
     /// name (the self-bracketing edit_document committed its own anonymous txn
     /// before the batch-end name_txn ran), yielding `name=None ops=[]`. After
     /// the fix every committed transaction is named AND its move is journaled.
+    ///
+    /// PER-FRAME DRAG COALESCING (OP_LOG.md §9 follow-up) then folds the two
+    /// adjacent same-name ("selection on_mousemove") same-target ("eye")
+    /// single-op move frames into ONE journal transaction whose `move_selection`
+    /// carries the SUMMED delta (dx 5 + 7 = 12) — collapsing the verbose
+    /// per-frame run into one undo step. The regression intent survives: every
+    /// frame's move IS captured (now summed into the named coalesced txn), not
+    /// dropped. `Model::commit_txn` coalesces in place at the journal tip.
     #[test]
     fn subsequent_drag_frame_is_named_and_journals_move() {
         let mut store = StateStore::new();
@@ -9253,24 +9261,31 @@ mod tests {
             Some(&mut model), None, None, Some("selection on_mousemove"));
 
         // FRAME 2: a SEPARATE batch — a BARE doc.translate_selection, NO
-        // snapshot. This is the path the hole lived on.
+        // snapshot. This is the path the hole lived on; it coalesces into FRAME 1.
         run_effects(
             &[serde_json::json!({"doc.translate_selection": {"dx": 7, "dy": 0}})],
             &serde_json::json!({}), &mut store,
             Some(&mut model), None, None, Some("selection on_mousemove"));
 
-        // Two committed transactions, one per frame.
-        assert_eq!(model.journal().len(), 2,
-            "each drag frame commits its own transaction");
-        for (i, txn) in model.journal().iter().enumerate() {
-            // EVERY production txn is named (the §9 invariant).
-            assert_eq!(txn.name.as_deref(), Some("selection on_mousemove"),
-                "frame {i}: every production transaction is named");
-            // EVERY frame journals its move (frame 2 is the regression).
-            let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
-            assert_eq!(verbs, vec!["move_selection"],
-                "frame {i}: the move_selection op is journaled (ops non-empty)");
-        }
+        // ONE coalesced transaction for the whole continuous drag.
+        assert_eq!(model.journal().len(), 1,
+            "adjacent same-gesture drag frames coalesce into one transaction");
+        let txn = &model.journal()[0];
+        // The coalesced production txn is named (the §9 invariant).
+        assert_eq!(txn.name.as_deref(), Some("selection on_mousemove"),
+            "the coalesced drag transaction is named");
+        // The move IS journaled (frame 2 was the original regression) — now
+        // summed into one move_selection op.
+        let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(verbs, vec!["move_selection"],
+            "the coalesced drag journals exactly one move_selection op");
+        let dx = txn.ops[0].params.get("dx").and_then(|v| v.as_f64()).unwrap();
+        let dy = txn.ops[0].params.get("dy").and_then(|v| v.as_f64()).unwrap();
+        assert_eq!((dx, dy), (12.0, 0.0),
+            "the coalesced move carries the SUMMED delta (5 + 7 = 12)");
+        // Undo-step lock-step: the whole drag is ONE undo step.
+        assert_eq!(model.journal_head(), 1,
+            "the coalesced drag is a single undo step");
     }
 
     /// Guard the op_apply lazy-begin fix against over-reach: a BARE marquee

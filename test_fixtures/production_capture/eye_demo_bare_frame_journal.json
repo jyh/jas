@@ -1,1 +1,1 @@
-[{"name":"selection on_mousemove","ops":[{"op":"select_rect","params":{"extend":false,"height":55.0,"width":55.0,"x":-5.0,"y":-5.0},"targets":["eye"]},{"op":"move_selection","params":{"dx":5.0,"dy":0.0},"targets":["eye"]}]},{"name":"selection on_mousemove","ops":[{"op":"move_selection","params":{"dx":7.0,"dy":0.0},"targets":["eye"]}]}]
+[{"name":"selection on_mousemove","ops":[{"op":"select_rect","params":{"extend":false,"height":55.0,"width":55.0,"x":-5.0,"y":-5.0},"targets":["eye"]},{"op":"move_selection","params":{"dx":12.0,"dy":0.0},"targets":["eye"]}]}]

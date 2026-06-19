@@ -668,6 +668,35 @@ impl Model {
             return;
         }
 
+        // --- Per-frame drag coalescing (OP_LOG.md §9 follow-up) ------------
+        //
+        // A live drag commits ONE transaction PER FRAME: selection.yaml fires
+        // `doc.snapshot` only on the first mousemove, and each subsequent
+        // `on_mousemove` is its own `run_effects` batch that `begin_txn`s +
+        // commits. So a drag of N frames lands as N consecutive single-op move
+        // transactions in the journal — verbose, and N separate undo steps.
+        //
+        // Coalesce ADJACENT same-gesture move transactions into ONE (summed
+        // delta), which also collapses the N undo steps into one. This is the
+        // ONLY correct layer: `record_op` only ever sees the ops WITHIN one
+        // pending_txn (a drag puts each frame's move in a SEPARATE pending_txn),
+        // so the two consecutive drag moves only become adjacent HERE, where the
+        // pending txn is finalized against the journal tip. The no-op rule above
+        // runs FIRST, unchanged — a zero-delta single frame is dropped before we
+        // ever reach coalescing.
+        //
+        // Coalescable verbs are EXACTLY the additive translates of the same
+        // target set via `Controller::move_selection`: `move_selection` and its
+        // id-primary twin `move_by_ids`. Never copy_selection/copy_by_ids (a
+        // copy is non-additive — two copies != one copy), never the
+        // selection-only verbs (run boundaries).
+        if self.try_coalesce_drag_frame(pending.as_ref()) {
+            // Merged into the journal tip in place; the pending txn is dropped
+            // and its redundant undo checkpoint popped, so the undo stack and
+            // the journal cursor stay in lock-step (one drag == one undo step).
+            return;
+        }
+
         // A real edit invalidates redo on BOTH representations: clear the redo
         // snapshot stack and truncate the journal's redo tail (the relocated
         // "new edit invalidates redo" semantics — OP_LOG.md §5).
@@ -687,6 +716,137 @@ impl Model {
         self.next_txn_counter += 1;
         self.op_journal.push(txn);
         self.journal_head = self.op_journal.len();
+    }
+
+    /// Per-frame drag coalescing (OP_LOG.md §9 follow-up). Called by
+    /// [`commit_txn`] AFTER the no-op early-return and BEFORE the normal
+    /// truncate/append: try to merge the just-finalized pending transaction
+    /// `T_new` into the journal tip `T_prev = op_journal[journal_head - 1]` as a
+    /// summed-delta translate. Returns `true` iff it coalesced (the caller then
+    /// returns early — the pending txn was absorbed, no new journal entry, and
+    /// the redundant undo checkpoint was popped so the undo stack stays in
+    /// lock-step with the journal cursor: one continuous drag == one undo step).
+    ///
+    /// PREDICATE (all must hold):
+    ///  (guard) we are at the journal TIP: `journal_head == op_journal.len()`.
+    ///    If the user undid then dragged, `journal_head < len`, and the tail
+    ///    about to be truncated is NOT a valid merge target — do not coalesce.
+    ///  (a) `T_new` has EXACTLY ONE op whose verb is a coalescable translate
+    ///      (`move_selection` or `move_by_ids`).
+    ///  (b) `T_prev.ops.last()` exists and has the SAME verb.
+    ///  (c) targets BYTE-EQUAL: `T_prev.ops.last().targets == T_new.ops[0].targets`
+    ///      (for `move_selection` these are the pre-mutation selection ids; for
+    ///      `move_by_ids` the params `ids` array must ALSO be byte-equal).
+    ///  (d) SAME NAME: `T_prev.name == T_new.name` — drag-scoped, so two
+    ///      DELIBERATE separate same-target moves (e.g. a fresh gesture) stay
+    ///      distinct undo steps rather than silently fusing.
+    ///  (e) the ONLY params that differ are `dx`/`dy`.
+    ///
+    /// MERGE: sum `T_new`'s dx/dy into `T_prev`'s last op's params in place and
+    /// drop `T_new` entirely. NET-ZERO WHOLE-DRAG: if the merged op's net delta
+    /// is (0,0) AND the merged `T_prev` now byte-matches its ORIGIN checkpoint
+    /// (the whole drag round-tripped), drop `T_prev` too and pop its origin
+    /// checkpoint — the no-op rule extended across the coalesced run, leaving no
+    /// journal entry and no undo step. Coalescing pops the LATER checkpoint and
+    /// keeps the EARLIER/origin one, so the origin byte-compare stays valid.
+    fn try_coalesce_drag_frame(&mut self, pending: Option<&PendingTxn>) -> bool {
+        const COALESCABLE: [&str; 2] = ["move_selection", "move_by_ids"];
+
+        // (guard) only at the journal tip; a post-undo drag must not merge into
+        // the about-to-be-truncated redo tail.
+        if self.journal_head != self.op_journal.len() {
+            return false;
+        }
+        // (a) T_new is exactly one coalescable move op.
+        let Some(pending) = pending else { return false };
+        if pending.ops.len() != 1 {
+            return false;
+        }
+        let new_op = &pending.ops[0];
+        if !COALESCABLE.contains(&new_op.op.as_str()) {
+            return false;
+        }
+        // T_prev = the journal tip; its LAST op is the merge target.
+        let Some(prev) = self.op_journal.last() else {
+            return false;
+        };
+        // (d) same drag-scoped name.
+        if prev.name != pending.name {
+            return false;
+        }
+        let Some(prev_op) = prev.ops.last() else {
+            return false;
+        };
+        // (b) same verb.
+        if prev_op.op != new_op.op {
+            return false;
+        }
+        // (c) byte-equal targets (and, for move_by_ids, byte-equal `ids`).
+        if prev_op.targets != new_op.targets {
+            return false;
+        }
+        if new_op.op == "move_by_ids"
+            && prev_op.params.get("ids") != new_op.params.get("ids")
+        {
+            return false;
+        }
+        // (e) the only params that differ are dx/dy: strip dx/dy from both and
+        // require the remainder byte-equal. (This also catches a `move_by_ids`
+        // whose non-`ids` payload diverged, and would catch any future param a
+        // verb grows.)
+        let strip = |p: &serde_json::Value| -> serde_json::Value {
+            let mut p = p.clone();
+            if let serde_json::Value::Object(m) = &mut p {
+                m.remove("dx");
+                m.remove("dy");
+            }
+            p
+        };
+        if strip(&prev_op.params) != strip(&new_op.params) {
+            return false;
+        }
+
+        // --- MERGE: sum dx/dy into T_prev's last op in place. -------------
+        let new_dx = new_op.params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let new_dy = new_op.params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        // Re-borrow mutably now that all the immutable checks have passed.
+        let tip_idx = self.op_journal.len() - 1;
+        let prev = &mut self.op_journal[tip_idx];
+        let prev_op = prev.ops.last_mut().expect("checked non-empty above");
+        let merged_dx =
+            prev_op.params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) + new_dx;
+        let merged_dy =
+            prev_op.params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) + new_dy;
+        if let serde_json::Value::Object(m) = &mut prev_op.params {
+            m.insert("dx".into(), serde_json::json!(merged_dx));
+            m.insert("dy".into(), serde_json::json!(merged_dy));
+        }
+
+        // Pop the redundant per-frame undo checkpoint (the same mechanism the
+        // no-op rule uses): this frame contributes no new undo step, so the
+        // undo stack stays in lock-step with the (unchanged) journal length.
+        // After this pop, `undo_stack.last()` is T_prev's ORIGIN checkpoint.
+        self.undo_stack.pop();
+
+        // --- NET-ZERO WHOLE-DRAG: the coalesced run round-tripped. ---------
+        // If the merged delta is exactly (0,0) AND the live document now
+        // byte-matches T_prev's origin checkpoint, the whole drag (including
+        // this frame) cancelled out: drop T_prev entirely and pop its origin
+        // checkpoint too, so a round-trip drag leaves NO journal entry and NO
+        // undo step (the no-op rule, extended across the coalesced run).
+        if merged_dx == 0.0 && merged_dy == 0.0 {
+            let round_tripped = self.undo_stack.last().is_some_and(|(chk, _)| {
+                document_to_test_json(chk) == document_to_test_json(&self.document)
+                    && chk.layers == self.document.layers
+                    && chk.symbols == self.document.symbols
+            });
+            if round_tripped {
+                self.op_journal.pop();
+                self.journal_head = self.op_journal.len();
+                self.undo_stack.pop();
+            }
+        }
+        true
     }
 
     /// Abandon the open transaction, rolling the document and index back to the
