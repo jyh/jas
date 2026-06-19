@@ -2240,7 +2240,19 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ctrl#set_document !new_doc
   in
 
-  let scale_apply_args store ctx args copy : unit =
+  (* OP_LOG.md section 9 Phase P7: the CONFIRM apply of the transform tools
+     journals through [Op_apply.op_apply] reading the [journal] effect flag
+     (the shared bundle carries [journal: true] on doc.{scale,rotate,shear}
+     .apply). The op carries RESOLVED literal params (replay has no eval
+     context), so replay composes the IDENTICAL matrix as the production confirm
+     — the checkpoint_equivalence gate. For [copy:true] a [copy_selection] op is
+     journaled FIRST (two ops, one transaction), mirroring Rust/Swift. The
+     PREVIEW path ([journal] absent) stays out-of-band: it keeps writing through
+     [apply_matrix_to_selection] (the unbracketed channel) and journals nothing. *)
+  let journal_op (op : Yojson.Safe.t) : unit =
+    Op_apply.op_apply ctrl#model ctrl op in
+
+  let scale_apply_args store ctx args copy journal : unit =
     let lookup k = List.assoc_opt k args in
     let (sx, sy) =
       if List.mem_assoc "sx" args then
@@ -2257,9 +2269,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     in
     if abs_float (sx -. 1.0) < 1e-9 && abs_float (sy -. 1.0) < 1e-9 then ()
     else begin
-      if copy then ctrl#copy_selection 0.0 0.0;
       let (rx, ry) = resolve_reference_point store ctx in
-      let matrix = Transform_apply.scale_matrix ~sx ~sy ~rx ~ry in
       let strokes_on =
         match Expr_eval.evaluate "state.scale_strokes"
                 (State_store.eval_context ~extra:ctx store) with
@@ -2272,22 +2282,31 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
         | Expr_eval.Bool b -> b
         | _ -> false
       in
-      let stroke_factor =
-        if strokes_on then
-          Some (Transform_apply.stroke_width_factor ~sx ~sy)
-        else None
-      in
-      let corner_factors =
-        if corners_on then Some (abs_float sx, abs_float sy) else None
-      in
-      apply_matrix_to_selection
-        ~scale_strokes:stroke_factor
-        ~scale_corners:corner_factors
-        matrix
+      if journal then begin
+        (* Confirm: route through op_apply (copy first, then the transform). *)
+        if copy then journal_op (`Assoc [ ("op", `String "copy_selection");
+                                           ("dx", `Float 0.0); ("dy", `Float 0.0) ]);
+        journal_op (`Assoc [
+          ("op", `String "scale_transform");
+          ("sx", `Float sx); ("sy", `Float sy);
+          ("rx", `Float rx); ("ry", `Float ry);
+          ("scale_strokes", `Bool strokes_on);
+          ("scale_corners", `Bool corners_on) ])
+      end else begin
+        (* Preview (out-of-band): unbracketed direct compose, journals nothing. *)
+        if copy then ctrl#copy_selection 0.0 0.0;
+        let matrix = Transform_apply.scale_matrix ~sx ~sy ~rx ~ry in
+        let stroke_factor =
+          if strokes_on then Some (Transform_apply.stroke_width_factor ~sx ~sy) else None in
+        let corner_factors =
+          if corners_on then Some (abs_float sx, abs_float sy) else None in
+        apply_matrix_to_selection
+          ~scale_strokes:stroke_factor ~scale_corners:corner_factors matrix
+      end
     end
   in
 
-  let rotate_apply_args store ctx args copy : unit =
+  let rotate_apply_args store ctx args copy journal : unit =
     let lookup k = List.assoc_opt k args in
     let theta_deg =
       if List.mem_assoc "angle" args then
@@ -2303,14 +2322,22 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     in
     if abs_float theta_deg < 1e-9 then ()
     else begin
-      if copy then ctrl#copy_selection 0.0 0.0;
       let (rx, ry) = resolve_reference_point store ctx in
-      apply_matrix_to_selection
-        (Transform_apply.rotate_matrix ~theta_deg ~rx ~ry)
+      if journal then begin
+        if copy then journal_op (`Assoc [ ("op", `String "copy_selection");
+                                          ("dx", `Float 0.0); ("dy", `Float 0.0) ]);
+        journal_op (`Assoc [
+          ("op", `String "rotate_transform");
+          ("angle", `Float theta_deg);
+          ("rx", `Float rx); ("ry", `Float ry) ])
+      end else begin
+        if copy then ctrl#copy_selection 0.0 0.0;
+        apply_matrix_to_selection (Transform_apply.rotate_matrix ~theta_deg ~rx ~ry)
+      end
     end
   in
 
-  let shear_apply_args store ctx args copy : unit =
+  let shear_apply_args store ctx args copy journal : unit =
     let lookup k = List.assoc_opt k args in
     let (angle_deg, axis, axis_angle_deg) =
       if List.mem_assoc "angle" args && List.mem_assoc "axis" args then
@@ -2329,11 +2356,21 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     in
     if abs_float angle_deg < 1e-9 then ()
     else begin
-      if copy then ctrl#copy_selection 0.0 0.0;
       let (rx, ry) = resolve_reference_point store ctx in
-      apply_matrix_to_selection
-        (Transform_apply.shear_matrix
-           ~angle_deg ~axis ~axis_angle_deg ~rx ~ry)
+      if journal then begin
+        if copy then journal_op (`Assoc [ ("op", `String "copy_selection");
+                                          ("dx", `Float 0.0); ("dy", `Float 0.0) ]);
+        journal_op (`Assoc [
+          ("op", `String "shear_transform");
+          ("angle", `Float angle_deg);
+          ("axis", `String axis);
+          ("axis_angle", `Float axis_angle_deg);
+          ("rx", `Float rx); ("ry", `Float ry) ])
+      end else begin
+        if copy then ctrl#copy_selection 0.0 0.0;
+        apply_matrix_to_selection
+          (Transform_apply.shear_matrix ~angle_deg ~axis ~axis_angle_deg ~rx ~ry)
+      end
     end
   in
 
@@ -2341,7 +2378,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     (match spec with
      | `Assoc args ->
        let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
-       scale_apply_args store ctx args copy
+       let journal = eval_bool (List.assoc_opt "journal" args) store ctx in
+       scale_apply_args store ctx args copy journal
      | _ -> ());
     `Null
   in
@@ -2349,7 +2387,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     (match spec with
      | `Assoc args ->
        let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
-       rotate_apply_args store ctx args copy
+       let journal = eval_bool (List.assoc_opt "journal" args) store ctx in
+       rotate_apply_args store ctx args copy journal
      | _ -> ());
     `Null
   in
@@ -2357,7 +2396,8 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     (match spec with
      | `Assoc args ->
        let copy = eval_bool (List.assoc_opt "copy" args) store ctx in
-       shear_apply_args store ctx args copy
+       let journal = eval_bool (List.assoc_opt "journal" args) store ctx in
+       shear_apply_args store ctx args copy journal
      | _ -> ());
     `Null
   in

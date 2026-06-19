@@ -1529,6 +1529,55 @@ let () =
         production_capture_eye_demo;
       Alcotest.test_case "production_capture eye_demo_bare_frame" `Quick
         production_capture_eye_demo_bare_frame;
+
+      (* OP_LOG.md section 9 verb33 P1-P7 (the actions.yaml<->op_apply
+         unification). Each shared source fixture replays through
+         [Op_apply.op_apply] and byte-matches the Rust goldens via
+         [document_to_test_json] AND the checkpoint_equivalence gate (the
+         prime-directive pin). Mirrors the Rust + Swift harness registration. *)
+      (* P1 print-config (8 verbs). *)
+      Alcotest.test_case "print_config_setters operations" `Quick (fun () ->
+        run_operation_fixture "print_config_setters.json");
+      (* P2 artboard reorder/field (5 verbs). *)
+      Alcotest.test_case "artboard_set_field_batch operations" `Quick (fun () ->
+        run_operation_fixture "artboard_set_field_batch.json");
+      Alcotest.test_case "artboard_reorder operations" `Quick (fun () ->
+        run_operation_fixture "artboard_reorder.json");
+      Alcotest.test_case "artboard_delete operations" `Quick (fun () ->
+        run_operation_fixture "artboard_delete.json");
+      (* P3 artboard create/duplicate (2 verbs, value-in-op id). *)
+      Alcotest.test_case "artboard_create operations" `Quick (fun () ->
+        run_operation_fixture "artboard_create.json");
+      Alcotest.test_case "artboard_duplicate operations" `Quick (fun () ->
+        run_operation_fixture "artboard_duplicate.json");
+      (* P4 structural tree-mutation (4 verbs, value-in-op element). *)
+      Alcotest.test_case "structural_delete_at operations" `Quick (fun () ->
+        run_operation_fixture "structural_delete_at.json");
+      Alcotest.test_case "structural_delete_selection operations" `Quick (fun () ->
+        run_operation_fixture "structural_delete_selection.json");
+      Alcotest.test_case "structural_insert_after operations" `Quick (fun () ->
+        run_operation_fixture "structural_insert_after.json");
+      Alcotest.test_case "structural_insert_at operations" `Quick (fun () ->
+        run_operation_fixture "structural_insert_at.json");
+      (* P5 group/layer wrapping (3 verbs). *)
+      Alcotest.test_case "wrap_in_group operations" `Quick (fun () ->
+        run_operation_fixture "wrap_in_group.json");
+      Alcotest.test_case "wrap_in_layer operations" `Quick (fun () ->
+        run_operation_fixture "wrap_in_layer.json");
+      Alcotest.test_case "unpack_group_at operations" `Quick (fun () ->
+        run_operation_fixture "unpack_group_at.json");
+      (* P6 set_attr_on_selection (brush attrs; no-op hardening). *)
+      Alcotest.test_case "set_attr_on_selection operations" `Quick (fun () ->
+        run_operation_fixture "set_attr_on_selection.json");
+      (* P7 transform trio (scale / rotate / shear) + copy. *)
+      Alcotest.test_case "transform_scale operations" `Quick (fun () ->
+        run_operation_fixture "transform_scale.json");
+      Alcotest.test_case "transform_rotate operations" `Quick (fun () ->
+        run_operation_fixture "transform_rotate.json");
+      Alcotest.test_case "transform_shear operations" `Quick (fun () ->
+        run_operation_fixture "transform_shear.json");
+      Alcotest.test_case "transform_copy operations" `Quick (fun () ->
+        run_operation_fixture "transform_copy.json");
     ];
 
     (* Workspace layout tests *)

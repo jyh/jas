@@ -367,8 +367,27 @@ class model ?(document = Document.default_document ()) ?filename () =
           | None -> false
           | Some chk ->
             chk == doc
-            || Test_json.document_to_test_json chk
-               = Test_json.document_to_test_json doc
+            (* CANONICALLY-INVISIBLE FIELDS (OP_LOG.md section 9 Phase P6
+               follow-up): [document_to_test_json] deliberately OMITS some
+               authoritative fields — notably the Path [stroke_brush] /
+               [stroke_brush_overrides] brush bindings — to keep the
+               cross-language byte-gate compatible with legacy fixtures. That
+               makes the JSON compare BLIND to a transaction whose ONLY net
+               change is a brush edit (e.g. set_attr_on_selection fired on an
+               already-selected path, where the selection does not change),
+               which would otherwise be dropped here: neither journaled NOR
+               given an undo step. So when the JSON says "no change" we
+               additionally compare the authoritative element trees ([layers]
+               plus the [symbols] master store, the only homes of brush-bearing
+               Paths) via the polymorphic [=], which DOES see those fields. A
+               transaction is a no-op only if BOTH the canonical JSON and the
+               structural compare agree it changed nothing; any
+               canonically-invisible field edit keeps it. Mirrors the Rust
+               [Model::commit_txn] / Swift [Model.commitTxn]. *)
+            || (Test_json.document_to_test_json chk
+                = Test_json.document_to_test_json doc
+                && chk.Document.layers = doc.Document.layers
+                && chk.Document.symbols = doc.Document.symbols)
         in
         if no_net_change then begin
           (* Drop the no-op checkpoint; leave redo and the journal untouched. *)
