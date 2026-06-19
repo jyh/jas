@@ -476,10 +476,30 @@ public class Model: ObservableObject {
         // no-op. Otherwise fall back to the canonical `documentToTestJson`
         // byte-compare against the checkpoint (the same canonicalization the
         // cross-language gate uses).
+        //
+        // CANONICALLY-INVISIBLE FIELDS (OP_LOG.md §9 Phase P6 follow-up):
+        // `documentToTestJson` deliberately OMITS some authoritative fields —
+        // notably the Path `strokeBrush` / `strokeBrushOverrides` brush bindings
+        // — to keep the cross-language byte-gate compatible with legacy fixtures.
+        // That makes the JSON compare BLIND to a transaction whose ONLY net
+        // change is a brush edit (e.g. set_attr_on_selection fired on an
+        // already-selected path, where the selection does not change), which
+        // would otherwise be dropped here: neither journaled NOR given an undo
+        // step. So when the JSON says "no change" we additionally compare the
+        // authoritative element trees (`layers` + the `symbols` master store, the
+        // only homes of brush-bearing Paths) via the derived `Equatable`, which
+        // DOES see those fields. A transaction is a no-op only if BOTH the
+        // canonical JSON and the structural compare agree it changed nothing; any
+        // canonically-invisible field edit keeps it. Mirrors Rust
+        // `Model::commit_txn`.
         let genAtBegin = pending?.genAtBegin ?? generation
         let checkpoint = undoStack.last?.0
         let noNetChange = generation == genAtBegin
-            || (checkpoint.map { documentToTestJson($0) == documentToTestJson(document) } ?? false)
+            || (checkpoint.map {
+                documentToTestJson($0) == documentToTestJson(document)
+                    && $0.layers == document.layers
+                    && $0.symbols == document.symbols
+            } ?? false)
         if noNetChange {
             // Drop the no-op checkpoint; leave redo and the journal untouched.
             if !undoStack.isEmpty { undoStack.removeLast() }

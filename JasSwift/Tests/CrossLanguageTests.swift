@@ -577,6 +577,50 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_ops.json")
 }
 
+// MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)
+//
+// The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
+// the ORACLE: each replays through the Swift `opApply` and byte-matches its
+// golden (documentToTestJson), exactly as the pre-existing operations fixtures
+// do, plus the checkpoint_equivalence replay gate. Mirrors the Rust
+// cross_language_test.rs registrations.
+
+// P1 — print-config setters (8 verbs). The single source fixture
+// print_config_setters.json carries 5 sub-cases (document_setup,
+// preferences_root, output_and_inks, graphics_cm_marks_advanced,
+// type_mismatch_skips); the per-case print_config_*.json files are their
+// expected-document goldens, not separate source fixtures.
+@Test func operationPrintConfigSetters() throws { try runOperationFixture("print_config_setters.json") }
+
+// P2 — artboard reorder / field setters (5 verbs).
+@Test func operationArtboardSetFieldBatch() throws { try runOperationFixture("artboard_set_field_batch.json") }
+@Test func operationArtboardReorder() throws { try runOperationFixture("artboard_reorder.json") }
+@Test func operationArtboardDelete() throws { try runOperationFixture("artboard_delete.json") }
+
+// P3 — artboard create / duplicate (value-in-op ids).
+@Test func operationArtboardCreate() throws { try runOperationFixture("artboard_create.json") }
+@Test func operationArtboardDuplicate() throws { try runOperationFixture("artboard_duplicate.json") }
+
+// P4 — structural delete / insert (value-in-op element JSON).
+@Test func operationStructuralDeleteAt() throws { try runOperationFixture("structural_delete_at.json") }
+@Test func operationStructuralDeleteSelection() throws { try runOperationFixture("structural_delete_selection.json") }
+@Test func operationStructuralInsertAfter() throws { try runOperationFixture("structural_insert_after.json") }
+@Test func operationStructuralInsertAt() throws { try runOperationFixture("structural_insert_at.json") }
+
+// P5 — group / layer wrapping (multi-step → one op).
+@Test func operationWrapInGroup() throws { try runOperationFixture("wrap_in_group.json") }
+@Test func operationWrapInLayer() throws { try runOperationFixture("wrap_in_layer.json") }
+@Test func operationUnpackGroupAt() throws { try runOperationFixture("unpack_group_at.json") }
+
+// P6 — set_attr_on_selection (brush attrs).
+@Test func operationSetAttrOnSelection() throws { try runOperationFixture("set_attr_on_selection.json") }
+
+// P7 — transforms (scale / rotate / shear / copy).
+@Test func operationTransformScale() throws { try runOperationFixture("transform_scale.json") }
+@Test func operationTransformRotate() throws { try runOperationFixture("transform_rotate.json") }
+@Test func operationTransformShear() throws { try runOperationFixture("transform_shear.json") }
+@Test func operationTransformCopy() throws { try runOperationFixture("transform_copy.json") }
+
 /// Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4): pins the
 /// reserved causal/merge metadata + each op's verb and targets across apps.
 /// Fixed key order + deterministic txn-N ids make it byte-shareable. Mirrors
@@ -860,6 +904,144 @@ private func runProductionBatchFixture(_ fixturePath: String) {
 /// `production_capture_eye_demo_bare_frame`.
 @Test func productionCaptureEyeDemoBareFrame() {
     runProductionBatchFixture("production_capture/eye_demo_bare_frame.json")
+}
+
+// MARK: - OP_LOG.md §9 Phase P7 — transform CONFIRM production route
+
+/// Build a model with the rect_with_id selection established (the production
+/// transform tests' shared setup). Mirrors Rust `transform_production_model`.
+private func transformProductionModel() -> Model {
+    let svg = readFixture("svg/rect_with_id.svg")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    model.beginTxn()
+    opApply(model, controller, [
+        "op": "select_rect", "x": 0.0, "y": 0.0, "width": 96.0, "height": 96.0,
+        "extend": false,
+    ])
+    model.commitTxn()
+    return model
+}
+
+/// Drive an action's effects through the REAL runEffects with the given resolved
+/// `param.*` context, stamping `action` as the txn name. Mirrors Rust
+/// `run_transform_action`.
+private func runTransformAction(_ model: Model, _ action: String, _ params: [String: Any]) {
+    guard let bundle = WorkspaceData.load(),
+          let actionDef = bundle.actions()[action] as? [String: Any],
+          let effects = actionDef["effects"] as? [Any] else {
+        Issue.record("could not load action '\(action)' effects from bundle")
+        return
+    }
+    let store = StateStore()
+    let platformEffects = buildYamlToolEffects(model: model)
+    runEffects(effects, ctx: ["param": params], store: store,
+               actions: bundle.actions(),
+               platformEffects: platformEffects,
+               model: model, actionName: action)
+}
+
+/// True iff the element at `path` carries a non-nil transform.
+private func transformedAt(_ model: Model, _ path: ElementPath) -> Bool {
+    guard let el = model.document.tryGetElement(path) else { return false }
+    return el.transform != nil
+}
+
+/// checkpoint_equivalence for a production-confirm model: replaying the whole
+/// journal from the same setup must serialize byte-identically to the live doc.
+private func assertConfirmReplayEquivalent(_ model: Model) {
+    let live = documentToTestJson(model.document)
+    let replayed = replayJournal(readFixture("svg/rect_with_id.svg"),
+                                 model.journal, model.journalHeadValue)
+    #expect(replayed == live,
+        "checkpoint_equivalence: production confirm journal replay != live document")
+}
+
+/// Phase P7 — the PRODUCTION confirm path. Drives the REAL
+/// scale/rotate/shear_options_confirm actions from the bundle (journal:true) and
+/// asserts exactly ONE transform op is journaled carrying the RESOLVED params
+/// (rx/ry = the 72×72-pt selection-bounds center = 36, the factors/angle/flags),
+/// the live doc is transformed, and checkpoint_equivalence holds. Mirrors Rust
+/// `production_transform_confirm_journals_one_op_with_resolved_params`.
+@Test func productionTransformConfirmJournalsOneOp() {
+    // (scale) uniform 200%, copy=false. 96×96 px → 72×72 pt ⇒ center (36, 36).
+    do {
+        let model = transformProductionModel()
+        runTransformAction(model, "scale_options_confirm", [
+            "uniform": true, "uniform_pct": 200.0,
+            "horizontal_pct": 100.0, "vertical_pct": 100.0,
+            "scale_strokes": true, "scale_corners": false,
+            "preview": false, "copy": false,
+        ])
+        let txn = model.journal.last!
+        #expect(txn.ops.map { $0.op } == ["scale_transform"],
+            "confirm journals exactly one scale_transform op (copy=false)")
+        let p = txn.ops[0].params
+        #expect((p["sx"] as? NSNumber)?.doubleValue == 2.0)
+        #expect((p["sy"] as? NSNumber)?.doubleValue == 2.0)
+        #expect((p["rx"] as? NSNumber)?.doubleValue == 36.0, "rx = selection-bounds center")
+        #expect((p["ry"] as? NSNumber)?.doubleValue == 36.0, "ry = selection-bounds center")
+        #expect((p["scale_strokes"] as? NSNumber)?.boolValue == true)
+        #expect((p["scale_corners"] as? NSNumber)?.boolValue == false)
+        #expect(txn.ops[0].targets == ["rect-1"], "targets = pre-mutation selection id")
+        #expect(transformedAt(model, [0, 0]), "the rect carries a transform after confirm")
+        assertConfirmReplayEquivalent(model)
+    }
+    // (rotate) 30° around the bounds center.
+    do {
+        let model = transformProductionModel()
+        runTransformAction(model, "rotate_options_confirm",
+            ["angle": 30.0, "preview": false, "copy": false])
+        let txn = model.journal.last!
+        #expect(txn.ops.map { $0.op } == ["rotate_transform"], "one rotate_transform op")
+        let p = txn.ops[0].params
+        #expect((p["angle"] as? NSNumber)?.doubleValue == 30.0)
+        #expect((p["rx"] as? NSNumber)?.doubleValue == 36.0)
+        #expect((p["ry"] as? NSNumber)?.doubleValue == 36.0)
+        #expect(txn.ops[0].targets == ["rect-1"])
+        #expect(transformedAt(model, [0, 0]))
+        assertConfirmReplayEquivalent(model)
+    }
+    // (shear) 20° horizontal around the bounds center.
+    do {
+        let model = transformProductionModel()
+        runTransformAction(model, "shear_options_confirm",
+            ["angle": 20.0, "axis": "horizontal", "axis_angle": 0.0,
+             "preview": false, "copy": false])
+        let txn = model.journal.last!
+        #expect(txn.ops.map { $0.op } == ["shear_transform"], "one shear_transform op")
+        let p = txn.ops[0].params
+        #expect((p["angle"] as? NSNumber)?.doubleValue == 20.0)
+        #expect(p["axis"] as? String == "horizontal")
+        #expect((p["axis_angle"] as? NSNumber)?.doubleValue == 0.0)
+        #expect((p["rx"] as? NSNumber)?.doubleValue == 36.0)
+        #expect((p["ry"] as? NSNumber)?.doubleValue == 36.0)
+        #expect(txn.ops[0].targets == ["rect-1"])
+        #expect(transformedAt(model, [0, 0]))
+        assertConfirmReplayEquivalent(model)
+    }
+}
+
+/// Phase P7 — the copy=true composition. Drives the REAL confirm with copy=true
+/// and asserts the transaction journals [copy_selection, scale_transform] (TWO
+/// ops), the original is untouched, the copy carries the matrix, and
+/// checkpoint_equivalence holds. Mirrors Rust
+/// `production_transform_copy_journals_two_ops`.
+@Test func productionTransformCopyJournalsTwoOps() {
+    let model = transformProductionModel()
+    runTransformAction(model, "scale_options_confirm", [
+        "uniform": true, "uniform_pct": 200.0,
+        "horizontal_pct": 100.0, "vertical_pct": 100.0,
+        "scale_strokes": true, "scale_corners": false,
+        "preview": false, "copy": true,
+    ])
+    let txn = model.journal.last!
+    #expect(txn.ops.map { $0.op } == ["copy_selection", "scale_transform"],
+        "copy=true journals [copy_selection, scale_transform] in ONE transaction")
+    #expect(txn.ops[0].targets == ["rect-1"], "copy_selection.targets = pre-mutation source id")
+    #expect(!transformedAt(model, [0, 0]), "the original is untouched by a copy-transform")
+    #expect(transformedAt(model, [0, 1]), "the duplicate carries the composed matrix")
+    assertConfirmReplayEquivalent(model)
 }
 
 // MARK: - Workspace layout equivalence tests

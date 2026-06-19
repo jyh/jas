@@ -1488,6 +1488,11 @@ public func svgToDocument(_ svg: String) -> Document {
     }
 
     let (parsedSetup, parsedPrefs) = parseJasPrintBlocks(root)
+    // Artboards ride a <sodipodi:namedview> + <inkscape:page> block (Inkscape's
+    // multi-page convention); SVG has no native artboard concept. Empty when the
+    // file carries no namedview/pages (the at-least-one-artboard invariant is
+    // repaired at actual file open, not here). Mirrors Rust `parse_artboards`.
+    let parsedArtboards = parseArtboards(root)
     var layers: [Layer] = []
     // Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
     // into doc.symbols (NOT into layers), so masters are never painted in
@@ -1538,7 +1543,7 @@ public func svgToDocument(_ svg: String) -> Document {
     }
     if layers.isEmpty { layers = [Layer(children: [])] }
     return dedupeElementIds(normalizeDocument(Document(
-        layers: layers, symbols: symbols, artboards: [],
+        layers: layers, symbols: symbols, artboards: parsedArtboards,
         documentSetup: parsedSetup,
         printPreferences: parsedPrefs)))
 }
@@ -1723,6 +1728,41 @@ private func parsePrintPreferencesNode(_ node: XMLElement) -> PrintPreferences {
         colorManagement: colorManagement,
         advanced: advanced
     )
+}
+
+/// Parse <inkscape:page> children of any top-level <sodipodi:namedview> block
+/// into Artboard structs. The writer stores x/y/width/height in px; convert
+/// back to internal pt units here (×0.75). Returns [] when no namedview / pages
+/// are present (the caller seeds the at-least-one-artboard invariant separately
+/// at actual file open). Mirrors Rust `svg::parse_artboards`.
+private func parseArtboards(_ root: XMLElement) -> [Artboard] {
+    var out: [Artboard] = []
+    guard let children = root.children else { return out }
+    for child in children {
+        guard let nv = child as? XMLElement, nv.localName == "namedview" else { continue }
+        for sub in nv.children ?? [] {
+            guard let page = sub as? XMLElement, page.localName == "page" else { continue }
+            // inkscape:label carries the user-visible name; fall back to the id
+            // if absent. Foundation drops the namespace prefix, so `label`.
+            let label = (page.attribute(forName: "inkscape:label")?.stringValue
+                ?? page.attribute(forName: "label")?.stringValue) ?? ""
+            let id = page.attribute(forName: "id")?.stringValue ?? ""
+            let name = label.isEmpty ? id : label
+            func f(_ n: String) -> Double {
+                Double(page.attribute(forName: n)?.stringValue ?? "0") ?? 0.0
+            }
+            out.append(Artboard(
+                id: id, name: name,
+                x: toPt(f("x")), y: toPt(f("y")),
+                width: toPt(f("width")), height: toPt(f("height")),
+                // Phase-1 jas-specific fields are not round-tripped through SVG;
+                // default them (matching Rust parse_artboards).
+                fill: .transparent,
+                showCenterMark: false, showCrossHairs: false,
+                showVideoSafeAreas: false, videoRulerPixelAspectRatio: 1.0))
+        }
+    }
+    return out
 }
 
 private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPreferences) {

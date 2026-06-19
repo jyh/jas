@@ -545,8 +545,18 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             return dragToScaleFactors(px: px, py: py, cx: cx, cy: cy,
                                       rx: rx, ry: ry, shift: shift)
         }()
-        scaleApply(model: model, store: store, ctx: ctx,
-                   sx: sx, sy: sy, copy: copy)
+        // OP_LOG.md §9 Phase P7 — the CONFIRM/PREVIEW boundary. journal:true
+        // (set only by the CONFIRM action in workspace.json) routes through
+        // opApply (a BRACKETED edit + one recorded scale_transform op). Absent/
+        // false journal (the PREVIEW path and live drag) keeps the unbracketed
+        // scaleApply, which journals nothing (the out-of-band preview channel).
+        if evalBool(args["journal"], store: store, ctx: ctx) {
+            scaleApplyJournaled(model: model, store: store, ctx: ctx,
+                                sx: sx, sy: sy, copy: copy)
+        } else {
+            scaleApply(model: model, store: store, ctx: ctx,
+                       sx: sx, sy: sy, copy: copy)
+        }
         return nil
     }
     effects["doc.rotate.apply"] = { spec, ctx, store in
@@ -565,8 +575,15 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             return dragToRotateAngle(px: px, py: py, cx: cx, cy: cy,
                                      rx: rx, ry: ry, shift: shift)
         }()
-        rotateApply(model: model, store: store, ctx: ctx,
-                    thetaDeg: thetaDeg, copy: copy)
+        // OP_LOG.md §9 Phase P7 — journal:true (CONFIRM) journals a
+        // rotate_transform op; PREVIEW stays out-of-band (see scale above).
+        if evalBool(args["journal"], store: store, ctx: ctx) {
+            rotateApplyJournaled(model: model, store: store, ctx: ctx,
+                                 thetaDeg: thetaDeg, copy: copy)
+        } else {
+            rotateApply(model: model, store: store, ctx: ctx,
+                        thetaDeg: thetaDeg, copy: copy)
+        }
         return nil
     }
     effects["doc.shear.apply"] = { spec, ctx, store in
@@ -588,9 +605,17 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             return dragToShearParams(px: px, py: py, cx: cx, cy: cy,
                                      rx: rx, ry: ry, shift: shift)
         }()
-        shearApply(model: model, store: store, ctx: ctx,
-                   angleDeg: angleDeg, axis: axis,
-                   axisAngleDeg: axisAngleDeg, copy: copy)
+        // OP_LOG.md §9 Phase P7 — journal:true (CONFIRM) journals a
+        // shear_transform op; PREVIEW stays out-of-band (see scale above).
+        if evalBool(args["journal"], store: store, ctx: ctx) {
+            shearApplyJournaled(model: model, store: store, ctx: ctx,
+                                angleDeg: angleDeg, axis: axis,
+                                axisAngleDeg: axisAngleDeg, copy: copy)
+        } else {
+            shearApply(model: model, store: store, ctx: ctx,
+                       angleDeg: angleDeg, axis: axis,
+                       axisAngleDeg: axisAngleDeg, copy: copy)
+        }
         return nil
     }
 
@@ -2624,6 +2649,84 @@ private func dragToShearParams(
     let k = perpDist / axisLen
     let axisAngleDeg = atan2(ay, ax) * 180.0 / .pi
     return (atan(k) * 180.0 / .pi, "custom", axisAngleDeg)
+}
+
+/// Resolve state.scale_strokes (default true) and state.scale_corners
+/// (default false) against the live eval context. Mirrors Rust
+/// `resolve_scale_flags`.
+private func resolveScaleFlags(store: StateStore, ctx: [String: Any]) -> (Bool, Bool) {
+    let evalCtx = store.evalContext(extra: ctx)
+    let scaleStrokes: Bool = {
+        if case .bool(let b) = evaluate("state.scale_strokes", context: evalCtx) { return b }
+        return true
+    }()
+    let scaleCorners: Bool = {
+        if case .bool(let b) = evaluate("state.scale_corners", context: evalCtx) { return b }
+        return false
+    }()
+    return (scaleStrokes, scaleCorners)
+}
+
+/// Scale apply — JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves every
+/// param to a LITERAL (factors, reference point, scale_strokes/scale_corners) and
+/// routes through `opApply` so the matrix is recorded as a `scale_transform` op
+/// (a BRACKETED edit). For copy=true it FIRST journals a `copy_selection` op
+/// (two ops in one transaction). The shared `applyScale` (OpApply.swift) makes
+/// the live mutation byte-identical to replay. Mirrors Rust `scale_apply_journaled`.
+private func scaleApplyJournaled(
+    model: Model, store: StateStore, ctx: [String: Any],
+    sx: Double, sy: Double, copy: Bool
+) {
+    if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
+    let controller = Controller(model: model)
+    if copy {
+        opApply(model, controller, ["op": "copy_selection", "dx": 0.0, "dy": 0.0])
+    }
+    // Resolve the reference point + flags AFTER the copy (matching the preview
+    // path, which resolves the ref point post-copy against the duplicates).
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    let (scaleStrokes, scaleCorners) = resolveScaleFlags(store: store, ctx: ctx)
+    opApply(model, controller, [
+        "op": "scale_transform", "sx": sx, "sy": sy, "rx": rx, "ry": ry,
+        "scale_strokes": scaleStrokes, "scale_corners": scaleCorners,
+    ])
+}
+
+/// Rotate apply — JOURNALED (CONFIRM) path. Resolves angle + reference point to
+/// literals and routes through `opApply` (`rotate_transform`). copy=true journals
+/// `copy_selection` first. Mirrors Rust `rotate_apply_journaled`.
+private func rotateApplyJournaled(
+    model: Model, store: StateStore, ctx: [String: Any],
+    thetaDeg: Double, copy: Bool
+) {
+    if abs(thetaDeg) < 1e-9 { return }
+    let controller = Controller(model: model)
+    if copy {
+        opApply(model, controller, ["op": "copy_selection", "dx": 0.0, "dy": 0.0])
+    }
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    opApply(model, controller, [
+        "op": "rotate_transform", "angle": thetaDeg, "rx": rx, "ry": ry,
+    ])
+}
+
+/// Shear apply — JOURNALED (CONFIRM) path. Resolves angle/axis/axis_angle +
+/// reference point to literals and routes through `opApply` (`shear_transform`).
+/// copy=true journals `copy_selection` first. Mirrors Rust `shear_apply_journaled`.
+private func shearApplyJournaled(
+    model: Model, store: StateStore, ctx: [String: Any],
+    angleDeg: Double, axis: String, axisAngleDeg: Double, copy: Bool
+) {
+    if abs(angleDeg) < 1e-9 { return }
+    let controller = Controller(model: model)
+    if copy {
+        opApply(model, controller, ["op": "copy_selection", "dx": 0.0, "dy": 0.0])
+    }
+    let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
+    opApply(model, controller, [
+        "op": "shear_transform", "angle": angleDeg, "axis": axis,
+        "axis_angle": axisAngleDeg, "rx": rx, "ry": ry,
+    ])
 }
 
 /// Scale apply implementation. Pre-multiplies each selected

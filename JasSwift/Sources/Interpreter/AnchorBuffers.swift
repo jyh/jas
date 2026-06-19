@@ -35,40 +35,60 @@ public struct PenAnchor: Equatable {
     }
 }
 
-private var _anchorBuffers: [String: [PenAnchor]] = [:]
+// Thread-local storage — the Swift analogue of Rust's `thread_local!`
+// in anchor_buffers.rs. Same rationale as PointBuffers: a pen gesture
+// runs on one thread, and a process-global `var` would be shared across
+// the swift-testing concurrent thread pool, letting two tests using the
+// same buffer name corrupt each other's anchors. Thread-local isolates
+// per-thread buffers, matching Rust.
+private let _anchorBufferKey = "jas.anchorBuffers"
+
+private func _anchorBufferStore() -> NSMutableDictionary {
+    let dict = Thread.current.threadDictionary
+    if let existing = dict[_anchorBufferKey] as? NSMutableDictionary {
+        return existing
+    }
+    let fresh = NSMutableDictionary()
+    dict[_anchorBufferKey] = fresh
+    return fresh
+}
+
+private func _anchorBufferGet(_ name: String) -> [PenAnchor] {
+    (_anchorBufferStore()[name] as? [PenAnchor]) ?? []
+}
 
 func anchorBuffersPush(_ name: String, _ x: Double, _ y: Double) {
-    if _anchorBuffers[name] == nil {
-        _anchorBuffers[name] = []
-    }
-    _anchorBuffers[name]?.append(.corner(x, y))
+    let store = _anchorBufferStore()
+    var buf = (store[name] as? [PenAnchor]) ?? []
+    buf.append(.corner(x, y))
+    store[name] = buf
 }
 
 func anchorBuffersPop(_ name: String) {
-    _anchorBuffers[name]?.removeLast()
-    if _anchorBuffers[name]?.isEmpty == true {
-        _anchorBuffers.removeValue(forKey: name)
+    let store = _anchorBufferStore()
+    guard var buf = store[name] as? [PenAnchor], !buf.isEmpty else { return }
+    buf.removeLast()
+    if buf.isEmpty {
+        store.removeObject(forKey: name)
+    } else {
+        store[name] = buf
     }
 }
 
 func anchorBuffersClear(_ name: String) {
-    _anchorBuffersRemove(name)
-}
-
-/// Private wrapper to keep the public name in plain `clear`.
-private func _anchorBuffersRemove(_ name: String) {
-    _anchorBuffers.removeValue(forKey: name)
+    _anchorBufferStore().removeObject(forKey: name)
 }
 
 func anchorBuffersLength(_ name: String) -> Int {
-    _anchorBuffers[name]?.count ?? 0
+    _anchorBufferGet(name).count
 }
 
 /// Update the last anchor's out-handle to (hx, hy), mirror the
 /// in-handle for tangent continuity, and flip `smooth` to true.
 /// No-op when the buffer is empty.
 func anchorBuffersSetLastOutHandle(_ name: String, _ hx: Double, _ hy: Double) {
-    guard var buf = _anchorBuffers[name], !buf.isEmpty else { return }
+    let store = _anchorBufferStore()
+    guard var buf = store[name] as? [PenAnchor], !buf.isEmpty else { return }
     var last = buf[buf.count - 1]
     last.hxOut = hx
     last.hyOut = hy
@@ -76,15 +96,15 @@ func anchorBuffersSetLastOutHandle(_ name: String, _ hx: Double, _ hy: Double) {
     last.hyIn = 2 * last.y - hy
     last.smooth = true
     buf[buf.count - 1] = last
-    _anchorBuffers[name] = buf
+    store[name] = buf
 }
 
 /// First anchor, if any. Used by close-hit detection.
 func anchorBuffersFirst(_ name: String) -> PenAnchor? {
-    _anchorBuffers[name]?.first
+    _anchorBufferGet(name).first
 }
 
 /// Borrow the buffer's anchors as an array.
 func anchorBuffersAnchors(_ name: String) -> [PenAnchor] {
-    _anchorBuffers[name] ?? []
+    _anchorBufferGet(name)
 }
