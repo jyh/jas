@@ -1,0 +1,20 @@
+[
+  {
+    "name": "selrel_copy_eye",
+    "setup_svg": "eye.svg",
+    "expected_json": "id_primary_copy_eye.json",
+    "ops": [
+      { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
+      { "op": "copy_selection", "dx": 50, "dy": 0 }
+    ]
+  },
+  {
+    "name": "id_primary_copy_eye",
+    "setup_svg": "eye.svg",
+    "expected_json": "id_primary_copy_eye.json",
+    "ops": [
+      { "op": "select_by_ids", "ids": ["eye"] },
+      { "op": "copy_by_ids", "from": ["eye"], "dx": 50, "dy": 0 }
+    ]
+  }
+]

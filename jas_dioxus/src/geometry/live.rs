@@ -656,28 +656,81 @@ impl LiveElement for RecordedElem {
 }
 
 /// Normalize a captured journal op-segment into a recorded recipe
-/// (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
-/// input-addressed form by tracking the working selection as recipe refs.
+/// (RECORDED_ELEMENTS.md §1/§4): rewrite the captured ops into the input-addressed
+/// `copy`/`translate` form `evaluate_with` consumes, tracking the working set as
+/// recipe refs.
 ///
-/// - A select op (`select_rect`/`select`) establishes the working selection from
-///   its resolved `targets` (the ids it selected); it is NOT emitted — selection
-///   becomes input-addressing.
-/// - `copy_selection` emits `copy{from, dx, dy}` (source = the working selection)
-///   and rebinds the selection to the produced `$n` handles.
-/// - `move_selection` emits `translate{ids, dx, dy}` on the working selection.
-/// - Ops outside the replay-safe subset are dropped from the recipe.
+/// Two captured shapes are accepted:
 ///
-/// The recipe's non-`$` refs are the **inputs** — the elements it rebinds by
-/// stable id (the deterministic "everything that traces to a read input rebinds;
-/// produced elements are `$n` handles" MVP rule; no AI fitter). Returns
-/// `(recipe, input_ids)`; the caller wraps them in a `RecordedElem`.
+/// **The id-primary family (OP_LOG.md §5 Fork 4 — the 3c-1 form, NO selection
+/// dependency).** When the segment is already id-primary, this is a PASS-THROUGH:
+/// every operand id is read DIRECTLY from the op's OWN PARAMS, never from a select
+/// op's selection-resolved `targets`, so the recipe is independent of any
+/// document selection.
+///   - `select_by_ids{ids}` establishes the working set from its `ids` PARAM; it
+///     is NOT emitted (id-addressing replaces selection).
+///   - `copy_by_ids{from, dx, dy}` emits `copy{from, dx, dy}` (source = its `from`
+///     PARAM) and rebinds the working set to the produced `$n` handles.
+///   - `move_by_ids{ids, dx, dy}` emits `translate{ids, dx, dy}` on the working
+///     set (which, after a copy, is the produced `$n` handles — so a "copy then
+///     move the copy" demonstration replays without ever naming the id-less copy).
+///
+/// **The legacy selection-relative family (OP_LOG.md §7 — kept verbatim).** A
+/// `select_rect`/`select` op establishes the working set from its resolved
+/// `targets`; `copy_selection`→`copy`, `move_selection`→`translate`. This bridge
+/// stays for the selection-relative corpus; the id-primary path above does NOT
+/// route through it.
+///
+/// Ops outside the replay-safe subset are dropped. The recipe's non-`$` refs are
+/// the **inputs** — the elements it rebinds by stable id (the deterministic MVP
+/// rule; no AI fitter). Returns `(recipe, input_ids)`; the caller wraps them in a
+/// `RecordedElem`.
 pub fn capture_recipe(segment: &[PrimitiveOp]) -> (Vec<PrimitiveOp>, Vec<String>) {
     let num = |p: &serde_json::Value, k: &str| p.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let str_ids = |p: &serde_json::Value, k: &str| -> Vec<String> {
+        p.get(k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
     let mut working: Vec<String> = Vec::new();
     let mut recipe: Vec<PrimitiveOp> = Vec::new();
     let mut counter = 0usize;
     for op in segment {
         match op.op.as_str() {
+            // ── id-primary family: operands from PARAMS (no selection dep) ──
+            "select_by_ids" => {
+                working = str_ids(&op.params, "ids");
+            }
+            "copy_by_ids" => {
+                let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                let from = str_ids(&op.params, "from");
+                recipe.push(PrimitiveOp {
+                    op: "copy".into(),
+                    params: serde_json::json!({ "from": from, "dx": dx, "dy": dy }),
+                    targets: Vec::new(),
+                });
+                let mut produced = Vec::new();
+                for _ in &from {
+                    produced.push(format!("${counter}"));
+                    counter += 1;
+                }
+                working = produced;
+            }
+            "move_by_ids" => {
+                let (dx, dy) = (num(&op.params, "dx"), num(&op.params, "dy"));
+                // The working set is the produced `$n` handles after a copy, or the
+                // op's own `ids` PARAM when it stands alone (a bare id-primary move).
+                if working.is_empty() {
+                    working = str_ids(&op.params, "ids");
+                }
+                recipe.push(PrimitiveOp {
+                    op: "translate".into(),
+                    params: serde_json::json!({ "ids": working, "dx": dx, "dy": dy }),
+                    targets: Vec::new(),
+                });
+            }
+            // ── legacy selection-relative family (kept verbatim) ──
             "select_rect" | "select" => {
                 working = op.targets.clone();
             }
@@ -1491,6 +1544,64 @@ mod tests {
         let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
         assert!((min_x - 50.0).abs() < 1e-6 && (max_x - 60.0).abs() < 1e-6,
             "the captured recipe replays to the demonstrated output");
+    }
+
+    #[test]
+    fn capture_recipe_passes_through_id_primary_segment_no_selection_dep() {
+        // OP_LOG.md §5 Fork 4 / 3c-1: an id-primary journal segment captures as a
+        // PASS-THROUGH — every operand id is read from the op PARAMS, never from a
+        // select op's selection-resolved `targets` (note targets is EMPTY here, so
+        // a capture that read targets would produce an empty recipe). select_by_ids
+        // sets the working set; copy_by_ids → copy{from}; move_by_ids → translate
+        // on the produced $0 handle.
+        let segment = vec![
+            PrimitiveOp { op: "select_by_ids".into(),
+                params: serde_json::json!({"ids": ["eye"]}), targets: vec![] },
+            recorded_op("copy_by_ids", serde_json::json!({"from": ["eye"], "dx": 0.0, "dy": 0.0})),
+            recorded_op("move_by_ids", serde_json::json!({"ids": [], "dx": 50.0, "dy": 0.0})),
+        ];
+        let (recipe, inputs) = capture_recipe(&segment);
+
+        // Operands came from params (targets was empty), so the recipe is non-empty.
+        assert_eq!(inputs, vec!["eye".to_string()]);
+        assert_eq!(recipe.len(), 2);
+        assert_eq!(recipe[0].op, "copy");
+        assert_eq!(recipe[0].params["from"], serde_json::json!(["eye"]));
+        assert_eq!(recipe[1].op, "translate");
+        assert_eq!(recipe[1].params["ids"], serde_json::json!(["$0"]),
+            "the move targets the produced copy handle, not the id-less copy");
+
+        // The captured recipe replays + re-derives identically to the
+        // selection-relative capture (proving the two capture forms agree).
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let recorded = RecordedElem::new(
+            recipe, inputs.into_iter().map(ElementRef).collect(), common);
+        let mut map = std::collections::HashMap::new();
+        map.insert("eye".to_string(), rc_rect(0.0, 0.0, 10.0, 10.0));
+        let mut visiting = VisitSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &MapResolver(map), &mut visiting);
+        assert_eq!(ps.len(), 1);
+        let (min_x, _, max_x, _) = bbox_of_ring(&ps[0]);
+        assert!((min_x - 50.0).abs() < 1e-6 && (max_x - 60.0).abs() < 1e-6,
+            "the id-primary captured recipe replays to the demonstrated output");
+    }
+
+    #[test]
+    fn capture_recipe_id_primary_bare_move_reads_ids_from_params() {
+        // A bare id-primary move (no preceding copy): the working set is the op's
+        // own `ids` PARAM, so translate operates on the named input directly.
+        let segment = vec![
+            PrimitiveOp { op: "select_by_ids".into(),
+                params: serde_json::json!({"ids": ["eye"]}), targets: vec![] },
+            recorded_op("move_by_ids", serde_json::json!({"ids": ["eye"], "dx": 50.0, "dy": 0.0})),
+        ];
+        let (recipe, inputs) = capture_recipe(&segment);
+        assert_eq!(inputs, vec!["eye".to_string()]);
+        assert_eq!(recipe.len(), 1);
+        assert_eq!(recipe[0].op, "translate");
+        assert_eq!(recipe[0].params["ids"], serde_json::json!(["eye"]),
+            "a bare id-primary move translates the named input directly");
     }
 
     #[test]
