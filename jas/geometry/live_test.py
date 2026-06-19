@@ -288,6 +288,64 @@ def test_capture_recipe_normalizes_select_copy_move_to_input_addressed():
         "the captured recipe replays to the demonstrated output")
 
 
+def test_capture_recipe_passes_through_id_primary_segment_no_selection_dep():
+    # OP_LOG.md §5 Fork 4 / 3c-1: an id-primary journal segment captures as a
+    # PASS-THROUGH — every operand id is read from the op PARAMS, never from a
+    # select op's selection-resolved ``targets`` (note targets is EMPTY here, so a
+    # capture that read targets would produce an empty recipe). select_by_ids sets
+    # the working set; copy_by_ids -> copy{from}; move_by_ids -> translate on the
+    # produced $0 handle. Mirrors the Rust live.rs test.
+    from document.op_log import PrimitiveOp
+    from geometry.element import RecordedElem
+    from geometry.live import DEFAULT_PRECISION, capture_recipe
+    segment = [
+        PrimitiveOp(op="select_by_ids", params={"ids": ["eye"]}, targets=[]),
+        PrimitiveOp(op="copy_by_ids",
+                    params={"from": ["eye"], "dx": 0.0, "dy": 0.0}, targets=[]),
+        PrimitiveOp(op="move_by_ids",
+                    params={"ids": [], "dx": 50.0, "dy": 0.0}, targets=[]),
+    ]
+    recipe, inputs = capture_recipe(segment)
+
+    # Operands came from params (targets was empty), so the recipe is non-empty.
+    assert inputs == ["eye"]
+    assert len(recipe) == 2
+    assert recipe[0].op == "copy"
+    assert recipe[0].params["from"] == ["eye"]
+    assert recipe[1].op == "translate"
+    assert recipe[1].params["ids"] == ["$0"], (
+        "the move targets the produced copy handle, not the id-less copy")
+
+    # The captured recipe replays + re-derives identically to the
+    # selection-relative capture (proving the two capture forms agree).
+    recorded = RecordedElem(ops=tuple(recipe), inputs=tuple(inputs), id="rec")
+    resolver = _MapResolver({"eye": _rect_at(0, 0)})
+    ps = recorded.evaluate_with(DEFAULT_PRECISION, resolver, set())
+    assert len(ps) == 1
+    min_x, _, max_x, _ = _bbox(ps[0])
+    assert abs(min_x - 50.0) < 1e-6 and abs(max_x - 60.0) < 1e-6, (
+        "the id-primary captured recipe replays to the demonstrated output")
+
+
+def test_capture_recipe_id_primary_bare_move_reads_ids_from_params():
+    # A bare id-primary move (no preceding copy): the working set is the op's own
+    # ``ids`` PARAM, so translate operates on the named input directly. Mirrors the
+    # Rust live.rs test.
+    from document.op_log import PrimitiveOp
+    from geometry.live import capture_recipe
+    segment = [
+        PrimitiveOp(op="select_by_ids", params={"ids": ["eye"]}, targets=[]),
+        PrimitiveOp(op="move_by_ids",
+                    params={"ids": ["eye"], "dx": 50.0, "dy": 0.0}, targets=[]),
+    ]
+    recipe, inputs = capture_recipe(segment)
+    assert inputs == ["eye"]
+    assert len(recipe) == 1
+    assert recipe[0].op == "translate"
+    assert recipe[0].params["ids"] == ["eye"], (
+        "a bare id-primary move translates the named input directly")
+
+
 def test_reference_evaluates_to_target_geometry():
     from geometry.element import ReferenceElem
     from geometry.live import DEFAULT_PRECISION

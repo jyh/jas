@@ -994,6 +994,93 @@ def apply_shear(model: Model, angle_deg: float, axis: str, axis_angle_deg: float
     return (True, targets)
 
 
+# ── OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md — the id-primary op family ─────
+#
+# The id-primary verbs ``select_by_ids`` / ``move_by_ids`` / ``copy_by_ids``
+# promote the recorded-recipe vocabulary (input-addressed, side-effect-free) to a
+# first-class op family ``op_apply`` can execute, so a captured recipe IS a
+# replayable journal segment (RECORDED_ELEMENTS.md §7) and ``capture_recipe``
+# collapses to a pass-through. They are ADDITIVE: the selection-relative verbs
+# (``select_rect`` / ``move_selection`` / ``copy_selection``) keep their params
+# VERBATIM (OP_LOG.md §7 — selection is serialized Document state, so the
+# byte-gate reproduces it); this is a NEW family, not a params rewrite. The
+# decisive property (OP_LOG.md §7 determinism rule): the operand ids come from the
+# OP'S OWN PARAMS, never inferred from ``doc.selection``, so snapshot and replay
+# apply identical operands and a recorded recipe survives source edits with NO
+# selection dependency.
+#
+# THE BYTE-GATE RECONCILIATION (OP_LOG.md §6, the gate compares
+# document_to_test_json INCLUDING selection): the family is committed as the
+# canonical PAIR ``[select_by_ids, <op>_by_ids]``, AND each ``<op>_by_ids`` ALSO
+# re-establishes the working selection from its OWN ids before mutating. So the
+# replayed selection is byte-identical to ``[select_rect, move_selection]`` for the
+# same elements: ``select_by_ids`` resolves ids to paths and writes
+# ``ElementSelection.all(path)`` in DOCUMENT ORDER (the same order
+# ``_select_flat`` / ``select_rect`` produces), then the mutator routes through the
+# SAME shared ``Controller`` body (no divergent second mutation path). Hardened
+# reads: an unknown id / a non-array params is SKIPPED, never a panic.
+
+
+def _id_paths_in_document_order(doc) -> list[tuple[str, tuple[int, ...]]]:
+    """Walk the element tree (Group/Layer ``children`` only — the SAME descent
+    discipline as the id-index builder ``geometry.live._collect_ref_ids``)
+    collecting ``(id, path)`` for every id-bearing element, in DOCUMENT ORDER. The
+    id-primary selection builder uses this so a ``select_by_ids`` produces the SAME
+    ordered selection a ``select_rect`` over the same elements would — the
+    byte-gate reconciliation. Top-level layer ids are NOT resolution targets
+    (mirroring the id index), so the walk starts at each layer's children, exactly
+    like ``resolver_from_document``. Mirrors the Rust
+    ``id_paths_in_document_order``.
+    """
+    out: list[tuple[str, tuple[int, ...]]] = []
+
+    def walk(elem, path: tuple[int, ...]) -> None:
+        eid = _element_id(elem)
+        if eid is not None:
+            out.append((eid, path))
+        children = getattr(elem, "children", None)
+        if children is not None:
+            for i, child in enumerate(children):
+                walk(child, path + (i,))
+
+    for li, layer in enumerate(doc.layers):
+        children = getattr(layer, "children", None)
+        if children is not None:
+            for ci, child in enumerate(children):
+                walk(child, (li, ci))
+    return out
+
+
+def _selection_for_ids(doc, ids: list[str]):
+    """Build the selection (in DOCUMENT ORDER) for the elements whose ``id`` is in
+    ``ids``, as ``ElementSelection.all(path)`` entries. Document order — NOT the
+    order of ``ids`` — so the result is byte-identical to what ``select_rect``
+    would produce for the same set (the byte-gate reconciliation). An id that
+    resolves to no element is silently dropped (hardened: a stale/unknown id is a
+    skip). Mirrors the Rust ``selection_for_ids``.
+    """
+    from document.document import ElementSelection
+    wanted = set(ids)
+    return frozenset(
+        ElementSelection.all(path)
+        for (eid, path) in _id_paths_in_document_order(doc)
+        if eid in wanted
+    )
+
+
+def apply_select_by_ids(model: Model, ctrl: Controller, ids: list[str]) -> list[str]:
+    """Resolve ``ids`` to their selection and write it BY PATH (selection-only,
+    non-undoable — like ``select_rect``, this goes through the unbracketed
+    selection write ``Controller.set_selection``). The id-primary ``select_by_ids``
+    body, SHARED by the standalone ``select_by_ids`` op and by ``move_by_ids`` /
+    ``copy_by_ids`` (which re-establish the working selection from their own ids
+    before the mutation). Returns the resolved selection ids (in document order)
+    for ``targets``. Mirrors the Rust ``apply_select_by_ids``.
+    """
+    ctrl.set_selection(_selection_for_ids(model.document, ids))
+    return selection_to_ids(model.document)
+
+
 def op_apply(model: Model, op: dict) -> None:
     """The single op dispatcher (OP_LOG.md §4). Applies one primitive op to the
     model and records it into the open transaction (the ``checkpoint_equivalence``
@@ -1039,8 +1126,10 @@ def op_apply(model: Model, op: dict) -> None:
     # byte-unchanged. ``select_rect`` is EXCLUDED: it only changes selection
     # (non-undoable, serialized state), so a bare marquee must stay
     # journal-neutral — opening a txn for it would spuriously journal a
-    # selection-only batch as an undoable step.
-    if name != "select_rect" and not model.in_txn:
+    # selection-only batch as an undoable step. ``select_by_ids`` is the id-primary
+    # twin (selection-only, non-undoable), so it is excluded for the identical
+    # reason.
+    if name not in ("select_rect", "select_by_ids") and not model.in_txn:
         model.begin_txn()
 
     ctrl = Controller(model=model)
@@ -1056,7 +1145,32 @@ def op_apply(model: Model, op: dict) -> None:
     if name in ("move_selection", "copy_selection"):
         targets = selection_to_ids(model.document)
 
-    if name == "select_rect":
+    # ── id-primary op family (OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md) ──
+    # Operand ids come from the OP'S OWN PARAMS (never doc.selection), so snapshot
+    # and replay apply identical operands (the §7 determinism rule). Each
+    # ``*_by_ids`` re-establishes the working selection from its own ids (via the
+    # SHARED ``apply_select_by_ids`` body) BEFORE routing through the SAME
+    # ``Controller`` mutator the selection-relative verb uses, so the replayed
+    # document+selection is byte-identical to ``[select_rect, move_selection]``
+    # (the byte-gate reconciliation, OP_LOG.md §6).
+    if name == "select_by_ids":
+        # Selection-only / non-undoable (like select_rect): write the resolved
+        # selection BY PATH in document order; targets = the resolved ids (the
+        # keystone the recipe seeds its working set from).
+        targets = apply_select_by_ids(model, ctrl, str_list_field(op, "ids"))
+    elif name == "move_by_ids":
+        # Set the working selection from the OP's ids, then run the SAME mutator
+        # ``move_selection`` uses. targets = the operand ids (from params, resolved
+        # to the selection) — never inferred post-mutation.
+        targets = apply_select_by_ids(model, ctrl, str_list_field(op, "ids"))
+        ctrl.move_selection(num_field(op, "dx"), num_field(op, "dy"))
+    elif name == "copy_by_ids":
+        # Set the working selection from the OP's ``from`` ids, then run the SAME
+        # mutator ``copy_selection`` uses. targets = the source ids (the produced
+        # copies are born id-less, so the source is the operand).
+        targets = apply_select_by_ids(model, ctrl, str_list_field(op, "from"))
+        ctrl.copy_selection(num_field(op, "dx"), num_field(op, "dy"))
+    elif name == "select_rect":
         ctrl.select_rect(
             num_field(op, "x"),
             num_field(op, "y"),

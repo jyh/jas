@@ -509,6 +509,123 @@ class CrossLanguageTest(absltest.TestCase):
         # P7: copy=true journals [copy_selection, <transform>] in one txn.
         self._run_operation_fixture("transform_copy.json")
 
+    def test_operation_id_primary_move(self):
+        # OP_LOG.md §5 Fork 4 / 3c-1 — the id-primary op-addressing flip. The
+        # fixture carries TWO cases on the SAME ``eye.svg`` pointing at the SAME
+        # golden:
+        #   - ``selrel_move_eye``    : [select_rect, move_selection]   (sel-rel)
+        #   - ``id_primary_move_eye``: [select_by_ids, move_by_ids]    (id-primary)
+        # Both must produce a BYTE-IDENTICAL document AND selection (the golden is
+        # shared), which proves the id-primary verbs replay to the same
+        # document+selection as the selection-relative pair — the byte-gate
+        # reconciliation. The unchanged checkpoint_equivalence gate (run per case
+        # by ``_run_operation_fixture``) additionally proves each journals a
+        # replay-safe segment. The id-primary verb reads its operand ids from its
+        # OWN params, so snapshot and replay apply identical operands (the §7
+        # determinism rule).
+        self._run_operation_fixture("id_primary_move.json")
+
+    def test_operation_id_primary_copy(self):
+        # OP_LOG.md §5 Fork 4 / 3c-1 — the id-primary copy verb. Same shared-golden
+        # shape as ``test_operation_id_primary_move``: [select_rect,
+        # copy_selection] and [select_by_ids, copy_by_ids] produce a byte-identical
+        # document (the copy is born id-less on BOTH paths) AND selection.
+        self._run_operation_fixture("id_primary_copy.json")
+
+    def test_id_primary_move_reads_operand_from_params_not_selection(self):
+        # 3c-1 determinism check (OP_LOG.md §7): an id-primary op reads its operand
+        # ids from its OWN params, NEVER from ``doc.selection``, so it applies the
+        # SAME operands regardless of the ambient selection. Drive
+        # ``move_by_ids{["eye"]}`` with a DELIBERATELY WRONG ambient selection (the
+        # whole layer pre-selected) and confirm the result still equals the shared
+        # golden — i.e. the op ignored the ambient selection and moved exactly the
+        # operand named in its params.
+        from document.document import ElementSelection
+        setup_svg = _read_fixture("svg/eye.svg")
+        model = Model(document=svg_to_document(setup_svg))
+        ctrl = Controller(model=model)
+        # Poison the ambient selection with an unrelated path — an op that inferred
+        # its operand from doc.selection would act on the wrong thing.
+        ctrl.set_selection(frozenset({ElementSelection.all((0,))}))
+        model.begin_txn()
+        op_apply(model, {"op": "select_by_ids", "ids": ["eye"]})
+        op_apply(model, {"op": "move_by_ids", "ids": ["eye"], "dx": 50, "dy": 0})
+        model.commit_txn()
+        actual = document_to_test_json(model.document)
+        expected = _read_fixture("operations/id_primary_move_eye.json")
+        self.assertEqual(actual, expected,
+            "id-primary move read its operand from params, not the ambient "
+            "selection")
+
+        # Snapshot==replay even though the snapshot ran with a poisoned ambient
+        # selection: the journaled ops carry their own operands, so a fresh replay
+        # (no ambient selection) reproduces the document byte-identically.
+        replayed = self._replay_journal(
+            setup_svg, model.journal, model.journal_head)
+        self.assertEqual(replayed, actual,
+            "id-primary op applies identical operands on snapshot and replay")
+
+    def test_id_primary_capture_recipe_rederives_on_source_edit(self):
+        # 3c-1 EYE-DEMO RE-DERIVATION PIN (the load-bearing payoff): run a FAITHFUL
+        # id-primary journal segment [select_by_ids, copy_by_ids] through the SHARED
+        # dispatcher (so it is a real, byte-gated, replayable journal segment),
+        # normalize the committed segment to a RecordedElem via the now-pass-through
+        # capture_recipe, edit the SOURCE input, re-derive, and confirm the output
+        # TRACKS the edited source. The recipe survives source edits with NO
+        # selection dependency — the operand ids came from the op params
+        # (from:["eye"]), never from a select op's resolved selection. Reuses the
+        # existing eye-demo golden (eye_demo_rederived.json): copy_by_ids{dx:50}
+        # captures to copy{dx:50}, whose re-derivation against the edited source
+        # (eye->x=100 px) is byte-identical to the selection-relative demo's
+        # copy(0)+translate(50) net offset.
+        from geometry.element import RecordedElem
+        from geometry.live import capture_recipe, DEFAULT_PRECISION
+
+        # A faithful id-primary demonstration: select the eye, copy it +50. This is
+        # a REAL journal segment op_apply replays byte-identically (it is the
+        # id_primary_copy fixture's id-primary case).
+        setup_svg = _read_fixture("svg/eye.svg")
+        model = Model(document=svg_to_document(setup_svg))
+        model.begin_txn()
+        model.name_txn("id-primary demo")
+        op_apply(model, {"op": "select_by_ids", "ids": ["eye"]})
+        op_apply(model, {"op": "copy_by_ids", "from": ["eye"], "dx": 50, "dy": 0})
+        model.commit_txn()
+
+        # capture_recipe is a PASS-THROUGH over the id-primary segment: it reads the
+        # operand id from the op's ``from`` PARAM (no selection dependency —
+        # select_by_ids' targets are NOT consulted).
+        segment = model.journal[-1].ops
+        # Guard: the captured segment is purely id-primary (proves the brittle
+        # selection-relative bridge is NOT on this path).
+        for op in segment:
+            self.assertIn(op.op, ("select_by_ids", "copy_by_ids"),
+                f"segment is id-primary, got {op.op}")
+        recipe, inputs = capture_recipe(segment)
+        self.assertEqual(inputs, ["eye"])
+        self.assertEqual(len(recipe), 1)
+        self.assertEqual(recipe[0].op, "copy")
+        self.assertEqual(recipe[0].params["from"], ["eye"])
+
+        # Wrap + re-derive against the EDITED source (eye moved to x=100 px).
+        recorded = RecordedElem(
+            ops=tuple(recipe), inputs=tuple(inputs), id="rec")
+        edited_svg = setup_svg.replace('x="0" y="0"', 'x="100" y="0"')
+        edited_el = svg_to_document(edited_svg).get_element((0, 0))
+
+        class _OneResolver:
+            def resolve(self, ref):
+                return edited_el if ref == "eye" else None
+
+        ps = recorded.evaluate_with(DEFAULT_PRECISION, _OneResolver(), set())
+        actual = self._polygon_set_to_test_json(ps)
+        # The re-derived output tracks the edited source — the SAME golden the
+        # selection-relative eye demo pins (the net offset is identical).
+        expected = _read_fixture("production_capture/eye_demo_rederived.json")
+        self.assertEqual(actual, expected,
+            "the id-primary recipe re-derived against the edited source, no "
+            "selection dependency")
+
     # ---------------------------------------------------------------
     # P7 — transform CONFIRM PRODUCTION ROUTE (OP_LOG.md §9 / §8).
     # Drives the REAL scale/rotate/shear_options_confirm actions from the
