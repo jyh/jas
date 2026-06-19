@@ -181,6 +181,20 @@ fn find_element_by_id(doc: &Document, id: &str) -> Option<Element> {
 /// Mediates between user actions and the document model.
 pub struct Controller;
 
+/// Resolve the current selection to the stable `common.id`s of the selected
+/// elements, in selection order (OP_LOG.md §9 / Fork 4: the `targets` of a
+/// journaled op). Id-less selected elements are silently dropped (`common.id`
+/// is `Option`; a recorded source must carry an id — a documented
+/// prerequisite, not a bug). One definition reused by the production
+/// `op_apply` path and the `#[cfg(test)]` harness so both populate `targets`
+/// identically.
+pub fn selection_to_ids(doc: &Document) -> Vec<String> {
+    doc.selection
+        .iter()
+        .filter_map(|es| doc.get_element(&es.path).and_then(|e| e.common().id.clone()))
+        .collect()
+}
+
 impl Controller {
     /// Add an element to the current editing target and select the
     /// new element. In content-mode (the default), the element is
