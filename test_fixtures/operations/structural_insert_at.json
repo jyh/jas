@@ -1,0 +1,74 @@
+[
+  {
+    "name": "structural_insert_at_nested",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "insert_at",
+            "parent_path": [0],
+            "index": 0,
+            "element": {
+              "Rect": {
+                "x": 0.0, "y": 0.0, "width": 72.0, "height": 72.0,
+                "rx": 0.0, "ry": 0.0,
+                "fill": { "color": { "Rgb": { "r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0 } }, "opacity": 1.0 },
+                "stroke": null,
+                "common": {
+                  "opacity": 1.0, "mode": "normal", "transform": null,
+                  "locked": false, "visibility": "Preview", "mask": null,
+                  "id": "ins-1"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_json": "structural_insert_at_nested_expected.json"
+  },
+  {
+    "name": "structural_insert_at_top_level_layer",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_layer",
+        "ops": [
+          {
+            "op": "insert_at",
+            "parent_path": [],
+            "index": 1,
+            "element": {
+              "Layer": {
+                "children": [],
+                "common": {
+                  "opacity": 1.0, "mode": "normal", "transform": null,
+                  "locked": false, "visibility": "Preview", "mask": null,
+                  "name": "Layer 9", "id": "lyr-1"
+                },
+                "isolated_blending": false,
+                "knockout_group": false
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_json": "structural_insert_at_top_level_layer_expected.json"
+  },
+  {
+    "name": "structural_insert_at_malformed_element_skips",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_layer",
+        "ops": [
+          { "op": "insert_at", "parent_path": [], "index": 1 }
+        ]
+      }
+    ],
+    "expected_json": "structural_insert_at_malformed_element_skips_expected.json"
+  }
+]

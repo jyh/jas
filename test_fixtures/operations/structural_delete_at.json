@@ -1,0 +1,41 @@
+[
+  {
+    "name": "structural_delete_at_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "delete_layer_selection",
+        "ops": [
+          { "op": "delete_at", "path": [0, 1] }
+        ]
+      }
+    ],
+    "expected_json": "structural_delete_at_child_expected.json"
+  },
+  {
+    "name": "structural_delete_at_top_level_layer",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "delete_layer_selection",
+        "ops": [
+          { "op": "delete_at", "path": [1] }
+        ]
+      }
+    ],
+    "expected_json": "structural_delete_at_top_level_layer_expected.json"
+  },
+  {
+    "name": "structural_delete_at_malformed_path_skips",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "delete_layer_selection",
+        "ops": [
+          { "op": "delete_at" }
+        ]
+      }
+    ],
+    "expected_json": "structural_delete_at_malformed_path_skips_expected.json"
+  }
+]

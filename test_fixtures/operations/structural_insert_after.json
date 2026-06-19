@@ -1,0 +1,44 @@
+[
+  {
+    "name": "structural_insert_after_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "duplicate_layer_selection",
+        "ops": [
+          {
+            "op": "insert_after",
+            "path": [0, 0],
+            "element": {
+              "Rect": {
+                "x": 0.0, "y": 0.0, "width": 72.0, "height": 72.0,
+                "rx": 0.0, "ry": 0.0,
+                "fill": { "color": { "Rgb": { "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0 } }, "opacity": 1.0 },
+                "stroke": null,
+                "common": {
+                  "opacity": 1.0, "mode": "normal", "transform": null,
+                  "locked": false, "visibility": "Preview", "mask": null,
+                  "id": "dup-1"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_json": "structural_insert_after_child_expected.json"
+  },
+  {
+    "name": "structural_insert_after_malformed_element_skips",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "duplicate_layer_selection",
+        "ops": [
+          { "op": "insert_after", "path": [0, 0], "element": { "NotAVariant": {} } }
+        ]
+      }
+    ],
+    "expected_json": "structural_insert_after_malformed_element_skips_expected.json"
+  }
+]

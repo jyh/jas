@@ -1,0 +1,19 @@
+[
+  {
+    "name": "structural_delete_selection_one",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      { "op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false },
+      { "op": "delete_selection" }
+    ],
+    "expected_json": "structural_delete_selection_one_expected.json"
+  },
+  {
+    "name": "structural_delete_selection_empty_noop",
+    "setup_svg": "two_rects.svg",
+    "ops": [
+      { "op": "delete_selection" }
+    ],
+    "expected_json": "structural_delete_selection_empty_noop_expected.json"
+  }
+]

@@ -522,6 +522,123 @@ fn apply_artboard_field_in_place(
     }
 }
 
+// ── OP_LOG.md §9 Phase P4 — the structural tree-mutation verbs ──────────────
+//
+// `delete_at` / `delete_selection` / `insert_after` / `insert_at` are the first
+// verbs that mutate the ELEMENT TREE (not the artboard list / print config) to
+// journal through `op_apply`, so the renderer.rs production handler and the replay
+// harness share ONE mutation body. The two INSERTING verbs use the VALUE-IN-OP
+// strategy at full strength (OP_LOG.md §7): the op carries the ENTIRE element to
+// insert as LITERAL serde JSON in the params (exactly as P3 carried the minted id,
+// but now the value is a whole `Element`). In production the element comes from a
+// preceding NON-JOURNALED binder — `clone_at` (binds a clone of an existing
+// element as JSON in ctx) or `create_layer` (a deterministic factory producing a
+// Layer as JSON). Those binders stay non-journaled (they only produce ctx values);
+// only the resulting `insert_after`/`insert_at` journals, carrying the produced
+// element JSON. On replay these helpers deserialize the element from the op JSON
+// via `serde_json::from_value::<Element>` (Element derives Deserialize, so this
+// layer is self-contained — no interpreter import) and insert it BYTE-IDENTICALLY:
+// the clone keeps whatever id it had (value-in-op ⇒ replay inserts the same id),
+// which the checkpoint_equivalence gate (OP_LOG.md §6) proves via
+// document_to_test_json. Hardened reads: a malformed/absent element or path SKIPS
+// rather than panicking; an effective-change check (delete a present path / a
+// non-empty selection) means a no-op edit journals nothing. Elements live in the
+// `document.layers` tree (paths, not ids), so `targets` carries the affected
+// element's `common.id` when it has one, else `[]` (delete_selection carries the
+// pre-deletion selection ids).
+
+/// Deserialize the `element` op param into an [`Element`]. Returns `None` if the
+/// field is absent or is not a valid serialized Element (a malformed production
+/// payload skips the op rather than panicking — the value-in-op element must
+/// round-trip, so a non-Element value is a hard skip).
+fn parse_element(op: &serde_json::Value) -> Option<crate::geometry::element::Element> {
+    let v = op.get("element")?;
+    serde_json::from_value::<crate::geometry::element::Element>(v.clone()).ok()
+}
+
+/// The `common.id` of an Element, or `None` when id-less. Used to populate
+/// `targets` for the inserting verbs (Fork 4 merge metadata; the byte-gate
+/// ignores it).
+fn element_id(el: &crate::geometry::element::Element) -> Option<String> {
+    el.common().id.clone()
+}
+
+/// Delete the element at `path`. Returns `true` iff an element was present and
+/// removed (an absent path is a no-op that journals nothing). Self-bracketing
+/// through `edit_document` (joins an open transaction; opens its own otherwise),
+/// so the renderer.rs handler and this arm share ONE mutation body. The deleted
+/// element's id (if any) is returned to the caller for `targets`.
+pub fn apply_delete_element_at(
+    model: &mut Model,
+    path: &ElementPath,
+) -> (bool, Vec<String>) {
+    let doc = model.document().clone();
+    let Some(existing) = doc.get_element(path) else {
+        return (false, Vec::new());
+    };
+    let targets: Vec<String> = element_id(existing).into_iter().collect();
+    let new_doc = doc.delete_element(path);
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Delete every currently-selected element (reference-aware delete path). Returns
+/// the pre-deletion selection ids (for `targets`) and `true` iff the selection
+/// was non-empty (an empty selection is a no-op that journals nothing). The
+/// document's serialized selection IS the operand — no params.
+pub fn apply_delete_selection(model: &mut Model) -> (bool, Vec<String>) {
+    let doc = model.document();
+    if doc.selection.is_empty() {
+        return (false, Vec::new());
+    }
+    let targets = controller::selection_to_ids(doc);
+    let new_doc = doc.delete_selection();
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Insert `element` immediately after the element at `path`. The element is taken
+/// VERBATIM (value-in-op): whatever id it carries is inserted as-is, so replay is
+/// byte-identical to production. Returns the inserted element's id (if any) for
+/// `targets`. An empty path is a no-op at the document layer
+/// (`insert_element_after` returns the document unchanged); we still journal it
+/// only on the renderer's resolved-path contract — the harness fixtures always
+/// supply a well-formed path, and the gate would catch a non-effective insert.
+pub fn apply_insert_element_after(
+    model: &mut Model,
+    path: &ElementPath,
+    element: crate::geometry::element::Element,
+) -> Vec<String> {
+    let targets: Vec<String> = element_id(&element).into_iter().collect();
+    let new_doc = model.document().clone().insert_element_after(path, element);
+    model.edit_document(new_doc);
+    targets
+}
+
+/// Insert `element` at `index` under `parent_path` (an empty `parent_path` inserts
+/// into the top-level `layers` array). The element is taken VERBATIM (value-in-op).
+/// Returns the inserted element's id (if any) for `targets`. Mirrors renderer.rs's
+/// `insert_element_at` body exactly so the production and replay paths agree.
+pub fn apply_insert_element_at(
+    model: &mut Model,
+    parent_path: &ElementPath,
+    index: usize,
+    element: crate::geometry::element::Element,
+) -> Vec<String> {
+    let targets: Vec<String> = element_id(&element).into_iter().collect();
+    let mut new_doc = model.document().clone();
+    if parent_path.is_empty() {
+        let idx = index.min(new_doc.layers.len());
+        new_doc.layers.insert(idx, element);
+    } else {
+        let mut insert_path = parent_path.clone();
+        insert_path.push(index);
+        new_doc = new_doc.insert_element_at(&insert_path, element);
+    }
+    model.edit_document(new_doc);
+    targets
+}
+
 /// Read a JSON array-of-strings field (the `ids` payload for the move verbs).
 /// Non-string entries are dropped; a missing/non-array field yields `[]`.
 fn str_list_field(op: &serde_json::Value, key: &str) -> Vec<String> {
@@ -715,9 +832,52 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             };
             Controller::set_instance_transform(model, &path, transform);
         }
+        // Structural tree-mutation verbs (OP_LOG.md §9 Phase P4). `delete_at` /
+        // `delete_selection` / `insert_after` / `insert_at` mutate the element
+        // TREE through the SHARED helpers (apply_delete_element_at /
+        // apply_delete_selection / apply_insert_element_after /
+        // apply_insert_element_at), so the renderer.rs handlers and these arms
+        // share ONE mutation body. The inserting verbs carry the WHOLE element as
+        // LITERAL serde JSON (value-in-op, OP_LOG.md §7) — `parse_element`
+        // deserializes it defensively (a non-Element value SKIPS). Hardened reads:
+        // a missing/malformed path or element early-returns BEFORE record_op, and
+        // a no-op edit (absent delete path / empty selection) journals nothing.
+        // targets carry the affected element's id (delete_selection → the
+        // pre-deletion selection ids).
+        "delete_at" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return;
+            };
+            let (changed, t) = apply_delete_element_at(model, &path);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
         "delete_selection" => {
-            let new_doc = model.document().delete_selection();
-            model.edit_document(new_doc);
+            let (changed, t) = apply_delete_selection(model);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        "insert_after" => {
+            let (Some(path), Some(element)) = (parse_path(op.get("path")), parse_element(op))
+            else {
+                return;
+            };
+            targets = apply_insert_element_after(model, &path, element);
+        }
+        "insert_at" => {
+            let (Some(parent_path), Some(element)) =
+                (parse_path(op.get("parent_path")), parse_element(op))
+            else {
+                return;
+            };
+            // A missing/malformed index defaults to 0 (the renderer's contract:
+            // index is a resolved usize; out-of-range clamps in the helper).
+            let index = op.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            targets = apply_insert_element_at(model, &parent_path, index, element);
         }
         "lock_selection" => {
             Controller::lock_selection(model);
