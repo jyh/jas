@@ -1,8 +1,11 @@
 # Operation Log — the transaction spine
 
-**Status:** design locked (2026-06-17); Increments 1, 2, 3a, and 3b-A **built + merged
-to main** (recorded live elements at cross-language parity across all four native apps);
-Increment 3b-B (production op-capture) in progress (§9). · **Implements:** `VISION.md` §10
+**Status:** design locked (2026-06-17); Increments 1, 2, 3a, 3b-A, 3b-B, the full
+33-verb unification, the enforced `set_document` chokepoint, per-frame drag
+coalescing, 3c-1 (id-primary flip), and 3d (`OpWorld` trait + runtime layout
+dispatcher) all **built + merged to main** at cross-language parity. Deferred:
+sibling-app panel/menu production routing (in progress), 3c-2/3/4 (collaboration),
+3d-1's trait in the siblings — see §9. · **Implements:** `VISION.md` §10
 critical-path item 2 ("the operation/transaction log formalized as the atomic,
 reversible, summarizable unit") · **Relationship to other docs:** it is the `VISION.md`
 §5 item 5 "operation log is the spine" foundation; it generalizes today's boolean+simplify undo
@@ -325,25 +328,38 @@ it from the production effect path for **exactly the three replay-safe verbs**
   `RecordedElem` → edit source → `evaluate_with` → byte-pin the re-derived output
   (the eye demo on the real path).
 
-**v1 DEFERRED follow-ons (this is their tracking home):**
-- **Layers-panel "Duplicate"** (`duplicate_layer_selection` → `doc.clone_at` +
-  `doc.insert_after`) and **"Duplicate Artboard"** (`doc.duplicate_artboard`) — both
-  live in the *other* runner (`renderer.rs::run_yaml_effect`, AppState-level, with a
-  throwaway `StateStore`) and journal nothing in v1. So the same logical "duplicate
-  then move" is captured via canvas drag but NOT via the menu/panel — a known
-  asymmetry. Fold in when the `renderer.rs` handlers are next consolidated.
-- The other ~30 `doc.*` verbs (`set`/`rotate`/`scale`/`shear`, all artboard/layer/
-  print-config setters, `wrap`/`unpack`/`delete_*`/`insert_*`/`create_*`) stay
-  named-but-op-less. **The journal is not a complete canonical history yet.**
-- **Per-frame drag coalescing** — `on_mousemove` fires one `translate_selection` per
-  frame, so a captured drag is many composing `move_selection` ops (byte-correct,
-  verbose). Coalescing deferred.
+**STATUS UPDATE (2026-06-19).** Most of what this section originally deferred has
+since shipped + merged to main across the apps; the live tracking detail lives in
+the `project_oplog_increment1` memory. Recap of what is now DONE (no longer
+deferred): the **Layers/Artboard "Duplicate"** gestures journal real ops in Rust
+(`duplicate_layer_selection` → `insert_after`; `doc.duplicate_artboard`) — both
+route through the shared `op_apply` (the `renderer.rs::run_yaml_effect` AppState
+runner uses the REAL `Model`, not a throwaway `StateStore` — the original note's
+premise was wrong); the **full 33-verb `actions.yaml`↔`op_apply` unification** (26
+journaling verbs, the rest correctly non-journaling) across all 4 native apps; the
+**`set_document` mutation-path consolidation** (the enforced `in_txn` chokepoint) in
+all 4 apps; **per-frame drag coalescing** (`commit_txn` merges adjacent same-gesture
+move txns → one journal entry + one undo step) in all 4 apps; the **3c-1 id-primary
+op-addressing flip** (move/copy/select by id) in all 4 apps; and **3d** (the shared
+`OpWorld` trait + a runtime `layout_apply` dispatcher) in all 4 apps.
+
+**Still genuinely deferred (demand-driven):**
+- **Sibling-app panel/menu production routing.** Rust routes *all* its panel/menu
+  production handlers through `op_apply` (so every gesture journals); the op_apply
+  *arms* exist in Swift/OCaml/Python (byte-gated by the shared operations fixtures),
+  but their panel/menu production handlers still mutate the document directly, so a
+  real panel/menu gesture in those apps journals nothing (undo still works via the
+  snapshot). Behavior-neutral for undo; matters for capture/versioning/AI-collab in
+  those apps. (In progress on `oplog-sibling-prod-routing`.)
+- **3c-2/3/4** — op-inversion, document identity (`doc_id`), and the recorded-merge
+  collaboration engine (merge model = recorded-merge-ready). Speculative until real
+  multi-user demand; this section's §11/§12 cautions still apply.
+- **3d-1's `OpWorld` trait** in the 3 sibling apps (low value — both harnesses
+  already exist there).
 - `common.id` is `Option`; `selection_to_ids` drops id-less elements, so a recorded
-  source must carry a `common.id` (assign-on-demand) — a documented prerequisite,
-  not a bug.
-- The full 33-verb `actions.yaml`↔`op_apply` unification, the ~148 `set_document`
-  consolidation tail, control-point granularity, and the Fork-4 id-primary rewrite
-  remain separate later projects. Flask is forward-replay-only (no live canvas).
+  source must carry a `common.id` — a documented prerequisite, not a bug.
+- Control-point granularity for recorded recipes. Flask stays forward-replay-only
+  (no live canvas).
 
 ---
 
