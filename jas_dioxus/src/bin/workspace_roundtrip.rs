@@ -76,131 +76,37 @@ fn main() {
     }
 }
 
+/// Apply one primitive LAYOUT op to `layout`. Delegates to the SINGLE runtime
+/// dispatcher `jas_dioxus::workspace::layout_apply::layout_apply` — the SAME
+/// per-verb mutation body the production layout-mutation sites and the
+/// `cross_language_test.rs` harness shim route through (3d-2, OP_LOG.md §12 Fork
+/// 5). This CLI is the cross-language test oracle the other apps validate
+/// against; sharing the one dispatcher means the in-process corpus and the CLI
+/// oracle cannot drift in op-shape or behavior — there is exactly ONE layout
+/// verb body in the crate now.
+///
+/// `layout_apply` is hardened to SKIP a malformed/unknown op rather than panic.
+/// The cross-language corpus only ever feeds well-formed, known verbs, so the
+/// prior per-verb `.unwrap()` parsing and the `Unknown workspace op` exit are
+/// unreachable on the real input; keeping the unknown-verb diagnostic for CLI
+/// users is retained as a thin pre-check below before delegating.
 fn apply_op(layout: &mut jas_dioxus::workspace::workspace::WorkspaceLayout, op: &serde_json::Value) {
-    use jas_dioxus::workspace::workspace::*;
-
-    let name = op["op"].as_str().unwrap();
-    match name {
-        "toggle_group_collapsed" => {
-            layout.toggle_group_collapsed(GroupAddr {
-                dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                group_idx: op["group_idx"].as_u64().unwrap() as usize,
-            });
-        }
-        "set_active_panel" => {
-            layout.set_active_panel(PanelAddr {
-                group: GroupAddr {
-                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                },
-                panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
-            });
-        }
-        "close_panel" => {
-            layout.close_panel(PanelAddr {
-                group: GroupAddr {
-                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                },
-                panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
-            });
-        }
-        "show_panel" => {
-            let kind = match op["kind"].as_str().unwrap() {
-                "color" => PanelKind::Color,
-                "stroke" => PanelKind::Stroke,
-                "properties" => PanelKind::Properties,
-                _ => PanelKind::Layers,
-            };
-            layout.show_panel(kind);
-        }
-        "reorder_panel" => {
-            layout.reorder_panel(
-                GroupAddr {
-                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                },
-                op["from"].as_u64().unwrap() as usize,
-                op["to"].as_u64().unwrap() as usize,
-            );
-        }
-        "move_panel_to_group" => {
-            layout.move_panel_to_group(
-                PanelAddr {
-                    group: GroupAddr {
-                        dock_id: DockId(op["from_dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["from_group_idx"].as_u64().unwrap() as usize,
-                    },
-                    panel_idx: op["from_panel_idx"].as_u64().unwrap() as usize,
-                },
-                GroupAddr {
-                    dock_id: DockId(op["to_dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["to_group_idx"].as_u64().unwrap() as usize,
-                },
-            );
-        }
-        "detach_group" => {
-            layout.detach_group(
-                GroupAddr {
-                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                },
-                op["x"].as_f64().unwrap(),
-                op["y"].as_f64().unwrap(),
-            );
-        }
-        "redock" => {
-            layout.redock(DockId(op["dock_id"].as_u64().unwrap() as usize));
-        }
-        "set_pane_position" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            pl.set_pane_position(
-                PaneId(op["pane_id"].as_u64().unwrap() as usize),
-                op["x"].as_f64().unwrap(),
-                op["y"].as_f64().unwrap(),
-            );
-        }
-        "tile_panes" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            pl.tile_panes(None);
-        }
-        "toggle_canvas_maximized" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            pl.toggle_canvas_maximized();
-        }
-        "resize_pane" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            pl.resize_pane(
-                PaneId(op["pane_id"].as_u64().unwrap() as usize),
-                op["width"].as_f64().unwrap(),
-                op["height"].as_f64().unwrap(),
-            );
-        }
-        "hide_pane" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            let kind = match op["kind"].as_str().unwrap() {
-                "toolbar" => PaneKind::Toolbar,
-                "dock" => PaneKind::Dock,
-                _ => PaneKind::Canvas,
-            };
-            pl.hide_pane(kind);
-        }
-        "show_pane" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            let kind = match op["kind"].as_str().unwrap() {
-                "toolbar" => PaneKind::Toolbar,
-                "dock" => PaneKind::Dock,
-                _ => PaneKind::Canvas,
-            };
-            pl.show_pane(kind);
-        }
-        "bring_pane_to_front" => {
-            let pl = layout.pane_layout.as_mut().unwrap();
-            pl.bring_pane_to_front(PaneId(op["pane_id"].as_u64().unwrap() as usize));
-        }
-        _ => {
-            eprintln!("Unknown workspace op: {}", name);
+    // Preserve the CLI's loud-fail on an unrecognized verb (the runtime
+    // dispatcher silently skips, which is right for production but unhelpful for
+    // a test-oracle invocation fed a typo). The KNOWN-verb set must stay in sync
+    // with `layout_apply`'s match arms.
+    const KNOWN: &[&str] = &[
+        "toggle_group_collapsed", "set_active_panel", "close_panel", "show_panel",
+        "reorder_panel", "move_panel_to_group", "detach_group", "redock",
+        "set_pane_position", "tile_panes", "toggle_canvas_maximized", "resize_pane",
+        "hide_pane", "show_pane", "bring_pane_to_front",
+    ];
+    match op["op"].as_str() {
+        Some(name) if KNOWN.contains(&name) => {}
+        other => {
+            eprintln!("Unknown workspace op: {}", other.unwrap_or("<missing>"));
             std::process::exit(1);
         }
     }
+    jas_dioxus::workspace::layout_apply::layout_apply(layout, op);
 }

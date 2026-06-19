@@ -11,6 +11,10 @@ pub(crate) mod dock_panel;
 pub mod fill_stroke_widget;
 pub mod icons;
 pub(crate) mod keyboard;
+// The single runtime LAYOUT-op dispatcher (OP_LOG.md §12, Fork 5, Increment
+// 3d-2): production layout mutations and the cross-language harness share this
+// one per-verb body. Promoted from the web-gated harness `apply_workspace_op`.
+pub mod layout_apply;
 pub mod menu;
 pub mod menu_bar;
 // Pane layout API surface includes accessors used externally and a

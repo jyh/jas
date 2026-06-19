@@ -2704,142 +2704,20 @@ mod tests {
     // ---------------------------------------------------------------
 
     #[cfg(feature = "web")]
-    use crate::workspace::workspace::{
-        DockId, GroupAddr, PanelAddr, PanelKind, PaneId, PaneKind,
-    };
+    use crate::workspace::workspace::{PaneId, PaneKind};
 
-    #[cfg(feature = "web")]
-    fn parse_panel_kind(s: &str) -> PanelKind {
-        match s {
-            "color" => PanelKind::Color,
-            "swatches" => PanelKind::Swatches,
-            "stroke" => PanelKind::Stroke,
-            "properties" => PanelKind::Properties,
-            _ => PanelKind::Layers,
-        }
-    }
-
-    #[cfg(feature = "web")]
-    fn parse_pane_kind(s: &str) -> PaneKind {
-        match s {
-            "toolbar" => PaneKind::Toolbar,
-            "dock" => PaneKind::Dock,
-            _ => PaneKind::Canvas,
-        }
-    }
-
+    /// Harness shim over the RUNTIME layout-op dispatcher (OP_LOG.md §12, Fork
+    /// 5, Increment 3d-2). The per-verb mutation bodies — once duplicated here —
+    /// now live in `crate::workspace::layout_apply::layout_apply`, which is the
+    /// SAME dispatcher the production layout-mutation sites route through. The
+    /// `workspace_operations/*.json` corpus replays through this shim, so harness
+    /// and production exercise ONE dispatcher (the layout analogue of how the
+    /// document corpus replays through `op_apply`). Kept as a thin wrapper so the
+    /// existing `LayoutOps::apply` / `op_world_layout_envelope` call sites read
+    /// unchanged.
     #[cfg(feature = "web")]
     fn apply_workspace_op(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
-        let name = op["op"].as_str().unwrap();
-        match name {
-            // Panel/dock operations
-            "toggle_group_collapsed" => {
-                layout.toggle_group_collapsed(GroupAddr {
-                    dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                    group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                });
-            }
-            "set_active_panel" => {
-                layout.set_active_panel(PanelAddr {
-                    group: GroupAddr {
-                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                    },
-                    panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
-                });
-            }
-            "close_panel" => {
-                layout.close_panel(PanelAddr {
-                    group: GroupAddr {
-                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                    },
-                    panel_idx: op["panel_idx"].as_u64().unwrap() as usize,
-                });
-            }
-            "show_panel" => {
-                let kind = parse_panel_kind(op["kind"].as_str().unwrap());
-                layout.show_panel(kind);
-            }
-            "reorder_panel" => {
-                layout.reorder_panel(
-                    GroupAddr {
-                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                    },
-                    op["from"].as_u64().unwrap() as usize,
-                    op["to"].as_u64().unwrap() as usize,
-                );
-            }
-            "move_panel_to_group" => {
-                layout.move_panel_to_group(
-                    PanelAddr {
-                        group: GroupAddr {
-                            dock_id: DockId(op["from_dock_id"].as_u64().unwrap() as usize),
-                            group_idx: op["from_group_idx"].as_u64().unwrap() as usize,
-                        },
-                        panel_idx: op["from_panel_idx"].as_u64().unwrap() as usize,
-                    },
-                    GroupAddr {
-                        dock_id: DockId(op["to_dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["to_group_idx"].as_u64().unwrap() as usize,
-                    },
-                );
-            }
-            "detach_group" => {
-                layout.detach_group(
-                    GroupAddr {
-                        dock_id: DockId(op["dock_id"].as_u64().unwrap() as usize),
-                        group_idx: op["group_idx"].as_u64().unwrap() as usize,
-                    },
-                    op["x"].as_f64().unwrap(),
-                    op["y"].as_f64().unwrap(),
-                );
-            }
-            "redock" => {
-                layout.redock(DockId(op["dock_id"].as_u64().unwrap() as usize));
-            }
-            // Pane operations
-            "set_pane_position" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                pl.set_pane_position(
-                    PaneId(op["pane_id"].as_u64().unwrap() as usize),
-                    op["x"].as_f64().unwrap(),
-                    op["y"].as_f64().unwrap(),
-                );
-            }
-            "tile_panes" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                pl.tile_panes(None);
-            }
-            "toggle_canvas_maximized" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                pl.toggle_canvas_maximized();
-            }
-            "resize_pane" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                pl.resize_pane(
-                    PaneId(op["pane_id"].as_u64().unwrap() as usize),
-                    op["width"].as_f64().unwrap(),
-                    op["height"].as_f64().unwrap(),
-                );
-            }
-            "hide_pane" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                let kind = parse_pane_kind(op["kind"].as_str().unwrap());
-                pl.hide_pane(kind);
-            }
-            "show_pane" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                let kind = parse_pane_kind(op["kind"].as_str().unwrap());
-                pl.show_pane(kind);
-            }
-            "bring_pane_to_front" => {
-                let pl = layout.pane_layout.as_mut().unwrap();
-                pl.bring_pane_to_front(PaneId(op["pane_id"].as_u64().unwrap() as usize));
-            }
-            _ => panic!("Unknown workspace op: {}", name),
-        }
+        crate::workspace::layout_apply::layout_apply(layout, op);
     }
 
     /// Layout op vocabulary (Fork 5; OP_LOG §12 "Layout-op unification").
@@ -2972,6 +2850,121 @@ mod tests {
             "OpWorld layout envelope diverged from direct apply_workspace_op path");
         assert!(!LayoutOps::verbs().is_empty(),
             "LayoutOps::verbs() must advertise the layout vocabulary");
+    }
+
+    // ---------------------------------------------------------------
+    // 3d-2 production-route tests (OP_LOG.md §12, Fork 5, Option B)
+    //
+    // These pin that the PRODUCTION layout-mutation sites route through the
+    // SAME runtime `layout_apply` dispatcher the harness corpus replays through,
+    // and that the dispatcher never panics on malformed input. `layout_apply`
+    // itself is module-level non-gated, but the WHOLE `workspace` / `panels`
+    // module tree is `#[cfg(feature = "web")]` at the crate root in this app, so
+    // these tests — which touch `AppState` and the panel dispatcher — are
+    // web-gated to match (and the `--no-default-features --lib` build, where the
+    // layout subsystem is absent, still compiles).
+    // ---------------------------------------------------------------
+
+    /// Production-route pin: drive a real production layout path — the Layers
+    /// panel hamburger-menu `close_panel` command (`layers_panel::dispatch`),
+    /// the same handler the live UI invokes — against a real `AppState`, and
+    /// assert (1) it produces the SAME `WorkspaceLayout` (`workspace_to_test_json`)
+    /// as feeding the equivalent op straight to the runtime `layout_apply`
+    /// dispatcher, proving the production site routes through the one dispatcher;
+    /// and (2) the dirty signal still fired — `needs_save()` flips true, which is
+    /// the `bump()` the `act` wrapper reads to persist. ZERO behavior change vs
+    /// the pre-3d-2 direct `workspace_layout.close_panel(addr)` call.
+    #[cfg(feature = "web")]
+    #[test]
+    fn layout_production_route_close_panel() {
+        use crate::workspace::app_state::AppState;
+        use crate::workspace::workspace::{WorkspaceLayout, PanelAddr, GroupAddr, DockId};
+        use crate::workspace::test_json::workspace_to_test_json;
+
+        // A real AppState with a known, fixture-shaped default layout.
+        let mut st = AppState::new();
+        st.workspace_layout = WorkspaceLayout::default_layout();
+        // Zero the dirty signal so a post-dispatch `needs_save()` proves the
+        // production handler's `bump()` (inside `close_panel`) fired.
+        st.workspace_layout.mark_saved();
+        assert!(!st.workspace_layout.needs_save(),
+            "precondition: layout must start clean");
+
+        // The Layers panel address in the default layout (matches the
+        // `panel_close_layers` corpus case: dock 0, group 2, panel 0).
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: DockId(0), group_idx: 2 },
+            panel_idx: 0,
+        };
+
+        // Oracle: the same op fed straight to the runtime dispatcher.
+        let mut oracle = WorkspaceLayout::default_layout();
+        crate::workspace::layout_apply::layout_apply(
+            &mut oracle,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        );
+        let expected = workspace_to_test_json(&oracle);
+
+        // Production path: the panel hamburger-menu dispatcher.
+        crate::panels::layers_panel::dispatch("close_panel", addr, &mut st);
+
+        let actual = workspace_to_test_json(&st.workspace_layout);
+        assert_eq!(actual, expected,
+            "production close_panel path diverged from the runtime layout_apply dispatcher");
+        assert!(st.workspace_layout.needs_save(),
+            "production close_panel must still bump the dirty signal (needs_save)");
+    }
+
+    /// No-panic pin: the runtime `layout_apply` dispatcher MUST tolerate
+    /// malformed / garbage ops without panicking — production input is never
+    /// trusted (the document `op_apply` discipline). Missing `op`, unknown verb,
+    /// wrong-typed params, and missing required `kind` must all SKIP. A
+    /// well-formed op on the same layout must still mutate (sanity), confirming
+    /// the harness ISN'T masking a no-op dispatcher.
+    #[cfg(feature = "web")]
+    #[test]
+    fn layout_apply_no_panic_on_malformed() {
+        use crate::workspace::workspace::WorkspaceLayout;
+        use crate::workspace::layout_apply::layout_apply;
+        use crate::workspace::test_json::workspace_to_test_json;
+
+        let mut layout = WorkspaceLayout::default_layout();
+        layout.ensure_pane_layout(1200.0, 800.0);
+        let baseline = workspace_to_test_json(&layout);
+
+        // None of these must panic; each is a no-op (skip).
+        let malformed = [
+            serde_json::json!({}),                                  // no "op"
+            serde_json::json!({"op": 42}),                          // "op" not a string
+            serde_json::json!({"op": "totally_unknown_verb"}),     // unknown verb
+            serde_json::json!({"op": "show_panel"}),               // missing required "kind"
+            serde_json::json!({"op": "show_panel", "kind": 7}),    // "kind" wrong type
+            serde_json::json!({"op": "hide_pane"}),                // missing required "kind"
+            serde_json::json!({"op": "close_panel"}),              // missing dock/group/panel
+            serde_json::json!({"op": "set_pane_position", "pane_id": "x"}), // garbage param
+            serde_json::json!({"op": "toggle_group_collapsed", "dock_id": -1}), // bad number
+            serde_json::json!({"op": "redock", "dock_id": "nope"}),
+        ];
+        for op in &malformed {
+            layout_apply(&mut layout, op); // must not panic
+        }
+
+        // Skipped ops with valid-but-unknown targets leave the layout unchanged
+        // for the cases that resolve to defaults but hit no element. (close_panel
+        // with defaulted 0/0/0 may mutate group 0; show_panel with missing kind
+        // skips entirely.) We only assert no panic above; here we additionally
+        // confirm a WELL-FORMED op still works on a fresh layout (the dispatcher
+        // is live, not inert).
+        let mut fresh = WorkspaceLayout::default_layout();
+        let before = workspace_to_test_json(&fresh);
+        layout_apply(&mut fresh, &serde_json::json!(
+            {"op": "toggle_group_collapsed", "dock_id": 0, "group_idx": 0}));
+        let after = workspace_to_test_json(&fresh);
+        assert_ne!(before, after,
+            "a well-formed op must still mutate — dispatcher is live");
+        // `baseline` is captured to document the malformed loop ran against a
+        // real, paned layout; reference it so the binding is not dead.
+        assert!(!baseline.is_empty());
     }
 
     // ---------------------------------------------------------------

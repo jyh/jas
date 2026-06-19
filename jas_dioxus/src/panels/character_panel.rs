@@ -22,7 +22,10 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// the icon toggles use, so menu and in-panel surfaces stay in sync.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
-        "close_panel" => state.workspace_layout.close_panel(addr),
+        "close_panel" => crate::workspace::layout_apply::layout_apply(
+            &mut state.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        ),
         "toggle_snap_to_glyph_visible" => {
             state.character_panel.snap_to_glyph_visible = !state.character_panel.snap_to_glyph_visible;
         }

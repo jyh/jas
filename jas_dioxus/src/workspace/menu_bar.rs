@@ -346,37 +346,48 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         let dock_collapsed = st.workspace_layout.anchored_dock(super::workspace::DockEdge::Right)
                             .is_some_and(|d| d.collapsed);
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            pl.canvas_maximized = false;
-                            let override_id = if dock_collapsed {
-                                pl.pane_by_kind(super::workspace::PaneKind::Dock).map(|p| (p.id, 36.0))
-                            } else {
-                                None
-                            };
-                            pl.tile_panes(override_id);
-                        }
+                        // Resolve the collapsed-dock width override against the
+                        // live pane layout, then dispatch through the shared
+                        // layout-op runtime (OP_LOG.md §12). `set_canvas_maximized:
+                        // false` reproduces the pre-3d-2 `pl.canvas_maximized = false`.
+                        let override_pane = if dock_collapsed {
+                            st.workspace_layout.pane_layout.as_ref()
+                                .and_then(|pl| pl.pane_by_kind(super::workspace::PaneKind::Dock).map(|p| (p.id, 36.0)))
+                        } else {
+                            None
+                        };
+                        crate::workspace::layout_apply::layout_apply(
+                            &mut st.workspace_layout,
+                            &crate::workspace::layout_apply::op_tile_panes(false, override_pane),
+                        );
                     }));
                 }
                 // Window menu: pane visibility
                 "toggle_pane_toolbar" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            if pl.is_pane_visible(super::workspace::PaneKind::Toolbar) {
-                                pl.hide_pane(super::workspace::PaneKind::Toolbar);
+                        let visible = st.workspace_layout.pane_layout.as_ref()
+                            .map(|pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar));
+                        if let Some(visible) = visible {
+                            let op = if visible {
+                                crate::workspace::layout_apply::op_hide_pane(super::workspace::PaneKind::Toolbar)
                             } else {
-                                pl.show_pane(super::workspace::PaneKind::Toolbar);
-                            }
+                                crate::workspace::layout_apply::op_show_pane(super::workspace::PaneKind::Toolbar)
+                            };
+                            crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout, &op);
                         }
                     }));
                 }
                 "toggle_pane_dock" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                            if pl.is_pane_visible(super::workspace::PaneKind::Dock) {
-                                pl.hide_pane(super::workspace::PaneKind::Dock);
+                        let visible = st.workspace_layout.pane_layout.as_ref()
+                            .map(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock));
+                        if let Some(visible) = visible {
+                            let op = if visible {
+                                crate::workspace::layout_apply::op_hide_pane(super::workspace::PaneKind::Dock)
                             } else {
-                                pl.show_pane(super::workspace::PaneKind::Dock);
-                            }
+                                crate::workspace::layout_apply::op_show_pane(super::workspace::PaneKind::Dock)
+                            };
+                            crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout, &op);
                         }
                     }));
                 }
@@ -385,10 +396,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Layers) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Layers);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Layers),
+                            );
                         }
                     }));
                 }
@@ -396,10 +413,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Color) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Color);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Color),
+                            );
                             // Per COLOR.md §Panel initialization rule:
                             // color_panel_mode is panel-local and
                             // resets to its default (HSB) on each
@@ -412,10 +435,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Swatches) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Swatches) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Swatches);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Swatches),
+                            );
                         }
                     }));
                 }
@@ -423,10 +452,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Stroke) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Stroke);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Stroke),
+                            );
                         }
                     }));
                 }
@@ -434,10 +469,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Properties) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Properties);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Properties),
+                            );
                         }
                     }));
                 }
@@ -445,10 +486,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Character) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Character) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Character);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Character),
+                            );
                         }
                     }));
                 }
@@ -456,10 +503,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Paragraph) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Paragraph) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Paragraph);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Paragraph),
+                            );
                         }
                     }));
                 }
@@ -467,10 +520,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::MagicWand) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::MagicWand) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::MagicWand);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::MagicWand),
+                            );
                         }
                     }));
                 }
@@ -478,10 +537,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Artboards) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Artboards) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Artboards);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Artboards),
+                            );
                         }
                     }));
                 }
@@ -489,10 +554,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Symbols) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Symbols) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Symbols);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Symbols),
+                            );
                         }
                     }));
                 }
@@ -500,10 +571,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Align) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Align) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Align);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Align),
+                            );
                         }
                     }));
                 }
@@ -511,10 +588,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Boolean) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Boolean) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Boolean);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Boolean),
+                            );
                         }
                     }));
                 }
@@ -522,10 +605,16 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Opacity) {
                             if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Opacity) {
-                                st.workspace_layout.close_panel(addr);
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_close_panel(addr),
+                                );
                             }
                         } else {
-                            st.workspace_layout.show_panel(super::workspace::PanelKind::Opacity);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Opacity),
+                            );
                         }
                     }));
                 }

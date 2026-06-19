@@ -70,7 +70,10 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         return;
     }
     match cmd {
-        "close_panel" => state.workspace_layout.close_panel(addr),
+        "close_panel" => crate::workspace::layout_apply::layout_apply(
+            &mut state.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        ),
         "sort_swatches_by_name" => {
             // Alphabetical (case-sensitive ASCII) reorder of the
             // active library. Selection is cleared because index
