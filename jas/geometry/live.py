@@ -274,24 +274,37 @@ def resolver_from_document(doc: "Document") -> DictResolver:
 
 def capture_recipe(segment):
     """Normalize a captured journal op-segment into a recorded recipe
-    (RECORDED_ELEMENTS.md §1/§4): rewrite selection-relative ops into the
-    input-addressed form by tracking the working selection as recipe refs.
+    (RECORDED_ELEMENTS.md §1/§4): rewrite the captured ops into the
+    input-addressed ``copy`` / ``translate`` form ``evaluate_with`` consumes,
+    tracking the working set as recipe refs.
 
-    - A select op (``select_rect`` / ``select``) establishes the working
-      selection from its resolved ``targets`` (the ids it selected); it is
-      NOT emitted — selection becomes input-addressing.
-    - ``copy_selection`` emits ``copy{from, dx, dy}`` (source = the working
-      selection) and rebinds the selection to the produced ``$n`` handles.
-    - ``move_selection`` emits ``translate{ids, dx, dy}`` on the working
-      selection.
-    - Ops outside the replay-safe subset are dropped from the recipe.
+    Two captured shapes are accepted:
 
-    The recipe's non-``$`` refs are the **inputs** — the elements it rebinds
-    by stable id (the deterministic "everything that traces to a read input
-    rebinds; produced elements are ``$n`` handles" MVP rule; no AI fitter).
-    Returns ``(recipe, input_ids)`` as a (list[PrimitiveOp], list[str]); the
-    caller wraps them in a ``RecordedElem``. Mirrors the Rust
-    ``capture_recipe``.
+    **The id-primary family (OP_LOG.md §5 Fork 4 — the 3c-1 form, NO selection
+    dependency).** When the segment is already id-primary, this is a PASS-THROUGH:
+    every operand id is read DIRECTLY from the op's OWN PARAMS, never from a select
+    op's selection-resolved ``targets``, so the recipe is independent of any
+    document selection.
+
+    - ``select_by_ids{ids}`` establishes the working set from its ``ids`` PARAM;
+      it is NOT emitted (id-addressing replaces selection).
+    - ``copy_by_ids{from, dx, dy}`` emits ``copy{from, dx, dy}`` (source = its
+      ``from`` PARAM) and rebinds the working set to the produced ``$n`` handles.
+    - ``move_by_ids{ids, dx, dy}`` emits ``translate{ids, dx, dy}`` on the working
+      set (which, after a copy, is the produced ``$n`` handles — so a "copy then
+      move the copy" demonstration replays without ever naming the id-less copy).
+
+    **The legacy selection-relative family (OP_LOG.md §7 — kept verbatim).** A
+    ``select_rect`` / ``select`` op establishes the working set from its resolved
+    ``targets``; ``copy_selection`` -> ``copy``, ``move_selection`` ->
+    ``translate``. This bridge stays for the selection-relative corpus; the
+    id-primary path above does NOT route through it.
+
+    Ops outside the replay-safe subset are dropped. The recipe's non-``$`` refs
+    are the **inputs** — the elements it rebinds by stable id (the deterministic
+    MVP rule; no AI fitter). Returns ``(recipe, input_ids)`` as a
+    (list[PrimitiveOp], list[str]); the caller wraps them in a ``RecordedElem``.
+    Mirrors the Rust ``capture_recipe``.
     """
     from document.op_log import PrimitiveOp
 
@@ -299,11 +312,43 @@ def capture_recipe(segment):
         val = params.get(k)
         return float(val) if isinstance(val, (int, float)) else 0.0
 
+    def _str_ids(params: dict, k: str) -> list[str]:
+        v = params.get(k)
+        if isinstance(v, list):
+            return [x for x in v if isinstance(x, str)]
+        return []
+
     working: list[str] = []
     recipe: list[PrimitiveOp] = []
     counter = 0
     for op in segment:
-        if op.op in ("select_rect", "select"):
+        # ── id-primary family: operands from PARAMS (no selection dep) ──
+        if op.op == "select_by_ids":
+            working = _str_ids(op.params, "ids")
+        elif op.op == "copy_by_ids":
+            dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+            from_ids = _str_ids(op.params, "from")
+            recipe.append(PrimitiveOp(
+                op="copy",
+                params={"from": from_ids, "dx": dx, "dy": dy},
+                targets=[]))
+            produced = []
+            for _ in from_ids:
+                produced.append(f"${counter}")
+                counter += 1
+            working = produced
+        elif op.op == "move_by_ids":
+            dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
+            # The working set is the produced ``$n`` handles after a copy, or the
+            # op's own ``ids`` PARAM when it stands alone (a bare id-primary move).
+            if not working:
+                working = _str_ids(op.params, "ids")
+            recipe.append(PrimitiveOp(
+                op="translate",
+                params={"ids": list(working), "dx": dx, "dy": dy},
+                targets=[]))
+        # ── legacy selection-relative family (kept verbatim) ──
+        elif op.op in ("select_rect", "select"):
             working = list(op.targets)
         elif op.op == "copy_selection":
             dx, dy = _num(op.params, "dx"), _num(op.params, "dy")
