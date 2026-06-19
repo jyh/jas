@@ -708,6 +708,131 @@ let production_capture_eye_demo () =
 let production_capture_eye_demo_bare_frame () =
   run_production_batch_fixture "production_capture/eye_demo_bare_frame.json"
 
+(* 3c-1 determinism check (OP_LOG.md section 7): an id-primary op reads its
+   operand ids from its OWN params, NEVER from doc.selection, so it applies the
+   SAME operands regardless of the ambient selection. Drive [move_by_ids{["eye"]}]
+   with a DELIBERATELY WRONG ambient selection (the whole top-level layer
+   pre-selected) and confirm the result still equals the shared golden — i.e. the
+   op ignored the ambient selection and moved exactly the operand named in its
+   params. Then confirm snapshot==replay even though the snapshot ran with a
+   poisoned ambient selection: the journaled ops carry their own operands, so a
+   fresh replay (no ambient selection) reproduces the document byte-identically.
+   Mirrors the Rust [id_primary_move_reads_operand_from_params_not_selection]. *)
+let id_primary_move_reads_operand_from_params () =
+  let setup_svg = read_fixture "svg/eye.svg" in
+  let doc = Jas.Svg.svg_to_document setup_svg in
+  let model = Jas.Model.create ~document:doc () in
+  let ctrl = Jas.Controller.create ~model () in
+  (* Poison the ambient selection with an unrelated path — an op that inferred
+     its operand from doc.selection would act on the wrong thing. *)
+  ctrl#set_selection
+    (Jas.Document.PathMap.singleton [0]
+       (Jas.Document.element_selection_all [0]));
+  model#begin_txn;
+  apply_op model ctrl
+    (`Assoc [ ("op", `String "select_by_ids");
+              ("ids", `List [ `String "eye" ]) ]);
+  apply_op model ctrl
+    (`Assoc [ ("op", `String "move_by_ids");
+              ("ids", `List [ `String "eye" ]);
+              ("dx", `Int 50); ("dy", `Int 0) ]);
+  model#commit_txn;
+  let actual = Jas.Test_json.document_to_test_json model#document in
+  let expected =
+    String.trim (read_fixture "operations/id_primary_move_eye.json") in
+  if actual <> expected then begin
+    Printf.eprintf
+      "=== id-primary move read operand from selection, not params ===\n";
+    Printf.eprintf "=== EXPECTED ===\n%s\n=== ACTUAL ===\n%s\n" expected actual;
+    assert false
+  end;
+  (* Snapshot==replay even with a poisoned ambient selection at snapshot time. *)
+  let replayed = replay_journal setup_svg model#journal model#journal_head in
+  if replayed <> actual then begin
+    Printf.eprintf
+      "=== id-primary determinism: snapshot != replay ===\n";
+    Printf.eprintf "=== SNAPSHOT ===\n%s\n=== REPLAY ===\n%s\n" actual replayed;
+    assert false
+  end
+
+(* 3c-1 EYE-DEMO RE-DERIVATION PIN (the load-bearing payoff): run a FAITHFUL
+   id-primary journal segment [select_by_ids, copy_by_ids] through the SHARED
+   dispatcher (so it is a real, byte-gated, replayable journal segment),
+   normalize the committed segment to a recorded element via the now-pass-through
+   [capture_recipe], edit the SOURCE input, re-derive, and confirm the output
+   TRACKS the edited source. The recipe survives source edits with NO selection
+   dependency — the operand ids came from the op params ([from:["eye"]]), never
+   from a select op-resolved selection. Reuses the existing eye-demo golden
+   (production_capture/eye_demo_rederived.json): copy_by_ids{dx:50} captures to
+   copy{dx:50}, whose re-derivation against the edited source (eye -> x=100 px)
+   is byte-identical to the selection-relative demo's copy(0)+translate(50) net
+   offset. Mirrors the Rust [id_primary_capture_recipe_rederives_on_source_edit]. *)
+let id_primary_capture_recipe_rederives_on_source_edit () =
+  (* A faithful id-primary demonstration: select the eye, copy it +50. This is a
+     REAL journal segment op_apply replays byte-identically (the id_primary_copy
+     fixture's id-primary case). *)
+  let setup_svg = read_fixture "svg/eye.svg" in
+  let doc = Jas.Svg.svg_to_document setup_svg in
+  let model = Jas.Model.create ~document:doc () in
+  let ctrl = Jas.Controller.create ~model () in
+  model#begin_txn;
+  model#name_txn "id-primary demo";
+  apply_op model ctrl
+    (`Assoc [ ("op", `String "select_by_ids");
+              ("ids", `List [ `String "eye" ]) ]);
+  apply_op model ctrl
+    (`Assoc [ ("op", `String "copy_by_ids");
+              ("from", `List [ `String "eye" ]);
+              ("dx", `Int 50); ("dy", `Int 0) ]);
+  model#commit_txn;
+  (* [capture_recipe] is a PASS-THROUGH over the id-primary segment: it reads the
+     operand id from the op-OWN [from] PARAM (no selection dependency —
+     select_by_ids targets are NOT consulted). *)
+  let segment =
+    (List.nth model#journal (List.length model#journal - 1)).Jas.Op_log.ops in
+  (* Guard: the captured segment is purely id-primary (proves the brittle
+     selection-relative bridge is NOT on this path). *)
+  List.iter (fun (o : Jas.Op_log.primitive_op) ->
+    match o.Jas.Op_log.op with
+    | "select_by_ids" | "copy_by_ids" -> ()
+    | other -> Printf.eprintf "segment is id-primary, got %s\n" other;
+      assert false
+  ) segment;
+  let recorded_ops =
+    List.map (fun (o : Jas.Op_log.primitive_op) ->
+      { Jas.Element.rop_op = o.Jas.Op_log.op;
+        rop_params = o.Jas.Op_log.params;
+        rop_targets = o.Jas.Op_log.targets }) segment in
+  let (recipe, inputs) = Jas.Live.capture_recipe recorded_ops in
+  assert (inputs = [ "eye" ]);
+  assert (List.length recipe = 1);
+  assert ((List.hd recipe).Jas.Element.rop_op = "copy");
+  (* Wrap + re-derive against the EDITED source (eye moved to x=100 px). *)
+  let recorded_el = Jas.Element.make_recorded ~id:(Some "rec") recipe inputs in
+  let rec_ = match recorded_el with
+    | Jas.Element.Live (Jas.Element.Recorded r) -> r
+    | _ -> failwith "make_recorded did not yield a recorded element" in
+  let edited_svg =
+    Str.global_replace (Str.regexp_string "x=\"0\" y=\"0\"")
+      "x=\"100\" y=\"0\"" setup_svg in
+  let edited_doc = Jas.Svg.svg_to_document edited_svg in
+  let edited_el = Jas.Document.get_element edited_doc [0; 0] in
+  let resolver : Jas.Live.element_resolver =
+    fun (r : Jas.Element.element_ref) ->
+      if r = "eye" then Some edited_el else None in
+  let visiting = ref Jas.Live.VisitSet.empty in
+  let ps =
+    Jas.Live.recorded_evaluate rec_ Jas.Live.default_precision resolver visiting in
+  let actual = polygon_set_to_test_json ps in
+  let expected =
+    String.trim (read_fixture "production_capture/eye_demo_rederived.json") in
+  if actual <> expected then begin
+    Printf.eprintf
+      "=== id-primary recipe re-derivation failed ===\n";
+    Printf.eprintf "=== EXPECTED ===\n%s\n=== ACTUAL ===\n%s\n" expected actual;
+    assert false
+  end
+
 let dependency_index_cross_language () =
   (* Parse the shared input document. *)
   let input = read_fixture "expected/dependency_index_input.json" in
@@ -1578,6 +1703,31 @@ let () =
         run_operation_fixture "transform_shear.json");
       Alcotest.test_case "transform_copy operations" `Quick (fun () ->
         run_operation_fixture "transform_copy.json");
+      (* OP_LOG.md section 5 Fork 4 / 3c-1 — the id-primary op-addressing flip.
+         Each fixture carries TWO cases on the SAME eye.svg pointing at ONE shared
+         golden: a selection-relative case ([select_rect, move/copy_selection])
+         and an id-primary case ([select_by_ids, move/copy_by_ids]). Both must
+         produce a BYTE-IDENTICAL document AND selection, which proves the
+         id-primary verbs replay to the same document+selection as the
+         selection-relative pair (the byte-gate reconciliation). The unchanged
+         checkpoint_equivalence gate (run per case by [run_operation_fixture])
+         additionally proves each journals a replay-safe segment. The id-primary
+         verb reads its operand ids from its OWN params, so snapshot and replay
+         apply identical operands (the section 7 determinism rule). Mirrors the
+         Rust + Swift id-primary fixture registration. *)
+      Alcotest.test_case "id_primary_move operations" `Quick (fun () ->
+        run_operation_fixture "id_primary_move.json");
+      Alcotest.test_case "id_primary_copy operations" `Quick (fun () ->
+        run_operation_fixture "id_primary_copy.json");
+      (* 3c-1 determinism: an id-primary op reads its operand from its OWN params,
+         never the ambient selection (snapshot==replay even when poisoned). *)
+      Alcotest.test_case "id_primary determinism (operand from params)" `Quick
+        id_primary_move_reads_operand_from_params;
+      (* 3c-1 eye-demo re-derivation pin: an id-primary segment captures as a
+         pass-through recipe that re-derives against an edited source with NO
+         selection dependency, byte-matching the existing eye-demo golden. *)
+      Alcotest.test_case "id_primary capture_recipe re-derives on source edit"
+        `Quick id_primary_capture_recipe_rederives_on_source_edit;
     ];
 
     (* Workspace layout tests *)

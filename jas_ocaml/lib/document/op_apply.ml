@@ -180,6 +180,89 @@ let parse_element (op : Yojson.Safe.t) : Element.element option =
 (* The [common.id] of an element, or [None] (for [targets]). *)
 let element_id (el : Element.element) : string option = Element.id_of el
 
+(* ── OP_LOG.md section 5 Fork 4 / RECORDED_ELEMENTS.md — the id-primary op family
+   ────────────────────────────────────────────────────────────────────────────
+
+   The id-primary verbs [select_by_ids] / [move_by_ids] / [copy_by_ids] promote
+   the recorded-recipe vocabulary (input-addressed, side-effect-free) to a
+   first-class op family [op_apply] can execute, so a captured recipe IS a
+   replayable journal segment (RECORDED_ELEMENTS.md section 7) and
+   [Live.capture_recipe] collapses to a pass-through. They are ADDITIVE: the
+   selection-relative verbs ([select_rect] / [move_selection] / [copy_selection])
+   keep their params VERBATIM (OP_LOG.md section 7 — selection is serialized
+   Document state, so the byte-gate reproduces it); this is a NEW family, not a
+   params rewrite. The decisive property (OP_LOG.md section 7 determinism rule):
+   the operand ids come from the OP-OWN PARAMS, never inferred from
+   doc.selection, so snapshot and replay apply identical operands and a recorded
+   recipe survives source edits with NO selection dependency.
+
+   THE BYTE-GATE RECONCILIATION (OP_LOG.md section 6, the gate compares
+   document_to_test_json INCLUDING selection): the family is committed as the
+   canonical PAIR [select_by_ids, <op>_by_ids], AND each [<op>_by_ids] ALSO
+   re-establishes the working selection from its OWN ids before mutating. So the
+   replayed selection is byte-identical to [select_rect, move_selection] for the
+   same elements: [select_by_ids] resolves ids to paths and writes
+   [element_selection_all path] in DOCUMENT ORDER (the same order
+   [select_flat] / [select_rect] produces), then the mutator routes through the
+   SAME shared [Controller] body (no divergent second mutation path). Hardened
+   reads: an unknown id / a non-array params is SKIPPED, never a raise. Mirrors
+   the Rust [op_apply.rs] id-primary family. *)
+
+(* Walk the element tree (Group / Layer children only — the SAME descent
+   discipline as the id-index builder [Live.collect_ref_ids]) collecting
+   [(common.id, path)] for every id-bearing element, in DOCUMENT ORDER. The
+   id-primary selection builder uses this so a [select_by_ids] produces the SAME
+   ordered selection a [select_rect] over the same elements would (the byte-gate
+   reconciliation). Top-level layer ids are NOT resolution targets (mirroring the
+   id-index), so the walk starts at each layer-child, exactly like
+   [rebuild_id_index]. Mirrors the Rust [id_paths_in_document_order]. *)
+let id_paths_in_document_order (doc : Document.document) :
+    (string * int list) list =
+  let out = ref [] in
+  let rec walk (elem : Element.element) (path : int list) : unit =
+    (match element_id elem with
+     | Some id -> out := (id, path) :: !out
+     | None -> ());
+    match elem with
+    | Element.Group { children; _ } | Element.Layer { children; _ } ->
+      Array.iteri (fun i child -> walk child (path @ [i])) children
+    | _ -> ()
+  in
+  Array.iteri (fun li layer ->
+    match layer with
+    | Element.Group { children; _ } | Element.Layer { children; _ } ->
+      Array.iteri (fun ci child -> walk child [li; ci]) children
+    | _ -> ()
+  ) doc.Document.layers;
+  List.rev !out
+
+(* Build the selection (in DOCUMENT ORDER) for the elements whose [common.id] is
+   in [ids], as [element_selection_all path] entries in a [PathMap]. Document
+   order — NOT the order of [ids] — so the result is byte-identical to what
+   [select_rect] would produce for the same set (the byte-gate reconciliation).
+   An id that resolves to no element is silently dropped (hardened: a stale /
+   unknown id is a skip). Mirrors the Rust [selection_for_ids]. *)
+let selection_for_ids (doc : Document.document) (ids : string list) :
+    Document.selection =
+  List.fold_left (fun acc (id, path) ->
+    if List.mem id ids then
+      Document.PathMap.add path (Document.element_selection_all path) acc
+    else acc
+  ) Document.PathMap.empty (id_paths_in_document_order doc)
+
+(* Resolve [ids] to their selection and write it BY PATH (selection-only,
+   non-undoable — like [select_rect], this goes through the unbracketed selection
+   write via [Controller.set_selection]). The id-primary [select_by_ids] body,
+   SHARED by the standalone [select_by_ids] op and by [move_by_ids] /
+   [copy_by_ids] (which re-establish the working selection from their own ids
+   before the mutation). Returns the resolved selection ids (in document order)
+   for [targets]. Mirrors the Rust [apply_select_by_ids]. *)
+let apply_select_by_ids (model : Model.model) (ctrl : Controller.controller)
+    (ids : string list) : string list =
+  let selection = selection_for_ids model#document ids in
+  ctrl#set_selection selection;
+  Controller.selection_to_ids model#document
+
 (* ── Print-config field setters (OP_LOG.md section 9 Phase P1) ────────────────
    The eight doc.* print-config verbs journal real ops. Each value is a
    RESOLVED literal; a type mismatch SKIPS (returns false), so a no-op edit
@@ -754,8 +837,10 @@ let op_apply (model : Model.model) (ctrl : Controller.controller)
           [Model.set_document] does NOT self-bracket the way Rust [edit_document]
           does, so this lazy [begin_txn] is the ONLY safeguard against a bare
           drag frame losing its op. [begin_txn] is a no-op while one is already
-          open. [select_rect] is EXCLUDED (selection-only, journal-neutral). *)
-       if name <> "select_rect" then model#begin_txn;
+          open. [select_rect] is EXCLUDED (selection-only, journal-neutral).
+          [select_by_ids] is the id-primary twin (selection-only, non-undoable),
+          so it is excluded for the identical reason. *)
+       if name <> "select_rect" && name <> "select_by_ids" then model#begin_txn;
        (* Fork-4 [targets] (OP_LOG.md section 9). Populated for the replay-safe
           verbs; every other verb keeps it empty unless its arm sets it. *)
        let targets = ref [] in
@@ -772,6 +857,33 @@ let op_apply (model : Model.model) (ctrl : Controller.controller)
         | "move_selection" ->
           ctrl#move_selection (num_field op "dx") (num_field op "dy")
         | "copy_selection" ->
+          ctrl#copy_selection (num_field op "dx") (num_field op "dy")
+        (* ── id-primary op family (OP_LOG.md section 5 Fork 4 /
+           RECORDED_ELEMENTS.md) ──
+           Operand ids come from the OP-OWN PARAMS (never doc.selection), so
+           snapshot and replay apply identical operands (the section 7
+           determinism rule). Each [*_by_ids] re-establishes the working
+           selection from its own ids (via the SHARED [apply_select_by_ids]
+           body) BEFORE routing through the SAME [Controller] mutator the
+           selection-relative verb uses, so the replayed document+selection is
+           byte-identical to [select_rect, move] (the byte-gate reconciliation,
+           OP_LOG.md section 6). *)
+        | "select_by_ids" ->
+          (* Selection-only / non-undoable (like select_rect): write the
+             resolved selection BY PATH in document order; targets = the
+             resolved ids (the keystone the recipe seeds its working set from). *)
+          targets := apply_select_by_ids model ctrl (str_list_field op "ids")
+        | "move_by_ids" ->
+          (* Set the working selection from the OP-OWN ids, then run the SAME
+             mutator [move_selection] uses. targets = the operand ids (from
+             params, resolved to the selection) — never inferred post-mutation. *)
+          targets := apply_select_by_ids model ctrl (str_list_field op "ids");
+          ctrl#move_selection (num_field op "dx") (num_field op "dy")
+        | "copy_by_ids" ->
+          (* Set the working selection from the OP-OWN [from] ids, then run the
+             SAME mutator [copy_selection] uses. targets = the source ids (the
+             produced copies are born id-less, so the source is the operand). *)
+          targets := apply_select_by_ids model ctrl (str_list_field op "from");
           ctrl#copy_selection (num_field op "dx") (num_field op "dy")
         | "assign_id" ->
           (match parse_path op "path", str_field op "id" with

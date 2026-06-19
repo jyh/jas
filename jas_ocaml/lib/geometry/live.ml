@@ -592,22 +592,35 @@ let recorded_evaluate rec_ precision resolver visiting =
   recorded_evaluate_with rec_ precision resolver visiting
 
 (* Normalize a captured journal op-segment into a recorded recipe
-   (RECORDED_ELEMENTS.md section 1 / section 4): rewrite selection-relative
-   ops into the input-addressed form by tracking the working selection as
-   recipe refs.
+   (RECORDED_ELEMENTS.md section 1 / section 4): rewrite the captured ops into
+   the input-addressed copy / translate form [evaluate_with] consumes, tracking
+   the working set as recipe refs.
 
-   - A select op (select_rect / select) establishes the working selection from
-     its resolved targets (the ids it selected); it is NOT emitted — selection
-     becomes input-addressing.
-   - copy_selection emits copy{from, dx, dy} (source = the working selection)
-     and rebinds the selection to the produced [$n] handles.
-   - move_selection emits translate{ids, dx, dy} on the working selection.
-   - Ops outside the replay-safe subset are dropped from the recipe.
+   Two captured shapes are accepted:
 
-   The recipe's non-[$] refs are the inputs — the elements it rebinds by
-   stable id (the deterministic mark-input MVP rule; no AI fitter). Returns
-   [(recipe, input_ids)]; the caller wraps them in a recorded element.
-   Mirrors the Rust [capture_recipe]. *)
+   The id-primary family (OP_LOG.md section 5 Fork 4 — the 3c-1 form, NO
+   selection dependency). When the segment is already id-primary, this is a
+   PASS-THROUGH: every operand id is read DIRECTLY from the op-OWN PARAMS, never
+   from a select op-resolved targets, so the recipe is independent of any
+   document selection.
+   - select_by_ids{ids} establishes the working set from its [ids] PARAM; it is
+     NOT emitted (id-addressing replaces selection).
+   - copy_by_ids{from, dx, dy} emits copy{from, dx, dy} (source = its [from]
+     PARAM) and rebinds the working set to the produced [$n] handles.
+   - move_by_ids{ids, dx, dy} emits translate{ids, dx, dy} on the working set
+     (which, after a copy, is the produced [$n] handles — so a copy-then-move
+     demonstration replays without ever naming the id-less copy).
+
+   The legacy selection-relative family (OP_LOG.md section 7 — kept verbatim). A
+   select_rect / select op establishes the working set from its resolved
+   targets; copy_selection -> copy, move_selection -> translate. This bridge
+   stays for the selection-relative corpus; the id-primary path above does NOT
+   route through it.
+
+   Ops outside the replay-safe subset are dropped. The recipe's non-[$] refs
+   are the inputs — the elements it rebinds by stable id (the deterministic
+   mark-input MVP rule; no AI fitter). Returns [(recipe, input_ids)]; the caller
+   wraps them in a recorded element. Mirrors the Rust [capture_recipe]. *)
 let capture_recipe (segment : recorded_op list) : recorded_op list * string list =
   let num params k =
     match params with
@@ -618,11 +631,48 @@ let capture_recipe (segment : recorded_op list) : recorded_op list * string list
        | _ -> 0.0)
     | _ -> 0.0
   in
+  (* Read a JSON array-of-strings PARAM (hardened: non-array yields []). *)
+  let str_ids params k =
+    match params with
+    | `Assoc fields ->
+      (match List.assoc_opt k fields with
+       | Some (`List items) ->
+         List.filter_map (function `String s -> Some s | _ -> None) items
+       | _ -> [])
+    | _ -> []
+  in
   let working = ref [] in
   let recipe = ref [] in
   let counter = ref 0 in
   List.iter (fun (op : recorded_op) ->
     match op.rop_op with
+    (* ── id-primary family: operands from PARAMS (no selection dep) ── *)
+    | "select_by_ids" ->
+      working := str_ids op.rop_params "ids"
+    | "copy_by_ids" ->
+      let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+      let from = str_ids op.rop_params "from" in
+      let from_arr = `List (List.map (fun s -> `String s) from) in
+      recipe := { rop_op = "copy";
+                  rop_params =
+                    `Assoc [ ("from", from_arr);
+                             ("dx", `Float dx); ("dy", `Float dy) ];
+                  rop_targets = [] } :: !recipe;
+      let produced = List.map (fun _ ->
+        let h = Printf.sprintf "$%d" !counter in incr counter; h) from in
+      working := produced
+    | "move_by_ids" ->
+      let dx = num op.rop_params "dx" and dy = num op.rop_params "dy" in
+      (* The working set is the produced [$n] handles after a copy, or the
+         op-OWN [ids] PARAM when it stands alone (a bare id-primary move). *)
+      if !working = [] then working := str_ids op.rop_params "ids";
+      let ids_arr = `List (List.map (fun s -> `String s) !working) in
+      recipe := { rop_op = "translate";
+                  rop_params =
+                    `Assoc [ ("ids", ids_arr);
+                             ("dx", `Float dx); ("dy", `Float dy) ];
+                  rop_targets = [] } :: !recipe
+    (* ── legacy selection-relative family (kept verbatim) ── *)
     | "select_rect" | "select" ->
       working := op.rop_targets
     | "copy_selection" ->
