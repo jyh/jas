@@ -15,55 +15,16 @@ import os
 # Add project root to path so imports work.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from workspace.workspace_layout import (
-    WorkspaceLayout, DockEdge, PanelKind, PanelGroup, Dock, FloatingDock,
-    GroupAddr, PanelAddr,
-)
-from workspace.pane import PaneLayout, PaneKind as PK
+from workspace.workspace_layout import WorkspaceLayout
 from workspace.workspace_test_json import workspace_to_test_json, test_json_to_workspace
+# 3d-2: delegate to the SINGLE runtime layout dispatcher instead of
+# reimplementing the 15 verbs here (eliminated the third hand-rolled
+# dispatcher, mirroring Rust bin/workspace_roundtrip.rs::apply_op).
+from workspace.layout_apply import layout_apply
 
 
 def apply_op(layout, op):
-    name = op["op"]
-    if name == "toggle_group_collapsed":
-        layout.toggle_group_collapsed(GroupAddr(op["dock_id"], op["group_idx"]))
-    elif name == "set_active_panel":
-        layout.set_active_panel(PanelAddr(GroupAddr(op["dock_id"], op["group_idx"]), op["panel_idx"]))
-    elif name == "close_panel":
-        layout.close_panel(PanelAddr(GroupAddr(op["dock_id"], op["group_idx"]), op["panel_idx"]))
-    elif name == "show_panel":
-        kind_map = {"layers": PanelKind.LAYERS, "color": PanelKind.COLOR,
-                     "stroke": PanelKind.STROKE, "properties": PanelKind.PROPERTIES}
-        layout.show_panel(kind_map[op["kind"]])
-    elif name == "reorder_panel":
-        layout.reorder_panel(GroupAddr(op["dock_id"], op["group_idx"]), op["from"], op["to"])
-    elif name == "move_panel_to_group":
-        layout.move_panel_to_group(
-            PanelAddr(GroupAddr(op["from_dock_id"], op["from_group_idx"]), op["from_panel_idx"]),
-            GroupAddr(op["to_dock_id"], op["to_group_idx"]))
-    elif name == "detach_group":
-        layout.detach_group(GroupAddr(op["dock_id"], op["group_idx"]), op["x"], op["y"])
-    elif name == "redock":
-        layout.redock(op["dock_id"])
-    elif name == "set_pane_position":
-        layout.pane_layout.set_pane_position(op["pane_id"], op["x"], op["y"])
-    elif name == "tile_panes":
-        layout.pane_layout.tile_panes()
-    elif name == "toggle_canvas_maximized":
-        layout.pane_layout.toggle_canvas_maximized()
-    elif name == "resize_pane":
-        layout.pane_layout.resize_pane(op["pane_id"], op["width"], op["height"])
-    elif name == "hide_pane":
-        kind_map = {"toolbar": PK.TOOLBAR, "canvas": PK.CANVAS, "dock": PK.DOCK}
-        layout.pane_layout.hide_pane(kind_map[op["kind"]])
-    elif name == "show_pane":
-        kind_map = {"toolbar": PK.TOOLBAR, "canvas": PK.CANVAS, "dock": PK.DOCK}
-        layout.pane_layout.show_pane(kind_map[op["kind"]])
-    elif name == "bring_pane_to_front":
-        layout.pane_layout.bring_pane_to_front(op["pane_id"])
-    else:
-        print(f"Unknown workspace op: {name}", file=sys.stderr)
-        sys.exit(1)
+    layout_apply(layout, op)
 
 
 def main():

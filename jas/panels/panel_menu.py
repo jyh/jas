@@ -673,7 +673,10 @@ def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
         layout.color_panel_mode = COLOR_MODE_COMMANDS[cmd]
         return
     if cmd == "close_panel":
-        layout.close_panel(addr)
+        # 3d-2: route through the runtime layout dispatcher (preserves the
+        # dirty signal — layout.close_panel bumps internally).
+        from workspace.layout_apply import layout_apply, op_close_panel
+        layout_apply(layout, op_close_panel(addr))
     elif cmd in ("new_layer",
                  "toggle_all_layers_visibility",
                  "toggle_all_layers_outline",

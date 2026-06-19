@@ -10,6 +10,15 @@ from PySide6.QtGui import QDrag
 from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
+# 3d-2: the runtime layout-op dispatcher. Production dock-panel mutations build
+# a resolved op via the typed op_* builders and route through layout_apply so
+# they share ONE per-verb mutation body with the cross-language harness. The
+# panel/dock verbs (close/reorder/move/detach_group/redock/set_active/toggle)
+# bump WorkspaceLayout internally, preserving the dirty signal.
+from workspace.layout_apply import (
+    layout_apply, op_toggle_group_collapsed, op_set_active_panel,
+    op_reorder_panel, op_move_panel_to_group, op_detach_group, op_redock,
+)
 from panels.panel_menu import panel_label, panel_menu, panel_dispatch, panel_is_checked, PanelMenuItemKind
 from panels.yaml_menu import get_panel_spec, get_workspace_data, build_qmenu, panel_label_from_yaml
 from panels.yaml_panel_view import YamlPanelView
@@ -117,6 +126,9 @@ class DroppablePanelGroup(QWidget):
         try:
             if parts[0] == "group" and len(parts) == 3:
                 from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
+                # DEFERRED (3d-2): move_group_within_dock / move_group_to_dock
+                # are dock GROUP-MOVE verbs NOT in the 15-verb dispatcher
+                # vocabulary; they stay direct (mirrors Rust dock group-move).
                 if from_addr.dock_id == self._dock_id:
                     self._layout_data.move_group_within_dock(self._dock_id, from_addr.group_idx, self._gi)
                 else:
@@ -124,9 +136,10 @@ class DroppablePanelGroup(QWidget):
             elif parts[0] == "panel" and len(parts) == 4:
                 from_addr = PanelAddr(group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])), panel_idx=int(parts[3]))
                 if from_addr.group == target:
-                    self._layout_data.reorder_panel(target, from_addr.panel_idx, len(self._group.panels))
+                    layout_apply(self._layout_data, op_reorder_panel(
+                        target, from_addr.panel_idx, len(self._group.panels)))
                 else:
-                    self._layout_data.move_panel_to_group(from_addr, target)
+                    layout_apply(self._layout_data, op_move_panel_to_group(from_addr, target))
         except (IndexError, ValueError):
             return
         event.acceptProposedAction()
@@ -799,12 +812,13 @@ class DockPanelWidget(QWidget):
         self.rebuild()
 
     def _toggle_group(self, dock_id, group_idx):
-        self._layout_data.toggle_group_collapsed(GroupAddr(dock_id=dock_id, group_idx=group_idx))
+        layout_apply(self._layout_data, op_toggle_group_collapsed(
+            GroupAddr(dock_id=dock_id, group_idx=group_idx)))
         self.rebuild()
 
     def _set_active(self, dock_id, group_idx, panel_idx):
-        self._layout_data.set_active_panel(
-            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
+        layout_apply(self._layout_data, op_set_active_panel(
+            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)))
         self.rebuild()
 
     def _on_external_drop(self, payload: str, x: int, y: int):
@@ -816,10 +830,13 @@ class DockPanelWidget(QWidget):
                 from_addr = PanelAddr(
                     group=GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2])),
                     panel_idx=int(parts[3]))
+                # DEFERRED (3d-2): detach_panel is NOT in the 15-verb dispatcher
+                # vocabulary (only detach_group is); stays direct.
                 self._layout_data.detach_panel(from_addr, float(x), float(y))
             elif parts[0] == "group" and len(parts) == 3:
                 from_addr = GroupAddr(dock_id=int(parts[1]), group_idx=int(parts[2]))
-                self._layout_data.detach_group(from_addr, float(x), float(y))
+                layout_apply(self._layout_data, op_detach_group(
+                    from_addr, float(x), float(y)))
         except (IndexError, ValueError):
             return
         self.rebuild_all()
@@ -960,9 +977,12 @@ class DockPanelWidget(QWidget):
         self.rebuild()
 
     def _expand_to(self, dock_id, group_idx, panel_idx):
+        # toggle_dock_collapsed is NOT a 15-verb dispatcher op (only
+        # toggle_group_collapsed is) — DEFERRED, stays direct. The
+        # set_active_panel half routes through the dispatcher.
         self._layout_data.toggle_dock_collapsed(dock_id)
-        self._layout_data.set_active_panel(
-            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
+        layout_apply(self._layout_data, op_set_active_panel(
+            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)))
         self.rebuild()
 
     # -- Floating docks --
@@ -1059,8 +1079,8 @@ class FloatingDockWindow(QWidget):
         return widget
 
     def _set_active(self, dock_id, group_idx, panel_idx):
-        self._layout_data.set_active_panel(
-            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx))
+        layout_apply(self._layout_data, op_set_active_panel(
+            PanelAddr(group=GroupAddr(dock_id=dock_id, group_idx=group_idx), panel_idx=panel_idx)))
         self._parent_panel.rebuild_floating()
 
     def _on_external_drop(self, payload: str, x: int, y: int):
@@ -1092,6 +1112,6 @@ class FloatingDockWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.y() < 20:  # Double-click title bar to redock
-            self._layout_data.redock(self._fd.dock.id)
+            layout_apply(self._layout_data, op_redock(self._fd.dock.id))
             self._parent_panel.rebuild_all()
         super().mouseDoubleClickEvent(event)
