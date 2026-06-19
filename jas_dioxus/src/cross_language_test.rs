@@ -457,6 +457,81 @@ mod tests {
     // Operation equivalence tests
     // ---------------------------------------------------------------
 
+    /// Shared op-dispatch envelope spanning the two harness op vocabularies
+    /// (OP_LOG.md §2 Fork 5 / §12, "Layout-op unification"). It pins, at the
+    /// TRAIT level, the contract that document ops and layout ops share — the
+    /// `parse -> apply -> serialize` envelope — so a THIRD op vocabulary cannot
+    /// entrench as yet another bespoke driver: a new world conforms to `OpWorld`
+    /// and reuses the unified runner below.
+    ///
+    /// Deliberately generic-over-`State` (NOT a `dyn` object): the two state
+    /// types — `Model` and `WorkspaceLayout` — are genuinely different and MUST
+    /// NOT merge. The trait spans ONLY the per-op envelope; the journal /
+    /// transaction brackets / undo / `checkpoint_equivalence` gate stay
+    /// DOCUMENT-ONLY on `Model` (in `run_operation_model` / `assert_operation_test`)
+    /// and are intentionally NOT on the trait — removing `OpWorld` would leave
+    /// document journaling/undo/gate byte-for-byte unchanged and would not
+    /// require layout to invent ids/journal/undo.
+    ///
+    /// Markers are zero-sized and never instantiated; the methods are
+    /// associated functions keyed off the marker type parameter `W`.
+    trait OpWorld {
+        /// The mutable state one op is applied to (`Model` or `WorkspaceLayout`).
+        type State;
+        /// Apply one primitive op to the state. Returns the op's resolved
+        /// `targets` (Fork 4 merge metadata). The unified runner does not
+        /// consume the return — the document world's targets already live in
+        /// the journal (read there by the gate), and the layout world has no
+        /// `common.id` targets — so both impls honestly return `Vec::new()`;
+        /// the return is part of the trait shape for a future third vocabulary.
+        fn apply(state: &mut Self::State, op: &serde_json::Value) -> Vec<String>;
+        /// Serialize the state to canonical, byte-comparable test JSON.
+        fn to_test_json(state: &Self::State) -> String;
+        /// The op verbs this world dispatches (documentation / introspection;
+        /// lets the trait-level test assert each world's vocabulary is wired).
+        fn verbs() -> &'static [&'static str];
+    }
+
+    /// Document op vocabulary (OP_LOG.md §4). `State = Model`; `apply` delegates
+    /// to the production `op_apply` dispatcher unchanged (so the journal,
+    /// `record_op` site, and `targets` are byte-identical to the runtime path),
+    /// then returns `Vec::new()` — the targets already live on the just-recorded
+    /// op in the journal, where the `checkpoint_equivalence` gate reads them, so
+    /// surfacing them again here would be redundant and is deliberately avoided
+    /// to keep `op_apply`'s signature/behavior untouched.
+    struct DocumentOps;
+    impl OpWorld for DocumentOps {
+        type State = Model;
+        fn apply(model: &mut Model, op: &serde_json::Value) -> Vec<String> {
+            crate::document::op_apply::op_apply(model, op);
+            Vec::new()
+        }
+        fn to_test_json(model: &Model) -> String {
+            document_to_test_json(model.document())
+        }
+        fn verbs() -> &'static [&'static str] {
+            // Indicative document verbs (the operations/*.json corpus is the
+            // exhaustive contract); enough to assert the world is wired.
+            &["snapshot", "undo", "redo", "set_attr", "delete_at", "insert_at"]
+        }
+    }
+
+    /// The ONE generic op-test runner (OP_LOG.md §2 Fork 5 / §12): apply each op
+    /// in `ops` to `state` via `W::apply`, then serialize via `W::to_test_json`.
+    /// This is the single dispatch+serialize core both the document and the
+    /// layout fixture paths share — the near-identical shape the two drivers
+    /// (`run_operation_test` and `run_workspace_operation_test`) previously
+    /// duplicated. Document-only concerns — the begin/commit transaction
+    /// brackets and the `checkpoint_equivalence` gate — stay in the document
+    /// driver (`run_operation_model` / `assert_operation_test`) AROUND this core,
+    /// not on the trait; the layout driver calls it directly.
+    fn run_ops_test<W: OpWorld>(state: &mut W::State, ops: &[serde_json::Value]) -> String {
+        for op in ops {
+            let _targets = W::apply(state, op);
+        }
+        W::to_test_json(state)
+    }
+
     /// Thin harness shim over the production dispatcher (OP_LOG.md §9,
     /// Increment 3b-B): both the `#[cfg(test)]` cross-language harness and the
     /// production effect path go through the SAME `op_apply` module and the SAME
@@ -465,7 +540,10 @@ mod tests {
     /// paths. Promoting the dispatcher out of `#[cfg(test)]` also hardened its
     /// param parsing so production input can't panic.
     fn apply_op(model: &mut Model, op: &serde_json::Value) {
-        crate::document::op_apply::op_apply(model, op);
+        // Route through the shared `OpWorld` envelope so the document dispatch
+        // path and the unified runner are the SAME code (DocumentOps::apply
+        // delegates to `op_apply` unchanged). targets live in the journal.
+        let _ = <DocumentOps as OpWorld>::apply(model, op);
     }
 
     /// Run a fixture and return the resulting Model (with its journal). Two
@@ -509,17 +587,23 @@ mod tests {
                 }
             }
         } else {
+            // Flat-`ops` form: one implicit outer transaction. The per-op
+            // dispatch + serialize goes through the unified `run_ops_test`
+            // runner (shared with the layout world); the begin/commit brackets
+            // are the DOCUMENT-ONLY concern that wraps it. The returned JSON is
+            // discarded here — `assert_operation_test` re-serializes the model
+            // it owns, after which the gate replays the journal — but routing
+            // the apply loop through `run_ops_test` puts the shared runner on
+            // the live document path on every build configuration.
             model.begin_txn();
-            for op in tc["ops"].as_array().unwrap() {
-                apply_op(&mut model, op);
-            }
+            let _ = run_ops_test::<DocumentOps>(&mut model, tc["ops"].as_array().unwrap());
             model.commit_txn();
         }
         model
     }
 
     fn run_operation_test(tc: &serde_json::Value) -> String {
-        document_to_test_json(run_operation_model(tc).document())
+        <DocumentOps as OpWorld>::to_test_json(&run_operation_model(tc))
     }
 
     /// `checkpoint_equivalence` gate (OP_LOG.md §6): replay the applied prefix
@@ -538,7 +622,7 @@ mod tests {
                 apply_op(&mut model, &op.params);
             }
         }
-        document_to_test_json(model.document())
+        <DocumentOps as OpWorld>::to_test_json(&model)
     }
 
     fn assert_operation_test(tc: &serde_json::Value) {
@@ -547,7 +631,7 @@ mod tests {
         let expected = read_fixture(&format!("operations/{}", expected_file));
         let expected = expected.trim();
         let model = run_operation_model(tc);
-        let actual = document_to_test_json(model.document());
+        let actual = <DocumentOps as OpWorld>::to_test_json(&model);
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -1048,6 +1132,40 @@ mod tests {
         for tc in tests.as_array().unwrap() {
             assert_operation_test(tc);
         }
+    }
+
+    /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /
+    /// §12). Proves `DocumentOps` is genuinely wired through the trait — apply a
+    /// known op via `<DocumentOps as OpWorld>::apply` through the unified
+    /// `run_ops_test` runner and confirm it produces the SAME canonical JSON as
+    /// the direct `op_apply` + `document_to_test_json` path. Behavior-preserving
+    /// by construction (the trait delegates to `op_apply`); this is the
+    /// trait-level proof that the envelope is identical.
+    #[test]
+    fn op_world_document_envelope() {
+        let setup = read_fixture("svg/two_rects.svg");
+        let op = serde_json::json!({"op": "select_rect", "x": -5.0, "y": -5.0,
+                                    "width": 55.0, "height": 55.0, "extend": false});
+
+        // Path A: direct op_apply + serialize.
+        let doc_a = svg_to_document(&setup);
+        let mut model_a = Model::new(doc_a, None);
+        model_a.begin_txn();
+        crate::document::op_apply::op_apply(&mut model_a, &op);
+        model_a.commit_txn();
+        let direct = document_to_test_json(model_a.document());
+
+        // Path B: through the unified OpWorld runner.
+        let doc_b = svg_to_document(&setup);
+        let mut model_b = Model::new(doc_b, None);
+        model_b.begin_txn();
+        let via_trait = run_ops_test::<DocumentOps>(&mut model_b, std::slice::from_ref(&op));
+        model_b.commit_txn();
+
+        assert_eq!(direct, via_trait,
+            "OpWorld document envelope diverged from direct op_apply path");
+        assert!(!DocumentOps::verbs().is_empty(),
+            "DocumentOps::verbs() must advertise the document vocabulary");
     }
 
     /// Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4): pins
@@ -2724,17 +2842,46 @@ mod tests {
         }
     }
 
+    /// Layout op vocabulary (Fork 5; OP_LOG §12 "Layout-op unification").
+    /// `State = WorkspaceLayout`; `apply` delegates to the harness-only,
+    /// web-gated `apply_workspace_op` body unchanged and returns `Vec::new()`
+    /// (layout ops carry no `common.id` targets); `to_test_json` delegates to
+    /// `workspace_to_test_json`. This world is HARNESS-ONLY — `apply_workspace_op`
+    /// is NOT promoted to runtime, there is NO layout journal / undo / gate; the
+    /// layout fixture path keeps only its weaker serialize-and-compare
+    /// round-trip. Conforming to `OpWorld` lets the layout fixture driver reuse
+    /// the same `run_ops_test` runner the document world uses, so a third op
+    /// vocabulary cannot entrench as a third bespoke driver.
+    #[cfg(feature = "web")]
+    struct LayoutOps;
+    #[cfg(feature = "web")]
+    impl OpWorld for LayoutOps {
+        type State = WorkspaceLayout;
+        fn apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) -> Vec<String> {
+            apply_workspace_op(layout, op);
+            Vec::new()
+        }
+        fn to_test_json(layout: &WorkspaceLayout) -> String {
+            workspace_to_test_json(layout)
+        }
+        fn verbs() -> &'static [&'static str] {
+            &[
+                "toggle_group_collapsed", "set_active_panel", "close_panel",
+                "show_panel", "reorder_panel", "move_panel_to_group",
+                "detach_group", "redock", "set_pane_position", "tile_panes",
+                "toggle_canvas_maximized", "resize_pane", "hide_pane",
+                "show_pane", "bring_pane_to_front",
+            ]
+        }
+    }
+
     #[cfg(feature = "web")]
     fn run_workspace_operation_test(tc: &serde_json::Value) -> String {
         let setup_name = tc["setup"].as_str().unwrap();
         let setup_json = read_fixture(&format!("expected/{}", setup_name));
         let mut layout = test_json_to_workspace(setup_json.trim());
-
-        for op in tc["ops"].as_array().unwrap() {
-            apply_workspace_op(&mut layout, op);
-        }
-
-        workspace_to_test_json(&layout)
+        // Same unified runner the document world uses (Fork 5).
+        run_ops_test::<LayoutOps>(&mut layout, tc["ops"].as_array().unwrap())
     }
 
     #[cfg(feature = "web")]
@@ -2796,6 +2943,35 @@ mod tests {
     #[test]
     fn workspace_pane_ops() {
         run_workspace_operation_fixture("workspace_operations/pane_ops.json");
+    }
+
+    /// `OpWorld` trait-level pin for the LAYOUT world (OP_LOG.md §2 Fork 5 /
+    /// §12). Proves `LayoutOps` is genuinely wired through the trait — applying a
+    /// known layout op via the unified `run_ops_test::<LayoutOps>` runner
+    /// produces the SAME canonical JSON as the direct `apply_workspace_op` +
+    /// `workspace_to_test_json` path. Together with `op_world_document_envelope`,
+    /// this shows the SAME runner spans both vocabularies (the Fork-5 point) with
+    /// NO layout journal / undo / gate.
+    #[cfg(feature = "web")]
+    #[test]
+    fn op_world_layout_envelope() {
+        let mut layout = WorkspaceLayout::default_layout();
+        layout.ensure_pane_layout(1200.0, 800.0);
+        let op = serde_json::json!({"op": "tile_panes"});
+
+        // Path A: direct apply_workspace_op + serialize.
+        let mut layout_a = layout.clone();
+        apply_workspace_op(&mut layout_a, &op);
+        let direct = workspace_to_test_json(&layout_a);
+
+        // Path B: through the unified OpWorld runner.
+        let mut layout_b = layout.clone();
+        let via_trait = run_ops_test::<LayoutOps>(&mut layout_b, std::slice::from_ref(&op));
+
+        assert_eq!(direct, via_trait,
+            "OpWorld layout envelope diverged from direct apply_workspace_op path");
+        assert!(!LayoutOps::verbs().is_empty(),
+            "LayoutOps::verbs() must advertise the layout vocabulary");
     }
 
     // ---------------------------------------------------------------
