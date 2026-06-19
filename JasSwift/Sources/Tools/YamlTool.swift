@@ -187,8 +187,18 @@ final class YamlTool: CanvasTool {
         // panics still leave the doc-primitive slot clean.
         let _reg = registerDocument(model.document)
         let effects = buildYamlToolEffects(model: model)
+        // OP_LOG.md §9 (Increment 3b-B): this tool gesture OWNS the journal
+        // transaction — pass the live Model so journaled verbs record into it,
+        // and `actionName: "<tool-id> <event>"` (e.g. "selection on_mousemove")
+        // so the committed transaction is named with the tool-qualified gesture
+        // verb. runEffects names + commits at the owning batch. Mirrors Rust's
+        // `format!("{} {}", self.spec.id, event_name)` (yaml_tool.rs) — the raw
+        // event name alone would drop the tool-id prefix and diverge from the
+        // shared goldens for every real gesture.
+        let actionName = "\(spec.id) \(eventName)"
         runEffects(handlerEffects, ctx: ctx, store: store,
-                   platformEffects: effects)
+                   platformEffects: effects,
+                   model: model, actionName: actionName)
         _ = _reg
     }
 

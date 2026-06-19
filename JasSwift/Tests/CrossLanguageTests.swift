@@ -414,101 +414,23 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
     }
 }
 
-/// Apply one fixture op to `model` via `controller`, exactly as the legacy
-/// harness did. Hoisted to module scope (out of `runOperationFixture`) so BOTH
-/// the snapshot path and the journal-replay gate (`replayJournal`) drive the
-/// identical dispatcher. The `op` dictionary is the raw fixture payload —
-/// `PrimitiveOp.params` carries the same dictionary, so a recorded op replays
-/// by feeding `op.params` straight back here.
+/// Apply one fixture op to `model` via `controller`. A thin shim over the
+/// production dispatcher (OP_LOG.md §9, Increment 3b-B): both the cross-language
+/// harness and the production effect path go through the SAME `opApply` module
+/// and the SAME `recordOp` site, so this lift is behavior-preserving (the
+/// operations fixtures stay byte-green) and `targets` is recorded identically on
+/// both paths. Promoting the dispatcher out of the test target also hardened its
+/// param parsing so production input can't crash. The `op` dictionary is the raw
+/// fixture payload — `PrimitiveOp.params` carries the same dictionary, so a
+/// recorded op replays by feeding `op.params` straight back here. Mirrors Rust's
+/// `apply_op` shim over `op_apply`.
+///
+/// Because `opApply` now records the op into the open transaction itself (the
+/// single `recordOp` site), the harness loops below no longer call `recordOp`
+/// separately. The legacy `snapshot` op (history navigation) maps to `opApply`'s
+/// commit-then-begin, matching Rust.
 private func applyFixtureOp(_ model: Model, _ controller: Controller, _ op: [String: Any]) {
-    let opName = op["op"] as! String
-    switch opName {
-    case "select_rect":
-        controller.selectRect(
-            x: op["x"] as! Double,
-            y: op["y"] as! Double,
-            width: op["width"] as! Double,
-            height: op["height"] as! Double,
-            extend: op["extend"] as? Bool ?? false)
-    case "move_selection":
-        controller.moveSelection(
-            dx: op["dx"] as! Double,
-            dy: op["dy"] as! Double)
-    case "copy_selection":
-        controller.copySelection(
-            dx: op["dx"] as! Double,
-            dy: op["dy"] as! Double)
-    case "assign_id":
-        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        controller.assignId(path, id: op["id"] as! String)
-    case "create_reference":
-        let targetPath = (op["target_path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        controller.createReference(
-            targetPath,
-            targetId: op["target_id"] as! String,
-            refId: op["ref_id"] as! String)
-    // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
-    // paths are read literally from the fixture payload, exactly like
-    // the create_reference case.
-    case "make_symbol":
-        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        controller.makeSymbol(
-            path,
-            masterId: op["master_id"] as! String,
-            refId: op["ref_id"] as! String)
-    case "place_instance":
-        controller.placeInstance(
-            masterId: op["master_id"] as! String,
-            refId: op["ref_id"] as! String)
-    case "detach":
-        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        controller.detach(path)
-    case "redefine":
-        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        controller.redefine(
-            masterId: op["master_id"] as! String,
-            path,
-            refId: op["ref_id"] as! String)
-    case "delete_symbol":
-        controller.deleteSymbol(
-            masterId: op["master_id"] as! String)
-    // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
-    // transform is carried in the payload as {a,b,c,d,e,f} (the same
-    // matrix shape parsed elsewhere) and applied verbatim.
-    case "set_instance_transform":
-        let path = (op["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
-        let t = op["transform"] as! [String: Any]
-        let transform = Transform(
-            a: (t["a"] as! NSNumber).doubleValue,
-            b: (t["b"] as! NSNumber).doubleValue,
-            c: (t["c"] as! NSNumber).doubleValue,
-            d: (t["d"] as! NSNumber).doubleValue,
-            e: (t["e"] as! NSNumber).doubleValue,
-            f: (t["f"] as! NSNumber).doubleValue)
-        controller.setInstanceTransform(path, transform: transform)
-    case "delete_selection":
-        model.document = model.document.deleteSelection()
-    case "lock_selection":
-        controller.lockSelection()
-    case "unlock_all":
-        controller.unlockAll()
-    case "hide_selection":
-        controller.hideSelection()
-    case "show_all":
-        controller.showAll()
-    case "boolean_union":
-        controller.applyDestructiveBoolean("union")
-    case "simplify":
-        controller.simplifySelection(precision: (op["precision"] as? Double) ?? 0.5)
-    case "snapshot":
-        model.snapshot()
-    case "undo":
-        model.undo()
-    case "redo":
-        model.redo()
-    default:
-        Issue.record("Unknown op: \(opName)")
-    }
+    opApply(model, controller, op)
 }
 
 /// checkpoint_equivalence gate (OP_LOG.md §6): replay the committed-and-applied
@@ -551,9 +473,10 @@ private func runOperationFixture(_ fixture: String) throws {
         // `history` directive of undo/redo positions the cursor; snapshot/undo/
         // redo are NOT ops here) and the legacy flat `ops` form (one implicit
         // outer transaction, so non-undoable ops like select_rect are captured
-        // into the journal). Each applied op is recorded into the open
-        // transaction via recordOp(PrimitiveOp(op:, params: op)) so commitTxn
-        // finalizes a transaction whose ops replay to the same document.
+        // into the journal). `applyFixtureOp` now routes through the production
+        // `opApply`, which records each op into the open transaction at its
+        // single `recordOp` site (with `targets` populated for the three
+        // replay-safe verbs) — so the loops no longer record separately.
         if let txns = tc["txns"] as? [[String: Any]] {
             for txn in txns {
                 model.beginTxn()
@@ -562,7 +485,6 @@ private func runOperationFixture(_ fixture: String) throws {
                 }
                 for op in (txn["ops"] as! [[String: Any]]) {
                     applyFixtureOp(model, controller, op)
-                    model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
                 }
                 model.commitTxn()
                 // OP_LOG.md Increment 3a: a `label` on a transaction marks a
@@ -583,7 +505,6 @@ private func runOperationFixture(_ fixture: String) throws {
             model.beginTxn()
             for op in (tc["ops"] as! [[String: Any]]) {
                 applyFixtureOp(model, controller, op)
-                model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
             }
             model.commitTxn()
         }
@@ -692,7 +613,6 @@ private func journalToTestJson(_ journal: [Transaction]) -> String {
                 if let n = txn["name"] as? String { model.nameTxn(n) }
                 for op in (txn["ops"] as! [[String: Any]]) {
                     applyFixtureOp(model, controller, op)
-                    model.recordOp(PrimitiveOp(op: op["op"] as! String, params: op))
                 }
                 model.commitTxn()
                 // Increment 3a: stamp the label onto the committed transaction.
@@ -706,6 +626,240 @@ private func journalToTestJson(_ journal: [Transaction]) -> String {
             #expect(actual == expected, "journal JSON mismatch for \(fixture)")
         }
     }
+}
+
+// MARK: - Production op-capture (OP_LOG.md §9, Increment 3b-B)
+
+/// Canonical JSON of the Transaction journal in the production-capture shape
+/// (name + ops{op, params, targets}, NO txn_id). Distinct from
+/// `journalToTestJson`: this pins the PARAM-TRANSLATION result (the marquee
+/// corners x1=-5,y1=-5,x2=50,y2=50 normalize to x=-5,y=-5,width=55,height=55,
+/// extend=false), so it emits each op's full `{op, params, targets}` with
+/// `params` sorted-key + fixed-float canonicalized exactly like
+/// `documentToTestJson` (via `canonicalRecordedValue`).
+///
+/// `txn_id` is EXCLUDED — it is a live-entropy seam, non-deterministic per-app,
+/// so it can never be byte-shared. The redundant `"op"` key inside the recorded
+/// `params` (opApply records the full op dict, verb included) is STRIPPED — the
+/// verb already lives in the op-level `op` field. `actor`/`parent`/`lamport` are
+/// OMITTED: this serializer pins only what the production-capture goldens are
+/// about (the translated ops + the action name). Mirrors Rust
+/// `production_journal_to_test_json`.
+private func productionJournalToTestJson(_ journal: [Transaction]) -> String {
+    func opt(_ s: String?) -> String { s.map { "\"\($0)\"" } ?? "null" }
+    let txns = journal.map { (t: Transaction) -> String in
+        let ops = t.ops.map { (o: PrimitiveOp) -> String in
+            // Strip the redundant top-level "op" key from params.
+            var params = o.params
+            params.removeValue(forKey: "op")
+            let targets = o.targets.map { "\"\($0)\"" }.joined(separator: ",")
+            return "{\"op\":\"\(o.op)\",\"params\":\(canonicalRecordedValue(params))," +
+                "\"targets\":[\(targets)]}"
+        }.joined(separator: ",")
+        return "{\"name\":\(opt(t.name)),\"ops\":[\(ops)]}"
+    }.joined(separator: ",")
+    return "[\(txns)]"
+}
+
+/// Canonical JSON of an evaluated polygon set (a list of rings, each a list of
+/// (x,y) points), using the SAME fixed-float canonicalization as
+/// `documentToTestJson` so the re-derived geometry golden is byte-shareable.
+/// Mirrors Rust `polygon_set_to_test_json`.
+private func polygonSetToTestJson(_ ps: BoolPolygonSet) -> String {
+    let rings = ps.map { (ring: BoolRing) -> String in
+        let pts = ring.map { (pt: (Double, Double)) -> String in
+            "[\(canonicalRecordedValue(pt.0)),\(canonicalRecordedValue(pt.1))]"
+        }.joined(separator: ",")
+        return "[\(pts)]"
+    }.joined(separator: ",")
+    return "[\(rings)]"
+}
+
+/// Build the fresh Model a production-capture fixture's `setup_svg` defines.
+private func productionModel(_ fixture: [String: Any]) -> Model {
+    let svgPath = fixture["setup_svg"] as! String
+    let svg = readFixture(svgPath)
+    return Model(document: svgToDocument(svg))
+}
+
+/// Run every `runEffects` batch a production-capture fixture defines through the
+/// REAL production interpreter, stamping the fixture's `action_name`.
+///
+/// Supports both fixture shapes:
+///   - `effect_batch: [...]` — ONE runEffects call (the eye_demo
+///     select→copy→move demonstration, committing one named transaction).
+///   - `frames: [[...], [...]]` — MULTIPLE separate runEffects calls (the
+///     drag-frame-hole closure: frame 1 = snapshot+select+translate, frame 2 =
+///     a BARE translate with NO snapshot). Each frame is a distinct batch, so
+///     each commits its own named transaction — the one scenario the test-path
+///     operations corpus structurally cannot reach.
+/// Mirrors Rust `run_production_batches`.
+private func runProductionBatches(_ fixture: [String: Any], _ model: Model) {
+    let actionName = fixture["action_name"] as? String
+    let store = StateStore()
+    let platformEffects = buildYamlToolEffects(model: model)
+    func runBatch(_ effects: [Any]) {
+        runEffects(effects, ctx: [:], store: store,
+                   platformEffects: platformEffects,
+                   model: model, actionName: actionName)
+    }
+    if let batch = fixture["effect_batch"] as? [Any] {
+        runBatch(batch)
+    } else if let frames = fixture["frames"] as? [[Any]] {
+        for frame in frames { runBatch(frame) }
+    } else {
+        Issue.record("production-capture fixture has neither effect_batch nor frames")
+    }
+}
+
+/// Re-derive the recorded element's output against the EDITED source and return
+/// its canonical polygon-set JSON.
+///
+/// Lifts the LAST committed transaction's op segment (the production journal
+/// segment), runs `captureRecipe` to normalize it into an input-addressed
+/// recipe, wraps it in a `RecordedElem`, then `evaluateWith` it over a resolver
+/// that returns the EDITED source (the fixture's `recorded.edit_source` applies
+/// a textual SVG edit). The SVG px→pt unit conversion (96/72 = ×0.75) bakes into
+/// the re-derived bbox: editing the source `eye` to x=100 (px) maps to x=75 (pt)
+/// with w=10px→7.5pt; copy(dx=0)+translate(+50) → the derived bbox spans x in
+/// [125, 132.5] (pt). Mirrors Rust `rederive_recorded_output`.
+private func rederiveRecordedOutput(_ fixture: [String: Any], _ journal: [Transaction]) -> String {
+    let segment = journal.last!.ops
+    let (recipe, inputs) = captureRecipe(segment)
+    let recorded = RecordedElem(
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+
+    // Apply the fixture's edit to the source SVG, parse, and resolve the edited
+    // element by id. Mirror the effects.rs proof's textual edit (replace
+    // `x="0" y="0"` → `x="100" y="0"`) so the parse is identical to Rust.
+    let rec = fixture["recorded"] as! [String: Any]
+    let edit = rec["edit_source"] as! [String: Any]
+    let editId = edit["id"] as! String
+    let newX = ((edit["set"] as! [String: Any])["x"] as! NSNumber).intValue
+    let svg = readFixture(fixture["setup_svg"] as! String)
+    let editedSvg = svg.replacingOccurrences(
+        of: "x=\"0\" y=\"0\"", with: "x=\"\(newX)\" y=\"0\"")
+    let editedDoc = svgToDocument(editedSvg)
+    // The edited source is layers[0].children[0].
+    let editedEl = editedDoc.getElement([0, 0])
+
+    struct OneResolver: ElementResolver {
+        let id: String
+        let el: Element
+        func resolve(_ ref: ElementRef) -> Element? {
+            ref.id == id ? el : nil
+        }
+    }
+    let resolver = OneResolver(id: editId, el: editedEl)
+    var visiting: VisitSet = []
+    let ps = recorded.evaluateWith(
+        precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    return polygonSetToTestJson(ps)
+}
+
+/// Reusable production-capture harness (OP_LOG.md §9, Increment 3b-B). Loads the
+/// fixture, drives the REAL `runEffects` over `setup_svg`, then asserts:
+///  (a) `productionJournalToTestJson` == `expected_journal_json` (pins the
+///      translated ops + the action name);
+///  (b) the `checkpoint_equivalence` replay (OP_LOG.md §6): replaying the journal
+///      ops via `opApply` from `setup_svg` is byte-identical BOTH to
+///      `expected_document_json` AND to the live snapshot-path document;
+///  (c) the recorded re-derivation (when the fixture declares `recorded`) ==
+///      `expected_output_json`;
+///  (d) a SCOPED completeness assert (OP_LOG.md §9): EVERY committed production
+///      transaction's `ops` is non-empty (the production path here MUST emit ops
+///      — NOT a global commit_txn invariant). Mirrors Rust
+///      `run_production_batch_fixture`.
+private func runProductionBatchFixture(_ fixturePath: String) {
+    let json = readFixture(fixturePath)
+    let fx = try! JSONSerialization.jsonObject(
+        with: json.data(using: .utf8)!) as! [String: Any]
+    let name = (fx["name"] as? String) ?? fixturePath
+
+    // Drive the REAL production interpreter.
+    let model = productionModel(fx)
+    runProductionBatches(fx, model)
+
+    // (a) journal serialization == golden.
+    let actualJournal = productionJournalToTestJson(model.journal)
+    let expectedJournal = readFixture(fx["expected_journal_json"] as! String)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if actualJournal != expectedJournal {
+        print("=== EXPECTED journal (\(name)) ===\n\(expectedJournal)")
+        print("=== ACTUAL journal (\(name)) ===\n\(actualJournal)")
+    }
+    #expect(actualJournal == expectedJournal,
+        "production-capture journal JSON mismatch for '\(name)'")
+
+    // Snapshot-path document (the live result of runEffects).
+    let snapshotDoc = documentToTestJson(model.document)
+
+    // (b) checkpoint_equivalence: replay the WHOLE journal via opApply from a
+    // fresh setup, byte-compare to BOTH the expected_document golden AND the
+    // live snapshot-path document.
+    let replay = productionModel(fx)
+    let replayController = Controller(model: replay)
+    for txn in model.journal {
+        for op in txn.ops {
+            opApply(replay, replayController, op.params)
+        }
+    }
+    let replayDoc = documentToTestJson(replay.document)
+    let expectedDoc = readFixture(fx["expected_document_json"] as! String)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if replayDoc != snapshotDoc {
+        print("=== checkpoint_equivalence GATE FAILED (\(name)) ===")
+        print("--- snapshot path ---\n\(snapshotDoc)")
+        print("--- journal replay ---\n\(replayDoc)")
+    }
+    #expect(replayDoc == snapshotDoc,
+        "checkpoint_equivalence: journal replay != snapshot path for '\(name)'")
+    if replayDoc != expectedDoc {
+        print("=== EXPECTED doc (\(name)) ===\n\(expectedDoc)")
+        print("=== ACTUAL doc (\(name)) ===\n\(replayDoc)")
+    }
+    #expect(replayDoc == expectedDoc,
+        "production-capture document JSON mismatch for '\(name)'")
+
+    // (c) recorded re-derivation against the edited source == golden.
+    if let rec = fx["recorded"] as? [String: Any] {
+        let actualOut = rederiveRecordedOutput(fx, model.journal)
+        let expectedOut = readFixture(rec["expected_output_json"] as! String)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if actualOut != expectedOut {
+            print("=== EXPECTED rederived (\(name)) ===\n\(expectedOut)")
+            print("=== ACTUAL rederived (\(name)) ===\n\(actualOut)")
+        }
+        #expect(actualOut == expectedOut,
+            "production-capture re-derivation mismatch for '\(name)'")
+    }
+
+    // (d) scoped completeness assert: every committed production transaction
+    // emits ops (the production path here is NOT named-but-op-less).
+    #expect(!model.journal.isEmpty,
+        "production batch committed at least one transaction (\(name))")
+    for (i, txn) in model.journal.enumerated() {
+        #expect(!txn.ops.isEmpty,
+            "production txn \(i) emits ops (3b-B completeness, \(name))")
+    }
+}
+
+/// Production op-capture eye demo (OP_LOG.md §9): marquee-select → copy → move,
+/// driven through the REAL runEffects, pins the translated journal, the
+/// checkpoint-equivalent document, and the live re-derivation. Mirrors Rust
+/// `production_capture_eye_demo`.
+@Test func productionCaptureEyeDemo() {
+    runProductionBatchFixture("production_capture/eye_demo.json")
+}
+
+/// Production op-capture drag-frame-hole closure (OP_LOG.md §9): two SEPARATE
+/// runEffects batches — frame 1 (snapshot+select+translate) and a BARE frame 2
+/// (translate, NO snapshot) — both commit NAMED transactions that journal their
+/// move_selection op. The one scenario the test-path operations corpus
+/// structurally cannot reach. Mirrors Rust
+/// `production_capture_eye_demo_bare_frame`.
+@Test func productionCaptureEyeDemoBareFrame() {
+    runProductionBatchFixture("production_capture/eye_demo_bare_frame.json")
 }
 
 // MARK: - Workspace layout equivalence tests

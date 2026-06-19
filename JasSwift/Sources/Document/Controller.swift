@@ -1521,6 +1521,20 @@ public class Controller {
     }
 }
 
+/// Resolve the current selection to the stable `common.id`s of the selected
+/// elements, in document order (OP_LOG.md §9 / Fork 4: the `targets` of a
+/// journaled op). Id-less selected elements are silently dropped (`id` is
+/// optional; a recorded source must carry an id — a documented prerequisite,
+/// not a bug). Sorting by path makes the order deterministic and cross-language
+/// stable even though Swift's `Selection` is a `Set`. One definition reused by
+/// the production `OpApply` path and the `#if DEBUG` harness so both populate
+/// `targets` identically. Mirrors Rust `controller::selection_to_ids`.
+public func selectionToIds(_ doc: Document) -> [String] {
+    doc.selection
+        .sorted { $0.path.lexicographicallyPrecedes($1.path) }
+        .compactMap { doc.tryGetElement($0.path)?.id }
+}
+
 // MARK: - Fill / Stroke summary
 
 public enum FillSummary: Equatable {
