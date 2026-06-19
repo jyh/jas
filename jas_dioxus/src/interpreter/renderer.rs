@@ -2433,42 +2433,60 @@ fn run_yaml_effect(
     // snapshots record the change. Effects assume snapshot has
     // already been called upstream in the action's effects list.
 
-    // doc.create_artboard: { [field]: expr, ... }
-    // Appends a new artboard. Optional field overrides (x, y, width,
-    // height, fill, show_*, video_ruler_pixel_aspect_ratio, name)
-    // are evaluated and applied on top of the default.
+    // doc.create_artboard: { [field]: expr, ... }  — OP_LOG.md §9 Phase P3.
+    // Appends a new artboard. Optional field overrides (x, y, width, height,
+    // fill, show_*, video_ruler_pixel_aspect_ratio, name) are evaluated and
+    // applied on top of the default.
+    //
+    // VALUE-IN-OP id strategy: the id is MINTED HERE (the entropic collision-retry
+    // mint — production captures the live id ONCE) and the default name is derived
+    // HERE; then the MINTED id is written into the op as a LITERAL (`id`) alongside
+    // the RESOLVED field overrides (a flat object, including the derived name when
+    // no override supplies one), and the op routes through the SHARED `op_apply`
+    // dispatcher (which calls `apply_create_artboard`). Replay reads the recorded
+    // id + resolved fields VERBATIM and NEVER re-mints / NEVER taps entropy, so the
+    // journal replays deterministically (checkpoint_equivalence). targets carry the
+    // new artboard id.
     if let Some(spec) = eff.get("doc.create_artboard").and_then(|v| v.as_object()) {
-        use crate::document::artboard::{
-            generate_artboard_id, next_artboard_name, Artboard,
-        };
+        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
         let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        // Collision-retry id mint.
+        let doc = tab.model.document();
+        // Collision-retry id mint (production entropy). This is the ONLY mint;
+        // op_apply replays the recorded literal and never mints.
         let existing_ids: std::collections::HashSet<String> =
-            new_doc.artboards.iter().map(|a| a.id.clone()).collect();
+            doc.artboards.iter().map(|a| a.id.clone()).collect();
         let mut id = String::new();
         for _ in 0..100 {
             let c = generate_artboard_id(None);
             if !existing_ids.contains(&c) { id = c; break; }
         }
         if id.is_empty() { return deferred; }
-        let default_name = next_artboard_name(&new_doc.artboards);
-        let mut ab = Artboard::default_with_id(id.clone());
-        ab.name = default_name;
+        // Derive the default name HERE (a function of the live doc); a `name`
+        // override in `spec` replaces it below. Build a RESOLVED flat `fields`
+        // object: each YAML expr is evaluated to a literal before journaling
+        // (replay has no eval context).
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "name".to_string(),
+            serde_json::json!(next_artboard_name(&doc.artboards)),
+        );
         for (k, v) in spec {
             let val = if let Some(s) = v.as_str() {
                 super::expr::eval(s, &*eval_ctx)
             } else {
                 super::expr_types::Value::from_json(v)
             };
-            apply_artboard_override(&mut ab, k, &val);
+            fields.insert(k.clone(), super::effects::value_to_json(&val));
         }
-        let new_id = ab.id.clone();
-        new_doc.artboards.push(ab);
-        tab.model.set_document(new_doc);
+        let op = serde_json::json!({
+            "op": "create_artboard",
+            "id": id.clone(),
+            "fields": serde_json::Value::Object(fields),
+        });
+        crate::document::op_apply::op_apply(&mut tab.model, &op);
         if let Some(as_n) = as_name {
             if let Some(map) = eval_ctx.as_object_mut() {
-                map.insert(as_n, serde_json::json!(new_id));
+                map.insert(as_n, serde_json::json!(id));
             }
         }
         return deferred;
@@ -2494,10 +2512,19 @@ fn run_yaml_effect(
     }
 
     // doc.duplicate_artboard: id_expr | { id, offset_x?, offset_y? }
+    //   — OP_LOG.md §9 Phase P3.
+    // Clones the source artboard (by resolved id) and appends it offset by
+    // (offset_x, offset_y) (default 20.0 each). VALUE-IN-OP id strategy: the
+    // new id is MINTED HERE (entropic collision-retry — production captures the
+    // live id ONCE) and the new name is DERIVED HERE via next_artboard_name; both
+    // are then written into the op as LITERALS (`new_id` / `name`) alongside the
+    // resolved source id + offsets, and the op routes through the SHARED `op_apply`
+    // dispatcher (which calls `apply_duplicate_artboard`). Replay reads the
+    // recorded new_id + name + offsets VERBATIM and NEVER re-mints / NEVER
+    // re-derives the name / NEVER taps entropy (checkpoint_equivalence). A missing
+    // source is a no-op that journals nothing. targets carry the new id.
     if let Some(eff_val) = eff.get("doc.duplicate_artboard") {
-        use crate::document::artboard::{
-            generate_artboard_id, next_artboard_name, Artboard,
-        };
+        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
         let (id_expr, ox_expr, oy_expr) = match eff_val {
             serde_json::Value::String(s) => (s.clone(), None, None),
             serde_json::Value::Object(m) => (
@@ -2523,24 +2550,33 @@ fn run_yaml_effect(
             .and_then(|v| if let super::expr_types::Value::Number(n) = v { Some(n) } else { None })
             .unwrap_or(20.0);
         let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        let Some(source) = new_doc.artboards.iter().find(|a| a.id == target).cloned() else {
+        let doc = tab.model.document();
+        // Resolve the source up front: a missing source short-circuits BEFORE we
+        // mint, so a no-op duplicate journals nothing (matching the op_apply arm).
+        if !doc.artboards.iter().any(|a| a.id == target) {
             return deferred;
-        };
+        }
+        // Collision-retry id mint (production entropy) — the ONLY mint.
         let existing_ids: std::collections::HashSet<String> =
-            new_doc.artboards.iter().map(|a| a.id.clone()).collect();
-        let mut id = String::new();
+            doc.artboards.iter().map(|a| a.id.clone()).collect();
+        let mut new_id = String::new();
         for _ in 0..100 {
             let c = generate_artboard_id(None);
-            if !existing_ids.contains(&c) { id = c; break; }
+            if !existing_ids.contains(&c) { new_id = c; break; }
         }
-        if id.is_empty() { return deferred; }
-        let mut dup = Artboard { id, ..source };
-        dup.name = next_artboard_name(&new_doc.artboards);
-        dup.x += ox;
-        dup.y += oy;
-        new_doc.artboards.push(dup);
-        tab.model.set_document(new_doc);
+        if new_id.is_empty() { return deferred; }
+        // Derive the new name HERE (a function of the live doc); journaled as a
+        // literal so replay never re-derives it.
+        let new_name = next_artboard_name(&doc.artboards);
+        let op = serde_json::json!({
+            "op": "duplicate_artboard",
+            "id": target,
+            "new_id": new_id,
+            "name": new_name,
+            "offset_x": ox,
+            "offset_y": oy,
+        });
+        crate::document::op_apply::op_apply(&mut tab.model, &op);
         return deferred;
     }
 
@@ -3389,33 +3425,11 @@ pub(crate) fn apply_artboards_panel_field(
 
 // ── Artboard doc helpers (ARTBOARDS.md §Reordering) ────────────────────
 
-fn apply_artboard_override(
-    ab: &mut crate::document::artboard::Artboard,
-    field: &str,
-    val: &super::expr_types::Value,
-) {
-    use super::expr_types::Value;
-    use crate::document::artboard::ArtboardFill;
-    match field {
-        "name" => if let Value::Str(s) = val { ab.name = s.clone(); }
-        "x" => if let Value::Number(n) = val { ab.x = *n; }
-        "y" => if let Value::Number(n) = val { ab.y = *n; }
-        "width" => if let Value::Number(n) = val { ab.width = *n; }
-        "height" => if let Value::Number(n) = val { ab.height = *n; }
-        "fill" => match val {
-            Value::Str(s) => ab.fill = ArtboardFill::from_canonical(s),
-            Value::Color(s) => ab.fill = ArtboardFill::from_canonical(s),
-            _ => {}
-        },
-        "show_center_mark" => if let Value::Bool(b) = val { ab.show_center_mark = *b; }
-        "show_cross_hairs" => if let Value::Bool(b) = val { ab.show_cross_hairs = *b; }
-        "show_video_safe_areas" => if let Value::Bool(b) = val { ab.show_video_safe_areas = *b; }
-        "video_ruler_pixel_aspect_ratio" => {
-            if let Value::Number(n) = val { ab.video_ruler_pixel_aspect_ratio = *n; }
-        }
-        _ => {}
-    }
-}
+// apply_artboard_override (the create/duplicate field-application) moved to
+// op_apply.rs (OP_LOG.md §9 Phase P3) as `apply_artboard_field_in_place`, so the
+// create path resolves each YAML expr to a JSON literal in the renderer, journals
+// it in the op's `fields`, and op_apply applies the RESOLVED literals at the
+// document layer (no interpreter import, mirroring P2 apply_set_artboard_field).
 
 fn extract_id_list(val: &super::expr_types::Value) -> Vec<String> {
     match val {
@@ -9745,6 +9759,151 @@ mod tests {
         assert_artboard_checkpoint_equivalence(&st, pre_doc);
     }
 
+    // OP_LOG.md §9 Phase P3 — production-route proofs for the TWO id-minting
+    // artboard verbs (`create_artboard` / `duplicate_artboard`). These drive the
+    // REAL renderer.rs production handler (`run_yaml_effects_named`) against a
+    // real AppState/Model and assert the VALUE-IN-OP id strategy end to end:
+    //   (1) the committed Transaction journals the verb op carrying a LITERAL
+    //       id/new_id (a base36 string, NOT a YAML expr) plus RESOLVED params
+    //       (fields / name / offsets), with targets == [new_id];
+    //   (2) the live document has the new artboard with that exact id;
+    //   (3) checkpoint_equivalence: replaying the journal from a fresh copy of the
+    //       PRE-edit document is byte-identical to the live (minted) document —
+    //       proving the captured-id replay reproduces the entropic mint without
+    //       re-minting. (op_apply NEVER taps entropy on replay.)
+    // Counterpart to the operations-fixture proof in cross_language_test.rs.
+
+    /// True iff `s` is a plausible minted artboard id: a non-empty base36 token
+    /// that is NOT a leftover YAML expr (no quotes / spaces / `doc.` / parens).
+    /// The production path must journal the MINTED literal, never the expr string.
+    fn looks_like_minted_id(s: &str) -> bool {
+        !s.is_empty()
+            && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    }
+
+    #[test]
+    fn production_route_journals_create_artboard() {
+        let mut st = make_state_with_two_artboards();
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+        let count_before = pre_doc.artboards.len();
+
+        // Mirror the real `new_artboard` action: a `snapshot` opens the txn, then
+        // create_artboard mints an id (production entropy) and journals it as a
+        // LITERAL. The `x`/`name` field values are STRING exprs (production evals
+        // them to literals before journaling).
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "doc.create_artboard": { "name": "'Cover'", "x": "500", "width": "400" }
+            }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("new_artboard"));
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1,
+            "create_artboard commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("new_artboard"));
+        assert_eq!(txn.ops.len(), 1, "exactly one create op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "create_artboard");
+        // (1) the op carries a LITERAL minted id, not an expr.
+        let minted = op.params["id"].as_str().expect("id is a string literal");
+        assert!(looks_like_minted_id(minted),
+            "the journaled id is a MINTED literal, not a YAML expr: {minted:?}");
+        // RESOLVED field overrides (the production eval → literal path).
+        assert_eq!(op.params["fields"]["name"], serde_json::json!("Cover"),
+            "the resolved name field (not the expr string)");
+        assert_eq!(op.params["fields"]["x"], serde_json::json!(500),
+            "the resolved x field (RESOLVED literal, not the YAML expr)");
+        assert_eq!(op.params["fields"]["width"], serde_json::json!(400));
+        // targets carry the created artboard id.
+        assert_eq!(op.targets, vec![minted.to_string()],
+            "create targets carry the new artboard id");
+        // (2) the live document has the new artboard with that id + fields.
+        assert_eq!(model.document().artboards.len(), count_before + 1);
+        let created = model.document().artboards.iter()
+            .find(|a| a.id == minted).expect("the created artboard is in the doc");
+        assert_eq!(created.name, "Cover");
+        assert_eq!(created.x, 500.0);
+        assert_eq!(created.width, 400.0);
+
+        // (3) checkpoint_equivalence: replay from the pre-edit doc reproduces the
+        // live (minted) doc byte-identically — the captured-id replay matches the
+        // minted-id production (replay never re-mints).
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    #[test]
+    fn production_route_journals_duplicate_artboard() {
+        let mut st = make_state_with_two_artboards();
+        // Make ab1 distinctive so we can prove the clone copied source geometry.
+        {
+            let mut d = st.tabs[st.active_tab].model.document().clone();
+            if let Some(ab) = d.artboards.iter_mut().find(|a| a.id == "ab1") {
+                ab.x = 10.0;
+                ab.y = 20.0;
+                ab.width = 333.0;
+            }
+            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+        }
+        // Snapshot the pre-edit document AFTER the setup write, so replay starts
+        // from the same baseline the live edit does.
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+        let count_before = pre_doc.artboards.len();
+
+        // Mirror the real `duplicate_artboard` action: { id, offset_x, offset_y }.
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "doc.duplicate_artboard": { "id": "'ab1'", "offset_x": "5", "offset_y": "7" }
+            }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("duplicate_artboard"));
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1,
+            "duplicate_artboard commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("duplicate_artboard"));
+        assert_eq!(txn.ops.len(), 1, "exactly one duplicate op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "duplicate_artboard");
+        // The source id is the resolved literal, not the expr.
+        assert_eq!(op.params["id"], serde_json::json!("ab1"),
+            "the resolved source id");
+        // (1) the op carries a LITERAL minted new_id, not an expr.
+        let minted = op.params["new_id"].as_str().expect("new_id is a string literal");
+        assert!(looks_like_minted_id(minted),
+            "the journaled new_id is a MINTED literal, not a YAML expr: {minted:?}");
+        assert_ne!(minted, "ab1", "the duplicate gets a fresh id");
+        // RESOLVED derived name + offsets are journaled as literals.
+        assert!(op.params["name"].as_str().expect("name literal").starts_with("Artboard "),
+            "the RESOLVED next-artboard name is journaled (not re-derived on replay)");
+        assert_eq!(op.params["offset_x"], serde_json::json!(5.0),
+            "the resolved offset_x literal");
+        assert_eq!(op.params["offset_y"], serde_json::json!(7.0),
+            "the resolved offset_y literal");
+        // targets carry the new (duplicated) artboard id.
+        assert_eq!(op.targets, vec![minted.to_string()],
+            "duplicate targets carry the new artboard id");
+        // (2) the live document has the clone with copied geometry + offset.
+        assert_eq!(model.document().artboards.len(), count_before + 1);
+        let dup = model.document().artboards.iter()
+            .find(|a| a.id == minted).expect("the duplicated artboard is in the doc");
+        assert_eq!(dup.x, 15.0, "source x (10) + offset_x (5)");
+        assert_eq!(dup.y, 27.0, "source y (20) + offset_y (7)");
+        assert_eq!(dup.width, 333.0, "source width copied");
+
+        // (3) checkpoint_equivalence: replay from the pre-edit doc reproduces the
+        // live minted doc byte-identically.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
     // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after
 
     #[test]
@@ -10827,15 +10986,25 @@ mod tests {
         assert_eq!(ids, vec!["a1", "a3", "a2", "a5", "a4"]);
     }
 
+    /// The create-path field application (formerly `apply_artboard_override`,
+    /// moved to op_apply.rs as `apply_artboard_field_in_place`, OP_LOG.md §9
+    /// Phase P3). Exercised here through the public `apply_create_artboard` Model
+    /// helper: the RESOLVED `fields` literals coerce onto the appended artboard.
     #[test]
-    fn apply_artboard_override_all_fields() {
-        let mut ab = Artboard::default_with_id("aaa".into());
-        super::apply_artboard_override(&mut ab, "name", &super::super::expr_types::Value::Str("Cover".into()));
-        super::apply_artboard_override(&mut ab, "x", &super::super::expr_types::Value::Number(100.0));
-        super::apply_artboard_override(&mut ab, "y", &super::super::expr_types::Value::Number(200.0));
-        super::apply_artboard_override(&mut ab, "width", &super::super::expr_types::Value::Number(400.0));
-        super::apply_artboard_override(&mut ab, "fill", &super::super::expr_types::Value::Str("#ff0000".into()));
-        super::apply_artboard_override(&mut ab, "show_center_mark", &super::super::expr_types::Value::Bool(true));
+    fn apply_create_artboard_applies_all_fields() {
+        let doc = crate::document::document::Document::default();
+        let mut model = crate::document::model::Model::new(doc, None);
+        let fields = serde_json::json!({
+            "name": "Cover",
+            "x": 100.0,
+            "y": 200.0,
+            "width": 400.0,
+            "fill": "#ff0000",
+            "show_center_mark": true,
+        });
+        crate::document::op_apply::apply_create_artboard(&mut model, "aaa", &fields);
+        let ab = model.document().artboards.iter()
+            .find(|a| a.id == "aaa").expect("the created artboard");
         assert_eq!(ab.name, "Cover");
         assert_eq!(ab.x, 100.0);
         assert_eq!(ab.y, 200.0);

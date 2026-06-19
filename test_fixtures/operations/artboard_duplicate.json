@@ -1,0 +1,62 @@
+[
+  {
+    "name": "artboard_duplicate_default_offset",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "duplicate_artboard",
+        "ops": [
+          {
+            "op": "duplicate_artboard",
+            "id": "ab2",
+            "new_id": "abDD",
+            "name": "Artboard 1",
+            "offset_x": 20.0,
+            "offset_y": 20.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "artboard_duplicate_default_offset_expected.json"
+  },
+  {
+    "name": "artboard_duplicate_custom_offset",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "duplicate_artboard",
+        "ops": [
+          {
+            "op": "duplicate_artboard",
+            "id": "ab1",
+            "new_id": "abEE",
+            "name": "Artboard 2",
+            "offset_x": -15.0,
+            "offset_y": 35.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "artboard_duplicate_custom_offset_expected.json"
+  },
+  {
+    "name": "artboard_duplicate_missing_source_noop",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "duplicate_artboard",
+        "ops": [
+          {
+            "op": "duplicate_artboard",
+            "id": "nope",
+            "new_id": "abFF",
+            "name": "Artboard 1",
+            "offset_x": 20.0,
+            "offset_y": 20.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "artboard_duplicate_missing_source_noop_expected.json"
+  }
+]

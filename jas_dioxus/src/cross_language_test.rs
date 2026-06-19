@@ -599,7 +599,9 @@ mod tests {
                          "operations/print_config_setters.json",
                          "operations/artboard_set_field_batch.json",
                          "operations/artboard_reorder.json",
-                         "operations/artboard_delete.json"] {
+                         "operations/artboard_delete.json",
+                         "operations/artboard_create.json",
+                         "operations/artboard_duplicate.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1597,6 +1599,62 @@ mod tests {
     #[test]
     fn operation_artboard_delete() {
         run_operation_fixture("operations/artboard_delete.json");
+    }
+
+    /// Artboard create (OP_LOG.md §9 Phase P3): `create_artboard` is the FIRST
+    /// id-minting verb to journal through `op_apply`. Under the VALUE-IN-OP id
+    /// strategy the op carries the minted `id` as a LITERAL (the harness fixtures
+    /// supply FIXED ids — `abZZ`/`abYY`/`abXX`) and a RESOLVED `fields` object;
+    /// the op_apply arm reads them VERBATIM and NEVER mints / NEVER taps entropy /
+    /// NEVER runs the collision-retry. The checkpoint_equivalence gate (run by
+    /// `assert_operation_test`) proves the journaled op replays byte-identically
+    /// to the snapshot-path document — INCLUDING the new artboard with its literal
+    /// id. A type-mismatch field is skipped (the artboard keeps the default for
+    /// that field) while the create itself still lands.
+    #[test]
+    fn operation_artboard_create() {
+        run_operation_fixture("operations/artboard_create.json");
+    }
+
+    /// Artboard duplicate (OP_LOG.md §9 Phase P3): `duplicate_artboard` clones a
+    /// source artboard (by `id`) and writes the minted `new_id` + the RESOLVED
+    /// `name` + `offset_x`/`offset_y` as LITERALS. The op_apply arm reads them
+    /// VERBATIM and NEVER mints (no entropy / no collision-retry on replay) and
+    /// NEVER re-derives the name. A missing source id is a no-op that journals
+    /// nothing. The checkpoint_equivalence gate proves byte-identical replay.
+    #[test]
+    fn operation_artboard_duplicate() {
+        run_operation_fixture("operations/artboard_duplicate.json");
+    }
+
+    /// OP_LOG.md §9 Phase P3 — replay determinism: the SAME journal (with its
+    /// literal minted ids) replays to the SAME document TWICE. This is the heart
+    /// of the value-in-op id strategy: even though the original mint was entropic,
+    /// replay is a pure deterministic function of the recorded journal (no
+    /// entropy / no collision-retry on the op_apply path). Covers BOTH id-minting
+    /// verbs.
+    #[test]
+    fn operation_artboard_create_duplicate_replay_is_deterministic() {
+        for fixture in &[
+            "operations/artboard_create.json",
+            "operations/artboard_duplicate.json",
+        ] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let model = run_operation_model(tc);
+                let setup = tc["setup_svg"].as_str().unwrap();
+                let head = model.journal_head();
+                let replay1 = replay_journal(setup, model.journal(), head);
+                let replay2 = replay_journal(setup, model.journal(), head);
+                assert_eq!(
+                    replay1, replay2,
+                    "replay of '{}' is non-deterministic (op_apply must never \
+                     mint/tap entropy on the id-minting verbs)",
+                    tc["name"].as_str().unwrap()
+                );
+            }
+        }
     }
 
     // ---------------------------------------------------------------
