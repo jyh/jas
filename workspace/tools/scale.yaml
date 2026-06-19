@@ -84,6 +84,12 @@ handlers:
                 cursor_y: "event.y"
                 shift:   "event.modifiers.shift"
                 copy:    "false"
+                # OP_LOG.md §9 Phase P7: the drag-release commit is a CONFIRM —
+                # it journals one scale_transform op (joining the doc.snapshot
+                # transaction opened on mousedown). on_mousemove never mutates the
+                # document (the live preview is the bbox_ghost overlay), so the
+                # drag has no per-frame journaling to suppress.
+                journal: true
           else:
             # Click without drag — set reference point, optionally
             # open dialog when Alt was held at press.

@@ -5332,7 +5332,8 @@
           "doc.scale.apply": {
             "sx": "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0",
             "sy": "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0",
-            "copy": "param.copy"
+            "copy": "param.copy",
+            "journal": true
           }
         },
         {
@@ -5403,7 +5404,8 @@
         {
           "doc.rotate.apply": {
             "angle": "param.angle",
-            "copy": "param.copy"
+            "copy": "param.copy",
+            "journal": true
           }
         },
         {
@@ -5478,7 +5480,8 @@
             "angle": "param.angle",
             "axis": "param.axis",
             "axis_angle": "param.axis_angle",
-            "copy": "param.copy"
+            "copy": "param.copy",
+            "journal": true
           }
         },
         {
@@ -22852,7 +22855,8 @@
                       "cursor_x": "event.x",
                       "cursor_y": "event.y",
                       "shift": "event.modifiers.shift",
-                      "copy": "false"
+                      "copy": "false",
+                      "journal": true
                     }
                   }
                 ],
@@ -23245,7 +23249,8 @@
                       "cursor_x": "event.x",
                       "cursor_y": "event.y",
                       "shift": "event.modifiers.shift",
-                      "copy": "false"
+                      "copy": "false",
+                      "journal": true
                     }
                   }
                 ],
@@ -23978,7 +23983,8 @@
                       "cursor_x": "event.x",
                       "cursor_y": "event.y",
                       "shift": "event.modifiers.shift",
-                      "copy": "false"
+                      "copy": "false",
+                      "journal": true
                     }
                   }
                 ],

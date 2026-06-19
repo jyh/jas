@@ -1,0 +1,29 @@
+[
+  {
+    "name": "rotate_transform_ref_origin",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "rotate_transform", "angle": 90.0, "rx": 0.0, "ry": 0.0}
+    ],
+    "expected_json": "transform_rotate_ref_origin_expected.json"
+  },
+  {
+    "name": "rotate_transform_ref_center",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "rotate_transform", "angle": 30.0, "rx": 48.0, "ry": 48.0}
+    ],
+    "expected_json": "transform_rotate_ref_center_expected.json"
+  },
+  {
+    "name": "rotate_transform_identity_noop",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "rotate_transform", "angle": 0.0, "rx": 48.0, "ry": 48.0}
+    ],
+    "expected_json": "transform_rotate_identity_noop_expected.json"
+  }
+]

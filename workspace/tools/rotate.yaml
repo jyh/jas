@@ -78,6 +78,9 @@ handlers:
                 cursor_y: "event.y"
                 shift:   "event.modifiers.shift"
                 copy:    "false"
+                # OP_LOG.md §9 Phase P7: the drag-release commit journals one
+                # rotate_transform op (joining the doc.snapshot transaction).
+                journal: true
           else:
             - set: { transform_reference_point: "[event.x, event.y]" }
             - if: "tool.rotate.alt_held"

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "scale_transform_uniform_ref_origin",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "scale_transform", "sx": 2.0, "sy": 2.0, "rx": 0.0, "ry": 0.0, "scale_strokes": true, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_uniform_ref_origin_expected.json"
+  },
+  {
+    "name": "scale_transform_nonuniform_ref_center",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "scale_transform", "sx": 1.5, "sy": 0.5, "rx": 48.0, "ry": 48.0, "scale_strokes": true, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_nonuniform_ref_center_expected.json"
+  },
+  {
+    "name": "scale_transform_with_stroke_scaled",
+    "setup_svg": "rect_with_stroke.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 48, "extend": false},
+      {"op": "scale_transform", "sx": 2.0, "sy": 2.0, "rx": 48.0, "ry": 24.0, "scale_strokes": true, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_with_stroke_scaled_expected.json"
+  },
+  {
+    "name": "scale_transform_stroke_preserved",
+    "setup_svg": "rect_with_stroke.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 48, "extend": false},
+      {"op": "scale_transform", "sx": 2.0, "sy": 2.0, "rx": 48.0, "ry": 24.0, "scale_strokes": false, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_stroke_preserved_expected.json"
+  },
+  {
+    "name": "scale_transform_identity_noop",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "scale_transform", "sx": 1.0, "sy": 1.0, "rx": 0.0, "ry": 0.0, "scale_strokes": true, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_identity_noop_expected.json"
+  }
+]

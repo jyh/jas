@@ -609,7 +609,11 @@ mod tests {
                          "operations/wrap_in_group.json",
                          "operations/wrap_in_layer.json",
                          "operations/unpack_group_at.json",
-                         "operations/set_attr_on_selection.json"] {
+                         "operations/set_attr_on_selection.json",
+                         "operations/transform_scale.json",
+                         "operations/transform_rotate.json",
+                         "operations/transform_shear.json",
+                         "operations/transform_copy.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -2016,6 +2020,372 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---------------------------------------------------------------
+    // OP_LOG.md §9 Phase P7 — the transform trio (scale / rotate / shear)
+    // ---------------------------------------------------------------
+
+    /// Phase P7 — the transform trio journals the CONFIRM apply through
+    /// `op_apply` as one transform op carrying the RESOLVED matrix params (the
+    /// factors/angle/axis, the resolved reference point rx/ry, and the scale
+    /// flags). The op_apply replay arms call the SAME shared helpers
+    /// (`apply_scale`/`apply_rotate`/`apply_shear`) as the production confirm
+    /// path, so the matrix compose is byte-identical and the
+    /// checkpoint_equivalence gate (`assert_operation_test`) proves each journaled
+    /// op replays byte-identically to the snapshot-path document. Identity
+    /// transforms (sx=sy=1 / angle=0) journal NOTHING (the no-op short-circuit).
+    #[test]
+    fn operation_transform_scale() {
+        run_operation_fixture("operations/transform_scale.json");
+    }
+
+    #[test]
+    fn operation_transform_rotate() {
+        run_operation_fixture("operations/transform_rotate.json");
+    }
+
+    #[test]
+    fn operation_transform_shear() {
+        run_operation_fixture("operations/transform_shear.json");
+    }
+
+    /// Phase P7 — the copy=true variant journals TWO ops in one transaction:
+    /// `copy_selection` (duplicate, born id-less) THEN the transform op (applied
+    /// to the duplicate). The byte-gate proves the original stays untouched and
+    /// the copy carries the composed matrix.
+    #[test]
+    fn operation_transform_copy() {
+        run_operation_fixture("operations/transform_copy.json");
+    }
+
+    /// Phase P7 — replay determinism: the SAME journal replays to the SAME
+    /// document TWICE. The matrix compose is a pure deterministic function of the
+    /// recorded op (resolved literals only — no state, no entropy, no drag
+    /// coordinates). Covers all three verbs + the copy variant.
+    #[test]
+    fn operation_transform_replay_is_deterministic() {
+        for fixture in &[
+            "operations/transform_scale.json",
+            "operations/transform_rotate.json",
+            "operations/transform_shear.json",
+            "operations/transform_copy.json",
+        ] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let model = run_operation_model(tc);
+                let setup = tc["setup_svg"].as_str().unwrap();
+                let head = model.journal_head();
+                let replay1 = replay_journal(setup, model.journal(), head);
+                let replay2 = replay_journal(setup, model.journal(), head);
+                assert_eq!(
+                    replay1, replay2,
+                    "replay of '{}' is non-deterministic (the transform matrix must \
+                     compose byte-identically from the resolved-literal op)",
+                    tc["name"].as_str().unwrap()
+                );
+            }
+        }
+    }
+
+    /// Read the production action-bundle (`workspace/workspace.json`) and return
+    /// the named action's `effects` array. The native apps load this bundle (not
+    /// the YAML), so driving these effects exercises the REAL confirm/preview
+    /// paths exactly as production does.
+    fn bundle_action_effects(action: &str) -> Vec<serde_json::Value> {
+        let bundle = std::fs::read_to_string("../workspace/workspace.json")
+            .expect("read workspace.json bundle");
+        let v: serde_json::Value = serde_json::from_str(&bundle).expect("parse bundle");
+        v["actions"][action]["effects"]
+            .as_array()
+            .unwrap_or_else(|| panic!("action {action} has no effects array"))
+            .clone()
+    }
+
+    /// Build a Model from `rect_with_id.svg` with the single rect (id "rect-1")
+    /// selected — the common setup for the production-route transform tests.
+    ///
+    /// The selection is established through a JOURNALED `select_rect` op in its own
+    /// committed transaction (not an out-of-band Controller call), so
+    /// checkpoint_equivalence can replay it: selection is serialized Document state
+    /// (OP_LOG.md §7), and `copy_selection` reads it on replay. This mirrors a real
+    /// session, where a prior journaled select established the selection before the
+    /// transform dialog opened.
+    fn transform_production_model() -> Model {
+        let svg = read_fixture("svg/rect_with_id.svg");
+        let mut model = Model::new(svg_to_document(&svg), None);
+        model.begin_txn();
+        crate::document::op_apply::op_apply(&mut model, &serde_json::json!({
+            "op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96,
+            "extend": false,
+        }));
+        model.commit_txn();
+        model
+    }
+
+    /// Drive an action's effects through the REAL `run_effects` with the given
+    /// resolved `param.*` context, stamping `action` as the txn name (matching
+    /// production's `name_txn`).
+    fn run_transform_action(model: &mut Model, action: &str, params: serde_json::Value) {
+        use crate::interpreter::effects::run_effects;
+        use crate::interpreter::state_store::StateStore;
+        let effects = bundle_action_effects(action);
+        let ctx = serde_json::json!({ "param": params });
+        let mut store = StateStore::new();
+        run_effects(&effects, &ctx, &mut store, Some(model), None, None, Some(action));
+    }
+
+    /// Phase P7 — the PRODUCTION confirm path. Drives the REAL
+    /// `scale_options_confirm` / `rotate_options_confirm` / `shear_options_confirm`
+    /// actions from the bundle and asserts:
+    ///  (a) exactly ONE transform op is journaled (copy=false);
+    ///  (b) the op carries the RESOLVED params — rx/ry literals (resolved from the
+    ///      selection-bounds center, NOT transient state), the factors/angle, and
+    ///      (scale) the flags;
+    ///  (c) the live document is transformed;
+    ///  (d) checkpoint_equivalence holds (the journaled op replays to the same doc).
+    #[test]
+    fn production_transform_confirm_journals_one_op_with_resolved_params() {
+        // (scale) uniform 200%, copy=false. The 96×96 (px) rect parses to 72×72
+        // in internal pt units (SVG px→pt ×0.75), so the selection-bounds center
+        // is (36, 36) ⇒ rx/ry resolve to 36 — the REAL geometric center, NOT any
+        // transient state. (That the resolved literal is 36, not 48, is itself the
+        // proof the reference point is resolved from the live selection geometry.)
+        {
+            let mut model = transform_production_model();
+            run_transform_action(&mut model, "scale_options_confirm", serde_json::json!({
+                "uniform": true, "uniform_pct": 200.0,
+                "horizontal_pct": 100.0, "vertical_pct": 100.0,
+                "scale_strokes": true, "scale_corners": false,
+                "preview": false, "copy": false,
+            }));
+            let txn = model.journal().last().expect("a committed transaction");
+            let ops: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+            assert_eq!(ops, vec!["scale_transform"],
+                "confirm journals exactly one scale_transform op (copy=false)");
+            let p = &txn.ops[0].params;
+            assert_eq!(p["sx"], 2.0, "resolved sx literal");
+            assert_eq!(p["sy"], 2.0, "resolved sy literal");
+            assert_eq!(p["rx"], 36.0, "rx resolved to the selection-bounds center literal");
+            assert_eq!(p["ry"], 36.0, "ry resolved to the selection-bounds center literal");
+            assert_eq!(p["scale_strokes"], true, "resolved scale_strokes flag literal");
+            assert_eq!(p["scale_corners"], false, "resolved scale_corners flag literal");
+            assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()],
+                "targets carry the pre-mutation selection id");
+            // (c) the live document is transformed.
+            assert!(transformed_at(&model, &[0, 0]),
+                "the selected rect carries a transform after confirm");
+            // (d) checkpoint_equivalence.
+            assert_confirm_replay_equivalent(&model);
+        }
+        // (rotate) 30° around the bounds center.
+        {
+            let mut model = transform_production_model();
+            run_transform_action(&mut model, "rotate_options_confirm", serde_json::json!({
+                "angle": 30.0, "preview": false, "copy": false,
+            }));
+            let txn = model.journal().last().expect("a committed transaction");
+            let ops: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+            assert_eq!(ops, vec!["rotate_transform"], "one rotate_transform op");
+            let p = &txn.ops[0].params;
+            assert_eq!(p["angle"], 30.0, "resolved angle literal");
+            assert_eq!(p["rx"], 36.0, "rx resolved literal");
+            assert_eq!(p["ry"], 36.0, "ry resolved literal");
+            assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()]);
+            assert!(transformed_at(&model, &[0, 0]));
+            assert_confirm_replay_equivalent(&model);
+        }
+        // (shear) 20° horizontal around the bounds center.
+        {
+            let mut model = transform_production_model();
+            run_transform_action(&mut model, "shear_options_confirm", serde_json::json!({
+                "angle": 20.0, "axis": "horizontal", "axis_angle": 0.0,
+                "preview": false, "copy": false,
+            }));
+            let txn = model.journal().last().expect("a committed transaction");
+            let ops: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+            assert_eq!(ops, vec!["shear_transform"], "one shear_transform op");
+            let p = &txn.ops[0].params;
+            assert_eq!(p["angle"], 20.0, "resolved angle literal");
+            assert_eq!(p["axis"], "horizontal", "resolved axis literal");
+            assert_eq!(p["axis_angle"], 0.0, "resolved axis_angle literal");
+            assert_eq!(p["rx"], 36.0, "rx resolved literal");
+            assert_eq!(p["ry"], 36.0, "ry resolved literal");
+            assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()]);
+            assert!(transformed_at(&model, &[0, 0]));
+            assert_confirm_replay_equivalent(&model);
+        }
+    }
+
+    /// Phase P7 — the PREVIEW path STAYS OUT-OF-BAND (OP_LOG.md §8). Drives the
+    /// REAL preview actions (`scale_options_preview` etc., which the dialog's
+    /// on_change hook fires) and asserts NO transform op is journaled — the
+    /// preview re-applies through the unbracketed preview-snapshot channel and the
+    /// journal stays empty. The live document IS still mutated (the preview is
+    /// visible) — only the JOURNAL is untouched.
+    #[test]
+    fn production_transform_preview_does_not_journal() {
+        // Drive the preview through a dialog scope carrying non-identity values
+        // (so the preview re-apply is a REAL mutation, not a trivial identity
+        // no-op that journals nothing for the wrong reason). The preview exprs
+        // read `dialog.*`; we seed them into the store and run the bundle's
+        // preview effects directly.
+        use crate::interpreter::effects::run_effects;
+        use crate::interpreter::state_store::StateStore;
+        use std::collections::HashMap;
+        let cases: &[(&str, &str, &[(&str, serde_json::Value)])] = &[
+            ("scale_options_preview", "scale_options", &[
+                ("uniform", serde_json::json!(true)),
+                ("uniform_pct", serde_json::json!(200.0)),
+            ]),
+            ("rotate_options_preview", "rotate_options", &[
+                ("angle", serde_json::json!(30.0)),
+            ]),
+            ("shear_options_preview", "shear_options", &[
+                ("angle", serde_json::json!(20.0)),
+                ("axis", serde_json::json!("horizontal")),
+                ("axis_angle", serde_json::json!(0.0)),
+            ]),
+        ];
+        for (action, dialog_id, dialog_state) in cases {
+            let mut model = transform_production_model();
+            // The dialog open captures a preview snapshot; the preview action's
+            // doc.preview.restore then has a base to restore.
+            model.capture_preview_snapshot();
+            let mut store = StateStore::new();
+            // Open the dialog scope so the preview exprs (`dialog.*`) resolve to
+            // the non-identity values the user has typed in.
+            let mut defaults: HashMap<String, serde_json::Value> = HashMap::new();
+            for (key, value) in dialog_state.iter() {
+                defaults.insert(key.to_string(), value.clone());
+            }
+            store.init_dialog(dialog_id, defaults, None);
+            let effects = bundle_action_effects(action);
+            run_effects(&effects, &serde_json::json!({}), &mut store,
+                Some(&mut model), None, None, Some(action));
+            // The live document IS mutated (the preview is visible) ...
+            assert!(transformed_at(&model, &[0, 0]),
+                "{action}: the preview re-apply does mutate the live document");
+            // ... but NO transform op is journaled — the preview is out-of-band.
+            let has_transform_op = model.journal().iter()
+                .flat_map(|t| t.ops.iter())
+                .any(|o| matches!(o.op.as_str(),
+                    "scale_transform" | "rotate_transform" | "shear_transform"));
+            assert!(!has_transform_op,
+                "{action}: the PREVIEW path must journal NO transform op \
+                 (out-of-band preview channel, OP_LOG.md §8); journal={:?}",
+                model.journal());
+        }
+    }
+
+    /// Phase P7 — the copy=true composition. Drives the REAL confirm with
+    /// copy=true and asserts the transaction journals exactly
+    /// [copy_selection, <transform>] (TWO ops), the original is untouched, and the
+    /// copy carries the matrix. checkpoint_equivalence holds.
+    #[test]
+    fn production_transform_copy_journals_two_ops() {
+        let mut model = transform_production_model();
+        run_transform_action(&mut model, "scale_options_confirm", serde_json::json!({
+            "uniform": true, "uniform_pct": 200.0,
+            "horizontal_pct": 100.0, "vertical_pct": 100.0,
+            "scale_strokes": true, "scale_corners": false,
+            "preview": false, "copy": true,
+        }));
+        let txn = model.journal().last().expect("a committed transaction");
+        let ops: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(ops, vec!["copy_selection", "scale_transform"],
+            "copy=true journals [copy_selection, scale_transform] in ONE transaction");
+        // copy_selection records the PRE-mutation source id; the transform op
+        // records the duplicate's targets (born id-less ⇒ empty).
+        assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()],
+            "copy_selection.targets = pre-mutation source id");
+        // The original rect (now at [0,0]) is untouched; the copy (at [0,1])
+        // carries the transform.
+        assert!(!transformed_at(&model, &[0, 0]),
+            "the original is untouched by a copy-transform");
+        assert!(transformed_at(&model, &[0, 1]),
+            "the duplicate carries the composed matrix");
+        assert_confirm_replay_equivalent(&model);
+    }
+
+    /// True iff the element at `path` carries a (non-None) common transform.
+    fn transformed_at(model: &Model, path: &[usize]) -> bool {
+        model.document().get_element(&path.to_vec())
+            .map(|e| e.common().transform.is_some())
+            .unwrap_or(false)
+    }
+
+    /// checkpoint_equivalence (OP_LOG.md §6) for a production-confirm model:
+    /// replaying the whole journal from the same setup must serialize
+    /// byte-identically to the live document.
+    fn assert_confirm_replay_equivalent(model: &Model) {
+        let live = document_to_test_json(model.document());
+        let replayed = replay_journal(
+            "rect_with_id.svg", model.journal(), model.journal_head());
+        assert_eq!(replayed, live,
+            "checkpoint_equivalence: production confirm journal replay != live document");
+    }
+
+    /// Phase P7 — the LIVE-DRAG path. Drives the REAL scale tool handlers from the
+    /// bundle (`on_mousedown` → `on_mousemove` → `on_mouseup`) with a faked event
+    /// context, asserting:
+    ///  - `on_mousemove` mutates NO document content and journals NOTHING (the
+    ///    live preview is the bbox_ghost overlay, not a doc mutation — out-of-band);
+    ///  - `on_mouseup` (the drag-release commit) journals exactly ONE
+    ///    `scale_transform` op (joining the doc.snapshot transaction);
+    ///  - checkpoint_equivalence holds for the dragged result.
+    #[test]
+    fn production_transform_drag_release_journals_one_op() {
+        use crate::interpreter::effects::run_effects;
+        use crate::interpreter::state_store::StateStore;
+        let bundle = std::fs::read_to_string("../workspace/workspace.json")
+            .expect("read bundle");
+        let v: serde_json::Value = serde_json::from_str(&bundle).unwrap();
+        let handler = |name: &str| -> Vec<serde_json::Value> {
+            v["tools"]["scale"]["handlers"][name].as_array().unwrap().clone()
+        };
+
+        let mut model = transform_production_model();
+        let mut store = StateStore::new();
+        let journal_len_before = model.journal().len();
+
+        // on_mousedown at (0,0): doc.snapshot + record press, mode='scaling'.
+        let down_ctx = serde_json::json!({
+            "event": { "x": 0.0, "y": 0.0, "modifiers": { "alt": false, "shift": false } }
+        });
+        run_effects(&handler("on_mousedown"), &down_ctx, &mut store,
+            Some(&mut model), None, None, Some("scale_tool.on_mousedown"));
+
+        // on_mousemove to (96, 96): updates cursor + moved=true. NO doc mutation,
+        // NO journal entry (the preview is the overlay, out-of-band).
+        let journal_len_after_down = model.journal().len();
+        let move_ctx = serde_json::json!({
+            "event": { "x": 96.0, "y": 96.0, "modifiers": { "alt": false, "shift": false } }
+        });
+        run_effects(&handler("on_mousemove"), &move_ctx, &mut store,
+            Some(&mut model), None, None, Some("scale_tool.on_mousemove"));
+        assert!(!transformed_at(&model, &[0, 0]),
+            "on_mousemove must NOT mutate the document (the preview is the overlay)");
+        assert_eq!(model.journal().len(), journal_len_after_down,
+            "on_mousemove journals NOTHING (out-of-band preview, OP_LOG.md §8)");
+
+        // on_mouseup at (96, 96): the drag-release CONFIRM. Journals one
+        // scale_transform op (joining the doc.snapshot transaction).
+        let up_ctx = move_ctx.clone();
+        run_effects(&handler("on_mouseup"), &up_ctx, &mut store,
+            Some(&mut model), None, None, Some("scale_tool.on_mouseup"));
+        assert!(transformed_at(&model, &[0, 0]),
+            "the drag-release commit transforms the selected rect");
+        assert!(model.journal().len() > journal_len_before,
+            "the drag release committed a transaction");
+        let txn = model.journal().last().expect("the drag-release transaction");
+        let ops: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(ops, vec!["scale_transform"],
+            "the drag release journals exactly one scale_transform op");
+        assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()],
+            "the drag-release op carries the pre-mutation selection id");
+        assert_confirm_replay_equivalent(&model);
     }
 
     // ---------------------------------------------------------------

@@ -1547,6 +1547,14 @@ fn run_doc_effect(
             //     sx + sy directly
             // Reference point comes from state.transform_reference_point
             // (when set) or the selection's union bbox center.
+            //
+            // OP_LOG.md §9 Phase P7 — the CONFIRM/PREVIEW boundary. `journal:true`
+            // (set only by the CONFIRM action) routes the apply through `op_apply`
+            // (a BRACKETED edit + one recorded `scale_transform` op carrying the
+            // RESOLVED matrix params). Absent/false `journal` (the PREVIEW path:
+            // on_change scale_options_preview, and the live drag) keeps the
+            // UNBRACKETED `scale_apply`, which journals NOTHING (the out-of-band
+            // preview channel, OP_LOG.md §8).
             if let serde_json::Value::Object(args) = spec {
                 let copy = eval_bool(args.get("copy"), store, ctx);
                 let (sx, sy) = if args.contains_key("sx") {
@@ -1562,7 +1570,11 @@ fn run_doc_effect(
                     let shift = eval_bool(args.get("shift"), store, ctx);
                     drag_to_scale_factors(px, py, cx, cy, rx, ry, shift)
                 };
-                scale_apply(model, store, ctx, sx, sy, copy);
+                if eval_bool(args.get("journal"), store, ctx) {
+                    scale_apply_journaled(model, store, ctx, sx, sy, copy);
+                } else {
+                    scale_apply(model, store, ctx, sx, sy, copy);
+                }
             }
         }
         "doc.rotate.apply" => {
@@ -1570,6 +1582,8 @@ fn run_doc_effect(
             // Two calling conventions:
             //   - drag path: press_x/y + cursor_x/y + shift → derive θ
             //   - dialog path: angle directly
+            // OP_LOG.md §9 Phase P7 — `journal:true` (CONFIRM) journals a
+            // `rotate_transform` op; PREVIEW stays out-of-band (see scale above).
             if let serde_json::Value::Object(args) = spec {
                 let copy = eval_bool(args.get("copy"), store, ctx);
                 let theta_deg = if args.contains_key("angle") {
@@ -1583,7 +1597,11 @@ fn run_doc_effect(
                     let shift = eval_bool(args.get("shift"), store, ctx);
                     drag_to_rotate_angle(px, py, cx, cy, rx, ry, shift)
                 };
-                rotate_apply(model, store, ctx, theta_deg, copy);
+                if eval_bool(args.get("journal"), store, ctx) {
+                    rotate_apply_journaled(model, store, ctx, theta_deg, copy);
+                } else {
+                    rotate_apply(model, store, ctx, theta_deg, copy);
+                }
             }
         }
         "doc.shear.apply" => {
@@ -1592,6 +1610,8 @@ fn run_doc_effect(
             //   - drag path: press_x/y + cursor_x/y + shift → derive
             //     (angle, axis, axis_angle)
             //   - dialog path: angle + axis + axis_angle directly
+            // OP_LOG.md §9 Phase P7 — `journal:true` (CONFIRM) journals a
+            // `shear_transform` op; PREVIEW stays out-of-band (see scale above).
             if let serde_json::Value::Object(args) = spec {
                 let copy = eval_bool(args.get("copy"), store, ctx);
                 let (angle_deg, axis, axis_angle_deg) =
@@ -1610,7 +1630,12 @@ fn run_doc_effect(
                     let shift = eval_bool(args.get("shift"), store, ctx);
                     drag_to_shear_params(px, py, cx, cy, rx, ry, shift)
                 };
-                shear_apply(model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
+                if eval_bool(args.get("journal"), store, ctx) {
+                    shear_apply_journaled(
+                        model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
+                } else {
+                    shear_apply(model, store, ctx, angle_deg, &axis, axis_angle_deg, copy);
+                }
             }
         }
         "doc.zoom.apply" => {
@@ -5676,16 +5701,28 @@ fn drag_to_shear_params(
     (k.atan().to_degrees(), "custom".to_string(), axis_angle_deg)
 }
 
-/// Scale apply implementation. Walks the selection (deduped by
-/// tree-path identity) and pre-multiplies each element's existing
-/// transform with the scale matrix. Honors `state.scale_strokes`
-/// (multiplies stroke-width by the geometric mean) and
-/// `state.scale_corners` (scales rounded_rect rx / ry).
-///
-/// When `copy: true`, the selection is first duplicated (each
-/// element copied, inserted immediately above the original in
-/// z-order, selection moves to the duplicates) and the transform
-/// is then applied to those copies — the originals are untouched.
+/// Resolve `state.scale_strokes` / `state.scale_corners` to their boolean
+/// literals (defaults: strokes on, corners off). Read once and reused by both the
+/// PREVIEW path (`scale_apply`) and the CONFIRM path (`scale_apply_journaled`) so
+/// the flags are identical on both. The confirm path bakes the resolved flags into
+/// the journaled op (replay has no `state.*`).
+fn resolve_scale_flags(store: &StateStore, ctx: &serde_json::Value) -> (bool, bool) {
+    let scale_strokes = match eval_expr("state.scale_strokes", store, ctx) {
+        Value::Bool(b) => b, _ => true,
+    };
+    let scale_corners = match eval_expr("state.scale_corners", store, ctx) {
+        Value::Bool(b) => b, _ => false,
+    };
+    (scale_strokes, scale_corners)
+}
+
+/// Scale apply implementation — the OUT-OF-BAND (PREVIEW / live-drag) path.
+/// Pre-multiplies each selected element's transform with the scale matrix via the
+/// SHARED `op_apply::compose_matrix_over_paths` (so the matrix compose is
+/// byte-identical to the journaled confirm path), then writes UNBRACKETED — this
+/// journals NOTHING (OP_LOG.md §8, the sanctioned non-journaled preview channel).
+/// Honors `state.scale_strokes` / `state.scale_corners` and `copy:true` (duplicate
+/// then transform the copy). The CONFIRM path is `scale_apply_journaled`.
 fn scale_apply(
     model: &mut Model,
     store: &StateStore,
@@ -5696,6 +5733,7 @@ fn scale_apply(
 ) {
     use crate::algorithms::transform_apply;
     use crate::document::controller::Controller;
+    use crate::document::op_apply::compose_matrix_over_paths;
     if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
         return; // Identity — nothing to do.
     }
@@ -5704,41 +5742,55 @@ fn scale_apply(
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
-
-    let scale_strokes = match eval_expr("state.scale_strokes", store, ctx) {
-        Value::Bool(b) => b, _ => true,
-    };
-    let scale_corners = match eval_expr("state.scale_corners", store, ctx) {
-        Value::Bool(b) => b, _ => false,
-    };
-    let stroke_factor = transform_apply::stroke_width_factor(sx, sy);
-
-    let paths: Vec<Vec<usize>> = model.document().selection.iter()
-        .map(|es| es.path.clone()).collect();
-    let mut new_doc = model.document().clone();
-    for path in &paths {
-        if let Some(elem) = new_doc.get_element_mut(path) {
-            // Compose: new_matrix * existing.
-            let current = elem.common().transform.unwrap_or_default();
-            elem.common_mut().transform = Some(matrix.multiply(&current));
-            // Stroke width — applied to the in-place stroke field.
-            if scale_strokes {
-                scale_element_stroke_width(elem, stroke_factor);
-            }
-            // Rounded-rect corners — only meaningful for RoundedRect-
-            // shaped Rect variants (rx / ry on RectElem).
-            if scale_corners {
-                scale_element_corners(elem, sx.abs(), sy.abs());
-            }
-        }
-    }
+    let (scale_strokes, scale_corners) = resolve_scale_flags(store, ctx);
+    let stroke_factor =
+        if scale_strokes { Some(transform_apply::stroke_width_factor(sx, sy)) } else { None };
+    let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
+    let paths = op_apply_selection_paths(model);
+    let new_doc = compose_matrix_over_paths(
+        model.document(), &paths, &matrix, stroke_factor, corners);
     model.set_document_unbracketed(new_doc);
 }
 
-/// Rotate apply implementation. Mirrors scale_apply with a rotation
-/// matrix; rotation is rigid so there are no stroke / corner
-/// options. Honors `copy: true` by duplicating the selection
-/// before applying.
+/// Scale apply — the JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves
+/// every param to a LITERAL (the factors, the reference point, the
+/// scale_strokes/scale_corners flags) and routes through `op_apply` so the matrix
+/// is recorded as a `scale_transform` op (a BRACKETED edit). For `copy:true` it
+/// FIRST journals a `copy_selection` op (so the duplicate is journaled too, like
+/// the P3-era duplicate path), THEN the transform op — TWO ops in the one
+/// transaction. The shared `op_apply::apply_scale` makes the live mutation
+/// byte-identical to replay.
+fn scale_apply_journaled(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    sx: f64,
+    sy: f64,
+    copy: bool,
+) {
+    if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
+        return; // Identity — nothing to do (no copy, no op).
+    }
+    if copy {
+        let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
+        crate::document::op_apply::op_apply(model, &op);
+    }
+    // Resolve the reference point + flags AFTER the copy (so the reference point
+    // resolves against the now-selected duplicates, matching the preview path,
+    // which also resolves the ref point post-copy).
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let (scale_strokes, scale_corners) = resolve_scale_flags(store, ctx);
+    let op = serde_json::json!({
+        "op": "scale_transform",
+        "sx": sx, "sy": sy, "rx": rx, "ry": ry,
+        "scale_strokes": scale_strokes, "scale_corners": scale_corners,
+    });
+    crate::document::op_apply::op_apply(model, &op);
+}
+
+/// Rotate apply — OUT-OF-BAND (PREVIEW / live-drag) path. Rigid (no stroke/corner
+/// options). Composes via the SHARED `compose_matrix_over_paths`, writes
+/// UNBRACKETED (journals nothing). The CONFIRM path is `rotate_apply_journaled`.
 fn rotate_apply(
     model: &mut Model,
     store: &StateStore,
@@ -5748,6 +5800,7 @@ fn rotate_apply(
 ) {
     use crate::algorithms::transform_apply;
     use crate::document::controller::Controller;
+    use crate::document::op_apply::compose_matrix_over_paths;
     if theta_deg.abs() < 1e-9 {
         return;
     }
@@ -5756,23 +5809,39 @@ fn rotate_apply(
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::rotate_matrix(theta_deg, rx, ry);
-
-    let paths: Vec<Vec<usize>> = model.document().selection.iter()
-        .map(|es| es.path.clone()).collect();
-    let mut new_doc = model.document().clone();
-    for path in &paths {
-        if let Some(elem) = new_doc.get_element_mut(path) {
-            let current = elem.common().transform.unwrap_or_default();
-            elem.common_mut().transform = Some(matrix.multiply(&current));
-        }
-    }
+    let paths = op_apply_selection_paths(model);
+    let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
     model.set_document_unbracketed(new_doc);
 }
 
-/// Shear apply implementation. Pure shear has determinant 1 so
-/// strokes are preserved naturally; there are no stroke or corner
-/// options. Honors `copy: true` by duplicating the selection
-/// before applying.
+/// Rotate apply — JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves the
+/// angle + reference point to literals and routes through `op_apply`
+/// (`rotate_transform`). `copy:true` journals `copy_selection` first (two ops).
+fn rotate_apply_journaled(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    theta_deg: f64,
+    copy: bool,
+) {
+    if theta_deg.abs() < 1e-9 {
+        return;
+    }
+    if copy {
+        let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
+        crate::document::op_apply::op_apply(model, &op);
+    }
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let op = serde_json::json!({
+        "op": "rotate_transform", "angle": theta_deg, "rx": rx, "ry": ry,
+    });
+    crate::document::op_apply::op_apply(model, &op);
+}
+
+/// Shear apply — OUT-OF-BAND (PREVIEW / live-drag) path. Pure shear (det 1)
+/// preserves strokes; no stroke/corner options. Composes via the SHARED
+/// `compose_matrix_over_paths`, writes UNBRACKETED (journals nothing). The CONFIRM
+/// path is `shear_apply_journaled`.
 fn shear_apply(
     model: &mut Model,
     store: &StateStore,
@@ -5784,6 +5853,7 @@ fn shear_apply(
 ) {
     use crate::algorithms::transform_apply;
     use crate::document::controller::Controller;
+    use crate::document::op_apply::compose_matrix_over_paths;
     if angle_deg.abs() < 1e-9 {
         return;
     }
@@ -5792,59 +5862,49 @@ fn shear_apply(
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry);
-
-    let paths: Vec<Vec<usize>> = model.document().selection.iter()
-        .map(|es| es.path.clone()).collect();
-    let mut new_doc = model.document().clone();
-    for path in &paths {
-        if let Some(elem) = new_doc.get_element_mut(path) {
-            let current = elem.common().transform.unwrap_or_default();
-            elem.common_mut().transform = Some(matrix.multiply(&current));
-        }
-    }
+    let paths = op_apply_selection_paths(model);
+    let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
     model.set_document_unbracketed(new_doc);
 }
 
-/// Multiply the element's stroke-width by `factor` in place.
-/// No-op on elements without a stroke.
-fn scale_element_stroke_width(
-    elem: &mut crate::geometry::element::Element,
-    factor: f64,
+/// Shear apply — JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves the
+/// angle + axis + axis_angle + reference point to literals and routes through
+/// `op_apply` (`shear_transform`). `copy:true` journals `copy_selection` first.
+fn shear_apply_journaled(
+    model: &mut Model,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+    angle_deg: f64,
+    axis: &str,
+    axis_angle_deg: f64,
+    copy: bool,
 ) {
-    use crate::geometry::element::Element;
-    let strokes = match elem {
-        Element::Line(e) => e.stroke.as_mut(),
-        Element::Rect(e) => e.stroke.as_mut(),
-        Element::Circle(e) => e.stroke.as_mut(),
-        Element::Ellipse(e) => e.stroke.as_mut(),
-        Element::Polyline(e) => e.stroke.as_mut(),
-        Element::Polygon(e) => e.stroke.as_mut(),
-        Element::Path(e) => e.stroke.as_mut(),
-        Element::Text(e) => e.stroke.as_mut(),
-        Element::TextPath(e) => e.stroke.as_mut(),
-        _ => None,
-    };
-    if let Some(s) = strokes {
-        s.width *= factor;
+    if angle_deg.abs() < 1e-9 {
+        return;
     }
+    if copy {
+        let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
+        crate::document::op_apply::op_apply(model, &op);
+    }
+    let (rx, ry) = resolve_reference_point(model, store, ctx);
+    let op = serde_json::json!({
+        "op": "shear_transform",
+        "angle": angle_deg, "axis": axis, "axis_angle": axis_angle_deg,
+        "rx": rx, "ry": ry,
+    });
+    crate::document::op_apply::op_apply(model, &op);
 }
 
-/// Scale a rounded_rect's rx / ry by `(sx_abs, sy_abs)`. No-op on
-/// other element types — corner radii are only modeled on the
-/// RectElem variant via its rx/ry fields. Per SCALE_TOOL.md
-/// §Apply behavior, scale_corners is axis-independent (rx scales
-/// by |sx|, ry scales by |sy|).
-fn scale_element_corners(
-    elem: &mut crate::geometry::element::Element,
-    sx_abs: f64,
-    sy_abs: f64,
-) {
-    use crate::geometry::element::Element;
-    if let Element::Rect(e) = elem {
-        e.rx *= sx_abs;
-        e.ry *= sy_abs;
-    }
+/// The resolved selection path list (selection order). Twin of
+/// `op_apply::selection_paths`, kept local so the preview path does not need a
+/// public re-export; the compose function is the SHARED one.
+fn op_apply_selection_paths(model: &Model) -> Vec<Vec<usize>> {
+    model.document().selection.iter().map(|es| es.path.clone()).collect()
 }
+
+// The per-element stroke-width / corner scalers moved to
+// `document::op_apply` (P7) so the PREVIEW (out-of-band) and the journaled CONFIRM
+// paths share ONE compose body (`compose_matrix_over_paths`) and cannot drift.
 
 #[cfg(test)]
 mod tests {
