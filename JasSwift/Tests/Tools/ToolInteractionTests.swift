@@ -847,7 +847,7 @@ private func pathEraserTool() -> CanvasTool {
     )
     let layer = Layer(name: "L", children: [.path(pathElem)])
     let model = Model()
-    model.document = Document(layers: [layer])
+    model.setDocumentUnbracketed(Document(layers: [layer]))
     let ctrl = Controller(model: model)
     let ctx = ToolContext(
         model: model,

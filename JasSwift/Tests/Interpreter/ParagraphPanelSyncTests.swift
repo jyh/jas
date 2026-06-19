@@ -13,9 +13,9 @@ import Testing
 @Test func paragraphPanelLiveOverridesNonTextSelected() {
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    model.document = Document(layers: [Layer(children: [rect])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [rect])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == false)
     #expect(o["area_text_selected"] as? Bool == false)
@@ -27,9 +27,9 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 16, width: 0, height: 0))
-    model.document = Document(layers: [Layer(children: [text])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == false)
@@ -40,9 +40,9 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hello",
                                   fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [text])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == true)
@@ -53,9 +53,9 @@ import Testing
     let model = Model()
     let tp = Element.textPath(TextPath(d: [], content: "path",
                                         fontFamily: "Helvetica", fontSize: 14))
-    model.document = Document(layers: [Layer(children: [tp])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [tp])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == false)
@@ -70,12 +70,12 @@ import Testing
                                   fontSize: 16, width: 200, height: 100))
     let point = Element.text(Text(x: 0, y: 0, content: "point",
                                    fontSize: 16, width: 0, height: 0))
-    model.document = Document(layers: [Layer(children: [area, point])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area, point])],
                               selectedLayer: 0,
                               selection: [
                                 ElementSelection(path: [0, 0]),
                                 ElementSelection(path: [0, 1]),
-                              ])
+                              ]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == false)
@@ -99,9 +99,9 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [wrapper, content],
         fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == true)
@@ -122,9 +122,9 @@ import Testing
     let content = Tspan(id: 1, content: "1. item")
     let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, content],
                                   fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["numbered_list"] as? String == "num-decimal")
     #expect(o["bullets"] as? String == "")
@@ -137,9 +137,9 @@ import Testing
     let model = Model()
     let area = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["text_selected"] as? Bool == true)
     #expect(o["area_text_selected"] as? Bool == true)
@@ -165,9 +165,9 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["left_indent"] as? Double == 12)
     #expect(o["hyphenate"] as? Bool == true)
@@ -186,9 +186,9 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["left_indent"] == nil)
 }
@@ -205,9 +205,9 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["bullets"] == nil)
     #expect(o["numbered_list"] == nil)
@@ -221,9 +221,9 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [wrapper, body],
         fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
 }
 
 @Test func setParagraphPanelMutualExclusionRadio() {
@@ -371,9 +371,9 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     let body = Tspan(id: 1, content: "hi")
     let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, body],
                                   fontSize: 16, width: 200, height: 100))
-    model.document = Document(layers: [Layer(children: [area])],
+    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
-                              selection: [ElementSelection(path: [0, 0])])
+                              selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
     #expect(o["justify_right"] as? Bool == true)
     #expect(o["align_left"] as? Bool == false)

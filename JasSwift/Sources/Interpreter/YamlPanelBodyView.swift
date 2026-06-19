@@ -950,14 +950,14 @@ struct YamlElementView: View {
             if model.fillOnTop {
                 model.defaultFill = nil
                 if !model.document.selection.isEmpty {
-                    model.snapshot()
-                    ctrl.setSelectionFill(nil)
+                    // One undo step: withTxn opens the bracket, setSelectionFill
+                    // (editDocument) joins it.
+                    model.withTxn { ctrl.setSelectionFill(nil) }
                 }
             } else {
                 model.defaultStroke = nil
                 if !model.document.selection.isEmpty {
-                    model.snapshot()
-                    ctrl.setSelectionStroke(nil)
+                    model.withTxn { ctrl.setSelectionStroke(nil) }
                 }
             }
             return
@@ -3072,7 +3072,6 @@ struct TreeViewContent: View {
             return false
         }
         let moved = model.document.getElement(src)
-        model.snapshot()
         var doc = model.document.deleteElement(src)
         var tgt = target
         let sameLevel = (src.count == tgt.count) && (Array(src.dropLast()) == Array(tgt.dropLast()))
@@ -3089,7 +3088,8 @@ struct TreeViewContent: View {
         } else {
             doc = doc.insertElementAfter(tgt, element: moved)
         }
-        model.document = doc
+        // Undoable layer reorder: editDocument self-brackets one undo step.
+        model.editDocument(doc)
         dragSource = nil; dragTarget = nil
         return true
     }
@@ -3138,21 +3138,19 @@ struct TreeViewContent: View {
                 return (0..<kids.count).map { parentPrefix + [$0] }
             }()
             if let s = soloState, s.path == path {
-                // Unsolo: restore
-                model.snapshot()
+                // Unsolo: restore. editDocument self-brackets one undo step.
                 var d = model.document
                 for (sp, vis) in s.saved {
                     let e2 = d.getElement(sp)
                     d = d.replaceElement(sp, with: e2.withVisibility(vis))
                 }
-                model.document = d
+                model.editDocument(d)
                 soloState = nil
             } else {
                 var saved: [ElementPath: Visibility] = [:]
                 for sp in siblings where sp != path {
                     saved[sp] = model.document.getElement(sp).visibility
                 }
-                model.snapshot()
                 var d = model.document
                 if e.visibility == .invisible {
                     d = d.replaceElement(path, with: e.withVisibility(.preview))
@@ -3161,14 +3159,13 @@ struct TreeViewContent: View {
                     let e2 = d.getElement(sp)
                     d = d.replaceElement(sp, with: e2.withVisibility(.invisible))
                 }
-                model.document = d
+                model.editDocument(d)
                 soloState = (path: path, saved: saved)
             }
         } else {
             soloState = nil
             let newVis = cycleVisibility(e.visibility)
-            model.snapshot()
-            model.document = model.document.replaceElement(path, with: e.withVisibility(newVis))
+            model.editDocument(model.document.replaceElement(path, with: e.withVisibility(newVis)))
         }
     }
 
@@ -3261,7 +3258,6 @@ struct TreeViewContent: View {
                     let e = model.document.getElement(path)
                     let wasUnlocked = !e.isLocked
                     let isCont = isContainerElem(e)
-                    model.snapshot()
                     var doc = model.document
                     // Save child states when locking a container
                     if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
@@ -3285,7 +3281,8 @@ struct TreeViewContent: View {
                             }
                         }
                     }
-                    model.document = doc
+                    // Undoable lock toggle: editDocument self-brackets one step.
+                    model.editDocument(doc)
                 }
             // Twirl or gap
             if row.isContainer {
@@ -3309,8 +3306,8 @@ struct TreeViewContent: View {
                         let newLayer = Layer(name: editingName, children: le.children,
                                              opacity: le.opacity, transform: le.transform,
                                              locked: le.locked, visibility: le.visibility)
-                        model.snapshot()
-                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
+                        // Undoable rename: editDocument self-brackets one step.
+                        model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }
                     renamingPath = nil
                 })
@@ -3338,13 +3335,14 @@ struct TreeViewContent: View {
                 .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
                 .frame(width: 12, height: 12)
                 .onTapGesture {
-                    model.document = Document(
+                    // Selection-only row-select: non-undoable (OP_LOG.md §7/§8).
+                    model.setDocumentUnbracketed(Document(
                         layers: model.document.layers,
                         selectedLayer: model.document.selectedLayer,
                         selection: [ElementSelection.all(path)],
                         artboards: model.document.artboards,
                         artboardOptions: model.document.artboardOptions
-                    )
+                    ))
                 }
         }
         .frame(height: 24)
@@ -3442,7 +3440,6 @@ struct TreeViewContent: View {
 
     private func flattenArtwork() {
         guard !panelSelection.isEmpty else { return }
-        model.snapshot()
         var d = model.document
         for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
             let e = d.getElement(p)
@@ -3465,7 +3462,8 @@ struct TreeViewContent: View {
                 }
             }
         }
-        model.document = d
+        // Undoable flatten: editDocument self-brackets one undo step.
+        model.editDocument(d)
         panelSelection.removeAll()
     }
 
@@ -3504,8 +3502,8 @@ struct TreeViewContent: View {
                 .onTapGesture {
                     let e = model.document.getElement(path)
                     let newE = e.withVisibility(cycleVisibility(e.visibility))
-                    model.snapshot()
-                    model.document = model.document.replaceElement(path, with: newE)
+                    // Undoable: editDocument self-brackets one undo step.
+                    model.editDocument(model.document.replaceElement(path, with: newE))
                 }
             // Lock
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
@@ -3513,8 +3511,8 @@ struct TreeViewContent: View {
                 .onTapGesture {
                     let e = model.document.getElement(path)
                     let newE = e.withLocked(!e.isLocked)
-                    model.snapshot()
-                    model.document = model.document.replaceElement(path, with: newE)
+                    // Undoable: editDocument self-brackets one undo step.
+                    model.editDocument(model.document.replaceElement(path, with: newE))
                 }
             // Twirl or gap
             if isContainer(elem) {
@@ -3541,8 +3539,8 @@ struct TreeViewContent: View {
                         let newLayer = Layer(name: editingName, children: le.children,
                                              opacity: le.opacity, transform: le.transform,
                                              locked: le.locked, visibility: le.visibility)
-                        model.snapshot()
-                        model.document = model.document.replaceElement(path, with: .layer(newLayer))
+                        // Undoable rename: editDocument self-brackets one step.
+                        model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }
                     renamingPath = nil
                 })
@@ -3572,13 +3570,14 @@ struct TreeViewContent: View {
                 .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
                 .frame(width: 12, height: 12)
                 .onTapGesture {
-                    model.document = Document(
+                    // Selection-only row-select: non-undoable (OP_LOG.md §7/§8).
+                    model.setDocumentUnbracketed(Document(
                         layers: model.document.layers,
                         selectedLayer: model.document.selectedLayer,
                         selection: [ElementSelection.all(path)],
                         artboards: model.document.artboards,
                         artboardOptions: model.document.artboardOptions
-                    )
+                    ))
                 }
         }
         .frame(height: 24)
@@ -3613,7 +3612,6 @@ struct TreeViewContent: View {
                 return false
             }
             let moved = model.document.getElement(src)
-            model.snapshot()
             var doc = model.document.deleteElement(src)
             // Adjust target if src was at same level and before
             var target = path
@@ -3629,7 +3627,8 @@ struct TreeViewContent: View {
             } else {
                 doc = doc.insertElementAfter(target, element: moved)
             }
-            model.document = doc
+            // Undoable reorder: editDocument self-brackets one undo step.
+            model.editDocument(doc)
             dragSource = nil; dragTarget = nil
             return true
         }

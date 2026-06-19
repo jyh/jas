@@ -159,7 +159,7 @@ import AppKit
         .line(Line(x1: 0, y1: 0, x2: 1, y2: 1,
                       stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
     ])
-    model.document = Document(layers: [layer])
+    model.setDocumentUnbracketed(Document(layers: [layer]))
 
     let view = CanvasNSView()
     view.document = model.document

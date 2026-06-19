@@ -975,9 +975,11 @@ struct FillStrokeWidget: View {
         model.defaultStroke = newStroke
         if !model.document.selection.isEmpty {
             let ctrl = Controller(model: model)
-            model.snapshot()
-            ctrl.setSelectionFill(newFill)
-            ctrl.setSelectionStroke(newStroke)
+            // Fill + stroke swap as ONE undo step (withTxn; each editDocument joins).
+            model.withTxn {
+                ctrl.setSelectionFill(newFill)
+                ctrl.setSelectionStroke(newStroke)
+            }
         }
     }
 
@@ -989,9 +991,11 @@ struct FillStrokeWidget: View {
         model.defaultStroke = newStroke
         if !model.document.selection.isEmpty {
             let ctrl = Controller(model: model)
-            model.snapshot()
-            ctrl.setSelectionFill(nil)
-            ctrl.setSelectionStroke(newStroke)
+            // Fill + stroke reset as ONE undo step (withTxn; each editDocument joins).
+            model.withTxn {
+                ctrl.setSelectionFill(nil)
+                ctrl.setSelectionStroke(newStroke)
+            }
         }
     }
 

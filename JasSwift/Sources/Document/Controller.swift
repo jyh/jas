@@ -18,7 +18,7 @@ public class Controller {
     }
 
     public func setDocument(_ document: Document) {
-        model.document = document
+        model.editDocument(document)
     }
 
     public func setFilename(_ filename: String) {
@@ -27,19 +27,19 @@ public class Controller {
 
     public func addLayer(_ layer: Layer) {
         let old = model.document
-        model.document = Document(
+        model.editDocument(Document(
             layers: old.layers + [layer],
             selectedLayer: old.selectedLayer,
             selection: old.selection,
             artboards: old.artboards,
             artboardOptions: old.artboardOptions
-        )
+        ))
     }
 
     public func removeLayer(at index: Int) {
         var layers = model.document.layers
         layers.remove(at: index)
-        model.document = model.document.replacing(layers: layers)
+        model.editDocument(model.document.replacing(layers: layers))
     }
 
     /// Add an element to the current editing target and select the
@@ -77,13 +77,13 @@ public class Controller {
         // moment they drew their first shape. The off-canvas master store
         // (SYMBOLS.md §6) must survive the same way, so placeInstance /
         // makeSymbol / createReference don't drop the masters.
-        model.document = Document(layers: layers, symbols: doc.symbols,
+        model.editDocument(Document(layers: layers, symbols: doc.symbols,
                                   selectedLayer: idx,
                                   selection: [es],
                                   artboards: doc.artboards,
                                   artboardOptions: doc.artboardOptions,
                                   documentSetup: doc.documentSetup,
-                                  printPreferences: doc.printPreferences)
+                                  printPreferences: doc.printPreferences))
     }
 
     /// Stamp a stable `id` onto the element at `path` — the lazy
@@ -96,7 +96,7 @@ public class Controller {
     public func assignId(_ path: ElementPath, id: String) {
         let doc = model.document
         guard let elem = doc.tryGetElement(path) else { return }
-        model.document = doc.replaceElement(path, with: elem.withId(id))
+        model.editDocument(doc.replaceElement(path, with: elem.withId(id)))
     }
 
     /// Create a by-id reference to the element at `targetPath`
@@ -115,7 +115,7 @@ public class Controller {
         if let existing = target.id {
             resolvedId = existing
         } else {
-            model.document = doc.replaceElement(targetPath, with: target.withId(targetId))
+            model.editDocument(doc.replaceElement(targetPath, with: target.withId(targetId)))
             resolvedId = targetId
         }
         let reference = Element.live(.reference(ReferenceElem(
@@ -155,7 +155,7 @@ public class Controller {
         // Replace the element in place with the instance, then push the master
         // into the off-canvas store.
         let newDoc = doc.replaceElement(path, with: reference)
-        model.document = newDoc.replacing(symbols: newDoc.symbols + [master])
+        model.editDocument(newDoc.replacing(symbols: newDoc.symbols + [master]))
     }
 
     /// Place Instance: append a `ReferenceElem` targeting an existing master
@@ -219,7 +219,7 @@ public class Controller {
             copy = withStroke(copy, stroke: instance.stroke)
         }
 
-        model.document = doc.replaceElement(path, with: copy)
+        model.editDocument(doc.replaceElement(path, with: copy))
     }
 
     /// Set the instance `transform` of the `ReferenceElem` at `path` (Symbols
@@ -237,7 +237,7 @@ public class Controller {
         // Rebuild the reference with the instance transform set, preserving the
         // target, render CTM, paint overrides, and common props.
         instance.instanceTransform = transform
-        model.document = doc.replaceElement(path, with: .live(.reference(instance)))
+        model.editDocument(doc.replaceElement(path, with: .live(.reference(instance))))
     }
 
     /// Redefine: replace the master with id `masterId` in `doc.symbols` with a
@@ -264,7 +264,7 @@ public class Controller {
         let newDoc = doc.replaceElement(path, with: reference)
         var newSymbols = newDoc.symbols
         newSymbols[masterIdx] = newMaster
-        model.document = newDoc.replacing(symbols: newSymbols)
+        model.editDocument(newDoc.replacing(symbols: newSymbols))
     }
 
     /// Delete Symbol: remove the master whose `common.id == masterId` from
@@ -280,7 +280,7 @@ public class Controller {
         else { return }
         var newSymbols = doc.symbols
         newSymbols.remove(at: idx)
-        model.document = doc.replacing(symbols: newSymbols)
+        model.editDocument(doc.replacing(symbols: newSymbols))
     }
 
     /// Append ``element`` to the mask subtree of the element at
@@ -320,7 +320,7 @@ public class Controller {
         // No canonical path for "inside a mask" — select the
         // mask-target element itself after the add.
         newDoc = newDoc.replacing(selection: [ElementSelection.all(path)])
-        model.document = newDoc
+        model.editDocument(newDoc)
         return true
     }
 
@@ -393,7 +393,8 @@ public class Controller {
             }
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = doc.replacing(selection: finalSel)
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(doc.replacing(selection: finalSel))
     }
 
     /// Recursive selection with customizable leaf handling. Used by
@@ -425,7 +426,8 @@ public class Controller {
             check([li], .layer(layer), .preview)
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
-        model.document = doc.replacing(selection: finalSel)
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(doc.replacing(selection: finalSel))
     }
 
     // MARK: - Public selection methods
@@ -471,7 +473,8 @@ public class Controller {
     }
 
     public func setSelection(_ selection: Selection) {
-        model.document = model.document.replacing(selection: selection)
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(model.document.replacing(selection: selection))
     }
 
     public func selectElement(_ path: ElementPath) {
@@ -488,18 +491,21 @@ public class Controller {
                 for i in 0..<g.children.count {
                     selection.insert(ElementSelection.all(parentPath + [i]))
                 }
-                model.document = doc.replacing(selection: selection)
+                // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+                model.setDocumentUnbracketed(doc.replacing(selection: selection))
                 return
             }
         }
         let _ = elem
-        model.document = doc.replacing(selection: [ElementSelection.all(path)])
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(doc.replacing(selection: [ElementSelection.all(path)]))
     }
 
     public func selectControlPoint(path: ElementPath, index: Int) {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let es = ElementSelection.partial(path, [index])
-        model.document = model.document.replacing(selection: [es])
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(model.document.replacing(selection: [es]))
     }
 
     public func movePathHandle(_ path: ElementPath, anchorIdx: Int,
@@ -513,7 +519,7 @@ public class Controller {
                                                opacity: v.opacity, transform: v.transform,
                                                locked: v.locked))
             doc = doc.replaceElement(path, with: newElem)
-            model.document = doc
+            model.editDocument(doc)
         }
     }
 
@@ -524,7 +530,7 @@ public class Controller {
             let newElem = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Simplify the geometry of each selected Polygon / Path element in
@@ -627,7 +633,7 @@ public class Controller {
                 break
             }
         }
-        model.document = newDoc
+        model.editDocument(newDoc)
     }
 
     public func lockSelection() {
@@ -646,7 +652,7 @@ public class Controller {
             let elem = doc.getElement(es.path)
             doc = doc.replaceElement(es.path, with: lockRecursive(elem))
         }
-        model.document = doc.replacing(selection: [])
+        model.editDocument(doc.replacing(selection: []))
     }
 
     public func unlockAll() {
@@ -704,7 +710,7 @@ public class Controller {
             let _ = newDoc.getElement(path)
             newSelection.insert(ElementSelection.all(path))
         }
-        model.document = doc.replacing(layers: newLayers, selection: newSelection)
+        model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
 
     /// Set every element in the current selection to
@@ -721,7 +727,7 @@ public class Controller {
             let elem = doc.getElement(es.path)
             doc = doc.replaceElement(es.path, with: elem.withVisibility(.invisible))
         }
-        model.document = doc.replacing(selection: [])
+        model.editDocument(doc.replacing(selection: []))
     }
 
     /// Traverse the document, set every element whose own visibility
@@ -770,7 +776,7 @@ public class Controller {
         for path in shownPaths {
             newSelection.insert(ElementSelection.all(path))
         }
-        model.document = doc.replacing(layers: newLayers, selection: newSelection)
+        model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
 
     /// Group the currently selected sibling elements into a new Group.
@@ -804,7 +810,7 @@ public class Controller {
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
+        model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
     }
 
     /// Ungroup all selected Group elements, replacing each with its children.
@@ -856,7 +862,7 @@ public class Controller {
             }
             offset += nChildren - 1
         }
-        model.document = newDoc.replacing(selection: newSelection)
+        model.editDocument(newDoc.replacing(selection: newSelection))
     }
 
     /// Make a compound shape from the current selection using UNION.
@@ -906,7 +912,7 @@ public class Controller {
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
+        model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
     }
 
     /// Alt/Option+click on the four Shape Mode buttons. Creates a
@@ -966,7 +972,7 @@ public class Controller {
             }
             offset += n - 1
         }
-        model.document = newDoc.replacing(selection: newSelection)
+        model.editDocument(newDoc.replacing(selection: newSelection))
     }
 
     /// Expand every selected compound shape into static Polygon
@@ -1015,7 +1021,7 @@ public class Controller {
             }
             offset += n - 1
         }
-        model.document = newDoc.replacing(selection: newSelection)
+        model.editDocument(newDoc.replacing(selection: newSelection))
     }
 
     /// Destructively apply one of the nine boolean ops to the
@@ -1190,7 +1196,7 @@ public class Controller {
         for i in 0..<newElements.count {
             newSelection.insert(ElementSelection.all([layerIdx, childIdx + i]))
         }
-        model.document = newDoc.replacing(layers: newLayers, selection: newSelection)
+        model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
     }
 
     /// Re-apply the last destructive or compound-creating boolean op
@@ -1211,28 +1217,63 @@ public class Controller {
         }
     }
 
-    /// Set the fill of every element in the current selection.
-    public func setSelectionFill(_ fill: Fill?) {
+    /// Build the document with `fill` applied to every selected element,
+    /// WITHOUT committing it. Shared by the undoable ``setSelectionFill(_:)``
+    /// and the non-undoable live-drag ``setSelectionFillLive(_:)``. Mirrors the
+    /// Rust `Controller::fill_applied`.
+    private func fillApplied(_ fill: Fill?) -> Document {
         var doc = model.document
-        if doc.selection.isEmpty { return }
+        if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
             let newElem = withFill(elem, fill: fill)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        return doc
     }
 
-    /// Set the stroke of every element in the current selection.
-    public func setSelectionStroke(_ stroke: Stroke?) {
+    /// Set the fill of every element in the current selection (undoable,
+    /// self-bracketing via ``Model/editDocument(_:)``).
+    public func setSelectionFill(_ fill: Fill?) {
+        if model.document.selection.isEmpty { return }
+        model.editDocument(fillApplied(fill))
+    }
+
+    /// Live, NON-undoable fill set for per-tick color-slider drag
+    /// (`setActiveColorLive`). Undo is captured once on pointer-up by
+    /// ``setSelectionFill(_:)`` / `setActiveColor`, so the drag must not push
+    /// checkpoints. Mirrors the Rust `Controller::set_selection_fill_live`.
+    public func setSelectionFillLive(_ fill: Fill?) {
+        if model.document.selection.isEmpty { return }
+        model.setDocumentUnbracketed(fillApplied(fill))
+    }
+
+    /// Build the document with `stroke` applied to every selected element,
+    /// WITHOUT committing it. Mirrors the Rust `Controller::stroke_applied`.
+    private func strokeApplied(_ stroke: Stroke?) -> Document {
         var doc = model.document
-        if doc.selection.isEmpty { return }
+        if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
             let newElem = withStroke(elem, stroke: stroke)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        return doc
+    }
+
+    /// Set the stroke of every element in the current selection (undoable,
+    /// self-bracketing).
+    public func setSelectionStroke(_ stroke: Stroke?) {
+        if model.document.selection.isEmpty { return }
+        model.editDocument(strokeApplied(stroke))
+    }
+
+    /// Live, NON-undoable stroke set for per-tick color drag (see
+    /// ``setSelectionFillLive(_:)``). Mirrors the Rust
+    /// `Controller::set_selection_stroke_live`.
+    public func setSelectionStrokeLive(_ stroke: Stroke?) {
+        if model.document.selection.isEmpty { return }
+        model.setDocumentUnbracketed(strokeApplied(stroke))
     }
 
     /// Set strokeBrush on every selected element (paths only). Used
@@ -1245,7 +1286,7 @@ public class Controller {
             let newElem = withStrokeBrush(elem, strokeBrush: slug)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Set strokeBrushOverrides on every selected element (paths only).
@@ -1257,7 +1298,7 @@ public class Controller {
             let newElem = withStrokeBrushOverrides(elem, overrides: overrides)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Set the fillGradient of every element in the current selection.
@@ -1271,7 +1312,7 @@ public class Controller {
             let newElem = withFillGradient(elem, fillGradient: gradient)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Set the strokeGradient of every element in the current selection.
@@ -1283,7 +1324,7 @@ public class Controller {
             let newElem = withStrokeGradient(elem, strokeGradient: gradient)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     // ── Opacity mask lifecycle (OPACITY.md § States) ───────────
@@ -1309,7 +1350,7 @@ public class Controller {
             )
             doc = doc.replaceElement(es.path, with: withMask(elem, mask: m))
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Remove the opacity mask from every selected element.
@@ -1321,7 +1362,7 @@ public class Controller {
             if elem.mask == nil { continue }
             doc = doc.replaceElement(es.path, with: withMask(elem, mask: nil))
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Set `mask.clip` on every selected element that has a mask.
@@ -1376,7 +1417,7 @@ public class Controller {
             )
             doc = doc.replaceElement(es.path, with: withMask(elem, mask: newMask))
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Internal helper: apply `transform` to every selected element's
@@ -1388,7 +1429,7 @@ public class Controller {
             guard let old = elem.mask else { continue }
             doc = doc.replaceElement(es.path, with: withMask(elem, mask: transform(old)))
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Write Character-panel text attributes to every `Text` /
@@ -1419,7 +1460,7 @@ public class Controller {
             }
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     /// Apply a character-attribute dict onto a single `Text`, returning
@@ -1498,7 +1539,7 @@ public class Controller {
             let newElem = withWidthPoints(elem, widthPoints: widthPoints)
             doc = doc.replaceElement(es.path, with: newElem)
         }
-        model.document = doc
+        model.editDocument(doc)
     }
 
     public func copySelection(dx: Double, dy: Double) {
@@ -1517,7 +1558,7 @@ public class Controller {
             // Copying always selects the new element as a whole.
             newSelection.insert(ElementSelection.all(copyPath))
         }
-        model.document = doc.replacing(selection: newSelection)
+        model.editDocument(doc.replacing(selection: newSelection))
     }
 }
 

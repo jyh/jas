@@ -120,42 +120,42 @@ func applyPrintConfigField(
     case "set_print_preferences_field":
         guard let np = applyPrintPrefField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_marks_and_bleed_field":
         guard let np = applyMarksAndBleedField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_output_field":
         guard let np = applyOutputField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_output_ink_field":
         guard let np = applyOutputInkField(doc.printPreferences, index: index, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_graphics_field":
         guard let np = applyGraphicsField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_color_management_field":
         guard let np = applyColorManagementField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_advanced_field":
         guard let np = applyAdvancedField(doc.printPreferences, field: field, val: val)
         else { return false }
-        model.document = withPrintPreferences(doc, np)
+        model.setDocument(withPrintPreferences(doc, np))
         return true
     case "set_document_setup_field":
         guard let ns = applyDocumentSetupField(doc.documentSetup, field: field, val: val)
         else { return false }
-        model.document = withDocumentSetup(doc, ns)
+        model.setDocument(withDocumentSetup(doc, ns))
         return true
     default:
         return false
@@ -241,7 +241,7 @@ func applySetArtboardField(_ model: Model, id: String, field: String, val: Value
     guard let i = abs.firstIndex(where: { $0.id == id }) else { return false }
     guard let updated = applyArtboardFieldValue(abs[i], field: field, val: val) else { return false }
     abs[i] = updated
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
     return true
 }
 
@@ -284,7 +284,7 @@ func applySetArtboardOptionsField(_ model: Model, field: String, val: Value) -> 
     default:
         return false
     }
-    model.document = withArtboardOptions(model.document, newOpts)
+    model.setDocument(withArtboardOptions(model.document, newOpts))
     return true
 }
 
@@ -296,7 +296,7 @@ func applyDeleteArtboardById(_ model: Model, id: String) -> Bool {
     let before = abs.count
     abs.removeAll { $0.id == id }
     guard abs.count < before else { return false }
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
     return true
 }
 
@@ -339,7 +339,7 @@ func moveArtboardsDownInPlace(_ abs: inout [Artboard], _ selectedIds: [String]) 
 func applyMoveArtboardsUp(_ model: Model, _ ids: [String]) -> Bool {
     var abs = model.document.artboards
     guard moveArtboardsUpInPlace(&abs, ids) else { return false }
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
     return true
 }
 
@@ -347,7 +347,7 @@ func applyMoveArtboardsUp(_ model: Model, _ ids: [String]) -> Bool {
 func applyMoveArtboardsDown(_ model: Model, _ ids: [String]) -> Bool {
     var abs = model.document.artboards
     guard moveArtboardsDownInPlace(&abs, ids) else { return false }
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
     return true
 }
 
@@ -370,7 +370,7 @@ func applyCreateArtboard(_ model: Model, id: String, fields: [String: Any]?) {
     }
     var abs = model.document.artboards
     abs.append(ab)
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
 }
 
 /// Clone the artboard whose id == `sourceId`, assign the GIVEN (already-minted)
@@ -389,7 +389,7 @@ func applyDuplicateArtboard(
         showVideoSafeAreas: src.showVideoSafeAreas,
         videoRulerPixelAspectRatio: src.videoRulerPixelAspectRatio)
     abs.append(dup)
-    model.document = withArtboards(model.document, abs)
+    model.setDocument(withArtboards(model.document, abs))
     return true
 }
 
@@ -515,7 +515,7 @@ private func elementId(_ el: Element) -> String? { el.id }
 func applyDeleteElementAt(_ model: Model, _ path: ElementPath) -> (Bool, [String]) {
     guard let existing = model.document.tryGetElement(path) else { return (false, []) }
     let targets = elementId(existing).map { [$0] } ?? []
-    model.document = model.document.deleteElement(path)
+    model.setDocument(model.document.deleteElement(path))
     return (true, targets)
 }
 
@@ -525,7 +525,7 @@ func applyDeleteElementAt(_ model: Model, _ path: ElementPath) -> (Bool, [String
 func applyDeleteSelection(_ model: Model) -> (Bool, [String]) {
     if model.document.selection.isEmpty { return (false, []) }
     let targets = selectionToIds(model.document)
-    model.document = model.document.deleteSelection()
+    model.setDocument(model.document.deleteSelection())
     return (true, targets)
 }
 
@@ -534,7 +534,7 @@ func applyDeleteSelection(_ model: Model) -> (Bool, [String]) {
 /// `apply_insert_element_after`.
 func applyInsertElementAfter(_ model: Model, _ path: ElementPath, _ element: Element) -> [String] {
     let targets = elementId(element).map { [$0] } ?? []
-    model.document = model.document.insertElementAfter(path, element: element)
+    model.setDocument(model.document.insertElementAfter(path, element: element))
     return targets
 }
 
@@ -553,9 +553,9 @@ func applyInsertElementAt(
         var layers = model.document.layers
         let idx = min(index, layers.count)
         layers.insert(l, at: idx)
-        model.document = withLayers(model.document, layers)
+        model.setDocument(withLayers(model.document, layers))
     } else {
-        model.document = insertElementAtPath(model.document, parentPath, index, element)
+        model.setDocument(insertElementAtPath(model.document, parentPath, index, element))
     }
     return targets
 }
@@ -707,7 +707,7 @@ func applyWrapInGroup(_ model: Model, _ paths: [ElementPath], _ id: String?) -> 
     } else {
         newDoc = insertElementAtPath(newDoc, insertParent, insertIndex, group)
     }
-    model.document = newDoc
+    model.setDocument(newDoc)
     return (true, targets)
 }
 
@@ -729,7 +729,7 @@ func applyWrapInLayer(_ model: Model, _ paths: [ElementPath], _ name: String, _ 
     if let lid = id { targets.append(lid) }
     var layers = newDoc.layers
     layers.append(newLayer)
-    model.document = withLayers(newDoc, layers)
+    model.setDocument(withLayers(newDoc, layers))
     return (true, targets)
 }
 
@@ -748,7 +748,7 @@ func applyUnpackGroupAt(_ model: Model, _ path: ElementPath) -> (Bool, [String])
         newDoc = insertElementAtPath(newDoc, Array(insertPath.dropLast()), insertPath[insertPath.count - 1], child)
         insertPath[insertPath.count - 1] += 1
     }
-    model.document = newDoc
+    model.setDocument(newDoc)
     return (true, targets)
 }
 
@@ -852,7 +852,7 @@ func applyScale(
     let strokeFactor = scaleStrokes ? TransformApply.strokeWidthFactor(sx: sx, sy: sy) : nil
     let corners = scaleCorners ? (abs(sx), abs(sy)) : nil
     let paths = selectionPaths(model.document)
-    model.document = composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners)
+    model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners))
     return (true, targets)
 }
 
@@ -864,7 +864,7 @@ func applyRotate(_ model: Model, thetaDeg: Double, rx: Double, ry: Double) -> (B
     let targets = selectionToIds(model.document)
     let matrix = TransformApply.rotateMatrix(thetaDeg: thetaDeg, rx: rx, ry: ry)
     let paths = selectionPaths(model.document)
-    model.document = composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: nil, corners: nil)
+    model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: nil, corners: nil))
     return (true, targets)
 }
 
@@ -878,7 +878,7 @@ func applyShear(
     let targets = selectionToIds(model.document)
     let matrix = TransformApply.shearMatrix(angleDeg: angleDeg, axis: axis, axisAngleDeg: axisAngleDeg, rx: rx, ry: ry)
     let paths = selectionPaths(model.document)
-    model.document = composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: nil, corners: nil)
+    model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: nil, corners: nil))
     return (true, targets)
 }
 

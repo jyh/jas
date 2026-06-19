@@ -2154,13 +2154,15 @@ class CanvasNSView: NSView {
                 let savedSelection = document.selection
                 tools[oldValue]?.deactivate(ctx)
                 tools[currentTool]?.activate(ctx)
-                // Preserve selection across tool changes
+                // Preserve selection across tool changes — selection-only,
+                // non-undoable (OP_LOG.md §7/§8). Mirrors the tool-change
+                // selection-restore unbracketed write in OCaml/Python.
                 if document.selection != savedSelection {
                     var doc = document
                     doc = Document(layers: doc.layers,
                                       selectedLayer: doc.selectedLayer,
                                       selection: savedSelection)
-                    controller?.model.document = doc
+                    controller?.model.setDocumentUnbracketed(doc)
                 }
             }
             window?.invalidateCursorRects(for: self)
@@ -2751,8 +2753,8 @@ class CanvasNSView: NSView {
                 if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
                     return
                 }
-                model.snapshot()
-                model.document = doc.deleteSelection()
+                // Undoable: editDocument self-brackets one undo step.
+                model.editDocument(doc.deleteSelection())
             }
         case "\u{1B}":  // Escape
             // OPACITY.md §Preview interactions: Escape exits
@@ -2778,9 +2780,12 @@ class CanvasNSView: NSView {
                     model.defaultFill = nil
                     model.defaultStroke = Stroke(color: .black)
                     if !model.document.selection.isEmpty {
-                        model.snapshot()
-                        controller?.setSelectionFill(nil)
-                        controller?.setSelectionStroke(Stroke(color: .black))
+                        // Fill + stroke as ONE undo step: withTxn opens the
+                        // bracket, each setSelection* (editDocument) joins it.
+                        model.withTxn {
+                            controller?.setSelectionFill(nil)
+                            controller?.setSelectionStroke(Stroke(color: .black))
+                        }
                     }
                 }
             case "x":
@@ -2808,9 +2813,12 @@ class CanvasNSView: NSView {
                             model.defaultStroke = nil
                         }
                         if !model.document.selection.isEmpty {
-                            model.snapshot()
-                            controller?.setSelectionFill(model.defaultFill)
-                            controller?.setSelectionStroke(model.defaultStroke)
+                            // Fill + stroke swap as ONE undo step (withTxn; each
+                            // setSelection* editDocument joins it).
+                            model.withTxn {
+                                controller?.setSelectionFill(model.defaultFill)
+                                controller?.setSelectionStroke(model.defaultStroke)
+                            }
                         }
                     }
                 } else {
