@@ -955,6 +955,231 @@ class CrossLanguageTest(absltest.TestCase):
         self._run_production_batch_fixture(
             "production_capture/eye_demo_bare_frame.json")
 
+    # ---------------------------------------------------------------
+    # Per-frame drag coalescing (OP_LOG.md §9 follow-up). A live drag commits
+    # ONE transaction PER FRAME (selection.yaml fires doc.snapshot only on the
+    # first mousemove; each on_mousemove is its own run_effects batch that
+    # begin_txns + commits), so a drag of N frames lands as N consecutive
+    # single-op move transactions in the journal — and N undo steps.
+    # Model.commit_txn coalesces ADJACENT same-gesture move transactions
+    # (move_selection / move_by_ids) into ONE summed-delta translate, collapsing
+    # the N undo steps into one. The txns-form below commits each frame
+    # SEPARATELY, so the SECOND commit triggers coalescing into the first.
+    # Mirrors the Rust drag_coalesce* tests.
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _last_op_delta(txn):
+        # The dx/dy of a journal transaction's LAST op (the move being summed).
+        op = txn.ops[-1]
+
+        def num(v):
+            return float(v) if isinstance(v, (int, float)) else 0.0
+        return (num(op.params.get("dx", 0.0)), num(op.params.get("dy", 0.0)))
+
+    def _assert_drag_coalesce(self, tc):
+        # Drive a coalescing fixture (txns-form, each frame committed separately)
+        # and assert the post-coalesce journal shape + undo-step lock-step:
+        #  - the journal collapsed to `expect_journal_txns` transactions;
+        #  - the tip txn's op list is `expect_journal_ops` long (when declared);
+        #  - the tip txn's last move op carries the SUMMED delta (when declared);
+        #  - the undo stack and journal cursor are in lock-step
+        #    (journal_head == expect_undo_steps), and undoing exactly that many
+        #    times drains both back to the origin (can_undo False,
+        #    journal_head == 0) — i.e. ONE undo reverts a whole coalesced drag.
+        name = tc["name"]
+        svg = _read_fixture(f"svg/{tc['setup_svg']}")
+        doc = svg_to_document(svg)
+        model = Model(document=doc)
+        ctrl = Controller(model=model)
+        for txn in tc["txns"]:
+            model.begin_txn()
+            if "name" in txn:
+                model.name_txn(txn["name"])
+            for op in txn["ops"]:
+                self._apply_op(model, ctrl, op)
+            model.commit_txn()
+
+        expect_txns = tc["expect_journal_txns"]
+        self.assertEqual(len(model.journal), expect_txns,
+            f"[{name}] journal txn count")
+
+        if "expect_journal_ops" in tc:
+            tip = model.journal[-1]
+            self.assertEqual(len(tip.ops), tc["expect_journal_ops"],
+                f"[{name}] tip txn op count")
+        if "expect_last_move_dx" in tc:
+            dx = float(tc["expect_last_move_dx"])
+            dy = float(tc.get("expect_last_move_dy", 0.0))
+            gdx, gdy = self._last_op_delta(model.journal[-1])
+            self.assertEqual((gdx, gdy), (dx, dy),
+                f"[{name}] summed delta")
+
+        # Undo-step lock-step: journal cursor == undo depth == declared steps.
+        steps = tc["expect_undo_steps"]
+        self.assertEqual(model.journal_head, steps,
+            f"[{name}] journal_head (== undo steps)")
+        for i in range(steps):
+            self.assertTrue(model.can_undo, f"[{name}] expected to undo step {i}")
+            model.undo()
+        self.assertFalse(model.can_undo,
+            f"[{name}] after {steps} undos the undo stack must be empty")
+        self.assertEqual(model.journal_head, 0,
+            f"[{name}] after {steps} undos the journal cursor must be at origin")
+
+    def test_drag_coalesce(self):
+        # (a)/(c)-twin coalescing pins + (c)-via-name/copy break pins, driven
+        # from the shared drag_coalesce.json fixture (txns-form, cross-language).
+        tests = json.loads(_read_fixture("operations/drag_coalesce.json"))
+        for tc in tests:
+            self._assert_drag_coalesce(tc)
+
+    def test_drag_coalesce_net_zero(self):
+        # (b) NET-ZERO whole-drag: a same-name same-target run that sums to (0,0)
+        # AND round-trips the document leaves NO journal entry and NO undo step.
+        # The selection is pre-established OUT OF BAND (non-undoable select_rect,
+        # journaling nothing) so the two move frames are the ONLY journaled
+        # transactions — and after the net-zero drop the journal is genuinely
+        # EMPTY and the document is byte-identical to pre-drag.
+        setup = _read_fixture("svg/eye.svg")
+        model = Model(document=svg_to_document(setup))
+        ctrl = Controller(model=model)
+
+        # Pre-select the eye out of band (no journal entry, no undo step).
+        ctrl.select_rect(-5.0, -5.0, 55.0, 55.0, extend=False)
+        pre_drag = document_to_test_json(model.document)
+        self.assertEqual(len(model.journal), 0,
+            "out-of-band select must not journal")
+        self.assertFalse(model.can_undo,
+            "out-of-band select must not push an undo step")
+
+        # Frame 1: move dx:5 (commits one txn into the empty journal).
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": 5, "dy": 0})
+        model.commit_txn()
+        self.assertEqual(len(model.journal), 1, "frame 1 journals one txn")
+        self.assertTrue(model.can_undo, "frame 1 pushes one undo step")
+
+        # Frame 2: move dx:-5 (same name, same target) -> net (0,0) round-trip.
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": -5, "dy": 0})
+        model.commit_txn()
+
+        self.assertEqual(len(model.journal), 0,
+            "net-zero whole-drag must leave NO journal entry")
+        self.assertEqual(model.journal_head, 0,
+            "net-zero whole-drag leaves cursor at origin")
+        self.assertFalse(model.can_undo,
+            "net-zero whole-drag must leave NO undo step")
+        self.assertEqual(document_to_test_json(model.document), pre_drag,
+            "net-zero whole-drag must restore the pre-drag document byte-for-byte")
+
+    def test_drag_coalesce_target_break(self):
+        # (c) TARGET break (predicate c proper): two ADJACENT single-op move
+        # frames whose target sets differ do NOT coalesce. The selection is
+        # changed OUT OF BAND between the frames (so each frame is a single-op
+        # move txn, isolating the target-mismatch predicate from the op-count
+        # predicate), proving the run breaks and stays TWO distinct undo steps.
+        from document.document import ElementSelection
+        setup = _read_fixture("svg/two_ided_rects.svg")
+        model = Model(document=svg_to_document(setup))
+        ctrl = Controller(model=model)
+
+        # Select element "a" (path [0,0]) out of band.
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 0))}))
+
+        # Frame 1: move "a".
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": 5, "dy": 0})
+        model.commit_txn()
+        self.assertEqual(len(model.journal), 1)
+        self.assertEqual(model.journal[0].ops[0].targets, ["a"],
+            "frame 1 targets element a")
+
+        # Change selection to "b" (path [0,1]) out of band — a DIFFERENT target.
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 1))}))
+
+        # Frame 2: a single-op move on "b". Same name, same verb, but the
+        # target set differs ([a] vs [b]) -> predicate (c) fails -> NO coalesce.
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": 7, "dy": 0})
+        model.commit_txn()
+
+        self.assertEqual(len(model.journal), 2,
+            "different target must NOT coalesce -> two distinct txns")
+        self.assertEqual(model.journal[1].ops[0].targets, ["b"],
+            "frame 2 targets element b")
+        self.assertEqual(model.journal_head, 2,
+            "two distinct undo steps (lock-step)")
+        dx0, _ = self._last_op_delta(model.journal[0])
+        dx1, _ = self._last_op_delta(model.journal[1])
+        self.assertEqual((dx0, dx1), (5.0, 7.0),
+            "deltas stay separate (5 and 7), not summed")
+
+    def test_drag_coalesce_post_undo_no_merge(self):
+        # (guard) TIP guard (journal_head == len(op_journal)): a coalescable move
+        # frame committed AFTER an undo — when the journal cursor sits BEHIND the
+        # tip (journal_head < len) — must NOT merge into the about-to-be-truncated
+        # redo tail. It must take the normal truncate/append path: the redo tail
+        # is discarded and the new frame lands as its OWN txn with its OWN delta
+        # (never summed into the stale tail). The sole signal for the TIP guard.
+        from document.document import ElementSelection
+        setup = _read_fixture("svg/two_ided_rects.svg")
+        model = Model(document=svg_to_document(setup))
+        ctrl = Controller(model=model)
+
+        # Select element "a" (path [0,0]) out of band (no journal entry).
+        ctrl.set_selection(frozenset({ElementSelection.all((0, 0))}))
+
+        # Frame 1: a coalescable move (dx:5). Commits one txn at the tip.
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": 5, "dy": 0})
+        model.commit_txn()
+        self.assertEqual(len(model.journal), 1, "frame 1 journals one txn")
+        self.assertEqual(model.journal_head, 1, "cursor at the tip after frame 1")
+
+        # Undo frame 1: cursor moves BEHIND the tip (journal_head 0 < len 1) and
+        # a redo entry is staged. This is the guard's scenario.
+        model.undo()
+        self.assertEqual(model.journal_head, 0,
+            "undo moved the cursor behind the tip")
+        self.assertEqual(len(model.journal), 1,
+            "the undone txn is still the redo tail")
+        self.assertTrue(model.can_redo, "frame 1 is available to redo")
+
+        # Frame 2: a SAME name / SAME target / SAME verb coalescable move (dx:11)
+        # — every predicate (a)-(e) holds EXCEPT the TIP guard, which fails
+        # (journal_head 0 != len 1). So it must NOT coalesce: the normal path
+        # truncates the redo tail and appends frame 2 as its own txn.
+        model.begin_txn()
+        model.name_txn("selection on_mousemove")
+        self._apply_op(model, ctrl, {"op": "move_selection", "dx": 11, "dy": 0})
+        model.commit_txn()
+
+        # Normal truncate/append ran: redo tail discarded, frame 2 appended.
+        self.assertEqual(len(model.journal), 1,
+            "post-undo frame must truncate+append, NOT merge into the redo tail")
+        self.assertEqual(model.journal_head, 1,
+            "cursor advanced to the new tip (lock-step)")
+        self.assertFalse(model.can_redo, "a new edit discards the redo tail")
+        # The decisive guard signal: the surviving txn carries frame 2's delta
+        # ALONE (11), never frame 1's (5) summed in (16). A regressed guard would
+        # have merged into the stale tail and produced 16.
+        dx, _ = self._last_op_delta(model.journal[0])
+        self.assertEqual(dx, 11.0,
+            "surviving txn carries frame 2's delta alone (11), not summed (16) "
+            "— proves the TIP guard blocked the merge")
+        # And undoing the single surviving step drains the journal in lock-step.
+        model.undo()
+        self.assertEqual(model.journal_head, 0,
+            "one undo drains the single post-undo step")
+        self.assertFalse(model.can_undo, "no further undo steps")
+
     @staticmethod
     def _journal_to_test_json(journal):
         # Canonical JSON of the Transaction journal (OP_LOG.md §10 item 4):
