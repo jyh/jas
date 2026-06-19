@@ -240,7 +240,19 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             ]
             if let data = try? JSONSerialization.data(withJSONObject: overrides),
                let s = String(data: data, encoding: .utf8) {
-                Controller(model: model).setSelectionStrokeBrushOverrides(s)
+                // OP_LOG.md §9 Phase P6 — route the brush-overrides write on the
+                // selection through the SHARED `opApply` dispatcher
+                // (`set_attr_on_selection`, the SAME setSelectionStrokeBrushOverrides
+                // mutator) so this dialog-confirm gesture JOURNALS a real op. The
+                // brush_options_confirm action emits no `snapshot`, so this owns
+                // its own one-step named transaction (the write was previously a
+                // self-bracketing editDocument).
+                model.withTxn {
+                    model.nameTxn("brush_options_confirm")
+                    opApply(model, Controller(model: model),
+                            ["op": "set_attr_on_selection",
+                             "attr": "stroke_brush_overrides", "value": s])
+                }
             }
 
         default:
@@ -309,23 +321,23 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // brush attributes only; other attrs ignored. Used by
     // apply_brush_to_selection / remove_brush_from_selection in
     // actions.yaml. Mirrors the JS Phase 1.8 effect.
+    // OP_LOG.md §9 Phase P6: route through the SHARED `opApply` dispatcher
+    // (`apply_set_attr_on_selection`, the SAME Controller brush mutator) so the
+    // brush-apply gesture JOURNALS a real `set_attr_on_selection` op (verb +
+    // RESOLVED literal value + targets). The op carries the RESOLVED value: an
+    // empty/null resolved value maps to a CLEAR, encoded as the empty string
+    // (the arm reads a present-but-empty `value` as nil/clear; an ABSENT `value`
+    // key would hard-skip). Mirrors Rust's `doc.set_attr_on_selection`.
     effects["doc.set_attr_on_selection"] = { spec, ctx, store in
         guard let args = spec as? [String: Any],
               let attr = args["attr"] as? String else { return nil }
-        let value: String? = {
+        let value: String = {
             let v = evalExprAsValue(args["value"], store: store, ctx: ctx)
             if case .string(let s) = v, !s.isEmpty { return s }
-            return nil
+            return ""
         }()
-        switch attr {
-        case "stroke_brush":
-            Controller(model: model).setSelectionStrokeBrush(value)
-        case "stroke_brush_overrides":
-            Controller(model: model).setSelectionStrokeBrushOverrides(value)
-        default:
-            // Phase 1: only brush attrs supported.
-            break
-        }
+        opApply(model, Controller(model: model),
+                ["op": "set_attr_on_selection", "attr": attr, "value": value])
         return nil
     }
 
