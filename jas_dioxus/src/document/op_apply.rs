@@ -1145,6 +1145,99 @@ fn str_field<'a>(op: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     op.get(key).and_then(|v| v.as_str())
 }
 
+// ── OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md — the id-primary op family ─────
+//
+// The id-primary verbs `select_by_ids` / `move_by_ids` / `copy_by_ids` promote the
+// recorded-recipe vocabulary (input-addressed, side-effect-free) to a first-class
+// op family `op_apply` can execute, so a captured recipe IS a replayable journal
+// segment (RECORDED_ELEMENTS.md §7) and `capture_recipe` collapses to a pass-through.
+// They are ADDITIVE: the selection-relative verbs (`select_rect` / `move_selection`
+// / `copy_selection`) keep their params VERBATIM (OP_LOG.md §7 — selection is
+// serialized Document state, so the byte-gate reproduces it); this is a NEW family,
+// not a params rewrite. The decisive property (OP_LOG.md §7 determinism rule):
+// the operand ids come from the OP'S OWN PARAMS, never inferred from doc.selection,
+// so snapshot and replay apply identical operands and a recorded recipe survives
+// source edits with NO selection dependency.
+//
+// THE BYTE-GATE RECONCILIATION (OP_LOG.md §6, the gate compares
+// document_to_test_json INCLUDING selection): the family is committed as the
+// canonical PAIR `[select_by_ids, <op>_by_ids]`, AND each `<op>_by_ids` ALSO
+// re-establishes the working selection from its OWN ids before mutating. So the
+// replayed selection is byte-identical to `[select_rect, move_selection]` for the
+// same elements: `select_by_ids` resolves ids to paths and writes
+// `ElementSelection::all(path)` in DOCUMENT ORDER (the same order
+// `select_flat`/`select_rect` produces), then the mutator routes through the SAME
+// shared `Controller` body (no divergent second mutation path). Hardened reads:
+// an unknown id / a non-array params is SKIPPED, never a panic.
+
+/// Walk the element tree (Group/Layer children only — the SAME descent discipline
+/// as the IdIndex builder `collect_ref_ids`) collecting `(common.id, path)` for
+/// every id-bearing element, in DOCUMENT ORDER. The id-primary selection builder
+/// uses this so a `select_by_ids` produces the SAME ordered selection a
+/// `select_rect` over the same elements would — the byte-gate reconciliation.
+/// Top-level layer ids are NOT resolution targets (mirroring the IdIndex), so the
+/// walk starts at each layer's children, exactly like `rebuild_id_index`.
+fn id_paths_in_document_order(
+    doc: &crate::document::document::Document,
+) -> Vec<(String, ElementPath)> {
+    fn walk(
+        elem: &crate::geometry::element::Element,
+        path: &mut ElementPath,
+        out: &mut Vec<(String, ElementPath)>,
+    ) {
+        if let Some(id) = &elem.common().id {
+            out.push((id.clone(), path.clone()));
+        }
+        if let Some(children) = elem.children() {
+            for (i, child) in children.iter().enumerate() {
+                path.push(i);
+                walk(child, path, out);
+                path.pop();
+            }
+        }
+    }
+    let mut out: Vec<(String, ElementPath)> = Vec::new();
+    for (li, layer) in doc.layers.iter().enumerate() {
+        if let Some(children) = layer.children() {
+            for (ci, child) in children.iter().enumerate() {
+                let mut path: ElementPath = vec![li, ci];
+                walk(child, &mut path, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// Build the selection (in DOCUMENT ORDER) for the elements whose `common.id` is
+/// in `ids`, as `ElementSelection::all(path)` entries. Document order — NOT the
+/// order of `ids` — so the result is byte-identical to what `select_rect` would
+/// produce for the same set (the byte-gate reconciliation). An id that resolves
+/// to no element is silently dropped (hardened: a stale/unknown id is a skip).
+fn selection_for_ids(
+    doc: &crate::document::document::Document,
+    ids: &[String],
+) -> crate::document::document::Selection {
+    use crate::document::document::ElementSelection;
+    let wanted: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+    id_paths_in_document_order(doc)
+        .into_iter()
+        .filter(|(id, _)| wanted.contains(id.as_str()))
+        .map(|(_, path)| ElementSelection::all(path))
+        .collect()
+}
+
+/// Resolve `ids` to their selection and write it BY PATH (selection-only,
+/// non-undoable — like `select_rect`, this goes through the unbracketed selection
+/// write). The id-primary `select_by_ids` body, SHARED by the standalone
+/// `select_by_ids` op and by `move_by_ids`/`copy_by_ids` (which re-establish the
+/// working selection from their own ids before the mutation). Returns the resolved
+/// selection ids (in document order) for `targets`.
+pub fn apply_select_by_ids(model: &mut Model, ids: &[String]) -> Vec<String> {
+    let selection = selection_for_ids(model.document(), ids);
+    Controller::set_selection(model, selection);
+    controller::selection_to_ids(model.document())
+}
+
 /// Read an f64 field, defaulting to 0.0 (the non-panicking number form).
 fn num_field(op: &serde_json::Value, key: &str) -> f64 {
     op.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
@@ -1199,8 +1292,9 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
     // `select_rect` is EXCLUDED: it only changes selection (non-undoable,
     // serialized state), so a bare marquee must stay journal-neutral — opening a
     // txn for it would spuriously journal a selection-only batch as an
-    // undoable step.
-    if name != "select_rect" && !model.in_txn() {
+    // undoable step. `select_by_ids` is the id-primary twin (selection-only,
+    // non-undoable), so it is excluded for the identical reason.
+    if name != "select_rect" && name != "select_by_ids" && !model.in_txn() {
         model.begin_txn();
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe
@@ -1215,6 +1309,37 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         targets = controller::selection_to_ids(model.document());
     }
     match name {
+        // ── id-primary op family (OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md) ──
+        // Operand ids come from the OP'S OWN PARAMS (never doc.selection), so
+        // snapshot and replay apply identical operands (the §7 determinism rule).
+        // Each `*_by_ids` re-establishes the working selection from its own ids
+        // (via the SHARED `apply_select_by_ids` body) BEFORE routing through the
+        // SAME `Controller` mutator the selection-relative verb uses, so the
+        // replayed document+selection is byte-identical to `[select_rect, move]`
+        // (the byte-gate reconciliation, OP_LOG.md §6).
+        "select_by_ids" => {
+            // Selection-only / non-undoable (like select_rect): write the
+            // resolved selection BY PATH in document order; targets = the
+            // resolved ids (the keystone the recipe seeds its working set from).
+            let ids = str_list_field(op, "ids");
+            targets = apply_select_by_ids(model, &ids);
+        }
+        "move_by_ids" => {
+            // Set the working selection from the OP's ids, then run the SAME
+            // mutator `move_selection` uses. targets = the operand ids (from
+            // params, resolved to the selection) — never inferred post-mutation.
+            let ids = str_list_field(op, "ids");
+            targets = apply_select_by_ids(model, &ids);
+            Controller::move_selection(model, num_field(op, "dx"), num_field(op, "dy"));
+        }
+        "copy_by_ids" => {
+            // Set the working selection from the OP's `from` ids, then run the
+            // SAME mutator `copy_selection` uses. targets = the source ids (the
+            // produced copies are born id-less, so the source is the operand).
+            let from = str_list_field(op, "from");
+            targets = apply_select_by_ids(model, &from);
+            Controller::copy_selection(model, num_field(op, "dx"), num_field(op, "dy"));
+        }
         "select_rect" => {
             Controller::select_rect(
                 model,

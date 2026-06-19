@@ -1,0 +1,20 @@
+[
+  {
+    "name": "selrel_move_eye",
+    "setup_svg": "eye.svg",
+    "expected_json": "id_primary_move_eye.json",
+    "ops": [
+      { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
+      { "op": "move_selection", "dx": 50, "dy": 0 }
+    ]
+  },
+  {
+    "name": "id_primary_move_eye",
+    "setup_svg": "eye.svg",
+    "expected_json": "id_primary_move_eye.json",
+    "ops": [
+      { "op": "select_by_ids", "ids": ["eye"] },
+      { "op": "move_by_ids", "ids": ["eye"], "dx": 50, "dy": 0 }
+    ]
+  }
+]
