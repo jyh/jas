@@ -1998,8 +1998,6 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             sx, sy = _drag_to_scale_factors(px, py, cx, cy, rx, ry, shift)
         if abs(sx - 1.0) < 1e-9 and abs(sy - 1.0) < 1e-9:
             return None
-        if copy:
-            controller.copy_selection(0.0, 0.0)
         rx, ry = _resolve_reference_point(store, ctx)
         # Read state.scale_strokes (default true) and state.scale_corners
         # (default false) — see SCALE_TOOL.md §Apply behavior.
@@ -2007,6 +2005,24 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         scale_strokes = strokes_v.value if strokes_v.type == ValueType.BOOL else True
         corners_v = _eval_value("state.scale_corners", store, ctx)
         scale_corners = corners_v.value if corners_v.type == ValueType.BOOL else False
+        # OP_LOG.md §9 Phase P7 — the CONFIRM apply journals through op_apply
+        # (the action carries `journal: true`); the PREVIEW apply stays
+        # out-of-band on the unbracketed _apply_matrix_to_selection (§8). When
+        # journaling, copy=true journals [copy_selection, scale_transform] in
+        # the one open batch transaction (TWO ops); the matrix compose is the
+        # SHARED op_apply helper, so the production confirm and the replay
+        # reproduce the identical matrix (the checkpoint_equivalence gate).
+        if _eval_bool_arg(spec.get("journal"), store, ctx):
+            from document.op_apply import op_apply
+            if copy:
+                op_apply(controller.model, {"op": "copy_selection", "dx": 0.0, "dy": 0.0})
+            op_apply(controller.model, {
+                "op": "scale_transform", "sx": sx, "sy": sy, "rx": rx, "ry": ry,
+                "scale_strokes": scale_strokes, "scale_corners": scale_corners,
+            })
+            return None
+        if copy:
+            controller.copy_selection(0.0, 0.0)
         _apply_matrix_to_selection(
             scale_matrix(sx, sy, rx, ry),
             stroke_factor=stroke_width_factor(sx, sy) if scale_strokes else None,
@@ -2031,9 +2047,19 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             theta_deg = _drag_to_rotate_angle(px, py, cx, cy, rx, ry, shift)
         if abs(theta_deg) < 1e-9:
             return None
+        rx, ry = _resolve_reference_point(store, ctx)
+        # P7 CONFIRM journals through op_apply (journal:true); PREVIEW stays
+        # out-of-band. copy=true journals [copy_selection, rotate_transform].
+        if _eval_bool_arg(spec.get("journal"), store, ctx):
+            from document.op_apply import op_apply
+            if copy:
+                op_apply(controller.model, {"op": "copy_selection", "dx": 0.0, "dy": 0.0})
+            op_apply(controller.model, {
+                "op": "rotate_transform", "angle": theta_deg, "rx": rx, "ry": ry,
+            })
+            return None
         if copy:
             controller.copy_selection(0.0, 0.0)
-        rx, ry = _resolve_reference_point(store, ctx)
         _apply_matrix_to_selection(rotate_matrix(theta_deg, rx, ry))
         return None
 
@@ -2057,9 +2083,20 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                 px, py, cx, cy, rx, ry, shift)
         if abs(angle_deg) < 1e-9:
             return None
+        rx, ry = _resolve_reference_point(store, ctx)
+        # P7 CONFIRM journals through op_apply (journal:true); PREVIEW stays
+        # out-of-band. copy=true journals [copy_selection, shear_transform].
+        if _eval_bool_arg(spec.get("journal"), store, ctx):
+            from document.op_apply import op_apply
+            if copy:
+                op_apply(controller.model, {"op": "copy_selection", "dx": 0.0, "dy": 0.0})
+            op_apply(controller.model, {
+                "op": "shear_transform", "angle": angle_deg, "axis": axis,
+                "axis_angle": axis_angle_deg, "rx": rx, "ry": ry,
+            })
+            return None
         if copy:
             controller.copy_selection(0.0, 0.0)
-        rx, ry = _resolve_reference_point(store, ctx)
         _apply_matrix_to_selection(
             shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry))
         return None

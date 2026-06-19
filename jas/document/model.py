@@ -328,9 +328,21 @@ class Model:
         pending = self._pending_txn
         self._pending_txn = None
         checkpoint = self._undo_stack[-1] if self._undo_stack else None
+        # No-op rule + P6 hardening (OP_LOG.md §9): a transaction whose net
+        # document change is byte-identical is dropped. The canonical
+        # document_to_test_json OMITS Path brush fields (stroke_brush /
+        # stroke_brush_overrides), so a brush-only edit (set_attr_on_selection)
+        # would FALSELY read as a no-op under the JSON compare alone. AND a
+        # structural layers/symbols object compare onto the JSON compare so a
+        # brush-only edit is correctly journaled. Mirrors the Rust commit_txn.
         no_net_change = checkpoint is not None and (
             self._document is checkpoint
-            or document_to_test_json(self._document) == document_to_test_json(checkpoint)
+            or (
+                document_to_test_json(self._document)
+                == document_to_test_json(checkpoint)
+                and self._document.layers == checkpoint.layers
+                and self._document.symbols == checkpoint.symbols
+            )
         )
         if no_net_change:
             if self._undo_stack:
