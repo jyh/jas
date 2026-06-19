@@ -1,0 +1,1 @@
+[{"name":"selection demo","ops":[{"op":"select_rect","params":{"extend":false,"height":55.0,"width":55.0,"x":-5.0,"y":-5.0},"targets":["eye"]},{"op":"copy_selection","params":{"dx":0.0,"dy":0.0},"targets":["eye"]},{"op":"move_selection","params":{"dx":50.0,"dy":0.0},"targets":[]}]}]

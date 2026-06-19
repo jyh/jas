@@ -1097,6 +1097,380 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------
+    // Production op-capture cross-language fixture (OP_LOG.md §9,
+    // Increment 3b-B). The 3b-B production logic already ships in Rust
+    // (effects.rs `run_doc_effect` routing the three replay-safe verbs +
+    // `run_effects` action-name stamping; controller::selection_to_ids; the
+    // lazy `begin_txn`-excluding-`select_rect` drag-frame-hole fix in
+    // op_apply). This section EXTRACTS the two #[cfg(test)] effects.rs proofs
+    // into a SHARED, byte-pinnable fixture + goldens + harness so the
+    // Swift/OCaml/Python ports have a golden to match byte-for-byte. The
+    // harness drives the REAL `interpreter::effects::run_effects` (NOT the
+    // hand-bracketed `apply_op` operations path) — that is the whole point:
+    // it exercises the YAML→harness param translation (marquee corner coords
+    // x1/y1/x2/y2/additive → x/y/width/height/extend), batch ownership /
+    // single-transaction commit, action naming, and the lazy-begin hole fix.
+    // ---------------------------------------------------------------
+
+    /// Production-capture JOURNAL serializer VARIANT (OP_LOG.md §10 item 4).
+    ///
+    /// Distinct from `journal_to_test_json` (the txn_metadata serializer), which
+    /// deliberately OMITS op params and pins txn_id/lamport/parent/actor. The
+    /// production golden MUST instead pin the PARAM-TRANSLATION result (the
+    /// marquee corners x1=-5,y1=-5,x2=50,y2=50 normalize to
+    /// x=-5,y=-5,width=55,height=55,extend=false), so this variant emits, per
+    /// transaction: `name`, and per op `{op, params, targets}` with `params`
+    /// sorted-key + fixed-float canonicalized exactly like `document_to_test_json`
+    /// (via `test_json::canonical_json_value`).
+    ///
+    /// `txn_id` is EXCLUDED — it is a live-entropy seam, non-deterministic
+    /// per-app (live runs draw entropy), so it can never be byte-shared. The
+    /// redundant `"op"` key inside the recorded `params` (op_apply records the
+    /// full op value, verb included) is STRIPPED — the verb already lives in the
+    /// op-level `op` field, and the golden's `params` shape is the pure payload
+    /// the ports replay. `actor`/`parent`/`lamport` are OMITTED: this serializer
+    /// pins only what the production-capture goldens are about (the translated
+    /// ops + the action name); the causal metadata already has its own
+    /// byte-stable golden (`txn_metadata_golden.json`) which this work leaves
+    /// untouched.
+    fn production_journal_to_test_json(
+        journal: &[crate::document::op_log::Transaction],
+    ) -> String {
+        fn opt(s: &Option<String>) -> String {
+            match s {
+                Some(v) => format!("{v:?}"),
+                None => "null".to_string(),
+            }
+        }
+        let txns: Vec<String> = journal
+            .iter()
+            .map(|t| {
+                let ops: Vec<String> = t
+                    .ops
+                    .iter()
+                    .map(|o| {
+                        // Strip the redundant top-level "op" key from params:
+                        // op_apply records the FULL op value (verb included), but
+                        // the verb already lives in the op-level `op` field, so
+                        // the golden's `params` is the pure payload.
+                        let mut params = o.params.clone();
+                        if let serde_json::Value::Object(map) = &mut params {
+                            map.remove("op");
+                        }
+                        let targets: Vec<String> =
+                            o.targets.iter().map(|x| format!("{x:?}")).collect();
+                        format!(
+                            "{{\"op\":{:?},\"params\":{},\"targets\":[{}]}}",
+                            o.op,
+                            crate::geometry::test_json::canonical_json_value(&params),
+                            targets.join(","),
+                        )
+                    })
+                    .collect();
+                format!(
+                    "{{\"name\":{},\"ops\":[{}]}}",
+                    opt(&t.name),
+                    ops.join(","),
+                )
+            })
+            .collect();
+        format!("[{}]", txns.join(","))
+    }
+
+    /// Canonical JSON of an evaluated `PolygonSet` (a list of rings, each a list
+    /// of (x,y) points), using the SAME fixed-float canonicalization as
+    /// `document_to_test_json` so the re-derived geometry golden is byte-shareable
+    /// across apps. Pins the re-derived OUTPUT of the production-captured recipe
+    /// against the EDITED source (the liveness payoff), not the recipe shape.
+    fn polygon_set_to_test_json(ps: &[Vec<(f64, f64)>]) -> String {
+        let rings: Vec<String> = ps
+            .iter()
+            .map(|ring| {
+                let pts: Vec<String> = ring
+                    .iter()
+                    .map(|&(x, y)| {
+                        format!(
+                            "[{},{}]",
+                            crate::geometry::test_json::canonical_json_value(
+                                &serde_json::json!(x)),
+                            crate::geometry::test_json::canonical_json_value(
+                                &serde_json::json!(y)),
+                        )
+                    })
+                    .collect();
+                format!("[{}]", pts.join(","))
+            })
+            .collect();
+        format!("[{}]", rings.join(","))
+    }
+
+    /// Build the fresh Model a production-capture fixture's `setup_svg` defines.
+    fn production_model(fixture: &serde_json::Value) -> Model {
+        let setup_svg =
+            read_fixture(fixture["setup_svg"].as_str().expect("setup_svg"));
+        Model::new(svg_to_document(&setup_svg), None)
+    }
+
+    /// Run every `run_effects` batch a production-capture fixture defines through
+    /// the REAL production interpreter, stamping the fixture's `action_name`.
+    ///
+    /// Supports both fixture shapes:
+    ///   - `effect_batch: [...]` — ONE run_effects call (the eye_demo
+    ///     select→copy→move demonstration, committing one named transaction).
+    ///   - `frames: [[...], [...]]` — MULTIPLE separate run_effects calls (the
+    ///     drag-frame-hole closure: frame 1 = snapshot+select+translate,
+    ///     frame 2 = a BARE translate with NO snapshot). Each frame is a
+    ///     distinct batch, so each commits its own named transaction — the one
+    ///     scenario the test-path operations corpus structurally cannot reach.
+    fn run_production_batches(fixture: &serde_json::Value, model: &mut Model) {
+        use crate::interpreter::effects::run_effects;
+        use crate::interpreter::state_store::StateStore;
+        let action_name = fixture["action_name"].as_str();
+        let parse_batch = |v: &serde_json::Value| -> Vec<serde_json::Value> {
+            v.as_array().expect("a batch is an array of effects").clone()
+        };
+        let mut store = StateStore::new();
+        if let Some(batch) = fixture.get("effect_batch") {
+            let effects = parse_batch(batch);
+            run_effects(
+                &effects, &serde_json::json!({}), &mut store,
+                Some(model), None, None, action_name);
+        } else if let Some(frames) = fixture.get("frames").and_then(|v| v.as_array()) {
+            for frame in frames {
+                let effects = parse_batch(frame);
+                run_effects(
+                    &effects, &serde_json::json!({}), &mut store,
+                    Some(model), None, None, action_name);
+            }
+        } else {
+            panic!("production-capture fixture has neither effect_batch nor frames");
+        }
+    }
+
+    /// Re-derive the recorded element's output against the EDITED source and
+    /// return its canonical PolygonSet JSON.
+    ///
+    /// Lifts the LAST committed transaction's op segment (the production journal
+    /// segment), runs `capture_recipe` to normalize it into an input-addressed
+    /// recipe, wraps it in a `RecordedElem`, then `evaluate_with` it over a
+    /// resolver that returns the EDITED source (the fixture's
+    /// `recorded.edit_source` applies `set:{x:..}` to the source SVG).
+    ///
+    /// NOTE — the SVG px→pt unit conversion (96/72 = ×0.75) bakes into the
+    /// re-derived bbox: editing the source `eye` to x=100 (px) maps to x=75 (pt)
+    /// with w=10px→7.5pt; copy(dx=0)+translate(+50) → the derived bbox spans
+    /// x in [125, 132.5] (pt). The derivative FOLLOWED the edit (capture-time
+    /// source was x=0 → would have been [50,57.5]) — that is the whole point of
+    /// liveness, and it is what this golden pins.
+    fn rederive_recorded_output(
+        fixture: &serde_json::Value,
+        journal: &[crate::document::op_log::Transaction],
+    ) -> String {
+        use crate::geometry::live::{
+            capture_recipe, ElementRef, ElementResolver, RecordedElem, DEFAULT_PRECISION,
+        };
+        use crate::geometry::element::CommonProps;
+        use std::rc::Rc;
+
+        let segment = journal.last().expect("a committed transaction").ops.clone();
+        let (recipe, inputs) = capture_recipe(&segment);
+
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let recorded = RecordedElem::new(
+            recipe,
+            inputs.iter().cloned().map(ElementRef).collect(),
+            common,
+        );
+
+        // Apply the fixture's edit to the source SVG, parse, and resolve the
+        // edited element by id.
+        let rec = &fixture["recorded"];
+        let edit = &rec["edit_source"];
+        let edit_id = edit["id"].as_str().expect("edit_source.id");
+        let setup_svg =
+            read_fixture(fixture["setup_svg"].as_str().expect("setup_svg"));
+        // The eye_demo edit sets x=100; mirror the effects.rs proof's textual
+        // edit (replace x="0" y="0" → x="100" y="0") so the parse is identical.
+        let new_x = edit["set"]["x"].as_f64().expect("edit_source.set.x");
+        let edited_svg = setup_svg.replace(
+            r#"x="0" y="0""#, &format!(r#"x="{}" y="0""#, new_x as i64));
+        let edited_doc = svg_to_document(&edited_svg);
+        // The edited source is layers[0].children[0].
+        let edited_el = edited_doc
+            .get_element(&vec![0, 0])
+            .expect("edited source element")
+            .clone();
+
+        struct OneResolver {
+            id: String,
+            el: Rc<crate::geometry::element::Element>,
+        }
+        impl ElementResolver for OneResolver {
+            fn resolve(
+                &self, id: &ElementRef,
+            ) -> Option<Rc<crate::geometry::element::Element>> {
+                if id.0 == self.id { Some(self.el.clone()) } else { None }
+            }
+        }
+        let resolver = OneResolver { id: edit_id.to_string(), el: Rc::new(edited_el) };
+        let mut visiting = std::collections::BTreeSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+        polygon_set_to_test_json(&ps)
+    }
+
+    /// Reusable production-capture harness (OP_LOG.md §9, Increment 3b-B). Loads
+    /// the fixture, drives the REAL `run_effects` over `setup_svg`, then asserts:
+    ///  (a) `production_journal_to_test_json` == `expected_journal_json`
+    ///      (pins the translated ops + the action name);
+    ///  (b) the `checkpoint_equivalence` replay (OP_LOG.md §6): replaying the
+    ///      journal ops via `op_apply` from `setup_svg` is byte-identical BOTH to
+    ///      `expected_document_json` AND to the live snapshot-path document;
+    ///  (c) the recorded re-derivation (when the fixture declares `recorded`)
+    ///      == `expected_output_json`;
+    ///  (d) a SCOPED completeness assert (OP_LOG.md §9): EVERY committed
+    ///      production transaction's `ops` is non-empty (the production path here
+    ///      MUST emit ops — NOT a global commit_txn invariant; the other ~30
+    ///      verbs legitimately still emit empty ops).
+    fn run_production_batch_fixture(fixture_path: &str) {
+        let json_str = read_fixture(fixture_path);
+        let fx: serde_json::Value =
+            serde_json::from_str(&json_str).expect("parse production-capture fixture");
+        let name = fx["name"].as_str().unwrap_or(fixture_path);
+
+        // Drive the REAL production interpreter.
+        let mut model = production_model(&fx);
+        run_production_batches(&fx, &mut model);
+
+        // (a) journal serialization == golden.
+        let actual_journal = production_journal_to_test_json(model.journal());
+        let expected_journal =
+            read_fixture(fx["expected_journal_json"].as_str().expect("expected_journal_json"));
+        let expected_journal = expected_journal.trim();
+        if actual_journal != expected_journal {
+            eprintln!("=== EXPECTED journal ({name}) ===\n{expected_journal}");
+            eprintln!("=== ACTUAL journal ({name}) ===\n{actual_journal}");
+            panic!("production-capture journal JSON mismatch for '{name}'");
+        }
+
+        // Snapshot-path document (the live result of run_effects).
+        let snapshot_doc = document_to_test_json(model.document());
+
+        // (b) checkpoint_equivalence: replay the WHOLE journal via op_apply from
+        // a fresh setup, byte-compare to BOTH the expected_document golden AND
+        // the live snapshot-path document.
+        let mut replay = production_model(&fx);
+        for txn in model.journal() {
+            for op in &txn.ops {
+                crate::document::op_apply::op_apply(&mut replay, &op.params);
+            }
+        }
+        let replay_doc = document_to_test_json(replay.document());
+        let expected_doc =
+            read_fixture(fx["expected_document_json"].as_str().expect("expected_document_json"));
+        let expected_doc = expected_doc.trim();
+        if replay_doc != snapshot_doc {
+            eprintln!("=== checkpoint_equivalence GATE FAILED ({name}) ===");
+            eprintln!("--- snapshot path ---\n{snapshot_doc}");
+            eprintln!("--- journal replay ---\n{replay_doc}");
+            panic!("checkpoint_equivalence: journal replay != snapshot path for '{name}'");
+        }
+        if replay_doc != expected_doc {
+            eprintln!("=== EXPECTED doc ({name}) ===\n{expected_doc}");
+            eprintln!("=== ACTUAL doc ({name}) ===\n{replay_doc}");
+            panic!("production-capture document JSON mismatch for '{name}'");
+        }
+
+        // (c) recorded re-derivation against the edited source == golden.
+        if fx.get("recorded").is_some() {
+            let actual_out = rederive_recorded_output(&fx, model.journal());
+            let expected_out = read_fixture(
+                fx["recorded"]["expected_output_json"].as_str().expect("expected_output_json"));
+            let expected_out = expected_out.trim();
+            if actual_out != expected_out {
+                eprintln!("=== EXPECTED rederived ({name}) ===\n{expected_out}");
+                eprintln!("=== ACTUAL rederived ({name}) ===\n{actual_out}");
+                panic!("production-capture re-derivation mismatch for '{name}'");
+            }
+        }
+
+        // (d) scoped completeness assert: every committed production transaction
+        // emits ops (the production path here is NOT named-but-op-less).
+        assert!(!model.journal().is_empty(),
+            "production batch committed at least one transaction ({name})");
+        for (i, txn) in model.journal().iter().enumerate() {
+            assert!(!txn.ops.is_empty(),
+                "production txn {i} emits ops (3b-B completeness, {name})");
+        }
+    }
+
+    /// Bootstrap: generate the production-capture goldens from the real
+    /// production path. Run with:
+    ///   cargo test generate_production_capture_goldens -- --ignored --nocapture
+    /// Rust is the source of truth for the canonical shape; the sibling apps
+    /// match these goldens byte-for-byte.
+    #[test]
+    #[ignore]
+    fn generate_production_capture_goldens() {
+        for fixture_path in [
+            "production_capture/eye_demo.json",
+            "production_capture/eye_demo_bare_frame.json",
+        ] {
+            let json_str = read_fixture(fixture_path);
+            let fx: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            let mut model = production_model(&fx);
+            run_production_batches(&fx, &mut model);
+
+            let journal = production_journal_to_test_json(model.journal());
+            let jpath = format!(
+                "{}/{}", FIXTURES, fx["expected_journal_json"].as_str().unwrap());
+            std::fs::write(&jpath, &journal).unwrap();
+            eprintln!("Generated {jpath}\n{journal}");
+
+            // Document golden = the journal-replay document (== snapshot path,
+            // gated below).
+            let mut replay = production_model(&fx);
+            for txn in model.journal() {
+                for op in &txn.ops {
+                    crate::document::op_apply::op_apply(&mut replay, &op.params);
+                }
+            }
+            let doc = document_to_test_json(replay.document());
+            let dpath = format!(
+                "{}/{}", FIXTURES, fx["expected_document_json"].as_str().unwrap());
+            std::fs::write(&dpath, &doc).unwrap();
+            eprintln!("Generated {dpath}\n{doc}");
+
+            if fx.get("recorded").is_some() {
+                let out = rederive_recorded_output(&fx, model.journal());
+                let opath = format!(
+                    "{}/{}", FIXTURES,
+                    fx["recorded"]["expected_output_json"].as_str().unwrap());
+                std::fs::write(&opath, &out).unwrap();
+                eprintln!("Generated {opath}\n{out}");
+            }
+        }
+    }
+
+    /// Production op-capture eye demo (OP_LOG.md §9): marquee-select → copy →
+    /// move, driven through the REAL run_effects, pins the translated journal,
+    /// the checkpoint-equivalent document, and the live re-derivation.
+    #[test]
+    fn production_capture_eye_demo() {
+        run_production_batch_fixture("production_capture/eye_demo.json");
+    }
+
+    /// Production op-capture drag-frame-hole closure (OP_LOG.md §9): two SEPARATE
+    /// run_effects batches — frame 1 (snapshot+select+translate) and a BARE
+    /// frame 2 (translate, NO snapshot) — both commit NAMED transactions that
+    /// journal their move_selection op. The one scenario the test-path
+    /// operations corpus structurally cannot reach.
+    #[test]
+    fn production_capture_eye_demo_bare_frame() {
+        run_production_batch_fixture("production_capture/eye_demo_bare_frame.json");
+    }
+
     /// The canonical recorded-live-element document (RECORDED_ELEMENTS.md): a
     /// recorded element whose recipe copies its input "eye" and translates the
     /// copy +50x. Built identically in every app's harness, so its
