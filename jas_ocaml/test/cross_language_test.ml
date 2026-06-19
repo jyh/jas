@@ -624,6 +624,249 @@ let production_capture_eye_demo () =
 let production_capture_eye_demo_bare_frame () =
   run_production_batch_fixture "production_capture/eye_demo_bare_frame.json"
 
+(* ------------------------------------------------------------------ *)
+(* Per-frame drag coalescing (OP_LOG.md section 9 follow-up). A live drag commits
+   ONE transaction PER FRAME (selection.yaml fires doc.snapshot only on the first
+   mousemove; each on_mousemove is its own run_effects batch that begin_txns +
+   commits), so a drag of N frames lands as N consecutive single-op move
+   transactions in the journal — and N undo steps. [Model.commit_txn] coalesces
+   ADJACENT same-gesture move transactions (move_selection / move_by_ids) into ONE
+   summed-delta translate, collapsing the N undo steps into one. The txns-form
+   below commits each frame SEPARATELY, so the SECOND commit triggers coalescing
+   into the first. Mirrors the Rust [drag_coalesce*] tests. *)
+(* ------------------------------------------------------------------ *)
+
+(* The dx/dy of a journal transaction's LAST op (the move being summed). *)
+let last_op_delta (txn : Jas.Op_log.transaction) : float * float =
+  let op = match List.rev txn.Jas.Op_log.ops with
+    | op :: _ -> op
+    | [] -> failwith "txn has at least one op" in
+  let num key = match op.Jas.Op_log.params with
+    | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`Float f) -> f | Some (`Int i) -> float_of_int i | _ -> 0.0)
+    | _ -> 0.0 in
+  (num "dx", num "dy")
+
+(* The journal tip (last transaction). *)
+let journal_tip (model : Jas.Model.model) : Jas.Op_log.transaction =
+  match List.rev model#journal with
+  | t :: _ -> t
+  | [] -> failwith "expected a tip txn"
+
+(* Build + drive a coalescing fixture case (txns-form, each frame committed
+   separately) and assert the post-coalesce journal shape + undo-step lock-step:
+    - the journal collapsed to [expect_journal_txns] transactions;
+    - the tip txn op list is [expect_journal_ops] long (when declared);
+    - the tip txn last move op carries the SUMMED delta (when declared);
+    - the undo stack and journal cursor are in lock-step ([journal_head] ==
+      [expect_undo_steps]), and undoing exactly that many times drains both back
+      to the origin ([can_undo] false, [journal_head] = 0) — i.e. ONE undo
+      reverts a whole coalesced drag. Mirrors the Rust [assert_drag_coalesce]. *)
+let assert_drag_coalesce (tc : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let name = tc |> member "name" |> to_string in
+  let setup_svg_file = tc |> member "setup_svg" |> to_string in
+  let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+  let doc = Jas.Svg.svg_to_document svg in
+  let model = Jas.Model.create ~document:doc () in
+  let ctrl = Jas.Controller.create ~model () in
+  (* Commit each frame as its own transaction (the live drag shape). *)
+  List.iter (fun txn ->
+    model#begin_txn;
+    (match txn |> member "name" with
+     | `Null -> () | n -> model#name_txn (to_string n));
+    List.iter (fun op -> apply_op model ctrl op) (txn |> member "ops" |> to_list);
+    model#commit_txn
+  ) (tc |> member "txns" |> to_list);
+
+  let expect_txns = tc |> member "expect_journal_txns" |> to_int in
+  let got_txns = List.length model#journal in
+  if got_txns <> expect_txns then
+    failwith (Printf.sprintf
+      "[%s] journal txn count: expected %d, got %d" name expect_txns got_txns);
+
+  (match tc |> member "expect_journal_ops" with
+   | `Null -> ()
+   | v ->
+     let ops = to_int v in
+     let tip_ops = List.length (journal_tip model).Jas.Op_log.ops in
+     if tip_ops <> ops then
+       failwith (Printf.sprintf
+         "[%s] tip txn op count: expected %d, got %d" name ops tip_ops));
+
+  (match tc |> member "expect_last_move_dx" with
+   | `Null -> ()
+   | v ->
+     let dx = to_number v in
+     let dy = match tc |> member "expect_last_move_dy" with
+       | `Null -> 0.0 | w -> to_number w in
+     let gdx, gdy = last_op_delta (journal_tip model) in
+     if (gdx, gdy) <> (dx, dy) then
+       failwith (Printf.sprintf
+         "[%s] summed delta: expected (%g,%g), got (%g,%g)"
+         name dx dy gdx gdy));
+
+  (* Undo-step lock-step: journal cursor == undo depth == declared steps. *)
+  let steps = tc |> member "expect_undo_steps" |> to_int in
+  if model#journal_head <> steps then
+    failwith (Printf.sprintf
+      "[%s] journal_head (== undo steps): expected %d, got %d"
+      name steps model#journal_head);
+  for i = 0 to steps - 1 do
+    if not model#can_undo then
+      failwith (Printf.sprintf "[%s] expected to undo step %d" name i);
+    model#undo
+  done;
+  if model#can_undo then
+    failwith (Printf.sprintf
+      "[%s] after %d undos the undo stack must be empty (lock-step)" name steps);
+  if model#journal_head <> 0 then
+    failwith (Printf.sprintf
+      "[%s] after %d undos the journal cursor must be at the origin" name steps)
+
+(* (a)/(c)-twin coalescing pins + (c)-via-name/copy break pins, driven from the
+   shared [drag_coalesce.json] fixture (txns-form, cross-language). Mirrors the
+   Rust [drag_coalesce] test. *)
+let drag_coalesce () =
+  let json_str = read_fixture "operations/drag_coalesce.json" in
+  let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+  List.iter assert_drag_coalesce tests
+
+(* A single move op as a Yojson value (the apply_op payload). *)
+let move_op dx dy : Yojson.Safe.t =
+  `Assoc [("op", `String "move_selection"); ("dx", `Int dx); ("dy", `Int dy)]
+
+(* NET-ZERO whole-drag: a same-name same-target run that sums to (0,0) AND
+   round-trips the document leaves NO journal entry and NO undo step. The
+   selection is pre-established OUT OF BAND (non-undoable [select_rect], journaling
+   nothing) so the two move frames are the ONLY journaled transactions — and after
+   the net-zero drop the journal is genuinely EMPTY and the document is
+   byte-identical to pre-drag. Mirrors the Rust [drag_coalesce_net_zero]. *)
+let drag_coalesce_net_zero () =
+  let svg = read_fixture "svg/eye.svg" in
+  let model = Jas.Model.create ~document:(Jas.Svg.svg_to_document svg) () in
+  let ctrl = Jas.Controller.create ~model () in
+  (* Pre-select the eye out of band (no journal entry, no undo step). *)
+  ctrl#select_rect ~extend:false (-5.0) (-5.0) 55.0 55.0;
+  let pre_drag = Jas.Test_json.document_to_test_json model#document in
+  assert (model#journal = []);
+  assert (not model#can_undo);
+  (* Frame 1: move dx:5 (commits one txn into the empty journal). *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op 5 0);
+  model#commit_txn;
+  assert (List.length model#journal = 1);
+  assert model#can_undo;
+  (* Frame 2: move dx:-5 (same name, same target) -> net (0,0) round-trip. *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op (-5) 0);
+  model#commit_txn;
+  if model#journal <> [] then
+    failwith (Printf.sprintf
+      "net-zero whole-drag must leave NO journal entry, got %d txns"
+      (List.length model#journal));
+  assert (model#journal_head = 0);
+  assert (not model#can_undo);
+  if Jas.Test_json.document_to_test_json model#document <> pre_drag then
+    failwith "net-zero whole-drag must restore the pre-drag document byte-for-byte"
+
+(* Build a single-element selection at [path] (out of band). *)
+let select_path (ctrl : Jas.Controller.controller) (path : int list) =
+  let es = Jas.Document.element_selection_all path in
+  ctrl#set_selection (Jas.Document.PathMap.singleton path es)
+
+(* TARGET break (predicate c proper): two ADJACENT single-op move frames whose
+   target sets differ do NOT coalesce. The selection is changed OUT OF BAND
+   between the frames (so each frame is a single-op move txn, isolating the
+   target-mismatch predicate from the op-count predicate), proving the run breaks
+   and stays TWO distinct undo steps. Mirrors the Rust
+   [drag_coalesce_target_break]. *)
+let drag_coalesce_target_break () =
+  let svg = read_fixture "svg/two_ided_rects.svg" in
+  let model = Jas.Model.create ~document:(Jas.Svg.svg_to_document svg) () in
+  let ctrl = Jas.Controller.create ~model () in
+  (* Select element "a" (path [0;0]) out of band. *)
+  select_path ctrl [0; 0];
+  (* Frame 1: move "a". *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op 5 0);
+  model#commit_txn;
+  assert (List.length model#journal = 1);
+  assert ((List.nth model#journal 0).Jas.Op_log.ops |> List.hd
+          |> fun o -> o.Jas.Op_log.targets = ["a"]);
+  (* Change selection to "b" (path [0;1]) out of band — a DIFFERENT target. *)
+  select_path ctrl [0; 1];
+  (* Frame 2: a single-op move on "b". Same name, same verb, but the target set
+     differs ([a] vs [b]) -> predicate (c) fails -> NO coalesce. *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op 7 0);
+  model#commit_txn;
+  if List.length model#journal <> 2 then
+    failwith "different target must NOT coalesce -> two distinct txns";
+  assert ((List.nth model#journal 1).Jas.Op_log.ops |> List.hd
+          |> fun o -> o.Jas.Op_log.targets = ["b"]);
+  assert (model#journal_head = 2);
+  let dx0, _ = last_op_delta (List.nth model#journal 0) in
+  let dx1, _ = last_op_delta (List.nth model#journal 1) in
+  if (dx0, dx1) <> (5.0, 7.0) then
+    failwith "deltas stay separate (5 and 7), not summed"
+
+(* TIP guard (predicate [journal_head = List.length op_journal]): a coalescable
+   move frame committed AFTER an undo — when the journal cursor sits BEHIND the
+   tip ([journal_head < len]) — must NOT merge into the about-to-be-truncated redo
+   tail. It must take the normal truncate/append path: the redo tail is discarded
+   and the new frame lands as its OWN txn with its OWN delta (never summed into
+   the stale tail). This is the ONLY test that drives [commit_txn] with
+   [journal_head < len] for a coalescable move, so it is the sole signal for the
+   TIP guard. Mirrors the Rust [drag_coalesce_post_undo_no_merge]. *)
+let drag_coalesce_post_undo_no_merge () =
+  let svg = read_fixture "svg/two_ided_rects.svg" in
+  let model = Jas.Model.create ~document:(Jas.Svg.svg_to_document svg) () in
+  let ctrl = Jas.Controller.create ~model () in
+  (* Select element "a" (path [0;0]) out of band (no journal entry). *)
+  select_path ctrl [0; 0];
+  (* Frame 1: a coalescable move (dx:5). Commits one txn at the tip. *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op 5 0);
+  model#commit_txn;
+  assert (List.length model#journal = 1);
+  assert (model#journal_head = 1);
+  (* Undo frame 1: cursor moves BEHIND the tip (journal_head 0 < len 1) and a
+     redo entry is staged. This is the guard's scenario. *)
+  model#undo;
+  assert (model#journal_head = 0);
+  assert (List.length model#journal = 1);
+  assert model#can_redo;
+  (* Frame 2: a SAME name / SAME target / SAME verb coalescable move (dx:11) —
+     every predicate holds EXCEPT the TIP guard, which fails (journal_head 0 !=
+     len 1). So it must NOT coalesce: the normal path truncates the redo tail and
+     appends frame 2 as its own txn. *)
+  model#begin_txn;
+  model#name_txn "selection on_mousemove";
+  apply_op model ctrl (move_op 11 0);
+  model#commit_txn;
+  if List.length model#journal <> 1 then
+    failwith
+      "post-undo frame must truncate+append (one txn), NOT merge into the redo tail";
+  assert (model#journal_head = 1);
+  assert (not model#can_redo);
+  (* The decisive guard signal: the surviving txn carries frame 2's delta ALONE
+     (11), never frame 1's (5) summed in (16). *)
+  let dx, _ = last_op_delta (List.nth model#journal 0) in
+  if dx <> 11.0 then
+    failwith
+      "surviving txn carries frame 2 delta alone (11), not summed with the \
+       discarded tail (would be 16) — proves the TIP guard blocked the merge";
+  model#undo;
+  assert (model#journal_head = 0);
+  assert (not model#can_undo)
+
 (* 3c-1 determinism check (OP_LOG.md section 7): an id-primary op reads its
    operand ids from its OWN params, NEVER from doc.selection, so it applies the
    SAME operands regardless of the ambient selection. Drive [move_by_ids{["eye"]}]
@@ -1570,6 +1813,21 @@ let () =
         production_capture_eye_demo;
       Alcotest.test_case "production_capture eye_demo_bare_frame" `Quick
         production_capture_eye_demo_bare_frame;
+
+      (* OP_LOG.md section 9 follow-up: per-frame drag coalescing. The shared
+         [drag_coalesce.json] fixture pins the 3-frame collapse + move_by_ids
+         twin + break-on-different-name/target/copy; the dedicated tests pin the
+         net-zero whole-drag (round-trip drag leaves no journal entry / no undo
+         step), the single-op target break (predicate c proper), and the TIP
+         guard (a post-undo coalescable frame must not merge into the
+         about-to-be-truncated redo tail). Mirror the Rust [drag_coalesce*]. *)
+      Alcotest.test_case "drag_coalesce operations" `Quick drag_coalesce;
+      Alcotest.test_case "drag_coalesce net-zero whole-drag" `Quick
+        drag_coalesce_net_zero;
+      Alcotest.test_case "drag_coalesce target break" `Quick
+        drag_coalesce_target_break;
+      Alcotest.test_case "drag_coalesce post-undo no merge (tip guard)" `Quick
+        drag_coalesce_post_undo_no_merge;
 
       (* OP_LOG.md section 9 verb33 P1-P7 (the actions.yaml<->op_apply
          unification). Each shared source fixture replays through
