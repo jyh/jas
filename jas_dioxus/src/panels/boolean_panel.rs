@@ -21,7 +21,10 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
-        "close_panel" => state.workspace_layout.close_panel(addr),
+        "close_panel" => crate::workspace::layout_apply::layout_apply(
+            &mut state.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        ),
         // Forward menu commands to the YAML actions catalog so the
         // hamburger menu fires the same effect chain as the panel
         // YAML dispatch wiring.

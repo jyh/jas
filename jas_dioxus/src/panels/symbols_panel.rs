@@ -31,7 +31,10 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// ids and calls the Controller ops.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
-        "close_panel" => state.workspace_layout.close_panel(addr),
+        "close_panel" => crate::workspace::layout_apply::layout_apply(
+            &mut state.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        ),
         "new_symbol" | "place_instance" | "delete_symbol_action" => {
             let params = serde_json::Map::new();
             crate::interpreter::renderer::dispatch_action(cmd, &params, state);

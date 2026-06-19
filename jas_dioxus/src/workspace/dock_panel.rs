@@ -894,10 +894,13 @@ pub(crate) fn build_dock_groups(
                     },
                     onclick: move |_| {
                         (act_click.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.workspace_layout.set_active_panel(PanelAddr {
-                                group: GroupAddr { dock_id: did, group_idx: gi },
-                                panel_idx: pi,
-                            });
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_set_active_panel(PanelAddr {
+                                    group: GroupAddr { dock_id: did, group_idx: gi },
+                                    panel_idx: pi,
+                                }),
+                            );
                         }));
                     },
                     "{label}"
@@ -910,10 +913,13 @@ pub(crate) fn build_dock_groups(
                                 onclick: move |evt: Event<MouseData>| {
                                     evt.stop_propagation();
                                     (act_close.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        st.workspace_layout.close_panel(PanelAddr {
-                                            group: GroupAddr { dock_id: did, group_idx: gi },
-                                            panel_idx: pi,
-                                        });
+                                        crate::workspace::layout_apply::layout_apply(
+                                            &mut st.workspace_layout,
+                                            &crate::workspace::layout_apply::op_close_panel(PanelAddr {
+                                                group: GroupAddr { dock_id: did, group_idx: gi },
+                                                panel_idx: pi,
+                                            }),
+                                        );
                                     }));
                                 },
                                 "\u{00d7}"
@@ -1011,9 +1017,15 @@ pub(crate) fn build_dock_groups(
                                 (DragPayload::Panel(from), DropTarget::TabBar { group: to_group, index: to_idx }) => {
                                     if from.group == to_group {
                                         // Same group: reorder
-                                        st.workspace_layout.reorder_panel(to_group, from.panel_idx, to_idx);
+                                        crate::workspace::layout_apply::layout_apply(
+                                            &mut st.workspace_layout,
+                                            &crate::workspace::layout_apply::op_reorder_panel(to_group, from.panel_idx, to_idx),
+                                        );
                                     } else {
-                                        st.workspace_layout.move_panel_to_group(from, to_group);
+                                        crate::workspace::layout_apply::layout_apply(
+                                            &mut st.workspace_layout,
+                                            &crate::workspace::layout_apply::op_move_panel_to_group(from, to_group),
+                                        );
                                     }
                                 }
                                 _ => {}
@@ -1066,10 +1078,13 @@ pub(crate) fn build_dock_groups(
                             let act = act_chevron.clone();
                             move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    st.workspace_layout.toggle_group_collapsed(GroupAddr {
-                                        dock_id: did,
-                                        group_idx: gi,
-                                    });
+                                    crate::workspace::layout_apply::layout_apply(
+                                        &mut st.workspace_layout,
+                                        &crate::workspace::layout_apply::op_toggle_group_collapsed(GroupAddr {
+                                            dock_id: did,
+                                            group_idx: gi,
+                                        }),
+                                    );
                                 }));
                             }
                         },
@@ -1246,10 +1261,13 @@ pub(crate) fn DockGroupsView() -> Element {
                             onclick: move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                                     st.workspace_layout.toggle_dock_collapsed(did);
-                                    st.workspace_layout.set_active_panel(PanelAddr {
-                                        group: GroupAddr { dock_id: did, group_idx: gi },
-                                        panel_idx: pi,
-                                    });
+                                    crate::workspace::layout_apply::layout_apply(
+                                        &mut st.workspace_layout,
+                                        &crate::workspace::layout_apply::op_set_active_panel(PanelAddr {
+                                            group: GroupAddr { dock_id: did, group_idx: gi },
+                                            panel_idx: pi,
+                                        }),
+                                    );
                                 }));
                             },
                             "{first_char}"
@@ -1365,7 +1383,10 @@ pub(crate) fn FloatingDocksView() -> Element {
                         evt.stop_propagation();
                         title_drag.set(None);
                         (act_redock.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            st.workspace_layout.redock(fid);
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_redock(fid),
+                            );
                         }));
                     },
                 }

@@ -1016,6 +1016,20 @@ pub fn App() -> Element {
                         }));
                         return;
                     }
+                    // 3d-2 DEVIATION (deferred, OP_LOG.md §12 Fork 5): the live
+                    // pane-drag / border-drag / edge-resize blocks below keep their
+                    // DIRECT `pl.<verb>()` calls and are NOT routed through
+                    // `layout_apply`. Each interleaves the dispatcher verb
+                    // (`set_pane_position`, `resize_pane`) with NON-verb work on the
+                    // same `&mut pl` borrow within one frame — detect_snaps +
+                    // align_to_snaps after a move, or the Left/Top resize branches
+                    // that re-borrow `pl.pane_mut` to clamp width and reposition x/y
+                    // together. A serialized op-per-step would either lose that
+                    // single-borrow interleave or fire a verb plus a second mutation
+                    // the dispatcher has no arm for. Routing them needs a
+                    // compound/batched op shape; deferred. (The discrete, single-
+                    // mutation pane verbs — hide_pane, bring_pane_to_front,
+                    // toggle_canvas_maximized — ARE routed at their click sites.)
                     // Pane drag (move with live snapping)
                     if let Some((pid, off_x, off_y)) = pane_drag() {
                         let new_x = coords.x - off_x;
@@ -1157,6 +1171,21 @@ pub fn App() -> Element {
                         if let Some(payload) = drag_source() {
                             let (x, y) = last_drag_pos();
                             let cur_tgt = drop_target_sig();
+                            // 3d-2 DEVIATION (deferred, OP_LOG.md §12 Fork 5): the
+                            // `detach_group` calls below are NOT routed through
+                            // `layout_apply`. This is the SAME re-borrow / target-
+                            // interleave class as the `set_pane_position` /
+                            // `resize_pane` drag sites in `onmousemove` — the detach
+                            // verb returns the new floating-dock id (`fid`), which
+                            // this closure immediately consumes to chain
+                            // `snap_to_edge(fid, edge)` in the same borrow. The
+                            // `layout_apply` `detach_group` arm discards that return
+                            // (the corpus only exercises the unsnapped detach), so
+                            // routing here would drop the `fid` the edge-snap needs.
+                            // Promoting it requires the dispatcher to surface the
+                            // result (an op-return / two-op pattern) — deferred with
+                            // the drag sites. `detach_panel` is intentionally not a
+                            // dispatcher verb at all, so it is out of scope here.
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                                 let _result = match payload {
                                     DragPayload::Panel(addr) => {
@@ -1210,9 +1239,10 @@ pub fn App() -> Element {
                         open_menu.set(None);
                         panel_menu_sig.set(None);
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                pl.bring_pane_to_front(toolbar_pane_id);
-                            }
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_bring_pane_to_front(toolbar_pane_id),
+                            );
                         }));
                     }
                 },
@@ -1234,9 +1264,10 @@ pub fn App() -> Element {
                                 onmousedown: move |evt: Event<MouseData>| {
                                     evt.stop_propagation();
                                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                            pl.hide_pane(PaneKind::Toolbar);
-                                        }
+                                        crate::workspace::layout_apply::layout_apply(
+                                            &mut st.workspace_layout,
+                                            &crate::workspace::layout_apply::op_hide_pane(PaneKind::Toolbar),
+                                        );
                                     }));
                                 },
                                 "\u{00D7}" // ×
@@ -1263,9 +1294,10 @@ pub fn App() -> Element {
                         popup_slot.set(None);
                         if !canvas_maximized {
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                    pl.bring_pane_to_front(canvas_pane_id);
-                                }
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_bring_pane_to_front(canvas_pane_id),
+                                );
                             }));
                         }
                     }
@@ -1288,9 +1320,10 @@ pub fn App() -> Element {
                                 evt.stop_propagation();
                                 pane_drag.set(None);
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                        pl.toggle_canvas_maximized();
-                                    }
+                                    crate::workspace::layout_apply::layout_apply(
+                                        &mut st.workspace_layout,
+                                        &crate::workspace::layout_apply::op_toggle_canvas_maximized(),
+                                    );
                                 }));
                             }
                         },
@@ -1307,9 +1340,10 @@ pub fn App() -> Element {
                             let act = act.clone();
                             move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                        pl.toggle_canvas_maximized();
-                                    }
+                                    crate::workspace::layout_apply::layout_apply(
+                                        &mut st.workspace_layout,
+                                        &crate::workspace::layout_apply::op_toggle_canvas_maximized(),
+                                    );
                                 }));
                             }
                         },
@@ -1376,9 +1410,10 @@ pub fn App() -> Element {
                     move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                            if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                pl.bring_pane_to_front(dock_pane_id);
-                            }
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_bring_pane_to_front(dock_pane_id),
+                            );
                         }));
                     }
                 },
@@ -1425,9 +1460,10 @@ pub fn App() -> Element {
                                 onmousedown: move |evt: Event<MouseData>| {
                                     evt.stop_propagation();
                                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                        if let Some(ref mut pl) = st.workspace_layout.pane_layout {
-                                            pl.hide_pane(PaneKind::Dock);
-                                        }
+                                        crate::workspace::layout_apply::layout_apply(
+                                            &mut st.workspace_layout,
+                                            &crate::workspace::layout_apply::op_hide_pane(PaneKind::Dock),
+                                        );
                                     }));
                                 },
                                 "\u{00D7}" // x
