@@ -3440,30 +3440,17 @@ struct TreeViewContent: View {
 
     private func flattenArtwork() {
         guard !panelSelection.isEmpty else { return }
-        var d = model.document
-        for p in panelSelection.sorted(by: { $0.lexicographicallyPrecedes($1) }).reversed() {
-            let e = d.getElement(p)
-            if case .group(let g) = e {
-                d = d.deleteElement(p)
-                var insertPath = p
-                var firstInsert = true
-                for child in g.children {
-                    if firstInsert && (insertPath.last ?? 0) == 0 {
-                        d = d.insertElementAfter(insertPath, element: child)
-                    } else if firstInsert {
-                        var ia = insertPath
-                        ia[ia.count - 1] = (ia.last ?? 1) - 1
-                        d = d.insertElementAfter(ia, element: child)
-                    } else {
-                        d = d.insertElementAfter(insertPath, element: child)
-                    }
-                    firstInsert = false
-                    insertPath[insertPath.count - 1] += 1
-                }
-            }
-        }
-        // Undoable flatten: editDocument self-brackets one undo step.
-        model.editDocument(d)
+        // OP_LOG.md §9 Phase P5 — route through the `flatten_artwork` YAML action
+        // (a foreach of `doc.unpack_group_at` over reverse(selection)) so the
+        // gesture JOURNALS one `unpack_group_at` op per group through the SHARED
+        // `opApply` dispatcher (one named undo step). Behavior is unchanged: the
+        // action's reverse-order unpack matches the prior native loop, and the
+        // shared `apply_unpack_group_at` body re-inserts children in place.
+        LayersPanel.dispatchYamlAction(
+            "flatten_artwork",
+            model: model,
+            panelSelection: panelSelection.map { Array($0) }
+        )
         panelSelection.removeAll()
     }
 

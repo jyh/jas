@@ -3,6 +3,23 @@
 import AppKit
 import Foundation
 
+/// Convert a RESOLVED interpreter `Value` (the production eval result for a
+/// `value` op param) into the op-literal `Any` the `opApply` arms parse via
+/// `jsonToValue` — NSNumber for numbers/bools (the `isBool` discriminator is
+/// preserved), String for strings/colors. A non-coercible value (null / list /
+/// path / closure) returns nil, which the caller treats as "skip the op"
+/// exactly like the old handlers' typed guards. Mirrors Rust's
+/// `value_to_json` → `op_apply` jsonToValue round-trip (OP_LOG.md §9).
+private func opLiteral(_ v: Value) -> Any? {
+    switch v {
+    case .bool(let b): return NSNumber(value: b)
+    case .number(let n): return NSNumber(value: n)
+    case .string(let s): return s
+    case .color(let c): return c
+    case .null, .list, .path, .closure: return nil
+    }
+}
+
 public enum LayersPanel {
     /// Source of truth is workspace/panels/layers.yaml's `menu:` block
     /// (review #15); the generic reader builds the items from the bundle.
@@ -92,6 +109,23 @@ public enum LayersPanel {
             "param": params,
         ]
 
+        runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
+                              model: model, actions: actions,
+                              dialogs: ws.data["dialogs"] as? [String: Any],
+                              onCloseDialog: onCloseDialog)
+    }
+
+    /// Build the LayersPanel platform-effect registry and run `effects` through
+    /// the shared `runEffects` pipeline, naming the owning transaction
+    /// `actionName` (OP_LOG.md §9). Extracted from ``dispatchYamlAction`` so the
+    /// registry construction has a single home; the production dispatch and the
+    /// test seam (``runEffectsForTest``) share ONE registry, so a production-
+    /// route test exercises exactly the same handlers a panel/menu gesture does.
+    private static func runLayersPanelEffects(
+        _ effects: [Any], actionName: String, ctx: [String: Any],
+        model: Model, actions: [String: Any]?, dialogs: [String: Any]?,
+        onCloseDialog: (() -> Void)?
+    ) {
         // Platform handlers
         // OP_LOG.md Increment 1: the `snapshot` effect OPENS the undo
         // transaction (beginTxn) rather than pushing a bare checkpoint, so the
@@ -103,6 +137,16 @@ public enum LayersPanel {
             model.beginTxn()
             return nil
         }
+        // OP_LOG.md §9: the verb33 doc.* handlers below route through the SHARED
+        // `opApply` dispatcher (the same path the tool gestures use), so each
+        // panel/menu gesture JOURNALS a real op (verb + RESOLVED params) into
+        // the open transaction — matching Rust's `run_yaml_effect` arms which
+        // build a resolved op JSON and call `op_apply`. The mutation is
+        // byte-identical (opApply calls the SAME mutators these handlers used
+        // before routing); the only added effect is `recordOp`. A shared
+        // Controller is reused across handlers (it is stateless — a thin wrapper
+        // over `model`). Mirrors `jas_dioxus` renderer.rs.
+        let controller = Controller(model: model)
         let docSetHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let pathExpr = (spec["path"] as? String) ?? ""
@@ -154,26 +198,21 @@ public enum LayersPanel {
         // level Layer wrapped via Element.layer or a nested element) flows
         // through ctx via as:-binding. Swift's [String: Any] ctx holds
         // Element values directly (no serde roundtrip needed).
+        // doc.delete_at: path — OP_LOG.md §9 Phase P4. Routes through the SHARED
+        // `opApply` dispatcher (`apply_delete_element_at`, the SAME
+        // Document.deleteElement body). The optional `as:`-bound removed element
+        // is resolved from the live doc BEFORE opApply mutates it (opApply has no
+        // return value), preserving the Phase-3 return-binding contract.
         let docDeleteAtHandler: PlatformEffect = { value, callCtx, _ in
             guard let pathExpr = value as? String else { return nil }
             let pathVal = evaluate(pathExpr, context: callCtx)
             guard case .path(let indices) = pathVal, !indices.isEmpty
             else { return nil }
             let doc = model.document
-            // Top-level: delete from [Layer]; deeper: walk Element tree
-            // via Document.deleteElement / getElement.
-            if indices.count == 1 {
-                guard indices[0] >= 0 && indices[0] < doc.layers.count
-                else { return nil }
-                let removed = Element.layer(doc.layers[indices[0]])
-                var newLayers = doc.layers
-                newLayers.remove(at: indices[0])
-                // See note above: use replacing() to preserve all Document fields.
-                model.editDocument(doc.replacing(layers: newLayers))
-                return removed
-            }
-            let removed = doc.getElement(indices)
-            model.editDocument(doc.deleteElement(indices))
+            // Resolve the to-be-removed element for the optional `as:` binding
+            // before the mutation (clamped/guarded exactly as the arm is).
+            guard let removed = doc.tryGetElement(indices) else { return nil }
+            opApply(model, controller, ["op": "delete_at", "path": indices])
             return removed
         }
         let docCloneAtHandler: PlatformEffect = { value, callCtx, _ in
@@ -189,6 +228,13 @@ public enum LayersPanel {
             }
             return doc.getElement(indices)
         }
+        // doc.insert_after: { path, element } — OP_LOG.md §9 Phase P4. VALUE-IN-OP:
+        // the resolved Element (from a preceding NON-JOURNALED `doc.clone_at`
+        // binder) is carried VERBATIM in the op under `element` and routed
+        // through the SHARED `opApply` dispatcher (`apply_insert_element_after`
+        // → Document.insertElementAfter, which handles both top-level Layer and
+        // nested inserts). A top-level path with a non-Layer element is a no-op
+        // inside the arm (mirrors the old guard).
         let docInsertAfterHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let pathExpr = (spec["path"] as? String) ?? ""
@@ -207,26 +253,25 @@ public enum LayersPanel {
                 newElement = nil
             }
             guard let elem = newElement else { return nil }
-            let doc = model.document
-            // Top-level: insert into [Layer]; deeper: insert into the
-            // Element tree via Document.insertElementAfter.
-            if indices.count == 1 {
-                guard case .layer(let layer) = elem else { return nil }
-                let insertIdx = min(indices[0] + 1, doc.layers.count)
-                var newLayers = doc.layers
-                newLayers.insert(layer, at: insertIdx)
-                // See note above: use replacing() to preserve all Document fields.
-                model.editDocument(doc.replacing(layers: newLayers))
-            } else {
-                model.editDocument(doc.insertElementAfter(indices, element: elem))
+            // A top-level insert requires a Layer (the arm routes through
+            // Document.insertElementAfter, which traps on a non-Layer at depth 1);
+            // preserve the old handler's silent skip for that case.
+            if indices.count == 1, case .layer = elem {} else if indices.count == 1 {
+                return nil
             }
+            opApply(model, controller,
+                    ["op": "insert_after", "path": indices, "element": elem])
             return nil
         }
 
-        // doc.wrap_in_layer: { paths, name } — append a new top-level
-        // Layer containing the selected elements. Swift's Document.layers
-        // is [Layer] (top-level Layers only), so this only supports a
-        // top-level selection.
+        // doc.wrap_in_layer: { paths, name } — OP_LOG.md §9 Phase P5. Append a new
+        // top-level Layer containing the selected elements. Routes through the
+        // SHARED `opApply` dispatcher (`apply_wrap_in_layer`, the SAME multi-step
+        // collect/reverse-delete/append body) so the whole wrap JOURNALS as ONE
+        // `wrap_in_layer` op. CRITICAL: the `name` expr is resolved against the
+        // LIVE doc FIRST and journaled as the RESOLVED LITERAL — replay must NOT
+        // re-derive a possibly-colliding name from the (now-mutated) tree. The
+        // `__path__` markers are normalized to plain index arrays for the op.
         let docWrapInLayerHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let pathsExpr = (spec["paths"] as? String) ?? "[]"
@@ -240,49 +285,28 @@ public enum LayersPanel {
                 }
             }
             if normalized.isEmpty { return nil }
-            normalized.sort { $0.lexicographicallyPrecedes($1) }
-            // Top-level only
+            // Top-level only (Swift's top level is [Layer]).
             let topLevelIndices = normalized.compactMap { p -> Int? in
                 p.count == 1 ? p[0] : nil
             }
             if topLevelIndices.count != normalized.count { return nil }
-            // Evaluate name expression
+            // Resolve the name FIRST (against the live doc) and journal the LITERAL.
             let nameExpr = (spec["name"] as? String) ?? "'Layer'"
             let nameVal = evaluate(nameExpr, context: callCtx)
             let name: String
             if case .string(let s) = nameVal { name = s } else { name = "Layer" }
-            // Collect children in document order
-            let originalLayers = model.document.layers
-            let childLayers = topLevelIndices.map { originalLayers[$0] }
-            // Promote Layer -> Element (Layer's children are Elements;
-            // collecting Layers into a layer means wrapping them as
-            // inner structure). For now, wrap them as children using
-            // Element.layer(inner).
-            var children: [Element] = []
-            for c in childLayers {
-                children.append(Element.layer(c))
-            }
-            // Remove sources in descending order
-            let sortedIndices = topLevelIndices.sorted(by: >)
-            var newLayers = originalLayers
-            for idx in sortedIndices {
-                newLayers.remove(at: idx)
-            }
-            let newLayer = Layer(name: name, children: children)
-            newLayers.append(newLayer)
-            // .replacing(...) preserves documentSetup / printPreferences
-            // — passing them through the designated init silently drops
-            // any field not enumerated, which would reset the user's
-            // Print dialog state on every layer rename / lock toggle.
-            model.editDocument(model.document.replacing(layers: newLayers))
+            opApply(model, controller,
+                    ["op": "wrap_in_layer", "paths": normalized, "name": name])
             return nil
         }
 
-        // doc.wrap_in_group: { paths } — wrap the elements at the given
-        // paths into a new Group at the topmost source position. All
-        // paths must share the same parent and be at least depth 2
-        // (children of a Layer or deeper); Swift's Document.layers is
-        // [Layer], so top-level items cannot be wrapped in a Group.
+        // doc.wrap_in_group: { paths } — OP_LOG.md §9 Phase P5. Wrap the elements
+        // at the given paths into a new Group at the topmost source position.
+        // Routes through the SHARED `opApply` dispatcher (`apply_wrap_in_group`)
+        // so the multi-step mutation JOURNALS as ONE op carrying the RESOLVED
+        // plain index arrays. All paths must share a parent and be nested
+        // (depth >= 2); the arm collects in document order and inserts at the
+        // topmost source index.
         let docWrapInGroupHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let pathsExpr = (spec["paths"] as? String) ?? "[]"
@@ -297,52 +321,28 @@ public enum LayersPanel {
             }
             if normalized.isEmpty { return nil }
             normalized.sort { $0.lexicographicallyPrecedes($1) }
-            // All paths must share the same parent and be nested (depth >= 2).
+            // All paths must share the same parent and be nested (depth >= 2) —
+            // the same same-parent invariant the arm assumes (it inserts the
+            // group at the topmost source's parent).
             guard let first = normalized.first, first.count >= 2 else { return nil }
             let parentPath = Array(first.dropLast())
             for p in normalized where Array(p.dropLast()) != parentPath {
                 return nil
             }
-            // Collect the selected children in document order.
-            let doc = model.document
-            let children = normalized.map { doc.getElement($0) }
-            // Delete all but the topmost in reverse, then replace the
-            // topmost with a new Group containing every collected child.
-            var newDoc = doc
-            for p in normalized.dropFirst().reversed() {
-                newDoc = newDoc.deleteElement(p)
-            }
-            let newGroup = Element.group(Group(children: children))
-            newDoc = newDoc.replaceElement(first, with: newGroup)
-            model.editDocument(newDoc)
+            opApply(model, controller, ["op": "wrap_in_group", "paths": normalized])
             return nil
         }
 
-        // doc.unpack_group_at: path — replace a Group with its children
-        // in place. Path must point to a Group nested inside a Layer;
-        // top-level paths (length 1) point to Layers, which cannot be
-        // unpacked.
+        // doc.unpack_group_at: path — OP_LOG.md §9 Phase P5. Replace a Group with
+        // its children in place. Routes through the SHARED `opApply` dispatcher
+        // (`apply_unpack_group_at`) so the multi-step extraction JOURNALS as ONE
+        // op carrying the RESOLVED plain index path. A non-Group target (or a
+        // top-level path) is a no-op inside the arm.
         let docUnpackGroupAtHandler: PlatformEffect = { value, callCtx, _ in
             guard let pathExpr = value as? String else { return nil }
             let pathVal = evaluate(pathExpr, context: callCtx)
             guard case .path(let indices) = pathVal, indices.count >= 2 else { return nil }
-            let doc = model.document
-            let elem = doc.getElement(indices)
-            guard case .group(let g) = elem else { return nil }
-            var newDoc = doc
-            if g.children.isEmpty {
-                newDoc = newDoc.deleteElement(indices)
-            } else {
-                // Replace the group with its first child, then insert
-                // each subsequent child just after its predecessor.
-                newDoc = newDoc.replaceElement(indices, with: g.children[0])
-                var insertAfter = indices
-                for child in g.children.dropFirst() {
-                    newDoc = newDoc.insertElementAfter(insertAfter, element: child)
-                    insertAfter[insertAfter.count - 1] += 1
-                }
-            }
-            model.editDocument(newDoc)
+            opApply(model, controller, ["op": "unpack_group_at", "path": indices])
             return nil
         }
 
@@ -356,8 +356,13 @@ public enum LayersPanel {
             if case .string(let s) = nameVal { name = s } else { name = "Layer" }
             return Layer(name: name, children: [])
         }
-        // doc.insert_at: { parent_path, index, element } — top-level insert
-        // for now (nested insertion deferred to a later sub-tollgate).
+        // doc.insert_at: { parent_path, index, element } — OP_LOG.md §9 Phase P4.
+        // VALUE-IN-OP: the resolved Layer (from a preceding NON-JOURNALED
+        // `doc.create_layer` binder) is wrapped as an Element and carried VERBATIM
+        // in the op under `element`, routed through the SHARED `opApply`
+        // dispatcher (`apply_insert_element_at`, the SAME top-level [Layer] insert
+        // body, which clamps the index). Top-level insert only (Swift's top level
+        // is [Layer]).
         let docInsertAtHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any] else { return nil }
             let parentExpr = (spec["parent_path"] as? String) ?? "path()"
@@ -381,14 +386,10 @@ public enum LayersPanel {
                     let l = callCtx[name] as? Layer { layer = l }
             else { layer = nil }
             guard let elem = layer else { return nil }
-            let insertIdx = max(0, min(index, model.document.layers.count))
-            var newLayers = model.document.layers
-            newLayers.insert(elem, at: insertIdx)
-            // .replacing(...) preserves documentSetup / printPreferences
-            // — passing them through the designated init silently drops
-            // any field not enumerated, which would reset the user's
-            // Print dialog state on every layer rename / lock toggle.
-            model.editDocument(model.document.replacing(layers: newLayers))
+            opApply(model, controller, [
+                "op": "insert_at", "parent_path": parentIndices,
+                "index": index, "element": Element.layer(elem),
+            ])
             return nil
         }
 
@@ -448,15 +449,51 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.delete_selection — OP_LOG.md §9 Phase P4. Delete every currently-
+        // selected element. Routes through the SHARED `opApply` dispatcher
+        // (`apply_delete_selection`, the SAME Document.deleteSelection body) so
+        // the deletion JOURNALS a real `delete_selection` op (targets carry the
+        // pre-deletion selection ids). Reachable via the YAML orphan-confirm OK
+        // actions; Swift's menu Delete/Cut use a native NSAlert confirm but route
+        // the mutation through the SAME opApply verb (see JasCommands).
+        let docDeleteSelectionHandler: PlatformEffect = { _, _, _ in
+            opApply(model, controller, ["op": "delete_selection"])
+            return nil
+        }
+
+        // doc.copy_selection_to_clipboard — non-document side effect (no op /
+        // no journal): write the current selection's SVG to the system
+        // pasteboard, mirroring the menu Cut copy-half. Paired with
+        // doc.delete_selection in cut_orphan_confirm_ok.
+        let docCopySelectionToClipboardHandler: PlatformEffect = { _, _, _ in
+            let doc = model.document
+            let elements = doc.selection.map { doc.getElement($0.path) }
+            guard !elements.isEmpty else { return nil }
+            let svg = documentToSvg(Document(layers: [Layer(children: elements)]))
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(svg, forType: .string)
+            return nil
+        }
+
         // ── Artboard handlers (ARTBOARDS.md §Menu, §Rename, §Reordering) ──
         //
-        // All seven mirror the Python / Rust doc.* handlers. They mutate
-        // model.document via the Artboard type helpers and commit via
-        // reassigning model.document.
+        // OP_LOG.md §9 Phase P2/P3 — each evaluates its YAML exprs to RESOLVED
+        // literals, builds the per-verb op JSON, and routes through the SHARED
+        // `opApply` dispatcher (`apply_create_artboard` / `apply_set_artboard_*`
+        // / ...), the SAME Artboard-helper mutation body these handlers used
+        // before routing. Routing through `opApply` JOURNALS the edit as a real
+        // op (one op per field-call, so artboard_options_confirm — which chains
+        // ten set_artboard_field calls — lands as ten ops in its one txn) and
+        // replays byte-identically. VALUE-IN-OP: create/duplicate mint the id
+        // ONCE here (production entropy) and journal it as a LITERAL, so replay
+        // reads it VERBATIM and never re-mints. Mirrors Rust renderer.rs.
 
         let docCreateArtboardHandler: PlatformEffect = { value, callCtx, _ in
             let spec = (value as? [String: Any]) ?? [:]
-            var doc = model.document
+            let doc = model.document
+            // Collision-retry id mint (production entropy) — the ONLY mint;
+            // opApply replays the recorded literal and never mints.
             let existing = Set(doc.artboards.map(\.id))
             var id = ""
             for _ in 0..<100 {
@@ -464,8 +501,11 @@ public enum LayersPanel {
                 if !existing.contains(c) { id = c; break }
             }
             guard !id.isEmpty else { return nil }
-            var ab = Artboard.defaultWithId(id)
-            ab = ab.with(name: nextArtboardName(doc.artboards))
+            // Build a RESOLVED flat `fields` object: the default name (derived
+            // from the live doc) plus each YAML expr evaluated to a literal
+            // (replay has no eval context). A `name` override in `spec` replaces
+            // the default below.
+            var fields: [String: Any] = ["name": nextArtboardName(doc.artboards)]
             for (k, v) in spec {
                 let val: Value
                 if let s = v as? String {
@@ -479,51 +519,18 @@ public enum LayersPanel {
                 } else {
                     continue
                 }
-                switch k {
-                case "name": if case .string(let s) = val { ab = ab.with(name: s) }
-                case "x": if case .number(let n) = val { ab = ab.with(x: n) }
-                case "y": if case .number(let n) = val { ab = ab.with(y: n) }
-                case "width": if case .number(let n) = val { ab = ab.with(width: n) }
-                case "height": if case .number(let n) = val { ab = ab.with(height: n) }
-                case "fill":
-                    if case .string(let s) = val {
-                        ab = ab.with(fill: ArtboardFill.fromCanonical(s))
-                    } else if case .color(let s) = val {
-                        ab = ab.with(fill: ArtboardFill.fromCanonical(s))
-                    }
-                case "show_center_mark": if case .bool(let b) = val { ab = ab.with(showCenterMark: b) }
-                case "show_cross_hairs": if case .bool(let b) = val { ab = ab.with(showCrossHairs: b) }
-                case "show_video_safe_areas": if case .bool(let b) = val { ab = ab.with(showVideoSafeAreas: b) }
-                case "video_ruler_pixel_aspect_ratio":
-                    if case .number(let n) = val { ab = ab.with(videoRulerPixelAspectRatio: n) }
-                default: break
-                }
+                if let literal = opLiteral(val) { fields[k] = literal }
             }
-            doc = Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards + [ab],
-                artboardOptions: doc.artboardOptions
-            )
-            model.editDocument(doc)
-            return ab.id
+            opApply(model, controller,
+                    ["op": "create_artboard", "id": id, "fields": fields])
+            return id
         }
 
         let docDeleteArtboardByIdHandler: PlatformEffect = { value, callCtx, _ in
             guard let idExpr = value as? String else { return nil }
             let val = evaluate(idExpr, context: callCtx)
             guard case .string(let target) = val else { return nil }
-            let doc = model.document
-            let newArtboards = doc.artboards.filter { $0.id != target }
-            if newArtboards.count == doc.artboards.count { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: newArtboards,
-                artboardOptions: doc.artboardOptions
-            ))
+            opApply(model, controller, ["op": "delete_artboard_by_id", "id": target])
             return nil
         }
 
@@ -545,7 +552,11 @@ public enum LayersPanel {
             let idVal = evaluate(idExpr, context: callCtx)
             guard case .string(let target) = idVal else { return nil }
             let doc = model.document
-            guard let source = doc.artboards.first(where: { $0.id == target }) else { return nil }
+            // Resolve the source up front: a missing source short-circuits
+            // BEFORE we mint, so a no-op duplicate journals nothing (matching
+            // the opApply arm). VALUE-IN-OP: mint new_id + derive name HERE
+            // (the ONLY mint / derive) and journal both as literals.
+            guard doc.artboards.contains(where: { $0.id == target }) else { return nil }
             let existing = Set(doc.artboards.map(\.id))
             var newId = ""
             for _ in 0..<100 {
@@ -553,26 +564,11 @@ public enum LayersPanel {
                 if !existing.contains(c) { newId = c; break }
             }
             guard !newId.isEmpty else { return nil }
-            let dup = Artboard(
-                id: newId,
-                name: nextArtboardName(doc.artboards),
-                x: source.x + ox,
-                y: source.y + oy,
-                width: source.width,
-                height: source.height,
-                fill: source.fill,
-                showCenterMark: source.showCenterMark,
-                showCrossHairs: source.showCrossHairs,
-                showVideoSafeAreas: source.showVideoSafeAreas,
-                videoRulerPixelAspectRatio: source.videoRulerPixelAspectRatio
-            )
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards + [dup],
-                artboardOptions: doc.artboardOptions
-            ))
+            opApply(model, controller, [
+                "op": "duplicate_artboard", "id": target, "new_id": newId,
+                "name": nextArtboardName(doc.artboards),
+                "offset_x": ox, "offset_y": oy,
+            ])
             return nil
         }
 
@@ -594,41 +590,11 @@ public enum LayersPanel {
             } else {
                 return nil
             }
-            let doc = model.document
-            let newArtboards: [Artboard] = doc.artboards.map { ab in
-                guard ab.id == target else { return ab }
-                switch field {
-                case "name": if case .string(let s) = val { return ab.with(name: s) }
-                case "x": if case .number(let n) = val { return ab.with(x: n) }
-                case "y": if case .number(let n) = val { return ab.with(y: n) }
-                case "width": if case .number(let n) = val { return ab.with(width: n) }
-                case "height": if case .number(let n) = val { return ab.with(height: n) }
-                case "fill":
-                    if case .string(let s) = val {
-                        return ab.with(fill: ArtboardFill.fromCanonical(s))
-                    }
-                    if case .color(let s) = val {
-                        return ab.with(fill: ArtboardFill.fromCanonical(s))
-                    }
-                case "show_center_mark":
-                    if case .bool(let b) = val { return ab.with(showCenterMark: b) }
-                case "show_cross_hairs":
-                    if case .bool(let b) = val { return ab.with(showCrossHairs: b) }
-                case "show_video_safe_areas":
-                    if case .bool(let b) = val { return ab.with(showVideoSafeAreas: b) }
-                case "video_ruler_pixel_aspect_ratio":
-                    if case .number(let n) = val { return ab.with(videoRulerPixelAspectRatio: n) }
-                default: break
-                }
-                return ab
-            }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: newArtboards,
-                artboardOptions: doc.artboardOptions
-            ))
+            guard let literal = opLiteral(val) else { return nil }
+            opApply(model, controller, [
+                "op": "set_artboard_field", "id": target,
+                "field": field, "value": literal,
+            ])
             return nil
         }
 
@@ -643,322 +609,56 @@ public enum LayersPanel {
             } else {
                 return nil
             }
-            guard case .bool(let flag) = val else { return nil }
-            let doc = model.document
-            let newOpts: ArtboardOptions
-            switch field {
-            case "fade_region_outside_artboard":
-                newOpts = ArtboardOptions(
-                    fadeRegionOutsideArtboard: flag,
-                    updateWhileDragging: doc.artboardOptions.updateWhileDragging
-                )
-            case "update_while_dragging":
-                newOpts = ArtboardOptions(
-                    fadeRegionOutsideArtboard: doc.artboardOptions.fadeRegionOutsideArtboard,
-                    updateWhileDragging: flag
-                )
-            default: return nil
-            }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: newOpts,
-                documentSetup: doc.documentSetup,
-                printPreferences: doc.printPreferences
-            ))
+            guard let literal = opLiteral(val) else { return nil }
+            opApply(model, controller, [
+                "op": "set_artboard_options_field", "field": field, "value": literal,
+            ])
             return nil
         }
 
-        // doc.set_document_setup_field — PRINT.md §1A
-        let docSetDocumentSetupFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
+        // The eight print-config field setters (PRINT.md §1–§6) — OP_LOG.md §9
+        // Phase P1. Each evaluates its YAML `value` expr to a RESOLVED literal,
+        // builds a `{op, field, value[, index]}` op JSON, and routes through the
+        // SHARED `opApply` dispatcher (which calls `applyPrintConfigField`, the
+        // SAME field-match + type-coerce + setDocument body the per-field
+        // switches drove before P1). Routing through `opApply` JOURNALS the edit
+        // as a real op so it replays byte-identically (checkpoint_equivalence).
+        // `set_output_ink_field` also carries an `index`; a missing index on the
+        // ink verb skips (preserving the old early-return). A type mismatch /
+        // unknown field is a no-op inside `opApply` that journals nothing.
+        // Factory: one closure per print-config verb, all sharing this body.
+        func printConfigHandler(_ verb: String) -> PlatformEffect {
+            return { value, callCtx, _ in
+                guard let spec = value as? [String: Any],
+                      let field = spec["field"] as? String else { return nil }
+                let val: Value
+                if let s = spec["value"] as? String {
+                    val = evaluate(s, context: callCtx)
+                } else if let b = spec["value"] as? Bool {
+                    val = .bool(b)
+                } else if let n = spec["value"] as? NSNumber {
+                    val = .number(n.doubleValue)
+                } else {
+                    return nil
+                }
+                guard let literal = opLiteral(val) else { return nil }
+                var op: [String: Any] = ["op": verb, "field": field, "value": literal]
+                if verb == "set_output_ink_field" {
+                    guard let indexNum = spec["index"] as? NSNumber else { return nil }
+                    op["index"] = indexNum.intValue
+                }
+                opApply(model, controller, op)
                 return nil
             }
-            let doc = model.document
-            let s = doc.documentSetup
-            let newSetup: DocumentSetup
-            switch field {
-            case "bleed_top":
-                guard case .number(let n) = val else { return nil }
-                newSetup = _withDocSetup(s, bleedTop: n)
-            case "bleed_right":
-                guard case .number(let n) = val else { return nil }
-                newSetup = _withDocSetup(s, bleedRight: n)
-            case "bleed_bottom":
-                guard case .number(let n) = val else { return nil }
-                newSetup = _withDocSetup(s, bleedBottom: n)
-            case "bleed_left":
-                guard case .number(let n) = val else { return nil }
-                newSetup = _withDocSetup(s, bleedLeft: n)
-            case "bleed_uniform":
-                guard case .bool(let b) = val else { return nil }
-                newSetup = _withDocSetup(s, bleedUniform: b)
-            case "show_images_outline":
-                guard case .bool(let b) = val else { return nil }
-                newSetup = _withDocSetup(s, showImagesOutline: b)
-            case "highlight_substituted_glyphs":
-                guard case .bool(let b) = val else { return nil }
-                newSetup = _withDocSetup(s, highlightSubstitutedGlyphs: b)
-            // Phase 6 additions
-            case "grid_size":
-                guard case .number(let n) = val else { return nil }
-                newSetup = _withDocSetup(s, gridSize: n)
-            case "grid_color":
-                guard case .string(let str) = val else { return nil }
-                newSetup = _withDocSetup(s, gridColor: str)
-            case "paper_color":
-                guard case .string(let str) = val else { return nil }
-                newSetup = _withDocSetup(s, paperColor: str)
-            case "simulate_colored_paper":
-                guard case .bool(let b) = val else { return nil }
-                newSetup = _withDocSetup(s, simulateColoredPaper: b)
-            case "transparency_flattener_preset":
-                guard case .string(let str) = val,
-                      let p = FlattenerPreset(rawValue: str) else { return nil }
-                newSetup = _withDocSetup(s, transparencyFlattenerPreset: p)
-            case "discard_white_overprint":
-                guard case .bool(let b) = val else { return nil }
-                newSetup = _withDocSetup(s, discardWhiteOverprint: b)
-            default: return nil
-            }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: newSetup,
-                printPreferences: doc.printPreferences
-            ))
-            return nil
         }
-
-        // doc.set_print_preferences_field — PRINT.md §1B
-        let docSetPrintPreferencesFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            let np = applyPrintPrefField(p, field: field, val: val)
-            guard let updated = np else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same
-        // wiring shape as doc.set_print_preferences_field above; the
-        // applyMarksAndBleedField helper handles the typed dispatch
-        // and rebuilds PrintPreferences with a new marksAndBleed.
-        let docSetMarksAndBleedFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            let np = applyMarksAndBleedField(p, field: field, val: val)
-            guard let updated = np else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_output_field — PRINT.md §Phase 3. Same wiring shape
-        // as the marks-and-bleed handler above; applyOutputField
-        // handles the typed dispatch onto Output.
-        let docSetOutputFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            guard let updated = applyOutputField(p, field: field, val: val) else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_output_ink_field — PRINT.md §Phase 3. Adds an
-        // ``index`` parameter for which row of Output.inks to update.
-        let docSetOutputInkFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String,
-                  let indexNum = spec["index"] as? NSNumber else { return nil }
-            let index = indexNum.intValue
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            guard let updated = applyOutputInkField(p, index: index, field: field, val: val) else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_graphics_field — PRINT.md §Phase 4. Same wiring
-        // shape as the marks-and-bleed handler above; applyGraphicsField
-        // handles the typed dispatch onto Graphics.
-        let docSetGraphicsFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            guard let updated = applyGraphicsField(p, field: field, val: val) else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_color_management_field — PRINT.md §Phase 5. Same
-        // wiring shape as the graphics handler above.
-        let docSetColorManagementFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            guard let updated = applyColorManagementField(p, field: field, val: val) else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
-
-        // doc.set_advanced_field — PRINT.md §Phase 6.
-        let docSetAdvancedFieldHandler: PlatformEffect = { value, callCtx, _ in
-            guard let spec = value as? [String: Any],
-                  let field = spec["field"] as? String else { return nil }
-            let val: Value
-            if let s = spec["value"] as? String {
-                val = evaluate(s, context: callCtx)
-            } else if let b = spec["value"] as? Bool {
-                val = .bool(b)
-            } else if let n = spec["value"] as? NSNumber {
-                val = .number(n.doubleValue)
-            } else {
-                return nil
-            }
-            let doc = model.document
-            let p = doc.printPreferences
-            guard let updated = applyAdvancedField(p, field: field, val: val) else { return nil }
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: doc.artboards,
-                artboardOptions: doc.artboardOptions,
-                documentSetup: doc.documentSetup,
-                printPreferences: updated
-            ))
-            return nil
-        }
+        let docSetDocumentSetupFieldHandler = printConfigHandler("set_document_setup_field")
+        let docSetPrintPreferencesFieldHandler = printConfigHandler("set_print_preferences_field")
+        let docSetMarksAndBleedFieldHandler = printConfigHandler("set_marks_and_bleed_field")
+        let docSetOutputFieldHandler = printConfigHandler("set_output_field")
+        let docSetOutputInkFieldHandler = printConfigHandler("set_output_ink_field")
+        let docSetGraphicsFieldHandler = printConfigHandler("set_graphics_field")
+        let docSetColorManagementFieldHandler = printConfigHandler("set_color_management_field")
+        let docSetAdvancedFieldHandler = printConfigHandler("set_advanced_field")
 
         // geometry.export_pdf — PRINT.md §1B. Generates a PDF from the
         // current document and presents an NSSavePanel for the user to
@@ -983,50 +683,27 @@ public enum LayersPanel {
             return nil
         }
 
-        func reorderArtboards(up: Bool, idsExpr: String, callCtx: [String: Any]) {
+        // doc.move_artboards_up / _down — OP_LOG.md §9 Phase P2. Resolve the ids
+        // list expr to literal strings, build a `{op, ids}` op, and route
+        // through the SHARED `opApply` dispatcher (`apply_move_artboards_up/down`,
+        // the SAME swap-with-neighbor-skipping-selected body the inline reorder
+        // ran). A boundary no-op (top/bottom artboard) journals nothing.
+        func moveArtboards(verb: String, idsExpr: String, callCtx: [String: Any]) {
             let val = evaluate(idsExpr, context: callCtx)
             guard case .list(let items) = val else { return }
             let ids = items.compactMap { $0.value as? String }
-            let selected = Set(ids)
-            var abs = model.document.artboards
-            var changed = false
-            if up {
-                for i in 0..<abs.count {
-                    if !selected.contains(abs[i].id) { continue }
-                    if i == 0 { continue }
-                    if selected.contains(abs[i - 1].id) { continue }
-                    abs.swapAt(i - 1, i)
-                    changed = true
-                }
-            } else {
-                for i in stride(from: abs.count - 1, through: 0, by: -1) {
-                    if !selected.contains(abs[i].id) { continue }
-                    if i + 1 >= abs.count { continue }
-                    if selected.contains(abs[i + 1].id) { continue }
-                    abs.swapAt(i, i + 1)
-                    changed = true
-                }
-            }
-            guard changed else { return }
-            let doc = model.document
-            model.editDocument(Document(
-                layers: doc.layers,
-                selectedLayer: doc.selectedLayer,
-                selection: doc.selection,
-                artboards: abs,
-                artboardOptions: doc.artboardOptions
-            ))
+            opApply(model, controller, ["op": verb, "ids": ids])
         }
 
         let docMoveArtboardsUpHandler: PlatformEffect = { value, callCtx, _ in
             guard let idsExpr = value as? String else { return nil }
-            reorderArtboards(up: true, idsExpr: idsExpr, callCtx: callCtx)
+            moveArtboards(verb: "move_artboards_up", idsExpr: idsExpr, callCtx: callCtx)
             return nil
         }
 
         let docMoveArtboardsDownHandler: PlatformEffect = { value, callCtx, _ in
             guard let idsExpr = value as? String else { return nil }
-            reorderArtboards(up: false, idsExpr: idsExpr, callCtx: callCtx)
+            moveArtboards(verb: "move_artboards_down", idsExpr: idsExpr, callCtx: callCtx)
             return nil
         }
 
@@ -1056,6 +733,8 @@ public enum LayersPanel {
             "doc.set_advanced_field": docSetAdvancedFieldHandler,
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
+            "doc.delete_selection": docDeleteSelectionHandler,
+            "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "geometry.export_pdf": geometryExportPdfHandler,
             "list_push": listPushHandler,
             "pop": popHandler,
@@ -1072,19 +751,38 @@ public enum LayersPanel {
         // state here and the DockPanelView bridge reads the
         // transition to show the overlay. ``dialogs`` must be
         // supplied for open_dialog to locate the dialog definition.
-        let dialogs = ws.data["dialogs"] as? [String: Any]
-        // OP_LOG.md §9 (Increment 3b-B): name this panel-action dispatch site so
-        // any transaction it opens is stamped with the actions.yaml verb (the
-        // name-for-all-actions part of 3b-B). The Layers-panel mutators use the
-        // snapshot path (`snapshot` handler) and journal nothing in v1, so
-        // `nameTxn`/`commitTxn` are inert here today — but the site is correctly
-        // wired for when these AppState-level handlers consolidate onto opApply.
+        //
+        // OP_LOG.md §9: name this panel-action dispatch site so the owning
+        // transaction is stamped with the actions.yaml verb (`nameTxn`). The
+        // verb33 doc.* handlers above route through `opApply` (which calls
+        // `recordOp`), so the named transaction now journals a real op per
+        // panel/menu gesture — matching Rust's `run_yaml_effects_named`.
         runEffects(effects, ctx: ctx, store: model.stateStore,
                    actions: actions,
                    dialogs: dialogs,
                    platformEffects: platformEffects,
                    model: model, actionName: actionName)
     }
+
+    #if DEBUG
+    /// TEST SEAM (OP_LOG.md §9 production-route proofs). Run an arbitrary
+    /// `effects` list through the SAME LayersPanel platform-effect registry +
+    /// `nameTxn` path the production ``dispatchYamlAction`` uses, so a
+    /// production-route test drives the REAL handlers (not a hand-rolled copy).
+    /// `ctx` defaults to empty; pass `params` for actions that read `param.*`.
+    static func runEffectsForTest(
+        actionName: String, effects: [Any], model: Model,
+        params: [String: Any] = [:]
+    ) {
+        let ws = WorkspaceData.load()
+        let ctx: [String: Any] = ["param": params]
+        runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
+                              model: model,
+                              actions: ws?.data["actions"] as? [String: Any],
+                              dialogs: ws?.data["dialogs"] as? [String: Any],
+                              onCloseDialog: nil)
+    }
+    #endif
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
         false

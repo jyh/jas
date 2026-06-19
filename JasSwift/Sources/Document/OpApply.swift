@@ -497,7 +497,19 @@ func applyDuplicateArtboard(
 /// converts the serde shape to the canonical test_json flat shape `parseElement`
 /// already consumes, then delegates. Only the variants the fixtures carry (Rect,
 /// Layer) are mapped; an unknown tag returns nil.
+///
+/// VALUE-IN-OP — production fast path (OP_LOG.md §9): the cross-language fixtures
+/// carry `element` as a serde-externally-tagged `[String: Any]` dict (the
+/// portable, disk-shareable form Rust emits via `serde_json::to_value`); the
+/// SWIFT production handlers (`doc.insert_after` / `doc.insert_at`) already hold
+/// an in-memory `Element` (Swift lacks a serde ENCODER, only the decoder below),
+/// so they pass that `Element` VERBATIM under the SAME `element` key. This fast
+/// path returns it directly — additive and fixture-neutral (a fixture never
+/// stores a Swift `Element` value), so the byte-gated dispatch arms are
+/// unchanged. The in-process journal replays the same `[String: Any]` op dict
+/// (which holds the `Element`), so checkpoint_equivalence holds in-process.
 func parseSerdeElement(_ op: [String: Any]) -> Element? {
+    if let e = op["element"] as? Element { return e }
     guard let el = op["element"] as? [String: Any] else { return nil }
     guard let dict = serdeElementToTestJson(el) else { return nil }
     return parseElement(dict)

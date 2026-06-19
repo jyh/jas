@@ -790,8 +790,15 @@ public struct JasCommands: Commands {
         if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
             return
         }
-        // Undoable: editDocument self-brackets one undo step.
-        model.editDocument(doc.deleteSelection())
+        // OP_LOG.md §9 Phase P4 — route the menu Delete through the SHARED
+        // `opApply` dispatcher (`apply_delete_selection`, the SAME
+        // Document.deleteSelection body) so the gesture JOURNALS a real
+        // `delete_selection` op (one named undo step). The synchronous orphan
+        // NSAlert above IS Swift's confirm path; only the mutation routes here.
+        model.withTxn {
+            model.nameTxn("delete_orphan_confirm_ok")
+            opApply(model, Controller(model: model), ["op": "delete_selection"])
+        }
     }
 
     /// Present the synchronous warn-then-orphan confirm (mirrors `revert()`'s
@@ -849,8 +856,14 @@ public struct JasCommands: Commands {
             return
         }
         copySelection()  // clipboard only — no document write
-        // Undoable delete-half of the cut: editDocument self-brackets one step.
-        model.editDocument(model.document.deleteSelection())
+        // OP_LOG.md §9 Phase P4 — route the delete-half of the cut through the
+        // SHARED `opApply` dispatcher so it JOURNALS a real `delete_selection`
+        // op (one named undo step). The clipboard copy is a non-document side
+        // effect (no op). Mirrors Rust's cut_orphan_confirm_ok.
+        model.withTxn {
+            model.nameTxn("cut_orphan_confirm_ok")
+            opApply(model, Controller(model: model), ["op": "delete_selection"])
+        }
     }
 
     private func copySelection() {
