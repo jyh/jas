@@ -1667,6 +1667,43 @@ def _parse_jas_print_blocks(root: ET.Element):
     return setup, prefs
 
 
+def _parse_artboards(root: ET.Element):
+    """Parse ``<inkscape:page>`` children of any top-level
+    ``<sodipodi:namedview>`` into Artboards. Per the writer side,
+    x/y/width/height are stored in px and converted back to internal pt units
+    here. ``inkscape:label`` carries the user-visible name, falling back to the
+    id when absent. Phase-1 jas-specific fields are not round-tripped through
+    SVG (defaulted). Returns ``()`` when no namedview / pages are present.
+    Mirrors the Rust ``parse_artboards`` (the cross-language SVG read contract).
+    """
+    from document.artboard import Artboard
+    out = []
+    for child in root:
+        if _strip_ns(child.tag) != "namedview":
+            continue
+        for page in child:
+            if _strip_ns(page.tag) != "page":
+                continue
+            label = (page.get(f"{{{_INKSCAPE_NS}}}label")
+                     or page.get("inkscape:label") or "")
+            page_id = page.get("id") or ""
+            name = page_id if not label else label
+            out.append(Artboard(
+                id=page_id,
+                name=name,
+                x=_pt(_parse_float_attr(page, "x", 0.0)),
+                y=_pt(_parse_float_attr(page, "y", 0.0)),
+                width=_pt(_parse_float_attr(page, "width", 0.0)),
+                height=_pt(_parse_float_attr(page, "height", 0.0)),
+                fill="transparent",
+                show_center_mark=False,
+                show_cross_hairs=False,
+                show_video_safe_areas=False,
+                video_ruler_pixel_aspect_ratio=1.0,
+            ))
+    return tuple(out)
+
+
 def svg_to_document(svg: str) -> Document:
     """Parse an SVG string and return a Document.
 
@@ -1679,6 +1716,7 @@ def svg_to_document(svg: str) -> Document:
         logging.warning("Failed to parse SVG: %s", e)
         return Document(layers=(Layer(children=()),))
     parsed_setup, parsed_prefs = _parse_jas_print_blocks(root)
+    parsed_artboards = _parse_artboards(root)
     layers: list[Layer] = []
     # Symbols (master store, SYMBOLS.md §5 / Fork S3): <defs> children parse
     # into doc.symbols (NOT into layers), so masters are never painted in
@@ -1722,5 +1760,6 @@ def svg_to_document(svg: str) -> Document:
     return dedupe_element_ids(normalize_document(Document(
         layers=tuple(layers),
         symbols=tuple(symbols),
+        artboards=parsed_artboards,
         document_setup=parsed_setup,
         print_preferences=parsed_prefs)))

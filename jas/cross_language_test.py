@@ -428,6 +428,198 @@ class CrossLanguageTest(absltest.TestCase):
         self._run_operation_fixture("boolean_ops.json")
 
     # ---------------------------------------------------------------
+    # The 33-verb actions.yaml<->op_apply unification (OP_LOG.md §9
+    # Phases P1-P7). Each shared fixture replays through the production
+    # op_apply dispatcher and byte-matches the Rust golden via
+    # document_to_test_json — the prime-directive cross-language pin.
+    # ---------------------------------------------------------------
+
+    def test_operation_print_config_setters(self):
+        # P1: the eight print-config field setters (set_*_field) journal
+        # RESOLVED literals through apply_print_config_field.
+        self._run_operation_fixture("print_config_setters.json")
+
+    def test_operation_artboard_set_field_batch(self):
+        # P2: set_artboard_field / set_artboard_options_field (one op per
+        # field call; type-mismatch skips journal nothing).
+        self._run_operation_fixture("artboard_set_field_batch.json")
+
+    def test_operation_artboard_reorder(self):
+        # P2: move_artboards_up / move_artboards_down (swap-skipping-selected).
+        self._run_operation_fixture("artboard_reorder.json")
+
+    def test_operation_artboard_delete(self):
+        # P2: delete_artboard_by_id (missing id is a journal-nothing no-op).
+        self._run_operation_fixture("artboard_delete.json")
+
+    def test_operation_artboard_create(self):
+        # P3: create_artboard — VALUE-IN-OP id read verbatim, never minted.
+        self._run_operation_fixture("artboard_create.json")
+
+    def test_operation_artboard_duplicate(self):
+        # P3: duplicate_artboard — VALUE-IN-OP new_id + resolved name literal.
+        self._run_operation_fixture("artboard_duplicate.json")
+
+    def test_operation_structural_delete_at(self):
+        # P4: delete_at (path-keyed tree delete; absent path no-ops).
+        self._run_operation_fixture("structural_delete_at.json")
+
+    def test_operation_structural_delete_selection(self):
+        # P4: delete_selection (reference-aware; empty selection no-ops).
+        self._run_operation_fixture("structural_delete_selection.json")
+
+    def test_operation_structural_insert_after(self):
+        # P4: insert_after — carries the WHOLE element as value-in-op JSON.
+        self._run_operation_fixture("structural_insert_after.json")
+
+    def test_operation_structural_insert_at(self):
+        # P4: insert_at — value-in-op element; empty parent_path => top-level.
+        self._run_operation_fixture("structural_insert_at.json")
+
+    def test_operation_wrap_in_group(self):
+        # P5: wrap_in_group (multi-step replays as one op; optional id).
+        self._run_operation_fixture("wrap_in_group.json")
+
+    def test_operation_wrap_in_layer(self):
+        # P5: wrap_in_layer — carries the RESOLVED name literal; optional id.
+        self._run_operation_fixture("wrap_in_layer.json")
+
+    def test_operation_unpack_group_at(self):
+        # P5: unpack_group_at (non-Group / absent path no-ops).
+        self._run_operation_fixture("unpack_group_at.json")
+
+    def test_operation_set_attr_on_selection(self):
+        # P6: set_attr_on_selection — stroke_brush / stroke_brush_overrides;
+        # empty value clears, unknown attr skips.
+        self._run_operation_fixture("set_attr_on_selection.json")
+
+    def test_operation_transform_scale(self):
+        # P7: scale_transform (resolved matrix; identity no-ops; strokes/corners).
+        self._run_operation_fixture("transform_scale.json")
+
+    def test_operation_transform_rotate(self):
+        # P7: rotate_transform (resolved matrix; zero-angle no-ops).
+        self._run_operation_fixture("transform_rotate.json")
+
+    def test_operation_transform_shear(self):
+        # P7: shear_transform (resolved matrix; zero-angle no-ops).
+        self._run_operation_fixture("transform_shear.json")
+
+    def test_operation_transform_copy(self):
+        # P7: copy=true journals [copy_selection, <transform>] in one txn.
+        self._run_operation_fixture("transform_copy.json")
+
+    # ---------------------------------------------------------------
+    # P7 — transform CONFIRM PRODUCTION ROUTE (OP_LOG.md §9 / §8).
+    # Drives the REAL scale/rotate/shear_options_confirm actions from the
+    # compiled bundle (journal:true) through run_effects and asserts exactly
+    # the right op(s) are journaled with RESOLVED params, the live doc is
+    # transformed, and checkpoint_equivalence holds. Mirrors the Swift
+    # productionTransformConfirmJournalsOneOp / ...CopyJournalsTwoOps.
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _transform_production_model():
+        # rect_with_id selection established (the production transform setup).
+        svg = _read_fixture("svg/rect_with_id.svg")
+        model = Model(document=svg_to_document(svg))
+        model.begin_txn()
+        op_apply(model, {"op": "select_rect", "x": 0.0, "y": 0.0,
+                         "width": 96.0, "height": 96.0, "extend": False})
+        model.commit_txn()
+        return model
+
+    @staticmethod
+    def _run_transform_action(model, action, params):
+        import os as _os
+        from workspace_interpreter.loader import load_workspace
+        from tools import yaml_tool_effects
+        repo_root = _os.path.abspath(
+            _os.path.join(_os.path.dirname(__file__), ".."))
+        bundle = load_workspace(_os.path.join(repo_root, "workspace", "workspace.json"))
+        action_def = bundle["actions"][action]
+        effects = action_def["effects"]
+        ctrl = Controller(model=model)
+        pe = yaml_tool_effects.build(ctrl)
+        store = StateStore()
+        run_effects(effects, {"param": params}, store,
+                    actions=bundle["actions"], platform_effects=pe,
+                    model=model, action_name=action)
+
+    def _assert_confirm_replay_equivalent(self, model):
+        live = document_to_test_json(model.document)
+        replay = Model(document=svg_to_document(_read_fixture("svg/rect_with_id.svg")))
+        for txn in model.journal:
+            for o in txn.ops:
+                op_apply(replay, o.params)
+        self.assertEqual(document_to_test_json(replay.document), live,
+            "checkpoint_equivalence: production confirm replay != live document")
+
+    def test_production_transform_confirm_journals_one_op(self):
+        # (scale) uniform 200%, copy=false. 96x96 px -> 72x72 pt => center 36.
+        model = self._transform_production_model()
+        self._run_transform_action(model, "scale_options_confirm", {
+            "uniform": True, "uniform_pct": 200.0,
+            "horizontal_pct": 100.0, "vertical_pct": 100.0,
+            "scale_strokes": True, "scale_corners": False,
+            "preview": False, "copy": False,
+        })
+        txn = model.journal[-1]
+        self.assertEqual([o.op for o in txn.ops], ["scale_transform"])
+        p = txn.ops[0].params
+        self.assertEqual(p["sx"], 2.0)
+        self.assertEqual(p["sy"], 2.0)
+        self.assertEqual(p["rx"], 36.0)
+        self.assertEqual(p["ry"], 36.0)
+        self.assertEqual(p["scale_strokes"], True)
+        self.assertEqual(p["scale_corners"], False)
+        self.assertEqual(txn.ops[0].targets, ["rect-1"])
+        self.assertIsNotNone(model.document.get_element((0, 0)).transform)
+        self._assert_confirm_replay_equivalent(model)
+
+        # (rotate) 30 deg around the bounds center.
+        model = self._transform_production_model()
+        self._run_transform_action(model, "rotate_options_confirm",
+            {"angle": 30.0, "preview": False, "copy": False})
+        txn = model.journal[-1]
+        self.assertEqual([o.op for o in txn.ops], ["rotate_transform"])
+        p = txn.ops[0].params
+        self.assertEqual(p["angle"], 30.0)
+        self.assertEqual(p["rx"], 36.0)
+        self.assertEqual(p["ry"], 36.0)
+        self.assertEqual(txn.ops[0].targets, ["rect-1"])
+        self._assert_confirm_replay_equivalent(model)
+
+        # (shear) 20 deg horizontal around the bounds center.
+        model = self._transform_production_model()
+        self._run_transform_action(model, "shear_options_confirm",
+            {"angle": 20.0, "axis": "horizontal", "axis_angle": 0.0,
+             "preview": False, "copy": False})
+        txn = model.journal[-1]
+        self.assertEqual([o.op for o in txn.ops], ["shear_transform"])
+        p = txn.ops[0].params
+        self.assertEqual(p["angle"], 20.0)
+        self.assertEqual(p["axis"], "horizontal")
+        self.assertEqual(p["rx"], 36.0)
+        self.assertEqual(p["ry"], 36.0)
+        self.assertEqual(txn.ops[0].targets, ["rect-1"])
+        self._assert_confirm_replay_equivalent(model)
+
+    def test_production_transform_copy_journals_two_ops(self):
+        # copy=true journals [copy_selection, scale_transform] in one txn.
+        model = self._transform_production_model()
+        self._run_transform_action(model, "scale_options_confirm", {
+            "uniform": True, "uniform_pct": 200.0,
+            "horizontal_pct": 100.0, "vertical_pct": 100.0,
+            "scale_strokes": True, "scale_corners": False,
+            "preview": False, "copy": True,
+        })
+        txn = model.journal[-1]
+        self.assertEqual([o.op for o in txn.ops],
+                         ["copy_selection", "scale_transform"])
+        self._assert_confirm_replay_equivalent(model)
+
+    # ---------------------------------------------------------------
     # Production op-capture cross-language fixture (OP_LOG.md §9,
     # Increment 3b-B). Drives the REAL effect runner
     # (workspace_interpreter.effects.run_effects with the jas

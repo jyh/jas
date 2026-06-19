@@ -561,9 +561,9 @@ def _artboard_json(ab):
     o.num("width", ab.width)
     o.num("height", ab.height)
     o.str("fill", ab.fill)
-    o.bool("show_center_mark", ab.show_center_mark)
-    o.bool("show_cross_hairs", ab.show_cross_hairs)
-    o.bool("show_video_safe_areas", ab.show_video_safe_areas)
+    o.bool_("show_center_mark", ab.show_center_mark)
+    o.bool_("show_cross_hairs", ab.show_cross_hairs)
+    o.bool_("show_video_safe_areas", ab.show_video_safe_areas)
     o.num("video_ruler_pixel_aspect_ratio", ab.video_ruler_pixel_aspect_ratio)
     return o.build()
 
@@ -574,8 +574,8 @@ def _artboards_json(artboards):
 
 def _artboard_options_json(opts):
     o = _JsonObj()
-    o.bool("fade_region_outside_artboard", opts.fade_region_outside_artboard)
-    o.bool("update_while_dragging", opts.update_while_dragging)
+    o.bool_("fade_region_outside_artboard", opts.fade_region_outside_artboard)
+    o.bool_("update_while_dragging", opts.update_while_dragging)
     return o.build()
 
 
