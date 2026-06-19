@@ -102,6 +102,13 @@ val replace_element : document -> element_path -> Element.element -> document
 val effective_visibility : document -> element_path -> Element.visibility
 
 val insert_element_after : document -> element_path -> Element.element -> document
+
+(** Insert [new_elem] AT the slot named by [path]: the final index is the
+    insertion position (shifting later siblings right) under the parent named
+    by the preceding indices. An empty [path] returns the document unchanged;
+    a top-level [\[i\]] inserts at index [i] of [layers]. Mirrors the Rust
+    [Document::insert_element_at]. *)
+val insert_element_at : document -> element_path -> Element.element -> document
 val delete_element : document -> element_path -> document
 val delete_selection : document -> document
 val children_of : Element.element -> Element.element array

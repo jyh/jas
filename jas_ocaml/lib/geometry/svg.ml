@@ -1660,8 +1660,71 @@ let parse_jas_print_blocks svg =
   with _ -> ());
   (!setup, !prefs)
 
+(* Parse <inkscape:page> children of any top-level <sodipodi:namedview>
+   block into [Artboard.artboard] records. The document_to_svg side stores
+   x/y/width/height in px; this converts them back to internal pt units (the
+   [pt] helper, x0.75). [inkscape:label] (local name "label" after xmlm strips
+   the namespace) carries the user-visible name, falling back to the id when
+   absent. Returns [] when no namedview / pages are present — callers repair
+   the at-least-one-artboard invariant separately. The Phase-1 jas-specific
+   toggles are not round-tripped through SVG, so they default. Mirrors the Rust
+   [parse_artboards] and the Swift [parseArtboards] (the cross-language
+   read-side parity fix: two_artboards.svg must import its three pages). *)
+let parse_artboards_from_svg svg : Artboard.artboard list =
+  let out = ref [] in
+  (try
+    let i = Xmlm.make_input (`String (0, svg)) in
+    (match Xmlm.peek i with `Dtd _ -> let _ = Xmlm.input i in () | _ -> ());
+    (match Xmlm.input i with `El_start _ -> () | _ -> failwith "expected svg");
+    let rec walk_root () =
+      match Xmlm.peek i with
+      | `El_end -> ()
+      | `Data _ -> let _ = Xmlm.input i in walk_root ()
+      | `Dtd _ -> let _ = Xmlm.input i in walk_root ()
+      | `El_start ((_, tag), _) when tag = "namedview" ->
+        let _ = Xmlm.input i in
+        walk_namedview ();
+        walk_root ()
+      | `El_start _ ->
+        let _ = Xmlm.input i in
+        skip_element i;
+        walk_root ()
+    and walk_namedview () =
+      match Xmlm.peek i with
+      | `El_end -> let _ = Xmlm.input i in ()
+      | `Data _ -> let _ = Xmlm.input i in walk_namedview ()
+      | `El_start ((_, tag), xmlm_attrs) ->
+        let _ = Xmlm.input i in
+        let attrs = attrs_of_xmlm_attrs xmlm_attrs in
+        (if tag = "page" then begin
+           let label = match get_attr attrs "label" with
+             | Some s -> s | None -> "" in
+           let id = match get_attr attrs "id" with Some s -> s | None -> "" in
+           let name = if label = "" then id else label in
+           out := {
+             Artboard.id; name;
+             x = pt (get_attr_f attrs "x" 0.0);
+             y = pt (get_attr_f attrs "y" 0.0);
+             width = pt (get_attr_f attrs "width" 0.0);
+             height = pt (get_attr_f attrs "height" 0.0);
+             fill = Artboard.Transparent;
+             show_center_mark = false;
+             show_cross_hairs = false;
+             show_video_safe_areas = false;
+             video_ruler_pixel_aspect_ratio = 1.0;
+           } :: !out
+         end);
+        skip_element i;
+        walk_namedview ()
+      | `Dtd _ -> let _ = Xmlm.input i in walk_namedview ()
+    in
+    walk_root ()
+  with _ -> ());
+  List.rev !out
+
 let svg_to_document svg =
   let (parsed_setup, parsed_prefs) = parse_jas_print_blocks svg in
+  let parsed_artboards = parse_artboards_from_svg svg in
   try
     let i = Xmlm.make_input (`String (0, svg)) in
     (* skip dtd *)
@@ -1684,6 +1747,7 @@ let svg_to_document svg =
       (Normalize.normalize_document
          (Document.make_document
             ~symbols
+            ~artboards:parsed_artboards
             ~document_setup:parsed_setup
             ~print_preferences:parsed_prefs
             (Array.of_list layers)))

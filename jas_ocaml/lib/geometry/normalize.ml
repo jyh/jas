@@ -6,13 +6,16 @@
     color alpha channels. *)
 
 let rec normalize_document (doc : Document.document) =
-  Document.make_document
-    (* Masters get the same opacity normalization as layer content
-       (SYMBOLS.md section 5). *)
-    ~symbols:(Array.map normalize_element doc.Document.symbols)
-    ~document_setup:doc.Document.document_setup
-    ~print_preferences:doc.Document.print_preferences
-    (Array.map normalize_element doc.Document.layers)
+  (* Only the element arrays get opacity normalization; every OTHER document
+     field is preserved via the functional update. The previous form rebuilt
+     through make_document and silently DROPPED artboards / artboard_options /
+     selection / selected_layer (the SVG-parsed <inkscape:page> artboards were
+     lost on every open — the cross-language read-side divergence the artboard
+     op_apply fixtures exposed). Masters get the same opacity normalization as
+     layer content (SYMBOLS.md section 5). *)
+  { doc with
+    Document.layers = Array.map normalize_element doc.Document.layers;
+    Document.symbols = Array.map normalize_element doc.Document.symbols }
 
 and normalize_fill (f : Element.fill) =
   let alpha = Element.color_alpha f.fill_color in

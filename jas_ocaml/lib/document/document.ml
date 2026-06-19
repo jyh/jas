@@ -264,6 +264,43 @@ let insert_element_after doc path new_elem =
     let new_layer = insert_after_in_group layer rest new_elem in
     { doc with layers = array_replace_nth doc.layers i new_layer }
 
+(** Return a new array with x inserted AT position n (shifting n.. right).
+    n is clamped to [0, len]. *)
+let array_insert_at arr n x =
+  let len = Array.length arr in
+  let n = max 0 (min n len) in
+  Array.init (len + 1) (fun i ->
+    if i < n then arr.(i)
+    else if i = n then x
+    else arr.(i - 1))
+
+(** Recursively insert new_elem AT the slot indicated by rest (the final
+    index inserts/shifts under the parent named by the preceding indices). *)
+let rec insert_at_in_group node rest new_elem =
+  match rest with
+  (* Precondition: rest must be non-empty. Guaranteed by insert_element_at. *)
+  | [] -> failwith "rest must be non-empty"
+  | [i] ->
+    with_children node (array_insert_at (children_of node) i new_elem)
+  | i :: rest ->
+    let cs = children_of node in
+    let new_child = insert_at_in_group cs.(i) rest new_elem in
+    with_children node (array_replace_nth cs i new_child)
+
+(** Return a new document with [new_elem] inserted AT the slot [path]: the
+    final index is the insertion position under the parent named by the
+    preceding indices (an empty path returns the document unchanged). Mirrors
+    the Rust [Document::insert_element_at]. *)
+let insert_element_at doc path new_elem =
+  match path with
+  | [] -> doc
+  | [i] ->
+    { doc with layers = array_insert_at doc.layers i new_elem }
+  | i :: rest ->
+    let layer = doc.layers.(i) in
+    let new_layer = insert_at_in_group layer rest new_elem in
+    { doc with layers = array_replace_nth doc.layers i new_layer }
+
 (** Return a new document with the element at [path] replaced by [new_elem]. *)
 let replace_element doc path new_elem =
   match path with
