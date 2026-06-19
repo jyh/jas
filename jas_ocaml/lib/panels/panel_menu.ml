@@ -1110,7 +1110,10 @@ let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model
    | None -> ());
   match cmd with
   | "close_panel" ->
-    close_panel layout addr;
+    (* OP_LOG 3d-2: route the per-panel hamburger-menu close through the
+       shared runtime layout dispatcher ([close_panel] bumps internally,
+       preserving the dirty signal). *)
+    Layout_apply.layout_apply layout (Layout_apply.op_close_panel addr);
     (* Reset color-panel mode to the YAML default (HSB) on close
        per CLR-028 — the spec says the mode is panel-local and
        should re-derive from the active color on reopen. Otherwise

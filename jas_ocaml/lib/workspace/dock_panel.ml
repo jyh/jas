@@ -143,7 +143,11 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
             apply_dark_css btn (Printf.sprintf "* { color: %s; background-color: #505050; }" !theme_text_dim);
             btn#connect#clicked ~callback:(fun () ->
               toggle_dock_collapsed layout dock.id;
-              set_active_panel layout { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
+              (* OP_LOG 3d-2: route through the shared runtime layout dispatcher.
+                 [set_active_panel] bumps internally, preserving the dirty signal. *)
+              Layout_apply.layout_apply layout
+                (Layout_apply.op_set_active_panel
+                   { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi });
               rebuild ()
             ) |> ignore
           ) group.panels
@@ -196,7 +200,10 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
             btn#connect#clicked ~callback:(fun () ->
               (match !drag_ref with
                | No_drag ->
-                 set_active_panel layout { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
+                 (* OP_LOG 3d-2: route through the shared runtime dispatcher. *)
+                 Layout_apply.layout_apply layout
+                   (Layout_apply.op_set_active_panel
+                      { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi });
                  rebuild ()
                | _ -> ())
             ) |> ignore;
@@ -303,7 +310,10 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
           let chevron = GButton.button ~label:chevron_label ~packing:(tab_bar#pack ~from:`END ~expand:false) () in
           apply_dark_css chevron (Printf.sprintf "button { color: %s; background: %s; font-size: 18px; border: none; border-radius: 0; box-shadow: none; min-height: 0; min-width: 0; padding: 0 4px; }" !theme_text_button !theme_bg_dark);
           chevron#connect#clicked ~callback:(fun () ->
-            toggle_group_collapsed layout { dock_id = dock.id; group_idx = gi };
+            (* OP_LOG 3d-2: route through the shared runtime dispatcher
+               ([toggle_group_collapsed] bumps internally). *)
+            Layout_apply.layout_apply layout
+              (Layout_apply.op_toggle_group_collapsed { dock_id = dock.id; group_idx = gi });
             rebuild ()
           ) |> ignore;
 
@@ -354,6 +364,10 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
             let target_group = { dock_id = dock.id; group_idx = gi } in
             (match !drag_ref with
              | Dragging_group from ->
+               (* DEFERRED (OP_LOG 3d-2): the dock GROUP-MOVE verbs
+                  [move_group_within_dock]/[move_group_to_dock] are NOT in the
+                  15-verb [Layout_apply] vocabulary, so they stay direct
+                  (mirrors the Rust deferral). *)
                if from.dock_id = dock.id then
                  move_group_within_dock layout dock.id ~from:from.group_idx ~to_:gi
                else
@@ -361,10 +375,15 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                drag_ref := No_drag;
                rebuild ()
              | Dragging_panel from ->
+               (* OP_LOG 3d-2: route through the shared runtime dispatcher
+                  (both verbs bump internally). *)
                if from.group = target_group then
-                 reorder_panel layout ~group:target_group ~from:from.panel_idx ~to_:(Array.length group.panels)
+                 Layout_apply.layout_apply layout
+                   (Layout_apply.op_reorder_panel target_group
+                      ~from:from.panel_idx ~to_:(Array.length group.panels))
                else
-                 move_panel_to_group layout ~from ~to_:target_group;
+                 Layout_apply.layout_apply layout
+                   (Layout_apply.op_move_panel_to_group ~from ~to_:target_group);
                drag_ref := No_drag;
                rebuild ()
              | No_drag -> ());
@@ -505,7 +524,9 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
       title_bar#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev = 1 &&
            GdkEvent.get_type (ev :> GdkEvent.any) = `TWO_BUTTON_PRESS then begin
-          Workspace_layout.redock layout fid;
+          (* OP_LOG 3d-2: route through the shared runtime dispatcher
+             ([redock] bumps internally). *)
+          Layout_apply.layout_apply layout (Layout_apply.op_redock fid);
           rebuild ();
           rebuild_floating ();
           true
@@ -535,7 +556,10 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
           btn#connect#clicked ~callback:(fun () ->
             (match !drag_ref with
              | No_drag ->
-               Workspace_layout.set_active_panel layout { group = { dock_id = fid; group_idx = gi }; panel_idx = pi };
+               (* OP_LOG 3d-2: route through the shared runtime dispatcher. *)
+               Layout_apply.layout_apply layout
+                 (Layout_apply.op_set_active_panel
+                    { group = { dock_id = fid; group_idx = gi }; panel_idx = pi });
                rebuild_floating ()
              | _ -> ())
           ) |> ignore;

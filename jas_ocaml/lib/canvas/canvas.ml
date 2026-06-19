@@ -50,6 +50,9 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
           Workspace_layout.toggle_dock_collapsed workspace_layout d.id;
           let collapsed = (match Workspace_layout.anchored_dock workspace_layout Workspace_layout.Right with
             | Some d -> d.collapsed | None -> false) in
+          (* DEFERRED (OP_LOG 3d-2): this is a COMPOUND collapse-then-tile that
+             also mutates [p.config.fixed_width] (not a dispatcher verb) before
+             tiling with the collapsed-dock override, so it stays direct. *)
           Workspace_layout.panes_mut workspace_layout (fun pl ->
             let dock_pane = Pane.pane_by_kind pl Pane.Dock in
             let override = match dock_pane, collapsed with
@@ -72,7 +75,10 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
     spacer#misc#set_size_request ~width:0 ();
     (* Close button *)
     make_clickable_label "\xC3\x97" ~packing:(hbox#pack ~expand:false) ~callback:(fun () ->
-      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.hide_pane pl kind);
+      (* OP_LOG 3d-2: route through the shared runtime dispatcher; [panes_mut]
+         preserves the dirty signal. *)
+      Workspace_layout.panes_mut workspace_layout (fun _pl ->
+        Layout_apply.layout_apply workspace_layout (Layout_apply.op_hide_pane kind));
       refresh_all ())
   end;
 
@@ -80,7 +86,10 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
   title_bar#event#add [`BUTTON_PRESS];
   ignore (title_bar#event#connect#button_press ~callback:(fun ev ->
     if GdkEvent.get_type ev = `TWO_BUTTON_PRESS && config.double_click_action = Pane.Maximize then begin
-      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.toggle_canvas_maximized pl);
+      (* OP_LOG 3d-2: route through the shared runtime dispatcher; [panes_mut]
+         preserves the dirty signal. *)
+      Workspace_layout.panes_mut workspace_layout (fun _pl ->
+        Layout_apply.layout_apply workspace_layout (Layout_apply.op_toggle_canvas_maximized ()));
       refresh_all ();
       true
     end else begin
@@ -94,7 +103,11 @@ let make_title_bar ~workspace_layout ~refresh_all ~pane_id ~kind ~(config : Pane
         | None -> (0.0, 0.0)
       in
       drag := Pane_drag { pane_id; off_x = x -. px; off_y = y -. py };
-      Workspace_layout.panes_mut workspace_layout (fun pl -> Pane.bring_pane_to_front pl pane_id);
+      (* OP_LOG 3d-2: route through the shared runtime dispatcher; [panes_mut]
+         preserves the dirty signal. The subsequent live-drag motion handler is
+         DEFERRED (see the [Pane_drag] motion case below). *)
+      Workspace_layout.panes_mut workspace_layout (fun _pl ->
+        Layout_apply.layout_apply workspace_layout (Layout_apply.op_bring_pane_to_front pane_id));
       refresh_all ();
       true
     end
@@ -538,6 +551,12 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
   ignore (pane_container#event#connect#motion_notify ~callback:(fun ev ->
     let mx = GdkEvent.Motion.x_root ev in
     let my = GdkEvent.Motion.y_root ev in
+    (* DEFERRED (OP_LOG 3d-2): the live pane-DRAG / edge-RESIZE / border-drag
+       mid-gesture handlers below stay direct. They are compound gestures
+       ([set_pane_position]+detect/align snaps, [drag_shared_border], direct
+       edge geometry, [on_viewport_resize]) rather than single dispatcher
+       verbs, and re-borrowing the layout mid-gesture would risk behavior
+       change (mirrors the Rust [set_pane_position]/[resize_pane] deferral). *)
     (match !drag with
      | Pane_drag { pane_id; off_x; off_y } ->
        let new_x = mx -. off_x in
@@ -617,6 +636,9 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
       if w > 10.0 && h > 10.0 && w < 10000.0 && h < 10000.0 then begin
         pane_container#set_width (int_of_float w);
         pane_container#set_height (int_of_float h);
+        (* DEFERRED (OP_LOG 3d-2): viewport-resize is a compound gesture
+           ([on_viewport_resize] is not a dispatcher verb, chained with a
+           collapsed-override re-tile), so it stays direct. *)
         Workspace_layout.panes_mut workspace_layout (fun pl ->
           Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
           (* Re-tile with collapsed override if dock is collapsed *)
@@ -650,6 +672,9 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
     if w > 10.0 && h > 10.0 then begin
       pane_container#set_width (int_of_float w);
       pane_container#set_height (int_of_float h);
+      (* DEFERRED (OP_LOG 3d-2): initial window-map layout is a compound
+         [on_viewport_resize]+[repair_snaps] (neither a dispatcher verb), so it
+         stays direct. *)
       Workspace_layout.panes_mut workspace_layout (fun pl ->
         Pane.on_viewport_resize pl ~new_w:w ~new_h:h;
         Pane.repair_snaps pl ~viewport_w:w ~viewport_h:h)
