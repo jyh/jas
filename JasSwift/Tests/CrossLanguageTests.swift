@@ -789,6 +789,241 @@ private func journalToTestJson(_ journal: [Transaction]) -> String {
     }
 }
 
+// MARK: - Per-frame drag coalescing (OP_LOG.md §9 follow-up)
+//
+// A live drag commits ONE transaction PER FRAME (selection.yaml fires
+// doc.snapshot only on the first mousemove; each on_mousemove is its own
+// runEffects batch that beginTxns + commits), so a drag of N frames lands as N
+// consecutive single-op move transactions in the journal — and N undo steps.
+// `Model.commitTxn` coalesces ADJACENT same-gesture move transactions
+// (move_selection / move_by_ids) into ONE summed-delta translate, collapsing the
+// N undo steps into one. The txns-form below commits each frame SEPARATELY, so
+// the SECOND commit triggers coalescing into the first. Mirrors the Rust
+// cross_language_test.rs registrations.
+
+/// The dx/dy of a journal transaction's LAST op (the move being summed).
+private func lastOpDelta(_ txn: Transaction) -> (Double, Double) {
+    let op = txn.ops.last!
+    return (
+        (op.params["dx"] as? NSNumber)?.doubleValue ?? 0.0,
+        (op.params["dy"] as? NSNumber)?.doubleValue ?? 0.0
+    )
+}
+
+/// Drive a coalescing fixture (txns-form, each frame committed separately) and
+/// assert the post-coalesce journal shape + undo-step lock-step:
+///  - the journal collapsed to `expect_journal_txns` transactions;
+///  - the tip txn's op list is `expect_journal_ops` long (when declared);
+///  - the tip txn's last move op carries the SUMMED delta (when declared);
+///  - the undo stack and journal cursor are in lock-step
+///    (`journalHead == expect_undo_steps`), and undoing exactly that many times
+///    drains both back to the origin (`canUndo` false, `journalHead == 0`) — i.e.
+///    ONE undo reverts a whole coalesced drag. Mirrors Rust `assert_drag_coalesce`.
+private func assertDragCoalesce(_ tc: [String: Any]) {
+    let name = tc["name"] as! String
+    let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    for txn in (tc["txns"] as! [[String: Any]]) {
+        model.beginTxn()
+        if let n = txn["name"] as? String { model.nameTxn(n) }
+        for op in (txn["ops"] as! [[String: Any]]) {
+            applyFixtureOp(model, controller, op)
+        }
+        model.commitTxn()
+    }
+
+    let expectTxns = (tc["expect_journal_txns"] as! NSNumber).intValue
+    #expect(model.journal.count == expectTxns,
+        "[\(name)] journal txn count: expected \(expectTxns), got \(model.journal.count)")
+
+    if let ops = (tc["expect_journal_ops"] as? NSNumber)?.intValue {
+        let tip = model.journal.last!
+        #expect(tip.ops.count == ops,
+            "[\(name)] tip txn op count: expected \(ops), got \(tip.ops.count)")
+    }
+    if let dx = (tc["expect_last_move_dx"] as? NSNumber)?.doubleValue {
+        let dy = (tc["expect_last_move_dy"] as? NSNumber)?.doubleValue ?? 0.0
+        let (gdx, gdy) = lastOpDelta(model.journal.last!)
+        #expect(gdx == dx && gdy == dy,
+            "[\(name)] summed delta: expected (\(dx),\(dy)), got (\(gdx),\(gdy))")
+    }
+
+    // Undo-step lock-step: journal cursor == undo depth == declared steps.
+    let steps = (tc["expect_undo_steps"] as! NSNumber).intValue
+    #expect(model.journalHeadValue == steps,
+        "[\(name)] journalHead (== undo steps): expected \(steps), got \(model.journalHeadValue)")
+    for i in 0..<steps {
+        #expect(model.canUndo, "[\(name)] expected to undo step \(i)")
+        model.undo()
+    }
+    #expect(!model.canUndo,
+        "[\(name)] after \(steps) undos the undo stack must be empty (lock-step)")
+    #expect(model.journalHeadValue == 0,
+        "[\(name)] after \(steps) undos the journal cursor must be at the origin")
+}
+
+/// (a)/(c)-twin coalescing pins + (c)-via-name/copy break pins, driven from the
+/// shared `drag_coalesce.json` fixture (txns-form, cross-language). Mirrors Rust
+/// `drag_coalesce`.
+@Test func dragCoalesce() throws {
+    let json = readFixture("operations/drag_coalesce.json")
+    let tests = try JSONSerialization.jsonObject(
+        with: json.data(using: .utf8)!) as! [[String: Any]]
+    for tc in tests {
+        assertDragCoalesce(tc)
+    }
+}
+
+/// (b) NET-ZERO whole-drag: a same-name same-target run that sums to (0,0) AND
+/// round-trips the document leaves NO journal entry and NO undo step.
+///
+/// The selection is pre-established OUT OF BAND (non-undoable
+/// `Controller.selectRect`, journaling nothing) so the two move frames are the
+/// ONLY journaled transactions — and after the net-zero drop the journal is
+/// genuinely EMPTY and the document is byte-identical to pre-drag. Mirrors Rust
+/// `drag_coalesce_net_zero`.
+@Test func dragCoalesceNetZero() {
+    let setup = readFixture("svg/eye.svg")
+    let model = Model(document: svgToDocument(setup))
+    let controller = Controller(model: model)
+
+    // Pre-select the eye out of band (no journal entry, no undo step).
+    controller.selectRect(x: -5.0, y: -5.0, width: 55.0, height: 55.0, extend: false)
+    let preDrag = documentToTestJson(model.document)
+    #expect(model.journal.isEmpty, "out-of-band select must not journal")
+    #expect(!model.canUndo, "out-of-band select must not push an undo step")
+
+    // Frame 1: move dx:5 (commits one txn into the empty journal).
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": 5, "dy": 0])
+    model.commitTxn()
+    #expect(model.journal.count == 1, "frame 1 journals one txn")
+    #expect(model.canUndo, "frame 1 pushes one undo step")
+
+    // Frame 2: move dx:-5 (same name, same target) -> net (0,0) round-trip.
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": -5, "dy": 0])
+    model.commitTxn()
+
+    #expect(model.journal.isEmpty,
+        "net-zero whole-drag must leave NO journal entry, got \(model.journal.count) txns")
+    #expect(model.journalHeadValue == 0, "net-zero whole-drag leaves cursor at origin")
+    #expect(!model.canUndo,
+        "net-zero whole-drag must leave NO undo step (no-op rule across the run)")
+    #expect(documentToTestJson(model.document) == preDrag,
+        "net-zero whole-drag must restore the pre-drag document byte-for-byte")
+}
+
+/// (c) TARGET break (predicate c proper): two ADJACENT single-op move frames
+/// whose target sets differ do NOT coalesce. The selection is changed OUT OF
+/// BAND between the frames (so each frame is a single-op move txn, isolating the
+/// target-mismatch predicate from the op-count predicate), proving the run
+/// breaks and stays TWO distinct undo steps. Mirrors Rust
+/// `drag_coalesce_target_break`.
+@Test func dragCoalesceTargetBreak() {
+    let setup = readFixture("svg/two_ided_rects.svg")
+    let model = Model(document: svgToDocument(setup))
+    let controller = Controller(model: model)
+
+    // Select element "a" (path [0,0]) out of band.
+    controller.setSelection([ElementSelection.all([0, 0])])
+
+    // Frame 1: move "a".
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": 5, "dy": 0])
+    model.commitTxn()
+    #expect(model.journal.count == 1)
+    #expect(model.journal[0].ops[0].targets == ["a"], "frame 1 targets element a")
+
+    // Change selection to "b" (path [0,1]) out of band — a DIFFERENT target.
+    controller.setSelection([ElementSelection.all([0, 1])])
+
+    // Frame 2: a single-op move on "b". Same name, same verb, but the target set
+    // differs ([a] vs [b]) -> predicate (c) fails -> NO coalesce.
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": 7, "dy": 0])
+    model.commitTxn()
+
+    #expect(model.journal.count == 2,
+        "different target must NOT coalesce -> two distinct txns")
+    #expect(model.journal[1].ops[0].targets == ["b"], "frame 2 targets element b")
+    #expect(model.journalHeadValue == 2, "two distinct undo steps (lock-step)")
+    // Both moves are single-op, single-target additive translates of the SAME
+    // verb/name — only the TARGET differs — so this isolates predicate (c) from
+    // the op-count and verb predicates.
+    let (dx0, _) = lastOpDelta(model.journal[0])
+    let (dx1, _) = lastOpDelta(model.journal[1])
+    #expect(dx0 == 5.0 && dx1 == 7.0,
+        "deltas stay separate (5 and 7), not summed")
+}
+
+/// (guard) TIP guard (predicate `journalHead == opJournal.count`): a coalescable
+/// move frame committed AFTER an undo — when the journal cursor sits BEHIND the
+/// tip (`journalHead < count`) — must NOT merge into the about-to-be-truncated
+/// redo tail. It must take the normal truncate/append path: the redo tail is
+/// discarded and the new frame lands as its OWN txn with its OWN delta (never
+/// summed into the stale tail).
+///
+/// This is the ONLY test that drives `commitTxn` with `journalHead < count` for a
+/// coalescable move, so it is the sole signal for the TIP guard: without it,
+/// regressing the guard is invisible to the suite because the merge target is
+/// unconditionally `opJournal.last` — a regressed guard would silently fuse this
+/// frame's delta into a redo-tail txn that is about to be truncated, corrupting
+/// history. Mirrors Rust `drag_coalesce_post_undo_no_merge`.
+@Test func dragCoalescePostUndoNoMerge() {
+    let setup = readFixture("svg/two_ided_rects.svg")
+    let model = Model(document: svgToDocument(setup))
+    let controller = Controller(model: model)
+
+    // Select element "a" (path [0,0]) out of band (no journal entry).
+    controller.setSelection([ElementSelection.all([0, 0])])
+
+    // Frame 1: a coalescable move (dx:5). Commits one txn at the tip.
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": 5, "dy": 0])
+    model.commitTxn()
+    #expect(model.journal.count == 1, "frame 1 journals one txn")
+    #expect(model.journalHeadValue == 1, "cursor at the tip after frame 1")
+
+    // Undo frame 1: cursor moves BEHIND the tip (journalHead 0 < count 1) and a
+    // redo entry is staged. This is the guard's scenario.
+    model.undo()
+    #expect(model.journalHeadValue == 0, "undo moved the cursor behind the tip")
+    #expect(model.journal.count == 1, "the undone txn is still the redo tail")
+    #expect(model.canRedo, "frame 1 is available to redo")
+
+    // Frame 2: a SAME name / SAME target / SAME verb coalescable move (dx:11) —
+    // every predicate (a)-(e) holds EXCEPT the TIP guard, which fails
+    // (journalHead 0 != count 1). So it must NOT coalesce: the normal path
+    // truncates the redo tail and appends frame 2 as its own txn.
+    model.beginTxn()
+    model.nameTxn("selection on_mousemove")
+    applyFixtureOp(model, controller, ["op": "move_selection", "dx": 11, "dy": 0])
+    model.commitTxn()
+
+    // Normal truncate/append ran: redo tail discarded, frame 2 appended fresh.
+    #expect(model.journal.count == 1,
+        "post-undo frame must truncate+append (one txn), NOT merge into the redo tail")
+    #expect(model.journalHeadValue == 1, "cursor advanced to the new tip (lock-step)")
+    #expect(!model.canRedo, "a new edit discards the redo tail")
+    // The decisive guard signal: the surviving txn carries frame 2's delta ALONE
+    // (11), never frame 1's (5) summed in (16). A regressed guard would have
+    // merged into the stale tail and produced 16.
+    let (dx, _) = lastOpDelta(model.journal[0])
+    #expect(dx == 11.0,
+        "surviving txn carries frame 2's delta alone (11), not summed with the discarded tail (would be 16) — proves the TIP guard blocked the merge")
+    // And undoing the single surviving step drains the journal in lock-step.
+    model.undo()
+    #expect(model.journalHeadValue == 0, "one undo drains the single post-undo step")
+    #expect(!model.canUndo, "no further undo steps")
+}
+
 // MARK: - Production op-capture (OP_LOG.md §9, Increment 3b-B)
 
 /// Canonical JSON of the Transaction journal in the production-capture shape
