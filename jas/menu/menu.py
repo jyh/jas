@@ -494,8 +494,8 @@ def _revert(window: QMainWindow, model: Model | None) -> None:
             return
         with open(model.filename, "r", encoding="utf-8") as f:
             svg = f.read()
-        model.snapshot()
-        model.document = svg_to_document(svg)
+        # Reverting is an undoable edit (one self-bracketed undo step).
+        model.edit_document(svg_to_document(svg))
         model.mark_saved()
     except Exception as e:
         QMessageBox.critical(window, "Error", str(e))
@@ -595,9 +595,12 @@ def _open_yaml_dialog(window: QMainWindow, dialog_id: str) -> None:
         effects = action_def.get("effects", [])
         run_ctx = dict(ctx)
         run_ctx["param"] = params
+        # Pass `model` (+ action_name) so run_effects OWNS the transaction the
+        # dialog action's `snapshot` effect opens and commits it (one undo step).
         run_effects(effects, run_ctx, state_store,
                     actions=actions_catalog, dialogs=dialogs_catalog,
-                    platform_effects=platform_effects)
+                    platform_effects=platform_effects,
+                    model=model, action_name=action_name)
     show_yaml_dialog(dialog_id, params={}, store=state_store,
                      ctx=ctx, dispatch_fn=_dispatch, parent=window)
 
@@ -614,7 +617,11 @@ def _build_dialog_platform_effects(model: Model) -> dict:
     from panels.artboard_effects import build_artboard_handlers
     handlers = dict(build_artboard_handlers(model))
     def snapshot_h(_value, _ctx, _store):
-        model.snapshot()
+        # OP_LOG.md Increment 1: the dialog action's `snapshot` effect OPENS the
+        # undo transaction (begin_txn) so the subsequent doc.* field setters
+        # (enforced set_document chokepoint) are legal; run_effects owns the
+        # commit. Mirrors the yaml_tool / Rust doc.snapshot => begin_txn path.
+        model.begin_txn()
         return None
     handlers["snapshot"] = snapshot_h
     return handlers
@@ -624,7 +631,7 @@ def _lock_selection(model: Model) -> None:
     """Lock all selected elements and clear the selection."""
     from document.controller import Controller
     controller = Controller(model=model)
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     controller.lock_selection()
 
 
@@ -632,7 +639,7 @@ def _unlock_all(model: Model) -> None:
     """Unlock all locked elements in the document."""
     from document.controller import Controller
     controller = Controller(model=model)
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     controller.unlock_all()
 
 
@@ -640,7 +647,7 @@ def _hide_selection(model: Model) -> None:
     """Hide every element in the current selection."""
     from document.controller import Controller
     controller = Controller(model=model)
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     controller.hide_selection()
 
 
@@ -648,7 +655,7 @@ def _show_all(model: Model) -> None:
     """Reset every hidden element in the document back to Preview."""
     from document.controller import Controller
     controller = Controller(model=model)
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     controller.show_all()
 
 
@@ -699,8 +706,8 @@ def _delete_selection(model: Model, window=None) -> None:
         return
     if not _confirm_delete_if_orphans(model, window):
         return
-    model.snapshot()
-    model.document = doc.delete_selection()
+    # Undoable edit (one self-bracketed undo step).
+    model.edit_document(doc.delete_selection())
 
 
 def _select_all(model: Model) -> None:
@@ -772,13 +779,17 @@ def _link_to_selection(model: Model) -> None:
     if ref_id is None:
         return
 
-    # create_reference + offset-move under ONE snapshot = a single undo
+    # create_reference + offset-move under ONE transaction = a single undo
     # step (the offset rides on the new reference's transform via
-    # move_selection).
-    model.snapshot()
+    # move_selection). with_txn opens the bracket; each Controller mutator's
+    # edit_document JOINS it (one undo step). Mirrors the Rust with_txn pattern.
     controller = Controller(model=model)
-    controller.create_reference(target_path, target_id, ref_id)
-    controller.move_selection(PASTE_OFFSET, PASTE_OFFSET)
+
+    def _gesture() -> None:
+        controller.create_reference(target_path, target_id, ref_id)
+        controller.move_selection(PASTE_OFFSET, PASTE_OFFSET)
+
+    model.with_txn(_gesture)
 
 
 def _group_selection(model: Model) -> None:
@@ -806,7 +817,6 @@ def _group_selection(model: Model) -> None:
         except (IndexError, ValueError):
             return
     # Remove selected elements in reverse order to preserve indices
-    model.snapshot()
     new_doc = doc
     for p in reversed(paths):
         new_doc = new_doc.delete_element(p)
@@ -824,7 +834,9 @@ def _group_selection(model: Model) -> None:
     # Select the new group
     group_path = insert_path
     new_selection = frozenset([ElementSelection.all(group_path)])
-    model.document = dreplace(new_doc, layers=tuple(new_layers), selection=new_selection)
+    # Undoable edit (one self-bracketed undo step).
+    model.edit_document(
+        dreplace(new_doc, layers=tuple(new_layers), selection=new_selection))
 
 
 def _ungroup_selection(model: Model) -> None:
@@ -848,7 +860,6 @@ def _ungroup_selection(model: Model) -> None:
     if not group_paths:
         return
     group_paths.sort()
-    model.snapshot()
     new_doc = doc
     new_selection: set[ElementSelection] = set()
     # Process in reverse order to preserve indices
@@ -883,7 +894,8 @@ def _ungroup_selection(model: Model) -> None:
             new_selection.add(ElementSelection.all(path))
         # Each ungroup replaces 1 element with n_children, shifting by n_children - 1
         offset += n_children - 1
-    model.document = dreplace(new_doc, selection=frozenset(new_selection))
+    # Undoable edit (one self-bracketed undo step).
+    model.edit_document(dreplace(new_doc, selection=frozenset(new_selection)))
 
 
 def _ungroup_all(model: Model) -> None:
@@ -917,8 +929,9 @@ def _ungroup_all(model: Model) -> None:
     )
     if not changed:
         return
-    model.snapshot()
-    model.document = dreplace(doc, layers=new_layers, selection=frozenset())
+    # Undoable edit (one self-bracketed undo step).
+    model.edit_document(
+        dreplace(doc, layers=new_layers, selection=frozenset()))
 
 
 def _copy_selection(model: Model) -> None:
@@ -969,9 +982,10 @@ def _cut_selection(model: Model, parent=None) -> None:
             QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
         if reply != QMessageBox.Ok:
             return
-    model.snapshot()
     _copy_selection(model)
-    model.document = model.document.delete_selection()
+    # Undoable edit (one self-bracketed undo step). _copy_selection only writes
+    # to the system clipboard, so it carries no document mutation to bracket.
+    model.edit_document(model.document.delete_selection())
 
 
 def _translate_element(elem, dx: float, dy: float):
@@ -1000,7 +1014,6 @@ def _paste_clipboard(model: Model, offset: float) -> None:
     If it contains plain text, add a Text element.
     offset: translation in pt (24 for Paste, 0 for Paste in Place).
     """
-    model.snapshot()
     from dataclasses import replace as dreplace
 
     from document.document import Document, ElementSelection
@@ -1043,8 +1056,9 @@ def _paste_clipboard(model: Model, offset: float) -> None:
             new_layers[target_idx] = dreplace(
                 new_layers[target_idx],
                 children=new_layers[target_idx].children + children)
-        model.document = dreplace(doc, layers=tuple(new_layers),
-                                  selection=frozenset(new_selection))
+        # Undoable edit (one self-bracketed undo step).
+        model.edit_document(dreplace(doc, layers=tuple(new_layers),
+                                     selection=frozenset(new_selection)))
     else:
         # Plain text: create a Text element
         elem = Text(x=offset, y=offset + 16.0, content=text)
@@ -1054,5 +1068,6 @@ def _paste_clipboard(model: Model, offset: float) -> None:
         new_selection.add(ElementSelection.all(path))
         new_layer = dreplace(layer, children=layer.children + (elem,))
         new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
-        model.document = dreplace(doc, layers=tuple(new_layers),
-                                  selection=frozenset(new_selection))
+        # Undoable edit (one self-bracketed undo step).
+        model.edit_document(dreplace(doc, layers=tuple(new_layers),
+                                     selection=frozenset(new_selection)))

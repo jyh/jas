@@ -156,8 +156,6 @@ def apply_make_compound_shape(model, operation: CompoundOperation = CompoundOper
     if visibility is not None:
         fields["visibility"] = visibility
     compound = CompoundShape(**fields)
-
-    model.snapshot()
     new_doc = doc
     # Delete selected elements in reverse order.
     for p in reversed(paths):
@@ -172,9 +170,7 @@ def apply_make_compound_shape(model, operation: CompoundOperation = CompoundOper
     new_doc = dataclasses.replace(
         new_doc, selection=frozenset([ElementSelection.all(insert_path)])
     )
-    model.document = new_doc
-
-
+    model.edit_document(new_doc)
 def apply_compound_creation(model, op_name: str) -> None:
     """Alt/Option+click variant on the four Shape Mode buttons.
     Creates a live compound shape with the chosen [op_name] instead
@@ -208,8 +204,6 @@ def apply_release_compound_shape(model) -> None:
     if not cs_paths:
         return
     cs_paths.sort()
-
-    model.snapshot()
     orig_doc = doc
     new_doc = doc
     for cs_path in reversed(cs_paths):
@@ -245,9 +239,7 @@ def apply_release_compound_shape(model) -> None:
         offset += n - 1
 
     new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
-    model.document = new_doc
-
-
+    model.edit_document(new_doc)
 # ── Destructive boolean operations ──────────────────────────────
 
 def _polygon_from_ring(ring, fill, stroke, opacity, transform, locked, visibility):
@@ -437,8 +429,6 @@ def apply_destructive_boolean(
                 new_elements.append(_polygon_from_ring(
                     r, fill, stroke, opacity, transform, locked, visibility
                 ))
-
-    model.snapshot()
     new_doc = doc
     for p in reversed(paths):
         new_doc = new_doc.delete_element(p)
@@ -459,9 +449,7 @@ def apply_destructive_boolean(
         except (IndexError, ValueError):
             pass
     new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
-    model.document = new_doc
-
-
+    model.edit_document(new_doc)
 # ── Expand ──────────────────────────────────────────────────────
 
 def apply_expand_compound_shape(model) -> None:
@@ -484,8 +472,6 @@ def apply_expand_compound_shape(model) -> None:
     if not cs_paths:
         return
     cs_paths.sort()
-
-    model.snapshot()
     expanded_counts: list[int] = []
     new_doc = doc
     for cs_path in reversed(cs_paths):
@@ -520,9 +506,7 @@ def apply_expand_compound_shape(model) -> None:
         offset += n - 1
 
     new_doc = dataclasses.replace(new_doc, selection=frozenset(new_selection))
-    model.document = new_doc
-
-
+    model.edit_document(new_doc)
 # ── Repeat + Reset ──────────────────────────────────────────────
 
 # Op names whose "_compound" suffix indicates a compound-creating

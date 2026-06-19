@@ -1034,8 +1034,8 @@ class MainWindow(QMainWindow):
         from menu.menu import _confirm_delete_if_orphans
         if not _confirm_delete_if_orphans(m, self):
             return
-        m.snapshot()
-        m.document = doc.delete_selection()
+        # Undoable edit (one self-bracketed undo step).
+        m.edit_document(doc.delete_selection())
 
     def _zoom_in(self):
         """Zoom in by zoom_step centered at viewport center.
@@ -1127,9 +1127,11 @@ class MainWindow(QMainWindow):
             m.fill_on_top = True
             canvas = self.tab_widget.currentWidget()
             if isinstance(canvas, CanvasWidget) and m.document.selection:
-                m.snapshot()
-                canvas._controller.set_selection_fill(m.default_fill)
-                canvas._controller.set_selection_stroke(m.default_stroke)
+                # Fill + stroke as ONE undo step: with_txn opens the bracket,
+                # each Controller mutator's edit_document JOINS it.
+                m.with_txn(lambda: (
+                    canvas._controller.set_selection_fill(m.default_fill),
+                    canvas._controller.set_selection_stroke(m.default_stroke)))
         self._sync_fill_stroke_widget()
 
     def _toggle_fill_on_top(self):
@@ -1160,9 +1162,11 @@ class MainWindow(QMainWindow):
                 m.default_stroke = None
             canvas = self.tab_widget.currentWidget()
             if isinstance(canvas, CanvasWidget) and m.document.selection:
-                m.snapshot()
-                canvas._controller.set_selection_fill(m.default_fill)
-                canvas._controller.set_selection_stroke(m.default_stroke)
+                # Fill + stroke as ONE undo step: with_txn opens the bracket,
+                # each Controller mutator's edit_document JOINS it.
+                m.with_txn(lambda: (
+                    canvas._controller.set_selection_fill(m.default_fill),
+                    canvas._controller.set_selection_stroke(m.default_stroke)))
         self._sync_fill_stroke_widget()
 
     def _set_fill_none(self):
@@ -1172,7 +1176,7 @@ class MainWindow(QMainWindow):
             m.default_fill = None
             canvas = self.tab_widget.currentWidget()
             if isinstance(canvas, CanvasWidget) and m.document.selection:
-                m.snapshot()
+                # The Controller mutator self-brackets via edit_document.
                 canvas._controller.set_selection_fill(None)
         self._sync_fill_stroke_widget()
 
@@ -1183,7 +1187,7 @@ class MainWindow(QMainWindow):
             m.default_stroke = None
             canvas = self.tab_widget.currentWidget()
             if isinstance(canvas, CanvasWidget) and m.document.selection:
-                m.snapshot()
+                # The Controller mutator self-brackets via edit_document.
                 canvas._controller.set_selection_stroke(None)
         self._sync_fill_stroke_widget()
 
@@ -1493,7 +1497,8 @@ class MainWindow(QMainWindow):
             try:
                 if key == "hex":
                     from panels.panel_menu import set_active_color
-                    model.snapshot()
+                    # set_active_color's Controller mutator self-brackets
+                    # via edit_document (one undo step).
                     set_active_color(color, model)
                 else:
                     set_active_color_live(color, model)

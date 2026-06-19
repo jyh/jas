@@ -204,10 +204,78 @@ class Model:
     def document(self) -> Document:
         return self._document
 
+    # OP_LOG.md Increment 1 (enforced chokepoint, mirroring jas_dioxus
+    # ``model.rs``): three writes funnel into one private ``_write_document``.
+    #   - ``set_document``      — UNDOABLE write; asserts ``_in_txn`` is open.
+    #   - ``edit_document``     — SELF-BRACKETING undoable write (opens+commits
+    #                             its own txn if none is open, else joins the
+    #                             caller's). This is what the Controller mutators
+    #                             use, so a standalone edit is a complete one-step
+    #                             undo and a nested one joins the owning action.
+    #   - ``set_document_unbracketed`` — sanctioned NON-undoable write
+    #                             (selection / preview re-apply / live drag /
+    #                             view-state / undo-redo history-nav / test
+    #                             setup); never asserts (OP_LOG.md §7/§8).
+    # The bare ``document`` property setter routes to ``set_document`` so it is
+    # the ENFORCED undoable path: a bare ``model.document = ...`` outside a
+    # transaction trips the assert (the oracle). Writes that are deliberately
+    # not undoable must say so by calling ``set_document_unbracketed`` directly.
+
     @document.setter
     def document(self, document: Document) -> None:
+        self.set_document(document)
+
+    def _write_document(self, document: Document) -> None:
+        """The single committing write to ``self._document``: overwrite and
+        notify listeners. Both ``set_document`` and ``set_document_unbracketed``
+        funnel here so there is exactly one place document content is committed.
+        Mirrors the Rust private ``write_document``."""
         self._document = document
         self._notify()
+
+    def set_document(self, document: Document) -> None:
+        """Replace the document — the committing write for UNDOABLE mutations.
+        The ``assert self._in_txn`` is LIVE (OP_LOG.md Increment 1, enforced
+        chokepoint): any undoable edit that skipped the transaction bracket fails
+        the test suite, so the journal cursor is complete by construction.
+        Self-bracketing mutators use ``edit_document``; sanctioned non-undoable
+        writes use ``set_document_unbracketed`` (which never asserts). Mirrors
+        the Rust ``set_document``."""
+        assert self._in_txn, (
+            "set_document outside a transaction: undoable edits use begin_txn/"
+            "commit_txn or with_txn; Controller mutators use edit_document; "
+            "non-undoable writes (selection, preview, live-drag, view-state, "
+            "undo/redo, test setup) use set_document_unbracketed."
+        )
+        self._write_document(document)
+
+    def edit_document(self, document: Document) -> None:
+        """Self-bracketing undoable write: if no transaction is open, wrap this
+        edit in its own begin/commit (one undo step); if one is already open,
+        just write (joining the caller's transaction). This is what the
+        ``Controller`` mutators use, so a standalone call (a unit test, or a
+        direct Controller call) is a complete one-step undo, while the same
+        method called inside a UI ``with_txn`` / ``begin_txn`` joins that action
+        — production behavior is unchanged, and no test needs an explicit
+        bracket. Distinct from ``set_document`` (which asserts a transaction is
+        already open) and ``set_document_unbracketed`` (non-undoable). Mirrors
+        the Rust ``edit_document``."""
+        opened = not self._in_txn
+        if opened:
+            self.begin_txn()
+        self._write_document(document)
+        if opened:
+            self.commit_txn()
+
+    def set_document_unbracketed(self, document: Document) -> None:
+        """Committing write for sanctioned NON-undoable mutations — selection-
+        only and pure view-state changes, dialog-preview re-apply, live drag,
+        and test setup (OP_LOG.md §7/§8). Same effect as ``set_document`` but the
+        distinct name is what lets the live ``_in_txn`` guard in ``set_document``
+        tell "deliberately not undoable" from "forgot to open a transaction":
+        this path never asserts. Mirrors the Rust
+        ``set_document_unbracketed``."""
+        self._write_document(document)
 
     def snapshot(self) -> None:
         """Save the current document state for undo."""

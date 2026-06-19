@@ -196,6 +196,11 @@ class TypeOnPathTool(CanvasTool):
         ctx.model.current_edit_session = self.session
 
     def _end_session(self, ctx: ToolContext | None = None) -> None:
+        # Close the transaction opened by the first keystroke's snapshot
+        # (OP_LOG.md Increment 1): the whole editing session is one undo step.
+        # commit_txn is a no-op when no transaction is open.
+        if ctx is not None:
+            ctx.commit()
         self.session = None
         self._did_snapshot = False
         self._drag_start = None
@@ -314,7 +319,8 @@ class TypeOnPathTool(CanvasTool):
             if self._offset_preview is not None:
                 elem = ctx.document.get_element(self._offset_drag_path)
                 if isinstance(elem, TextPath):
-                    ctx.snapshot()
+                    # One-shot gesture: set_document self-brackets (edit_document)
+                    # into a single undo step (OP_LOG.md Increment 1).
                     new_elem = dataclasses.replace(elem, start_offset=self._offset_preview)
                     new_doc = ctx.document.replace_element(self._offset_drag_path, new_elem)
                     ctx.controller.set_document(new_doc)

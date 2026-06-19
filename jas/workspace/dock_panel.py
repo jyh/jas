@@ -565,13 +565,17 @@ class DockPanelWidget(QWidget):
                 if model is not None:
                     apply_expand_compound_shape(model)
 
-            # snapshot: push undo checkpoint on jas Model (replaces
-            # the effects.py default which only touches store state —
-            # native jas owns undo on the Model).
+            # snapshot: OPEN the undo transaction on the jas Model (replaces
+            # the effects.py default which only touches store state — native jas
+            # owns undo on the Model). OP_LOG.md Increment 1: begin_txn opens the
+            # bracket so the subsequent doc.* writes (enforced set_document
+            # chokepoint) are legal; run_effects (passed `model` below) OWNS the
+            # commit, making the whole action one undo step. Mirrors the
+            # yaml_tool / Rust doc.snapshot => begin_txn path.
             def handle_snapshot(_data, _ctx, _store):
                 m = self._get_model() if self._get_model else None
                 if m is not None:
-                    m.snapshot()
+                    m.begin_txn()
 
             # Paragraph panel menu items (PARAGRAPH.md §Menu): each
             # action's effects use one of these platform handlers to
@@ -632,10 +636,13 @@ class DockPanelWidget(QWidget):
                 from panels.artboard_effects import build_artboard_handlers
                 platform_effects.update(build_artboard_handlers(model))
 
+            # Pass `model` (+ action_name) so run_effects OWNS the transaction
+            # the snapshot effect opened and commits it once (one undo step).
             run_effects(action_def.get("effects", []), ctx, self._state_store,
                        actions=ws.get("actions"),
                        dialogs=ws.get("dialogs"),
-                       platform_effects=platform_effects)
+                       platform_effects=platform_effects,
+                       model=model, action_name=action_name)
 
             # If a dialog was opened by the effect, show it
             self._check_dialog_opened(self._state_store, dialog_before)

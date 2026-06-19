@@ -1166,7 +1166,7 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
                 return
             model.default_fill = fill
             if model.document.selection:
-                model.snapshot()
+                # The Controller mutator self-brackets via edit_document.
                 ctrl.set_selection_fill(fill)
         elif key == "stroke_color":
             raw = store.get("stroke_color")
@@ -1182,7 +1182,7 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
                 return
             model.default_stroke = stroke
             if model.document.selection:
-                model.snapshot()
+                # The Controller mutator self-brackets via edit_document.
                 ctrl.set_selection_stroke(stroke)
 
     store.subscribe(["fill_color", "stroke_color"], _on_change)
