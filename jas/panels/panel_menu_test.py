@@ -815,11 +815,11 @@ def test_opacity_make_mask_reads_live_new_masks_flags():
         model = Model()
         rect = Rect(x=0.0, y=0.0, width=10.0, height=10.0)
         layer = Layer(name="L", children=(rect,))
-        model.document = replace(
+        model.set_document_unbracketed(replace(
             model.document,
             layers=(layer,),
             selection=frozenset({ElementSelection.all((0, 0))}),
-        )
+        ))
         panel_dispatch(PanelKind.OPACITY, "make_opacity_mask", addr, layout, model=model)
         mask = model.document.get_element((0, 0)).mask
         assert mask is not None, "make_opacity_mask did not create a mask"
@@ -869,11 +869,11 @@ def _model_with_selected_text():
     model = Model()
     text = Text(x=0.0, y=0.0, content="hi")
     layer = Layer(name="L", children=(text,))
-    model.document = replace(
+    model.set_document_unbracketed(replace(
         model.document,
         layers=(layer,),
         selection=frozenset({ElementSelection.all((0, 0))}),
-    )
+    ))
     return model
 
 
@@ -983,11 +983,11 @@ def _model_with_area_text_wrapper():
                 width=200, height=100)
     model = Model()
     layer = Layer(name="L", children=(text,))
-    model.document = replace(
+    model.set_document_unbracketed(replace(
         model.document,
         layers=(layer,),
         selection=frozenset({ElementSelection.all((0, 0))}),
-    )
+    ))
     return model
 
 

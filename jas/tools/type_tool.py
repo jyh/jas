@@ -234,6 +234,11 @@ class TypeTool(CanvasTool):
         ctx.model.current_edit_session = self.session
 
     def _end_session(self, ctx: ToolContext | None = None) -> None:
+        # Close the transaction opened by the first keystroke's snapshot
+        # (OP_LOG.md Increment 1): the whole editing session is one undo step.
+        # commit_txn is a no-op when no transaction is open.
+        if ctx is not None:
+            ctx.commit()
         self.session = None
         self._did_snapshot = False
         self._drag = None

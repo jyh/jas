@@ -2000,11 +2000,11 @@ class CanvasWidget(QWidget):
         self._current_tool_enum = tool
         self._active_tool.activate(self._tool_ctx)
         self._update_cursor()
-        # Preserve selection across tool changes
+        # Preserve selection across tool changes (selection-only, non-undoable).
         if self._model.document.selection != saved_selection:
             from dataclasses import replace
-            self._model.document = replace(self._model.document,
-                                           selection=saved_selection)
+            self._model.set_document_unbracketed(replace(
+                self._model.document, selection=saved_selection))
 
     def _update_cursor(self) -> None:
         # Active tool can override the per-tool cursor (e.g. the type

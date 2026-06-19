@@ -55,8 +55,18 @@ class ToolContext:
         return self.model.document
 
     def snapshot(self) -> None:
-        """Save the current document state for undo."""
-        self.model.snapshot()
+        """Open the undo transaction for this gesture (OP_LOG.md Increment 1).
+        A tool calls this once before mutating, so the per-keystroke
+        ``set_document`` writes JOIN one transaction (the enforced chokepoint);
+        the gesture's owner closes it with ``commit`` (e.g. at session end).
+        ``begin_txn`` is idempotent while one is already open. Mirrors the Rust
+        type-tool ``begin_txn`` / ``set_document`` / ``commit_txn`` flow."""
+        self.model.begin_txn()
+
+    def commit(self) -> None:
+        """Close the transaction opened by ``snapshot`` (no-op when none open),
+        committing the gesture as one undo step (OP_LOG.md Increment 1)."""
+        self.model.commit_txn()
 
 
 class KeyMods:

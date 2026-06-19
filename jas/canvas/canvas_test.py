@@ -102,7 +102,7 @@ class CanvasWidgetTest(absltest.TestCase):
     def test_registers_with_model(self):
         model = Model()
         canvas = self._make_canvas(model)
-        model.document = Document(layers=())
+        model.set_document_unbracketed(Document(layers=()))
 
     def test_filename_on_model(self):
         model = Model()
@@ -172,11 +172,11 @@ class CanvasWidgetTest(absltest.TestCase):
         """Drawing when a layer already exists appends to it."""
         model = Model()
         ctrl = Controller(model=model)
-        model.document = Document(
+        model.set_document_unbracketed(Document(
             layers=(Layer(name="L1", children=(
                 Line(x1=0, y1=0, x2=1, y2=1, stroke=Stroke(color=RgbColor(0, 0, 0))),
             )),),
-        )
+        ))
         canvas = CanvasWidget(model=model, controller=ctrl)
         canvas.set_tool(Tool.LINE)
         from unittest.mock import MagicMock

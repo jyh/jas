@@ -144,8 +144,12 @@ class Controller:
         return self._model.document
 
     def set_document(self, document: Document) -> None:
-        """Replace the entire document."""
-        self._model.document = document
+        """Replace the entire document — the general undoable mutator used by
+        tool/effect handlers (they wrap an action in begin_txn/with_txn, so this
+        joins that transaction; standalone it self-brackets). Routes through
+        ``edit_document`` (OP_LOG.md Increment 1). Selection-only writes use the
+        ``select_*`` / ``set_selection`` methods (non-undoable)."""
+        self._model.edit_document(document)
 
     def set_filename(self, filename: str) -> None:
         """Update the filename."""
@@ -153,18 +157,18 @@ class Controller:
 
     def add_layer(self, layer: Layer) -> None:
         """Append a layer to the document."""
-        self._model.document = replace(
+        self._model.edit_document(replace(
             self._model.document,
             layers=self._model.document.layers + (layer,),
-        )
+        ))
 
     def remove_layer(self, index: int) -> None:
         """Remove the layer at the given index."""
         layers = list(self._model.document.layers)
         del layers[index]
-        self._model.document = replace(
+        self._model.edit_document(replace(
             self._model.document, layers=tuple(layers),
-        )
+        ))
 
     def add_element(self, element: Element) -> None:
         """Append ``element`` to the current editing target and
@@ -191,8 +195,8 @@ class Controller:
         new_layer = replace(layer, children=layer.children + (element,))
         new_layers = doc.layers[:idx] + (new_layer,) + doc.layers[idx + 1:]
         es = ElementSelection.all((idx, child_idx))
-        self._model.document = replace(doc, layers=new_layers,
-                                       selection=frozenset({es}))
+        self._model.edit_document(replace(doc, layers=new_layers,
+                                       selection=frozenset({es})))
 
     def assign_id(self, path: ElementPath, id: str) -> None:
         """Stamp a stable ``id`` onto the element at ``path`` — the lazy
@@ -212,7 +216,7 @@ class Controller:
         except (ValueError, IndexError, KeyError):
             return
         new_elem = replace(elem, id=id)
-        self._model.document = doc.replace_element(path, new_elem)
+        self._model.edit_document(doc.replace_element(path, new_elem))
 
     def create_reference(self, target_path: ElementPath, target_id: str,
                          ref_id: str) -> None:
@@ -236,8 +240,8 @@ class Controller:
             resolved_id = target.id
         else:
             resolved_id = target_id
-            self._model.document = doc.replace_element(
-                target_path, replace(target, id=target_id))
+            self._model.edit_document(doc.replace_element(
+                target_path, replace(target, id=target_id)))
         reference = ReferenceElem(target=resolved_id, id=ref_id)
         self.add_element(reference)
 
@@ -278,8 +282,8 @@ class Controller:
         # Replace the element in place with the instance, then push the master
         # into the off-canvas store.
         new_doc = doc.replace_element(path, reference)
-        self._model.document = replace(
-            new_doc, symbols=new_doc.symbols + (master,))
+        self._model.edit_document(replace(
+            new_doc, symbols=new_doc.symbols + (master,)))
 
     def place_instance(self, master_id: str, ref_id: str) -> None:
         """Place Instance: append a ``ReferenceElem`` targeting an existing
@@ -347,7 +351,7 @@ class Controller:
         if elem.stroke is not None:
             copy = _with_stroke(copy, elem.stroke)
 
-        self._model.document = doc.replace_element(path, copy)
+        self._model.edit_document(doc.replace_element(path, copy))
 
     def set_instance_transform(self, path: ElementPath,
                                transform: Transform) -> None:
@@ -371,7 +375,7 @@ class Controller:
         # Rebuild the reference with the instance transform set, preserving the
         # target, paint overrides, and the render CTM.
         new_elem = replace(elem, instance_transform=transform)
-        self._model.document = doc.replace_element(path, new_elem)
+        self._model.edit_document(doc.replace_element(path, new_elem))
 
     def redefine(self, master_id: str, path: ElementPath,
                  ref_id: str) -> None:
@@ -406,7 +410,7 @@ class Controller:
         new_doc = doc.replace_element(path, reference)
         new_symbols = (new_doc.symbols[:master_idx] + (new_master,)
                        + new_doc.symbols[master_idx + 1:])
-        self._model.document = replace(new_doc, symbols=new_symbols)
+        self._model.edit_document(replace(new_doc, symbols=new_symbols))
 
     def delete_symbol(self, master_id: str) -> None:
         """Delete Symbol: remove the master whose ``id == master_id`` from
@@ -426,7 +430,7 @@ class Controller:
         if idx is None:
             return
         new_symbols = doc.symbols[:idx] + doc.symbols[idx + 1:]
-        self._model.document = replace(doc, symbols=new_symbols)
+        self._model.edit_document(replace(doc, symbols=new_symbols))
 
     def _add_element_to_mask(self, element: Element,
                               path: tuple[int, ...]) -> bool:
@@ -455,7 +459,7 @@ class Controller:
         # No canonical "inside a mask" path — select the mask-target
         # element itself after the add.
         es = ElementSelection.all(path)
-        self._model.document = replace(new_doc, selection=frozenset({es}))
+        self._model.edit_document(replace(new_doc, selection=frozenset({es})))
         return True
 
     @staticmethod
@@ -537,7 +541,8 @@ class Controller:
         new_sel = frozenset(entries)
         if extend:
             new_sel = self._toggle_selection(doc.selection, new_sel)
-        self._model.document = replace(doc, selection=new_sel)
+        # Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(replace(doc, selection=new_sel))
 
     def _select_recursive(
         self,
@@ -577,7 +582,8 @@ class Controller:
         new_sel = frozenset(entries)
         if extend:
             new_sel = self._toggle_selection(doc.selection, new_sel)
-        self._model.document = replace(doc, selection=new_sel)
+        # Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(replace(doc, selection=new_sel))
 
     # ------------------------------------------------------------------
     # Public selection methods (thin wrappers)
@@ -644,8 +650,10 @@ class Controller:
         self._select_flat(lambda _: True)
 
     def set_selection(self, selection: Selection) -> None:
-        """Set the document selection directly."""
-        self._model.document = replace(self._model.document, selection=selection)
+        """Set the document selection directly. Selection-only: a non-undoable
+        write (OP_LOG.md §7/§8)."""
+        self._model.set_document_unbracketed(
+            replace(self._model.document, selection=selection))
 
     def select_element(self, path: ElementPath) -> None:
         """Select an element by path.
@@ -672,10 +680,13 @@ class Controller:
                     ElementSelection.all(parent_path + (i,))
                     for i in range(len(parent.children))
                 )
-                self._model.document = replace(doc, selection=frozenset(entries))
+                # Selection-only: non-undoable (OP_LOG.md §7/§8).
+                self._model.set_document_unbracketed(
+                    replace(doc, selection=frozenset(entries)))
                 return
-        self._model.document = replace(
-            doc, selection=frozenset({ElementSelection.all(path)})
+        # Selection-only: non-undoable (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(
+            replace(doc, selection=frozenset({ElementSelection.all(path)}))
         )
 
     def select_control_point(self, path: ElementPath, index: int) -> None:
@@ -685,10 +696,11 @@ class Controller:
         """
         if not path:
             raise ValueError("Path must be non-empty")
-        self._model.document = replace(
+        # Selection-only: non-undoable (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(replace(
             self._model.document,
             selection=frozenset({ElementSelection.partial(path, [index])}),
-        )
+        ))
 
     def move_selection(self, dx: float, dy: float) -> None:
         """Move all selected control points by (dx, dy)."""
@@ -698,7 +710,7 @@ class Controller:
             elem = doc.get_element(es.path)
             new_elem = move_control_points(elem, es.kind, dx, dy)
             new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def simplify_selection(self, precision: float) -> None:
         """Simplify the geometry of each selected Polygon / Path element
@@ -782,7 +794,7 @@ class Controller:
                     continue
                 new_path = replace(elem, d=tuple(new_cmds))
                 new_doc = new_doc.replace_element(es.path, new_path)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def copy_selection(self, dx: float, dy: float) -> None:
         """Duplicate selected elements, offset by (dx, dy), leaving originals unchanged."""
@@ -802,8 +814,8 @@ class Controller:
             copy_path = es.path[:-1] + (es.path[-1] + 1,)
             # Copying always selects the new element as a whole.
             new_selection.add(ElementSelection.all(copy_path))
-        self._model.document = replace(
-            new_doc, selection=frozenset(new_selection))
+        self._model.edit_document(replace(
+            new_doc, selection=frozenset(new_selection)))
 
     def lock_selection(self) -> None:
         """Lock all selected elements and clear the selection.
@@ -824,7 +836,7 @@ class Controller:
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
             new_doc = new_doc.replace_element(es.path, _lock(elem))
-        self._model.document = replace(new_doc, selection=frozenset())
+        self._model.edit_document(replace(new_doc, selection=frozenset()))
 
     def unlock_all(self) -> None:
         """Unlock all locked elements and select them."""
@@ -860,7 +872,7 @@ class Controller:
         new_doc = replace(doc, layers=new_layers)
         for path, _ in unlocked_paths:
             new_selection.add(ElementSelection.all(path))
-        self._model.document = replace(new_doc, selection=frozenset(new_selection))
+        self._model.edit_document(replace(new_doc, selection=frozenset(new_selection)))
 
     def move_path_handle(self, path: ElementPath, anchor_idx: int,
                          handle_type: str, dx: float, dy: float) -> None:
@@ -869,7 +881,7 @@ class Controller:
         elem = doc.get_element(path)
         if isinstance(elem, Path):
             new_elem = _move_path_handle(elem, anchor_idx, handle_type, dx, dy)
-            self._model.document = doc.replace_element(path, new_elem)
+            self._model.edit_document(doc.replace_element(path, new_elem))
 
     def hide_selection(self) -> None:
         """Set every element in the current selection to
@@ -889,7 +901,7 @@ class Controller:
             elem = new_doc.get_element(es.path)
             hidden = replace(elem, visibility=Visibility.INVISIBLE)
             new_doc = new_doc.replace_element(es.path, hidden)
-        self._model.document = replace(new_doc, selection=frozenset())
+        self._model.edit_document(replace(new_doc, selection=frozenset()))
 
     def show_all(self) -> None:
         """Traverse the document, set every element whose own
@@ -924,11 +936,12 @@ class Controller:
         new_selection = frozenset(
             ElementSelection.all(p) for p in shown_paths
         )
-        self._model.document = replace(
-            doc, layers=new_layers, selection=new_selection)
+        self._model.edit_document(replace(
+            doc, layers=new_layers, selection=new_selection))
 
-    def set_selection_fill(self, fill: Fill | None) -> None:
-        """Set the fill of all selected elements."""
+    def _fill_applied(self, fill: Fill | None) -> Document:
+        """Pure: return the document with ``fill`` applied to every selected
+        element (no write). Mirrors the Rust ``fill_applied``."""
         doc = self._model.document
         new_doc = doc
         for es in doc.selection:
@@ -936,10 +949,11 @@ class Controller:
             new_elem = _with_fill(elem, fill)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        return new_doc
 
-    def set_selection_stroke(self, stroke: Stroke | None) -> None:
-        """Set the stroke of all selected elements."""
+    def _stroke_applied(self, stroke: Stroke | None) -> Document:
+        """Pure: return the document with ``stroke`` applied to every selected
+        element (no write). Mirrors the Rust ``stroke_applied``."""
         doc = self._model.document
         new_doc = doc
         for es in doc.selection:
@@ -947,7 +961,28 @@ class Controller:
             new_elem = _with_stroke(elem, stroke)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        return new_doc
+
+    def set_selection_fill(self, fill: Fill | None) -> None:
+        """Set the fill of all selected elements (undoable, self-bracketing)."""
+        self._model.edit_document(self._fill_applied(fill))
+
+    def set_selection_fill_live(self, fill: Fill | None) -> None:
+        """Live, NON-undoable fill set for per-tick color-slider drag
+        (``set_active_color_live``). Undo is captured once on pointer-up by
+        ``set_active_color``, so the drag must NOT push checkpoints. Mirrors the
+        Rust ``set_selection_fill_live`` (OP_LOG.md §7/§8 live-drag)."""
+        self._model.set_document_unbracketed(self._fill_applied(fill))
+
+    def set_selection_stroke(self, stroke: Stroke | None) -> None:
+        """Set the stroke of all selected elements (undoable, self-bracketing)."""
+        self._model.edit_document(self._stroke_applied(stroke))
+
+    def set_selection_stroke_live(self, stroke: Stroke | None) -> None:
+        """Live, NON-undoable stroke set for per-tick color drag (see
+        ``set_selection_fill_live``). Mirrors the Rust
+        ``set_selection_stroke_live``."""
+        self._model.set_document_unbracketed(self._stroke_applied(stroke))
 
     def set_selection_stroke_brush(self, slug: str | None) -> None:
         """Set stroke_brush on every selected element (paths only).
@@ -959,7 +994,7 @@ class Controller:
             new_elem = _with_stroke_brush(elem, slug)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def set_selection_stroke_brush_overrides(self, overrides: str | None) -> None:
         """Set stroke_brush_overrides on every selected element (paths only)."""
@@ -970,7 +1005,7 @@ class Controller:
             new_elem = _with_stroke_brush_overrides(elem, overrides)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def set_selection_fill_gradient(self, gradient: Gradient | None) -> None:
         """Phase 5: set the fill_gradient of all selected elements.
@@ -985,7 +1020,7 @@ class Controller:
             new_elem = _with_fill_gradient(elem, gradient)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def set_selection_stroke_gradient(self, gradient: Gradient | None) -> None:
         """Phase 5: set the stroke_gradient of all selected elements."""
@@ -996,7 +1031,7 @@ class Controller:
             new_elem = _with_stroke_gradient(elem, gradient)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def set_selection_width_profile(self, width_points: tuple[StrokeWidthPoint, ...]) -> None:
         """Set the variable-width stroke profile for all selected elements."""
@@ -1009,7 +1044,7 @@ class Controller:
             new_elem = _with_width_points(elem, width_points)
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     # ── Opacity mask lifecycle (OPACITY.md § States) ─────────────
 
@@ -1037,7 +1072,7 @@ class Controller:
                 unlink_transform=None,
             )
             new_doc = new_doc.replace_element(es.path, _with_mask(elem, m))
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def release_mask_on_selection(self) -> None:
         """Remove the opacity mask from every selected element."""
@@ -1050,7 +1085,7 @@ class Controller:
             if elem.mask is None:
                 continue
             new_doc = new_doc.replace_element(es.path, _with_mask(elem, None))
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def _update_mask_on_selection(self, transform) -> None:
         """Apply ``transform`` (Mask -> Mask) to every selected element's
@@ -1063,7 +1098,7 @@ class Controller:
             if elem.mask is None:
                 continue
             new_doc = new_doc.replace_element(es.path, _with_mask(elem, transform(elem.mask)))
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
     def set_mask_clip_on_selection(self, clip: bool) -> None:
         """Set ``mask.clip`` on every selected element that has a mask."""
@@ -1103,7 +1138,7 @@ class Controller:
             new_mask = dataclasses.replace(
                 elem.mask, linked=new_linked, unlink_transform=capture)
             new_doc = new_doc.replace_element(es.path, _with_mask(elem, new_mask))
-        self._model.document = new_doc
+        self._model.edit_document(new_doc)
 
 
 # -- Fill/Stroke summary types --

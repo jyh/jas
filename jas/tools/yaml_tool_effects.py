@@ -994,7 +994,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         elem = controller.document.get_element(path)
         if not isinstance(elem, PathElem):
             return None
-        controller.model.snapshot()
+        controller.model.begin_txn()
         new_cmds = path_ops.delete_anchor_from_path(elem.d, anchor_idx)
         if new_cmds is not None:
             new_elem = _path_with_commands(elem, new_cmds)
@@ -1063,7 +1063,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         elem = doc.get_element(path)
         if not isinstance(elem, PathElem):
             return None
-        controller.model.snapshot()
+        controller.model.begin_txn()
         ins = path_ops.insert_point_in_path(elem.d, seg_idx, t)
         new_elem = _path_with_commands(elem, ins.commands)
         controller.set_document(doc.replace_element(path, new_elem))
@@ -2239,19 +2239,19 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                 controller.document.replace_element(path, new_elem))
 
         if mode == "pressed_smooth":
-            controller.model.snapshot()
+            controller.model.begin_txn()
             apply(convert_smooth_to_corner(elem.d, ai))
         elif mode == "pressed_corner":
             moved = ((tx - ox) ** 2 + (ty - oy) ** 2) ** 0.5
             if moved > 1.0:
-                controller.model.snapshot()
+                controller.model.begin_txn()
                 apply(convert_corner_to_smooth(elem, ai, tx, ty).d)
         elif mode == "pressed_handle":
             handle_type = store.get_tool("anchor_point", "handle_type") or ""
             dx = tx - ox
             dy = ty - oy
             if abs(dx) > 0.5 or abs(dy) > 0.5:
-                controller.model.snapshot()
+                controller.model.begin_txn()
                 apply(move_path_handle_independent(elem, ai, handle_type, dx, dy).d)
         return None
 
@@ -2274,7 +2274,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             return None
         rx, ry, rw, rh, additive = normalize_rect_args(spec, store, ctx)
         if rw > 1.0 or rh > 1.0:
-            controller.model.snapshot()
+            controller.model.begin_txn()
             controller.partial_select_rect(rx, ry, rw, rh, extend=additive)
         elif not additive:
             controller.set_selection(frozenset())
@@ -2361,7 +2361,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                 for es in doc.selection
             )
             if not already or shift:
-                controller.model.snapshot()
+                controller.model.begin_txn()
                 if shift:
                     sel = set(doc.selection)
                     existing = next((es for es in sel if es.path == path), None)
@@ -3061,7 +3061,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         doc = controller.document
         if len(targets) >= len(doc.artboards):
             return None  # at-least-one invariant block
-        controller.model.snapshot()
+        controller.model.begin_txn()
         new_artboards = tuple(a for a in doc.artboards if a.id not in targets)
         controller.set_document(_dc_replace(doc, artboards=new_artboards))
         return None

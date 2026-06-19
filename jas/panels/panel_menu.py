@@ -391,7 +391,12 @@ def _dispatch_yaml_layers_action(action_name: str, model,
 
     # Platform handlers
     def snapshot_handler(_value, _ctx, _store):
-        model.snapshot()
+        # OP_LOG.md Increment 1: the panel action's `snapshot` effect OPENS the
+        # undo transaction (begin_txn), so the subsequent doc.* writes (which go
+        # through the enforced set_document chokepoint) are legal. run_effects is
+        # passed `model` below so it OWNS the commit, making the whole action one
+        # undo step. Mirrors the yaml_tool / Rust doc.snapshot => begin_txn path.
+        model.begin_txn()
 
     def doc_set_handler(spec, call_ctx, _store):
         if not isinstance(spec, dict):
@@ -653,8 +658,11 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         platform_effects["close_dialog"] = close_dialog_handler
 
     store = StateStore()
+    # Pass `model` (+ action_name) so run_effects OWNS the transaction the
+    # snapshot effect opened and commits it once at the end (one undo step).
     run_effects(effects, ctx, store,
-                actions=actions, platform_effects=platform_effects)
+                actions=actions, platform_effects=platform_effects,
+                model=model, action_name=action_name)
 
 
 def panel_dispatch(kind: PanelKind, cmd: str, addr: PanelAddr,
@@ -833,14 +841,14 @@ def set_active_color(color, model) -> None:
     if model.fill_on_top:
         model.default_fill = Fill(color=color)
         if model.document.selection:
-            model.snapshot()
+            # The Controller mutator self-brackets via edit_document.
             ctrl = Controller(model)
             ctrl.set_selection_fill(Fill(color=color))
     else:
         width = model.default_stroke.width if model.default_stroke else 1.0
         model.default_stroke = Stroke(color=color, width=width)
         if model.document.selection:
-            model.snapshot()
+            # The Controller mutator self-brackets via edit_document.
             ctrl = Controller(model)
             ctrl.set_selection_stroke(Stroke(color=color, width=width))
     push_recent_color(color.to_hex(), model)
@@ -897,14 +905,16 @@ def set_active_color_live(color, model) -> None:
     if model.fill_on_top:
         model.default_fill = Fill(color=color)
         if model.document.selection:
+            # Live drag: NON-undoable write (coalesced into one undo step on
+            # release by set_active_color). OP_LOG.md §7/§8.
             ctrl = Controller(model)
-            ctrl.set_selection_fill(Fill(color=color))
+            ctrl.set_selection_fill_live(Fill(color=color))
     else:
         width = model.default_stroke.width if model.default_stroke else 1.0
         model.default_stroke = Stroke(color=color, width=width)
         if model.document.selection:
             ctrl = Controller(model)
-            ctrl.set_selection_stroke(Stroke(color=color, width=width))
+            ctrl.set_selection_stroke_live(Stroke(color=color, width=width))
 
 
 _recent_colors_listeners: list = []

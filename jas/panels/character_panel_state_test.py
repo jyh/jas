@@ -225,6 +225,10 @@ class TestApplyEndToEnd:
             def snapshot(self):
                 self.snapshots += 1
 
+            def edit_document(self, document):
+                self.document = document
+                self.snapshots += 1
+
         return _Model(text_elem), StateStore()
 
     def test_font_family_written_to_selected_text(self):
@@ -262,6 +266,10 @@ class TestApplyEndToEnd:
                 self.snapshots = 0
 
             def snapshot(self):
+                self.snapshots += 1
+
+            def edit_document(self, document):
+                self.document = document
                 self.snapshots += 1
 
         model = _Model()
@@ -579,6 +587,10 @@ class TestPendingRouting:
             def snapshot(self):
                 self.snapshots += 1
 
+            def edit_document(self, document):
+                self.document = document
+                self.snapshots += 1
+
         model = _Model()
         session = TextEditSession(
             path=(0, 0), target=EditTarget.TEXT,
@@ -715,6 +727,10 @@ class TestCharacterAutoLeading:
                 self.snapshots = 0
 
             def snapshot(self):
+                self.snapshots += 1
+
+            def edit_document(self, document):
+                self.document = document
                 self.snapshots += 1
 
         return _Model(text_elem)

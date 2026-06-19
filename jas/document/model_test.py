@@ -20,7 +20,8 @@ class ModelTest(absltest.TestCase):
         model = Model()
         received = []
         model.on_document_changed(lambda doc: received.append(len(doc.layers)))
-        model.document = Document(layers=())
+        # Test setup write (no undo intent) -> the sanctioned non-asserting path.
+        model.set_document_unbracketed(Document(layers=()))
         self.assertEqual(received, [0])
 
     def test_multiple_listeners(self):
@@ -28,7 +29,7 @@ class ModelTest(absltest.TestCase):
         a, b = [], []
         model.on_document_changed(lambda doc: a.append(len(doc.layers)))
         model.on_document_changed(lambda doc: b.append(len(doc.layers)))
-        model.document = Document(layers=())
+        model.set_document_unbracketed(Document(layers=()))
         self.assertEqual(a, [0])
         self.assertEqual(b, [0])
 
@@ -37,14 +38,14 @@ class ModelTest(absltest.TestCase):
         count = []
         model.on_document_changed(lambda doc: count.append(len(doc.layers)))
         layer = Layer(children=(), name="L1")
-        model.document = Document(layers=(layer,))
-        model.document = Document(layers=(layer, layer))
+        model.set_document_unbracketed(Document(layers=(layer,)))
+        model.set_document_unbracketed(Document(layers=(layer, layer)))
         self.assertEqual(count, [1, 2])
 
     def test_immutability(self):
         model = Model()
         before = model.document
-        model.document = Document(layers=())
+        model.set_document_unbracketed(Document(layers=()))
         after = model.document
         self.assertEqual(len(before.layers), 1)
         self.assertEqual(len(after.layers), 0)
@@ -58,8 +59,8 @@ class ModelTest(absltest.TestCase):
     def test_undo_redo(self):
         model = Model()
         self.assertFalse(model.can_undo)
-        model.snapshot()
-        model.document = Document(layers=())
+        # An undoable edit through the self-bracketing chokepoint.
+        model.edit_document(Document(layers=()))
         self.assertTrue(model.can_undo)
         self.assertFalse(model.can_redo)
         model.undo()
@@ -71,15 +72,12 @@ class ModelTest(absltest.TestCase):
     def test_undo_clears_redo_on_new_edit(self):
         model = Model()
         layer = Layer(children=(), name="L1")
-        model.snapshot()
-        model.document = Document(layers=(layer,))
-        model.snapshot()
-        model.document = Document(layers=(layer, layer))
+        model.edit_document(Document(layers=(layer,)))
+        model.edit_document(Document(layers=(layer, layer)))
         model.undo()
         self.assertEqual(len(model.document.layers), 1)
         self.assertTrue(model.can_redo)
-        model.snapshot()
-        model.document = Document(layers=())
+        model.edit_document(Document(layers=()))
         self.assertFalse(model.can_redo)
 
     def test_undo_empty_stack(self):
@@ -101,15 +99,13 @@ class ModelTest(absltest.TestCase):
 
     def test_is_modified_after_committed_edit(self):
         model = Model()
-        model.snapshot()
-        model.document = Document(layers=())
+        model.edit_document(Document(layers=()))
         self.assertTrue(model.is_modified)
 
     def test_is_modified_false_after_undo_back_to_saved(self):
         model = Model()
         model.mark_saved()  # saved at journal_head 0
-        model.snapshot()
-        model.document = Document(layers=())
+        model.edit_document(Document(layers=()))
         self.assertTrue(model.is_modified)
         model.undo()
         self.assertFalse(
@@ -120,8 +116,7 @@ class ModelTest(absltest.TestCase):
 
     def test_is_modified_false_after_mark_saved(self):
         model = Model()
-        model.snapshot()
-        model.document = Document(layers=())
+        model.edit_document(Document(layers=()))
         self.assertTrue(model.is_modified)
         model.mark_saved()
         self.assertFalse(model.is_modified)
@@ -158,6 +153,68 @@ class ModelTest(absltest.TestCase):
         self.assertEqual(len(model.journal), 2)
         self.assertEqual(model.journal[1].txn_id, "txn-2")
         self.assertFalse(model.can_redo)
+
+
+class WriteChokepointTest(absltest.TestCase):
+    """OP_LOG.md Increment 1 — the enforced write chokepoint. Mirrors the Rust
+    ``set_document_outside_txn_panics`` test (jas_dioxus ``model.rs``) plus the
+    three-way split: ``set_document`` asserts a txn is open, ``edit_document``
+    self-brackets, ``set_document_unbracketed`` never asserts."""
+
+    def test_set_document_outside_txn_raises(self):
+        # The oracle: an undoable write with no open transaction trips the live
+        # in_txn assert (Python asserts are active under pytest; stripped under
+        # -O for production). Mirrors set_document_outside_txn_panics in Rust.
+        model = Model()
+        with self.assertRaises(AssertionError):
+            model.set_document(Document(layers=()))
+
+    def test_document_property_setter_outside_txn_raises(self):
+        # The bare property setter routes to set_document, so it is the same
+        # enforced undoable path — a bare assignment outside a txn also trips.
+        model = Model()
+        with self.assertRaises(AssertionError):
+            model.document = Document(layers=())
+
+    def test_set_document_inside_txn_succeeds(self):
+        model = Model()
+        model.begin_txn()
+        model.set_document(Document(layers=()))  # legal: _in_txn is open
+        model.commit_txn()
+        self.assertEqual(len(model.document.layers), 0)
+
+    def test_set_document_unbracketed_never_asserts(self):
+        # Sanctioned non-undoable write: legal with no open transaction and it
+        # does NOT advance the journal cursor (no undo step).
+        model = Model()
+        head = model.journal_head
+        model.set_document_unbracketed(Document(layers=()))
+        self.assertEqual(len(model.document.layers), 0)
+        self.assertEqual(model.journal_head, head)
+        self.assertFalse(model.can_undo)
+
+    def test_edit_document_self_brackets_when_no_txn_open(self):
+        # Standalone edit_document opens + commits its own one-step txn.
+        model = Model()
+        model.edit_document(Document(layers=()))
+        self.assertEqual(len(model.journal), 1)
+        self.assertEqual(model.journal_head, 1)
+        self.assertTrue(model.can_undo)
+        model.undo()
+        self.assertEqual(len(model.document.layers), 1)
+
+    def test_edit_document_joins_already_open_txn(self):
+        # Nested inside a caller's bracket, edit_document does NOT open its own
+        # txn — both writes land in the SAME single transaction (one undo step).
+        model = Model()
+        l = Layer(children=(), name="L1")
+        model.begin_txn()
+        model.edit_document(Document(layers=(l,)))
+        model.edit_document(Document(layers=(l, l)))
+        model.commit_txn()
+        self.assertEqual(len(model.journal), 1)  # one transaction, not two
+        model.undo()
+        self.assertEqual(len(model.document.layers), 1)  # back to pre-gesture
 
 
 class VersioningTest(absltest.TestCase):

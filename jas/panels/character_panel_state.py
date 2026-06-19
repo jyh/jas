@@ -90,8 +90,12 @@ def apply_character_panel_to_selection(store, model) -> None:
             new_tspans = tuple(apply_overrides_to_tspan_range(
                 list(elem.tspans), lo, hi, overrides, elem=elem))
             new_elem = replace(elem, tspans=new_tspans)
-            model.snapshot()
-            model.document = doc.replace_element(session.path, new_elem)
+            # Undoable edit (one self-bracketed undo step) via the chokepoint.
+            new_doc = doc.replace_element(session.path, new_elem)
+            if hasattr(model, "edit_document"):
+                model.edit_document(new_doc)
+            else:
+                model.document = new_doc
             return
 
     selection = getattr(doc, "selection", None) or []
@@ -113,8 +117,8 @@ def apply_character_panel_to_selection(store, model) -> None:
     if not target_paths:
         return
 
-    # Snapshot before the batch so undo reverts the whole apply.
-    model.snapshot()
+    # Build the whole batch, then commit it as ONE undoable edit (one undo
+    # step) via the self-bracketing chokepoint.
     for path in target_paths:
         elem = doc.get_element(path)
         if isinstance(elem, Text):
@@ -124,7 +128,11 @@ def apply_character_panel_to_selection(store, model) -> None:
         else:
             continue
         doc = doc.replace_element(path, new_elem)
-    model.document = doc
+    # Undoable edit (one self-bracketed undo step) via the chokepoint.
+    if hasattr(model, "edit_document"):
+        model.edit_document(doc)
+    else:
+        model.document = doc
 
 
 def build_panel_full_overrides(panel: dict) -> Tspan:

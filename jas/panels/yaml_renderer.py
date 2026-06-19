@@ -657,7 +657,8 @@ def _render_slider(el, store, ctx, dispatch_fn):
                     mode = ps.get("mode", "hsb")
                     color = _compute_helper(ps, mode)
                     if color is not None:
-                        model.snapshot()
+                        # set_active_color's Controller mutator self-brackets
+                        # via edit_document (one undo step).
                         set_active_color(color, model)
                 slider.sliderReleased.connect(_on_release)
         elif value_expr.startswith("dialog."):
@@ -2551,12 +2552,11 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     # when nothing would orphan).
                     if not _confirm_panel_delete_if_orphans(m, paths, widget):
                         return
-                    m.snapshot()
                     paths.sort(reverse=True)
                     new_doc = doc
                     for p in paths:
                         new_doc = new_doc.delete_element(p)
-                    m.document = new_doc
+                    m.edit_document(new_doc)
                     panel_selection.clear()
                     _rebuild()
         elif key == Qt.Key_A and meta:
@@ -2742,7 +2742,6 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                         _rebuild()
                         return
                     moved_elem = d.get_element(src)
-                    m.snapshot()
                     new_doc = d.delete_element(src)
                     # Adjust target path if src was before it at the same level
                     target = list(p)
@@ -2759,7 +2758,7 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     else:
                         target[-1] -= 1
                         new_doc = new_doc.insert_element_after(tuple(target), moved_elem)
-                    m.document = new_doc
+                    m.edit_document(new_doc)
             drag_source[0] = None
             drag_target[0] = None
             _rebuild()
@@ -2797,13 +2796,12 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                 if solo_state[0] and solo_state[0][0] == p:
                     # Restore saved
                     saved = solo_state[0][1]
-                    m.snapshot()
                     new_doc = d
                     for sp, sv in saved.items():
                         e = new_doc.get_element(sp)
                         if e is not None:
                             new_doc = new_doc.replace_element(sp, dc_replace(e, visibility=sv))
-                    m.document = new_doc
+                    m.edit_document(new_doc)
                     solo_state[0] = None
                 else:
                     saved = {}
@@ -2812,7 +2810,6 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                             e = d.get_element(sp)
                             if e is not None:
                                 saved[sp] = e.visibility
-                    m.snapshot()
                     new_doc = d
                     e0 = new_doc.get_element(p)
                     if e0 is not None and e0.visibility == Visibility.INVISIBLE:
@@ -2822,7 +2819,7 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                             e = new_doc.get_element(sp)
                             if e is not None:
                                 new_doc = new_doc.replace_element(sp, dc_replace(e, visibility=Visibility.INVISIBLE))
-                    m.document = new_doc
+                    m.edit_document(new_doc)
                     solo_state[0] = (p, saved)
             else:
                 solo_state[0] = None
@@ -2832,13 +2829,12 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     return
                 new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
                 new_e = dc_replace(e, visibility=new_vis)
-                m.snapshot()
                 new_doc = d.replace_element(p, new_e)
                 if new_vis == Visibility.INVISIBLE:
                     new_doc = dc_replace(new_doc, selection=frozenset(
                         es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
                     ))
-                m.document = new_doc
+                m.edit_document(new_doc)
             _rebuild()
         eye_btn.mousePressEvent = _on_eye_mouse
         row_layout.addWidget(eye_btn)
@@ -2858,7 +2854,6 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             was_locked = getattr(e, 'locked', False)
             new_locked = not was_locked
             is_cont = isinstance(e, Group)
-            m.snapshot()
             # Save/restore for containers
             if is_cont and not was_locked and hasattr(e, 'children'):
                 # Save children's lock states before locking
@@ -2883,7 +2878,7 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                 new_doc = dc_replace(new_doc, selection=frozenset(
                     es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
                 ))
-            m.document = new_doc
+            m.edit_document(new_doc)
             _rebuild()
         lock_btn.clicked.connect(_on_lock)
         row_layout.addWidget(lock_btn)
@@ -2924,8 +2919,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     e = d.get_element(p)
                     if isinstance(e, LayerCls):
                         new_e = dc_replace(e, name=edit.text())
-                        m.snapshot()
-                        m.document = d.replace_element(p, new_e)
+                        # Undoable edit (one self-bracketed undo step).
+                        m.edit_document(d.replace_element(p, new_e))
                 renaming_path[0] = None
                 _rebuild()
             name_edit.returnPressed.connect(_on_commit)
@@ -2962,7 +2957,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
             if m is None: return
             d = m.document
             new_sel = frozenset([ElementSelection.all(p)])
-            m.document = dc_replace(d, selection=new_sel)
+            # Selection-only: non-undoable (OP_LOG.md §7/§8).
+            m.set_document_unbracketed(dc_replace(d, selection=new_sel))
             _rebuild()
         sq.mousePressEvent = _on_select
         row_layout.addWidget(sq)

@@ -375,9 +375,11 @@ def apply_paragraph_panel_to_selection(store, model) -> None:
         any_change = True
 
     if any_change:
-        if hasattr(model, "snapshot"):
-            model.snapshot()
-        model.document = new_doc
+        # Undoable edit (one self-bracketed undo step) via the chokepoint.
+        if hasattr(model, "edit_document"):
+            model.edit_document(new_doc)
+        else:
+            model.document = new_doc
 
 
 def apply_paragraph_panel_mutual_exclusion(store, key, value) -> None:
@@ -519,9 +521,11 @@ def apply_justification_dialog_to_selection(model, v: JustificationDialogValues)
         new_doc = new_doc.replace_element(path, new_elem)
         any_change = True
     if any_change:
-        if hasattr(model, "snapshot"):
-            model.snapshot()
-        model.document = new_doc
+        # Undoable edit (one self-bracketed undo step) via the chokepoint.
+        if hasattr(model, "edit_document"):
+            model.edit_document(new_doc)
+        else:
+            model.document = new_doc
 
 
 # ── Phase 9: Hyphenation dialog OK commit ──────────────────
@@ -602,9 +606,11 @@ def apply_hyphenation_dialog_to_selection(model, store, v: HyphenationDialogValu
                 new_doc = new_doc.replace_element(path, new_elem)
                 any_change = True
             if any_change:
-                if hasattr(model, "snapshot"):
-                    model.snapshot()
-                model.document = new_doc
+                # Undoable edit (one self-bracketed undo step) via the chokepoint.
+                if hasattr(model, "edit_document"):
+                    model.edit_document(new_doc)
+                else:
+                    model.document = new_doc
 
     # Master mirror to panel state for HYPHENATE_CHECKBOX.
     if v.hyphenate is not None and store is not None:

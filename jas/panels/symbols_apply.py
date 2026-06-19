@@ -90,7 +90,7 @@ def apply_new_symbol(model) -> str | None:
     if ref_id is None:
         return None
 
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     Controller(model=model).make_symbol(path, master_id, ref_id)
     # make_symbol KEEPS an existing element id as the master key; resolve
     # which id actually became the master from the in-place instance's
@@ -117,7 +117,7 @@ def apply_place_instance(model, master_id: str | None) -> None:
     ref_id = _mint(existing)
     if ref_id is None:
         return
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     Controller(model=model).place_instance(master_id, ref_id)
 
 
@@ -133,5 +133,5 @@ def apply_delete_symbol(model, master_id: str | None) -> None:
     if model is None or not master_id:
         return
     from document.controller import Controller
-    model.snapshot()
+    # The Controller mutator self-brackets via edit_document (one undo step).
     Controller(model=model).delete_symbol(master_id)
