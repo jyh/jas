@@ -1229,7 +1229,14 @@ class yaml_tool (spec : tool_spec) = object (_self)
       let ctx = [("event", event)] in
       let guard = Doc_primitives.register_document ctrl#document in
       let platform_effects = Yaml_tool_effects.build ctrl in
-      Effects.run_effects ~platform_effects effects ctx store;
+      (* OP_LOG.md section 9 (Increment 3b-B): this dispatch is a production batch
+         — thread the Model so [run_effects] owns/commits the transaction the
+         doc.* handlers open, naming it with the tool event-handler verb so the
+         journal's [name=None] hole is closed for tool gestures. Mirrors the Rust
+         [run_effects] action_name at the tool event-handler call. *)
+      Effects.run_effects ~platform_effects
+        ~owner_model:(Some ctrl#model) ~action_name:(Some event_name)
+        effects ctx store;
       guard.restore ()
     end
 

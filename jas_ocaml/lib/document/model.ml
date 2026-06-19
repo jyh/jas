@@ -319,6 +319,13 @@ class model ?(document = Document.default_document ()) ?filename () =
        (0..=journal length). Test/inspection accessor. *)
     method journal_head : int = journal_head
 
+    (* True while an undoable transaction is open (between begin_txn and
+       commit_txn). Read by the effect runner's owner-bracket (OP_LOG.md section
+       9): a batch OWNS the transaction only if none was open when it started,
+       and by op_apply's lazy begin_txn (which is a no-op while one is already
+       open). Mirrors the Rust [Model.in_txn] / Swift [Model.isInTxn]. *)
+    method in_txn : bool = in_txn
+
     (* Open an undoable transaction: push the pre-edit checkpoint (the document
        and its paired index) onto the undo stack, exactly like snapshot but
        WITHOUT clearing the redo stack — the redo-clear happens at commit_txn,

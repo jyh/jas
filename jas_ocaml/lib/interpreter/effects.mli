@@ -17,13 +17,24 @@ type platform_effect =
     up for [dispatch:] and [open_dialog:] primitives.  [platform_effects]
     registers host-provided handlers keyed by effect name.
     [diagnostics] accumulates schema warnings/errors; defaults to a
-    throwaway ref if omitted. *)
+    throwaway ref if omitted.
+
+    [owner_model] / [action_name] thread the OP_LOG.md section 9 journal
+    owner-bracket (Increment 3b-B): when an [owner_model] is supplied and no
+    transaction is open at entry, this batch OWNS the transaction — it commits
+    once at the end (after the on_change hook), naming it with [action_name]
+    first, so every production action's edits form one named undo step. A nested
+    [run_effects] sees in_txn=true and does NOT name or commit. Omitting
+    [owner_model] (the default and the existing callsites) leaves the bracket
+    inert. *)
 val run_effects :
   ?actions:Yojson.Safe.t ->
   ?dialogs:Yojson.Safe.t ->
   ?schema:bool ->
   ?platform_effects:(string * platform_effect) list ->
   ?diagnostics:Schema.diagnostic list ref ->
+  ?owner_model:Model.model option ->
+  ?action_name:string option ->
   Yojson.Safe.t list ->
   (string * Yojson.Safe.t) list ->
   State_store.t ->

@@ -53,6 +53,14 @@ class controller : ?model:Model.model -> unit -> object
   method toggle_mask_linked_on_selection : unit
 end
 
+(** Resolve the current selection to the stable [common.id]s of the selected
+    elements, in document order (OP_LOG.md section 9 / Fork 4: the [targets] of
+    a journaled op). Id-less selected elements are silently dropped. One
+    definition reused by the production [op_apply] path and the cross-language
+    harness so both populate [targets] identically. Mirrors Rust
+    [controller::selection_to_ids]. *)
+val selection_to_ids : Document.document -> string list
+
 (** Return the mask on the first selected element, if any. *)
 val first_mask : Document.document -> Element.mask option
 

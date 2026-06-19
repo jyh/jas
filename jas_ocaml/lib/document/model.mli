@@ -79,6 +79,12 @@ class model : ?document:Document.document -> ?filename:string -> unit -> object
       appends; {!undo} / {!redo} move it. Drives {!is_modified}. *)
   method journal_head : int
 
+  (** True while an undoable transaction is open (between {!begin_txn} and
+      {!commit_txn}). Read by the effect runner's owner-bracket (OP_LOG.md
+      section 9) and by {!Op_apply.op_apply}'s lazy begin_txn. Mirrors the Rust
+      [Model.in_txn] / Swift [Model.isInTxn]. *)
+  method in_txn : bool
+
   (** Open an undoable transaction: push the pre-edit checkpoint onto the undo
       stack (like {!snapshot} but WITHOUT clearing redo — that moves to
       {!commit_txn}). Idempotent while a transaction is already open. *)
