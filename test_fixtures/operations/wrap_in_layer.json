@@ -1,0 +1,71 @@
+[
+  {
+    "name": "wrap_in_layer_two_top_level",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "collect_in_new_layer",
+        "ops": [
+          {
+            "op": "wrap_in_layer",
+            "paths": [[0], [1]],
+            "name": "Layer 1"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_layer_two_top_level_expected.json"
+  },
+  {
+    "name": "wrap_in_layer_with_id",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "collect_in_new_layer",
+        "ops": [
+          {
+            "op": "wrap_in_layer",
+            "paths": [[0], [1]],
+            "name": "Collected",
+            "id": "lyr-9"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_layer_with_id_expected.json"
+  },
+  {
+    "name": "wrap_in_layer_malformed_paths_skips",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "collect_in_new_layer",
+        "ops": [
+          {
+            "op": "wrap_in_layer",
+            "paths": 7,
+            "name": "Layer 1"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_layer_malformed_paths_skips_expected.json"
+  },
+  {
+    "name": "wrap_in_layer_empty_paths_noop",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "collect_in_new_layer",
+        "ops": [
+          {
+            "op": "wrap_in_layer",
+            "paths": [],
+            "name": "Layer 1"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_layer_empty_paths_noop_expected.json"
+  }
+]

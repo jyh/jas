@@ -605,7 +605,10 @@ mod tests {
                          "operations/structural_delete_at.json",
                          "operations/structural_delete_selection.json",
                          "operations/structural_insert_after.json",
-                         "operations/structural_insert_at.json"] {
+                         "operations/structural_insert_at.json",
+                         "operations/wrap_in_group.json",
+                         "operations/wrap_in_layer.json",
+                         "operations/unpack_group_at.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1710,6 +1713,132 @@ mod tests {
                     replay1, replay2,
                     "replay of '{}' is non-deterministic (value-in-op element must \
                      insert byte-identically with its literal id)",
+                    tc["name"].as_str().unwrap()
+                );
+            }
+        }
+    }
+
+    /// Group/layer wrapping verbs (OP_LOG.md §9 Phase P5): the highest-structural-
+    /// complexity verbs. Each is a MULTI-STEP mutation that must replay as ONE
+    /// deterministic op:
+    ///   - `wrap_in_group` collects the elements at `paths` in document order,
+    ///     reverse-deletes them, then inserts a new Group (carrying them as
+    ///     children) at the TOPMOST source index under the shared parent. The op
+    ///     carries the RESOLVED plain index arrays (`[[..],..]`) and, value-in-op,
+    ///     an optional literal container `id`.
+    ///   - `wrap_in_layer` is parallel but appends a new top-level Layer carrying
+    ///     the RESOLVED name LITERAL (never the `next_layer_name` expr — replay
+    ///     must not re-derive a possibly-colliding name) and an optional literal id.
+    ///   - `unpack_group_at` extracts a Group's children, deletes the group, and
+    ///     re-inserts the children at the vacated position with ascending indices
+    ///     (children keep their ids — no minting).
+    /// The checkpoint_equivalence gate (run by `assert_operation_test`) proves the
+    /// multi-step reconstructs the EXACT tree — child order, deletion order, and
+    /// insertion index all deterministic from the op — byte-identically on the
+    /// replay path. Malformed paths / missing groups SKIP (records nothing) without
+    /// panicking; an empty `paths` is a no-op that journals nothing.
+    #[test]
+    fn operation_wrap_in_group() {
+        run_operation_fixture("operations/wrap_in_group.json");
+    }
+
+    #[test]
+    fn operation_wrap_in_layer() {
+        run_operation_fixture("operations/wrap_in_layer.json");
+    }
+
+    #[test]
+    fn operation_unpack_group_at() {
+        run_operation_fixture("operations/unpack_group_at.json");
+    }
+
+    /// OP_LOG.md §9 Phase P5 — Fork-4 targets: `wrap_in_group` / `wrap_in_layer`
+    /// record the wrapped element ids PLUS the container id when the op assigns one
+    /// (value-in-op). `unpack_group_at` records the unpacked children's ids. The
+    /// byte-gate ignores targets, so this is the only place it is pinned.
+    #[test]
+    fn operation_wrap_unpack_records_id_targets() {
+        // wrap_in_group with id "grp-1": wrapped rects are id-less (two_rects.svg),
+        // so targets is just the assigned group id.
+        let cases: &[(&str, &str, &str, Vec<&str>)] = &[
+            ("operations/wrap_in_group.json", "wrap_in_group_with_id", "wrap_in_group",
+                vec!["grp-1"]),
+            ("operations/wrap_in_layer.json", "wrap_in_layer_with_id", "wrap_in_layer",
+                vec!["lyr-9"]),
+        ];
+        for (fixture, name, expected_verb, expected_targets) in cases {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            let tc = tests.as_array().unwrap().iter()
+                .find(|t| t["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("fixture case {name} not found"));
+            let model = run_operation_model(tc);
+            let last = model.journal().last().expect("a committed transaction");
+            assert_eq!(last.ops.len(), 1, "{name}: one wrap op journaled");
+            assert_eq!(last.ops[0].op, *expected_verb, "{name}: the journaled verb");
+            let expected: Vec<String> = expected_targets.iter().map(|s| s.to_string()).collect();
+            assert_eq!(last.ops[0].targets, expected,
+                "{name}: targets carry wrapped ids + the assigned container id");
+        }
+    }
+
+    /// OP_LOG.md §9 Phase P5 — malformed/no-op cases journal NOTHING (the op never
+    /// reaches record_op when nothing changed). Proves the hardened param parse +
+    /// effective-change guard: a malformed `paths`, an empty `paths`, a non-Group
+    /// target, and a missing path each leave the journal empty.
+    #[test]
+    fn operation_wrap_unpack_noop_journals_nothing() {
+        let cases: &[(&str, &str)] = &[
+            ("operations/wrap_in_group.json", "wrap_in_group_malformed_paths_skips"),
+            ("operations/wrap_in_group.json", "wrap_in_group_empty_paths_noop"),
+            ("operations/wrap_in_layer.json", "wrap_in_layer_malformed_paths_skips"),
+            ("operations/wrap_in_layer.json", "wrap_in_layer_empty_paths_noop"),
+            ("operations/unpack_group_at.json", "unpack_group_at_non_group_noop"),
+            ("operations/unpack_group_at.json", "unpack_group_at_missing_path_noop"),
+            ("operations/unpack_group_at.json", "unpack_group_at_malformed_path_skips"),
+        ];
+        for (fixture, name) in cases {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            let tc = tests.as_array().unwrap().iter()
+                .find(|t| t["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("fixture case {name} not found"));
+            let model = run_operation_model(tc);
+            // A no-op/malformed wrap mutates nothing, so the bracketing transaction
+            // is empty — and an empty transaction is dropped on commit (the
+            // commit_txn no-op rule, OP_LOG.md §9). The journal is therefore empty.
+            assert!(model.journal().is_empty(),
+                "{name}: a no-op/malformed wrap must journal NOTHING (got {:?})",
+                model.journal());
+        }
+    }
+
+    /// OP_LOG.md §9 Phase P5 — multi-step replay determinism: the SAME journal
+    /// replays to the SAME document TWICE. The multi-step reconstruction (sort
+    /// paths, reverse-delete, build container, insert at topmost index) is a pure
+    /// deterministic function of the recorded op — child order, deletion order, and
+    /// insertion index are all fixed by the op, with no entropy and no re-derived
+    /// name. Covers all three wrapping verbs.
+    #[test]
+    fn operation_wrap_unpack_replay_is_deterministic() {
+        for fixture in &[
+            "operations/wrap_in_group.json",
+            "operations/wrap_in_layer.json",
+            "operations/unpack_group_at.json",
+        ] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let model = run_operation_model(tc);
+                let setup = tc["setup_svg"].as_str().unwrap();
+                let head = model.journal_head();
+                let replay1 = replay_journal(setup, model.journal(), head);
+                let replay2 = replay_journal(setup, model.journal(), head);
+                assert_eq!(
+                    replay1, replay2,
+                    "replay of '{}' is non-deterministic (the multi-step wrap must \
+                     reconstruct the tree byte-identically from the op)",
                     tc["name"].as_str().unwrap()
                 );
             }

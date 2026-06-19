@@ -1,0 +1,67 @@
+[
+  {
+    "name": "wrap_in_group_two_siblings",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_group",
+        "ops": [
+          {
+            "op": "wrap_in_group",
+            "paths": [[0, 0], [0, 1]]
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_group_two_siblings_expected.json"
+  },
+  {
+    "name": "wrap_in_group_with_id",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_group",
+        "ops": [
+          {
+            "op": "wrap_in_group",
+            "paths": [[0, 0], [0, 1]],
+            "id": "grp-1"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_group_with_id_expected.json"
+  },
+  {
+    "name": "wrap_in_group_malformed_paths_skips",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_group",
+        "ops": [
+          {
+            "op": "wrap_in_group",
+            "paths": "not-an-array"
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_group_malformed_paths_skips_expected.json"
+  },
+  {
+    "name": "wrap_in_group_empty_paths_noop",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "new_group",
+        "ops": [
+          {
+            "op": "wrap_in_group",
+            "paths": []
+          }
+        ]
+      }
+    ],
+    "expected_json": "wrap_in_group_empty_paths_noop_expected.json"
+  }
+]

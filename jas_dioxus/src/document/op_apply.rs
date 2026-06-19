@@ -639,6 +639,224 @@ pub fn apply_insert_element_at(
     targets
 }
 
+// ── OP_LOG.md §9 Phase P5 — the group/layer wrapping verbs ──────────────────
+//
+// `wrap_in_group` / `wrap_in_layer` / `unpack_group_at` are the highest-structural-
+// complexity verbs to journal through `op_apply`: each is a MULTI-STEP mutation
+// (collect elements at paths, reverse-delete them, build a container, insert it)
+// that must replay as ONE deterministic op. The multi-step algorithm — sort paths
+// in document order, collect clones, delete in REVERSE order, build the container,
+// insert at the topmost source index (group) / append (layer) — lives ENTIRELY in
+// these three Model-level helpers, so the renderer.rs production handlers and the
+// op_apply replay arms share ONE mutation body (the byte-gate, OP_LOG.md §6, then
+// proves they agree). Each op carries enough to replay byte-identically:
+//   - `paths`: the RESOLVED plain index arrays (`[[..],..]`). The renderer
+//     represents path lists internally as `{__path__:[..]}` markers; it normalizes
+//     them to plain arrays BEFORE building the op, so this layer parses uniformly.
+//   - `name` (wrap_in_layer only): the RESOLVED name LITERAL. The renderer evals
+//     `active_document.next_layer_name` against the LIVE doc FIRST and journals the
+//     result; replay reuses that literal rather than re-deriving a possibly-
+//     colliding name from the (now-mutated) tree.
+//   - `id` (optional, value-in-op): when the action assigns a container id, it is a
+//     LITERAL in the op; absent ⇒ the container is born id-less.
+// Hardened reads: a malformed `paths` (not an array of index arrays) or a missing/
+// non-Group target SKIPS rather than panicking, and an empty/non-effective edit
+// journals nothing (the caller records only on `true`). Elements live in the
+// `document.layers` tree (paths, not ids), so `targets` carries the wrapped
+// element ids PLUS the container id when assigned (wrap_*), or the unpacked
+// children ids (unpack); the byte-gate ignores `targets` (merge metadata).
+
+/// Parse the `paths` op param — a JSON array of index arrays (`[[..],..]`) — into
+/// a `Vec<ElementPath>`. Returns `None` if the field is absent or is not an array
+/// of arrays of non-negative integers (a malformed payload skips the op rather
+/// than panicking). An empty top-level array yields `Some(vec![])`, which the
+/// caller treats as a no-op (journals nothing).
+fn parse_path_list(v: Option<&serde_json::Value>) -> Option<Vec<ElementPath>> {
+    let arr = v?.as_array()?;
+    let mut out: Vec<ElementPath> = Vec::with_capacity(arr.len());
+    for item in arr {
+        // Each item must itself be an array of indices; a non-array entry makes
+        // the whole list malformed (hard skip — no partial wraps).
+        let inner = item.as_array()?;
+        let mut path: ElementPath = Vec::with_capacity(inner.len());
+        for n in inner {
+            path.push(n.as_u64()? as usize);
+        }
+        out.push(path);
+    }
+    Some(out)
+}
+
+/// The `common.id` of an Element-like container's common props, helper for targets.
+fn opt_id(common: &crate::geometry::element::CommonProps) -> Option<String> {
+    common.id.clone()
+}
+
+/// Collect (in sorted document order) clones of the elements at `paths`, plus
+/// their ids for `targets`. Returns `(children, child_ids, sorted_paths)`. A path
+/// that resolves to nothing is silently dropped (matching the renderer's
+/// `get_element` filter); `sorted_paths` is the input sorted ascending (the order
+/// both the collect and the reverse-delete depend on).
+fn collect_children_for_wrap(
+    doc: &crate::document::document::Document,
+    paths: &[ElementPath],
+) -> (
+    Vec<std::rc::Rc<crate::geometry::element::Element>>,
+    Vec<String>,
+    Vec<ElementPath>,
+) {
+    use std::rc::Rc;
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    let mut children: Vec<Rc<crate::geometry::element::Element>> = Vec::new();
+    let mut ids: Vec<String> = Vec::new();
+    for p in &sorted {
+        if let Some(elem) = doc.get_element(p) {
+            if let Some(id) = element_id(elem) {
+                ids.push(id);
+            }
+            children.push(Rc::new(elem.clone()));
+        }
+    }
+    (children, ids, sorted)
+}
+
+/// Wrap the elements at `paths` in a new Group (OP_LOG.md §9 Phase P5). Collects
+/// clones in document order, reverse-deletes the sources, builds a Group carrying
+/// them as children (with the optional value-in-op `id`), and inserts it at the
+/// TOPMOST source index under the shared parent. Self-bracketing through
+/// `edit_document` (joins an open transaction; opens its own otherwise), so the
+/// renderer.rs handler and the op_apply arm share ONE mutation body. Returns
+/// `(changed, targets)`: `changed` is `false` (no-op, journals nothing) when no
+/// source element resolved or the topmost path is empty; `targets` is the wrapped
+/// child ids plus the group id when assigned.
+pub fn apply_wrap_in_group(
+    model: &mut Model,
+    paths: &[ElementPath],
+    id: Option<&str>,
+) -> (bool, Vec<String>) {
+    use crate::geometry::element::{Element, GroupElem, CommonProps};
+    let doc = model.document().clone();
+    let (children, child_ids, sorted) = collect_children_for_wrap(&doc, paths);
+    // No source resolved ⇒ nothing to wrap (no-op, journals nothing).
+    if children.is_empty() {
+        return (false, Vec::new());
+    }
+    // The insertion site is the topmost (smallest) source path: split into the
+    // shared parent + the final index. An empty topmost path is malformed.
+    let first = &sorted[0];
+    if first.is_empty() {
+        return (false, Vec::new());
+    }
+    let insert_parent: ElementPath = first[..first.len() - 1].to_vec();
+    let insert_index = first[first.len() - 1];
+    // Reverse-delete the sources (descending paths keep indices valid).
+    let mut new_doc = doc;
+    for p in sorted.iter().rev() {
+        new_doc = new_doc.delete_element(p);
+    }
+    // Build the group (value-in-op id when assigned, else id-less).
+    let common = CommonProps {
+        id: id.map(|s| s.to_string()),
+        ..Default::default()
+    };
+    let mut targets = child_ids;
+    if let Some(group_id) = opt_id(&common) {
+        targets.push(group_id);
+    }
+    let group = Element::Group(GroupElem {
+        children,
+        common,
+        isolated_blending: false,
+        knockout_group: false,
+    });
+    // Insert at the topmost index (empty parent ⇒ top-level layers array).
+    if insert_parent.is_empty() {
+        let idx = insert_index.min(new_doc.layers.len());
+        new_doc.layers.insert(idx, group);
+    } else {
+        let mut insert_path = insert_parent;
+        insert_path.push(insert_index);
+        new_doc = new_doc.insert_element_at(&insert_path, group);
+    }
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Wrap the elements at `paths` in a new top-level Layer with the RESOLVED `name`
+/// LITERAL (OP_LOG.md §9 Phase P5). Parallel to `apply_wrap_in_group` but always
+/// APPENDS the new Layer to the top-level `layers` array. The `name` is taken
+/// VERBATIM — the renderer resolved `next_layer_name` against the live doc before
+/// journaling, so replay never re-derives a colliding name. Optional value-in-op
+/// `id`. Returns `(changed, targets)`: `changed` is `false` (no-op) when no source
+/// resolved; `targets` is the wrapped child ids plus the layer id when assigned.
+pub fn apply_wrap_in_layer(
+    model: &mut Model,
+    paths: &[ElementPath],
+    name: &str,
+    id: Option<&str>,
+) -> (bool, Vec<String>) {
+    use crate::geometry::element::{Element, LayerElem, CommonProps};
+    let doc = model.document().clone();
+    let (children, child_ids, sorted) = collect_children_for_wrap(&doc, paths);
+    if children.is_empty() {
+        return (false, Vec::new());
+    }
+    let mut new_doc = doc;
+    for p in sorted.iter().rev() {
+        new_doc = new_doc.delete_element(p);
+    }
+    let common = CommonProps {
+        name: Some(name.to_string()),
+        id: id.map(|s| s.to_string()),
+        ..Default::default()
+    };
+    let mut targets = child_ids;
+    if let Some(layer_id) = opt_id(&common) {
+        targets.push(layer_id);
+    }
+    let new_layer = Element::Layer(LayerElem {
+        children,
+        common,
+        isolated_blending: false,
+        knockout_group: false,
+    });
+    new_doc.layers.push(new_layer);
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Unpack the Group at `path` (OP_LOG.md §9 Phase P5): extract its children,
+/// delete the group, and re-insert the children at the vacated position with
+/// ascending indices (children keep their ids — NO minting). Self-bracketing
+/// through `edit_document`. A non-Group target (or an absent path) is a no-op that
+/// journals nothing. Returns `(changed, targets)` where `targets` is the unpacked
+/// children's ids.
+pub fn apply_unpack_group_at(
+    model: &mut Model,
+    path: &ElementPath,
+) -> (bool, Vec<String>) {
+    use crate::geometry::element::Element;
+    let doc = model.document().clone();
+    // The target must be a Group; anything else (incl. an absent path) is a no-op.
+    let children: Vec<Element> = match doc.get_element(path) {
+        Some(Element::Group(g)) => g.children.iter().map(|rc| (**rc).clone()).collect(),
+        _ => return (false, Vec::new()),
+    };
+    let targets: Vec<String> = children.iter().filter_map(element_id).collect();
+    let mut new_doc = doc.delete_element(path);
+    // Insert children at the vacated position, ascending the final index so they
+    // land in their original document order at the group's former slot.
+    let mut insert_path = path.clone();
+    for child in children {
+        new_doc = new_doc.insert_element_at(&insert_path, child);
+        let last = insert_path.len() - 1;
+        insert_path[last] += 1;
+    }
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
 /// Read a JSON array-of-strings field (the `ids` payload for the move verbs).
 /// Non-string entries are dropped; a missing/non-array field yields `[]`.
 fn str_list_field(op: &serde_json::Value, key: &str) -> Vec<String> {
@@ -878,6 +1096,59 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             // index is a resolved usize; out-of-range clamps in the helper).
             let index = op.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             targets = apply_insert_element_at(model, &parent_path, index, element);
+        }
+        // Group/layer wrapping verbs (OP_LOG.md §9 Phase P5). The highest-
+        // structural-complexity verbs: each is a MULTI-STEP mutation (collect,
+        // reverse-delete, build container, insert) that replays as ONE
+        // deterministic op through the SHARED helpers (apply_wrap_in_group /
+        // apply_wrap_in_layer / apply_unpack_group_at), so the renderer.rs handlers
+        // and these arms share ONE mutation body. `paths` is parsed defensively
+        // (a malformed list SKIPS before any mutation; an empty list is a no-op
+        // that journals nothing). `wrap_in_layer` carries the RESOLVED name LITERAL
+        // (replay never re-derives next_layer_name). An optional value-in-op `id`
+        // assigns the container's id. A no-op edit (no source resolved / non-Group
+        // target) records nothing. targets carry the wrapped/unpacked element ids
+        // plus the container id when assigned.
+        "wrap_in_group" => {
+            let Some(paths) = parse_path_list(op.get("paths")) else {
+                return;
+            };
+            if paths.is_empty() {
+                return;
+            }
+            let id = str_field(op, "id");
+            let (changed, t) = apply_wrap_in_group(model, &paths, id);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        "wrap_in_layer" => {
+            let Some(paths) = parse_path_list(op.get("paths")) else {
+                return;
+            };
+            if paths.is_empty() {
+                return;
+            }
+            // The name is a RESOLVED literal; a missing name defaults to "" (the
+            // renderer always supplies the resolved next_layer_name).
+            let name = str_field(op, "name").unwrap_or("").to_string();
+            let id = str_field(op, "id");
+            let (changed, t) = apply_wrap_in_layer(model, &paths, &name, id);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        "unpack_group_at" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return;
+            };
+            let (changed, t) = apply_unpack_group_at(model, &path);
+            if !changed {
+                return;
+            }
+            targets = t;
         }
         "lock_selection" => {
             Controller::lock_selection(model);
