@@ -291,11 +291,12 @@ impl Model {
     /// ([`begin_txn`]/[`commit_txn`] or [`with_txn`]) first; `set_document`
     /// itself does not push onto the undo stack.
     ///
-    /// This is the committing write for UNDOABLE mutations. OP_LOG.md Increment 1
-    /// will (in a later sub-step) add a `debug_assert!(self.in_txn)` here so any
-    /// undoable edit that skipped the bracket fails the test suite; sanctioned
+    /// This is the committing write for UNDOABLE mutations. The
+    /// `debug_assert!(self.in_txn)` below is LIVE (OP_LOG.md Increment 1, enforced
+    /// chokepoint): any undoable edit that skipped the transaction bracket fails
+    /// the test suite, so the journal is complete by construction. Sanctioned
     /// non-undoable writes use [`set_document_unbracketed`] instead, which never
-    /// asserts. In this sub-step the two are behavior-identical.
+    /// asserts; self-bracketing mutators use [`edit_document`].
     pub fn set_document(&mut self, doc: Document) {
         debug_assert!(
             self.in_txn,
@@ -329,10 +330,10 @@ impl Model {
 
     /// Committing write for sanctioned NON-undoable mutations — selection-only
     /// and pure view-state changes, dialog-preview re-apply, and live drag
-    /// (OP_LOG.md §7/§8). Behavior-identical to [`set_document`] today; the
-    /// distinct name is what lets the future `in_txn` guard tell "deliberately
-    /// not undoable" from "forgot to open a transaction." No call site uses it
-    /// yet (later sub-steps route the non-undoable writes here).
+    /// (OP_LOG.md §7/§8). Same effect as [`set_document`] but the distinct name
+    /// is what lets the live `in_txn` guard in [`set_document`] tell "deliberately
+    /// not undoable" from "forgot to open a transaction": this path never asserts.
+    /// ~53 call sites route the non-undoable writes here.
     pub fn set_document_unbracketed(&mut self, doc: Document) {
         self.write_document(doc);
     }
@@ -1197,6 +1198,17 @@ mod tests {
 
     fn empty_doc() -> Document {
         Document { layers: vec![], selected_layer: 0, selection: vec![], ..Document::default() }
+    }
+
+    #[test]
+    #[should_panic(expected = "set_document outside a transaction")]
+    fn set_document_outside_txn_panics() {
+        // The enforced chokepoint (OP_LOG.md Increment 1): an undoable write that
+        // skipped the transaction bracket fails the test suite via the live
+        // debug_assert!(in_txn) in set_document. Non-undoable writes that need no
+        // bracket use set_document_unbracketed (no assert) instead.
+        let mut model = Model::default();
+        model.set_document(empty_doc()); // no begin_txn -> debug_assert fires
     }
 
     #[test]
