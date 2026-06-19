@@ -19,7 +19,7 @@ public enum ParagraphPanel {
                                 model: Model? = nil) {
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         case "toggle_hanging_punctuation":
             guard let model = model else { return }
             // Sync from selection so untouched fields keep current

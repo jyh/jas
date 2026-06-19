@@ -1218,127 +1218,16 @@ private func assertWorkspaceFixture(_ name: String, _ json: String) {
 
 // MARK: - Workspace operation equivalence tests
 
+/// Harness shim over the RUNTIME layout-op dispatcher (OP_LOG.md §12, Fork 5,
+/// Increment 3d-2). The per-verb mutation bodies — once duplicated here — now
+/// live in `layoutApply` (Sources/Workspace/LayoutApply.swift), which is the
+/// SAME dispatcher the production layout-mutation sites route through. The
+/// `workspace_operations/*.json` corpus replays through this shim, so harness
+/// and production exercise ONE dispatcher (the layout analogue of how the
+/// document corpus replays through op-apply). Kept as a thin wrapper so the
+/// existing `runWorkspaceOperationFixture` call site reads unchanged.
 private func applyWorkspaceOp(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
-    let name = op["op"] as! String
-    switch name {
-    // Panel/dock operations
-    case "toggle_group_collapsed":
-        layout.toggleGroupCollapsed(GroupAddr(
-            dockId: DockId(op["dock_id"] as! Int),
-            groupIdx: op["group_idx"] as! Int
-        ))
-    case "set_active_panel":
-        layout.setActivePanel(PanelAddr(
-            group: GroupAddr(
-                dockId: DockId(op["dock_id"] as! Int),
-                groupIdx: op["group_idx"] as! Int
-            ),
-            panelIdx: op["panel_idx"] as! Int
-        ))
-    case "close_panel":
-        layout.closePanel(PanelAddr(
-            group: GroupAddr(
-                dockId: DockId(op["dock_id"] as! Int),
-                groupIdx: op["group_idx"] as! Int
-            ),
-            panelIdx: op["panel_idx"] as! Int
-        ))
-    case "show_panel":
-        let kind = parsePanelKindOp(op["kind"] as! String)
-        layout.showPanel(kind)
-    case "reorder_panel":
-        layout.reorderPanel(
-            GroupAddr(
-                dockId: DockId(op["dock_id"] as! Int),
-                groupIdx: op["group_idx"] as! Int
-            ),
-            from: op["from"] as! Int,
-            to: op["to"] as! Int
-        )
-    case "move_panel_to_group":
-        layout.movePanelToGroup(
-            PanelAddr(
-                group: GroupAddr(
-                    dockId: DockId(op["from_dock_id"] as! Int),
-                    groupIdx: op["from_group_idx"] as! Int
-                ),
-                panelIdx: op["from_panel_idx"] as! Int
-            ),
-            to: GroupAddr(
-                dockId: DockId(op["to_dock_id"] as! Int),
-                groupIdx: op["to_group_idx"] as! Int
-            )
-        )
-    case "detach_group":
-        layout.detachGroup(
-            GroupAddr(
-                dockId: DockId(op["dock_id"] as! Int),
-                groupIdx: op["group_idx"] as! Int
-            ),
-            x: op["x"] as! Double,
-            y: op["y"] as! Double
-        )
-    case "redock":
-        layout.redock(DockId(op["dock_id"] as! Int))
-    // Pane operations
-    case "set_pane_position":
-        layout.panesMut { pl in
-            pl.setPanePosition(
-                PaneId(op["pane_id"] as! Int),
-                x: op["x"] as! Double,
-                y: op["y"] as! Double
-            )
-        }
-    case "tile_panes":
-        layout.panesMut { pl in
-            pl.tilePanes(collapsedOverride: nil)
-        }
-    case "toggle_canvas_maximized":
-        layout.panesMut { pl in
-            pl.toggleCanvasMaximized()
-        }
-    case "resize_pane":
-        layout.panesMut { pl in
-            pl.resizePane(
-                PaneId(op["pane_id"] as! Int),
-                width: op["width"] as! Double,
-                height: op["height"] as! Double
-            )
-        }
-    case "hide_pane":
-        let kind = parsePaneKindOp(op["kind"] as! String)
-        layout.panesMut { pl in
-            pl.hidePane(kind)
-        }
-    case "show_pane":
-        let kind = parsePaneKindOp(op["kind"] as! String)
-        layout.panesMut { pl in
-            pl.showPane(kind)
-        }
-    case "bring_pane_to_front":
-        layout.panesMut { pl in
-            pl.bringPaneToFront(PaneId(op["pane_id"] as! Int))
-        }
-    default:
-        Issue.record("Unknown workspace op: \(name)")
-    }
-}
-
-private func parsePanelKindOp(_ s: String) -> PanelKind {
-    switch s {
-    case "color": return .color
-    case "stroke": return .stroke
-    case "properties": return .properties
-    default: return .layers
-    }
-}
-
-private func parsePaneKindOp(_ s: String) -> PaneKind {
-    switch s {
-    case "toolbar": return .toolbar
-    case "dock": return .dock
-    default: return .canvas
-    }
+    layoutApply(&layout, op)
 }
 
 private func runWorkspaceOperationFixture(_ fixture: String) throws {
@@ -1378,6 +1267,93 @@ private func runWorkspaceOperationFixture(_ fixture: String) throws {
 
 @Test func testWorkspacePaneOps() throws {
     try runWorkspaceOperationFixture("pane_ops.json")
+}
+
+// MARK: - 3d-2 production-route tests (OP_LOG.md §12, Fork 5, Option B)
+//
+// These pin that the PRODUCTION layout-mutation sites route through the SAME
+// runtime `layoutApply` dispatcher the harness corpus replays through, and
+// that the dispatcher never crashes on malformed input.
+
+/// Production-route pin: drive a real production layout path — the Layers panel
+/// hamburger-menu `close_panel` command (`LayersPanel.dispatch`), the same
+/// handler the live UI invokes — against a real `WorkspaceLayout`, and assert
+/// (1) it produces the SAME layout (`workspaceToTestJson`) as feeding the
+/// equivalent op straight to the runtime `layoutApply` dispatcher, proving the
+/// production site routes through the one dispatcher; and (2) the dirty signal
+/// still fired — `needsSave()` flips true, which is the `bump()` the save path
+/// reads to persist. ZERO behavior change vs the pre-3d-2 direct
+/// `layout.closePanel(addr)` call.
+@Test func testLayoutProductionRouteClosePanel() {
+    // A real default layout, marked clean so a post-dispatch `needsSave()`
+    // proves the production handler's `bump()` (inside `closePanel`) fired.
+    var layout = WorkspaceLayout.defaultLayout()
+    layout.markSaved()
+    #expect(!layout.needsSave(), "precondition: layout must start clean")
+
+    // The Layers panel address in the default layout (dock 0, group 4, panel 1).
+    func findLayers(_ l: WorkspaceLayout) -> PanelAddr? {
+        for (_, dock) in l.anchored {
+            for (gi, group) in dock.groups.enumerated() {
+                if let pi = group.panels.firstIndex(of: .layers) {
+                    return PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi)
+                }
+            }
+        }
+        return nil
+    }
+    guard let addr = findLayers(layout) else {
+        Issue.record("Layers panel must exist in the default layout")
+        return
+    }
+
+    // Oracle: the same op fed straight to the runtime dispatcher.
+    var oracle = WorkspaceLayout.defaultLayout()
+    layoutApply(&oracle, opClosePanel(addr))
+    let expected = workspaceToTestJson(oracle)
+
+    // Production path: the Layers panel hamburger-menu dispatcher.
+    LayersPanel.dispatch("close_panel", addr: addr, layout: &layout)
+
+    let actual = workspaceToTestJson(layout)
+    #expect(actual == expected,
+        "production close_panel path diverged from the runtime layoutApply dispatcher")
+    #expect(layout.needsSave(),
+        "production close_panel must still bump the dirty signal (needsSave)")
+}
+
+/// No-panic pin: the runtime `layoutApply` dispatcher MUST tolerate malformed /
+/// garbage ops without crashing — production input is never trusted. Missing
+/// `op`, unknown verb, wrong-typed params, and missing required `kind` must all
+/// SKIP. A well-formed op on a fresh layout must still mutate (sanity),
+/// confirming the dispatcher ISN'T inert.
+@Test func testLayoutApplyNoPanicOnMalformed() {
+    var layout = WorkspaceLayout.defaultLayout()
+    layout.ensurePaneLayout(viewportW: 1200, viewportH: 800)
+
+    // None of these must crash; each is a no-op (skip).
+    let malformed: [[String: Any]] = [
+        [:],                                                       // no "op"
+        ["op": 42],                                                // "op" not a string
+        ["op": "totally_unknown_verb"],                           // unknown verb
+        ["op": "show_panel"],                                     // missing required "kind"
+        ["op": "show_panel", "kind": 7],                         // "kind" wrong type
+        ["op": "hide_pane"],                                      // missing required "kind"
+        ["op": "close_panel"],                                    // missing dock/group/panel
+        ["op": "set_pane_position", "pane_id": "x"],             // garbage param
+        ["op": "toggle_group_collapsed", "dock_id": -1],        // bad number
+        ["op": "redock", "dock_id": "nope"],                    // garbage param
+    ]
+    for op in malformed {
+        layoutApply(&layout, op) // must not crash
+    }
+
+    // A WELL-FORMED op must still mutate a fresh layout (dispatcher is live).
+    var fresh = WorkspaceLayout.defaultLayout()
+    let before = workspaceToTestJson(fresh)
+    layoutApply(&fresh, ["op": "toggle_group_collapsed", "dock_id": 0, "group_idx": 0])
+    let after = workspaceToTestJson(fresh)
+    #expect(before != after, "a well-formed op must still mutate — dispatcher is live")
 }
 
 // MARK: - Pane geometry algorithm test vectors

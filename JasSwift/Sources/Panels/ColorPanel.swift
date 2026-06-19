@@ -48,7 +48,7 @@ public enum ColorPanel {
 
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         case "invert_active_color":
             guard let model = model else { return }
             if let color = model.fillOnTop ? model.defaultFill?.color : model.defaultStroke?.color {

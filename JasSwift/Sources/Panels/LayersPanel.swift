@@ -39,7 +39,7 @@ public enum LayersPanel {
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         switch cmd {
-        case "close_panel": layout.closePanel(addr)
+        case "close_panel": layoutApply(&layout, opClosePanel(addr))
         case "toggle_all_layers_visibility",
              "toggle_all_layers_outline",
              "toggle_all_layers_lock",

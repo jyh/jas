@@ -16,7 +16,7 @@ public enum MagicWandPanel {
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout) {
         switch cmd {
-        case "close_panel": layout.closePanel(addr)
+        case "close_panel": layoutApply(&layout, opClosePanel(addr))
         // reset_magic_wand_panel flows through the yaml-driven
         // renderer dispatch path.
         default: break

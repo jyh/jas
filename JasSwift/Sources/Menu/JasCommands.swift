@@ -349,9 +349,14 @@ public struct JasCommands: Commands {
 
             if let ws = workspace {
                 Button("Tile") {
-                    ws.workspaceLayout.panesMut { pl in
-                        pl.tilePanes(collapsedOverride: nil)
-                    }
+                    // OP_LOG 3d-2: dispatch through the shared layout-op runtime.
+                    // Swift's menu Tile neither clears canvas maximization nor
+                    // applies a collapsed-dock override, so both params are
+                    // omitted — byte-identical to the prior
+                    // `pl.tilePanes(collapsedOverride: nil)` call and matching
+                    // the bare corpus `tile_panes` path.
+                    layoutApply(&ws.workspaceLayout,
+                                opTilePanes(setCanvasMaximized: nil, overridePane: nil))
                     ws.workspaceLayout.saveIfNeeded()
                 }
 
@@ -384,12 +389,13 @@ public struct JasCommands: Commands {
         let visible = ws.workspaceLayout.panes()?.isPaneVisible(kind) ?? true
         let prefix = visible ? "\u{2713} " : "    "
         Button(prefix + label) {
-            ws.workspaceLayout.panesMut { pl in
-                if pl.isPaneVisible(kind) {
-                    pl.hidePane(kind)
-                } else {
-                    pl.showPane(kind)
-                }
+            // OP_LOG 3d-2: resolve the live visibility against the pane layout,
+            // then dispatch hide/show through the shared layout-op runtime
+            // (only when a pane layout exists, matching the prior `panesMut`
+            // guard). Byte-identical to the prior in-`panesMut` branch.
+            if let visibleNow = ws.workspaceLayout.panes()?.isPaneVisible(kind) {
+                let op = visibleNow ? opHidePane(kind) : opShowPane(kind)
+                layoutApply(&ws.workspaceLayout, op)
             }
             ws.workspaceLayout.saveIfNeeded()
         }
@@ -401,12 +407,15 @@ public struct JasCommands: Commands {
         let prefix = visible ? "\u{2713} " : "    "
         Button(prefix + label) {
             guard let ws = workspace else { return }
+            // OP_LOG 3d-2: dispatch close/show through the shared layout-op
+            // runtime. Byte-identical to the prior direct
+            // `closePanel(addr)` / `showPanel(kind)` calls.
             if ws.workspaceLayout.isPanelVisible(kind) {
                 if let addr = findPanel(ws.workspaceLayout, kind) {
-                    ws.workspaceLayout.closePanel(addr)
+                    layoutApply(&ws.workspaceLayout, opClosePanel(addr))
                 }
             } else {
-                ws.workspaceLayout.showPanel(kind)
+                layoutApply(&ws.workspaceLayout, opShowPanel(kind))
             }
             ws.workspaceLayout.saveIfNeeded()
         }

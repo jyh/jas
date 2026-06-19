@@ -67,7 +67,7 @@ public enum OpacityPanel {
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         case "toggle_opacity_thumbnails":
             layout.opacityPanel.thumbnailsHidden.toggle()
         case "toggle_opacity_options":

@@ -14,7 +14,7 @@ public enum AlignPanel {
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
-        if cmd == "close_panel" { layout.closePanel(addr); return }
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)); return }
         guard let model = model else { return }
         // Pin the active panel id so set_panel_state effects target
         // the Align panel rather than whichever panel rendered most

@@ -33,7 +33,7 @@ public enum SymbolsPanel {
                                  model: Model? = nil) {
         switch cmd {
         case "close_panel":
-            layout.closePanel(addr)
+            layoutApply(&layout, opClosePanel(addr))
         case "new_symbol", "place_instance", "delete_symbol_action":
             guard let m = model else { return }
             dispatchSymbolAction(cmd, model: m)
