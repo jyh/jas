@@ -31,9 +31,16 @@ import Foundation
 func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     var effects: [String: PlatformEffect] = [:]
 
-    // doc.snapshot — push current document onto the undo stack.
+    // doc.snapshot — open the journal transaction (OP_LOG.md §9, Increment
+    // 3b-B). `beginTxn` pushes the pre-edit undo checkpoint exactly like
+    // `snapshot` did (so undo still works), but leaves the transaction OPEN so
+    // the subsequent journaled verbs (select_rect / copy_selection /
+    // move_selection) record into it; the batch owner (YamlTool.dispatch via
+    // runEffects) names + commits it. Mirrors Rust's `doc.snapshot` →
+    // `begin_txn`. `beginTxn` is a no-op while a transaction is already open, and
+    // the no-op rule in `commitTxn` drops a zero-edit gesture's checkpoint.
     effects["doc.snapshot"] = { _, _, _ in
-        model.snapshot()
+        model.beginTxn()
         return nil
     }
 
@@ -86,12 +93,19 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     }
 
     // doc.translate_selection — { dx, dy } (either numbers or expressions).
+    // OP_LOG.md §9 (Increment 3b-B): one of the THREE production-journaled verbs.
+    // Route through `opApply` (which calls the SAME `Controller.moveSelection`,
+    // so the document mutation is byte-identical) so the move is journaled as
+    // `move_selection` with pre-mutation `targets`. The op_apply call is INSIDE
+    // the closure, reading the live selection at CALL TIME (the closure captures
+    // `model` by reference). Mirrors Rust's `doc.translate_selection`.
     effects["doc.translate_selection"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let dx = evalNumber(args["dx"], store: store, ctx: ctx)
         let dy = evalNumber(args["dy"], store: store, ctx: ctx)
         if dx == 0 && dy == 0 { return nil }
-        Controller(model: model).moveSelection(dx: dx, dy: dy)
+        opApply(model, Controller(model: model),
+                ["op": "move_selection", "dx": dx, "dy": dy])
         return nil
     }
 
@@ -317,21 +331,38 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
 
     // doc.copy_selection — { dx, dy }. Duplicates the selected elements
     // at an offset and reselects the copies.
+    // OP_LOG.md §9 (Increment 3b-B): one of the THREE production-journaled verbs.
+    // Route through `opApply` (same `Controller.copySelection`, byte-identical
+    // mutation) so the copy is journaled as `copy_selection` with pre-mutation
+    // source `targets`. (The copy is born id-less via `clearingIds()`, so a
+    // following move's targets are correctly empty.) Mirrors Rust's
+    // `doc.copy_selection`.
     effects["doc.copy_selection"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let dx = evalNumber(args["dx"], store: store, ctx: ctx)
         let dy = evalNumber(args["dy"], store: store, ctx: ctx)
-        Controller(model: model).copySelection(dx: dx, dy: dy)
+        opApply(model, Controller(model: model),
+                ["op": "copy_selection", "dx": dx, "dy": dy])
         return nil
     }
 
     // doc.select_in_rect — { x1, y1, x2, y2, additive }. Uses the
     // axis-aligned box between (x1,y1) and (x2,y2); additive bool
     // maps to the Controller's `extend` flag.
+    // OP_LOG.md §9 (Increment 3b-B): the keystone of the THREE production-
+    // journaled verbs — `select_rect` records `targets` (resolved AFTER the
+    // Controller call), which `captureRecipe` seeds its working set from (empty
+    // targets ⇒ empty recipe). CRITICAL PARAM-SHAPE TRANSLATION: the YAML
+    // marquee delivers corner coords `x1/y1/x2/y2` + `additive`, but the
+    // journaled `select_rect` verb (and thus replay / `opApply`) expects
+    // `x/y/width/height` + `extend`. Translate here so the journaled op replays
+    // BYTE-IDENTICALLY through the same `Controller.selectRect`.
     effects["doc.select_in_rect"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let (rx, ry, rw, rh, additive) = normalizeRectArgs(args, store: store, ctx: ctx)
-        Controller(model: model).selectRect(x: rx, y: ry, width: rw, height: rh, extend: additive)
+        opApply(model, Controller(model: model),
+                ["op": "select_rect", "x": rx, "y": ry,
+                 "width": rw, "height": rh, "extend": additive])
         return nil
     }
 

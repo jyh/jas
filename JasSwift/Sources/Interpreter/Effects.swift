@@ -31,8 +31,18 @@ func runEffects(
     dialogs: [String: Any]? = nil,
     platformEffects: [String: PlatformEffect] = [:],
     schema: Bool = false,
+    model: Model? = nil,
+    actionName: String? = nil,
     diagnostics: inout [Diagnostic]
 ) {
+    // OP_LOG.md §9 (Increment 3b-B): this batch OWNS the journal transaction
+    // only if none was open when it started — so a reentrant nested runEffects
+    // (let/in, then/else, foreach, dispatch, on_change) does NOT name or commit
+    // the outer's transaction. The owner commits once at the end, spanning every
+    // effect in this batch into a single undo step. `model` is nil on the
+    // resolver-unaware call paths (panels that don't journal, the convenience
+    // overload), where this whole bracket is inert. Mirrors Rust's `owns_txn`.
+    let ownsTxn = model.map { !$0.isInTxn } ?? false
     // Thread ctx through sibling effects: `let:` extends ctx for
     // subsequent siblings; nested lists (then/else/do) recurse with
     // their own ctx so bindings don't leak back.
@@ -83,10 +93,15 @@ func runEffects(
                     let val = evalExpr(exprV, store: store, ctx: extended)
                     bind(&extended, name, val)
                 }
+                // Nested runEffects (let/in): `model` rides along so an op
+                // applied here records into the owner's open transaction, but
+                // `actionName: nil` (and `ownsTxn == false` here) keeps naming
+                // + commit with the owning batch. OP_LOG.md §9.
                 runEffects(inEffects, ctx: extended, store: store,
                            actions: actions, dialogs: dialogs,
                            platformEffects: platformEffects,
-                           schema: schema, diagnostics: &diagnostics)
+                           schema: schema, model: model, actionName: nil,
+                           diagnostics: &diagnostics)
                 continue
             }
             for (name, exprV) in bindings {
@@ -106,10 +121,12 @@ func runEffects(
                 var iterCtx = threadedCtx
                 iterCtx[varName] = item.value
                 iterCtx["_index"] = i
+                // Nested runEffects (foreach body): owner keeps naming/commit.
                 runEffects(body, ctx: iterCtx, store: store,
                            actions: actions, dialogs: dialogs,
                            platformEffects: platformEffects,
-                           schema: schema, diagnostics: &diagnostics)
+                           schema: schema, model: model, actionName: nil,
+                           diagnostics: &diagnostics)
             }
             continue
         }
@@ -131,7 +148,7 @@ func runEffects(
         if handled { continue }
         runOne(effect, ctx: threadedCtx, store: store, actions: actions,
                dialogs: dialogs, platformEffects: platformEffects,
-               schema: schema, diagnostics: &diagnostics)
+               schema: schema, model: model, diagnostics: &diagnostics)
     }
     // Dialog on_change post-batch hook. Fires the action declared on
     // the open dialog's on_change field whenever this batch mutated
@@ -139,30 +156,50 @@ func runEffects(
     // Re-entrancy guarded so the action's effects do not re-fire.
     // See SCALE_TOOL.md §Preview.
     if !store.isFiringOnChange() && store.takeDialogDirty() {
-        if let actionName = store.getDialogOnChange() {
+        if let onChangeAction = store.getDialogOnChange() {
             store.setFiringOnChange(true)
-            let dispatchEffect: [String: Any] = ["dispatch": actionName]
+            let dispatchEffect: [String: Any] = ["dispatch": onChangeAction]
+            // on_change runs inside the owning batch's transaction (model rides
+            // along); it does not name/commit (ownsTxn is false in the nested
+            // dispatch).
             runOne(dispatchEffect, ctx: threadedCtx, store: store,
                    actions: actions, dialogs: dialogs,
                    platformEffects: platformEffects,
-                   schema: schema, diagnostics: &diagnostics)
+                   schema: schema, model: model, diagnostics: &diagnostics)
             store.setFiringOnChange(false)
         }
     }
+    // OP_LOG.md §9 (Increment 3b-B): commit the transaction this batch opened
+    // (if any), making the whole action one undo step and stamping it with its
+    // action/event verb so the journal's `name=None` legibility hole is closed
+    // for ALL actions, not just the three op-journaled verbs. `nameTxn` /
+    // `commitTxn` are no-ops if no transaction was opened in this batch (a
+    // no-edit gesture stays anonymous), and inert when `model` is nil.
+    if ownsTxn, let m = model {
+        if let an = actionName { m.nameTxn(an) }
+        m.commitTxn()
+    }
 }
 
-/// Convenience overload for callers that don't need diagnostics.
+/// Convenience overload for callers that don't need diagnostics. `model` /
+/// `actionName` thread the OP_LOG.md §9 journal owner-bracket: the owning batch
+/// (a tool gesture or a panel action dispatch) passes the live Model and the
+/// gesture/action verb so the production transaction is journaled + named; all
+/// other callers default to nil (no journaling, no behavior change).
 func runEffects(
     _ effects: [Any],
     ctx: [String: Any],
     store: StateStore,
     actions: [String: Any]? = nil,
     dialogs: [String: Any]? = nil,
-    platformEffects: [String: PlatformEffect] = [:]
+    platformEffects: [String: PlatformEffect] = [:],
+    model: Model? = nil,
+    actionName: String? = nil
 ) {
     var diags: [Diagnostic] = []
     runEffects(effects, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
-               platformEffects: platformEffects, schema: false, diagnostics: &diags)
+               platformEffects: platformEffects, schema: false,
+               model: model, actionName: actionName, diagnostics: &diags)
 }
 
 // MARK: - Internal
@@ -255,6 +292,7 @@ private func runOne(
     dialogs: [String: Any]?,
     platformEffects: [String: PlatformEffect] = [:],
     schema: Bool = false,
+    model: Model? = nil,
     diagnostics: inout [Diagnostic]
 ) {
     // set: { key: expr, ... }
@@ -410,16 +448,20 @@ private func runOne(
         let result = evaluate(condExpr, context: evalCtx)
         if result.toBool() {
             if !thenEffects.isEmpty {
+                // Nested branch: model rides along (ops join the owner's txn);
+                // actionName: nil so the owner names/commits. OP_LOG.md §9.
                 runEffects(thenEffects, ctx: ctx, store: store,
                            actions: actions, dialogs: dialogs,
                            platformEffects: platformEffects,
-                           schema: schema, diagnostics: &diagnostics)
+                           schema: schema, model: model, actionName: nil,
+                           diagnostics: &diagnostics)
             }
         } else if !elseEffects.isEmpty {
             runEffects(elseEffects, ctx: ctx, store: store,
                        actions: actions, dialogs: dialogs,
                        platformEffects: platformEffects,
-                       schema: schema, diagnostics: &diagnostics)
+                       schema: schema, model: model, actionName: nil,
+                       diagnostics: &diagnostics)
         }
         return
     }
@@ -509,9 +551,15 @@ private func runOne(
                 }
                 dispatchCtx["param"] = resolved
             }
+            // OP_LOG.md §9: name the transaction with the dispatched
+            // actions.yaml verb. If this dispatch is the owner (no outer
+            // transaction open), the inner runEffects' owner-bracket stamps the
+            // verb; if it is nested under an outer owner, that bracket sees
+            // ownsTxn == false and skips, so the outer owner names it.
             runEffects(actionEffects, ctx: dispatchCtx, store: store, actions: actions, dialogs: dialogs,
                        platformEffects: platformEffects,
-                       schema: schema, diagnostics: &diagnostics)
+                       schema: schema, model: model, actionName: actionName,
+                       diagnostics: &diagnostics)
         }
         return
     }

@@ -1067,10 +1067,17 @@ public enum LayersPanel {
         // transition to show the overlay. ``dialogs`` must be
         // supplied for open_dialog to locate the dialog definition.
         let dialogs = ws.data["dialogs"] as? [String: Any]
+        // OP_LOG.md §9 (Increment 3b-B): name this panel-action dispatch site so
+        // any transaction it opens is stamped with the actions.yaml verb (the
+        // name-for-all-actions part of 3b-B). The Layers-panel mutators use the
+        // snapshot path (`snapshot` handler) and journal nothing in v1, so
+        // `nameTxn`/`commitTxn` are inert here today — but the site is correctly
+        // wired for when these AppState-level handlers consolidate onto opApply.
         runEffects(effects, ctx: ctx, store: model.stateStore,
                    actions: actions,
                    dialogs: dialogs,
-                   platformEffects: platformEffects)
+                   platformEffects: platformEffects,
+                   model: model, actionName: actionName)
     }
 
     public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {

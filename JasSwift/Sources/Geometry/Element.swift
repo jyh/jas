@@ -835,20 +835,34 @@ public enum Element: Equatable {
             return self
         }
         switch self {
+        // Every shape reconstruction below preserves ALL common props
+        // (name / id / visibility / blendMode / mask / gradients), mirroring
+        // Rust `move_control_points` which clones the element / `common`. A move
+        // must keep the element's stable identity (OP_LOG.md §9 / Fork 4: a
+        // journaled `move_selection` resolves `targets` from the moved element's
+        // `common.id`) — dropping the id here silently broke the second drag
+        // frame's targets and the document's id.
         case .line(let v):
             return .line(Line(
                 x1: v.x1 + (kind.contains(0) ? dx : 0),
                 y1: v.y1 + (kind.contains(0) ? dy : 0),
                 x2: v.x2 + (kind.contains(1) ? dx : 0),
                 y2: v.y2 + (kind.contains(1) ? dy : 0),
-                stroke: v.stroke, opacity: v.opacity, transform: v.transform,
-                locked: v.locked))
+                stroke: v.stroke, widthPoints: v.widthPoints,
+                opacity: v.opacity, transform: v.transform,
+                locked: v.locked,
+                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
         case .rect(let v):
             if kind.isAll(total: 4) {
                 return .rect(Rect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
                                      rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked))
+                                     locked: v.locked,
+                                     visibility: v.visibility, blendMode: v.blendMode,
+                                     mask: v.mask, fillGradient: v.fillGradient,
+                                     strokeGradient: v.strokeGradient,
+                                     name: v.name, id: v.id))
             }
             var pts = [(v.x, v.y), (v.x + v.width, v.y),
                        (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
@@ -858,13 +872,21 @@ public enum Element: Equatable {
             return .polygon(Polygon(points: pts,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked))
+                                       locked: v.locked,
+                                       visibility: v.visibility, blendMode: v.blendMode,
+                                       mask: v.mask, fillGradient: v.fillGradient,
+                                       strokeGradient: v.strokeGradient,
+                                       name: v.name, id: v.id))
         case .circle(let v):
             if kind.isAll(total: 4) {
                 return .circle(Circle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
                                          fill: v.fill, stroke: v.stroke,
                                          opacity: v.opacity, transform: v.transform,
-                                         locked: v.locked))
+                                         locked: v.locked,
+                                         visibility: v.visibility, blendMode: v.blendMode,
+                                         mask: v.mask, fillGradient: v.fillGradient,
+                                         strokeGradient: v.strokeGradient,
+                                         name: v.name, id: v.id))
             }
             var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
                        (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
@@ -877,13 +899,21 @@ public enum Element: Equatable {
             return .circle(Circle(cx: ncx, cy: ncy, r: nr,
                                      fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked))
+                                     locked: v.locked,
+                                     visibility: v.visibility, blendMode: v.blendMode,
+                                     mask: v.mask, fillGradient: v.fillGradient,
+                                     strokeGradient: v.strokeGradient,
+                                     name: v.name, id: v.id))
         case .ellipse(let v):
             if kind.isAll(total: 4) {
                 return .ellipse(Ellipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
                                            fill: v.fill, stroke: v.stroke,
                                            opacity: v.opacity, transform: v.transform,
-                                           locked: v.locked))
+                                           locked: v.locked,
+                                           visibility: v.visibility, blendMode: v.blendMode,
+                                           mask: v.mask, fillGradient: v.fillGradient,
+                                           strokeGradient: v.strokeGradient,
+                                           name: v.name, id: v.id))
             }
             var cps = [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                        (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
@@ -896,7 +926,11 @@ public enum Element: Equatable {
                                        rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked))
+                                       locked: v.locked,
+                                       visibility: v.visibility, blendMode: v.blendMode,
+                                       mask: v.mask, fillGradient: v.fillGradient,
+                                       strokeGradient: v.strokeGradient,
+                                       name: v.name, id: v.id))
         case .polygon(let v):
             let newPoints = v.points.enumerated().map { (i, pt) in
                 kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
@@ -904,7 +938,11 @@ public enum Element: Equatable {
             return .polygon(Polygon(points: newPoints,
                                        fill: v.fill, stroke: v.stroke,
                                        opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked))
+                                       locked: v.locked,
+                                       visibility: v.visibility, blendMode: v.blendMode,
+                                       mask: v.mask, fillGradient: v.fillGradient,
+                                       strokeGradient: v.strokeGradient,
+                                       name: v.name, id: v.id))
         case .path(let v):
             var cmds = v.d
             var anchorIdx = 0

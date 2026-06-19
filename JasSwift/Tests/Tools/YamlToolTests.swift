@@ -194,3 +194,37 @@ private func simpleSpec(_ id: String, _ handlers: [String: [Any]],
     tool.onPress(ctx, x: 5, y: 7, shift: false, alt: false)
     #expect(model.document.layers[0].children.count == 1)
 }
+
+// MARK: - Committed transaction name (OP_LOG.md §9, Increment 3b-B)
+
+/// Regression for the dispatch-derived txn name: YamlTool.dispatch must name
+/// the committed production transaction "<tool-id> <event>" (e.g.
+/// "mover on_mousemove"), NOT the bare event name. Rust's
+/// YamlTool::dispatch does `format!("{} {}", self.spec.id, event_name)`; the
+/// raw event alone diverges from the shared goldens for every real gesture.
+/// The production-capture harness injects `action_name` directly and so could
+/// not catch this — this drives dispatch end-to-end.
+@Test func yamlToolDispatchNamesTxnWithToolIdPrefix() {
+    // Handler: snapshot (opens the lazy txn) → select the rect by rect →
+    // translate it (journals move_selection, so the txn has a net change and
+    // commits with a name).
+    let tool = YamlTool.fromWorkspaceTool([
+        "id": "mover",
+        "handlers": ["on_mousemove": [
+            ["doc.snapshot": NSNull()],
+            ["doc.select_in_rect":
+                ["x1": -5, "y1": -5, "x2": 50, "y2": 50, "additive": false]],
+            ["doc.translate_selection": ["dx": 5, "dy": 0]],
+        ]],
+    ])!
+    let model = Model(document: Document(
+        layers: [Layer(children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])],
+        selectedLayer: 0, selection: []
+    ))
+    let ctx = makeCtx(model: model)
+    tool.onMove(ctx, x: 5, y: 0, shift: false, dragging: true)
+
+    #expect(model.journal.count == 1, "one production transaction committed")
+    #expect(model.journal.first?.name == "mover on_mousemove",
+            "committed txn must carry the tool-id prefix, not the bare event")
+}
