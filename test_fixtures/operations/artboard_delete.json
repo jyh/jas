@@ -1,0 +1,28 @@
+[
+  {
+    "name": "artboard_delete",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "delete_artboard_from_dialog",
+        "ops": [
+          { "op": "delete_artboard_by_id", "id": "ab2" }
+        ]
+      }
+    ],
+    "expected_json": "artboard_delete_expected.json"
+  },
+  {
+    "name": "artboard_delete_missing_noop",
+    "setup_svg": "two_artboards.svg",
+    "txns": [
+      {
+        "name": "delete_artboard_from_dialog",
+        "ops": [
+          { "op": "delete_artboard_by_id", "id": "nope" }
+        ]
+      }
+    ],
+    "expected_json": "artboard_delete_missing_noop_expected.json"
+  }
+]

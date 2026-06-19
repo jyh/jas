@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" viewBox="0 0 96 96" width="96" height="96">
+  <sodipodi:namedview id="namedview1">
+    <inkscape:page x="0" y="0" width="96" height="96" id="ab1" inkscape:label="Board One"/>
+    <inkscape:page x="120" y="0" width="96" height="96" id="ab2" inkscape:label="Board Two"/>
+    <inkscape:page x="240" y="0" width="96" height="96" id="ab3" inkscape:label="Board Three"/>
+  </sodipodi:namedview>
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <rect x="0" y="0" width="96" height="96" fill="rgb(255,0,0)" stroke="none"/>
+  </g>
+</svg>
