@@ -595,7 +595,8 @@ mod tests {
         for fixture in &["operations/select_and_move.json", "operations/undo_redo_laws.json",
                          "operations/controller_ops.json",
                          "operations/tspan_ops.json",
-                         "operations/symbols_ops.json"] {
+                         "operations/symbols_ops.json",
+                         "operations/print_config_setters.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1550,6 +1551,18 @@ mod tests {
     #[test]
     fn operation_boolean_ops() {
         run_operation_fixture("operations/boolean_ops.json");
+    }
+
+    /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
+    /// print-config verbs journal real ops through `op_apply`. The fixtures span
+    /// all four target structs (document_setup, print_preferences root,
+    /// output.inks[index], graphics/color_management/marks/output/advanced) plus
+    /// a type-mismatch skip case. The checkpoint_equivalence gate (run by
+    /// `assert_operation_test`) proves each journaled op replays byte-identically
+    /// to the snapshot-path document — i.e. the arm both mutates and replays.
+    #[test]
+    fn operation_print_config_setters() {
+        run_operation_fixture("operations/print_config_setters.json");
     }
 
     // ---------------------------------------------------------------

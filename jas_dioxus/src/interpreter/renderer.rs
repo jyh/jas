@@ -2617,353 +2617,65 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.set_print_preferences_field: { field, value }  — PRINT.md §1B
-    if let Some(spec) = eff.get("doc.set_print_preferences_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::{
-            artboard_range_mode_from, media_size_from, orientation_from, print_layers_from,
-            scaling_mode_from,
-        };
-        // Borrow once and dispatch by field name. Type mismatches
-        // (string-to-bool etc) silently skip the update — matches
-        // doc.set_document_setup_field's defensiveness.
-        let p = &mut new_doc.print_preferences;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("preset_name", super::expr_types::Value::Str(s)) => p.preset_name = s.clone(),
-            ("printer_name", super::expr_types::Value::Str(s)) => {
-                p.printer_name = if s.is_empty() { None } else { Some(s.clone()) };
-            }
-            ("printer_name", _) if matches!(value_val, super::expr_types::Value::Number(_) | super::expr_types::Value::Bool(_)) => applied = false,
-            ("copies", super::expr_types::Value::Number(n)) => p.copies = (*n as i64).max(0) as u32,
-            ("collate", super::expr_types::Value::Bool(b)) => p.collate = *b,
-            ("reverse_order", super::expr_types::Value::Bool(b)) => p.reverse_order = *b,
-            ("artboard_range_mode", super::expr_types::Value::Str(s)) => {
-                p.artboard_range_mode = artboard_range_mode_from(s);
-            }
-            ("artboard_range", super::expr_types::Value::Str(s)) => p.artboard_range = s.clone(),
-            ("ignore_artboards", super::expr_types::Value::Bool(b)) => p.ignore_artboards = *b,
-            ("skip_blank_artboards", super::expr_types::Value::Bool(b)) => {
-                p.skip_blank_artboards = *b
-            }
-            ("media_size", super::expr_types::Value::Str(s)) => {
-                p.media_size = media_size_from(s);
-            }
-            ("media_width", super::expr_types::Value::Number(n)) => p.media_width = *n,
-            ("media_height", super::expr_types::Value::Number(n)) => p.media_height = *n,
-            ("orientation", super::expr_types::Value::Str(s)) => {
-                p.orientation = orientation_from(s);
-            }
-            ("auto_rotate", super::expr_types::Value::Bool(b)) => p.auto_rotate = *b,
-            ("transverse", super::expr_types::Value::Bool(b)) => p.transverse = *b,
-            ("print_layers", super::expr_types::Value::Str(s)) => {
-                p.print_layers = print_layers_from(s);
-            }
-            ("placement_x", super::expr_types::Value::Number(n)) => p.placement_x = *n,
-            ("placement_y", super::expr_types::Value::Number(n)) => p.placement_y = *n,
-            ("scaling_mode", super::expr_types::Value::Str(s)) => {
-                p.scaling_mode = scaling_mode_from(s);
-            }
-            ("custom_scale", super::expr_types::Value::Number(n)) => p.custom_scale = *n,
-            ("tile_overlap_h", super::expr_types::Value::Number(n)) => p.tile_overlap_h = *n,
-            ("tile_overlap_v", super::expr_types::Value::Number(n)) => p.tile_overlap_v = *n,
-            ("tile_range", super::expr_types::Value::Str(s)) => p.tile_range = s.clone(),
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_marks_and_bleed_field: { field, value }  — PRINT.md §2
-    if let Some(spec) = eff.get("doc.set_marks_and_bleed_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::printer_mark_type_from;
-        let m = &mut new_doc.print_preferences.marks_and_bleed;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("all_printer_marks", super::expr_types::Value::Bool(b)) => m.all_printer_marks = *b,
-            ("trim_marks", super::expr_types::Value::Bool(b)) => m.trim_marks = *b,
-            ("registration_marks", super::expr_types::Value::Bool(b)) => m.registration_marks = *b,
-            ("color_bars", super::expr_types::Value::Bool(b)) => m.color_bars = *b,
-            ("page_information", super::expr_types::Value::Bool(b)) => m.page_information = *b,
-            ("printer_mark_type", super::expr_types::Value::Str(s)) => {
-                m.printer_mark_type = printer_mark_type_from(s);
-            }
-            ("trim_mark_weight", super::expr_types::Value::Number(n)) => m.trim_mark_weight = *n,
-            ("mark_offset", super::expr_types::Value::Number(n)) => m.mark_offset = *n,
-            ("use_document_bleed", super::expr_types::Value::Bool(b)) => m.use_document_bleed = *b,
-            ("bleed_top", super::expr_types::Value::Number(n)) => m.bleed_top = *n,
-            ("bleed_right", super::expr_types::Value::Number(n)) => m.bleed_right = *n,
-            ("bleed_bottom", super::expr_types::Value::Number(n)) => m.bleed_bottom = *n,
-            ("bleed_left", super::expr_types::Value::Number(n)) => m.bleed_left = *n,
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_output_field: { field, value }  — PRINT.md §3
-    if let Some(spec) = eff.get("doc.set_output_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::{
-            output_mode_from, emulsion_from, image_polarity_from,
-        };
-        let o = &mut new_doc.print_preferences.output;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("mode", super::expr_types::Value::Str(s)) => o.mode = output_mode_from(s),
-            ("emulsion", super::expr_types::Value::Str(s)) => o.emulsion = emulsion_from(s),
-            ("image_polarity", super::expr_types::Value::Str(s)) => o.image_polarity = image_polarity_from(s),
-            ("printer_resolution", super::expr_types::Value::Str(s)) => o.printer_resolution = s.clone(),
-            ("convert_spot_to_process", super::expr_types::Value::Bool(b)) => o.convert_spot_to_process = *b,
-            ("overprint_black", super::expr_types::Value::Bool(b)) => o.overprint_black = *b,
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_output_ink_field: { index, field, value }  — PRINT.md §3
-    if let Some(spec) = eff.get("doc.set_output_ink_field").and_then(|v| v.as_object()) {
-        let index = match spec.get("index").and_then(|v| v.as_u64()) {
-            Some(n) => n as usize,
-            None => return deferred,
-        };
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::dot_shape_from;
-        let inks = &mut new_doc.print_preferences.output.inks;
-        let Some(ink) = inks.get_mut(index) else { return deferred; };
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("print", super::expr_types::Value::Bool(b)) => ink.print = *b,
-            ("frequency", super::expr_types::Value::Number(n)) => ink.frequency = *n,
-            ("angle", super::expr_types::Value::Number(n)) => ink.angle = *n,
-            ("dot_shape", super::expr_types::Value::Str(s)) => ink.dot_shape = dot_shape_from(s),
-            ("name", super::expr_types::Value::Str(s)) => ink.name = s.clone(),
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_graphics_field: { field, value }  — PRINT.md §4
-    if let Some(spec) = eff.get("doc.set_graphics_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::{
-            font_download_from, postscript_level_from, data_format_from,
-        };
-        let g = &mut new_doc.print_preferences.graphics;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("flatness", super::expr_types::Value::Number(n)) => g.flatness = *n,
-            ("font_download", super::expr_types::Value::Str(s)) => g.font_download = font_download_from(s),
-            ("postscript_level", super::expr_types::Value::Str(s)) => g.postscript_level = postscript_level_from(s),
-            ("data_format", super::expr_types::Value::Str(s)) => g.data_format = data_format_from(s),
-            ("compatible_gradient_printing", super::expr_types::Value::Bool(b)) => g.compatible_gradient_printing = *b,
-            ("raster_effects_resolution", super::expr_types::Value::Number(n)) => g.raster_effects_resolution = *n,
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_color_management_field: { field, value }  — PRINT.md §5
-    if let Some(spec) = eff.get("doc.set_color_management_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::{
-            color_handling_from, rendering_intent_from,
-        };
-        let c = &mut new_doc.print_preferences.color_management;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("document_profile", super::expr_types::Value::Str(s)) => c.document_profile = s.clone(),
-            ("color_handling", super::expr_types::Value::Str(s)) => c.color_handling = color_handling_from(s),
-            ("printer_profile", super::expr_types::Value::Str(s)) => c.printer_profile = s.clone(),
-            ("rendering_intent", super::expr_types::Value::Str(s)) => c.rendering_intent = rendering_intent_from(s),
-            ("preserve_rgb_numbers", super::expr_types::Value::Bool(b)) => c.preserve_rgb_numbers = *b,
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
-    }
-
-    // doc.set_document_setup_field: { field, value }  — PRINT.md §1A
-    if let Some(spec) = eff.get("doc.set_document_setup_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        match field.as_str() {
-            "bleed_top" | "bleed_right" | "bleed_bottom" | "bleed_left" => {
-                let n = match value_val {
-                    super::expr_types::Value::Number(n) => n,
-                    super::expr_types::Value::Bool(_) => return deferred,
-                    _ => return deferred,
+    // The eight print-config field setters (PRINT.md §1–§6) — OP_LOG.md §9
+    // Phase P1. Each evaluates its YAML `value` expr to a RESOLVED literal,
+    // builds a `{op, field, value[, index]}` op JSON, and routes through the
+    // SHARED `op_apply` dispatcher (which calls `apply_print_config_field`, the
+    // same field-match + type-coerce + `edit_document` body the renderer used
+    // inline before P1). Routing through `op_apply` JOURNALS the edit as a real
+    // op so it replays byte-identically (the checkpoint_equivalence gate) and is
+    // legible to capture/recipe/AI surfaces — the production proving ground for
+    // the actions.yaml↔op_apply unification. `set_output_ink_field` also carries
+    // an `index`; the others ignore it. The transaction is already owned/named/
+    // committed by `run_yaml_effects_named` (the action emits `snapshot` first),
+    // so the per-verb work is just: resolve → op JSON → op_apply.
+    {
+        // The renderer YAML verb → the op_apply verb (drop the `doc.` prefix).
+        const PRINT_FIELD_EFFECTS: &[(&str, &str)] = &[
+            ("doc.set_print_preferences_field", "set_print_preferences_field"),
+            ("doc.set_marks_and_bleed_field", "set_marks_and_bleed_field"),
+            ("doc.set_output_field", "set_output_field"),
+            ("doc.set_output_ink_field", "set_output_ink_field"),
+            ("doc.set_graphics_field", "set_graphics_field"),
+            ("doc.set_color_management_field", "set_color_management_field"),
+            ("doc.set_document_setup_field", "set_document_setup_field"),
+            ("doc.set_advanced_field", "set_advanced_field"),
+        ];
+        for (yaml_key, op_verb) in PRINT_FIELD_EFFECTS {
+            if let Some(spec) = eff.get(*yaml_key).and_then(|v| v.as_object()) {
+                let field = match spec.get("field").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return deferred,
                 };
-                match field.as_str() {
-                    "bleed_top" => new_doc.document_setup.bleed_top = n,
-                    "bleed_right" => new_doc.document_setup.bleed_right = n,
-                    "bleed_bottom" => new_doc.document_setup.bleed_bottom = n,
-                    "bleed_left" => new_doc.document_setup.bleed_left = n,
-                    _ => unreachable!(),
+                // Resolve the value expr to a typed Value, then to a RESOLVED
+                // JSON literal (op_apply replays without an eval context).
+                let value_val = match spec.get("value") {
+                    Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
+                    Some(v) => super::expr_types::Value::from_json(v),
+                    None => return deferred,
+                };
+                let value_json = super::effects::value_to_json(&value_val);
+                // `index` only applies to set_output_ink_field; absent ⇒ 0
+                // (the helper bounds-checks). A missing index on the ink verb
+                // matched the old early-return — preserve by reading as u64.
+                let mut op = serde_json::json!({
+                    "op": op_verb,
+                    "field": field,
+                    "value": value_json,
+                });
+                if *op_verb == "set_output_ink_field" {
+                    let index = match spec.get("index").and_then(|v| v.as_u64()) {
+                        Some(n) => n,
+                        None => return deferred,
+                    };
+                    op["index"] = serde_json::json!(index);
                 }
-            }
-            "bleed_uniform" | "show_images_outline" | "highlight_substituted_glyphs"
-            | "simulate_colored_paper" | "discard_white_overprint" => {
-                let b = match value_val {
-                    super::expr_types::Value::Bool(b) => b,
-                    _ => return deferred,
-                };
-                match field.as_str() {
-                    "bleed_uniform" => new_doc.document_setup.bleed_uniform = b,
-                    "show_images_outline" => new_doc.document_setup.show_images_outline = b,
-                    "highlight_substituted_glyphs" => new_doc.document_setup.highlight_substituted_glyphs = b,
-                    "simulate_colored_paper" => new_doc.document_setup.simulate_colored_paper = b,
-                    "discard_white_overprint" => new_doc.document_setup.discard_white_overprint = b,
-                    _ => unreachable!(),
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
+                return deferred;
             }
-            "grid_size" => {
-                let n = match value_val {
-                    super::expr_types::Value::Number(n) => n,
-                    _ => return deferred,
-                };
-                new_doc.document_setup.grid_size = n;
-            }
-            "grid_color" | "paper_color" => {
-                // Hex strings are coerced to Value::Color by Value::from_json,
-                // so accept both Str and Color here.
-                let s = match value_val {
-                    super::expr_types::Value::Str(s) => s.clone(),
-                    super::expr_types::Value::Color(c) => c.clone(),
-                    _ => return deferred,
-                };
-                match field.as_str() {
-                    "grid_color" => new_doc.document_setup.grid_color = s,
-                    "paper_color" => new_doc.document_setup.paper_color = s,
-                    _ => unreachable!(),
-                }
-            }
-            "transparency_flattener_preset" => {
-                let s = match value_val {
-                    super::expr_types::Value::Str(s) => s,
-                    _ => return deferred,
-                };
-                new_doc.document_setup.transparency_flattener_preset =
-                    crate::document::print_preferences::flattener_preset_from(&s);
-            }
-            _ => return deferred,
         }
-        tab.model.set_document(new_doc);
-        return deferred;
-    }
-
-    // doc.set_advanced_field: { field, value }  — PRINT.md §6
-    if let Some(spec) = eff.get("doc.set_advanced_field").and_then(|v| v.as_object()) {
-        let field = match spec.get("field").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return deferred,
-        };
-        let value_val = match spec.get("value") {
-            Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-            Some(v) => super::expr_types::Value::from_json(v),
-            None => return deferred,
-        };
-        let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
-        let mut new_doc = tab.model.document().clone();
-        use crate::document::print_preferences::flattener_preset_from;
-        let a = &mut new_doc.print_preferences.advanced;
-        let mut applied = true;
-        match (field.as_str(), &value_val) {
-            ("print_as_bitmap", super::expr_types::Value::Bool(b)) => a.print_as_bitmap = *b,
-            ("overprint_flattener_preset", super::expr_types::Value::Str(s)) => {
-                a.overprint_flattener_preset = flattener_preset_from(s);
-            }
-            _ => applied = false,
-        }
-        if applied {
-            tab.model.set_document(new_doc);
-        }
-        return deferred;
     }
 
     // doc.move_artboards_up: ids_expr
@@ -9838,6 +9550,81 @@ mod tests {
             "dispatch_action stamps the transaction with the action name");
         // And it is a real undoable step.
         assert!(model.can_undo(), "new_layer is undoable");
+    }
+
+    // OP_LOG.md §9 Phase P1 — production-route proof for the print-config
+    // setters. Drives the REAL renderer.rs production handler
+    // (`run_yaml_effects_named`) for a representative print-config verb against a
+    // real AppState/Model, and asserts:
+    //   (1) the committed Transaction journals the verb op with the RESOLVED
+    //       field + value (the production eval → literal path, NOT the YAML
+    //       expr string) and EMPTY targets (document-global config);
+    //   (2) checkpoint_equivalence: replaying the journaled op via `op_apply`
+    //       from a fresh copy of the pre-edit document is byte-identical to the
+    //       live snapshot-path document. This proves the production param-
+    //       building matches what replay expects.
+    // This is the production-side counterpart to the operations-fixture proof in
+    // cross_language_test.rs (which drives op_apply directly via the harness).
+    #[test]
+    fn production_route_journals_print_config_setter() {
+        use crate::geometry::test_json::document_to_test_json;
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        // Snapshot the pre-edit document so we can replay the journal onto a
+        // fresh copy for the checkpoint_equivalence gate.
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        // Mirror the real `document_setup_confirm` action: a `snapshot` opens
+        // the txn, then the field setter runs through the production handler.
+        // `run_yaml_effects_named` owns + names + commits the transaction.
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({
+                "doc.set_document_setup_field": { "field": "grid_size", "value": "42" }
+            }),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("document_setup_confirm"));
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1a) exactly one new, named transaction.
+        assert_eq!(model.journal().len(), before + 1,
+            "the print-config action commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("document_setup_confirm"),
+            "the transaction is named with its action verb");
+        // (1b) it journals the verb op with the RESOLVED field + value.
+        assert_eq!(txn.ops.len(), 1, "exactly one print-config op journaled");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "set_document_setup_field", "the journaled verb");
+        assert_eq!(op.params["field"], serde_json::json!("grid_size"),
+            "the resolved field name");
+        // The YAML value "42" is a STRING expr; the production path evaluates it
+        // to the number 42 and journals that RESOLVED literal (replay has no
+        // eval context, so the param MUST be the literal, not the expr string).
+        assert_eq!(op.params["value"], serde_json::json!(42),
+            "the journaled value is the RESOLVED literal, not the YAML expr");
+        // (1c) document-global config ⇒ empty targets.
+        assert!(op.targets.is_empty(),
+            "print-config ops carry empty targets (document-global)");
+        // The mutation actually landed.
+        assert_eq!(model.document().document_setup.grid_size, 42.0,
+            "grid_size was set on the live document");
+
+        // (2) checkpoint_equivalence: replay the journal op from the pre-edit
+        // document and byte-compare to the live snapshot-path document.
+        let snapshot_doc = document_to_test_json(model.document());
+        let mut replay = crate::document::model::Model::new(pre_doc, None);
+        for t in model.journal() {
+            for o in &t.ops {
+                crate::document::op_apply::op_apply(&mut replay, &o.params);
+            }
+        }
+        let replay_doc = document_to_test_json(replay.document());
+        assert_eq!(replay_doc, snapshot_doc,
+            "checkpoint_equivalence: journal replay == snapshot path");
     }
 
     // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after
