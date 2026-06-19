@@ -853,28 +853,45 @@ fn run_doc_effect(
             // and ignore. Used by apply_brush_to_selection /
             // remove_brush_from_selection in actions.yaml. Mirrors
             // the JS Phase 1.8 effect.
+            //
+            // OP_LOG.md §9 Phase P6: one of the production-journaled verbs.
+            // The YAML `value` is an EXPRESSION; replay has no eval context, so
+            // it is resolved HERE and the op carries the RESOLVED string LITERAL
+            // (`""` encodes the clear case: an empty/null/non-string eval result
+            // switches the brush off — `set_*` maps an empty string to `None`).
+            // Routing through `op_apply` (which calls the SAME `Controller`
+            // mutator) journals `set_attr_on_selection` with the resolved
+            // attr/value + pre-mutation selection `targets`, and the SHARED
+            // helper makes the mutation byte-identical on the replay path.
             if let serde_json::Value::Object(args) = spec {
                 let attr = args
                     .get("attr")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let value_str = args.get("value")
-                    .and_then(|v| match v {
-                        serde_json::Value::String(s) => {
-                            match eval_expr(s, store, ctx) {
-                                Value::Str(rs) if !rs.is_empty() => Some(rs),
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    });
-                match attr {
-                    "stroke_brush" =>
-                        Controller::set_selection_stroke_brush(model, value_str),
-                    "stroke_brush_overrides" =>
-                        Controller::set_selection_stroke_brush_overrides(model, value_str),
-                    _ => {} // Phase 1: only brush attrs supported
+                // Phase 1: only the two brush attrs are supported. An unknown
+                // attr (or a missing `value` key) skips without journaling.
+                if attr != "stroke_brush" && attr != "stroke_brush_overrides" {
+                    return;
                 }
+                let Some(value_spec) = args.get("value") else {
+                    return;
+                };
+                // Resolve the value expr to its string form: a non-empty string
+                // sets, anything else (empty / null / non-string) CLEARS. The op
+                // carries the RESOLVED string (`""` for the clear case).
+                let resolved = match value_spec {
+                    serde_json::Value::String(s) => match eval_expr(s, store, ctx) {
+                        Value::Str(rs) if !rs.is_empty() => rs,
+                        _ => String::new(),
+                    },
+                    _ => String::new(),
+                };
+                let op = serde_json::json!({
+                    "op": "set_attr_on_selection",
+                    "attr": attr,
+                    "value": resolved,
+                });
+                crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.copy_selection" => {
@@ -9248,5 +9265,229 @@ mod tests {
             "op_apply move arm applied dy exactly (min_y {min_y} != 11.0)");
         assert!((w - 7.5).abs() < 1e-6 && (h - 7.5).abs() < 1e-6,
             "move is a pure translation (size unchanged: {w}x{h})");
+    }
+
+    // -----------------------------------------------------------------
+    // OP_LOG.md §9 Phase P6 — set_attr_on_selection production route.
+    // Drives the REAL run_effects (the marquee+brush production batch a
+    // brushes-panel "apply brush to selection" gesture emits) and asserts
+    // the committed transaction journals `set_attr_on_selection` with the
+    // RESOLVED attr/value + pre-mutation selection targets, that the brush
+    // actually landed on the path, and that the checkpoint_equivalence gate
+    // holds.
+    // -----------------------------------------------------------------
+
+    /// An SVG with a single source PATH carrying a stable `common.id`
+    /// ("path-1"). `stroke_brush` is a Path-only attribute, so the production
+    /// route needs a Path (not the eye rect) to exercise an effective edit with
+    /// non-empty journal targets.
+    const BRUSH_PATH_SVG: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 96 96" width="96" height="96">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <path id="path-1" d="M0,0 L48,0 L48,48 Z" fill="none" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
+  </g>
+</svg>"#;
+
+    fn brush_path_model() -> Model {
+        Model::new(crate::geometry::svg::svg_to_document(BRUSH_PATH_SVG), None)
+    }
+
+    /// The production batch a brushes-panel "apply brush to selection" gesture
+    /// emits: snapshot the undo step, marquee-select the path, then set the
+    /// `stroke_brush` attribute. The `value` is a string-literal EXPRESSION
+    /// (`'"charcoal"'`) — the same shape actions.yaml delivers (a quoted-string
+    /// interpolation) — which run_doc_effect evaluates before journaling.
+    fn brush_production_batch() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"doc.snapshot": {}}),
+            serde_json::json!({"doc.select_in_rect": {
+                "x1": -5, "y1": -5, "x2": 100, "y2": 100, "additive": false
+            }}),
+            serde_json::json!({"doc.set_attr_on_selection": {
+                "attr": "stroke_brush",
+                "value": "\"charcoal\""
+            }}),
+        ]
+    }
+
+    #[test]
+    fn production_set_attr_on_selection_journals_resolved_op_with_targets() {
+        let mut store = StateStore::new();
+        let mut model = brush_path_model();
+        run_effects(
+            &brush_production_batch(), &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("apply brush to selection"));
+
+        // One committed, NAMED transaction.
+        assert_eq!(model.journal().len(), 1, "the batch is one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("apply brush to selection"),
+            "production transaction carries its action name");
+
+        // The verbs: select_rect (the marquee) then set_attr_on_selection. The
+        // doc.snapshot is history navigation, not a primitive op.
+        let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(verbs, vec!["select_rect", "set_attr_on_selection"],
+            "the marquee + the brush set are journaled in order");
+
+        // The brush op carries the RESOLVED attr/value LITERAL (the YAML expr
+        // '"charcoal"' was evaluated before journaling).
+        let attr_op = &txn.ops[1];
+        assert_eq!(attr_op.params["op"], "set_attr_on_selection");
+        assert_eq!(attr_op.params["attr"], "stroke_brush");
+        assert_eq!(attr_op.params["value"], "charcoal",
+            "the op carries the RESOLVED value literal, not the expr");
+
+        // Pre-mutation selection targets (the path's id).
+        assert_eq!(attr_op.targets, vec!["path-1".to_string()],
+            "set_attr_on_selection.targets == pre-mutation selection ids");
+
+        // The brush actually landed on the live path.
+        let live_brush = match model.document().get_element(&vec![0, 0]) {
+            Some(crate::geometry::element::Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0], got {other:?}"),
+        };
+        assert_eq!(live_brush, Some("charcoal".to_string()),
+            "the stroke_brush is applied to the selected path on the live path");
+
+        // checkpoint_equivalence (OP_LOG.md §6): replay the journal via op_apply
+        // from the same setup and byte-compare the canonical document. (The
+        // canonical JSON omits stroke_brush, so this proves the rest of the doc +
+        // selection replay identically; the brush field itself is pinned next.)
+        let snapshot_json =
+            crate::geometry::test_json::document_to_test_json(model.document());
+        let mut replay = brush_path_model();
+        for op in &txn.ops {
+            crate::document::op_apply::op_apply(&mut replay, &op.params);
+        }
+        let replay_json =
+            crate::geometry::test_json::document_to_test_json(replay.document());
+        assert_eq!(replay_json, snapshot_json,
+            "checkpoint_equivalence: journal replay == snapshot-path document");
+
+        // And the brush field specifically replays identically (the gate above is
+        // blind to it). This is the load-bearing assert for the value-in-op.
+        let replay_brush = match replay.document().get_element(&vec![0, 0]) {
+            Some(crate::geometry::element::Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0] on replay, got {other:?}"),
+        };
+        assert_eq!(replay_brush, live_brush,
+            "journal replay re-applies the same stroke_brush (value-in-op)");
+    }
+
+    /// OP_LOG.md §9 Phase P6 follow-up — the MOST COMMON production path:
+    /// apply_brush_to_selection fired on a path that is ALREADY selected, so the
+    /// batch's ONLY net document change is the brush edit and the selection does
+    /// NOT change. The brush fields (`stroke_brush` / `stroke_brush_overrides`)
+    /// are canonically INVISIBLE — `document_to_test_json` omits them — so the
+    /// JSON-blind no-op rule in `commit_txn` would, on its own, see a byte-
+    /// identical document and DROP the transaction (neither journaled NOR an undo
+    /// step). The structural-compare fallback in `commit_txn` (layers + symbols
+    /// via `Element` PartialEq) closes that gap. This test pins it: a brush-only
+    /// batch IS journaled and DOES create an undo step.
+    #[test]
+    fn production_brush_only_batch_journals_and_creates_undo_step() {
+        let mut store = StateStore::new();
+        let mut model = brush_path_model();
+        // Pre-select the path WITHOUT bracketing (set_selection is
+        // unbracketed: no transaction, no journal entry). This reproduces the
+        // "path already selected" precondition.
+        crate::document::controller::Controller::set_selection(
+            &mut model,
+            vec![crate::document::document::ElementSelection::all(vec![0, 0])],
+        );
+        assert!(!model.can_undo(),
+            "pre-selecting via the unbracketed path leaves no undo step");
+        assert_eq!(model.journal_head(), 0, "and no journaled transaction yet");
+
+        // The brush-only batch: snapshot opens the txn, then set the brush. NO
+        // select_in_rect — the selection is unchanged, so the brush edit is the
+        // ONLY net document change.
+        run_effects(
+            &[
+                serde_json::json!({"doc.snapshot": {}}),
+                serde_json::json!({"doc.set_attr_on_selection": {
+                    "attr": "stroke_brush",
+                    "value": "\"charcoal\""
+                }}),
+            ],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("apply brush to selection"));
+
+        // The brush actually landed.
+        let live_brush = match model.document().get_element(&vec![0, 0]) {
+            Some(crate::geometry::element::Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0], got {other:?}"),
+        };
+        assert_eq!(live_brush, Some("charcoal".to_string()),
+            "the stroke_brush is applied to the already-selected path");
+
+        // The transaction IS journaled (the structural fallback keeps it despite
+        // the canonical JSON being byte-identical), carrying the resolved op.
+        assert_eq!(model.journal().len(), 1,
+            "a brush-only batch (selection unchanged) IS journaled, not dropped");
+        let txn = model.journal().last().expect("a committed transaction");
+        let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(verbs, vec!["set_attr_on_selection"],
+            "only the brush set is journaled (no marquee in this batch)");
+        assert_eq!(txn.ops[0].params["value"], "charcoal",
+            "the op carries the RESOLVED value literal");
+        assert_eq!(txn.ops[0].targets, vec!["path-1".to_string()],
+            "targets == pre-mutation selection ids");
+
+        // And it creates an undo step (the journal cursor + undo stack advanced).
+        assert!(model.can_undo(),
+            "a brush-only batch creates an undo step");
+        assert_eq!(model.journal_head(), 1,
+            "the journal cursor advanced past the committed transaction");
+        assert!(model.is_modified(),
+            "a brush-only edit marks the document modified");
+
+        // Undo restores the pre-brush state (the brush is cleared again),
+        // proving the checkpoint was retained rather than dropped.
+        model.undo();
+        let after_undo = match model.document().get_element(&vec![0, 0]) {
+            Some(crate::geometry::element::Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0] after undo, got {other:?}"),
+        };
+        assert_eq!(after_undo, None,
+            "undo reverts the brush-only edit (the checkpoint was retained)");
+    }
+
+    /// OP_LOG.md §9 Phase P6 — hardened skip on the production route: an unknown
+    /// `attr` journals NO set_attr_on_selection op (and a bare marquee that only
+    /// changes selection stays journal-neutral, so the whole batch commits no
+    /// transaction).
+    #[test]
+    fn production_set_attr_unknown_attr_skips() {
+        let mut store = StateStore::new();
+        let mut model = brush_path_model();
+        run_effects(
+            &[
+                serde_json::json!({"doc.snapshot": {}}),
+                serde_json::json!({"doc.select_in_rect": {
+                    "x1": -5, "y1": -5, "x2": 100, "y2": 100, "additive": false
+                }}),
+                serde_json::json!({"doc.set_attr_on_selection": {
+                    "attr": "fill", "value": "\"red\""
+                }}),
+            ],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("apply brush to selection"));
+
+        // The snapshot opened a transaction, the marquee changed selection
+        // (serialized state, so the txn is NOT dropped as a no-op), but the
+        // unknown-attr set journaled nothing.
+        let has_attr_op = model.journal().iter()
+            .flat_map(|t| t.ops.iter())
+            .any(|o| o.op == "set_attr_on_selection");
+        assert!(!has_attr_op,
+            "an unknown attr journals no set_attr_on_selection op");
+        // The path's brush is untouched.
+        let brush = match model.document().get_element(&vec![0, 0]) {
+            Some(crate::geometry::element::Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0], got {other:?}"),
+        };
+        assert_eq!(brush, None, "an unknown attr leaves the brush unset");
     }
 }

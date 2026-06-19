@@ -1,0 +1,49 @@
+[
+  {
+    "name": "set_attr_on_selection_stroke_brush",
+    "setup_svg": "path_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": "charcoal"}
+    ],
+    "expected_json": "set_attr_on_selection_stroke_brush_expected.json"
+  },
+  {
+    "name": "set_attr_on_selection_overrides",
+    "setup_svg": "path_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": "charcoal"},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush_overrides", "value": "{\"angle\":42}"}
+    ],
+    "expected_json": "set_attr_on_selection_overrides_expected.json"
+  },
+  {
+    "name": "set_attr_on_selection_clear",
+    "setup_svg": "path_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": "charcoal"},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": ""}
+    ],
+    "expected_json": "set_attr_on_selection_clear_expected.json"
+  },
+  {
+    "name": "set_attr_on_selection_unknown_attr_skips",
+    "setup_svg": "path_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "fill", "value": "red"}
+    ],
+    "expected_json": "set_attr_on_selection_unknown_attr_skips_expected.json"
+  },
+  {
+    "name": "set_attr_on_selection_missing_value_skips",
+    "setup_svg": "path_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush"}
+    ],
+    "expected_json": "set_attr_on_selection_missing_value_skips_expected.json"
+  }
+]

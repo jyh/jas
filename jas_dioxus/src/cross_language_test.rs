@@ -608,7 +608,8 @@ mod tests {
                          "operations/structural_insert_at.json",
                          "operations/wrap_in_group.json",
                          "operations/wrap_in_layer.json",
-                         "operations/unpack_group_at.json"] {
+                         "operations/unpack_group_at.json",
+                         "operations/set_attr_on_selection.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1842,6 +1843,148 @@ mod tests {
                     tc["name"].as_str().unwrap()
                 );
             }
+        }
+    }
+
+    /// OP_LOG.md §9 Phase P6 — `set_attr_on_selection` (a Model-runner verb,
+    /// effects.rs): applies one brush attribute (`stroke_brush` /
+    /// `stroke_brush_overrides`) to every selected element through the SHARED
+    /// `apply_set_attr_on_selection` helper. The op carries the RESOLVED `attr`
+    /// + `value` LITERAL (replay has no eval context; an empty `value` string
+    /// encodes the clear case). Covers: set a brush slug, set overrides on top,
+    /// clear (empty value ⇒ None), and the hardened skips (unknown attr / missing
+    /// value). Byte-gated by `checkpoint_equivalence` (`assert_operation_test`).
+    ///
+    /// NOTE: `document_to_test_json` does NOT serialize `stroke_brush` /
+    /// `stroke_brush_overrides`, so the canonical-document byte-gate is BLIND to
+    /// these fields (the gate still proves the rest of the doc + selection
+    /// replay identically). The dedicated `operation_set_attr_pins_stroke_brush`
+    /// test below reads the PathElem fields DIRECTLY so the actual brush mutation
+    /// is pinned on both the live and replay paths.
+    #[test]
+    fn operation_set_attr_on_selection() {
+        run_operation_fixture("operations/set_attr_on_selection.json");
+    }
+
+    /// OP_LOG.md §9 Phase P6 — pin the ACTUAL stroke_brush mutation (the
+    /// canonical-document gate is blind to it). Reads the PathElem fields after
+    /// both the live run AND a journal replay, asserting they agree and carry the
+    /// resolved literal. Also pins the clear case (empty value ⇒ None on both
+    /// live + replay).
+    #[test]
+    fn operation_set_attr_pins_stroke_brush() {
+        use crate::geometry::element::Element;
+        // Helper: the brush slug + overrides on the single path at [0,0].
+        fn brush_of(model: &Model) -> (Option<String>, Option<String>) {
+            match model.document().get_element(&vec![0, 0]) {
+                Some(Element::Path(p)) =>
+                    (p.stroke_brush.clone(), p.stroke_brush_overrides.clone()),
+                _ => panic!("expected a Path at [0,0]"),
+            }
+        }
+        let json_str = read_fixture("operations/set_attr_on_selection.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let find = |name: &str| -> serde_json::Value {
+            tests.as_array().unwrap().iter()
+                .find(|t| t["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("case {name} not found")).clone()
+        };
+
+        // (1) set a brush slug.
+        let tc = find("set_attr_on_selection_stroke_brush");
+        let model = run_operation_model(&tc);
+        let live = brush_of(&model);
+        assert_eq!(live, (Some("charcoal".to_string()), None),
+            "the brush slug is applied to the selected path");
+        // The same fields survive a journal replay (the op carried the literal).
+        let replay = replay_model(&tc, &model);
+        assert_eq!(brush_of(&replay), live,
+            "journal replay re-applies the same brush slug (checkpoint_equivalence \
+             over a field the canonical JSON omits)");
+
+        // (2) set overrides on top of the slug.
+        let tc = find("set_attr_on_selection_overrides");
+        let model = run_operation_model(&tc);
+        let live = brush_of(&model);
+        assert_eq!(live,
+            (Some("charcoal".to_string()), Some("{\"angle\":42}".to_string())),
+            "overrides ride on top of the slug");
+        let replay = replay_model(&tc, &model);
+        assert_eq!(brush_of(&replay), live, "replay re-applies slug + overrides");
+
+        // (3) clear (empty value ⇒ None) — an effective change (the brush was set).
+        let tc = find("set_attr_on_selection_clear");
+        let model = run_operation_model(&tc);
+        let live = brush_of(&model);
+        assert_eq!(live, (None, None),
+            "an empty value clears the brush (None)");
+        let replay = replay_model(&tc, &model);
+        assert_eq!(brush_of(&replay), live, "replay re-applies the clear");
+    }
+
+    /// Build the journal-replay Model for a fixture's whole journal (re-derives
+    /// from `setup_svg`, applies every committed op via `op_apply`). Distinct
+    /// from `replay_journal` (which returns canonical JSON) — this returns the
+    /// Model so a test can read fields the canonical JSON omits.
+    fn replay_model(tc: &serde_json::Value, live: &Model) -> Model {
+        let setup_svg = read_fixture(&format!("svg/{}",
+            tc["setup_svg"].as_str().unwrap()));
+        let doc = svg_to_document(&setup_svg);
+        let mut model = Model::new(doc, None);
+        for txn in &live.journal()[0..live.journal_head()] {
+            for op in &txn.ops {
+                crate::document::op_apply::op_apply(&mut model, &op.params);
+            }
+        }
+        model
+    }
+
+    /// OP_LOG.md §9 Phase P6 — Fork-4 targets: `set_attr_on_selection` records
+    /// the PRE-mutation selection ids (resolved BEFORE the mutation, matching
+    /// copy/move). The byte-gate ignores targets, so this is the only place it is
+    /// pinned. The setup selects the single path with id "path-1".
+    #[test]
+    fn operation_set_attr_records_selection_targets() {
+        let json_str = read_fixture("operations/set_attr_on_selection.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let tc = tests.as_array().unwrap().iter()
+            .find(|t| t["name"].as_str() == Some("set_attr_on_selection_stroke_brush"))
+            .unwrap();
+        let model = run_operation_model(tc);
+        // The outer harness transaction holds both the select_rect (selection,
+        // serialized state) and the set_attr op; the LAST op is the brush set.
+        let last_txn = model.journal().last().expect("a committed transaction");
+        let attr_op = last_txn.ops.iter()
+            .find(|o| o.op == "set_attr_on_selection")
+            .expect("the set_attr_on_selection op is journaled");
+        assert_eq!(attr_op.targets, vec!["path-1".to_string()],
+            "targets carry the pre-mutation selection ids");
+        assert_eq!(attr_op.params["attr"], "stroke_brush");
+        assert_eq!(attr_op.params["value"], "charcoal",
+            "the op carries the RESOLVED value literal");
+    }
+
+    /// OP_LOG.md §9 Phase P6 — hardened skips journal NO `set_attr_on_selection`
+    /// op (unknown attr / missing value). The select_rect still records (it
+    /// changes selection), so the transaction is non-empty; the set_attr op
+    /// simply never reaches `record_op`.
+    #[test]
+    fn operation_set_attr_skips_journal_nothing() {
+        for name in &[
+            "set_attr_on_selection_unknown_attr_skips",
+            "set_attr_on_selection_missing_value_skips",
+        ] {
+            let json_str = read_fixture("operations/set_attr_on_selection.json");
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            let tc = tests.as_array().unwrap().iter()
+                .find(|t| t["name"].as_str() == Some(*name))
+                .unwrap_or_else(|| panic!("case {name} not found"));
+            let model = run_operation_model(tc);
+            let has_attr_op = model.journal().iter()
+                .flat_map(|t| t.ops.iter())
+                .any(|o| o.op == "set_attr_on_selection");
+            assert!(!has_attr_op,
+                "{name}: a hardened-skip case journals NO set_attr_on_selection op");
         }
     }
 
