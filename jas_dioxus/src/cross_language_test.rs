@@ -601,7 +601,11 @@ mod tests {
                          "operations/artboard_reorder.json",
                          "operations/artboard_delete.json",
                          "operations/artboard_create.json",
-                         "operations/artboard_duplicate.json"] {
+                         "operations/artboard_duplicate.json",
+                         "operations/structural_delete_at.json",
+                         "operations/structural_delete_selection.json",
+                         "operations/structural_insert_after.json",
+                         "operations/structural_insert_at.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1625,6 +1629,91 @@ mod tests {
     #[test]
     fn operation_artboard_duplicate() {
         run_operation_fixture("operations/artboard_duplicate.json");
+    }
+
+    /// Structural tree-mutation verbs (OP_LOG.md §9 Phase P4): `delete_at`
+    /// removes the element at a path (a missing path is a no-op that journals
+    /// nothing); `insert_after` / `insert_at` carry the WHOLE element to insert as
+    /// LITERAL serde JSON in the op (VALUE-IN-OP, §7) and insert it VERBATIM —
+    /// the carried id (`dup-1` / `ins-1` / `lyr-1`) survives byte-identically on
+    /// replay; `delete_selection` operates on the serialized selection. A
+    /// malformed/absent element or path SKIPS (records nothing) without panicking.
+    /// The checkpoint_equivalence gate (run by `assert_operation_test`) proves each
+    /// journaled op replays byte-identically to the snapshot-path document —
+    /// INCLUDING the inserted element with its literal id — which is the heart of
+    /// the element value-in-op strategy.
+    #[test]
+    fn operation_structural_delete_at() {
+        run_operation_fixture("operations/structural_delete_at.json");
+    }
+
+    #[test]
+    fn operation_structural_delete_selection() {
+        run_operation_fixture("operations/structural_delete_selection.json");
+    }
+
+    #[test]
+    fn operation_structural_insert_after() {
+        run_operation_fixture("operations/structural_insert_after.json");
+    }
+
+    #[test]
+    fn operation_structural_insert_at() {
+        run_operation_fixture("operations/structural_insert_at.json");
+    }
+
+    /// OP_LOG.md §9 Phase P4 — Fork-4 targets: an inserting verb whose carried
+    /// element has a `common.id` records that id in `targets`. The byte-gate
+    /// ignores targets, so this is the only place it is pinned.
+    #[test]
+    fn operation_structural_insert_records_id_targets() {
+        // insert_after carries id "dup-1"; insert_at carries "ins-1" (nested) and
+        // "lyr-1" (top-level layer).
+        let cases: &[(&str, &str, &str)] = &[
+            ("operations/structural_insert_after.json", "structural_insert_after_child", "dup-1"),
+            ("operations/structural_insert_at.json", "structural_insert_at_nested", "ins-1"),
+            ("operations/structural_insert_at.json", "structural_insert_at_top_level_layer", "lyr-1"),
+        ];
+        for (fixture, name, expected_id) in cases {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            let tc = tests.as_array().unwrap().iter()
+                .find(|t| t["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("fixture case {name} not found"));
+            let model = run_operation_model(tc);
+            let last = model.journal().last().expect("a committed transaction");
+            assert_eq!(last.ops.len(), 1, "{name}: one insert op journaled");
+            assert_eq!(last.ops[0].targets, vec![expected_id.to_string()],
+                "{name}: targets carry the inserted element's literal id (value-in-op)");
+        }
+    }
+
+    /// OP_LOG.md §9 Phase P4 — element value-in-op replay determinism: the SAME
+    /// journal (carrying the WHOLE element JSON) replays to the SAME document
+    /// TWICE, and the inserted element keeps its literal id (no re-mint, no
+    /// entropy). Covers the two inserting verbs.
+    #[test]
+    fn operation_structural_insert_replay_is_deterministic() {
+        for fixture in &[
+            "operations/structural_insert_after.json",
+            "operations/structural_insert_at.json",
+        ] {
+            let json_str = read_fixture(fixture);
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let model = run_operation_model(tc);
+                let setup = tc["setup_svg"].as_str().unwrap();
+                let head = model.journal_head();
+                let replay1 = replay_journal(setup, model.journal(), head);
+                let replay2 = replay_journal(setup, model.journal(), head);
+                assert_eq!(
+                    replay1, replay2,
+                    "replay of '{}' is non-deterministic (value-in-op element must \
+                     insert byte-identically with its literal id)",
+                    tc["name"].as_str().unwrap()
+                );
+            }
+        }
     }
 
     /// OP_LOG.md §9 Phase P3 — replay determinism: the SAME journal (with its

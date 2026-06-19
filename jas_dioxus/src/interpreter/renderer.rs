@@ -2779,20 +2779,34 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.delete_at: path_expr — PHASE3 §5.5
+    // doc.delete_at: path_expr — PHASE3 §5.5 / OP_LOG.md §9 Phase P4.
     // Deletes the element at path; if `as:` is set, binds the deleted
-    // element as JSON in ctx for subsequent effects.
+    // element as JSON in ctx for subsequent effects. The deletion routes
+    // through the SHARED `op_apply` dispatcher (which calls
+    // `apply_delete_element_at`) so it JOURNALS as a real `delete_at` op
+    // (replays byte-identically; targets carry the deleted element id when it
+    // has one). The `as:`-bound removed element is resolved from the live doc
+    // BEFORE op_apply mutates it, preserving the Phase-3 return-binding contract.
     if let Some(path_expr_v) = eff.get("doc.delete_at") {
         let path_expr = path_expr_v.as_str().unwrap_or("");
         let path_val = super::expr::eval(path_expr, &*eval_ctx);
         if let super::expr_types::Value::Path(indices) = path_val {
-            let removed = delete_element_at(&indices, st);
+            // Resolve the to-be-removed element for the optional `as:` binding
+            // before the mutation (op_apply has no return value).
+            let removed_json = if as_name.is_some() {
+                st.tabs.get(st.active_tab)
+                    .and_then(|tab| tab.model.document().get_element(&indices).cloned())
+                    .and_then(|e| serde_json::to_value(&e).ok())
+            } else {
+                None
+            };
+            let op = serde_json::json!({ "op": "delete_at", "path": indices });
+            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                crate::document::op_apply::op_apply(&mut tab.model, &op);
+            }
             if let Some(name) = as_name {
                 if let Some(map) = eval_ctx.as_object_mut() {
-                    let json = removed
-                        .and_then(|e| serde_json::to_value(&e).ok())
-                        .unwrap_or(serde_json::Value::Null);
-                    map.insert(name, json);
+                    map.insert(name, removed_json.unwrap_or(serde_json::Value::Null));
                 }
             }
         }
@@ -2837,10 +2851,14 @@ fn run_yaml_effect(
     // then delete_selection produces the new document and set_document
     // commits it. The selection is preserved across opening the confirm
     // dialog, so this deletes exactly what the user was about to delete.
+    // Routes through the SHARED `op_apply` dispatcher (which calls
+    // `apply_delete_selection`) so the deletion JOURNALS as a real
+    // `delete_selection` op (replays byte-identically; targets carry the
+    // pre-deletion selection ids) — OP_LOG.md §9 Phase P4.
     if eff.get("doc.delete_selection").is_some() {
+        let op = serde_json::json!({ "op": "delete_selection" });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            let new_doc = tab.model.document().delete_selection();
-            tab.model.set_document(new_doc);
+            crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -2865,7 +2883,15 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.insert_after: { path, element } — PHASE3 §5.5
+    // doc.insert_after: { path, element } — PHASE3 §5.5 / OP_LOG.md §9 Phase P4.
+    // VALUE-IN-OP: the resolved element is serialized to JSON and carried WHOLE
+    // in the op (replay deserializes and inserts it byte-identically, keeping
+    // whatever id it had). The element comes from a preceding NON-JOURNALED
+    // binder (`doc.clone_at` binds a clone as ctx JSON); only this insert
+    // journals, so the composite `duplicate_layer_selection` journals as ONE
+    // `insert_after` op per duplicate. Routes through the SHARED `op_apply`
+    // dispatcher (which calls `apply_insert_element_after`); targets carry the
+    // inserted element id when it has one.
     if let Some(spec) = eff.get("doc.insert_after").and_then(|v| v.as_object()) {
         let path_expr = spec.get("path").and_then(|v| v.as_str()).unwrap_or("");
         let path_val = super::expr::eval(path_expr, &*eval_ctx);
@@ -2875,7 +2901,17 @@ fn run_yaml_effect(
         };
         let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
         if let Some(e) = elem {
-            insert_element_after(&indices, e, st);
+            // Serialize the resolved element into the op as a LITERAL (value-in-op).
+            if let Ok(element_json) = serde_json::to_value(&e) {
+                let op = serde_json::json!({
+                    "op": "insert_after",
+                    "path": indices,
+                    "element": element_json,
+                });
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    crate::document::op_apply::op_apply(&mut tab.model, &op);
+                }
+            }
         }
         return deferred;
     }
@@ -3055,7 +3091,14 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.insert_at: { parent_path, index, element } — PHASE3 §5.5
+    // doc.insert_at: { parent_path, index, element } — PHASE3 §5.5 /
+    // OP_LOG.md §9 Phase P4. VALUE-IN-OP: the resolved element is serialized to
+    // JSON and carried WHOLE in the op (replay deserializes and inserts it
+    // byte-identically). The element comes from a preceding NON-JOURNALED binder
+    // (`doc.create_layer`, a deterministic Layer factory bound as ctx JSON); only
+    // this insert journals, so the composite `new_layer` journals as ONE
+    // `insert_at` op. Routes through the SHARED `op_apply` dispatcher (which calls
+    // `apply_insert_element_at`); targets carry the inserted element id when set.
     if let Some(spec) = eff.get("doc.insert_at").and_then(|v| v.as_object()) {
         let parent_expr = spec.get("parent_path").and_then(|v| v.as_str()).unwrap_or("path()");
         let parent_val = super::expr::eval(parent_expr, &*eval_ctx);
@@ -3074,7 +3117,18 @@ fn run_yaml_effect(
         };
         let elem = resolve_element_arg(spec.get("element"), &*eval_ctx);
         if let Some(e) = elem {
-            insert_element_at(&parent_indices, idx, e, st);
+            // Serialize the resolved element into the op as a LITERAL (value-in-op).
+            if let Ok(element_json) = serde_json::to_value(&e) {
+                let op = serde_json::json!({
+                    "op": "insert_at",
+                    "parent_path": parent_indices,
+                    "index": idx,
+                    "element": element_json,
+                });
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    crate::document::op_apply::op_apply(&mut tab.model, &op);
+                }
+            }
         }
         return deferred;
     }
@@ -3446,18 +3500,12 @@ fn extract_id_list(val: &super::expr_types::Value) -> Vec<String> {
 // (pure) + `apply_move_artboards_up` / `apply_move_artboards_down` (Model), so
 // the production handler routes through op_apply and the harness shares the body.
 
-fn delete_element_at(
-    path: &[usize],
-    st: &mut crate::workspace::app_state::AppState,
-) -> Option<crate::geometry::element::Element> {
-    let tab = st.tabs.get_mut(st.active_tab)?;
-    let doc = tab.model.document().clone();
-    let path_vec = path.to_vec();
-    let removed = doc.get_element(&path_vec).cloned();
-    let new_doc = doc.delete_element(&path_vec);
-    tab.model.set_document(new_doc);
-    removed
-}
+// delete_element_at / insert_element_after moved to op_apply.rs (OP_LOG.md §9
+// Phase P4) as `apply_delete_element_at` / `apply_insert_element_after`, so the
+// `doc.delete_at` / `doc.insert_after` production handlers route through op_apply
+// (journaling a real op) and the replay harness shares the same mutation body.
+// `insert_element_at` (below) is still used by the wrap_in_group path (P5,
+// deferred); `clone_element_at` stays here as the NON-JOURNALED ctx binder.
 
 /// Deep-clone the element at path without mutating the document.
 fn clone_element_at(
@@ -3469,19 +3517,9 @@ fn clone_element_at(
     tab.model.document().get_element(&path_vec).cloned()
 }
 
-/// Insert element immediately after the element at path.
-fn insert_element_after(
-    path: &[usize],
-    element: crate::geometry::element::Element,
-    st: &mut crate::workspace::app_state::AppState,
-) {
-    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return; };
-    let path_vec = path.to_vec();
-    let new_doc = tab.model.document().clone().insert_element_after(&path_vec, element);
-    tab.model.set_document(new_doc);
-}
-
-/// Insert element at a position under a parent path.
+/// Insert element at a position under a parent path. Still used by the
+/// `wrap_in_group` / `new_group` path (OP_LOG.md §9 Phase P5, deferred); the
+/// `doc.insert_at` handler now routes through `op_apply::apply_insert_element_at`.
 fn insert_element_at(
     parent_path: &[usize],
     index: usize,
@@ -9901,6 +9939,164 @@ mod tests {
 
         // (3) checkpoint_equivalence: replay from the pre-edit doc reproduces the
         // live minted doc byte-identically.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    // OP_LOG.md §9 Phase P4 — production-route proofs for the structural
+    // tree-mutation verbs. These drive the REAL renderer.rs production handler
+    // (`dispatch_action` → `run_yaml_effects_named`) for the COMPOSITE actions
+    // against a real AppState/Model, and assert (per action):
+    //   (1) the committed Transaction journals the structural op(s) — crucially,
+    //       the composites journal as ONE insert op (the preceding clone_at /
+    //       create_layer binders are NON-JOURNALED — they only bind ctx values);
+    //   (2) the live document reflects the mutation;
+    //   (3) checkpoint_equivalence: replaying the journal via `op_apply` from a
+    //       fresh copy of the pre-edit document is byte-identical to the live
+    //       snapshot-path document — INCLUDING the inserted element with its
+    //       value-in-op id, the heart of P4.
+    // Counterpart to the operations-fixture proof in cross_language_test.rs.
+
+    /// `duplicate_layer_selection` = `clone_at` (NON-JOURNALED ctx binder) →
+    /// `insert_after` (the ONLY journaled op). Per duplicated path it journals
+    /// exactly ONE `insert_after` op carrying the WHOLE clone element as literal
+    /// JSON (value-in-op). Proves the clone_at binder journals NOTHING.
+    #[test]
+    fn production_route_duplicate_layer_selection_journals_one_insert_after() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+        ]);
+        // Select the second layer (path [1]) so duplicate inserts one clone.
+        st.layers_panel_selection = vec![vec![1]];
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let params = serde_json::Map::new();
+        dispatch_action("duplicate_layer_selection", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1) exactly one new, named transaction journaling exactly ONE op...
+        assert_eq!(model.journal().len(), before + 1,
+            "duplicate_layer_selection commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("duplicate_layer_selection"));
+        // ...and that ONE op is the insert_after — the clone_at binder is
+        // NON-JOURNALED (it only binds the clone JSON into ctx).
+        assert_eq!(txn.ops.len(), 1,
+            "exactly ONE op journaled (clone_at is non-journaled; only insert_after journals)");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "insert_after", "the journaled verb is insert_after");
+        // The op carries the WHOLE element as literal JSON (value-in-op): it must
+        // deserialize back to a valid Element (a Layer named "B").
+        let carried: crate::geometry::element::Element =
+            serde_json::from_value(op.params["element"].clone())
+                .expect("the op carries a deserializable element (value-in-op)");
+        let carried_name = match &carried {
+            crate::geometry::element::Element::Layer(le) => le.name().to_string(),
+            other => panic!("expected the carried element to be a Layer, got {other:?}"),
+        };
+        assert_eq!(carried_name, "B", "the carried element is the clone of layer B");
+        // targets carry the inserted element id ONLY when it has one. The clone of
+        // an id-less layer B is id-less, so targets is empty (Fork 4 metadata; the
+        // byte-gate ignores it).
+        assert_eq!(op.targets, carried.common().id.clone().into_iter().collect::<Vec<_>>(),
+            "targets carry the inserted element id when set, else empty");
+        // (2) the live doc has the duplicate: A, B, B.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 3);
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "B");
+        assert_eq!(tab_layer(&st, 2).name(), "B");
+        // (3) checkpoint_equivalence.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    /// `new_layer` = `create_layer` (NON-JOURNALED deterministic Layer factory,
+    /// bound as ctx JSON) → `insert_at` (the ONLY journaled op). Journals exactly
+    /// ONE `insert_at` op carrying the created Layer as literal JSON. Proves the
+    /// create_layer binder journals NOTHING.
+    #[test]
+    fn production_route_new_layer_journals_one_insert_at() {
+        let mut st = make_state_with_layers(vec![
+            ("Layer 1".into(), Visibility::Preview, false),
+        ]);
+        st.layers_panel_selection = vec![];
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        let params = serde_json::Map::new();
+        dispatch_action("new_layer", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // (1) exactly one new, named transaction journaling exactly ONE op...
+        assert_eq!(model.journal().len(), before + 1,
+            "new_layer commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("new_layer"));
+        // ...and that ONE op is insert_at — create_layer is NON-JOURNALED.
+        assert_eq!(txn.ops.len(), 1,
+            "exactly ONE op journaled (create_layer is non-journaled; only insert_at journals)");
+        let op = &txn.ops[0];
+        assert_eq!(op.op, "insert_at", "the journaled verb is insert_at");
+        // The op carries the created Layer as literal JSON (value-in-op).
+        let carried: crate::geometry::element::Element =
+            serde_json::from_value(op.params["element"].clone())
+                .expect("the op carries a deserializable element (value-in-op)");
+        assert!(matches!(carried, crate::geometry::element::Element::Layer(_)),
+            "the carried element is a Layer (from the create_layer factory)");
+        // (2) the live doc has the new auto-named layer at the end.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 1).name(), "Layer 2");
+        // (3) checkpoint_equivalence.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+    }
+
+    /// `delete_layer_selection` routes its `doc.delete_at` per path through
+    /// op_apply. Drives the composite and proves the deletes journal as
+    /// `delete_at` ops + the gate holds. (The reference-aware `delete_selection`
+    /// variant is exercised by the operations fixture; here we use the panel
+    /// delete which is the production surface for delete_at.)
+    #[test]
+    fn production_route_delete_selection_journals_through_op_apply() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        // Select an element on the canvas so doc.delete_selection has an operand.
+        // delete_clean_confirm_ok is the reference-aware delete OK path:
+        // snapshot + doc.delete_selection. Build the selection directly.
+        {
+            use crate::document::document::ElementSelection;
+            let mut d = st.tabs[st.active_tab].model.document().clone();
+            d.selection = vec![ElementSelection::all(vec![1])];
+            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+        }
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        // Drive the production doc.delete_selection handler (the reference-aware
+        // delete OK path), which now routes through op_apply.
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({"doc.delete_selection": null}),
+        ];
+        run_yaml_effects_named(&effects, &eval_ctx, &mut st, Some("delete_clean_confirm_ok"));
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1,
+            "delete_selection commits one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.ops.len(), 1, "exactly one delete_selection op journaled");
+        assert_eq!(txn.ops[0].op, "delete_selection", "the journaled verb");
+        // The live doc dropped layer B.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "C");
+        // checkpoint_equivalence.
         assert_artboard_checkpoint_equivalence(&st, pre_doc);
     }
 
