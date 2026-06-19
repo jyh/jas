@@ -148,6 +148,15 @@ fn json_array(items: &[String]) -> String {
     format!("[{}]", items.join(","))
 }
 
+/// Public canonicalizer (OP_LOG.md §10): canonical JSON of an arbitrary
+/// serde_json value using the SAME sorted-key + fixed-float (`fmt`) rule the
+/// document/recipe serializers use. Exposed so the cross-language
+/// production-capture journal serializer pins op `params` byte-identically to
+/// `document_to_test_json` floats (e.g. the marquee `x:-5.0` → `-5`).
+pub fn canonical_json_value(v: &serde_json::Value) -> String {
+    canonical_value(v)
+}
+
 /// Canonical JSON of an arbitrary serde_json value (sorted object keys, fixed
 /// floats via `fmt`), so a recorded element's recipe `params` serialize
 /// byte-identically (RECORDED_ELEMENTS.md §8 / OP_LOG.md §5 canonicalization).

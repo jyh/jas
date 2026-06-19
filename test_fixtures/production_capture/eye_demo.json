@@ -1,0 +1,17 @@
+{
+  "name": "eye_demo",
+  "setup_svg": "svg/eye.svg",
+  "action_name": "selection demo",
+  "effect_batch": [
+    {"doc.snapshot": {}},
+    {"doc.select_in_rect": {"x1": -5, "y1": -5, "x2": 50, "y2": 50, "additive": false}},
+    {"doc.copy_selection": {"dx": 0, "dy": 0}},
+    {"doc.translate_selection": {"dx": 50, "dy": 0}}
+  ],
+  "expected_journal_json": "production_capture/eye_demo_journal.json",
+  "expected_document_json": "production_capture/eye_demo_doc.json",
+  "recorded": {
+    "edit_source": {"id": "eye", "set": {"x": 100}},
+    "expected_output_json": "production_capture/eye_demo_rederived.json"
+  }
+}
