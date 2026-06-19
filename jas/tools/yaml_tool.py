@@ -187,8 +187,14 @@ class YamlTool(CanvasTool):
         guard = doc_primitives.register_document(ctx.document)
         try:
             platform_effects = yaml_tool_effects.build(ctx.controller)
+            # OP_LOG.md §9, Increment 3b-B: this tool-event dispatch is the
+            # owning batch — thread the Model + the event verb so run_effects
+            # commits the lazily-opened transaction once (one undo step) and
+            # names it with the event handler (e.g. "select on_mouseup").
             run_effects(effects, eff_ctx, self._store,
-                        platform_effects=platform_effects)
+                        platform_effects=platform_effects,
+                        model=ctx.model,
+                        action_name=f"{self._spec.id} {event_name}")
         finally:
             guard.restore()
 
