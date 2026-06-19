@@ -416,6 +416,32 @@ class Model:
             if self._undo_stack:
                 self._undo_stack.pop()
             return
+
+        # ── Per-frame drag coalescing (OP_LOG.md §9 follow-up) ─────────────
+        #
+        # A live drag commits ONE transaction PER FRAME: selection.yaml fires
+        # doc.snapshot only on the first mousemove, and each subsequent
+        # on_mousemove is its own run_effects batch that begin_txns + commits.
+        # So a drag of N frames lands as N consecutive single-op move
+        # transactions in the journal — verbose, and N separate undo steps.
+        #
+        # Coalesce ADJACENT same-gesture move transactions into ONE (summed
+        # delta), which also collapses the N undo steps into one. This is the
+        # ONLY correct layer: record_op only ever sees the ops WITHIN one
+        # pending_txn (a drag puts each frame's move in a SEPARATE pending_txn),
+        # so the two consecutive drag moves only become adjacent HERE, where the
+        # pending txn is finalized against the journal tip. The no-op rule above
+        # runs FIRST, unchanged — a zero-delta single frame is dropped before we
+        # ever reach coalescing. Coalescable verbs are EXACTLY the additive
+        # translates of the same target set (move_selection / move_by_ids);
+        # never copy_selection/copy_by_ids (non-additive), never select_* (run
+        # boundaries). Mirrors the Rust try_coalesce_drag_frame.
+        if self._try_coalesce_drag_frame(pending):
+            # Merged into the journal tip in place; the pending txn is dropped
+            # and its redundant undo checkpoint popped, so the undo stack and
+            # the journal cursor stay in lock-step (one drag == one undo step).
+            return
+
         self._redo_stack.clear()
         del self._op_journal[self._journal_head:]
         parent = self._op_journal[-1].txn_id if self._op_journal else None
@@ -429,6 +455,122 @@ class Model:
         ))
         self._next_txn_counter += 1
         self._journal_head = len(self._op_journal)
+
+    # Verbs eligible for per-frame drag coalescing: EXACTLY the additive
+    # translates of the same target set via Controller.move_selection. Never
+    # copy_selection/copy_by_ids (a copy is non-additive — two copies != one),
+    # never the selection-only verbs (run boundaries).
+    _COALESCABLE = ("move_selection", "move_by_ids")
+
+    def _try_coalesce_drag_frame(self, pending: "_PendingTxn | None") -> bool:
+        """Per-frame drag coalescing (OP_LOG.md §9 follow-up). Called by
+        commit_txn AFTER the no-op early-return and BEFORE the normal
+        truncate/append: try to merge the just-finalized pending transaction
+        ``T_new`` into the journal tip ``T_prev = op_journal[journal_head - 1]``
+        as a summed-delta translate. Returns ``True`` iff it coalesced (the
+        caller then returns early — the pending txn was absorbed, no new journal
+        entry, and the redundant undo checkpoint was popped so the undo stack
+        stays in lock-step with the journal cursor: one continuous drag == one
+        undo step).
+
+        PREDICATE (all must hold):
+         (guard) we are at the journal TIP: ``journal_head == len(op_journal)``.
+           If the user undid then dragged, ``journal_head < len``, and the tail
+           about to be truncated is NOT a valid merge target — do not coalesce.
+         (a) ``T_new`` has EXACTLY ONE op whose verb is a coalescable translate
+             (move_selection or move_by_ids).
+         (b) ``T_prev.ops[-1]`` exists and has the SAME verb.
+         (c) targets BYTE-EQUAL: ``T_prev.ops[-1].targets == T_new.ops[0].targets``
+             (for move_by_ids the params ``ids`` array must ALSO be byte-equal —
+             though (e) already covers it).
+         (d) SAME NAME: ``T_prev.name == T_new.name`` — drag-scoped, so two
+             DELIBERATE separate same-target moves stay distinct undo steps.
+         (e) the ONLY params that differ are dx/dy: strip dx/dy from both and
+             require the remainder byte-equal.
+
+        MERGE: sum ``T_new``'s dx/dy into ``T_prev``'s last op's params in place
+        and drop ``T_new`` entirely. NET-ZERO WHOLE-DRAG: if the merged op's net
+        delta is (0,0) AND the merged ``T_prev`` now byte-matches its ORIGIN
+        checkpoint (the whole drag round-tripped), drop ``T_prev`` too and pop
+        its origin checkpoint — the no-op rule extended across the coalesced run,
+        leaving no journal entry and no undo step. Coalescing pops the LATER
+        checkpoint and keeps the EARLIER/origin one, so the origin byte-compare
+        stays valid. Mirrors the Rust ``try_coalesce_drag_frame``.
+        """
+        # (guard) only at the journal tip; a post-undo drag must not merge into
+        # the about-to-be-truncated redo tail.
+        if self._journal_head != len(self._op_journal):
+            return False
+        # (a) T_new is exactly one coalescable move op.
+        if pending is None or len(pending.ops) != 1:
+            return False
+        new_op = pending.ops[0]
+        if new_op.op not in self._COALESCABLE:
+            return False
+        # T_prev = the journal tip; its LAST op is the merge target.
+        if not self._op_journal:
+            return False
+        prev = self._op_journal[-1]
+        # (d) same drag-scoped name.
+        if prev.name != pending.name:
+            return False
+        if not prev.ops:
+            return False
+        prev_op = prev.ops[-1]
+        # (b) same verb.
+        if prev_op.op != new_op.op:
+            return False
+        # (c) byte-equal targets (and, for move_by_ids, byte-equal ``ids``).
+        if prev_op.targets != new_op.targets:
+            return False
+        if new_op.op == "move_by_ids" and \
+                prev_op.params.get("ids") != new_op.params.get("ids"):
+            return False
+        # (e) the only params that differ are dx/dy: strip dx/dy from both and
+        # require the remainder byte-equal. (This also catches a move_by_ids
+        # whose non-``ids`` payload diverged, and any future param a verb grows.)
+        def strip(p: dict) -> dict:
+            return {k: v for k, v in p.items() if k not in ("dx", "dy")}
+        if strip(prev_op.params) != strip(new_op.params):
+            return False
+
+        def num(p: dict, key: str) -> float:
+            v = p.get(key)
+            return float(v) if isinstance(v, (int, float)) \
+                and not isinstance(v, bool) else 0.0
+
+        # ── MERGE: sum dx/dy into T_prev's last op in place. ──────────────
+        merged_dx = num(prev_op.params, "dx") + num(new_op.params, "dx")
+        merged_dy = num(prev_op.params, "dy") + num(new_op.params, "dy")
+        prev_op.params["dx"] = merged_dx
+        prev_op.params["dy"] = merged_dy
+
+        # Pop the redundant per-frame undo checkpoint (the same mechanism the
+        # no-op rule uses): this frame contributes no new undo step, so the undo
+        # stack stays in lock-step with the (unchanged) journal length. After
+        # this pop, ``_undo_stack[-1]`` is T_prev's ORIGIN checkpoint.
+        if self._undo_stack:
+            self._undo_stack.pop()
+
+        # ── NET-ZERO WHOLE-DRAG: the coalesced run round-tripped. ─────────
+        # If the merged delta is exactly (0,0) AND the live document now
+        # byte-matches T_prev's origin checkpoint, the whole drag (including this
+        # frame) cancelled out: drop T_prev entirely and pop its origin
+        # checkpoint too, so a round-trip drag leaves NO journal entry and NO
+        # undo step (the no-op rule, extended across the coalesced run).
+        if merged_dx == 0.0 and merged_dy == 0.0:
+            origin = self._undo_stack[-1] if self._undo_stack else None
+            round_tripped = origin is not None and (
+                document_to_test_json(self._document)
+                == document_to_test_json(origin)
+                and self._document.layers == origin.layers
+                and self._document.symbols == origin.symbols
+            )
+            if round_tripped:
+                self._op_journal.pop()
+                self._journal_head = len(self._op_journal)
+                self._undo_stack.pop()
+        return True
 
     def abort_txn(self) -> None:
         """Roll back the open transaction to its checkpoint, discarding it (no
