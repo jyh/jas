@@ -1,0 +1,93 @@
+[
+  {
+    "name": "print_config_document_setup",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "document_setup_confirm",
+        "ops": [
+          { "op": "set_document_setup_field", "field": "bleed_top", "value": 9 },
+          { "op": "set_document_setup_field", "field": "bleed_uniform", "value": false },
+          { "op": "set_document_setup_field", "field": "grid_size", "value": 25 },
+          { "op": "set_document_setup_field", "field": "grid_color", "value": "#abcdef" },
+          { "op": "set_document_setup_field", "field": "simulate_colored_paper", "value": true },
+          { "op": "set_document_setup_field", "field": "transparency_flattener_preset", "value": "high" }
+        ]
+      }
+    ],
+    "expected_json": "print_config_document_setup.json"
+  },
+  {
+    "name": "print_config_preferences_root",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "print_options_confirm",
+        "ops": [
+          { "op": "set_print_preferences_field", "field": "preset_name", "value": "My Preset" },
+          { "op": "set_print_preferences_field", "field": "printer_name", "value": "Laser-1" },
+          { "op": "set_print_preferences_field", "field": "copies", "value": 3 },
+          { "op": "set_print_preferences_field", "field": "collate", "value": true },
+          { "op": "set_print_preferences_field", "field": "media_size", "value": "a4" },
+          { "op": "set_print_preferences_field", "field": "media_width", "value": 595.5 },
+          { "op": "set_print_preferences_field", "field": "orientation", "value": "landscape" },
+          { "op": "set_print_preferences_field", "field": "scaling_mode", "value": "fit_to_page" }
+        ]
+      }
+    ],
+    "expected_json": "print_config_preferences_root.json"
+  },
+  {
+    "name": "print_config_output_and_inks",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "print_options_confirm",
+        "ops": [
+          { "op": "set_output_field", "field": "mode", "value": "separations" },
+          { "op": "set_output_field", "field": "convert_spot_to_process", "value": true },
+          { "op": "set_output_ink_field", "field": "print", "value": false, "index": 0 },
+          { "op": "set_output_ink_field", "field": "frequency", "value": 133.5, "index": 1 },
+          { "op": "set_output_ink_field", "field": "angle", "value": 45, "index": 2 },
+          { "op": "set_output_ink_field", "field": "dot_shape", "value": "ellipse", "index": 3 }
+        ]
+      }
+    ],
+    "expected_json": "print_config_output_and_inks.json"
+  },
+  {
+    "name": "print_config_graphics_cm_marks_advanced",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "print_options_confirm",
+        "ops": [
+          { "op": "set_graphics_field", "field": "flatness", "value": 2.5 },
+          { "op": "set_graphics_field", "field": "postscript_level", "value": "level_2" },
+          { "op": "set_color_management_field", "field": "document_profile", "value": "Custom RGB" },
+          { "op": "set_color_management_field", "field": "preserve_rgb_numbers", "value": true },
+          { "op": "set_marks_and_bleed_field", "field": "trim_marks", "value": true },
+          { "op": "set_marks_and_bleed_field", "field": "mark_offset", "value": 12 },
+          { "op": "set_advanced_field", "field": "print_as_bitmap", "value": true },
+          { "op": "set_advanced_field", "field": "overprint_flattener_preset", "value": "low" }
+        ]
+      }
+    ],
+    "expected_json": "print_config_graphics_cm_marks_advanced.json"
+  },
+  {
+    "name": "print_config_type_mismatch_skips",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "print_options_confirm",
+        "ops": [
+          { "op": "set_document_setup_field", "field": "bleed_top", "value": true },
+          { "op": "set_print_preferences_field", "field": "printer_name", "value": 7 },
+          { "op": "set_document_setup_field", "field": "bleed_left", "value": 4 }
+        ]
+      }
+    ],
+    "expected_json": "print_config_type_mismatch_skips.json"
+  }
+]

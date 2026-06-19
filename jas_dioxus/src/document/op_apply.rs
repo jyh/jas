@@ -23,6 +23,235 @@ use crate::document::controller::{self, Controller};
 use crate::document::document::ElementPath;
 use crate::document::model::Model;
 
+/// The eight print-config field setters (PRINT.md §1–§6). OP_LOG.md §9 Phase P1
+/// (the actions.yaml↔op_apply unification proving ground): these journal real
+/// ops through `op_apply`, so the renderer.rs production handler and the replay
+/// harness share ONE mutation body. Each value is a RESOLVED literal
+/// (`serde_json::Value`) — replay has no eval context, so the YAML expr is
+/// resolved to a number/string/bool BEFORE it reaches here. Type mismatches
+/// (a string where a bool is wanted, etc.) SKIP rather than mutating, exactly
+/// like the pre-P1 inline renderer blocks. Returns `true` iff a field matched
+/// AND the value coerced — the caller records the op only on `true`, so a
+/// type-mismatch skip journals nothing (the document is unchanged, so an empty
+/// journal entry would add no information).
+pub const PRINT_CONFIG_VERBS: &[&str] = &[
+    "set_color_management_field",
+    "set_document_setup_field",
+    "set_graphics_field",
+    "set_marks_and_bleed_field",
+    "set_output_field",
+    "set_output_ink_field",
+    "set_print_preferences_field",
+    "set_advanced_field",
+];
+
+/// Apply one print-config field setter to `model`, self-bracketing through
+/// `edit_document` (joins an open transaction; opens its own otherwise — the
+/// same write path the Controller mutators use). `verb` selects which of the
+/// four print-config structs to dispatch into; `field` names the field; `value`
+/// is the RESOLVED literal; `index` is the ink index (only `set_output_ink_field`
+/// reads it). Returns `true` iff the field matched and the value coerced.
+///
+/// SHARED between `renderer.rs::run_yaml_effect` (production) and `op_apply`
+/// (replay) so the field-match + type-coerce + write are byte-identical on both
+/// paths (the checkpoint_equivalence gate, OP_LOG.md §6). Behavior-preserving vs
+/// the pre-P1 inline blocks: every match arm and every type-mismatch skip below
+/// mirrors the renderer.rs code it replaced.
+pub fn apply_print_config_field(
+    model: &mut Model,
+    verb: &str,
+    field: &str,
+    value: &serde_json::Value,
+    index: usize,
+) -> bool {
+    use crate::document::print_preferences as pp;
+    // Hardened reads: a malformed production payload never panics — a
+    // type-mismatch yields `None`, which the per-field arms treat as "skip".
+    let as_num = value.as_f64();
+    let as_bool = value.as_bool();
+    let as_str = value.as_str();
+    let mut new_doc = model.document().clone();
+    let applied: bool = match verb {
+        "set_print_preferences_field" => {
+            let p = &mut new_doc.print_preferences;
+            match field {
+                "preset_name" => match as_str {
+                    Some(s) => { p.preset_name = s.to_string(); true }
+                    None => false,
+                },
+                "printer_name" => match as_str {
+                    // Numbers/bools were explicitly rejected in the inline
+                    // block; a string (incl. empty → None) is the only accept.
+                    Some(s) => {
+                        p.printer_name = if s.is_empty() { None } else { Some(s.to_string()) };
+                        true
+                    }
+                    None => false,
+                },
+                "copies" => match as_num {
+                    Some(n) => { p.copies = (n as i64).max(0) as u32; true }
+                    None => false,
+                },
+                "collate" => match as_bool { Some(b) => { p.collate = b; true } None => false },
+                "reverse_order" => match as_bool { Some(b) => { p.reverse_order = b; true } None => false },
+                "artboard_range_mode" => match as_str {
+                    Some(s) => { p.artboard_range_mode = pp::artboard_range_mode_from(s); true }
+                    None => false,
+                },
+                "artboard_range" => match as_str {
+                    Some(s) => { p.artboard_range = s.to_string(); true }
+                    None => false,
+                },
+                "ignore_artboards" => match as_bool { Some(b) => { p.ignore_artboards = b; true } None => false },
+                "skip_blank_artboards" => match as_bool { Some(b) => { p.skip_blank_artboards = b; true } None => false },
+                "media_size" => match as_str {
+                    Some(s) => { p.media_size = pp::media_size_from(s); true }
+                    None => false,
+                },
+                "media_width" => match as_num { Some(n) => { p.media_width = n; true } None => false },
+                "media_height" => match as_num { Some(n) => { p.media_height = n; true } None => false },
+                "orientation" => match as_str {
+                    Some(s) => { p.orientation = pp::orientation_from(s); true }
+                    None => false,
+                },
+                "auto_rotate" => match as_bool { Some(b) => { p.auto_rotate = b; true } None => false },
+                "transverse" => match as_bool { Some(b) => { p.transverse = b; true } None => false },
+                "print_layers" => match as_str {
+                    Some(s) => { p.print_layers = pp::print_layers_from(s); true }
+                    None => false,
+                },
+                "placement_x" => match as_num { Some(n) => { p.placement_x = n; true } None => false },
+                "placement_y" => match as_num { Some(n) => { p.placement_y = n; true } None => false },
+                "scaling_mode" => match as_str {
+                    Some(s) => { p.scaling_mode = pp::scaling_mode_from(s); true }
+                    None => false,
+                },
+                "custom_scale" => match as_num { Some(n) => { p.custom_scale = n; true } None => false },
+                "tile_overlap_h" => match as_num { Some(n) => { p.tile_overlap_h = n; true } None => false },
+                "tile_overlap_v" => match as_num { Some(n) => { p.tile_overlap_v = n; true } None => false },
+                "tile_range" => match as_str {
+                    Some(s) => { p.tile_range = s.to_string(); true }
+                    None => false,
+                },
+                _ => false,
+            }
+        }
+        "set_marks_and_bleed_field" => {
+            let m = &mut new_doc.print_preferences.marks_and_bleed;
+            match field {
+                "all_printer_marks" => match as_bool { Some(b) => { m.all_printer_marks = b; true } None => false },
+                "trim_marks" => match as_bool { Some(b) => { m.trim_marks = b; true } None => false },
+                "registration_marks" => match as_bool { Some(b) => { m.registration_marks = b; true } None => false },
+                "color_bars" => match as_bool { Some(b) => { m.color_bars = b; true } None => false },
+                "page_information" => match as_bool { Some(b) => { m.page_information = b; true } None => false },
+                "printer_mark_type" => match as_str {
+                    Some(s) => { m.printer_mark_type = pp::printer_mark_type_from(s); true }
+                    None => false,
+                },
+                "trim_mark_weight" => match as_num { Some(n) => { m.trim_mark_weight = n; true } None => false },
+                "mark_offset" => match as_num { Some(n) => { m.mark_offset = n; true } None => false },
+                "use_document_bleed" => match as_bool { Some(b) => { m.use_document_bleed = b; true } None => false },
+                "bleed_top" => match as_num { Some(n) => { m.bleed_top = n; true } None => false },
+                "bleed_right" => match as_num { Some(n) => { m.bleed_right = n; true } None => false },
+                "bleed_bottom" => match as_num { Some(n) => { m.bleed_bottom = n; true } None => false },
+                "bleed_left" => match as_num { Some(n) => { m.bleed_left = n; true } None => false },
+                _ => false,
+            }
+        }
+        "set_output_field" => {
+            let o = &mut new_doc.print_preferences.output;
+            match field {
+                "mode" => match as_str { Some(s) => { o.mode = pp::output_mode_from(s); true } None => false },
+                "emulsion" => match as_str { Some(s) => { o.emulsion = pp::emulsion_from(s); true } None => false },
+                "image_polarity" => match as_str { Some(s) => { o.image_polarity = pp::image_polarity_from(s); true } None => false },
+                "printer_resolution" => match as_str { Some(s) => { o.printer_resolution = s.to_string(); true } None => false },
+                "convert_spot_to_process" => match as_bool { Some(b) => { o.convert_spot_to_process = b; true } None => false },
+                "overprint_black" => match as_bool { Some(b) => { o.overprint_black = b; true } None => false },
+                _ => false,
+            }
+        }
+        "set_output_ink_field" => {
+            let inks = &mut new_doc.print_preferences.output.inks;
+            match inks.get_mut(index) {
+                Some(ink) => match field {
+                    "print" => match as_bool { Some(b) => { ink.print = b; true } None => false },
+                    "frequency" => match as_num { Some(n) => { ink.frequency = n; true } None => false },
+                    "angle" => match as_num { Some(n) => { ink.angle = n; true } None => false },
+                    "dot_shape" => match as_str { Some(s) => { ink.dot_shape = pp::dot_shape_from(s); true } None => false },
+                    "name" => match as_str { Some(s) => { ink.name = s.to_string(); true } None => false },
+                    _ => false,
+                },
+                // An out-of-range index is a skip (the inline block early-returned).
+                None => false,
+            }
+        }
+        "set_graphics_field" => {
+            let g = &mut new_doc.print_preferences.graphics;
+            match field {
+                "flatness" => match as_num { Some(n) => { g.flatness = n; true } None => false },
+                "font_download" => match as_str { Some(s) => { g.font_download = pp::font_download_from(s); true } None => false },
+                "postscript_level" => match as_str { Some(s) => { g.postscript_level = pp::postscript_level_from(s); true } None => false },
+                "data_format" => match as_str { Some(s) => { g.data_format = pp::data_format_from(s); true } None => false },
+                "compatible_gradient_printing" => match as_bool { Some(b) => { g.compatible_gradient_printing = b; true } None => false },
+                "raster_effects_resolution" => match as_num { Some(n) => { g.raster_effects_resolution = n; true } None => false },
+                _ => false,
+            }
+        }
+        "set_color_management_field" => {
+            let c = &mut new_doc.print_preferences.color_management;
+            match field {
+                "document_profile" => match as_str { Some(s) => { c.document_profile = s.to_string(); true } None => false },
+                "color_handling" => match as_str { Some(s) => { c.color_handling = pp::color_handling_from(s); true } None => false },
+                "printer_profile" => match as_str { Some(s) => { c.printer_profile = s.to_string(); true } None => false },
+                "rendering_intent" => match as_str { Some(s) => { c.rendering_intent = pp::rendering_intent_from(s); true } None => false },
+                "preserve_rgb_numbers" => match as_bool { Some(b) => { c.preserve_rgb_numbers = b; true } None => false },
+                _ => false,
+            }
+        }
+        "set_advanced_field" => {
+            let a = &mut new_doc.print_preferences.advanced;
+            match field {
+                "print_as_bitmap" => match as_bool { Some(b) => { a.print_as_bitmap = b; true } None => false },
+                "overprint_flattener_preset" => match as_str {
+                    Some(s) => { a.overprint_flattener_preset = pp::flattener_preset_from(s); true }
+                    None => false,
+                },
+                _ => false,
+            }
+        }
+        "set_document_setup_field" => {
+            let d = &mut new_doc.document_setup;
+            match field {
+                "bleed_top" => match as_num { Some(n) => { d.bleed_top = n; true } None => false },
+                "bleed_right" => match as_num { Some(n) => { d.bleed_right = n; true } None => false },
+                "bleed_bottom" => match as_num { Some(n) => { d.bleed_bottom = n; true } None => false },
+                "bleed_left" => match as_num { Some(n) => { d.bleed_left = n; true } None => false },
+                "bleed_uniform" => match as_bool { Some(b) => { d.bleed_uniform = b; true } None => false },
+                "show_images_outline" => match as_bool { Some(b) => { d.show_images_outline = b; true } None => false },
+                "highlight_substituted_glyphs" => match as_bool { Some(b) => { d.highlight_substituted_glyphs = b; true } None => false },
+                "simulate_colored_paper" => match as_bool { Some(b) => { d.simulate_colored_paper = b; true } None => false },
+                "discard_white_overprint" => match as_bool { Some(b) => { d.discard_white_overprint = b; true } None => false },
+                "grid_size" => match as_num { Some(n) => { d.grid_size = n; true } None => false },
+                // grid_color/paper_color accept any string (the inline block
+                // accepted both Value::Str and the hex-coerced Value::Color,
+                // which both serialize to a JSON string).
+                "grid_color" => match as_str { Some(s) => { d.grid_color = s.to_string(); true } None => false },
+                "paper_color" => match as_str { Some(s) => { d.paper_color = s.to_string(); true } None => false },
+                "transparency_flattener_preset" => match as_str {
+                    Some(s) => { d.transparency_flattener_preset = pp::flattener_preset_from(s); true }
+                    None => false,
+                },
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    if applied {
+        model.edit_document(new_doc);
+    }
+    applied
+}
+
 /// Parse a JSON array of indices into an [`ElementPath`]. Returns `None` if the
 /// field is absent or not an array of non-negative integers (a malformed
 /// production payload skips the op rather than panicking).
@@ -252,6 +481,38 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         "simplify" => {
             let precision = op.get("precision").and_then(|v| v.as_f64()).unwrap_or(0.5);
             Controller::simplify_selection(model, precision);
+        }
+        // Print-config field setters (OP_LOG.md §9 Phase P1). The eight
+        // doc.* print-config verbs journal real ops: each op carries a RESOLVED
+        // `field`/`value` (and `index` for ink) — the value is a literal, NOT a
+        // YAML expr (replay has no eval context). Routes through the SAME
+        // `apply_print_config_field` helper as renderer.rs, so the mutation is
+        // byte-identical on the production and replay paths. A type-mismatch
+        // skip mutates nothing AND records nothing (early-return before
+        // `record_op`), so the journal carries only effective edits.
+        // `targets` stays EMPTY: this is document-global config, and the
+        // checkpoint_equivalence gate compares documents, not metadata.
+        v if PRINT_CONFIG_VERBS.contains(&v) => {
+            let Some(field) = str_field(op, "field") else {
+                return;
+            };
+            let Some(value) = op.get("value") else {
+                return;
+            };
+            // `index` is read defensively (only set_output_ink_field uses it);
+            // a missing/malformed index defaults to 0, which the helper's
+            // `inks.get_mut(index)` bounds-checks (out-of-range ⇒ skip).
+            let index = op.get("index").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+            // Clone `field`/`value` out of the borrow so `apply_…` can take
+            // `&mut model` (the helper borrows the model mutably).
+            let field = field.to_string();
+            let value = value.clone();
+            if !apply_print_config_field(model, v, &field, &value, index) {
+                // Type-mismatch / unknown-field skip: nothing mutated, so
+                // journal nothing (an empty op would replay to no change and
+                // only add noise).
+                return;
+            }
         }
         // Unknown verb: a malformed/unsupported production payload is skipped
         // rather than panicking. (The harness corpus only carries known verbs,
