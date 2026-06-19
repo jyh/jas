@@ -34,6 +34,7 @@ pub fn run_effects(
     mut model: Option<&mut Model>,
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
+    action_name: Option<&str>,
 ) {
     // OP_LOG.md Increment 1, sub-step 5: a YAML action opens its undo
     // transaction via the `doc.snapshot` effect (and self-contained doc.*
@@ -71,6 +72,17 @@ pub fn run_effects(
     // action one undo step. No-op when nothing opened one or when nested.
     if owns_txn {
         if let Some(m) = model.as_deref_mut() {
+            // OP_LOG.md §9 (Increment 3b-B): name every production transaction
+            // with its action/event verb (the actions.yaml verb at the action
+            // dispatch site, or the tool event-handler name) so the journal's
+            // `name=None` legibility hole is closed for ALL actions, not just
+            // the three op-journaled verbs. `name_txn` is a no-op if no
+            // transaction was opened in this batch, so a no-edit gesture stays
+            // anonymous. Set just before commit, once this batch's lazily-opened
+            // transaction (if any) is live.
+            if let Some(action) = action_name {
+                m.name_txn(action);
+            }
             m.commit_txn();
         }
     }
@@ -210,6 +222,8 @@ fn run_one(
             }
         }
         if let Some(serde_json::Value::Array(in_effects)) = effect.get("in") {
+            // Nested run_effects (let/in) — `owns_txn` is false here, so the
+            // outer batch keeps ownership and naming; pass None (OP_LOG.md §9).
             run_effects(
                 in_effects,
                 &extended_ctx,
@@ -217,6 +231,7 @@ fn run_one(
                 model.as_deref_mut(),
                 actions,
                 dialogs,
+                None,
             );
         }
         return;
@@ -279,11 +294,11 @@ fn run_one(
         if result.to_bool() {
             run_effects(
                 &then_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs);
+                model.as_deref_mut(), actions, dialogs, None);
         } else {
             run_effects(
                 &else_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs);
+                model.as_deref_mut(), actions, dialogs, None);
         }
         return;
     }
@@ -347,7 +362,15 @@ fn run_one(
                             c.insert("param".to_string(), serde_json::Value::Object(resolved));
                         }
                     }
-                    run_effects(action_effects, &dispatch_ctx, store, model.as_deref_mut(), actions, dialogs);
+                    // OP_LOG.md §9: name the transaction with the dispatched
+                    // actions.yaml verb. If this dispatch is the owner (no outer
+                    // transaction open), `name_txn` stamps the verb; if it is
+                    // nested under an owner, `name_txn` is skipped (the inner
+                    // run_effects sees `owns_txn == false`).
+                    run_effects(
+                        action_effects, &dispatch_ctx, store,
+                        model.as_deref_mut(), actions, dialogs,
+                        Some(action_name));
                 }
             }
         }
@@ -596,6 +619,17 @@ fn set_by_scoped_target(
 /// Dispatch a `doc.*` effect to the Model via `Controller`. Runs only
 /// when a Model is threaded through `run_effects`. Mirrors the `doc.*`
 /// arm of jas_flask/static/js/engine/effects.mjs.
+///
+/// OP_LOG.md §9 (Increment 3b-B) — production op-capture: EXACTLY THREE verbs
+/// here are journaled with real ops + `targets` by routing through `op_apply`:
+/// `doc.select_in_rect` → `select_rect`, `doc.copy_selection` →
+/// `copy_selection`, and `doc.translate_selection` → `move_selection`. Every
+/// OTHER `doc.*` verb (set/rotate/scale/shear, all artboard/layer/print-config
+/// setters, wrap/unpack/delete_*/insert_*/create_*, …) is STAGED-OPAQUE in
+/// 3b-B: it is named (via `name_txn`) but emits no ops. The Layers-panel
+/// "Duplicate" / "Duplicate Artboard" gestures live in the OTHER runner
+/// (`renderer.rs::run_yaml_effect`, AppState-level) and journal nothing here in
+/// v1 — also deferred. See OP_LOG.md §9 for the full deferred list.
 fn run_doc_effect(
     name: &str,
     spec: &serde_json::Value,
@@ -680,11 +714,22 @@ fn run_doc_effect(
             }
         }
         "doc.translate_selection" => {
+            // OP_LOG.md §9 (Increment 3b-B): one of the THREE production-
+            // journaled verbs. Route through `op_apply` (which calls the SAME
+            // `Controller::move_selection`, so the document mutation is byte-
+            // identical) so the move is journaled as `move_selection` with
+            // pre-mutation `targets`. Every OTHER doc.* verb below stays
+            // staged-opaque in 3b-B (named-but-op-less); the renderer.rs
+            // AppState-level handlers (Layers-panel Duplicate / Duplicate
+            // Artboard) are deferred there too. See OP_LOG.md §9.
             if let serde_json::Value::Object(args) = spec {
                 let dx = eval_number(args.get("dx"), store, ctx);
                 let dy = eval_number(args.get("dy"), store, ctx);
                 if dx != 0.0 || dy != 0.0 {
-                    Controller::move_selection(model, dx, dy);
+                    let op = serde_json::json!({
+                        "op": "move_selection", "dx": dx, "dy": dy,
+                    });
+                    crate::document::op_apply::op_apply(model, &op);
                 }
             }
         }
@@ -833,10 +878,18 @@ fn run_doc_effect(
             }
         }
         "doc.copy_selection" => {
+            // OP_LOG.md §9 (Increment 3b-B): one of the THREE production-
+            // journaled verbs. Route through `op_apply` (same
+            // `Controller::copy_selection`, byte-identical mutation) so the copy
+            // is journaled as `copy_selection` with pre-mutation source
+            // `targets`.
             if let serde_json::Value::Object(args) = spec {
                 let dx = eval_number(args.get("dx"), store, ctx);
                 let dy = eval_number(args.get("dy"), store, ctx);
-                Controller::copy_selection(model, dx, dy);
+                let op = serde_json::json!({
+                    "op": "copy_selection", "dx": dx, "dy": dy,
+                });
+                crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.add_element" => {
@@ -864,6 +917,15 @@ fn run_doc_effect(
             }
         }
         "doc.select_in_rect" => {
+            // OP_LOG.md §9 (Increment 3b-B): the keystone of the THREE
+            // production-journaled verbs — `select_rect` records `targets`
+            // (resolved AFTER the Controller call), which `capture_recipe` seeds
+            // its working set from (empty targets ⇒ empty recipe). CRITICAL
+            // PARAM-SHAPE TRANSLATION: the YAML marquee delivers corner coords
+            // `x1/y1/x2/y2` + `additive`, but the harness `select_rect` verb (and
+            // thus replay / `op_apply`) expects `x/y/width/height` + `extend`.
+            // Translate here so the journaled op replays BYTE-IDENTICALLY through
+            // the same `Controller::select_rect`.
             if let serde_json::Value::Object(args) = spec {
                 let x1 = eval_number(args.get("x1"), store, ctx);
                 let y1 = eval_number(args.get("y1"), store, ctx);
@@ -874,7 +936,12 @@ fn run_doc_effect(
                 let ry = y1.min(y2);
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
-                Controller::select_rect(model, rx, ry, rw, rh, additive);
+                let op = serde_json::json!({
+                    "op": "select_rect",
+                    "x": rx, "y": ry, "width": rw, "height": rh,
+                    "extend": additive,
+                });
+                crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.add_path_from_anchor_buffer" => {
@@ -5771,7 +5838,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("x", serde_json::json!(0));
         let effects = vec![serde_json::json!({"set": {"x": "5"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("x"), &serde_json::json!(5));
     }
 
@@ -5780,7 +5847,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("flag", serde_json::json!(true));
         let effects = vec![serde_json::json!({"toggle": "flag"})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("flag"), &serde_json::json!(false));
     }
 
@@ -5790,7 +5857,7 @@ mod tests {
         store.set("a", serde_json::json!("#ff0000"));
         store.set("b", serde_json::json!("#00ff00"));
         let effects = vec![serde_json::json!({"swap": ["a", "b"]})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("a"), &serde_json::json!("#00ff00"));
         assert_eq!(store.get("b"), &serde_json::json!("#ff0000"));
     }
@@ -5807,7 +5874,7 @@ mod tests {
                 "else": [{"set": {"result": "\"no\""}}]
             }
         })];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("result"), &serde_json::json!("yes"));
     }
 
@@ -5816,7 +5883,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("count", serde_json::json!(5));
         let effects = vec![serde_json::json!({"increment": {"key": "count", "by": 3}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("count"), &serde_json::json!(8.0));
     }
 
@@ -5828,7 +5895,7 @@ mod tests {
             "set_x": {"effects": [{"set": {"x": "42"}}]}
         });
         let effects = vec![serde_json::json!({"dispatch": "set_x"})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&actions), None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, Some(&actions), None, None);
         assert_eq!(store.get("x"), &serde_json::json!(42));
     }
 
@@ -5845,7 +5912,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "simple"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         assert_eq!(store.dialog_id(), Some("simple"));
         assert_eq!(store.get_dialog("name"), &serde_json::json!(""));
     }
@@ -5873,7 +5940,7 @@ mod tests {
         let effects = vec![serde_json::json!({
             "open_dialog": {"id": "picker", "params": {"target": "\"fill\""}}
         })];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         assert_eq!(store.dialog_id(), Some("picker"));
         assert_eq!(store.get_dialog("color"), &serde_json::json!("#00ff00"));
         // hsb_h("#00ff00") = 120
@@ -5887,7 +5954,7 @@ mod tests {
         defaults.insert("x".to_string(), serde_json::json!(1));
         store.init_dialog("test", defaults, None);
         let effects = vec![serde_json::json!({"close_dialog": null})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.dialog_id(), None);
     }
 
@@ -5913,7 +5980,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         let snap = store.dialog_snapshot().expect("snapshot should be captured on open");
         assert_eq!(snap.get("left_indent"), Some(&serde_json::json!(12)));
         assert_eq!(snap.get("right_indent"), Some(&serde_json::json!(0)));
@@ -5930,7 +5997,7 @@ mod tests {
             }
         });
         let effects = vec![serde_json::json!({"open_dialog": {"id": "plain"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         assert!(!store.has_dialog_snapshot());
     }
 
@@ -5948,12 +6015,12 @@ mod tests {
         });
         // Open captures snapshot of left_indent = 12
         let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         // Simulate Preview live-applying an edit: state moves to 99
         store.set("left_indent", serde_json::json!(99));
         // Cancel (close_dialog with snapshot present) restores to 12
         let close = vec![serde_json::json!({"close_dialog": null})];
-        run_effects(&close, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&close, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("left_indent"), &serde_json::json!(12));
         assert_eq!(store.dialog_id(), None);
         assert!(!store.has_dialog_snapshot());
@@ -5972,14 +6039,14 @@ mod tests {
             }
         });
         let open = vec![serde_json::json!({"open_dialog": {"id": "para_indent"}})];
-        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&open, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         store.set("left_indent", serde_json::json!(99));
         // OK action equivalent: clear snapshot, then close
         let ok_then_close = vec![
             serde_json::json!({"clear_dialog_snapshot": null}),
             serde_json::json!({"close_dialog": null}),
         ];
-        run_effects(&ok_then_close, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&ok_then_close, &serde_json::json!({}), &mut store, None, None, None, None);
         // Without snapshot to restore from, the user's edit (99) survives
         assert_eq!(store.get("left_indent"), &serde_json::json!(99));
         assert_eq!(store.dialog_id(), None);
@@ -5998,11 +6065,11 @@ mod tests {
         });
         // Open dialog
         let effects = vec![serde_json::json!({"open_dialog": {"id": "picker"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs));
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, Some(&dialogs), None);
         assert_eq!(store.get_dialog("color"), &serde_json::json!("#aabbcc"));
         // Set global state from dialog
         let effects = vec![serde_json::json!({"set": {"fill_color": "dialog.color"}})];
-        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None);
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("fill_color"), &serde_json::json!("#aabbcc"));
     }
 
@@ -6071,7 +6138,7 @@ mod tests {
         ];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert!(model.can_undo(), "snapshot + edit is one undoable step");
         assert!(model.is_modified());
         model.undo();
@@ -6089,7 +6156,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.snapshot": {}})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert!(!model.can_undo(), "empty transaction leaves no undo step");
         assert!(!model.is_modified());
     }
@@ -6102,7 +6169,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.snapshot": {}})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         // If we reached here without panic, the no-op path worked.
     }
 
@@ -6115,7 +6182,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.clear_selection": {}})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 0);
     }
 
@@ -6128,7 +6195,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let sel = &model.document().selection;
         assert_eq!(sel.len(), 2);
         assert_eq!(sel[0].path, vec![0, 0]);
@@ -6144,7 +6211,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let sel = &model.document().selection;
         assert_eq!(sel.len(), 1);
         assert_eq!(sel[0].path, vec![0, 0]);
@@ -6157,7 +6224,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.add_to_selection": [0, 0]})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 1);
         assert_eq!(model.document().selection[0].path, vec![0, 0]);
     }
@@ -6170,7 +6237,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.add_to_selection": [0, 0]})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 1);
     }
 
@@ -6181,7 +6248,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.toggle_selection": [0, 0]})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 1);
     }
 
@@ -6196,7 +6263,7 @@ mod tests {
         let effects = vec![serde_json::json!({"doc.toggle_selection": [0, 0]})];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 0);
     }
 
@@ -6211,7 +6278,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let elem = &model.document().layers[0].children().unwrap()[0];
         if let Element::Rect(r) = &**elem {
             assert_eq!(r.x, 5.0);
@@ -6234,7 +6301,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let elem = &model.document().layers[0].children().unwrap()[0];
         if let Element::Rect(r) = &**elem {
             assert_eq!(r.x, 0.0);
@@ -6258,7 +6325,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let elem = &model.document().layers[0].children().unwrap()[0];
         if let Element::Rect(r) = &**elem {
             assert_eq!(r.x, 3.0);
@@ -6278,7 +6345,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 2);
     }
 
@@ -6296,7 +6363,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 2);
     }
 
@@ -6311,7 +6378,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let children_after = model.document().layers[0].children().unwrap().len();
         assert_eq!(children_after, children_before + 1);
     }
@@ -6333,7 +6400,7 @@ mod tests {
         let effects = vec![serde_json::json!({
             "doc.set_selection": { "paths": ["hit"] }
         })];
-        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 1);
         assert_eq!(model.document().selection[0].path, vec![0, 0]);
     }
@@ -6355,7 +6422,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 0);
     }
 
@@ -6371,7 +6438,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(
             store.get_tool("selection", "mode"),
             &serde_json::json!("marquee"),
@@ -6386,7 +6453,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(
             store.get_tool("selection", "mode"),
             &serde_json::json!("idle"),
@@ -6401,7 +6468,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get("fill_color"), &serde_json::json!("#ff0000"));
     }
 
@@ -6415,7 +6482,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get("x"), &serde_json::json!(42));
         // And the tool scope stays empty.
         assert!(store.tool_scopes().is_empty());
@@ -6433,7 +6500,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get_panel("color", "mode"), &serde_json::json!("rgb"));
     }
 
@@ -6448,7 +6515,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         let ctx = store.eval_context();
         assert_eq!(ctx["tool"]["sel"]["mode"], serde_json::json!("drag"));
     }
@@ -6464,7 +6531,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         let v = super::super::expr::eval(
             "tool.sel.mode == \"marquee\"",
             &store.eval_context(),
@@ -6486,7 +6553,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get("result"), &serde_json::json!(20));
     }
 
@@ -6508,7 +6575,7 @@ mod tests {
         ];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get("captured"), &serde_json::json!(5));
         assert_eq!(store.get("after"), &serde_json::Value::Null);
     }
@@ -6537,7 +6604,7 @@ mod tests {
         let ctx = serde_json::json!({
             "event": { "x": 5.0, "y": 5.0 }  // inside rect0 at (0,0,10,10)
         });
-        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None, None);
         drop(_g);
         assert_eq!(model.document().selection.len(), 1);
         assert_eq!(model.document().selection[0].path, vec![0, 0]);
@@ -6562,7 +6629,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
         if let Element::Rect(r) = &*children[0] {
@@ -6593,7 +6660,7 @@ mod tests {
                 }
             }
         })];
-        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None);
+        run_effects(&effects, &ctx, &mut store, Some(&mut model), None, None, None);
         if let Element::Rect(r) = &*model.document().layers[0].children().unwrap()[0] {
             assert_eq!(r.x, 15.0);
             assert_eq!(r.y, 25.0);
@@ -6620,7 +6687,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let r = match &*model.document().layers[0].children().unwrap()[0] {
             Element::Rect(r) => r.clone(),
             _ => panic!("expected Rect"),
@@ -6648,7 +6715,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let r = match &*model.document().layers[0].children().unwrap()[0] {
             Element::Rect(r) => r.clone(),
             _ => panic!("expected Rect"),
@@ -6672,7 +6739,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let r = match &*model.document().layers[0].children().unwrap()[0] {
             Element::Rect(r) => r.clone(),
             _ => panic!("expected Rect"),
@@ -6691,7 +6758,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(
             model.document().layers[0].children().unwrap().len(),
             0,
@@ -6755,7 +6822,7 @@ mod tests {
             "doc.add_path_from_buffer": { "buffer": "tst1" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         assert!(p.stroke_brush.is_none());
     }
@@ -6775,7 +6842,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         assert_eq!(p.stroke_brush.as_deref(), Some("mylib/flat_1"));
     }
@@ -6796,7 +6863,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         let fill = p.fill.as_ref().expect("expected fill");
         assert_eq!(fill.color, Color::from_hex("#abcdef").unwrap());
@@ -6818,7 +6885,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         assert!(p.fill.is_none());
     }
@@ -6835,7 +6902,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         assert!(matches!(p.d.last().unwrap(), PathCommand::ClosePath));
     }
@@ -6849,7 +6916,7 @@ mod tests {
             "doc.add_path_from_buffer": { "buffer": "tst5b" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         assert!(!matches!(p.d.last().unwrap(), PathCommand::ClosePath));
     }
@@ -6869,7 +6936,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         let s = p.stroke.as_ref().expect("expected stroke");
         assert_eq!(s.width, 3.5);
@@ -6897,7 +6964,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         let s = p.stroke.as_ref().expect("expected stroke");
         assert_eq!(s.width, 8.0);
@@ -6926,7 +6993,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         let s = p.stroke.as_ref().expect("expected stroke");
         assert_eq!(s.width, 2.25);
@@ -6957,7 +7024,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let p = committed_path(&model);
         let s = p.stroke.as_ref().expect("expected stroke");
         assert_eq!(s.width, 12.0);
@@ -7025,7 +7092,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(store.get_tool("paintbrush", "mode"),
             &serde_json::json!("edit"));
         // entry_idx is some non-zero flat index near the press.
@@ -7044,7 +7111,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // mode was untouched — default is Null.
         assert_eq!(store.get_tool("paintbrush", "mode"),
             &serde_json::Value::Null);
@@ -7061,7 +7128,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(store.get_tool("paintbrush", "mode"),
             &serde_json::Value::Null);
     }
@@ -7081,7 +7148,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(store.get_tool("paintbrush", "mode"),
             &serde_json::json!("edit"));
 
@@ -7098,7 +7165,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
 
         // Verify path was modified: d should no longer be exactly the
         // 3 original commands (MoveTo + 2 LineTos).
@@ -7136,7 +7203,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let new_cmds = match &*model.document().layers[0].children().unwrap()[0] {
             Element::Path(pe) => pe.d.clone(),
             _ => panic!(),
@@ -7160,7 +7227,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(store.get_tool("paintbrush", "mode"),
             &serde_json::json!("edit"));
         super::super::point_buffers::clear("paintbrush");
@@ -7174,7 +7241,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let new_cmds = match &*model.document().layers[0].children().unwrap()[0] {
             Element::Path(pe) => pe.d.clone(),
             _ => panic!(),
@@ -7195,7 +7262,7 @@ mod tests {
         })];
         run_effects(
             &effects, &serde_json::json!({}), &mut store,
-            None, None, None);
+            None, None, None, None);
         assert_eq!(store.get_tool("sel", "mode"), &serde_json::json!("idle"));
         assert_eq!(store.get("fill_color"), &serde_json::json!("#000000"));
         assert_eq!(store.get("recent_count"), &serde_json::json!(5));
@@ -7234,7 +7301,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let children = model.document().layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
         let elem = &*children[0];
@@ -7301,7 +7368,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
 
         // The 20-30 square with tip size 10 swept 0-50: fully covered.
         // Expect the element removed.
@@ -7356,7 +7423,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
 
         // Element lacks jas:tool-origin → erase skips it entirely.
         let children = model.document().layers[0].children().unwrap();
@@ -7428,7 +7495,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let paths: std::collections::HashSet<Vec<usize>> = model.document()
             .selection.iter().map(|es| es.path.clone()).collect();
         assert!(paths.contains(&vec![0, 0]), "seed always included");
@@ -7454,7 +7521,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let paths: std::collections::HashSet<Vec<usize>> = model.document()
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 3);
@@ -7483,7 +7550,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let paths: std::collections::HashSet<Vec<usize>> = model.document()
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 1);
@@ -7536,7 +7603,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let paths: std::collections::HashSet<Vec<usize>> = model.document()
             .selection.iter().map(|es| es.path.clone()).collect();
         assert_eq!(paths.len(), 1);
@@ -7615,7 +7682,7 @@ mod tests {
             "doc.eyedropper.sample": { "source": [0, 0] }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let cache = store.get("eyedropper_cache").clone();
         assert!(!cache.is_null(), "sample must populate cache");
         // Cache is a serialized Appearance — the fill key should be
@@ -7636,7 +7703,7 @@ mod tests {
             "doc.eyedropper.sample": { "source": [0, 0] }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Rect 1 should now have red fill copied from rect 0.
         let target = model.document().get_element(&vec![0, 1]).unwrap();
         let fill = target.fill().expect("target now has fill");
@@ -7654,7 +7721,7 @@ mod tests {
                 "doc.eyedropper.sample": { "source": [0, 0] }
             })],
             &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Now Alt+click rect 1 (no selection).
         crate::document::controller::Controller::set_selection(&mut model, Vec::new());
         run_effects(
@@ -7662,7 +7729,7 @@ mod tests {
                 "doc.eyedropper.apply_loaded": { "target": [0, 1] }
             })],
             &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let target = model.document().get_element(&vec![0, 1]).unwrap();
         let fill = target.fill().expect("apply_loaded wrote fill");
         assert_eq!(fill.color, Color::rgb(1.0, 0.0, 0.0));
@@ -7678,7 +7745,7 @@ mod tests {
             "doc.eyedropper.apply_loaded": { "target": [0, 0] }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let cache = store.get("eyedropper_cache").clone();
         assert!(!cache.is_null(),
             "empty-cache Alt+click should fall through to sample");
@@ -7720,7 +7787,7 @@ mod tests {
                 "doc.eyedropper.sample": { "source": [0, 0] }
             })],
             &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Locked target's fill stays None.
         let target = model.document().get_element(&vec![0, 1]).unwrap();
         assert_eq!(target.fill(), None,
@@ -7742,7 +7809,7 @@ mod tests {
                 "doc.eyedropper.sample": { "source": [0, 0] }
             })],
             &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let target = model.document().get_element(&vec![0, 1]).unwrap();
         assert_eq!(target.fill(), None,
             "Fill master OFF must leave target's fill unchanged");
@@ -7791,7 +7858,7 @@ mod tests {
                 "doc.eyedropper.sample": { "source": [0, 0] }
             })],
             &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Both group children should have received the red fill.
         let child0 = model.document().get_element(&vec![0, 1, 0]).unwrap();
         let child1 = model.document().get_element(&vec![0, 1, 1]).unwrap();
@@ -7828,7 +7895,7 @@ mod tests {
             "doc.zoom.set": { "level": "1.0" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
 
         assert_eq!(model.zoom_level, 1.0);
         let doc_under_center_after = (
@@ -7853,7 +7920,7 @@ mod tests {
             "doc.zoom.set": { "level": "1000.0" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Clamped to max_zoom (default 64.0 from preferences.yaml).
         assert_eq!(model.zoom_level, 64.0);
     }
@@ -7870,7 +7937,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.zoom_level, 2.0);
         assert_eq!(model.view_offset_x, 150.0);
         assert_eq!(model.view_offset_y, 75.0);
@@ -7893,7 +7960,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.zoom_level, 2.0);
         // Anchor invariant: doc point (200, 150) was at screen
         // (200, 150) before; should still be at screen (200, 150).
@@ -7931,7 +7998,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.zoom_level, 2.0);
         // Anchor invariant for the viewport-center anchor: the
         // document point currently under (400, 300) must still be
@@ -7966,7 +8033,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Clamped to 64.0 (default max_zoom).
         assert_eq!(model.zoom_level, 64.0);
     }
@@ -7986,7 +8053,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // delta = (50, 70); initial = (0, 0); result = (50, 70).
         assert_eq!(model.view_offset_x, 50.0);
         assert_eq!(model.view_offset_y, 70.0);
@@ -8011,7 +8078,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert!((model.zoom_level - 3.8).abs() < 1e-9, "z = {}", model.zoom_level);
         // Rect center (100, 50) at zoom 3.8 → screen (380, 190).
         // Viewport center (400, 300). offset = 400 - 380 = 20; 300 - 190 = 110.
@@ -8034,7 +8101,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.zoom_level, 64.0);
     }
 
@@ -8058,7 +8125,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // No-op: pre-existing view state preserved.
         assert_eq!(model.zoom_level, 1.5);
         assert_eq!(model.view_offset_x, 100.0);
@@ -8079,7 +8146,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // No-op: Model defaults preserved.
         assert_eq!(model.zoom_level, 1.0);
         assert_eq!(model.view_offset_x, 0.0);
@@ -8112,7 +8179,7 @@ mod tests {
             "doc.zoom.fit_all_artboards": { "padding": "0" }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert!((model.zoom_level - 2.0).abs() < 1e-9, "z = {}", model.zoom_level);
     }
 
@@ -8135,7 +8202,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let abs = &model.document().artboards;
         assert_eq!(abs.len(), 2);
         let new_ab = &abs[1];
@@ -8164,7 +8231,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let new_ab = &model.document().artboards[1];
         assert_eq!(new_ab.x, 10.0);
         assert_eq!(new_ab.y, 20.0);
@@ -8188,7 +8255,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let new_ab = &model.document().artboards[1];
         assert_eq!(new_ab.width, 1.0);
         assert_eq!(new_ab.height, 1.0);
@@ -8211,7 +8278,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let new_ab = &model.document().artboards[1];
         assert_eq!(new_ab.x, 10.0);  // 10.4 rounds down
         assert_eq!(new_ab.y, 21.0);  // 20.6 rounds up
@@ -8302,7 +8369,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Tool state set.
         let tool_mode = store.eval_context()
             .get("tool").unwrap()
@@ -8361,7 +8428,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let pending = store.drain_panel_state_writes();
         // No anchor in eval context → falls back to plain replace.
         assert_eq!(pending.len(), 2);
@@ -8392,7 +8459,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let pending = store.drain_panel_state_writes();
         // No prior selection in eval context → Cmd toggles ccc IN.
         assert_eq!(pending.len(), 1);
@@ -8426,13 +8493,13 @@ mod tests {
         run_effects(
             &[serde_json::json!({"doc.artboard.probe_hover": {"x": "50", "y": "50"}})],
             &serde_json::json!({}),
-            &mut store, Some(&mut model), None, None);
+            &mut store, Some(&mut model), None, None, None);
         assert_eq!(read_hover(&store), "interior");
         // Outside any artboard.
         run_effects(
             &[serde_json::json!({"doc.artboard.probe_hover": {"x": "999", "y": "999"}})],
             &serde_json::json!({}),
-            &mut store, Some(&mut model), None, None);
+            &mut store, Some(&mut model), None, None, None);
         assert_eq!(read_hover(&store), "empty");
     }
 
@@ -8452,7 +8519,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let pending = store.drain_panel_state_writes();
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].1, "artboards_panel_selection");
@@ -8559,7 +8626,7 @@ mod tests {
             "doc.artboard.duplicate_init": {}
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Two artboards now (source + duplicate).
         assert_eq!(model.document().artboards.len(), 2);
         // Layer's children grew from 1 to 2 (deep-copy appended).
@@ -8610,7 +8677,7 @@ mod tests {
             "doc.artboard.duplicate_init": {}
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let abs = &model.document().artboards;
         assert_eq!(abs.len(), 2);
         assert_eq!(abs[0].id, "src00001");  // source unchanged
@@ -8659,7 +8726,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let ab = &model.document().artboards[0];
         assert_eq!(ab.x, 150.0);
         assert_eq!(ab.y, 70.0);
@@ -8715,7 +8782,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         // Artboard moved.
         assert_eq!(model.document().artboards[0].x, 50.0);
         assert_eq!(model.document().artboards[0].y, 30.0);
@@ -8765,13 +8832,13 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let after_first = (
             model.document().artboards[0].x,
             model.document().artboards[0].y,
         );
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let after_second = (
             model.document().artboards[0].x,
             model.document().artboards[0].y,
@@ -8806,7 +8873,7 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         assert_eq!(model.document().artboards[0].x, 180.0);
         assert_eq!(model.document().artboards[0].y, 100.0);
     }
@@ -8891,11 +8958,295 @@ mod tests {
             }
         })];
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let after_first = (model.view_offset_x, model.view_offset_y);
         run_effects(&effects, &serde_json::json!({}), &mut store,
-            Some(&mut model), None, None);
+            Some(&mut model), None, None, None);
         let after_second = (model.view_offset_x, model.view_offset_y);
         assert_eq!(after_first, after_second);
+    }
+
+    // -----------------------------------------------------------------
+    // OP_LOG.md §9 (Increment 3b-B) — production op-capture
+    //
+    // These two tests are the 3b-B deliverable: they drive the REAL
+    // production effect path (`run_effects` over `doc.*` effects) and prove
+    // (A) production now journals real ops + a name for the three replay-safe
+    // verbs, with the keystone `select_rect.targets`, and the
+    // `checkpoint_equivalence` gate holds; and (B) that production-captured
+    // journal segment actually feeds `RecordedElem` — the eye demo on the real
+    // path, re-derived against an EDITED source.
+    // -----------------------------------------------------------------
+
+    /// An SVG with a single source rect carrying a stable `common.id` ("eye"),
+    /// at (0,0,10,10). The marquee / copy / move gestures below address it by
+    /// id so the journaled `targets` are non-empty (the load-bearing keystone).
+    const EYE_SVG: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 200 100" width="200" height="100">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <rect id="eye" x="0" y="0" width="10" height="10" fill="rgb(255,0,0)" stroke="none"/>
+  </g>
+</svg>"#;
+
+    fn eye_model() -> Model {
+        Model::new(crate::geometry::svg::svg_to_document(EYE_SVG), None)
+    }
+
+    /// The production batch a "select then copy then move" demonstration emits:
+    /// open the undo transaction, marquee-select the eye, duplicate it, then
+    /// nudge the duplicate. Mirrors selection.yaml's on_mouseup / on_mousemove
+    /// effect shapes (corner-coord marquee + dx/dy deltas).
+    fn eye_production_batch() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"doc.snapshot": {}}),
+            // Corner-coord marquee covering the eye — the param shape the YAML
+            // delivers (x1/y1/x2/y2/additive), which run_doc_effect translates
+            // to the harness x/y/width/height/extend shape before journaling.
+            serde_json::json!({"doc.select_in_rect": {
+                "x1": -5, "y1": -5, "x2": 50, "y2": 50, "additive": false
+            }}),
+            serde_json::json!({"doc.copy_selection": {"dx": 0, "dy": 0}}),
+            serde_json::json!({"doc.translate_selection": {"dx": 50, "dy": 0}}),
+        ]
+    }
+
+    #[test]
+    fn production_path_journals_three_verbs_with_targets_and_passes_gate() {
+        let mut store = StateStore::new();
+        let mut model = eye_model();
+        let effects = eye_production_batch();
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("selection demo"));
+
+        // One committed transaction, NAMED with the action verb (closing the
+        // `name=None` legibility hole — OP_LOG.md §9).
+        assert_eq!(model.journal().len(), 1, "the batch is one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.name.as_deref(), Some("selection demo"),
+            "production transaction carries its action name");
+
+        // Real ops captured (not the old opaque ops:[]). `doc.snapshot` is
+        // history navigation, NOT a primitive op, so it is not in `ops`.
+        let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+        assert_eq!(verbs, vec!["select_rect", "copy_selection", "move_selection"],
+            "the three replay-safe verbs are journaled in order");
+
+        // Param-shape translation: the marquee corner coords became the harness
+        // x/y/width/height/extend shape so the op replays byte-identically.
+        // The corner marquee (-5,-5)..(50,50) normalizes to top-left origin
+        // (rx = min(x1,x2) = -5) + extent (w = |x2-x1| = 55), and additive
+        // becomes extend.
+        let sel = &txn.ops[0];
+        assert_eq!(sel.params["op"], "select_rect");
+        assert_eq!(sel.params["x"], -5.0);
+        assert_eq!(sel.params["y"], -5.0);
+        assert_eq!(sel.params["width"], 55.0);
+        assert_eq!(sel.params["height"], 55.0);
+        assert_eq!(sel.params["extend"], false);
+
+        // The keystone: the select op resolved its targets to the source id, so
+        // capture_recipe can seed a non-empty working set.
+        assert_eq!(sel.targets, vec!["eye".to_string()],
+            "select_rect.targets == [source id] — load-bearing for capture_recipe");
+        // copy_selection records the PRE-mutation source id.
+        assert_eq!(txn.ops[1].targets, vec!["eye".to_string()],
+            "copy_selection.targets == pre-mutation source id");
+        // move_selection's pre-mutation selection is the id-less copy, so its
+        // targets are empty (the copy is born id-less) — matches the
+        // capture_recipe normalization where the move targets the produced $0.
+        assert!(txn.ops[2].targets.is_empty(),
+            "move_selection targets the id-less copy (empty pre-mutation ids)");
+
+        // Scoped, per-fixture completeness assert (NOT a global commit_txn
+        // invariant — the other ~30 verbs legitimately still emit empty ops):
+        // the production path here MUST emit ops.
+        assert!(!txn.ops.is_empty(),
+            "the production journal segment is non-empty (3b-B completeness)");
+
+        // checkpoint_equivalence gate (OP_LOG.md §6): replay the journal ops
+        // via op_apply from the same setup and byte-compare to the snapshot-path
+        // document. Adding `targets` must not change document_to_test_json —
+        // targets is journal metadata, not document state.
+        let snapshot_json =
+            crate::geometry::test_json::document_to_test_json(model.document());
+        let mut replay = eye_model();
+        for op in &txn.ops {
+            crate::document::op_apply::op_apply(&mut replay, &op.params);
+        }
+        let replay_json =
+            crate::geometry::test_json::document_to_test_json(replay.document());
+        assert_eq!(replay_json, snapshot_json,
+            "checkpoint_equivalence: journal replay == snapshot-path document");
+    }
+
+    /// End-to-end payoff pin (the 3b-B deliverable over 3b-A): take the
+    /// PRODUCTION journal segment, capture_recipe it into a RecordedElem, then
+    /// evaluate that recipe against an EDITED source input and byte-pin the
+    /// re-derived output. This proves production capture actually feeds
+    /// RecordedElem (the eye demo on the real production path).
+    #[test]
+    fn production_capture_feeds_recorded_element_re_derivation() {
+        use crate::geometry::live::{
+            capture_recipe, ElementRef, ElementResolver, RecordedElem, DEFAULT_PRECISION,
+        };
+        use crate::geometry::element::{CommonProps, Element};
+        use std::rc::Rc;
+
+        // Drive the real production path and lift the committed segment.
+        let mut store = StateStore::new();
+        let mut model = eye_model();
+        run_effects(
+            &eye_production_batch(), &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("selection demo"));
+        let segment = model.journal().last().expect("a transaction").ops.clone();
+
+        // capture_recipe normalizes the production segment (select/copy/move,
+        // with the keystone select targets) into an input-addressed recipe.
+        let (recipe, inputs) = capture_recipe(&segment);
+        assert_eq!(inputs, vec!["eye".to_string()],
+            "the production select targets become the recipe input");
+        assert_eq!(recipe.iter().map(|o| o.op.as_str()).collect::<Vec<_>>(),
+            vec!["copy", "translate"],
+            "normalized to the input-addressed copy+translate recipe");
+
+        let mut common = CommonProps::default();
+        common.id = Some("rec".into());
+        let recorded = RecordedElem::new(
+            recipe, inputs.into_iter().map(ElementRef).collect(), common);
+
+        // A resolver over an EDITED source eye (moved to x=100). The recorded
+        // derivative must re-derive against the edit.
+        struct OneResolver(Rc<Element>);
+        impl ElementResolver for OneResolver {
+            fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>> {
+                if id.0 == "eye" { Some(self.0.clone()) } else { None }
+            }
+        }
+        let edited_eye = crate::geometry::svg::svg_to_document(
+            &EYE_SVG.replace(r#"x="0" y="0""#, r#"x="100" y="0""#));
+        // The edited eye is layers[0].children[0].
+        let eye_el = edited_eye.get_element(&vec![0, 0])
+            .expect("edited eye element").clone();
+        let resolver = OneResolver(Rc::new(eye_el));
+
+        let mut visiting = std::collections::BTreeSet::new();
+        let ps = recorded.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+
+        // One derived output (the copy), translated +50 from the EDITED source.
+        // The SVG px→pt unit conversion (96/72 = ×0.75) maps the edited eye
+        // x=100,w=10 (px) to x=75,w=7.5 (pt); copy(dx=0)+translate(+50) → bbox
+        // x in [125, 132.5]. The derivative followed the edit (source was x=0
+        // at capture → would have been [50,57.5]) — the whole point of liveness.
+        assert_eq!(ps.len(), 1, "one derived output element");
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, _) in &ps[0] {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+        }
+        assert!((min_x - 125.0).abs() < 1e-6 && (max_x - 132.5).abs() < 1e-6,
+            "production-captured recipe re-derives against the edited source \
+             (bbox [{min_x},{max_x}] != [125,132.5])");
+    }
+
+    /// OP_LOG.md §9 (Increment 3b-B) regression: the subsequent-drag-frame
+    /// journaling hole. selection.yaml emits `doc.snapshot` ONLY on the first
+    /// mousemove (`if: not snapshotted`); every later frame is a SEPARATE
+    /// run_effects batch carrying a BARE `doc.translate_selection` with no
+    /// snapshot. Before the op_apply lazy-begin fix, those later frames lost
+    /// BOTH the `move_selection` op (record_op no-op with no open txn) and the
+    /// name (the self-bracketing edit_document committed its own anonymous txn
+    /// before the batch-end name_txn ran), yielding `name=None ops=[]`. After
+    /// the fix every committed transaction is named AND its move is journaled.
+    #[test]
+    fn subsequent_drag_frame_is_named_and_journals_move() {
+        let mut store = StateStore::new();
+        let mut model = eye_model();
+        // Establish a selection (as a real marquee mousedown+up would).
+        Controller::select_element(&mut model, &vec![0, 0]);
+
+        // FRAME 1: the first mousemove batch — doc.snapshot opens the txn, then
+        // the move. This is the held-open happy path (already worked).
+        run_effects(
+            &[
+                serde_json::json!({"doc.snapshot": {}}),
+                serde_json::json!({"doc.translate_selection": {"dx": 5, "dy": 0}}),
+            ],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("selection on_mousemove"));
+
+        // FRAME 2: a SEPARATE batch — a BARE doc.translate_selection, NO
+        // snapshot. This is the path the hole lived on.
+        run_effects(
+            &[serde_json::json!({"doc.translate_selection": {"dx": 7, "dy": 0}})],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("selection on_mousemove"));
+
+        // Two committed transactions, one per frame.
+        assert_eq!(model.journal().len(), 2,
+            "each drag frame commits its own transaction");
+        for (i, txn) in model.journal().iter().enumerate() {
+            // EVERY production txn is named (the §9 invariant).
+            assert_eq!(txn.name.as_deref(), Some("selection on_mousemove"),
+                "frame {i}: every production transaction is named");
+            // EVERY frame journals its move (frame 2 is the regression).
+            let verbs: Vec<&str> = txn.ops.iter().map(|o| o.op.as_str()).collect();
+            assert_eq!(verbs, vec!["move_selection"],
+                "frame {i}: the move_selection op is journaled (ops non-empty)");
+        }
+    }
+
+    /// Guard the op_apply lazy-begin fix against over-reach: a BARE marquee
+    /// `doc.select_in_rect` (selection.yaml's on_mouseup, with NO doc.snapshot)
+    /// changes only SELECTION — non-undoable, serialized state. It must stay
+    /// journal-neutral and leave no undo step. (select_rect is EXCLUDED from the
+    /// lazy begin_txn in op_apply precisely so a click/marquee is undo-free.)
+    #[test]
+    fn bare_marquee_select_stays_journal_neutral() {
+        let mut store = StateStore::new();
+        let mut model = eye_model();
+        run_effects(
+            &[serde_json::json!({"doc.select_in_rect": {
+                "x1": -5, "y1": -5, "x2": 50, "y2": 50, "additive": false
+            }})],
+            &serde_json::json!({}), &mut store,
+            Some(&mut model), None, None, Some("select"));
+        // The selection took effect (the marquee actually selected the eye)...
+        assert_eq!(model.document().selection.len(), 1,
+            "the marquee selected the eye");
+        // ...but it is NOT undoable and NOT journaled.
+        assert!(!model.can_undo(),
+            "a selection-only marquee is not an undoable step");
+        assert_eq!(model.journal().len(), 0,
+            "a selection-only marquee journals no transaction");
+    }
+
+    /// Direct op_apply `move_selection` assertion (OP_LOG.md §9): pin the EDITED
+    /// document bbox THROUGH op_apply's move arm itself — not via the
+    /// self-consistent checkpoint gate (which cancels a shared bug) nor the
+    /// capture_recipe path (which reads dx from op.params and bypasses the move
+    /// arm). A `+1.0` drift on `Controller::move_selection(model, dx, dy)` would
+    /// fail HERE even though both Test A paths stayed green.
+    #[test]
+    fn op_apply_move_selection_pins_edited_bbox() {
+        let mut model = eye_model();
+        // Select the eye and move it by a non-symmetric (dx, dy) so a swapped
+        // or +1-drifted argument is detectable on each axis independently.
+        Controller::select_element(&mut model, &vec![0, 0]);
+        crate::document::op_apply::op_apply(
+            &mut model,
+            &serde_json::json!({"op": "move_selection", "dx": 3, "dy": 11}),
+        );
+        // The eye is layers[0].children[0]. Its source bbox (after px→pt 0.75
+        // scaling: x=0,y=0,w=10,h=10 px → 0,0,7.5,7.5 pt) shifts by exactly
+        // (dx, dy) = (3, 11).
+        let eye = model.document().get_element(&vec![0, 0]).expect("eye");
+        let (min_x, min_y, w, h) = eye.bounds();
+        assert!((min_x - 3.0).abs() < 1e-6,
+            "op_apply move arm applied dx exactly (min_x {min_x} != 3.0)");
+        assert!((min_y - 11.0).abs() < 1e-6,
+            "op_apply move arm applied dy exactly (min_y {min_y} != 11.0)");
+        assert!((w - 7.5).abs() < 1e-6 && (h - 7.5).abs() < 1e-6,
+            "move is a pure translation (size unchanged: {w}x{h})");
     }
 }

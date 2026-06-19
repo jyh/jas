@@ -304,6 +304,14 @@ impl YamlTool {
         // Clone handler to drop the borrow on self.spec; run_effects
         // wants &mut self.store.
         let effects = handler.to_vec();
+        // OP_LOG.md §9 (Increment 3b-B): the real tool on_event dispatch site —
+        // name the production transaction with the tool's event-handler verb
+        // (e.g. "selection on_mousemove") so the journal's `name=None`
+        // legibility hole is closed for every gesture, not just the three
+        // op-journaled verbs. This is where the marquee / drag / copy gestures
+        // that emit select_in_rect / translate_selection / copy_selection
+        // originate, with the REAL StateStore (not renderer.rs's throwaway one).
+        let action_name = format!("{} {}", self.spec.id, event_name);
         run_effects(
             &effects,
             &ctx,
@@ -311,6 +319,7 @@ impl YamlTool {
             Some(model),
             actions,
             None,
+            Some(action_name.as_str()),
         );
     }
 }

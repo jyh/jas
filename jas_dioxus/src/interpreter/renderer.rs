@@ -752,7 +752,11 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     }
                 }
                 let eval_ctx = build_appstate_ctx(&merged, st);
-                return run_yaml_effects(effects, &eval_ctx, st);
+                // OP_LOG.md §9: name the transaction with the dispatched action
+                // verb so every menu/keyboard/panel-driven undoable txn is
+                // legible (closes the name=None hole on the primary action
+                // surface). `action` is already in scope here.
+                return run_yaml_effects_named(effects, &eval_ctx, st, Some(action));
             }
         }
     }
@@ -2195,6 +2199,21 @@ fn run_yaml_effects(
     ctx_in: &serde_json::Value,
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
+    run_yaml_effects_named(effects, ctx_in, st, None)
+}
+
+/// `run_yaml_effects` with the owning action's name threaded in (OP_LOG.md §9).
+/// The batch owner stamps `name_txn(action)` just before `commit_txn` so every
+/// menu/keyboard/panel-dispatched undoable transaction is named — closing the
+/// `name=None` legibility hole for the primary action surface (not just the
+/// tool-gesture dispatches). Re-entrant calls (foreach/branch bodies) pass
+/// `None` so only the owner names, matching the effects.rs nested-call rule.
+fn run_yaml_effects_named(
+    effects: &[serde_json::Value],
+    ctx_in: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+    action_name: Option<&str>,
+) -> Vec<serde_json::Value> {
     let mut scope = ctx_in.clone();
     let mut deferred = Vec::new();
     // OP_LOG.md Increment 1, sub-step 6: a YAML action opens its undo
@@ -2209,6 +2228,12 @@ fn run_yaml_effects(
     }
     if owns_txn {
         if let Some(t) = st.tabs.get_mut(st.active_tab) {
+            // Name every production transaction with its action verb before
+            // committing (OP_LOG.md §9). `name_txn` is a no-op if nothing opened
+            // a txn this batch, so a no-edit action stays anonymous.
+            if let Some(action) = action_name {
+                t.model.name_txn(action);
+            }
             t.model.commit_txn();
         }
     }
@@ -3504,6 +3529,12 @@ fn run_yaml_effect(
                 &mut store,
                 Some(&mut tab.model),
                 None,
+                None,
+                // OP_LOG.md §9: deliberately NOT named here — this is the
+                // renderer.rs throwaway-StateStore delegation path (view
+                // actions: fit_active_artboard, zoom_to_actual_size, …), not
+                // the real tool on_event dispatch. Naming is wired at the
+                // yaml_tool dispatch site instead.
                 None,
             );
         }
@@ -9774,6 +9805,39 @@ mod tests {
              (zoom={}, off=({},{}))",
             m.zoom_level, m.view_offset_x, m.view_offset_y,
         );
+    }
+
+    // ── OP_LOG.md §9: dispatch_action names its transaction ─────────
+    //
+    // dispatch_action → run_yaml_effects_named is the primary action surface
+    // (menu / keyboard / panel). Before §9 it called run_yaml_effects with no
+    // action name, so every undoable menu/keyboard/panel transaction committed
+    // with name=None — the legibility hole §9 closes for ALL actions, not just
+    // the three op-journaled verbs. This pins that a YAML action dispatched
+    // through dispatch_action commits a transaction NAMED with its action verb.
+    #[test]
+    fn dispatch_action_names_the_committed_transaction() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        let before = st.tabs[st.active_tab].model.journal().len();
+        // `new_layer` is a YAML action (snapshot + doc.create_layer +
+        // doc.insert_at) routed through the catalog fallback — not a hardcoded
+        // handler — so it exercises the run_yaml_effects_named path.
+        let params = serde_json::Map::new();
+        dispatch_action("new_layer", &params, &mut st);
+
+        let model = &st.tabs[st.active_tab].model;
+        // The action committed exactly one new transaction...
+        assert_eq!(model.journal().len(), before + 1,
+            "new_layer commits one transaction");
+        // ...named with its action verb (the §9 invariant for the primary
+        // action surface).
+        assert_eq!(model.journal().last().and_then(|t| t.name.as_deref()),
+            Some("new_layer"),
+            "dispatch_action stamps the transaction with the action name");
+        // And it is a real undoable step.
+        assert!(model.can_undo(), "new_layer is undoable");
     }
 
     // ── Phase 3 Group B: doc.delete_at / doc.clone_at / doc.insert_after

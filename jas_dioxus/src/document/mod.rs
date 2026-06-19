@@ -5,5 +5,6 @@ pub mod document;
 pub mod document_setup;
 pub mod id_index;
 pub mod model;
+pub mod op_apply;
 pub mod op_log;
 pub mod print_preferences;

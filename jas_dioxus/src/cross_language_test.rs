@@ -8,8 +8,6 @@
 #[cfg(test)]
 mod tests {
     use crate::algorithms::hit_test;
-    use crate::document::controller::Controller;
-    use crate::document::document::ElementPath;
     use crate::document::model::Model;
     use crate::geometry::binary::{document_to_binary, binary_to_document};
     use crate::geometry::svg::{document_to_svg, svg_to_document};
@@ -459,211 +457,15 @@ mod tests {
     // Operation equivalence tests
     // ---------------------------------------------------------------
 
+    /// Thin harness shim over the production dispatcher (OP_LOG.md §9,
+    /// Increment 3b-B): both the `#[cfg(test)]` cross-language harness and the
+    /// production effect path go through the SAME `op_apply` module and the SAME
+    /// `record_op` site, so this lift is behavior-preserving (the operations
+    /// fixtures stay byte-green) and `targets` is recorded identically on both
+    /// paths. Promoting the dispatcher out of `#[cfg(test)]` also hardened its
+    /// param parsing so production input can't panic.
     fn apply_op(model: &mut Model, op: &serde_json::Value) {
-        let name = op["op"].as_str().unwrap();
-        // History-navigation ops (OP_LOG.md §5): they manage transaction
-        // boundaries / the journal cursor and are NOT primitive ops, so they
-        // are never journaled. `snapshot` commits the prior action's
-        // transaction (relocated redo-clear) and opens a new one, so the
-        // mutator ops that follow JOIN one checkpoint; undo/redo end the open
-        // context and move the cursor.
-        match name {
-            "snapshot" => {
-                model.commit_txn();
-                model.begin_txn();
-                return;
-            }
-            "undo" => {
-                model.undo();
-                return;
-            }
-            "redo" => {
-                model.redo();
-                return;
-            }
-            _ => {}
-        }
-        match name {
-            "select_rect" => {
-                Controller::select_rect(
-                    model,
-                    op["x"].as_f64().unwrap(),
-                    op["y"].as_f64().unwrap(),
-                    op["width"].as_f64().unwrap(),
-                    op["height"].as_f64().unwrap(),
-                    op["extend"].as_bool().unwrap_or(false),
-                );
-            }
-            "move_selection" => {
-                Controller::move_selection(
-                    model,
-                    op["dx"].as_f64().unwrap(),
-                    op["dy"].as_f64().unwrap(),
-                );
-            }
-            "copy_selection" => {
-                Controller::copy_selection(
-                    model,
-                    op["dx"].as_f64().unwrap(),
-                    op["dy"].as_f64().unwrap(),
-                );
-            }
-            "assign_id" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::assign_id(model, &path, op["id"].as_str().unwrap());
-            }
-            "create_reference" => {
-                let target_path: ElementPath = op["target_path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::create_reference(
-                    model,
-                    &target_path,
-                    op["target_id"].as_str().unwrap(),
-                    op["ref_id"].as_str().unwrap(),
-                );
-            }
-            // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and
-            // paths are read literally from the fixture payload, exactly like
-            // the create_reference arm.
-            "make_symbol" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::make_symbol(
-                    model,
-                    &path,
-                    op["master_id"].as_str().unwrap(),
-                    op["ref_id"].as_str().unwrap(),
-                );
-            }
-            "place_instance" => {
-                Controller::place_instance(
-                    model,
-                    op["master_id"].as_str().unwrap(),
-                    op["ref_id"].as_str().unwrap(),
-                );
-            }
-            "detach" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::detach(model, &path);
-            }
-            "redefine" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::redefine(
-                    model,
-                    op["master_id"].as_str().unwrap(),
-                    &path,
-                    op["ref_id"].as_str().unwrap(),
-                );
-            }
-            "delete_symbol" => {
-                Controller::delete_symbol(
-                    model,
-                    op["master_id"].as_str().unwrap(),
-                );
-            }
-            // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance
-            // transform is carried in the payload as {a,b,c,d,e,f} (the same
-            // matrix shape parsed elsewhere) and applied verbatim.
-            "set_instance_transform" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                let t = &op["transform"];
-                let transform = crate::geometry::element::Transform {
-                    a: t["a"].as_f64().unwrap(),
-                    b: t["b"].as_f64().unwrap(),
-                    c: t["c"].as_f64().unwrap(),
-                    d: t["d"].as_f64().unwrap(),
-                    e: t["e"].as_f64().unwrap(),
-                    f: t["f"].as_f64().unwrap(),
-                };
-                Controller::set_instance_transform(model, &path, transform);
-            }
-            "delete_selection" => {
-                let new_doc = model.document().delete_selection();
-                model.edit_document(new_doc);
-            }
-            "lock_selection" => {
-                Controller::lock_selection(model);
-            }
-            "unlock_all" => {
-                Controller::unlock_all(model);
-            }
-            "hide_selection" => {
-                Controller::hide_selection(model);
-            }
-            "show_all" => {
-                Controller::show_all(model);
-            }
-            "set_character_attribute" => {
-                let path: ElementPath = op["path"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|i| i.as_u64().unwrap() as usize)
-                    .collect();
-                Controller::set_character_attribute(
-                    model,
-                    &path,
-                    op["char_start"].as_u64().unwrap() as usize,
-                    op["char_end"].as_u64().unwrap() as usize,
-                    op["attribute"].as_str().unwrap(),
-                    op["value"].as_str().unwrap(),
-                );
-            }
-            // Boolean ops (OP_LOG.md §9 trap: these were NOT in apply_op — added
-            // for the boolean_union_simplify_grouping pin). The destructive
-            // boolean combines the ≥2 selected sibling paths; `simplify` refits
-            // the (now-selected) output. Both write via edit_document, joining
-            // the harness transaction so the pair is one journaled Transaction.
-            "boolean_union" => {
-                Controller::apply_destructive_boolean(
-                    model, "union",
-                    &crate::document::controller::BooleanOptions::default(),
-                );
-            }
-            "simplify" => {
-                let precision = op["precision"].as_f64().unwrap_or(0.5);
-                Controller::simplify_selection(model, precision);
-            }
-            _ => panic!("Unknown op: {}", name),
-        }
-        // Capture the op into the open transaction so the journal replays to
-        // the same document — the checkpoint_equivalence gate (OP_LOG.md §5-6).
-        // `targets` (Fork 4) is populated in a later sub-step; empty here is
-        // fine, as the gate compares documents, not metadata. record_op is a
-        // no-op when no transaction is open.
-        model.record_op(crate::document::op_log::PrimitiveOp {
-            op: name.to_string(),
-            params: op.clone(),
-            targets: Vec::new(),
-        });
+        crate::document::op_apply::op_apply(model, op);
     }
 
     /// Run a fixture and return the resulting Model (with its journal). Two
