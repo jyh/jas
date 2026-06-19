@@ -97,7 +97,9 @@ let apply_make_compound_shape_with_op (model : Model.model)
           mask = None;
         } in
         let compound = Live (Compound_shape cs) in
-        model#snapshot;
+        (* No internal snapshot: the op self-brackets via
+           edit_document (OP_LOG.md Increment 1), and joins the
+           outer txn opened by the YAML [snapshot] effect. *)
         (* Delete selected elements in reverse order. *)
         let rev_paths = List.sort (fun a b -> compare b a) paths in
         let new_doc = List.fold_left Document.delete_element doc rev_paths in
@@ -107,7 +109,7 @@ let apply_make_compound_shape_with_op (model : Model.model)
         let new_doc = insert_at_layer new_doc layer_idx child_idx compound in
         let new_sel = Document.PathMap.singleton insert_path
           (Document.make_element_selection insert_path) in
-        model#set_document { new_doc with Document.selection = new_sel }
+        model#edit_document { new_doc with Document.selection = new_sel }
       end
     end
   end
@@ -147,7 +149,9 @@ let apply_release_compound_shape (model : Model.model) : unit =
     in
     if cs_paths = [] then ()
     else begin
-      model#snapshot;
+      (* No internal snapshot: the op self-brackets via
+         edit_document (OP_LOG.md Increment 1), and joins the
+         outer txn opened by the YAML [snapshot] effect. *)
       (* Process in reverse to preserve indices. *)
       let new_doc = List.fold_left (fun doc cs_path ->
         let elem = Document.get_element doc cs_path in
@@ -181,7 +185,7 @@ let apply_release_compound_shape (model : Model.model) : unit =
           offset := !offset + n - 1
         | _ -> ()
       ) cs_paths;
-      model#set_document { new_doc with Document.selection = !new_sel }
+      model#edit_document { new_doc with Document.selection = !new_sel }
     end
   end
 
@@ -431,7 +435,9 @@ let apply_destructive_boolean ?(options = default_boolean_options)
                 else Some (polygon_from_ring r paint)
               ) ps
           ) outputs in
-          model#snapshot;
+          (* No internal snapshot: the op self-brackets via
+             edit_document (OP_LOG.md Increment 1), and joins the
+             outer txn opened by the YAML [snapshot] effect. *)
           let rev_paths = List.sort (fun a b -> compare b a) paths in
           let new_doc = List.fold_left Document.delete_element doc rev_paths in
           let insert_path = List.hd paths in
@@ -451,7 +457,7 @@ let apply_destructive_boolean ?(options = default_boolean_options)
               (Document.element_selection_all path)
               !new_sel
           ) new_elements;
-          model#set_document { new_doc with Document.selection = !new_sel }
+          model#edit_document { new_doc with Document.selection = !new_sel }
       end
     end
   end
@@ -476,7 +482,9 @@ let apply_expand_compound_shape (model : Model.model) : unit =
     in
     if cs_paths = [] then ()
     else begin
-      model#snapshot;
+      (* No internal snapshot: the op self-brackets via
+         edit_document (OP_LOG.md Increment 1), and joins the
+         outer txn opened by the YAML [snapshot] effect. *)
       let expanded_counts = ref [] in
       let new_doc = List.fold_left (fun doc cs_path ->
         let elem = Document.get_element doc cs_path in
@@ -512,7 +520,7 @@ let apply_expand_compound_shape (model : Model.model) : unit =
         done;
         offset := !offset + n - 1
       ) cs_paths counts;
-      model#set_document { new_doc with Document.selection = !new_sel }
+      model#edit_document { new_doc with Document.selection = !new_sel }
     end
   end
 

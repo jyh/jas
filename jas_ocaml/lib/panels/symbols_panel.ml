@@ -101,7 +101,8 @@ let new_symbol (store : State_store.t) (m : Model.model) : unit =
        (match mint existing with
         | None -> ()
         | Some ref_id ->
-          m#snapshot;
+          (* The Controller mutator self-brackets via edit_document (one undo
+             step); no separate snapshot needed (OP_LOG.md Increment 1). *)
           let ctrl = new Controller.controller ~model:m () in
           ctrl#make_symbol path master_id ref_id;
           (* Resolve which id actually became the master from the
@@ -127,7 +128,8 @@ let place_instance (store : State_store.t) (m : Model.model) : unit =
     (match mint existing with
      | None -> ()
      | Some ref_id ->
-       m#snapshot;
+       (* The Controller mutator self-brackets via edit_document (one undo
+          step); no separate snapshot needed (OP_LOG.md Increment 1). *)
        let ctrl = new Controller.controller ~model:m () in
        ctrl#place_instance master_id ref_id)
 
@@ -149,7 +151,8 @@ let delete_symbol_action
     let usage = usage_count m#document master_id in
     let proceed = if usage > 0 then confirm usage else true in
     if proceed then begin
-      m#snapshot;
+      (* The Controller mutator self-brackets via edit_document (one undo step);
+         no separate snapshot needed (OP_LOG.md Increment 1). *)
       let ctrl = new Controller.controller ~model:m () in
       ctrl#delete_symbol master_id;
       clear_selected_symbol store

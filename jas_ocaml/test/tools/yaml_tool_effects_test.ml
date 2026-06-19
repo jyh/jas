@@ -27,7 +27,7 @@ let two_rect_model () =
   } in
   let doc = Document.make_document [| layer |] in
   let m = Model.create () in
-  m#set_document doc;
+  m#set_document_unbracketed doc;
   m
 
 let make_ctrl_with (model : Model.model) =
@@ -231,7 +231,7 @@ let empty_layer_model () =
   } in
   let doc = Document.make_document [| layer |] in
   let m = Model.create () in
-  m#set_document doc;
+  m#set_document_unbracketed doc;
   m
 
 let blob_brush_commit_tests = [
@@ -285,7 +285,7 @@ let blob_brush_commit_tests = [
     } in
     let doc = Document.make_document [| layer |] in
     let m = Model.create () in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     let ctrl = make_ctrl_with m in
     let store = State_store.create () in
     blob_brush_state_defaults store;
@@ -324,7 +324,7 @@ let blob_brush_commit_tests = [
     } in
     let doc = Document.make_document [| layer |] in
     let m = Model.create () in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     let ctrl = make_ctrl_with m in
     let store = State_store.create () in
     blob_brush_state_defaults store;
@@ -387,7 +387,7 @@ let three_rect_model () =
   } in
   let doc = Document.make_document [| layer |] in
   let m = Model.create () in
-  m#set_document doc;
+  m#set_document_unbracketed doc;
   m
 
 let path_arg path =
@@ -460,7 +460,7 @@ let magic_wand_apply_tests = [
     } in
     let doc = Document.make_document [| layer |] in
     let m = Model.create () in
-    m#set_document doc;
+    m#set_document_unbracketed doc;
     let ctrl = make_ctrl_with m in
     let store = State_store.create () in
     magic_wand_state_defaults store;
@@ -486,7 +486,7 @@ let artboard_model abs_list =
   let doc = Document.make_document
     ~artboards:abs_list [| layer |] in
   let m = Model.create () in
-  m#set_document doc;
+  m#set_document_unbracketed doc;
   m
 
 let artboard_create_tests = [

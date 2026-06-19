@@ -39,7 +39,19 @@ class controller : ?model:Model.model -> unit -> object
   method copy_selection : float -> float -> unit
   method simplify_selection : float -> unit
   method set_selection_fill : Element.fill option -> unit
+
+  (** Live, NON-undoable fill set for per-tick color-slider drag (OP_LOG.md
+      sections 7 and 8): undo is captured once on pointer-up by the panel
+      [set_active_color], so the drag must not push checkpoints. Mirrors the
+      Rust [set_selection_fill_live]. *)
+  method set_selection_fill_live : Element.fill option -> unit
+
   method set_selection_stroke : Element.stroke option -> unit
+
+  (** Live, NON-undoable stroke set for per-tick color drag (see
+      {!set_selection_fill_live}). Mirrors the Rust [set_selection_stroke_live]. *)
+  method set_selection_stroke_live : Element.stroke option -> unit
+
   method set_selection_stroke_brush : string option -> unit
   method set_selection_stroke_brush_overrides : string option -> unit
   method set_selection_fill_gradient : Element.gradient option -> unit

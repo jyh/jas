@@ -219,7 +219,8 @@ let set_active_color color ~fill_on_top (m : Model.model) =
   if fill_on_top then begin
     m#set_default_fill (Some (Element.make_fill color));
     if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-      m#snapshot;
+      (* The Controller mutator self-brackets via edit_document (one undo step);
+         no separate snapshot needed (OP_LOG.md Increment 1). *)
       let ctrl = Controller.create ~model:m () in
       ctrl#set_selection_fill (Some (Element.make_fill color))
     end
@@ -227,7 +228,6 @@ let set_active_color color ~fill_on_top (m : Model.model) =
     let width = match m#default_stroke with Some s -> s.stroke_width | None -> 1.0 in
     m#set_default_stroke (Some (Element.make_stroke ~width color));
     if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-      m#snapshot;
       let ctrl = Controller.create ~model:m () in
       ctrl#set_selection_stroke (Some (Element.make_stroke ~width color))
     end
@@ -244,15 +244,17 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
   if fill_on_top then begin
     m#set_default_fill (Some (Element.make_fill color));
     if not (Document.PathMap.is_empty m#document.Document.selection) then begin
+      (* Live drag: a NON-undoable write (OP_LOG.md sections 7 and 8). Undo is
+         captured once on pointer-up by [set_active_color]. *)
       let ctrl = Controller.create ~model:m () in
-      ctrl#set_selection_fill (Some (Element.make_fill color))
+      ctrl#set_selection_fill_live (Some (Element.make_fill color))
     end
   end else begin
     let width = match m#default_stroke with Some s -> s.stroke_width | None -> 1.0 in
     m#set_default_stroke (Some (Element.make_stroke ~width color));
     if not (Document.PathMap.is_empty m#document.Document.selection) then begin
       let ctrl = Controller.create ~model:m () in
-      ctrl#set_selection_stroke (Some (Element.make_stroke ~width color))
+      ctrl#set_selection_stroke_live (Some (Element.make_stroke ~width color))
     end
   end
 
@@ -306,7 +308,14 @@ let dispatch_yaml_action
          let element_stash : (string, Element.element) Hashtbl.t = Hashtbl.create 4 in
          let next_stash_id = ref 0 in
          let snapshot_h : Effects.platform_effect = fun _ _ _ ->
-           m#snapshot; `Null in
+           (* OP_LOG.md Increment 1: the action [snapshot] effect OPENS the
+              undo transaction ([begin_txn] pushes the pre-edit checkpoint
+              exactly like [snapshot] did, so undo still works) and leaves it
+              open so the subsequent doc.* writes (the enforced [set_document]
+              chokepoint) and any self-bracketing [edit_document] mutators join
+              it; [Effects.run_effects] OWNS the commit (one undo step). Mirrors
+              the yaml_tool / Rust doc.snapshot -> begin_txn path. *)
+           m#begin_txn; `Null in
          let doc_set_h : Effects.platform_effect = fun spec call_ctx _ ->
            let path_expr = match spec with
              | `Assoc pairs ->
@@ -1061,7 +1070,13 @@ let dispatch_yaml_action
            | None -> base_platform_effects
          in
          let store = State_store.create () in
-         Effects.run_effects ~platform_effects effects ctx store;
+         (* Thread the model as the transaction OWNER so the [begin_txn] opened
+            by the [snapshot] effect is committed once at the end, spanning every doc.* write
+            and self-bracketing mutator in this action into a single undo step
+            (OP_LOG.md Increment 1). [action_name] names the journal transaction.
+            Mirrors the Rust / Python run_effects(model=) owner. *)
+         Effects.run_effects ~platform_effects ~owner_model:(Some m)
+           ~action_name:(Some action_name) effects ctx store;
          (* If the action cleared the selection, tell the caller. *)
          if !cleared_selection then
            (match on_selection_changed with

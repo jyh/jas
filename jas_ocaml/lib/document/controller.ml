@@ -111,21 +111,27 @@ class controller ?(model = Model.create ()) () =
 
     method document = model#document
 
+    (* The general undoable mutator used by tool / effect handlers: they wrap an
+       action in begin_txn / with_txn, so this JOINS that transaction; standalone
+       it self-brackets (one undo step). Routes through [edit_document] (OP_LOG.md
+       Increment 1, mirroring the Rust / Python Controller.set_document).
+       Selection-only writes use the [select_*] / [set_selection] methods
+       (non-undoable). *)
     method set_document (d : Document.document) =
-      model#set_document d
+      model#edit_document d
 
     method set_filename (filename : string) =
       model#set_filename filename
 
     method add_layer (layer : Element.element) =
-      model#set_document { model#document with Document.layers = Array.append model#document.Document.layers [|layer|] }
+      model#edit_document { model#document with Document.layers = Array.append model#document.Document.layers [|layer|] }
 
     method remove_layer (index : int) =
       let doc = model#document in
       let layers = Array.init (Array.length doc.Document.layers - 1) (fun i ->
         if i < index then doc.Document.layers.(i)
         else doc.Document.layers.(i + 1)) in
-      model#set_document { doc with Document.layers = layers }
+      model#edit_document { doc with Document.layers = layers }
 
     method add_element (elem : Element.element) =
       (* OPACITY.md \167Preview interactions: in mask-editing mode,
@@ -152,7 +158,7 @@ class controller ?(model = Model.create ()) () =
          let path = [idx; child_idx] in
          let es = Document.element_selection_all path in
          let sel = Document.PathMap.singleton path es in
-         model#set_document { doc with Document.layers = new_layers;
+         model#edit_document { doc with Document.layers = new_layers;
                                        Document.selection = sel })
 
     (** Stamp a stable [id] onto the element at [path] — the lazy
@@ -168,7 +174,7 @@ class controller ?(model = Model.create ()) () =
       | None -> ()
       | Some elem ->
         let new_elem = Element.with_id elem (Some id) in
-        model#set_document (Document.replace_element doc path new_elem)
+        model#edit_document (Document.replace_element doc path new_elem)
 
     (** Create a by-id reference to the element at [target_path]
         (REFERENCE_GRAPH.md \1674). Assign-on-create: stamp [target_id] onto the
@@ -190,7 +196,7 @@ class controller ?(model = Model.create ()) () =
           | None ->
             (* Assign-on-create: stamp the carried id and use it. *)
             let stamped = Element.with_id target (Some target_id) in
-            model#set_document
+            model#edit_document
               (Document.replace_element doc target_path stamped);
             target_id
         in
@@ -237,7 +243,7 @@ class controller ?(model = Model.create ()) () =
         let new_doc = Document.replace_element doc path reference in
         let new_symbols =
           Array.append new_doc.Document.symbols [| master |] in
-        model#set_document
+        model#edit_document
           { new_doc with Document.symbols = new_symbols }
 
     (** Place Instance: append a reference targeting an existing master
@@ -315,7 +321,7 @@ class controller ?(model = Model.create ()) () =
                | Some _ as s -> Element.with_stroke copy s
                | None -> copy
              in
-             model#set_document (Document.replace_element doc path copy))
+             model#edit_document (Document.replace_element doc path copy))
         | _ -> ()
 
     (** Set the instance transform of the reference at [path] (Symbols P4,
@@ -340,7 +346,7 @@ class controller ?(model = Model.create ()) () =
             { instance with
               Element.ref_instance_transform = Some transform } in
           let new_elem = Element.Live (Element.Reference updated) in
-          model#set_document (Document.replace_element doc path new_elem)
+          model#edit_document (Document.replace_element doc path new_elem)
         | _ -> ()
 
     (** Redefine: replace the master with id [master_id] in [doc.symbols] with
@@ -378,7 +384,7 @@ class controller ?(model = Model.create ()) () =
           let new_doc = Document.replace_element doc path reference in
           let new_symbols = Array.copy new_doc.Document.symbols in
           new_symbols.(master_idx) <- new_master;
-          model#set_document
+          model#edit_document
             { new_doc with Document.symbols = new_symbols }
 
     (** Delete Symbol: remove the master whose [common.id = master_id] from
@@ -408,7 +414,7 @@ class controller ?(model = Model.create ()) () =
             (Array.sub doc.Document.symbols (idx + 1)
                (Array.length doc.Document.symbols - idx - 1))
         in
-        model#set_document
+        model#edit_document
           { doc with Document.symbols = new_symbols }
 
     (** Append [elem] to the mask subtree of the element at [path].
@@ -434,7 +440,7 @@ class controller ?(model = Model.create ()) () =
                 mask-target element itself after the add. *)
              let es = Document.element_selection_all path in
              let sel = Document.PathMap.singleton path es in
-             model#set_document { new_doc with Document.selection = sel };
+             model#edit_document { new_doc with Document.selection = sel };
              true
            | _ -> false)
       with _ -> false
@@ -507,7 +513,8 @@ class controller ?(model = Model.create ()) () =
         | _ -> ()
       ) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
-      model#set_document { doc with Document.selection = new_sel }
+      (* Selection-only: a non-undoable write (OP_LOG.md sections 7 and 8). *)
+      model#set_document_unbracketed { doc with Document.selection = new_sel }
 
     method private select_recursive leaf_handler extend =
       let doc = model#document in
@@ -531,7 +538,8 @@ class controller ?(model = Model.create ()) () =
       in
       Array.iteri (fun li layer -> check [li] layer Element.Preview) doc.Document.layers;
       let new_sel = if extend then self#toggle_selection doc.Document.selection !selection else !selection in
-      model#set_document { doc with Document.selection = new_sel }
+      (* Selection-only: a non-undoable write (OP_LOG.md sections 7 and 8). *)
+      model#set_document_unbracketed { doc with Document.selection = new_sel }
 
     method select_all =
       self#select_flat (fun _ -> true) false
@@ -571,7 +579,8 @@ class controller ?(model = Model.create ()) () =
       ) extend
 
     method set_selection (selection : Document.selection) =
-      model#set_document { model#document with Document.selection }
+      (* Selection-only: a non-undoable write (OP_LOG.md sections 7 and 8). *)
+      model#set_document_unbracketed { model#document with Document.selection }
 
     method select_element (path : Document.element_path) =
       match path with
@@ -594,13 +603,16 @@ class controller ?(model = Model.create ()) () =
               Document.PathMap.add p
                 (Document.element_selection_all p) acc
             ) selection (Array.init (Array.length children) Fun.id) in
-            model#set_document { doc with Document.selection = selection }
+            (* Selection-only: non-undoable (OP_LOG.md sections 7 and 8). *)
+            model#set_document_unbracketed { doc with Document.selection = selection }
           | _ ->
-            model#set_document { doc with Document.selection =
+            (* Selection-only: non-undoable (OP_LOG.md sections 7 and 8). *)
+            model#set_document_unbracketed { doc with Document.selection =
               Document.PathMap.singleton path
                 (Document.element_selection_all path) }
         else
-          model#set_document { doc with Document.selection =
+          (* Selection-only: non-undoable (OP_LOG.md sections 7 and 8). *)
+          model#set_document_unbracketed { doc with Document.selection =
             Document.PathMap.singleton path
               (Document.element_selection_all path) }
 
@@ -609,7 +621,8 @@ class controller ?(model = Model.create ()) () =
       | [] -> ()
       | _ ->
         let es = Document.element_selection_partial path [index] in
-        model#set_document { model#document with Document.selection =
+        (* Selection-only: non-undoable (OP_LOG.md sections 7 and 8). *)
+        model#set_document_unbracketed { model#document with Document.selection =
           Document.PathMap.singleton path es }
 
     method move_path_handle (path : int list) (anchor_idx : int)
@@ -620,7 +633,7 @@ class controller ?(model = Model.create ()) () =
        | Element.Path ({ d; _ } as r) ->
          let new_d = Element.move_path_handle d anchor_idx handle_type dx dy in
          let new_elem = Element.Path { r with d = new_d } in
-         model#set_document (Document.replace_element doc path new_elem)
+         model#edit_document (Document.replace_element doc path new_elem)
        | _ -> ())
 
     method lock_selection =
@@ -637,7 +650,7 @@ class controller ?(model = Model.create ()) () =
           let elem = Document.get_element acc path in
           Document.replace_element acc path (lock elem)
         ) doc.Document.selection doc in
-        model#set_document { new_doc with Document.selection = Document.PathMap.empty }
+        model#edit_document { new_doc with Document.selection = Document.PathMap.empty }
       end
 
     method unlock_all =
@@ -679,7 +692,7 @@ class controller ?(model = Model.create ()) () =
         Document.PathMap.add path
           (Document.element_selection_all path) acc
       ) Document.PathMap.empty !locked_paths in
-      model#set_document { new_doc with Document.selection = new_sel }
+      model#edit_document { new_doc with Document.selection = new_sel }
 
     method hide_selection =
       let doc = model#document in
@@ -690,7 +703,7 @@ class controller ?(model = Model.create ()) () =
           let hidden = Element.set_visibility Element.Invisible elem in
           Document.replace_element acc path hidden
         ) doc.Document.selection doc in
-        model#set_document
+        model#edit_document
           { new_doc with Document.selection = Document.PathMap.empty }
       end
 
@@ -718,7 +731,7 @@ class controller ?(model = Model.create ()) () =
         Document.PathMap.add path
           (Document.element_selection_all path) acc
       ) Document.PathMap.empty !shown_paths in
-      model#set_document { doc with Document.layers = new_layers;
+      model#edit_document { doc with Document.layers = new_layers;
                                      Document.selection = new_sel }
 
     method move_selection (dx : float) (dy : float) =
@@ -728,7 +741,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = move_kind elem es.Document.es_kind dx dy in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     method copy_selection (dx : float) (dy : float) =
       let doc = model#document in
@@ -751,7 +764,7 @@ class controller ?(model = Model.create ()) () =
         let copy_es = Document.element_selection_all copy_path in
         (doc', Document.PathMap.add copy_path copy_es acc_sel)
       ) (doc, Document.PathMap.empty) sorted_sels in
-      model#set_document { new_doc with Document.selection = new_sel }
+      model#edit_document { new_doc with Document.selection = new_sel }
 
     (** Simplify the geometry of each selected Polygon / Path element in
         place by running the Schneider curve fit
@@ -837,26 +850,46 @@ class controller ?(model = Model.create ()) () =
                  Document.replace_element acc path new_path
              | _ -> acc)
         ) doc.Document.selection doc in
-        model#set_document new_doc
+        model#edit_document new_doc
       end
 
-    method set_selection_fill (f : Element.fill option) =
+    (* Pure: the document with [f] applied to every selected element (no write).
+       Mirrors the Rust [fill_applied]. *)
+    method private fill_applied (f : Element.fill option) : Document.document =
       let doc = model#document in
-      let new_doc = Document.PathMap.fold (fun path _ acc ->
+      Document.PathMap.fold (fun path _ acc ->
         let elem = Document.get_element acc path in
         let new_elem = Element.with_fill elem f in
         Document.replace_element acc path new_elem
-      ) doc.Document.selection doc in
-      model#set_document new_doc
+      ) doc.Document.selection doc
 
-    method set_selection_stroke (s : Element.stroke option) =
+    (* Pure: the document with [s] applied to every selected element (no write).
+       Mirrors the Rust [stroke_applied]. *)
+    method private stroke_applied (s : Element.stroke option) : Document.document =
       let doc = model#document in
-      let new_doc = Document.PathMap.fold (fun path _ acc ->
+      Document.PathMap.fold (fun path _ acc ->
         let elem = Document.get_element acc path in
         let new_elem = Element.with_stroke elem s in
         Document.replace_element acc path new_elem
-      ) doc.Document.selection doc in
-      model#set_document new_doc
+      ) doc.Document.selection doc
+
+    method set_selection_fill (f : Element.fill option) =
+      model#edit_document (self#fill_applied f)
+
+    (* Live, NON-undoable fill set for per-tick color-slider drag
+       ([set_active_color_live]). Undo is captured once on pointer-up by
+       [set_active_color], so the drag must NOT push checkpoints. Mirrors the
+       Rust [set_selection_fill_live] (OP_LOG.md sections 7 and 8 live-drag). *)
+    method set_selection_fill_live (f : Element.fill option) =
+      model#set_document_unbracketed (self#fill_applied f)
+
+    method set_selection_stroke (s : Element.stroke option) =
+      model#edit_document (self#stroke_applied s)
+
+    (* Live, NON-undoable stroke set for per-tick color drag (see
+       [set_selection_fill_live]). Mirrors the Rust [set_selection_stroke_live]. *)
+    method set_selection_stroke_live (s : Element.stroke option) =
+      model#set_document_unbracketed (self#stroke_applied s)
 
     (* Brush attribute writeback — Path-only. Used by
        apply_brush_to_selection / remove_brush_from_selection. *)
@@ -867,7 +900,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_stroke_brush elem slug in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     method set_selection_stroke_brush_overrides (overrides : string option) =
       let doc = model#document in
@@ -876,7 +909,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_stroke_brush_overrides elem overrides in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     (* Phase 5: gradient writeback. Pass [None] to clear (demote). *)
     method set_selection_fill_gradient (g : Element.gradient option) =
@@ -886,7 +919,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_fill_gradient elem g in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     method set_selection_stroke_gradient (g : Element.gradient option) =
       let doc = model#document in
@@ -895,7 +928,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_stroke_gradient elem g in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     method set_selection_width_profile (wp : Element.stroke_width_point list) =
       let doc = model#document in
@@ -904,7 +937,7 @@ class controller ?(model = Model.create ()) () =
         let new_elem = Element.with_width_points elem wp in
         Document.replace_element acc path new_elem
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     (* ── Opacity mask lifecycle (OPACITY.md §States) ─────────── *)
 
@@ -936,7 +969,7 @@ class controller ?(model = Model.create ()) () =
           Document.replace_element acc path
             (Element.with_mask elem (Some m))
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     (** Remove the opacity mask from every selected element. *)
     method release_mask_on_selection =
@@ -948,7 +981,7 @@ class controller ?(model = Model.create ()) () =
         | Some _ -> Document.replace_element acc path
                       (Element.with_mask elem None)
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     (** Internal: apply [f] to every selected element's mask. Elements
         without a mask are skipped. *)
@@ -961,7 +994,7 @@ class controller ?(model = Model.create ()) () =
         | Some m -> Document.replace_element acc path
                       (Element.with_mask elem (Some (f m)))
       ) doc.Document.selection doc in
-      model#set_document new_doc
+      model#edit_document new_doc
 
     (** Set [mask.clip] on every selected element that has a mask. *)
     method set_mask_clip_on_selection (clip : bool) =
@@ -1006,7 +1039,7 @@ class controller ?(model = Model.create ()) () =
             Document.replace_element acc path
               (Element.with_mask elem (Some new_mask))
         ) doc.Document.selection doc in
-        model#set_document new_doc
+        model#edit_document new_doc
   end
 
 (* ------------------------------------------------------------------ *)

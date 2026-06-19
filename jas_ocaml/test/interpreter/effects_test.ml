@@ -664,7 +664,7 @@ let phase3_pending_tests = [
       layers = [| layer |];
       selection;
     } in
-    model#set_document doc;
+    model#set_document_unbracketed doc;
     let session = Jas.Text_edit.create
       ~path:[0; 0] ~target:Jas.Text_edit.Edit_text
       ~content:"hello" ~insertion:3 in

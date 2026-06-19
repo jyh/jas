@@ -2247,10 +2247,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         active_tool#activate ctx;
         _self#update_cursor;
       end;
-      (* Preserve selection across tool changes *)
+      (* Preserve selection across tool changes. Selection-only: a non-undoable
+         write (OP_LOG.md sections 7 and 8). *)
       let doc = current_doc in
       if doc.Document.selection <> saved_selection then
-        model#set_document { doc with Document.selection = saved_selection }
+        model#set_document_unbracketed { doc with Document.selection = saved_selection }
 
     method pen_finish =
       (* For backward compatibility: deactivate pen tool to finish *)

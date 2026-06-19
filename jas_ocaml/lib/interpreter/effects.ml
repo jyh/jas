@@ -750,12 +750,15 @@ let apply_stroke_panel_to_selection (store : State_store.t)
     ~opacity:base.stroke_opacity base.stroke_color in
   ctrl#model#set_default_stroke (Some new_stroke);
   if not (Document.PathMap.is_empty doc.Document.selection) then begin
-    ctrl#model#snapshot;
-    ctrl#set_selection_stroke (Some new_stroke);
+    (* Stroke + width profile as ONE undo step: with_txn opens the bracket, the
+       edit_document inside each Controller mutator JOINS it (OP_LOG.md
+       Increment 1). *)
     let profile = json_to_string_default "uniform" (get "stroke_profile") in
     let flipped = json_to_bool_default false (get "stroke_profile_flipped") in
     let width_pts = Element.profile_to_width_points profile width flipped in
-    ctrl#set_selection_width_profile width_pts
+    ctrl#model#with_txn (fun () ->
+      ctrl#set_selection_stroke (Some new_stroke);
+      ctrl#set_selection_width_profile width_pts)
   end
 
 (** Sync stroke panel state from the first selected element's stroke. *)
@@ -1679,7 +1682,8 @@ let apply_character_panel_to_selection (store : State_store.t)
         in
         (match new_elem with
          | Some e ->
-           ctrl#model#snapshot;
+           (* The Controller mutator self-brackets via edit_document (one undo
+              step); no separate snapshot needed (OP_LOG.md Increment 1). *)
            ctrl#set_document (Document.replace_element ctrl#document session#path e)
          | None -> ());
         true
@@ -1720,8 +1724,9 @@ let apply_character_panel_to_selection (store : State_store.t)
     (* Only snapshot + commit when any text element was actually found
        (otherwise no-op preserves the undo history). *)
     if not (new_doc == doc) then begin
-      ctrl#model#snapshot;
-      ctrl#model#set_document new_doc
+      (* Undoable edit (one self-bracketed undo step) via edit_document
+         (OP_LOG.md Increment 1). *)
+      ctrl#model#edit_document new_doc
     end
   end
 
@@ -1827,10 +1832,10 @@ let subscribe_active_color (store : State_store.t)
         | `Null -> None
         | _ -> None in
       m#set_default_fill fill;
-      if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-        m#snapshot;
+      if not (Document.PathMap.is_empty m#document.Document.selection) then
+        (* The Controller mutator self-brackets via edit_document (one undo
+           step); no separate snapshot needed (OP_LOG.md Increment 1). *)
         ctrl#set_selection_fill fill
-      end
     end else if key = "stroke_color" then begin
       let ctrl = ctrl_getter () in
       let m = ctrl#model in
@@ -1845,10 +1850,10 @@ let subscribe_active_color (store : State_store.t)
         | `Null -> None
         | _ -> None in
       m#set_default_stroke stroke;
-      if not (Document.PathMap.is_empty m#document.Document.selection) then begin
-        m#snapshot;
+      if not (Document.PathMap.is_empty m#document.Document.selection) then
+        (* The Controller mutator self-brackets via edit_document (one undo
+           step); no separate snapshot needed (OP_LOG.md Increment 1). *)
         ctrl#set_selection_stroke stroke
-      end
     end)
 
 (** Phase 5 follow-up: subscribe to gradient panel state changes on
@@ -2108,8 +2113,9 @@ let apply_paragraph_panel_to_selection (store : State_store.t)
       | _ -> acc
     ) doc.Document.selection doc in
     if !any_change then begin
-      ctrl#model#snapshot;
-      ctrl#model#set_document new_doc
+      (* Undoable edit (one self-bracketed undo step) via edit_document
+         (OP_LOG.md Increment 1). *)
+      ctrl#model#edit_document new_doc
     end
   end
 
@@ -2267,8 +2273,9 @@ let apply_justification_dialog_to_selection
       | _ -> acc
     ) doc.Document.selection doc in
     if !any_change then begin
-      ctrl#model#snapshot;
-      ctrl#model#set_document new_doc
+      (* Undoable edit (one self-bracketed undo step) via edit_document
+         (OP_LOG.md Increment 1). *)
+      ctrl#model#edit_document new_doc
     end
   end
 
@@ -2348,8 +2355,9 @@ let apply_hyphenation_dialog_to_selection
       | _ -> acc
     ) doc.Document.selection doc in
     if !any_change then begin
-      ctrl#model#snapshot;
-      ctrl#model#set_document new_doc
+      (* Undoable edit (one self-bracketed undo step) via edit_document
+         (OP_LOG.md Increment 1). *)
+      ctrl#model#edit_document new_doc
     end
   end;
   (* Master mirror to panel state for HYPHENATE_CHECKBOX. *)
@@ -2489,7 +2497,11 @@ let apply_align_operation (store : State_store.t) (ctrl : Controller.controller)
           ~dx:t.dx ~dy:t.dy elem in
         Document.replace_element doc t.path moved
       ) doc translations in
-      model#set_document new_doc
+      (* Self-bracketing (OP_LOG.md Increment 1): a direct call (tests) opens
+         and commits its own undo step; in production the align YAML action
+         [snapshot] effect already opened the txn, so this joins it. Mirrors the
+         Rust [apply_align_operation]. *)
+      model#edit_document new_doc
     end
   end
 
