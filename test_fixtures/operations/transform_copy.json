@@ -1,0 +1,22 @@
+[
+  {
+    "name": "scale_transform_copy",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "copy_selection", "dx": 0.0, "dy": 0.0},
+      {"op": "scale_transform", "sx": 2.0, "sy": 2.0, "rx": 0.0, "ry": 0.0, "scale_strokes": true, "scale_corners": false}
+    ],
+    "expected_json": "transform_scale_copy_expected.json"
+  },
+  {
+    "name": "rotate_transform_copy",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "copy_selection", "dx": 0.0, "dy": 0.0},
+      {"op": "rotate_transform", "angle": 45.0, "rx": 48.0, "ry": 48.0}
+    ],
+    "expected_json": "transform_rotate_copy_expected.json"
+  }
+]

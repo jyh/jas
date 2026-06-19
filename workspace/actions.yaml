@@ -3263,6 +3263,11 @@ actions:
           sx:   "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0"
           sy:   "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0"
           copy: "param.copy"
+          # OP_LOG.md §9 Phase P7: the CONFIRM apply journals one scale_transform
+          # op (a bracketed edit recording the resolved matrix params). Only the
+          # confirm path sets journal:true; the preview path below omits it so it
+          # stays out-of-band on the preview-snapshot channel (OP_LOG.md §8).
+          journal: true
       - "doc.preview.clear": {}
       - close_dialog: None
 
@@ -3321,6 +3326,9 @@ actions:
       - "doc.rotate.apply":
           angle: "param.angle"
           copy:  "param.copy"
+          # OP_LOG.md §9 Phase P7: the CONFIRM apply journals one rotate_transform
+          # op. The preview path below omits journal so it stays out-of-band.
+          journal: true
       - "doc.preview.clear": {}
       - close_dialog: None
 
@@ -3375,6 +3383,9 @@ actions:
           axis:       "param.axis"
           axis_angle: "param.axis_angle"
           copy:       "param.copy"
+          # OP_LOG.md §9 Phase P7: the CONFIRM apply journals one shear_transform
+          # op. The preview path below omits journal so it stays out-of-band.
+          journal: true
       - "doc.preview.clear": {}
       - close_dialog: None
 

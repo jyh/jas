@@ -918,6 +918,211 @@ pub fn apply_set_attr_on_selection(
     (changed, targets)
 }
 
+// ── OP_LOG.md §9 Phase P7 — the transform trio (scale / rotate / shear) ──────
+//
+// `scale_transform` / `rotate_transform` / `shear_transform` are the highest-RISK
+// verbs to journal: unlike P1–P6 they were NOT bracketed edits at all. The CONFIRM
+// apply used to write via `set_document_unbracketed` and inherited its undo step
+// from the PREVIEW-SNAPSHOT channel, and no op recorded the matrix. P7 journals
+// the CONFIRM by recording one transform op carrying the RESOLVED matrix params
+// (the resolved sx/sy or angle or angle+axis+axis_angle, the resolved reference
+// point rx/ry, and the resolved scale_strokes/scale_corners flags), and switches
+// the confirm apply to a BRACKETED edit. The PREVIEW path stays OUT-OF-BAND
+// (OP_LOG.md §8): it keeps writing through the preview-snapshot channel / the
+// unbracketed apply and journals NOTHING.
+//
+// The matrix-application CORE lives in these Model-level helpers, which compose
+// the SAME `transform_apply::*` matrix against the selected element paths through
+// `edit_document` (self-bracketing: joins an open transaction, opens its own
+// otherwise). BOTH the confirm production path (effects.rs) and the op_apply
+// replay arms call them, so replay composes the IDENTICAL matrix (the
+// checkpoint_equivalence gate, OP_LOG.md §6, proves byte-equality). The shared
+// matrix builder + the in-place per-element compose live in `transform_doc_*`
+// (the Document-level pure form) so the PREVIEW path can run the same compose
+// against an unbracketed write without re-implementing the matrix.
+//
+// Every param is a RESOLVED LITERAL — replay has no eval context, no
+// `state.scale_*`, no `state.transform_reference_point`, no drag coordinates. The
+// confirm handler resolves all of them (incl. resolving the reference point from
+// `transform_reference_point` at confirm time) BEFORE building the op. For
+// `copy:true` the confirm handler FIRST routes `copy_selection` through op_apply
+// (journaling a `copy_selection` op, exactly as the P3-era duplicate path does),
+// THEN the transform op — TWO ops in the one transaction. Hardened reads: a
+// malformed param resolves to a no-op default; an IDENTITY transform (sx=sy=1 /
+// angle=0) is a no-op that journals nothing (matching the production identity
+// short-circuit). Elements live in the `document.layers` tree (paths, not ids),
+// so `targets` carries the PRE-mutation selection ids (resolved BEFORE the
+// mutation, matching copy/move); the byte-gate ignores `targets`.
+
+/// True when a scale is the identity (both factors ≈ 1.0). Mirrors the production
+/// `scale_apply` short-circuit so a no-op scale journals nothing on both paths.
+fn is_scale_identity(sx: f64, sy: f64) -> bool {
+    (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9
+}
+
+/// Compose `matrix` against every element at `paths` in `doc` (pre-multiplying the
+/// element's existing transform), returning the new document. Pure (no Model) so
+/// BOTH the bracketed confirm/replay path and the unbracketed PREVIEW path run the
+/// IDENTICAL compose. When `stroke_factor` is `Some`, each element's stroke width
+/// is multiplied by it (scale_strokes); when `corners` is `Some((sx_abs,sy_abs))`,
+/// rounded-rect rx/ry are scaled (scale_corners). Rotate/shear pass `None` for
+/// both (they have no stroke/corner options). `paths` is the resolved selection
+/// path list; an absent element at a path is silently skipped.
+///
+/// `pub` because the effects.rs PREVIEW path (out-of-band, unbracketed) calls the
+/// SAME compose so the preview matrix is byte-identical to the journaled confirm
+/// matrix without re-implementing it.
+pub fn compose_matrix_over_paths(
+    doc: &crate::document::document::Document,
+    paths: &[ElementPath],
+    matrix: &crate::geometry::element::Transform,
+    stroke_factor: Option<f64>,
+    corners: Option<(f64, f64)>,
+) -> crate::document::document::Document {
+    let mut new_doc = doc.clone();
+    for path in paths {
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            // Compose: matrix * existing (pre-multiply), matching scale_apply.
+            let current = elem.common().transform.unwrap_or_default();
+            elem.common_mut().transform = Some(matrix.multiply(&current));
+            if let Some(f) = stroke_factor {
+                scale_elem_stroke_width(elem, f);
+            }
+            if let Some((sx_abs, sy_abs)) = corners {
+                scale_elem_corners(elem, sx_abs, sy_abs);
+            }
+        }
+    }
+    new_doc
+}
+
+/// Multiply an element's stroke-width by `factor` in place (no-op without a
+/// stroke). Document-layer twin of effects.rs's `scale_element_stroke_width`, kept
+/// here so the shared compose does not reach up into the interpreter layer.
+fn scale_elem_stroke_width(elem: &mut crate::geometry::element::Element, factor: f64) {
+    use crate::geometry::element::Element;
+    let strokes = match elem {
+        Element::Line(e) => e.stroke.as_mut(),
+        Element::Rect(e) => e.stroke.as_mut(),
+        Element::Circle(e) => e.stroke.as_mut(),
+        Element::Ellipse(e) => e.stroke.as_mut(),
+        Element::Polyline(e) => e.stroke.as_mut(),
+        Element::Polygon(e) => e.stroke.as_mut(),
+        Element::Path(e) => e.stroke.as_mut(),
+        Element::Text(e) => e.stroke.as_mut(),
+        Element::TextPath(e) => e.stroke.as_mut(),
+        _ => None,
+    };
+    if let Some(s) = strokes {
+        s.width *= factor;
+    }
+}
+
+/// Scale a rounded-rect's rx/ry in place (no-op on other element types). Corner
+/// radii are only modeled on the RectElem variant.
+fn scale_elem_corners(elem: &mut crate::geometry::element::Element, sx_abs: f64, sy_abs: f64) {
+    use crate::geometry::element::Element;
+    if let Element::Rect(e) = elem {
+        e.rx *= sx_abs;
+        e.ry *= sy_abs;
+    }
+}
+
+/// The resolved selection path list (in selection order). Both the transform
+/// helpers and the production confirm path read this so the compose order is
+/// identical.
+fn selection_paths(doc: &crate::document::document::Document) -> Vec<ElementPath> {
+    doc.selection.iter().map(|es| es.path.clone()).collect()
+}
+
+/// Apply a scale around `(rx, ry)` with RESOLVED factors + flags to the selection,
+/// self-bracketing through `edit_document` (OP_LOG.md §9 Phase P7). Returns
+/// `(changed, targets)`: `changed` is `false` (no-op, journals nothing) for an
+/// IDENTITY scale; `targets` is the PRE-mutation selection ids. SHARED between the
+/// production confirm path and the op_apply replay arm so the matrix compose is
+/// byte-identical (the checkpoint_equivalence gate). Does NOT handle `copy` — the
+/// caller journals `copy_selection` as a separate op first (TWO-op transaction).
+pub fn apply_scale(
+    model: &mut Model,
+    sx: f64,
+    sy: f64,
+    rx: f64,
+    ry: f64,
+    scale_strokes: bool,
+    scale_corners: bool,
+) -> (bool, Vec<String>) {
+    use crate::algorithms::transform_apply;
+    if is_scale_identity(sx, sy) {
+        return (false, Vec::new());
+    }
+    let targets = controller::selection_to_ids(model.document());
+    let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
+    let stroke_factor = if scale_strokes {
+        Some(transform_apply::stroke_width_factor(sx, sy))
+    } else {
+        None
+    };
+    let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
+    let paths = selection_paths(model.document());
+    let new_doc = compose_matrix_over_paths(
+        model.document(),
+        &paths,
+        &matrix,
+        stroke_factor,
+        corners,
+    );
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Apply a rotation of `theta_deg` around `(rx, ry)` to the selection,
+/// self-bracketing through `edit_document` (OP_LOG.md §9 Phase P7). Rigid — no
+/// stroke/corner options. Returns `(changed, targets)`: `changed` is `false` for
+/// a zero-angle no-op; `targets` is the PRE-mutation selection ids.
+pub fn apply_rotate(
+    model: &mut Model,
+    theta_deg: f64,
+    rx: f64,
+    ry: f64,
+) -> (bool, Vec<String>) {
+    use crate::algorithms::transform_apply;
+    if theta_deg.abs() < 1e-9 {
+        return (false, Vec::new());
+    }
+    let targets = controller::selection_to_ids(model.document());
+    let matrix = transform_apply::rotate_matrix(theta_deg, rx, ry);
+    let paths = selection_paths(model.document());
+    let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
+/// Apply a shear of `angle_deg` along `axis` (with `axis_angle_deg` for the custom
+/// axis) around `(rx, ry)` to the selection, self-bracketing through
+/// `edit_document` (OP_LOG.md §9 Phase P7). Pure shear has determinant 1 so
+/// strokes are preserved naturally — no stroke/corner options. Returns
+/// `(changed, targets)`: `changed` is `false` for a zero-angle no-op; `targets` is
+/// the PRE-mutation selection ids.
+pub fn apply_shear(
+    model: &mut Model,
+    angle_deg: f64,
+    axis: &str,
+    axis_angle_deg: f64,
+    rx: f64,
+    ry: f64,
+) -> (bool, Vec<String>) {
+    use crate::algorithms::transform_apply;
+    if angle_deg.abs() < 1e-9 {
+        return (false, Vec::new());
+    }
+    let targets = controller::selection_to_ids(model.document());
+    let matrix = transform_apply::shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry);
+    let paths = selection_paths(model.document());
+    let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
+    model.edit_document(new_doc);
+    (true, targets)
+}
+
 /// Read a JSON array-of-strings field (the `ids` payload for the move verbs).
 /// Non-string entries are dropped; a missing/non-array field yields `[]`.
 fn str_list_field(op: &serde_json::Value, key: &str) -> Vec<String> {
@@ -1260,6 +1465,59 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
                 .map(|s| s.to_string());
             let attr = attr.to_string();
             let (changed, t) = apply_set_attr_on_selection(model, &attr, value);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        // Transform trio (OP_LOG.md §9 Phase P7). `scale_transform` /
+        // `rotate_transform` / `shear_transform` journal the CONFIRM apply of the
+        // Scale/Rotate/Shear tools through the SHARED helpers (apply_scale /
+        // apply_rotate / apply_shear), so the production confirm path and these
+        // replay arms compose the IDENTICAL matrix (the byte-gate, OP_LOG.md §6).
+        // Each op carries RESOLVED LITERALS only — the factors/angle/axis, the
+        // resolved reference point rx/ry, and (scale) the scale_strokes/
+        // scale_corners flags; replay never reads state.scale_* /
+        // transform_reference_point / drag coordinates. An IDENTITY transform is a
+        // no-op that journals nothing. The PREVIEW path does NOT route here (it
+        // stays out-of-band on the preview-snapshot channel, OP_LOG.md §8). For
+        // copy=true the production confirm path journals `copy_selection` as a
+        // SEPARATE op before the transform op (two ops in one txn). targets =
+        // pre-mutation selection ids.
+        "scale_transform" => {
+            let sx = num_field(op, "sx");
+            let sy = num_field(op, "sy");
+            let rx = num_field(op, "rx");
+            let ry = num_field(op, "ry");
+            // Flags default to the production defaults when absent (scale_strokes
+            // on, scale_corners off) — but the op always carries them resolved.
+            let scale_strokes = op.get("scale_strokes").and_then(|v| v.as_bool()).unwrap_or(true);
+            let scale_corners = op.get("scale_corners").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        "rotate_transform" => {
+            let angle = num_field(op, "angle");
+            let rx = num_field(op, "rx");
+            let ry = num_field(op, "ry");
+            let (changed, t) = apply_rotate(model, angle, rx, ry);
+            if !changed {
+                return;
+            }
+            targets = t;
+        }
+        "shear_transform" => {
+            let angle = num_field(op, "angle");
+            // axis defaults to "horizontal" when absent; the production confirm
+            // path always supplies a resolved axis string.
+            let axis = str_field(op, "axis").unwrap_or("horizontal").to_string();
+            let axis_angle = num_field(op, "axis_angle");
+            let rx = num_field(op, "rx");
+            let ry = num_field(op, "ry");
+            let (changed, t) = apply_shear(model, angle, &axis, axis_angle, rx, ry);
             if !changed {
                 return;
             }
