@@ -857,6 +857,67 @@ pub fn apply_unpack_group_at(
     (true, targets)
 }
 
+// ── OP_LOG.md §9 Phase P6 — set_attr_on_selection ───────────────────────────
+//
+// `set_attr_on_selection` is a Model-runner verb (effects.rs::run_doc_effect,
+// like the already-routed select_rect / copy_selection / move_selection): it
+// applies one attribute to every selected element through a `Controller`
+// mutator that self-brackets via `edit_document`. Phase 1 supports the two
+// brush attributes only — `stroke_brush` (the brush slug) and
+// `stroke_brush_overrides` (a compact-JSON override blob); both are path-only
+// (non-Path selected elements are left unchanged by the Controller). The op
+// carries the RESOLVED value LITERAL (replay has no eval context): the
+// production handler evaluates the YAML `value` expr FIRST, then journals the
+// resulting string. The empty-string ⇒ clear (None) mapping mirrors the
+// pre-P6 inline handler (an empty resolved string switched the brush off).
+// Hardened reads: an unknown `attr` or an absent `value` key SKIPS (records
+// nothing, never panics — the prior handler treated a missing value as a
+// silent clear, which P6 hardens to a no-op skip so the journal carries only
+// effective edits). targets = the PRE-mutation selection ids (resolved BEFORE
+// the mutation, matching copy/move).
+
+/// Apply one `set_attr_on_selection` brush attribute to `model` (OP_LOG.md §9
+/// Phase P6). `attr` selects the Controller mutator; `value` is the RESOLVED
+/// literal — `Some(s)` sets, `None` (an empty resolved string) clears. SHARED
+/// between `effects.rs::run_doc_effect` (production) and `op_apply` (replay) so
+/// the mutation is byte-identical on both paths (the checkpoint_equivalence
+/// gate, OP_LOG.md §6). Returns `(changed, targets)`: `changed` is `false`
+/// (no-op, journals nothing) for an unknown `attr` OR when the attribute write
+/// left every selected element unchanged (e.g. setting the brush a path already
+/// carries, or clearing an already-clear brush); `targets` is the pre-mutation
+/// selection ids.
+pub fn apply_set_attr_on_selection(
+    model: &mut Model,
+    attr: &str,
+    value: Option<String>,
+) -> (bool, Vec<String>) {
+    // Phase 1: only the two brush attributes are supported. An unknown attr is
+    // a hard skip (records nothing) rather than a silent clear.
+    if attr != "stroke_brush" && attr != "stroke_brush_overrides" {
+        return (false, Vec::new());
+    }
+    // targets resolve BEFORE the mutation (the brush set never changes which
+    // ids are selected, but pre-mutation is the uniform Fork-4 convention and
+    // avoids any post-mutation-id hazard).
+    let targets = controller::selection_to_ids(model.document());
+    // Snapshot the pre-edit layers so we can detect an effective change. The
+    // canonical no-op rule (commit_txn) is BLIND to stroke_brush —
+    // document_to_test_json omits it — so a stroke_brush-only edit cannot rely
+    // on that gate to drop a no-op; we detect it here via Element equality so
+    // an ineffective set journals nothing.
+    let before = model.document().layers.clone();
+    match attr {
+        "stroke_brush" => Controller::set_selection_stroke_brush(model, value),
+        "stroke_brush_overrides" => {
+            Controller::set_selection_stroke_brush_overrides(model, value)
+        }
+        // Unreachable: guarded above.
+        _ => return (false, Vec::new()),
+    }
+    let changed = model.document().layers != before;
+    (changed, targets)
+}
+
 /// Read a JSON array-of-strings field (the `ids` payload for the move verbs).
 /// Non-string entries are dropped; a missing/non-array field yields `[]`.
 fn str_list_field(op: &serde_json::Value, key: &str) -> Vec<String> {
@@ -1175,6 +1236,34 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             Controller::set_character_attribute(
                 model, &path, char_start, char_end, attribute, value,
             );
+        }
+        // set_attr_on_selection (OP_LOG.md §9 Phase P6). A Model-runner verb
+        // (effects.rs), routed through the SHARED `apply_set_attr_on_selection`
+        // helper so production and replay run the SAME Controller mutator. The op
+        // carries the RESOLVED `attr` + `value` LITERAL: an absent `value` key
+        // SKIPS (the prior handler silently cleared on a missing value; P6
+        // hardens that to a no-op skip), and an empty `value` string maps to a
+        // CLEAR (None). An unknown attr or an ineffective edit records nothing.
+        // targets = pre-mutation selection ids.
+        "set_attr_on_selection" => {
+            let Some(attr) = str_field(op, "attr") else {
+                return;
+            };
+            // A missing `value` key is a hard skip (no silent clear). When
+            // present, an empty string clears (None); a non-empty string sets.
+            let Some(value_field) = op.get("value") else {
+                return;
+            };
+            let value = value_field
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            let attr = attr.to_string();
+            let (changed, t) = apply_set_attr_on_selection(model, &attr, value);
+            if !changed {
+                return;
+            }
+            targets = t;
         }
         // Boolean ops (OP_LOG.md §9 trap: these were NOT in apply_op — added
         // for the boolean_union_simplify_grouping pin). The destructive

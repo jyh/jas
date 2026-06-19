@@ -636,6 +636,21 @@ impl Model {
         // no-op; otherwise fall back to the canonical `document_to_test_json`
         // byte-compare against the checkpoint (the same canonicalization the
         // cross-language gate uses).
+        //
+        // CANONICALLY-INVISIBLE FIELDS (OP_LOG.md §9 Phase P6 follow-up):
+        // `document_to_test_json` deliberately OMITS some authoritative fields
+        // — notably the Path `stroke_brush` / `stroke_brush_overrides` brush
+        // bindings — to keep the cross-language byte-gate compatible with legacy
+        // fixtures. That makes the JSON compare BLIND to a transaction whose
+        // ONLY net change is a brush edit (e.g. apply_brush_to_selection fired
+        // on an already-selected path, where the selection does not change),
+        // which would otherwise be dropped here: neither journaled NOR given an
+        // undo step. So when the JSON says "no change" we additionally compare
+        // the authoritative element trees (`layers` + the `symbols` master
+        // store, the only homes of brush-bearing Paths) via `Element`'s derived
+        // `PartialEq`, which DOES see those fields. A transaction is a no-op
+        // only if BOTH the canonical JSON and the structural compare agree it
+        // changed nothing; any canonically-invisible field edit keeps it.
         let gen_at_open = pending
             .as_ref()
             .map(|p| p.gen_at_open)
@@ -643,6 +658,8 @@ impl Model {
         let no_net_change = self.generation == gen_at_open
             || self.undo_stack.last().is_some_and(|(chk, _)| {
                 document_to_test_json(chk) == document_to_test_json(&self.document)
+                    && chk.layers == self.document.layers
+                    && chk.symbols == self.document.symbols
             });
         if no_net_change {
             // Drop the no-op checkpoint; leave redo and the journal untouched.
