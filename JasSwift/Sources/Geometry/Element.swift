@@ -1674,70 +1674,108 @@ public enum Element: Equatable {
         return withTransformSet(t)
     }
 
-    /// Internal: replace the element's transform with `t`,
-    /// preserving every other field. Shared by
-    /// `withTransformTranslated` and `withTransformPremultiplied`.
+    /// Internal: replace the element's transform with `t`, preserving EVERY
+    /// other field (name, id, blendMode, mask, gradients, brush bindings,
+    /// per-element extras). Shared by `withTransformTranslated` and
+    /// `withTransformPremultiplied`. Preserving the full common block is required
+    /// for cross-language equivalence (OP_LOG.md §9 Phase P7): a transform must
+    /// not silently drop the element's `id`/`name`/blend/mask — earlier this
+    /// helper rebuilt each variant with only geometry+stroke+opacity, dropping
+    /// the rest, which diverged from Rust's `transform.unwrap_or_default()`
+    /// compose that mutates the common block in place.
     private func withTransformSet(_ t: Transform) -> Element {
         switch self {
         case .line(let v):
             return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
                               stroke: v.stroke, widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: t,
-                              locked: v.locked, visibility: v.visibility))
+                              locked: v.locked, visibility: v.visibility,
+                              blendMode: v.blendMode, mask: v.mask,
+                              strokeGradient: v.strokeGradient, name: v.name, id: v.id))
         case .rect(let v):
             return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
                               rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
                               opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility))
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                              name: v.name, id: v.id))
         case .circle(let v):
             return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
                                   fill: v.fill, stroke: v.stroke,
                                   opacity: v.opacity, transform: t, locked: v.locked,
-                                  visibility: v.visibility))
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                  name: v.name, id: v.id))
         case .ellipse(let v):
             return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
                                     fill: v.fill, stroke: v.stroke,
                                     opacity: v.opacity, transform: t, locked: v.locked,
-                                    visibility: v.visibility))
+                                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                    name: v.name, id: v.id))
         case .polyline(let v):
             return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
                                      opacity: v.opacity, transform: t, locked: v.locked,
-                                     visibility: v.visibility))
+                                     visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                     name: v.name, id: v.id))
         case .polygon(let v):
             return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
                                     opacity: v.opacity, transform: t, locked: v.locked,
-                                    visibility: v.visibility))
+                                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                    name: v.name, id: v.id))
         case .path(let v):
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
                               widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility))
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                              strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
+                              toolOrigin: v.toolOrigin, name: v.name, id: v.id))
         case .text(let v):
-            return .text(Text(x: v.x, y: v.y, content: v.content,
+            return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
                               fontWeight: v.fontWeight, fontStyle: v.fontStyle,
                               textDecoration: v.textDecoration,
-                              width: v.width, height: v.height,
+                              textTransform: v.textTransform, fontVariant: v.fontVariant,
+                              baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                              letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                              aaMode: v.aaMode, rotate: v.rotate,
+                              horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                              kerning: v.kerning, width: v.width, height: v.height,
                               fill: v.fill, stroke: v.stroke,
                               opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility))
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              name: v.name, id: v.id))
         case .textPath(let v):
-            return .textPath(TextPath(d: v.d, content: v.content,
+            return .textPath(TextPath(d: v.d, tspans: v.tspans,
                                       startOffset: v.startOffset,
                                       fontFamily: v.fontFamily, fontSize: v.fontSize,
                                       fontWeight: v.fontWeight, fontStyle: v.fontStyle,
                                       textDecoration: v.textDecoration,
+                                      textTransform: v.textTransform, fontVariant: v.fontVariant,
+                                      baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                                      letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                                      aaMode: v.aaMode, rotate: v.rotate,
+                                      horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                                      kerning: v.kerning,
                                       fill: v.fill, stroke: v.stroke,
                                       opacity: v.opacity, transform: t, locked: v.locked,
-                                      visibility: v.visibility))
+                                      visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                      name: v.name, id: v.id))
         case .group(let v):
             return .group(Group(children: v.children, opacity: v.opacity,
                                 transform: t, locked: v.locked,
-                                visibility: v.visibility))
+                                visibility: v.visibility, blendMode: v.blendMode,
+                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
+                                mask: v.mask, name: v.name, id: v.id))
         case .layer(let v):
             return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
                                 transform: t, locked: v.locked,
-                                visibility: v.visibility, id: v.id))
+                                visibility: v.visibility, blendMode: v.blendMode,
+                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
+                                mask: v.mask, id: v.id))
         case .live(let v):
             return .live(v.withTransform(t))
         }
@@ -1905,53 +1943,81 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
         return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
                           stroke: stroke, widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform,
-                          locked: v.locked, visibility: v.visibility))
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: v.mask,
+                          strokeGradient: v.strokeGradient, name: v.name, id: v.id))
     case .rect(let v):
         return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
                           rx: v.rx, ry: v.ry, fill: v.fill, stroke: stroke,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                          name: v.name, id: v.id))
     case .circle(let v):
         return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
                               fill: v.fill, stroke: stroke,
                               opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility))
+                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                              name: v.name, id: v.id))
     case .ellipse(let v):
         return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
                                 fill: v.fill, stroke: stroke,
                                 opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                name: v.name, id: v.id))
     case .polyline(let v):
         return .polyline(Polyline(points: v.points, fill: v.fill, stroke: stroke,
                                   opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                  name: v.name, id: v.id))
     case .polygon(let v):
         return .polygon(Polygon(points: v.points, fill: v.fill, stroke: stroke,
                                 opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
+                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                name: v.name, id: v.id))
     case .path(let v):
         return .path(Path(d: v.d, fill: v.fill, stroke: stroke,
                           widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                          strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
     case .text(let v):
-        return .text(Text(x: v.x, y: v.y, content: v.content,
+        return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
                           fontFamily: v.fontFamily, fontSize: v.fontSize,
                           fontWeight: v.fontWeight, fontStyle: v.fontStyle,
                           textDecoration: v.textDecoration,
-                          width: v.width, height: v.height,
+                          textTransform: v.textTransform, fontVariant: v.fontVariant,
+                          baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                          letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                          aaMode: v.aaMode, rotate: v.rotate,
+                          horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                          kerning: v.kerning, width: v.width, height: v.height,
                           fill: v.fill, stroke: stroke,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
+                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                          name: v.name, id: v.id))
     case .textPath(let v):
-        return .textPath(TextPath(d: v.d, content: v.content,
+        return .textPath(TextPath(d: v.d, tspans: v.tspans,
                                   startOffset: v.startOffset,
                                   fontFamily: v.fontFamily, fontSize: v.fontSize,
                                   fontWeight: v.fontWeight, fontStyle: v.fontStyle,
                                   textDecoration: v.textDecoration,
+                                  textTransform: v.textTransform, fontVariant: v.fontVariant,
+                                  baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                                  letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                                  aaMode: v.aaMode, rotate: v.rotate,
+                                  horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                                  kerning: v.kerning,
                                   fill: v.fill, stroke: stroke,
                                   opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
+                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
+                                  name: v.name, id: v.id))
     case .group, .layer:
         return element
     case .live(let v):
@@ -1973,7 +2039,8 @@ public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element
                           fillGradient: v.fillGradient,
                           strokeGradient: v.strokeGradient,
                           strokeBrush: strokeBrush,
-                          strokeBrushOverrides: v.strokeBrushOverrides))
+                          strokeBrushOverrides: v.strokeBrushOverrides,
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
     default:
         return element
     }
@@ -1992,7 +2059,8 @@ public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> 
                           fillGradient: v.fillGradient,
                           strokeGradient: v.strokeGradient,
                           strokeBrush: v.strokeBrush,
-                          strokeBrushOverrides: overrides))
+                          strokeBrushOverrides: overrides,
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
     default:
         return element
     }
