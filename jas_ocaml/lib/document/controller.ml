@@ -8,6 +8,22 @@ let point_in_rect = Hit_test.point_in_rect
 let element_intersects_rect = Hit_test.element_intersects_rect
 let element_intersects_polygon = Hit_test.element_intersects_polygon
 
+(** Resolve the current selection to the stable [common.id]s of the selected
+    elements, in document order (OP_LOG.md section 9 / Fork 4: the [targets] of
+    a journaled op). Id-less selected elements are silently dropped ([id] is
+    optional; a recorded source must carry an id — a documented prerequisite,
+    not a bug). The selection is a [PathMap], whose [bindings] are sorted by
+    path (document order), so the order is deterministic and cross-language
+    stable. One definition reused by the production [op_apply] path and the
+    cross-language harness so both populate [targets] identically. Mirrors Rust
+    [controller::selection_to_ids] and Swift [selectionToIds]. *)
+let selection_to_ids (doc : Document.document) : string list =
+  Document.PathMap.bindings doc.Document.selection
+  |> List.filter_map (fun (_path, (es : Document.element_selection)) ->
+       match Document.get_element doc es.Document.es_path with
+       | exception _ -> None
+       | elem -> Element.id_of elem)
+
 (* ── Opacity-mask helpers (OPACITY.md §States) ───────────── *)
 
 (** Return the [mask] on the first selected element, if any. *)

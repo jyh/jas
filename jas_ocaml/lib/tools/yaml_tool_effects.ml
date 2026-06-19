@@ -121,7 +121,15 @@ let normalize_rect_args (args : (string * Yojson.Safe.t) list)
     [Controller] so mutations land on its [Model]. *)
 let build (ctrl : Controller.controller) : (string * Effects.platform_effect) list =
   let doc_snapshot _ _ _ =
-    ctrl#model#snapshot;
+    (* OP_LOG.md section 9 (Increment 3b-B): open the journal transaction.
+       [begin_txn] pushes the pre-edit undo checkpoint exactly like [snapshot]
+       did (so undo still works), but leaves the transaction OPEN so the
+       subsequent journaled verbs (select_rect / copy_selection /
+       move_selection) record into it; the batch owner ([Effects.run_effects])
+       names and commits it. Mirrors Rust's [doc.snapshot] -> [begin_txn].
+       [begin_txn] is a no-op while a transaction is already open, and
+       [commit_txn]'s no-op rule drops a zero-edit gesture's checkpoint. *)
+    ctrl#model#begin_txn;
     `Null
   in
   let doc_clear_selection _ _ _ =
@@ -168,12 +176,21 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
   let doc_translate_selection spec ctx store =
+    (* OP_LOG.md section 9 (Increment 3b-B): one of the THREE production-
+       journaled verbs. Route through [Op_apply.op_apply] (which calls the SAME
+       [Controller#move_selection], so the document mutation is byte-identical)
+       so the move is journaled as [move_selection] with pre-mutation [targets].
+       The lazy begin_txn inside op_apply also closes the bare-drag-frame hole.
+       Mirrors Rust's [doc.translate_selection]. *)
     (match spec with
      | `Assoc args ->
        let lookup k = List.assoc_opt k args in
        let dx = eval_number (lookup "dx") store ctx in
        let dy = eval_number (lookup "dy") store ctx in
-       if dx <> 0.0 || dy <> 0.0 then ctrl#move_selection dx dy
+       if dx <> 0.0 || dy <> 0.0 then
+         Op_apply.op_apply ctrl#model ctrl
+           (`Assoc [ ("op", `String "move_selection");
+                     ("dx", `Float dx); ("dy", `Float dy) ])
      | _ -> ());
     `Null
   in
@@ -588,20 +605,41 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     `Null
   in
   let doc_copy_selection spec ctx store =
+    (* OP_LOG.md section 9 (Increment 3b-B): one of the THREE production-
+       journaled verbs. Route through [Op_apply.op_apply] (same
+       [Controller#copy_selection], byte-identical mutation) so the copy is
+       journaled as [copy_selection] with pre-mutation source [targets]. (The
+       copy is born id-less via [Element.clear_ids], so a following move's
+       targets are correctly empty.) Mirrors Rust's [doc.copy_selection]. *)
     (match spec with
      | `Assoc args ->
        let lookup k = List.assoc_opt k args in
        let dx = eval_number (lookup "dx") store ctx in
        let dy = eval_number (lookup "dy") store ctx in
-       ctrl#copy_selection dx dy
+       Op_apply.op_apply ctrl#model ctrl
+         (`Assoc [ ("op", `String "copy_selection");
+                   ("dx", `Float dx); ("dy", `Float dy) ])
      | _ -> ());
     `Null
   in
   let doc_select_in_rect spec ctx store =
+    (* OP_LOG.md section 9 (Increment 3b-B): the keystone of the THREE
+       production-journaled verbs — [select_rect] records [targets] (resolved
+       AFTER the Controller call), which [capture_recipe] seeds its working set
+       from (empty targets -> empty recipe). CRITICAL PARAM-SHAPE TRANSLATION:
+       the YAML marquee delivers corner coords [x1/y1/x2/y2] + [additive], but
+       the journaled [select_rect] verb (and thus replay / op_apply) expects
+       [x/y/width/height] + [extend]. [normalize_rect_args] does the translation
+       so the journaled op replays BYTE-IDENTICALLY through the same
+       [Controller#select_rect]. Mirrors Rust's [doc.select_in_rect]. *)
     (match spec with
      | `Assoc args ->
        let (rx, ry, rw, rh, additive) = normalize_rect_args args store ctx in
-       ctrl#select_rect ~extend:additive rx ry rw rh
+       Op_apply.op_apply ctrl#model ctrl
+         (`Assoc [ ("op", `String "select_rect");
+                   ("x", `Float rx); ("y", `Float ry);
+                   ("width", `Float rw); ("height", `Float rh);
+                   ("extend", `Bool additive) ])
      | _ -> ());
     `Null
   in

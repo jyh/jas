@@ -90,7 +90,20 @@ let rec run_effects_inner
     (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
     ?(schema = false)
     ?(platform_effects : (string * platform_effect) list = [])
+    ?(owner_model : Model.model option = None)
+    ?(action_name : string option = None)
     (diagnostics : Schema.diagnostic list ref) : unit =
+  (* OP_LOG.md section 9 (Increment 3b-B): this batch OWNS the journal
+     transaction only if a model is threaded AND none was open when it started
+     — so a reentrant nested call (let/in, then/else, foreach, dispatch,
+     on_change) does NOT name or commit the outer's transaction (it sees
+     in_txn=true, hence owns_txn=false). The owner commits once at the end,
+     spanning every effect in this batch into a single undo step. [owner_model]
+     is [None] on the resolver-unaware call paths (panels that don't journal,
+     the existing callsites), where this whole bracket is inert. Mirrors Rust's
+     [owns_txn] / Swift [ownsTxn]. *)
+  let owns_txn =
+    match owner_model with Some m -> not m#in_txn | None -> false in
   (* Thread ctx through sibling effects: `let:` at position N extends
      ctx for positions N+1..end. Nested lists (then/else/do) get their
      own threading via recursive calls and don't leak bindings back. *)
@@ -139,7 +152,7 @@ let rec run_effects_inner
            (name, value_to_json value) :: List.filter (fun (k, _) -> k <> name) acc
          ) !ctx_ref pairs in
          run_effects_inner in_effects extended store actions dialogs
-           ~platform_effects ~schema diagnostics
+           ~platform_effects ~schema ~owner_model diagnostics
        | Some (`Assoc pairs), _ ->
          ctx_ref := List.fold_left (fun acc (name, expr) ->
            let value = eval_expr expr store acc in
@@ -168,12 +181,12 @@ let rec run_effects_inner
                ) !ctx_ref
              in
              run_effects_inner body iter_ctx store actions dialogs
-               ~schema ~platform_effects diagnostics
+               ~schema ~platform_effects ~owner_model diagnostics
            ) items
          | _ ->
            if not (try_platform eff) then
              run_one eff !ctx_ref store actions dialogs
-               ~platform_effects ~schema diagnostics)
+               ~platform_effects ~schema ~owner_model diagnostics)
     | `String _ ->
       (* Bare-string effects — platform handlers may catch snapshot etc. *)
       ignore (try_platform eff)
@@ -188,19 +201,32 @@ let rec run_effects_inner
      && State_store.take_dialog_dirty store then begin
     match State_store.get_dialog_on_change store with
     | None -> ()
-    | Some action_name ->
+    | Some on_change_action ->
       State_store.set_firing_on_change store true;
-      let dispatch_eff = `Assoc [("dispatch", `String action_name)] in
+      let dispatch_eff = `Assoc [("dispatch", `String on_change_action)] in
       run_one dispatch_eff !ctx_ref store actions dialogs
-        ~platform_effects ~schema diagnostics;
+        ~platform_effects ~schema ~owner_model diagnostics;
       State_store.set_firing_on_change store false
-  end
+  end;
+  (* Commit the transaction this batch opened (if any), making the whole action
+     one undo step (OP_LOG.md section 9). No-op when nothing opened one or when
+     nested. Name it FIRST with the action/event verb so the journal's
+     [name=None] legibility hole is closed for ALL actions, not just the three
+     op-journaled verbs; [name_txn] is a no-op if no transaction was opened (a
+     no-edit gesture stays anonymous). Mirrors Rust's owner-bracket. *)
+  if owns_txn then
+    (match owner_model with
+     | Some m ->
+       (match action_name with Some a -> m#name_txn a | None -> ());
+       m#commit_txn
+     | None -> ())
 
 and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t)
     (actions : Yojson.Safe.t) (dialogs : Yojson.Safe.t)
     ?(schema = false)
     ?(platform_effects : (string * platform_effect) list = [])
+    ?(owner_model : Model.model option = None)
     (diagnostics : Schema.diagnostic list ref) : unit =
   let mem key = Workspace_loader.json_member key eff in
 
@@ -301,13 +327,13 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
       (match mem "then" with
        | Some (`List then_effects) ->
          run_effects_inner then_effects ctx store actions dialogs
-           ~platform_effects ~schema diagnostics
+           ~platform_effects ~schema ~owner_model diagnostics
        | _ -> ())
     else
       (match mem "else" with
        | Some (`List else_effects) ->
          run_effects_inner else_effects ctx store actions dialogs
-           ~platform_effects ~schema diagnostics
+           ~platform_effects ~schema ~owner_model diagnostics
        | _ -> ())
   | Some (`Assoc cond) ->
     let cond_expr = (match List.assoc_opt "condition" cond with Some (`String s) -> s | _ -> "false") in
@@ -317,13 +343,13 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
       (match List.assoc_opt "then" cond with
        | Some (`List then_effects) ->
          run_effects_inner then_effects ctx store actions dialogs
-           ~platform_effects ~schema diagnostics
+           ~platform_effects ~schema ~owner_model diagnostics
        | _ -> ())
     else
       (match List.assoc_opt "else" cond with
        | Some (`List else_effects) ->
          run_effects_inner else_effects ctx store actions dialogs
-           ~platform_effects ~schema diagnostics
+           ~platform_effects ~schema ~owner_model diagnostics
        | _ -> ())
   | _ ->
 
@@ -375,8 +401,15 @@ and run_one (eff : Yojson.Safe.t) (ctx : (string * Yojson.Safe.t) list)
               ) params in
               ("param", `Assoc resolved) :: List.filter (fun (k, _) -> k <> "param") ctx
           in
+          (* OP_LOG.md section 9: name the transaction with the dispatched
+             actions.yaml verb. If this dispatch is the owner (no outer
+             transaction open), the inner [run_effects_inner] computes
+             owns_txn=true and [name_txn] stamps the verb; if it is nested under
+             an owner, owns_txn=false and naming is skipped (the outer owner
+             names it). Mirrors Rust's dispatch site. *)
           run_effects_inner action_effects dispatch_ctx store actions dialogs
-            ~platform_effects ~schema diagnostics
+            ~platform_effects ~schema ~owner_model
+            ~action_name:(Some action_name) diagnostics
         | _ -> ())
      | _ -> ())
   | _ ->
@@ -598,11 +631,13 @@ let run_effects
     ?(schema = false)
     ?(platform_effects : (string * platform_effect) list = [])
     ?(diagnostics : Schema.diagnostic list ref = ref [])
+    ?(owner_model : Model.model option = None)
+    ?(action_name : string option = None)
     (effects : Yojson.Safe.t list)
     (ctx : (string * Yojson.Safe.t) list)
     (store : State_store.t) : unit =
   run_effects_inner effects ctx store actions dialogs
-    ~schema ~platform_effects diagnostics
+    ~schema ~platform_effects ~owner_model ~action_name diagnostics
 
 (* ------------------------------------------------------------------ *)
 (* Stroke panel state binding                                          *)

@@ -134,94 +134,18 @@ let assert_json_roundtrip name =
     assert false
   end
 
-(* Apply one fixture op to [model] / [ctrl]. Top-level (taking the model and
-   controller explicitly) so the checkpoint_equivalence gate can replay a
-   transaction's recorded ops into a FRESH model with the identical dispatch.
-   OP_LOG.md section 6. *)
+(* Thin harness shim over the production dispatcher (OP_LOG.md section 9,
+   Increment 3b-B): both the cross-language harness and the production effect
+   path go through the SAME [Op_apply.op_apply] module and the SAME [record_op]
+   site, so this lift is behavior-preserving (the operations fixtures stay
+   byte-green) and [targets] is recorded identically on both paths. Top-level
+   (taking the model and controller explicitly) so the checkpoint_equivalence
+   gate can replay a transaction's recorded ops into a FRESH model with the
+   identical dispatch (OP_LOG.md section 6). [op_apply] records the op into the
+   open transaction itself, so the harness no longer calls [model#record_op]
+   separately. *)
 let apply_op (model : Jas.Model.model) (ctrl : Jas.Controller.controller) op =
-  let open Yojson.Safe.Util in
-  let to_num j = try to_float j with _ -> float_of_int (to_int j) in
-  let op_name = op |> member "op" |> to_string in
-  match op_name with
-      | "select_rect" ->
-        let x = op |> member "x" |> to_num in
-        let y = op |> member "y" |> to_num in
-        let w = op |> member "width" |> to_num in
-        let h = op |> member "height" |> to_num in
-        let extend = try op |> member "extend" |> to_bool with _ -> false in
-        ctrl#select_rect ~extend x y w h
-      | "move_selection" ->
-        let dx = op |> member "dx" |> to_num in
-        let dy = op |> member "dy" |> to_num in
-        ctrl#move_selection dx dy
-      | "copy_selection" ->
-        let dx = op |> member "dx" |> to_num in
-        let dy = op |> member "dy" |> to_num in
-        ctrl#copy_selection dx dy
-      | "assign_id" ->
-        let path = op |> member "path" |> to_list |> List.map to_int in
-        let id = op |> member "id" |> to_string in
-        ctrl#assign_id path id
-      | "create_reference" ->
-        let target_path =
-          op |> member "target_path" |> to_list |> List.map to_int in
-        let target_id = op |> member "target_id" |> to_string in
-        let ref_id = op |> member "ref_id" |> to_string in
-        ctrl#create_reference target_path target_id ref_id
-      (* Symbols P2 operations (SYMBOLS.md section 7). Value-in-op: the ids and
-         paths are read literally from the fixture payload, exactly like the
-         create_reference arm. *)
-      | "make_symbol" ->
-        let path = op |> member "path" |> to_list |> List.map to_int in
-        let master_id = op |> member "master_id" |> to_string in
-        let ref_id = op |> member "ref_id" |> to_string in
-        ctrl#make_symbol path master_id ref_id
-      | "place_instance" ->
-        let master_id = op |> member "master_id" |> to_string in
-        let ref_id = op |> member "ref_id" |> to_string in
-        ctrl#place_instance master_id ref_id
-      | "detach" ->
-        let path = op |> member "path" |> to_list |> List.map to_int in
-        ctrl#detach path
-      (* Symbols P4 (SYMBOLS.md section 4 / Fork F2). Value-in-op: the
-         instance transform is carried in the payload as {a,b,c,d,e,f} (the
-         same matrix shape parsed elsewhere) and applied verbatim. *)
-      | "set_instance_transform" ->
-        let path = op |> member "path" |> to_list |> List.map to_int in
-        let t = op |> member "transform" in
-        let transform = {
-          Jas.Element.a = t |> member "a" |> to_num;
-          b = t |> member "b" |> to_num;
-          c = t |> member "c" |> to_num;
-          d = t |> member "d" |> to_num;
-          e = t |> member "e" |> to_num;
-          f = t |> member "f" |> to_num;
-        } in
-        ctrl#set_instance_transform path transform
-      | "redefine" ->
-        let master_id = op |> member "master_id" |> to_string in
-        let path = op |> member "path" |> to_list |> List.map to_int in
-        let ref_id = op |> member "ref_id" |> to_string in
-        ctrl#redefine master_id path ref_id
-      | "delete_symbol" ->
-        let master_id = op |> member "master_id" |> to_string in
-        ctrl#delete_symbol master_id
-      | "delete_selection" ->
-        let new_doc = Jas.Document.delete_selection model#document in
-        model#set_document new_doc
-      | "lock_selection" -> ctrl#lock_selection
-      | "unlock_all" -> ctrl#unlock_all
-      | "hide_selection" -> ctrl#hide_selection
-      | "show_all" -> ctrl#show_all
-      | "boolean_union" ->
-        Jas.Boolean_apply.apply_destructive_boolean model "union"
-      | "simplify" ->
-        let precision = try op |> member "precision" |> to_num with _ -> 0.5 in
-        ctrl#simplify_selection precision
-  | "snapshot" -> model#snapshot
-  | "undo" -> model#undo
-  | "redo" -> model#redo
-  | _ -> failwith (Printf.sprintf "Unknown op: %s" op_name)
+  Jas.Op_apply.op_apply model ctrl op
 
 (* checkpoint_equivalence gate (OP_LOG.md section 6): replay the ops recorded
    in [journal.(0..head)] from the setup SVG into a FRESH model and serialize.
@@ -266,10 +190,10 @@ let run_operation_fixture fixture_name =
      | `Null ->
        model#begin_txn;
        List.iter (fun op ->
-         apply_op model ctrl op;
-         model#record_op
-           (Jas.Op_log.make_primitive_op
-              ~op:(op |> member "op" |> to_string) ~params:op ())
+         (* [op_apply] records the op into the open transaction itself
+            (OP_LOG.md section 9, 3b-B), so the harness no longer calls
+            [record_op] separately. *)
+         apply_op model ctrl op
        ) (tc |> member "ops" |> to_list);
        model#commit_txn
      | txns ->
@@ -279,10 +203,7 @@ let run_operation_fixture fixture_name =
           | `Null -> ()
           | n -> model#name_txn (to_string n));
          List.iter (fun op ->
-           apply_op model ctrl op;
-           model#record_op
-             (Jas.Op_log.make_primitive_op
-                ~op:(op |> member "op" |> to_string) ~params:op ())
+           apply_op model ctrl op
          ) (txn |> member "ops" |> to_list);
          model#commit_txn
        ) (to_list txns);
@@ -351,10 +272,8 @@ let run_journal_metadata fixture_name =
       model#begin_txn;
       (match txn |> member "name" with `Null -> () | n -> model#name_txn (to_string n));
       List.iter (fun op ->
-        apply_op model ctrl op;
-        model#record_op
-          (Jas.Op_log.make_primitive_op
-             ~op:(op |> member "op" |> to_string) ~params:op ())
+        (* [op_apply] records the op itself (OP_LOG.md section 9, 3b-B). *)
+        apply_op model ctrl op
       ) (txn |> member "ops" |> to_list);
       model#commit_txn;
       (* OP_LOG.md Increment 3a: a [label] on a transaction marks a version
@@ -568,6 +487,226 @@ let recorded_cross_language () =
     Printf.eprintf "=== EXPECTED ===\n%s\n=== ACTUAL ===\n%s\n" expected actual;
     assert false
   end
+
+(* ------------------------------------------------------------------ *)
+(* Production op-capture cross-language fixture (OP_LOG.md section 9,
+   Increment 3b-B). Drives the REAL [Effects.run_effects] (NOT the
+   hand-bracketed harness [apply_op] path) over the shared fixtures, exercising
+   the YAML->journal param translation (marquee corners x1/y1/x2/y2/additive ->
+   x/y/width/height/extend), batch ownership / single-transaction commit, action
+   naming, and the lazy-begin drag-frame-hole fix. Mirrors the Rust + Swift
+   harness. *)
+(* ------------------------------------------------------------------ *)
+
+(* Production-capture JOURNAL serializer (OP_LOG.md section 10 item 4). Distinct
+   from [journal_to_test_json] (the txn_metadata serializer, which OMITS op
+   params and pins txn_id/lamport/parent/actor). The production golden pins the
+   PARAM-TRANSLATION result, so this variant emits, per transaction: [name], and
+   per op [{op, params, targets}] with [params] canonicalized (sorted-key +
+   fixed-float) exactly like [document_to_test_json] (via
+   [Test_json.canonical_value]). [txn_id] is EXCLUDED (a live-entropy seam,
+   non-deterministic per-app). The redundant top-level "op" key inside the
+   recorded [params] (op_apply records the full op value, verb included) is
+   STRIPPED — the verb already lives in the op-level [op] field.
+   [actor]/[parent]/[lamport] are OMITTED (their own byte-stable golden exists).
+   Mirrors the Rust [production_journal_to_test_json]. *)
+let production_journal_to_test_json
+    (journal : Jas.Op_log.transaction list) : string =
+  let opt = function Some v -> Printf.sprintf "%S" v | None -> "null" in
+  let op_json (o : Jas.Op_log.primitive_op) =
+    (* Strip the redundant top-level "op" key from params. *)
+    let params = match o.Jas.Op_log.params with
+      | `Assoc fields -> `Assoc (List.filter (fun (k, _) -> k <> "op") fields)
+      | other -> other in
+    let targets =
+      String.concat ","
+        (List.map (fun x -> Printf.sprintf "%S" x) o.Jas.Op_log.targets) in
+    Printf.sprintf "{\"op\":%S,\"params\":%s,\"targets\":[%s]}"
+      o.Jas.Op_log.op (Jas.Test_json.canonical_value params) targets
+  in
+  let txn_json (t : Jas.Op_log.transaction) =
+    let ops = String.concat "," (List.map op_json t.Jas.Op_log.ops) in
+    Printf.sprintf "{\"name\":%s,\"ops\":[%s]}" (opt t.Jas.Op_log.name) ops
+  in
+  "[" ^ String.concat "," (List.map txn_json journal) ^ "]"
+
+(* Canonical JSON of an evaluated [polygon_set] (a list of rings, each an array
+   of (x,y) points), using the SAME fixed-float canonicalization as
+   [document_to_test_json] so the re-derived geometry golden is byte-shareable.
+   Mirrors the Rust [polygon_set_to_test_json]. *)
+let polygon_set_to_test_json (ps : Jas.Boolean.polygon_set) : string =
+  let pt_json (x, y) =
+    Printf.sprintf "[%s,%s]"
+      (Jas.Test_json.canonical_value (`Float x))
+      (Jas.Test_json.canonical_value (`Float y)) in
+  let ring_json ring =
+    "[" ^ String.concat "," (Array.to_list (Array.map pt_json ring)) ^ "]" in
+  "[" ^ String.concat "," (List.map ring_json ps) ^ "]"
+
+(* Build the fresh Model a production-capture fixture's [setup_svg] defines. *)
+let production_model (fixture : Yojson.Safe.t) : Jas.Model.model =
+  let open Yojson.Safe.Util in
+  let setup_svg = read_fixture (fixture |> member "setup_svg" |> to_string) in
+  Jas.Model.create ~document:(Jas.Svg.svg_to_document setup_svg) ()
+
+(* Run every [run_effects] batch a production-capture fixture defines through the
+   REAL production interpreter, stamping the fixture's [action_name]. Supports
+   both fixture shapes: [effect_batch] (ONE run_effects call) and [frames]
+   (MULTIPLE separate run_effects calls — the drag-frame-hole closure). Each
+   batch threads the Model as owner so it commits its own named transaction.
+   Mirrors the Rust [run_production_batches]. *)
+let run_production_batches (fixture : Yojson.Safe.t) (model : Jas.Model.model) =
+  let open Yojson.Safe.Util in
+  let action_name = match fixture |> member "action_name" with
+    | `String s -> Some s | _ -> None in
+  let ctrl = Jas.Controller.create ~model () in
+  let store = Jas.State_store.create () in
+  let platform_effects = Jas.Yaml_tool_effects.build ctrl in
+  let run_batch effects =
+    Jas.Effects.run_effects ~platform_effects
+      ~owner_model:(Some model) ~action_name effects [] store in
+  match fixture |> member "effect_batch" with
+  | `List effects -> run_batch effects
+  | _ ->
+    (match fixture |> member "frames" with
+     | `List frames ->
+       List.iter (fun frame -> run_batch (to_list frame)) frames
+     | _ ->
+       failwith "production-capture fixture has neither effect_batch nor frames")
+
+(* Re-derive the recorded element's output against the EDITED source and return
+   its canonical polygon-set JSON. Lifts the LAST committed transaction's op
+   segment, runs [capture_recipe] to normalize it into an input-addressed
+   recipe, wraps it in a recorded element, then evaluates it over a resolver
+   that returns the EDITED source (the fixture's [recorded.edit_source] applies
+   a textual SVG edit). The SVG px->pt conversion (96/72 = x0.75) bakes into the
+   re-derived bbox: editing the source [eye] to x=100 (px) maps to x=75 (pt)
+   with w=10px->7.5pt; copy(dx=0)+translate(+50) -> the derived bbox spans x in
+   [125, 132.5] (pt). Mirrors the Rust [rederive_recorded_output]. *)
+let rederive_recorded_output
+    (fixture : Yojson.Safe.t) (journal : Jas.Op_log.transaction list) : string =
+  let open Yojson.Safe.Util in
+  let segment = (List.nth journal (List.length journal - 1)).Jas.Op_log.ops in
+  (* Convert the journal segment (primitive_op list) into the recorded_op list
+     [capture_recipe] consumes. *)
+  let recorded_ops =
+    List.map (fun (o : Jas.Op_log.primitive_op) ->
+      { Jas.Element.rop_op = o.Jas.Op_log.op;
+        rop_params = o.Jas.Op_log.params;
+        rop_targets = o.Jas.Op_log.targets }) segment in
+  let (recipe, inputs) = Jas.Live.capture_recipe recorded_ops in
+  let recorded_el =
+    Jas.Element.make_recorded ~id:(Some "rec") recipe inputs in
+  let rec_ = match recorded_el with
+    | Jas.Element.Live (Jas.Element.Recorded r) -> r
+    | _ -> failwith "make_recorded did not yield a recorded element" in
+  (* Apply the fixture's edit to the source SVG, parse, and resolve the edited
+     element by id. Mirror the effects proof's textual edit (replace
+     x="0" y="0" -> x="100" y="0") so the parse is identical to Rust. *)
+  let rec_spec = fixture |> member "recorded" in
+  let edit = rec_spec |> member "edit_source" in
+  let edit_id = edit |> member "id" |> to_string in
+  let new_x = edit |> member "set" |> member "x" |> to_int in
+  let setup_svg = read_fixture (fixture |> member "setup_svg" |> to_string) in
+  let edited_svg =
+    Str.global_replace (Str.regexp_string "x=\"0\" y=\"0\"")
+      (Printf.sprintf "x=\"%d\" y=\"0\"" new_x) setup_svg in
+  let edited_doc = Jas.Svg.svg_to_document edited_svg in
+  (* The edited source is layers.(0) children.(0). *)
+  let edited_el = Jas.Document.get_element edited_doc [0; 0] in
+  let resolver : Jas.Live.element_resolver =
+    fun (r : Jas.Element.element_ref) ->
+      if r = edit_id then Some edited_el else None in
+  let visiting = ref Jas.Live.VisitSet.empty in
+  let ps =
+    Jas.Live.recorded_evaluate rec_ Jas.Live.default_precision resolver visiting in
+  polygon_set_to_test_json ps
+
+(* Reusable production-capture harness (OP_LOG.md section 9, Increment 3b-B).
+   Loads the fixture, drives the REAL [run_effects] over [setup_svg], then
+   asserts: (a) journal == golden; (b) checkpoint_equivalence replay (replaying
+   the journal ops via [op_apply] from [setup_svg] is byte-identical BOTH to the
+   document golden AND to the live snapshot-path document); (c) the recorded
+   re-derivation (when declared) == golden; (d) a SCOPED completeness assert:
+   EVERY committed production transaction's [ops] is non-empty. Mirrors the Rust
+   [run_production_batch_fixture]. *)
+let run_production_batch_fixture (fixture_path : string) =
+  let open Yojson.Safe.Util in
+  let fx = Yojson.Safe.from_string (read_fixture fixture_path) in
+  let name = match fx |> member "name" with
+    | `String s -> s | _ -> fixture_path in
+
+  (* Drive the REAL production interpreter. *)
+  let model = production_model fx in
+  run_production_batches fx model;
+
+  (* (a) journal serialization == golden. *)
+  let actual_journal = production_journal_to_test_json model#journal in
+  let expected_journal =
+    read_fixture (fx |> member "expected_journal_json" |> to_string) in
+  if actual_journal <> expected_journal then begin
+    Printf.eprintf "=== EXPECTED journal (%s) ===\n%s\n" name expected_journal;
+    Printf.eprintf "=== ACTUAL journal (%s) ===\n%s\n" name actual_journal;
+    assert false
+  end;
+
+  (* Snapshot-path document (the live result of run_effects). *)
+  let snapshot_doc = Jas.Test_json.document_to_test_json model#document in
+
+  (* (b) checkpoint_equivalence: replay the WHOLE journal via op_apply from a
+     fresh setup, byte-compare to BOTH the expected_document golden AND the live
+     snapshot-path document. *)
+  let replay = production_model fx in
+  let replay_ctrl = Jas.Controller.create ~model:replay () in
+  List.iter (fun (txn : Jas.Op_log.transaction) ->
+    List.iter (fun (op : Jas.Op_log.primitive_op) ->
+      Jas.Op_apply.op_apply replay replay_ctrl op.Jas.Op_log.params
+    ) txn.Jas.Op_log.ops
+  ) model#journal;
+  let replay_doc = Jas.Test_json.document_to_test_json replay#document in
+  let expected_doc =
+    read_fixture (fx |> member "expected_document_json" |> to_string) in
+  if replay_doc <> snapshot_doc then begin
+    Printf.eprintf "=== checkpoint_equivalence GATE FAILED (%s) ===\n" name;
+    Printf.eprintf "--- snapshot path ---\n%s\n" snapshot_doc;
+    Printf.eprintf "--- journal replay ---\n%s\n" replay_doc;
+    assert false
+  end;
+  if replay_doc <> expected_doc then begin
+    Printf.eprintf "=== EXPECTED doc (%s) ===\n%s\n" name expected_doc;
+    Printf.eprintf "=== ACTUAL doc (%s) ===\n%s\n" name replay_doc;
+    assert false
+  end;
+
+  (* (c) recorded re-derivation against the edited source == golden. *)
+  (match fx |> member "recorded" with
+   | `Null -> ()
+   | rec_spec ->
+     let actual_out = rederive_recorded_output fx model#journal in
+     let expected_out =
+       read_fixture (rec_spec |> member "expected_output_json" |> to_string) in
+     if actual_out <> expected_out then begin
+       Printf.eprintf "=== EXPECTED rederived (%s) ===\n%s\n" name expected_out;
+       Printf.eprintf "=== ACTUAL rederived (%s) ===\n%s\n" name actual_out;
+       assert false
+     end);
+
+  (* (d) scoped completeness assert: every committed production transaction
+     emits ops (the production path here is NOT named-but-op-less). *)
+  assert (model#journal <> []);
+  List.iteri (fun i (txn : Jas.Op_log.transaction) ->
+    if txn.Jas.Op_log.ops = [] then begin
+      Printf.eprintf
+        "production txn %d emits no ops (3b-B completeness, %s)\n" i name;
+      assert false
+    end
+  ) model#journal
+
+let production_capture_eye_demo () =
+  run_production_batch_fixture "production_capture/eye_demo.json"
+
+let production_capture_eye_demo_bare_frame () =
+  run_production_batch_fixture "production_capture/eye_demo_bare_frame.json"
 
 let dependency_index_cross_language () =
   (* Parse the shared input document. *)
@@ -1379,6 +1518,17 @@ let () =
          live element's recipe + inputs serialize byte-identically across the
          four native apps, pinned to operations/recorded_eye.json. *)
       Alcotest.test_case "recorded cross-language" `Quick recorded_cross_language;
+      (* Production op-capture (OP_LOG.md section 9, Increment 3b-B): marquee-
+         select -> copy -> move driven through the REAL run_effects pins the
+         translated journal, the checkpoint-equivalent document, and the live
+         re-derivation. The bare-frame variant pins the drag-frame-hole closure
+         (two SEPARATE batches, the second a BARE translate with no snapshot,
+         both committing NAMED transactions that journal their op). Mirrors the
+         Rust + Swift production-capture tests. *)
+      Alcotest.test_case "production_capture eye_demo" `Quick
+        production_capture_eye_demo;
+      Alcotest.test_case "production_capture eye_demo_bare_frame" `Quick
+        production_capture_eye_demo_bare_frame;
     ];
 
     (* Workspace layout tests *)
