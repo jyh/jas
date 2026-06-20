@@ -1,8 +1,9 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increment 1 (the generator engine + format + cross-language gate)
-built this pass; document/`LiveElement` integration, the fitter, operations, and
-constraints are **designed-but-deferred** (§7). · **Implements:** `VISION.md`
+**Status:** increments 1–2 built — the generator engine + format + cross-language
+gate (`regular_polygon`, `spiral`) and the `floor`/`mod` parity primitives +
+`star`/`gear` (the §6.3 flagship); document/`LiveElement` integration, the fitter,
+operations, and constraints are **designed-but-deferred** (§7). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -75,8 +76,9 @@ generator: |
 - **`closed`** — `true` ⇒ the points close into a polygon; `false` ⇒ an open
   polyline (e.g. a spiral).
 
-The two concepts shipped this increment: **`regular_polygon`** (closed) and
-**`spiral`** (open) — both expressible with the functions already pinned.
+Concepts shipped: **`regular_polygon`** (closed) and **`spiral`** (open) in
+increment 1; **`star`** and **`gear`** (closed; the §6.3 flagship) in increment 2,
+once the `floor`/`mod` parity primitives landed.
 
 ---
 
@@ -155,11 +157,11 @@ inlines the generator instead, so the engine is pinned before the wiring.
 
 1. **Generator engine + format + cross-language gate (this increment).**
    `regular_polygon` + `spiral`; no document coupling.
-2. **Parity primitives + gear/star.** A gear/star needs alternating tip/valley
-   radii. The language has no `mod`/`floor` and `+` is string-concat (not
-   list-concat), so the parity is not yet expressible. Add `floor` (and likely
-   `mod`) to the math family — corpus-pinned like the trig functions — then
-   author `gear` and `star`. This finishes the `VISION.md` flagship example.
+2. **Parity primitives + gear/star — ✅ done.** `floor(x)` and `mod(a, b)` (the
+   floored `a - b*floor(a/b)`, defined identically in every interpreter rather than
+   the host `%`, whose sign convention differs) were added to the math family and
+   corpus-pinned; `star` and `gear` are authored and gated across all five apps.
+   This completed the `VISION.md` §6.3 flagship example as data.
 3. **`LiveVariant::Generated` arm + concept registry (§6).** A concept instance
    lives in a document, renders, round-trips; parameters are editable (the live
    "tune the same parameters without redoing anything" of §6.4).

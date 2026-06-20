@@ -187,10 +187,11 @@ the AI. **Today:** tools already migrated native→data (all but Type/TypeOnPath
 language can **generate geometry** (`sin`/`cos`/`tan` degrees, `pow`, `range`, `fold`, pinned
 across five apps); and the **concept-pack format + generator engine have shipped** — a concept is
 a `workspace/concepts/*.yaml` (`params` + a generator expression → geometry), pinned by its own
-cross-language conformance corpus (`CONCEPTS.md`; `regular_polygon` + `spiral` ride it). A
-parametric concept is now data. **Remaining, in dependency order:** parity primitives so a
-gear/star is expressible (`mod`/`floor`); the document `LiveVariant::Generated` instance arm;
-operations; the fitter (`promote`); and a **constraint representation**. **Benefit:** N domains
+cross-language conformance corpus (`CONCEPTS.md`; `regular_polygon`, `spiral`, `star`, and the
+flagship `gear` ride it — with `mod`/`floor` added to the language for the gear/star parity). A
+parametric concept is now data, **the gear included**. **Remaining, in dependency order:** the
+document `LiveVariant::Generated` instance arm; operations; the fitter (`promote`); and a
+**constraint representation**. **Benefit:** N domains
 cost ~one engine, propagated to five apps for free. **Downside:** the fitter and a deterministic
 (no-JS) constraint representation are still unbuilt; the generator engine is corpus-pinned, so
 each addition stays safe.
@@ -356,7 +357,7 @@ Everything stands on three things — build them first:
 
 The live dependency graph (6.2 — ✅ shipped) and the operation-log spine (§5 item 5 / §10 item 2
 — ✅ shipped) are both in. The open chain, in dependency order: the rest of the concept-pack system (6.3 —
-the format + generator engine now ship; remaining are gear/star parity primitives, the document
+the format + generator engine ship and the gear/star flagship is data; remaining are the document
 `Generated` instance arm, operations, the fitter, and constraints) → capture/replay sessions
 (§9 regime 2, now unblocked by the journal) and the gesture/lens layer (6.4) → the AI operation
 API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay

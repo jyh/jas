@@ -145,5 +145,117 @@
         -15.216904261
       ]
     ]
+  },
+  {
+    "concept": "star",
+    "generator": "map(range(0, param.points * 2), fun k ->\n  let a = 360 * k / (param.points * 2) in\n  let r = if mod(k, 2) == 0 then param.outer else param.inner in\n  [r * cos(a), r * sin(a)])",
+    "params": {
+      "points": 5,
+      "outer": 10,
+      "inner": 4
+    },
+    "closed": true,
+    "expected": [
+      [
+        10,
+        0
+      ],
+      [
+        3.236067977,
+        2.351141009
+      ],
+      [
+        3.090169944,
+        9.510565163
+      ],
+      [
+        -1.236067977,
+        3.804226065
+      ],
+      [
+        -8.090169944,
+        5.877852523
+      ],
+      [
+        -4,
+        0
+      ],
+      [
+        -8.090169944,
+        -5.877852523
+      ],
+      [
+        -1.236067977,
+        -3.804226065
+      ],
+      [
+        3.090169944,
+        -9.510565163
+      ],
+      [
+        3.236067977,
+        -2.351141009
+      ]
+    ]
+  },
+  {
+    "concept": "gear",
+    "generator": "map(range(0, param.teeth * 4), fun k ->\n  let step = 360 / param.teeth in\n  let t = floor(k / 4) in\n  let p = mod(k, 4) in\n  let a = t * step + (if p >= 2 then step / 2 else 0) in\n  let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in\n  [r * cos(a), r * sin(a)])",
+    "params": {
+      "teeth": 3,
+      "outer": 10,
+      "root": 6
+    },
+    "closed": true,
+    "expected": [
+      [
+        6,
+        0
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        5,
+        8.660254038
+      ],
+      [
+        3,
+        5.196152423
+      ],
+      [
+        -3,
+        5.196152423
+      ],
+      [
+        -5,
+        8.660254038
+      ],
+      [
+        -10,
+        0
+      ],
+      [
+        -6,
+        0
+      ],
+      [
+        -3,
+        -5.196152423
+      ],
+      [
+        -5,
+        -8.660254038
+      ],
+      [
+        5,
+        -8.660254038
+      ],
+      [
+        3,
+        -5.196152423
+      ]
+    ]
   }
 ]

@@ -1,0 +1,20 @@
+id: star
+name: Star
+description: >
+  An N-pointed star centered on the origin. The generator walks 2*points
+  vertices around the center, alternating between the `outer` radius (the star's
+  tips) and the `inner` radius (the valleys between tips) using mod(k, 2) to pick
+  the radius by vertex parity. The first tip sits on the +x axis. The point list
+  is closed into a filled star polygon. A larger `outer`/`inner` ratio makes
+  sharper points; equal radii degenerate to a regular 2*points-gon. This is the
+  simplest concept that needs a parity primitive.
+params:
+  - { name: points, type: number, default: 5 }
+  - { name: outer,  type: number, default: 50 }
+  - { name: inner,  type: number, default: 20 }
+closed: true
+generator: |
+  map(range(0, param.points * 2), fun k ->
+    let a = 360 * k / (param.points * 2) in
+    let r = if mod(k, 2) == 0 then param.outer else param.inner in
+    [r * cos(a), r * sin(a)])

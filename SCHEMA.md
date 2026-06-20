@@ -1668,6 +1668,8 @@ type/arity mismatch or a non-finite result):
 | `min(a, b, …)`    | Smallest of the numeric arguments.                |
 | `max(a, b, …)`    | Largest of the numeric arguments.                 |
 | `abs(x)`          | Absolute value.                                   |
+| `floor(x)`        | Round toward negative infinity.                   |
+| `mod(a, b)`       | Floored modulo `a - b*floor(a/b)` — result takes the sign of `b`; `null` if `b == 0`. (Defined explicitly, not the host language's `%`, so all interpreters agree.) |
 | `sqrt(x)`         | Square root (`null` if `x < 0`).                  |
 | `pow(base, exp)`  | `base` raised to `exp`.                           |
 | `hypot(x, y)`     | Euclidean distance `√(x² + y²)`.                  |

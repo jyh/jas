@@ -31,3 +31,21 @@ tests:
     params: { steps: 5, angle_step: 72, r0: 4, growth: 3 }
     expected: [[4, 0], [2.163118961, 6.657395614], [-8.090169944, 5.877852523],
                [-10.517220927, -7.64120828], [4.94427191, -15.216904261]]
+
+  # 5-pointed star (outer 10, inner 4): 10 vertices alternating radius via
+  # mod(k, 2). Exercises the parity primitive.
+  - concept: star
+    params: { points: 5, outer: 10, inner: 4 }
+    expected: [[10, 0], [3.236067977, 2.351141009], [3.090169944, 9.510565163],
+               [-1.236067977, 3.804226065], [-8.090169944, 5.877852523], [-4, 0],
+               [-8.090169944, -5.877852523], [-1.236067977, -3.804226065],
+               [3.090169944, -9.510565163], [3.236067977, -2.351141009]]
+
+  # 3-tooth square gear (outer 10, root 6): 12 vertices, 4 per tooth, selected
+  # by mod(k, 4) and floor(k / 4) — the VISION §6.3 flagship as data.
+  - concept: gear
+    params: { teeth: 3, outer: 10, root: 6 }
+    expected: [[6, 0], [10, 0], [5, 8.660254038], [3, 5.196152423],
+               [-3, 5.196152423], [-5, 8.660254038], [-10, 0], [-6, 0],
+               [-3, -5.196152423], [-5, -8.660254038], [5, -8.660254038],
+               [3, -5.196152423]]
