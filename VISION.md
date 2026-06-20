@@ -128,7 +128,8 @@ off for many goals at once.
    (shared cull/LOD decisions → native paint), and AI (canonical perception → shared plan →
    native-agnostic execution) all use the same boundary. Pin the normalized middle; let the
    edges be native.
-5. **The operation log is the spine.** The transaction history is simultaneously undo/redo,
+5. **The operation log is the spine.** *(Foundation SHIPPED 2026-06, all four native apps;
+   see §10 item 2 / `OP_LOG.md`.)* The transaction history is simultaneously undo/redo,
    the replay-test fixtures, the AI's action surface, and the versioning/collaboration
    substrate. Versioning, comments, collaboration, and the AI are all "history and
    participants over an identified, operation-based document."
@@ -154,9 +155,10 @@ and the honest downside/dependency.
 The AI never *is* the source of truth; it proposes deterministic operations on a deterministic
 core, which executes and is fully pinned. The AI is centralized (one shared brain), never in
 the synchronous draw path, and the core is fully usable with it switched off.
-**Today:** the operation vocabulary, a portable document serialization (`test_json`), and the
-per-app effects engines already exist — ~70% of an agent's scaffolding. AI integration itself
-is greenfield. **Benefit:** equivalence survives (you test the *operation the AI committed*,
+**Today:** the operation vocabulary, a portable document serialization (`test_json`), the
+per-app effects engines, **and now the typed transaction journal** (§10 item 2 / `OP_LOG.md`)
+already exist — the deterministic-operation surface an agent commits through is largely in
+place. AI integration itself is greenfield. **Benefit:** equivalence survives (you test the *operation the AI committed*,
 not the model); AI cost/complexity paid once. **Downside:** offline/latency story required; a
 clean operation-API boundary must be held; depends on 6.2.
 
@@ -327,20 +329,28 @@ Everything stands on three things — build them first:
 
 1. **Stable element identity** — ✅ **SHIPPED** (additive `common.id` in all four native apps; coexists
    with tree-paths; round-trips via SVG `id`; duplicate clears id, undo/redo preserve it).
-2. **The operation / transaction log** — ⬜ **not started.** Still to be formalized as the
-   atomic, reversible, summarizable unit (generalizing today's boolean+simplify undo grouping,
-   which is currently whole-document snapshots, not a recordable op stream). **This is now the
-   top critical-path item** — versioning, AI legibility, capture/replay, and collaboration all
-   block on it.
-3. **The expression-language conformance corpus** — 🟡 **partial.** The corpus file exists
-   (`workspace/tests/expressions.yaml`) but gates **Python only**; make it a true
-   cross-language gate (load it in Rust/Swift/OCaml) and close the OCaml closure-scope
-   divergence **before** extending the language with geometry generators.
+2. **The operation / transaction log** — ✅ **SHIPPED** (Increments 1–3 across all four native
+   apps, merged to `main`; see `OP_LOG.md`). The atomic, reversible, summarizable unit is built:
+   a runtime `op_apply`, a typed `Transaction` journal (`op_journal` + `journal_head`) layered
+   *co-equally* over the snapshot stacks, the enforced `set_document` chokepoint (the
+   consolidation of §11), the **mandatory `checkpoint_equivalence` gate** (replay == snapshot,
+   byte-identical), the 33-verb `actions.yaml`↔`op_apply` unification, per-frame drag coalescing,
+   id-primary addressing (3c-1), the runtime layout-op dispatcher (3d), and sibling-app
+   production routing so *every* app's gestures journal — not just Rust's. **Still ahead:**
+   capture/replay sessions (§9 regime 2 — the highest-value follow-on), journal persistence, and
+   collaboration (op-inversion, `doc_id`, recorded-merge — 3c-2/3/4), all deliberately deferred
+   but kept format-ready.
+3. **The expression-language conformance corpus** — 🟡 **partial — and now the top remaining
+   critical-path item.** The corpus file exists (`workspace/tests/expressions.yaml`) but gates
+   **Python only**; make it a true cross-language gate (load it in Rust/Swift/OCaml) and close
+   the OCaml closure-scope divergence **before** extending the language with geometry generators.
 
-Then, in dependency order: the live dependency graph (6.2 — ✅ shipped) → concept-pack format
-+ language extension (6.3) → render-tree conformance and the gesture/lens layer (6.4) → the AI
-operation API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration
-(6.9) stay deferred-but-ready throughout.
+The live dependency graph (6.2 — ✅ shipped) and the operation-log spine (§5 item 5 / §10 item 2
+— ✅ shipped) are both in. The open chain, in dependency order: the expression-language corpus
+gate (item 3 above) → concept-pack format + language extension (6.3) → capture/replay sessions
+(§9 regime 2, now unblocked by the journal) and the gesture/lens layer (6.4) → the AI operation
+API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
+deferred-but-ready throughout.
 
 ---
 
@@ -362,9 +372,11 @@ direct prerequisites for this vision. The most relevant:
 - **Build the expression-language conformance corpus and fix closure-scope divergence** — the
   prerequisite for concept packs (6.3). 🟡 corpus file exists but gates Python only; OCaml
   closure-scope divergence is still unfixed and unpinned.
-- **Consolidate to one mutation path** (Rust currently has two effect runners: `renderer.rs`
-  on `AppState`, `effects.rs` on `StateStore`/`Model`) — ⬜ not done; required for artist
-  primacy (6.10) to be architecturally enforced.
+- **Consolidate to one mutation path** (Rust formerly had two effect runners: `renderer.rs`
+  on `AppState`, `effects.rs` on `StateStore`/`Model`) — ✅ **done**: all mutation now funnels
+  through the enforced `set_document` chokepoint (the `in_txn` assertion) in all four native
+  apps — the prerequisite that made the op-log journal complete-by-construction (`OP_LOG.md`
+  Increment 1). Artist primacy (6.10) is now architecturally enforced at this seam.
 - **Add the widget/effect parity guard and validator cross-reference layer** — ⬜ not done;
   catches whole classes of five-app divergence cheaply.
 
