@@ -5747,6 +5747,16 @@
         }
       ]
     },
+    "make_instance": {
+      "description": "The Object-menu entry point for Make Symbol (SYMBOLS.md \u00a77): promote the single selected canvas element to a master and leave an instance of it in its place. Enabled only when exactly one whole canvas element is selected. A `log` stub like the other symbol mutators; the real work lives in each app's native arm, which mints the master + instance ids by the value-in-op rule. (This declaration closes a dangling Object-menu action reference.)\n",
+      "category": "symbols",
+      "enabled_when": "active_document.selection_count == 1",
+      "effects": [
+        {
+          "log": "make_instance"
+        }
+      ]
+    },
     "place_instance": {
       "description": "Append a new instance of the panel-selected master to the active layer and select it (SYMBOLS.md \u00a77 Place Instance). Enabled only when a master is panel-selected. A fresh instance id is minted by the initiator (value-in-op). Single undo op.\n",
       "category": "symbols",
