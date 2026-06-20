@@ -626,6 +626,30 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             acc = _apply_closure(fn, [acc, Value.from_python(item)], ctx)
         return acc
 
+    if name == "floor":
+        if len(node.args) != 1:
+            return Value.null()
+        a = eval_node(node.args[0], ctx)
+        if a.type != ValueType.NUMBER:
+            return Value.null()
+        import math
+        return Value.number(float(math.floor(a.value)))
+
+    if name == "mod":
+        # Floored modulo: a - b * floor(a / b) (result takes the sign of b).
+        # Defined explicitly so every interpreter agrees regardless of its
+        # native %% sign convention. null on b == 0.
+        if len(node.args) != 2:
+            return Value.null()
+        va = eval_node(node.args[0], ctx)
+        vb = eval_node(node.args[1], ctx)
+        if va.type != ValueType.NUMBER or vb.type != ValueType.NUMBER:
+            return Value.null()
+        if vb.value == 0:
+            return Value.null()
+        import math
+        return Value.number(va.value - vb.value * math.floor(va.value / vb.value))
+
     # brush_type_of(slug) -- look up a brush in brush_libraries by
     # "lib_id/brush_slug" and return its `type` field as a string.
     # Returns Value.null() if the slug does not resolve. Consumed by

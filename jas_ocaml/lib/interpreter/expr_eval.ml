@@ -1125,6 +1125,28 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    else if name = "floor" then begin
+      if List.length args <> 1 then Null
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Number n -> Number (Float.floor n)
+        | _ -> Null
+    end
+
+    (* mod(a, b) — floored modulo a - b*floor(a/b) (sign of b); Null on b = 0.
+       Defined explicitly so every interpreter agrees regardless of its native
+       remainder operator. *)
+    else if name = "mod" then begin
+      if List.length args <> 2 then Null
+      else
+        let va = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vb = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match va, vb with
+        | Number a, Number b when b <> 0.0 ->
+          Number (a -. b *. Float.floor (a /. b))
+        | _ -> Null
+    end
+
     (* brush_type_of(slug) — look up a brush in brush_libraries by
        "lib_id/brush_slug" and return its [type] field as a string.
        Returns [Null] if the slug does not resolve. Consumed by

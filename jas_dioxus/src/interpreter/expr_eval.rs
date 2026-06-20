@@ -1007,6 +1007,38 @@ fn eval_func(
             acc
         }
 
+        // floor(x) -> Number | Null (rounds toward negative infinity).
+        "floor" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => Value::Number(n.floor()),
+                _ => Value::Null,
+            }
+        }
+
+        // mod(a, b) -> floored modulo a - b*floor(a/b) (sign of b); Null on b == 0.
+        // Defined explicitly so every interpreter agrees regardless of its native
+        // remainder operator's sign convention.
+        "mod" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let a = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let b = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            if b == 0.0 {
+                return Value::Null;
+            }
+            Value::Number(a - b * (a / b).floor())
+        }
+
         // ── Document-aware primitives ─────────────────────────
         //
         // Available only during a tool dispatch that has registered a

@@ -1,0 +1,25 @@
+id: gear
+name: Gear
+description: >
+  A square-toothed cog with `teeth` evenly spaced teeth, centered on the origin.
+  Each tooth occupies an angular sector of 360/teeth degrees and contributes four
+  vertices — a rise from the `root` radius to the `outer` (tooth-tip) radius at the
+  sector start, a flat tooth top across the first half of the sector at `outer`, a
+  fall back to `root`, and a valley floor across the second half at `root`. The
+  vertex's role within its tooth is selected by mod(k, 4) and its tooth index by
+  floor(k / 4); the result is a closed square-wave gear outline. This is the
+  `VISION.md` §6.3 flagship example expressed entirely as data — it exercises both
+  parity primitives (mod and floor) on top of the trig/range/map generators.
+params:
+  - { name: teeth, type: number, default: 12 }
+  - { name: outer, type: number, default: 50 }
+  - { name: root,  type: number, default: 38 }
+closed: true
+generator: |
+  map(range(0, param.teeth * 4), fun k ->
+    let step = 360 / param.teeth in
+    let t = floor(k / 4) in
+    let p = mod(k, 4) in
+    let a = t * step + (if p >= 2 then step / 2 else 0) in
+    let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in
+    [r * cos(a), r * sin(a)])

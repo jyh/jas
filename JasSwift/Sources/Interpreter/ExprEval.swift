@@ -1389,6 +1389,25 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return acc
 
+    // floor(x) -> Number | Null (rounds toward negative infinity).
+    case "floor":
+        guard args.count == 1 else { return .null }
+        let a = evalNode(args[0], ctx)
+        guard case .number(let n) = a else { return .null }
+        return .number(n.rounded(.down))
+
+    // mod(a, b) -> floored modulo a - b*floor(a/b) (sign of b); Null on b == 0.
+    // Defined explicitly so every interpreter agrees regardless of its native
+    // remainder operator's sign convention.
+    case "mod":
+        guard args.count == 2 else { return .null }
+        let va = evalNode(args[0], ctx)
+        let vb = evalNode(args[1], ctx)
+        guard case .number(let a) = va, case .number(let b) = vb, b != 0 else {
+            return .null
+        }
+        return .number(a - b * (a / b).rounded(.down))
+
     // brush_type_of(slug) — look up a brush in brush_libraries by
     // "lib_id/brush_slug" and return its `type` field as a string.
     // Returns .null if the slug doesn't resolve. Consumed by
