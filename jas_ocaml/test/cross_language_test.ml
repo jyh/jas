@@ -1063,8 +1063,56 @@ let orphaned_references_cross_language () =
     end
   ) cases
 
+(* Expression-language conformance (shared corpus).
+   Loads test_fixtures/expressions/conformance.json (generated from
+   workspace/tests/expressions.yaml — the same corpus the Python conformance
+   test reads) and asserts this app's evaluator produces the expected result
+   type and value for every case. Pins cross-language expression equivalence,
+   including the closure lexical-scoping contract. *)
+let assert_expression_conformance () =
+  let open Yojson.Safe.Util in
+  let json_str = read_fixture "expressions/conformance.json" in
+  let cases = Yojson.Safe.from_string json_str |> to_list in
+  let num_of = function
+    | `Int i -> float_of_int i
+    | `Float f -> f
+    | `Intlit s -> float_of_string s
+    | _ -> nan
+  in
+  let failures = List.filter_map (fun tc ->
+    let expr = tc |> member "expr" |> to_string in
+    (* Build the eval context from the optional state/data namespaces. *)
+    let ns key = match tc |> member key with `Null -> [] | v -> [(key, v)] in
+    let ctx = `Assoc (ns "state" @ ns "data") in
+    let result = Jas.Expr_eval.evaluate expr ctx in
+    let ty = tc |> member "type" |> to_string in
+    let expected = tc |> member "expected" in
+    let ok = match ty, result with
+      | "null", Jas.Expr_eval.Null -> true
+      | "bool", Jas.Expr_eval.Bool b -> b = to_bool expected
+      | "number", Jas.Expr_eval.Number n -> abs_float (n -. num_of expected) < 1e-9
+      | "string", Jas.Expr_eval.Str s -> s = to_string expected
+      | "color", Jas.Expr_eval.Color c -> c = to_string expected
+      | "list", Jas.Expr_eval.List _ -> true
+      | _ -> false
+    in
+    if ok then None
+    else Some (Printf.sprintf "  %s -> expected type %s, got a mismatch" expr ty)
+  ) cases in
+  if failures <> [] then begin
+    Printf.eprintf "expression conformance failures (%d of %d):\n%s\n"
+      (List.length failures) (List.length cases) (String.concat "\n" failures);
+    assert false
+  end
+
 let () =
   Alcotest.run "Cross_language" [
+    (* Expression-language conformance (shared corpus) *)
+    "Expression conformance", [
+      Alcotest.test_case "expression_conformance all cases" `Quick
+        assert_expression_conformance;
+    ];
+
     (* Binary round-trip *)
     "Binary round-trip", [
       Alcotest.test_case "binary_roundtrip all expected" `Quick (fun () ->

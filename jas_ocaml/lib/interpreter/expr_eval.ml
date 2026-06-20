@@ -704,7 +704,12 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
       let arg_vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) (List.tl args) in
       if List.length arg_vals <> List.length params then Null
       else begin
-        let call_env = List.combine params arg_vals @ captured_env @ local_env in
+        (* Lexical scoping: the closure body sees its captured definition
+           env plus the bound parameters only. The caller's env (local_env)
+           must NOT leak in — that would be dynamic scoping and diverges from
+           Python/Rust/Swift. Runtime namespaces stay fresh via ctx, which is
+           threaded through unchanged. *)
+        let call_env = List.combine params arg_vals @ captured_env in
         eval_node ~local_env:call_env ?store_cb body ctx
       end
     | _ -> Null
@@ -718,7 +723,12 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
       let arg_vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
       if List.length arg_vals <> List.length params then Null
       else begin
-        let call_env = List.combine params arg_vals @ captured_env @ local_env in
+        (* Lexical scoping: the closure body sees its captured definition
+           env plus the bound parameters only. The caller's env (local_env)
+           must NOT leak in — that would be dynamic scoping and diverges from
+           Python/Rust/Swift. Runtime namespaces stay fresh via ctx, which is
+           threaded through unchanged. *)
+        let call_env = List.combine params arg_vals @ captured_env in
         eval_node ~local_env:call_env ?store_cb body ctx
       end
     | _ ->

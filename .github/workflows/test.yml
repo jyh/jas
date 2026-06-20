@@ -18,6 +18,17 @@ jobs:
       - run: pip install PyYAML
       - run: bash scripts/check_workspace_json.sh
 
+  expr-corpus-fresh:
+    name: expression corpus JSON up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+      - run: bash scripts/check_expr_corpus.sh
+
   genericity:
     name: Genericity policy
     runs-on: ubuntu-latest
@@ -47,8 +58,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install numpy PySide6 pytest absl-py
+      - run: pip install numpy PySide6 pytest absl-py PyYAML
       - run: cd jas && python -m pytest
+      # The Python app's expression evaluator lives in workspace_interpreter;
+      # gate the shared conformance corpus (the Python reference) explicitly —
+      # `cd jas && pytest` does not discover workspace_interpreter/tests.
+      - name: Expression conformance (Python reference)
+        run: python -m pytest workspace_interpreter/tests/test_expr.py
 
   ocaml:
     name: OCaml tests

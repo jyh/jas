@@ -333,6 +333,18 @@ let closure_lexical_tests = [
   Alcotest.test_case "closure_namespace_refreshed" `Quick (fun () ->
     assert_number 42.0
       (eval ~state:[("x", `Int 42)] "let f = fun _ -> state.x in f(null)"));
+  (* x is bound only in the CALLER's scope, never captured by f.
+     Lexical scoping => x is unbound in f's body => Null. A dynamic-scope
+     leak (appending the caller env to the closure call env) would wrongly
+     resolve x to 99. Pins the named-closure call path. *)
+  Alcotest.test_case "closure_does_not_capture_caller_binding" `Quick (fun () ->
+    assert_null
+      (eval "let f = fun _ -> x in let x = 99 in f(null)"));
+  (* A captured binding is still visible through immediate application,
+     guarding against over-removal when the caller env is dropped. *)
+  Alcotest.test_case "closure_captures_binding_via_apply" `Quick (fun () ->
+    assert_number 1.0
+      (eval "let y = 1 in (fun _ -> y)(null)"));
 ]
 
 (* AST cache: same source string evaluated against varying contexts

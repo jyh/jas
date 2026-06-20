@@ -257,3 +257,73 @@ tests:
     state: { flag: false, a: "#ff0000", b: "#00ff00" }
     expected: "#ff00ff"
     type: color
+
+  # ── Closures, let-bindings & lexical scoping ──
+  # These pin the closure-capture contract across all interpreters. The
+  # critical invariant: a closure sees its captured definition scope plus
+  # its parameters — NEVER the caller's scope (lexical, not dynamic). Runtime
+  # namespaces (state/data/...) stay fresh from the call site.
+
+  - expr: "let x = 5 in x + 1"
+    expected: 6
+    type: number
+
+  - expr: "let x = 3 in let y = 4 in x + y"
+    expected: 7
+    type: number
+
+  - expr: "let x = 1 in let x = 2 in x"
+    expected: 2
+    type: number
+    note: "inner let shadows outer"
+
+  - expr: "let doubled = state.n * 2 in doubled + 1"
+    state: { n: 10 }
+    expected: 21
+    type: number
+
+  - expr: "(fun x -> x + 1)(5)"
+    expected: 6
+    type: number
+
+  - expr: "(fun (x, y) -> x + y)(3, 4)"
+    expected: 7
+    type: number
+
+  - expr: "(fun () -> 42)()"
+    expected: 42
+    type: number
+
+  - expr: "let f = fun x -> x * 2 in f(7)"
+    expected: 14
+    type: number
+
+  - expr: "let add = fun (a, b) -> a + b in add(add(1, 2), 3)"
+    expected: 6
+    type: number
+
+  - expr: "(fun v -> let doubled = v * 2 in doubled + 1)(5)"
+    expected: 11
+    type: number
+
+  - expr: "(fun x -> x + state.y)(10)"
+    state: { y: 5 }
+    expected: 15
+    type: number
+    note: "closure body reads a runtime namespace at call time"
+
+  - expr: "let x = 1 in let f = fun _ -> x in let x = 2 in f(null)"
+    expected: 1
+    type: number
+    note: "closure captures x=1 lexically; the later x=2 does not affect it"
+
+  - expr: "let f = fun _ -> x in let x = 99 in f(null)"
+    expected: null
+    type: "null"
+    note: "x is bound only in the caller's scope, never captured — lexical scoping yields null, not 99 (guards against the dynamic-scope leak)"
+
+  - expr: "let f = fun _ -> state.x in f(null)"
+    state: { x: 42 }
+    expected: 42
+    type: number
+    note: "namespace reads inside a closure resolve against the live call-site context"
