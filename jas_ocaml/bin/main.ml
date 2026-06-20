@@ -366,8 +366,17 @@ let () =
             Jas.Menubar.confirm_delete_orphans (List.length orphaned) main_window
         in
         if proceed then begin
-          m#snapshot;
-          m#set_document (Jas.Document.delete_selection doc)
+          (* OP_LOG.md section 9 Phase P4 — route the keyboard Delete through the
+             SHARED [Jas.Op_apply.op_apply] dispatcher ([apply_delete_selection],
+             the SAME [Document.delete_selection] body) so the gesture JOURNALS a
+             real [delete_selection] op (one named undo step). The synchronous
+             orphan confirm above IS the confirm path; only the mutation routes
+             here. Mirrors the Swift [delete_orphan_confirm_ok] / Rust. *)
+          let ctrl = Jas.Controller.create ~model:m () in
+          m#with_txn (fun () ->
+            m#name_txn "delete_orphan_confirm_ok";
+            Jas.Op_apply.op_apply m ctrl
+              (`Assoc [ ("op", `String "delete_selection") ]))
         end
       end;
       true

@@ -18,6 +18,16 @@
     transform) skips the op rather than raising. The harness fixtures (which
     always carry well-formed params) replay byte-identically. *)
 
+(** Stash a live element for VALUE-IN-OP carriage (OP_LOG.md section 9 Phase P4)
+    and return the opaque marker JSON the production [insert_after] / [insert_at]
+    handler places under the [element] key of the op. OCaml has no serde-shape element
+    ENCODER (only a decoder), so a production insert carries the live element via
+    this in-process stash; the journal replays the SAME marker and re-resolves
+    the SAME element, keeping checkpoint_equivalence. Additive and fixture-neutral
+    (a fixture carries the serde dict, never this marker). Mirrors the Swift
+    [parseSerdeElement] value-in-op fast path. *)
+val stash_element_value : Element.element -> Yojson.Safe.t
+
 (** Apply one primitive op to [model] (via [ctrl]) and record it into the open
     transaction (the checkpoint_equivalence gate, OP_LOG.md section 5-6).
 

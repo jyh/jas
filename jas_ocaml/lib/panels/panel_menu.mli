@@ -104,6 +104,18 @@ val dispatch_yaml_action :
   ?on_close_dialog:(unit -> unit) option ->
   string -> Model.model -> unit
 
+(** TEST SEAM (OP_LOG.md section 9 production-route proofs). Run an arbitrary
+    [effects] list through the SAME Layers-panel platform-effect registry +
+    owner-bracket the production [dispatch_yaml_action] uses, so a production-
+    route test drives the REAL handlers. Used to reach the artboard duplicate /
+    delete / reorder handlers, whose production actions read an artboard-panel
+    selection the renderer-free unit context does not populate. Mirrors the
+    Swift [LayersPanel.runEffectsForTest]. *)
+val run_action_effects_for_test :
+  ?panel_selection:int list list ->
+  ?params:(string * Yojson.Safe.t) list ->
+  string -> Yojson.Safe.t list -> Model.model -> unit
+
 (** Dispatch a hamburger-menu command for the named panel. Reads the
     layout for radio/mode toggles and the panel back-pointers for
     panel-local state mutations. *)
