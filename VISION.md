@@ -340,16 +340,20 @@ Everything stands on three things — build them first:
    capture/replay sessions (§9 regime 2 — the highest-value follow-on), journal persistence, and
    collaboration (op-inversion, `doc_id`, recorded-merge — 3c-2/3/4), all deliberately deferred
    but kept format-ready.
-3. **The expression-language conformance corpus** — 🟡 **partial — and now the top remaining
-   critical-path item.** The corpus file exists (`workspace/tests/expressions.yaml`) but gates
-   **Python only**; make it a true cross-language gate (load it in Rust/Swift/OCaml) and close
-   the OCaml closure-scope divergence **before** extending the language with geometry generators.
+3. **The expression-language conformance corpus** — ✅ **SHIPPED as a cross-language gate.**
+   `workspace/tests/expressions.yaml` is compiled to `test_fixtures/expressions/conformance.json`
+   and self-checked in all four native apps **plus** the Python reference, CI-gated (with a
+   freshness check). The closure lexical-scoping divergence it was meant to pin is fixed in OCaml
+   **and** Rust — the gate immediately caught a second leak a manual survey had missed.
+   **The top remaining critical-path item is now extending the language with geometry generators**
+   (`sin`/`cos`/`range`/`fold`) — the unlock for concept packs (6.3) — which the now-pinned corpus
+   makes safe to do.
 
 The live dependency graph (6.2 — ✅ shipped) and the operation-log spine (§5 item 5 / §10 item 2
-— ✅ shipped) are both in. The open chain, in dependency order: the expression-language corpus
-gate (item 3 above) → concept-pack format + language extension (6.3) → capture/replay sessions
-(§9 regime 2, now unblocked by the journal) and the gesture/lens layer (6.4) → the AI operation
-API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
+— ✅ shipped) are both in. The open chain, in dependency order: geometry generators in the expression
+language (the conformance gate that pins them is now in) → concept-pack format (6.3) →
+capture/replay sessions (§9 regime 2, now unblocked by the journal) and the gesture/lens layer
+(6.4) → the AI operation API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
 deferred-but-ready throughout.
 
 ---
@@ -370,8 +374,10 @@ direct prerequisites for this vision. The most relevant:
   dropped) — ✅ **done**: CompoundShape and per-range tspans now round-trip through JSON,
   binary, and SVG, pinned by the shared cross-language harness.
 - **Build the expression-language conformance corpus and fix closure-scope divergence** — the
-  prerequisite for concept packs (6.3). 🟡 corpus file exists but gates Python only; OCaml
-  closure-scope divergence is still unfixed and unpinned.
+  prerequisite for concept packs (6.3). ✅ **done**: the corpus is now a cross-language gate (all
+  four native apps + the Python reference self-check the same compiled cases in CI, with a
+  freshness check), and the closure lexical-scoping divergence is fixed and pinned in **both**
+  OCaml and Rust.
 - **Consolidate to one mutation path** (Rust formerly had two effect runners: `renderer.rs`
   on `AppState`, `effects.rs` on `StateStore`/`Model`) — ✅ **done**: all mutation now funnels
   through the enforced `set_document` chokepoint (the `in_txn` assertion) in all four native
