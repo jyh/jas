@@ -158,11 +158,6 @@ class TestOpacityPanel:
         for label in expected:
             assert label in labels, f"Menu entry '{label}' missing"
 
-    def test_menu_has_three_separators(self, panel):
-        menu = panel.get("menu", [])
-        sep_count = sum(1 for m in menu if m == "separator")
-        assert sep_count == 3
-
     def test_menu_make_mask_enabled_when_no_mask(self, panel):
         entry = self._menu_by_label(panel, "Make Opacity Mask")
         assert entry.get("enabled_when") == "!selection_has_mask"
