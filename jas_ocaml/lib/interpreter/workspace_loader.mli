@@ -31,6 +31,10 @@ val dialog_state_defaults :
   workspace -> string -> (string * Yojson.Safe.t) list
 val swatch_libraries : workspace -> Yojson.Safe.t
 
+(** [concepts_list ws] returns the concept-pack registry as a sorted list of
+    [{id, name, description}] objects (by id) for the Concepts panel. *)
+val concepts_list : workspace -> Yojson.Safe.t
+
 val brush_libraries : workspace -> Yojson.Safe.t
 (* Brush libraries map keyed by slug; reads
    workspace_data["brush_libraries"]. Returns an empty Assoc when

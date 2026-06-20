@@ -751,6 +751,14 @@ val make_recorded :
   ?id:string option -> ?opacity:float -> ?transform:transform option ->
   ?locked:bool -> recorded_op list -> element_ref list -> element
 
+(** Build a generated (parametric concept-instance) live element from its
+    concept pack id and parameter values, with no paint overrides. Its geometry
+    is produced by the concept's generator at eval time (CONCEPTS.md section 6).
+    Mirrors Rust [GeneratedElem::new]. *)
+val make_generated :
+  ?id:string option -> ?opacity:float -> ?transform:transform option ->
+  ?locked:bool -> string -> Yojson.Safe.t -> element
+
 (** {2 Lock state} *)
 
 val is_locked : element -> bool

@@ -258,6 +258,17 @@ class controller ?(model = Model.create ()) () =
         Element.make_reference ~id:(Some ref_id) master_id in
       self#add_element reference
 
+    (** PLACE CONCEPT INSTANCE: append a generated instance of a concept pack to
+        the active layer via [add_element] (which auto-selects it), one undo step
+        (CONCEPTS.md section 6). [concept_id] names the registry concept;
+        [params] are its parameter values (the initiator supplies the concept's
+        declared defaults); [elem_id] is the minted instance id (value-in-op). *)
+    method place_concept_instance
+        (concept_id : string) (params : Yojson.Safe.t) (elem_id : string) =
+      let generated =
+        Element.make_generated ~id:(Some elem_id) concept_id params in
+      self#add_element generated
+
     (** Detach (break the link / expand): replace the reference instance at
         [path] with an INDEPENDENT copy of its resolved target (SYMBOLS.md
         section 7, Fork S6 — the inverse of Make Symbol). The target id is

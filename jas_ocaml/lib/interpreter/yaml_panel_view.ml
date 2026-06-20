@@ -986,6 +986,14 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                  | Some store ->
                    Symbols_panel.place_instance store m; wrote_state := true
                  | None -> ())
+              | "place_concept_instance" ->
+                (* concepts_panel_select is the generic set_panel_state; only the
+                   place arm is native (mints + builds a Generated). *)
+                (match !_current_store with
+                 | Some store ->
+                   Concepts_panel.place_concept_instance store m;
+                   wrote_state := true
+                 | None -> ())
               | "delete_symbol_action" ->
                 (match !_current_store with
                  | Some store ->
@@ -4743,9 +4751,11 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       let icons_obj = Workspace_loader.icons ws in
       let swatch_libs = Workspace_loader.swatch_libraries ws in
       let brush_libs = Workspace_loader.brush_libraries ws in
+      let concepts = Workspace_loader.concepts_list ws in
       let data_obj = `Assoc [
         ("swatch_libraries", swatch_libs);
         ("brush_libraries", brush_libs);
+        ("concepts", concepts);
       ] in
       let active_document_view =
         Active_document_view.build (get_model ())

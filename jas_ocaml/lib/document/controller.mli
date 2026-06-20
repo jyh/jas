@@ -16,6 +16,7 @@ class controller : ?model:Model.model -> unit -> object
   method make_symbol :
     Document.element_path -> string -> string -> unit
   method place_instance : string -> string -> unit
+  method place_concept_instance : string -> Yojson.Safe.t -> string -> unit
   method detach : Document.element_path -> unit
   method set_instance_transform :
     Document.element_path -> Element.transform -> unit

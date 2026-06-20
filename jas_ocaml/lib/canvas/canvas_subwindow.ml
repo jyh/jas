@@ -1257,10 +1257,11 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
         (Live.recorded_evaluate rec_ Live.default_precision resolver visiting,
          rec_.rec_fill, rec_.rec_stroke, rec_.rec_opacity, rec_.rec_transform)
       | Generated gen ->
-        (* A generated element renders its concept's geometry; the production
-           concept-resolver wiring is deferred (CONCEPTS.md 3b), so it currently
-           renders empty under the null concept resolver. *)
-        (Live.generated_evaluate gen Live.default_precision Live.null_concept_resolver,
+        (* A generated element renders its concept's evaluated geometry,
+           resolving the concept's generator from the workspace registry
+           (CONCEPTS.md 3b). *)
+        (Live.generated_evaluate gen Live.default_precision
+           Concepts_panel.concept_resolver,
          gen.gen_fill, gen.gen_stroke, gen.gen_opacity, gen.gen_transform)
     in
     Cairo.Group.push cr;

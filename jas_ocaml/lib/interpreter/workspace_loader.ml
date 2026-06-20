@@ -140,6 +140,24 @@ let swatch_libraries (ws : workspace) : Yojson.Safe.t =
   | Some libs -> libs
   | None -> `Assoc []
 
+(** The concept-pack registry as a sorted list of [{id, name, description}]
+    objects (sorted by id), for the Concepts panel's [data.concepts] foreach.
+    Mirrors the Flask/Rust/Swift exposure (CONCEPTS.md section 6). *)
+let concepts_list (ws : workspace) : Yojson.Safe.t =
+  match json_member "concepts" ws.data with
+  | Some (`Assoc pairs) ->
+    let field spec k =
+      match json_member k spec with Some (`String s) -> s | _ -> "" in
+    let sorted = List.sort (fun (a, _) (b, _) -> compare a b) pairs in
+    `List (List.map (fun (id, spec) ->
+      let name = match field spec "name" with "" -> id | n -> n in
+      `Assoc [
+        ("id", `String id);
+        ("name", `String name);
+        ("description", `String (field spec "description"));
+      ]) sorted)
+  | _ -> `List []
+
 (** Get the brush_libraries data from the workspace.
     Returns a JSON object mapping library slugs to library
     definitions (name / description / brushes). See BRUSHES.md
