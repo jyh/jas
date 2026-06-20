@@ -1243,6 +1243,20 @@ fn num_field(op: &serde_json::Value, key: &str) -> f64 {
     op.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
 }
 
+/// Production-routing convenience (OP_LOG.md §9), NOT a dispatch arm: journal a
+/// native no-orphan Delete/Cut gesture (the `menu_bar.rs` / `keyboard.rs` fast
+/// paths) as a real `delete_selection` op, so the gesture is captured for
+/// replay/versioning instead of mutating the document directly. Opens exactly
+/// ONE named transaction (one undo step) and routes through `op_apply` — the
+/// same path the YAML orphan-confirm action and the sibling apps use. Pass the
+/// gesture verb as `txn_name` (e.g. `delete_selection` / `cut_selection`).
+pub fn journal_delete_selection(model: &mut Model, txn_name: &str) {
+    model.with_txn(|m| {
+        m.name_txn(txn_name);
+        op_apply(m, &serde_json::json!({ "op": "delete_selection" }));
+    });
+}
+
 /// The single op dispatcher (OP_LOG.md §4). Applies one primitive op to the
 /// model and records it into the open transaction (the `checkpoint_equivalence`
 /// gate, §5-6). History-navigation ops (`snapshot`/`undo`/`redo`) manage the

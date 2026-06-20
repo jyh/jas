@@ -10040,6 +10040,52 @@ mod tests {
         assert_artboard_checkpoint_equivalence(&st, pre_doc);
     }
 
+    /// OP_LOG.md §9 — the NATIVE no-orphan Delete/Cut gesture (`menu_bar.rs` +
+    /// `keyboard.rs` fast path) routes through `op_apply` via the shared
+    /// `journal_delete_selection` helper, so it journals a real
+    /// `delete_selection` op (parity with the YAML orphan-confirm path and the
+    /// sibling apps) while staying exactly one undo step. Drives the REAL helper
+    /// the four production sites call.
+    #[test]
+    fn production_route_native_delete_selection_journals_through_op_apply() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+            ("C".into(), Visibility::Preview, false),
+        ]);
+        {
+            use crate::document::document::ElementSelection;
+            let mut d = st.tabs[st.active_tab].model.document().clone();
+            d.selection = vec![ElementSelection::all(vec![1])];
+            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+        }
+        let pre_doc = st.tabs[st.active_tab].model.document().clone();
+        let before = st.tabs[st.active_tab].model.journal().len();
+
+        crate::document::op_apply::journal_delete_selection(
+            &mut st.tabs[st.active_tab].model, "delete_selection");
+
+        let model = &st.tabs[st.active_tab].model;
+        assert_eq!(model.journal().len(), before + 1,
+            "the native delete commits exactly one transaction");
+        let txn = model.journal().last().expect("a committed transaction");
+        assert_eq!(txn.ops.len(), 1, "exactly one delete_selection op journaled");
+        assert_eq!(txn.ops[0].op, "delete_selection", "the journaled verb");
+        assert_eq!(txn.name.as_deref(), Some("delete_selection"),
+            "the txn is named with the gesture verb");
+        // The live doc dropped layer B.
+        let layers = &model.document().layers;
+        assert_eq!(layers.len(), 2);
+        assert_eq!(tab_layer(&st, 0).name(), "A");
+        assert_eq!(tab_layer(&st, 1).name(), "C");
+        // checkpoint_equivalence: replay == snapshot path, byte-identical.
+        assert_artboard_checkpoint_equivalence(&st, pre_doc);
+        // One undo step restores the deletion (one gesture = one undo step).
+        st.tabs[st.active_tab].model.undo();
+        assert_eq!(st.tabs[st.active_tab].model.document().layers.len(), 3,
+            "a single undo restores all three layers");
+    }
+
     // OP_LOG.md §9 Phase P5 — production-route proofs for the THREE group/layer
     // wrapping verbs. These drive the REAL renderer.rs production handler
     // (`dispatch_action` → the composite action) against a real AppState/Model and
