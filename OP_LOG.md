@@ -2,10 +2,11 @@
 
 **Status:** design locked (2026-06-17); Increments 1, 2, 3a, 3b-A, 3b-B, the full
 33-verb unification, the enforced `set_document` chokepoint, per-frame drag
-coalescing, 3c-1 (id-primary flip), and 3d (`OpWorld` trait + runtime layout
-dispatcher) all **built + merged to main** at cross-language parity. Deferred:
-sibling-app panel/menu production routing (in progress), 3c-2/3/4 (collaboration),
-3d-1's trait in the siblings — see §9. · **Implements:** `VISION.md` §10
+coalescing, 3c-1 (id-primary flip), 3d (`OpWorld` trait + runtime layout
+dispatcher), and **sibling-app panel/menu production routing** (Swift/OCaml/Python
+gestures now journal through `op_apply`, native Delete/Cut journals uniformly in
+all 4 apps) all **built + merged to main** at cross-language parity. Deferred:
+3c-2/3/4 (collaboration), 3d-1's trait in the siblings — see §9. · **Implements:** `VISION.md` §10
 critical-path item 2 ("the operation/transaction log formalized as the atomic,
 reversible, summarizable unit") · **Relationship to other docs:** it is the `VISION.md`
 §5 item 5 "operation log is the spine" foundation; it generalizes today's boolean+simplify undo
@@ -341,16 +342,22 @@ journaling verbs, the rest correctly non-journaling) across all 4 native apps; t
 all 4 apps; **per-frame drag coalescing** (`commit_txn` merges adjacent same-gesture
 move txns → one journal entry + one undo step) in all 4 apps; the **3c-1 id-primary
 op-addressing flip** (move/copy/select by id) in all 4 apps; and **3d** (the shared
-`OpWorld` trait + a runtime `layout_apply` dispatcher) in all 4 apps.
+`OpWorld` trait + a runtime `layout_apply` dispatcher) in all 4 apps; and
+**sibling-app panel/menu production routing** — every panel/menu production handler
+in Swift/OCaml/Python now routes through `op_apply` (was: only Rust did; the arms
+existed in the siblings but their handlers mutated directly, so a real gesture
+journaled nothing). Each sibling added per-verb-group production-route tests
+(checkpoint_equivalence + one-step-undo) and kept the shared operations fixtures
+byte-green; the `op_apply` dispatch arms are byte-unchanged (value-in-op element
+carriage was added as additive non-arm fast paths). Two byproducts: Python's
+`doc.wrap_in_group` (the `new_group` action) was a silent no-op for lack of a
+registered handler and now works + journals (a parity *fix*); and the **native
+no-orphan Delete/Cut** gesture, which only Rust's orphan-confirm path used to
+journal, now journals a `delete_selection` op uniformly in **all 4 apps** (Rust
+gained a `journal_delete_selection` helper over its 4 menu/keyboard sites).
+Merged on `oplog-sibling-prod-routing`.
 
 **Still genuinely deferred (demand-driven):**
-- **Sibling-app panel/menu production routing.** Rust routes *all* its panel/menu
-  production handlers through `op_apply` (so every gesture journals); the op_apply
-  *arms* exist in Swift/OCaml/Python (byte-gated by the shared operations fixtures),
-  but their panel/menu production handlers still mutate the document directly, so a
-  real panel/menu gesture in those apps journals nothing (undo still works via the
-  snapshot). Behavior-neutral for undo; matters for capture/versioning/AI-collab in
-  those apps. (In progress on `oplog-sibling-prod-routing`.)
 - **3c-2/3/4** — op-inversion, document identity (`doc_id`), and the recorded-merge
   collaboration engine (merge model = recorded-merge-ready). Speculative until real
   multi-user demand; this section's §11/§12 cautions still apply.
