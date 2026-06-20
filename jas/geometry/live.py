@@ -82,6 +82,7 @@ def element_to_polygon_set_with(
         Line,
         Path,
         Polygon,
+        GeneratedElem,
         Polyline,
         Rect,
         RecordedElem,
@@ -121,6 +122,10 @@ def element_to_polygon_set_with(
     # RecordedElem (RECORDED_ELEMENTS.md): replays its recipe against the
     # resolved inputs. A by-id LiveElement, like a reference.
     if isinstance(elem, RecordedElem):
+        return elem.evaluate_with(precision, resolver, visiting)
+    # GeneratedElem (CONCEPTS.md §6): evaluates its concept's generator,
+    # resolved via the resolver's concept registry. Self-contained (no inputs).
+    if isinstance(elem, GeneratedElem):
         return elem.evaluate_with(precision, resolver, visiting)
     if isinstance(elem, CompoundShape):
         return elem.evaluate_with(precision, resolver, visiting)

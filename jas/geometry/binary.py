@@ -27,6 +27,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
+    GeneratedElem,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -417,6 +418,12 @@ def _pack_element(elem: Element) -> list:
              for o in elem.ops],
             sort_keys=True, separators=(",", ":"))
         return [_TAG_LIVE, *common, "recorded", inputs_json, ops_json]
+    elif isinstance(elem, GeneratedElem):
+        # [tag, common(1..6), kind(7), concept(8), params-json(9)], mirroring
+        # the Rust reference (concept id + params as a canonical JSON string).
+        params_json = json.dumps(elem.params, sort_keys=True,
+                                 separators=(",", ":"))
+        return [_TAG_LIVE, *common, "generated", elem.concept_id, params_json]
     raise ValueError(f"Unknown element type: {type(elem)}")
 
 
@@ -660,6 +667,12 @@ def _unpack_element(arr: list) -> Element:
                             targets=list(o.get("targets", [])))
                 for o in json.loads(arr[9]))
             return RecordedElem(ops=ops, inputs=inputs, **common)
+        elif kind == "generated":
+            # Inverse of the packer: slot 8 the concept id, slot 9 a JSON
+            # string of the params dict (CONCEPTS.md §6).
+            concept_id = arr[8]
+            params = json.loads(arr[9]) if arr[9] else {}
+            return GeneratedElem(concept_id=concept_id, params=params, **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element tag: {tag}")
 

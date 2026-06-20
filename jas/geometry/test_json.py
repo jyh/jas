@@ -22,6 +22,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
+    GeneratedElem,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -523,6 +524,15 @@ def _element_json(elem: Element) -> str:
                 f'"params":{_canonical_value(op.params)},'
                 f'"targets":{targets}}}')
         o.raw("ops", _json_array(ops))
+    elif isinstance(elem, GeneratedElem):
+        # CONCEPTS.md §6: type=live + kind=generated, plus the concept id and
+        # the canonicalized params, so the generated element serializes
+        # byte-identically across apps.
+        o.str("type", "live")
+        o.str("kind", "generated")
+        _common_fields(o, elem)
+        o.str("concept", elem.concept_id)
+        o.raw("params", _canonical_value(elem.params))
     return o.build()
 
 
@@ -1044,6 +1054,13 @@ def _parse_element(d: dict) -> Element:
                 for o in d.get("ops", []))
             inputs = tuple(d.get("inputs", []))
             return RecordedElem(ops=ops, inputs=inputs, **common)
+        elif kind == "generated":
+            # GeneratedElem is a first-class element with its own id / name,
+            # so it accepts the full common kwargs (CONCEPTS.md §6).
+            return GeneratedElem(
+                concept_id=d.get("concept", ""),
+                params=dict(d.get("params", {})),
+                **common)
         raise ValueError(f"Unknown live kind: {kind}")
     raise ValueError(f"Unknown element type: {typ}")
 

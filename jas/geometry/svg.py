@@ -5,6 +5,7 @@ The conversion factor is 96/72 (CSS px per pt at 96 DPI).
 """
 
 import dataclasses
+import json
 import re
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
@@ -17,6 +18,7 @@ from geometry.element import (
     CompoundShape, CurveTo, Element,
     Ellipse, Fill, Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, RecordedElem, ReferenceElem,
+    GeneratedElem,
     SmoothCurveTo,
     SmoothQuadTo, Stroke, Text, TextPath, Transform,
 )
@@ -476,6 +478,19 @@ def _element_svg(elem: Element, indent: str) -> str:
             joined = ",".join(inputs)
             return (f'{indent}<g data-jas-live="recorded"'
                     f' data-jas-inputs="{escape(joined)}"{attrs}></g>')
+
+        case GeneratedElem(concept_id=concept_id, params=params,
+                           opacity=opacity, transform=transform, id=eid):
+            # A generated element exports as a data-jas-live group carrying the
+            # concept id + params. Full SVG round-trip is deferred (CONCEPTS.md);
+            # no current fixture exercises it (data-jas-params is not compared).
+            attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                     f'{_id_attr(eid)}')
+            params_str = json.dumps(params, sort_keys=True,
+                                    separators=(",", ":"))
+            return (f'{indent}<g data-jas-live="generated"'
+                    f' data-jas-concept="{escape(concept_id)}"'
+                    f' data-jas-params="{escape(params_str)}"{attrs}></g>')
 
     return ""
 

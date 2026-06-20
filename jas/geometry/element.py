@@ -1305,6 +1305,15 @@ class Layer(Group):
 ElementRef = str
 
 
+@dataclass(frozen=True)
+class ConceptDef:
+    """A resolved concept definition the geometry layer needs to evaluate a
+    ``GeneratedElem``: the generator expression and whether its point list
+    closes into a polygon (CONCEPTS.md). Mirrors the Rust ``ConceptDef``."""
+    generator: str
+    closed: bool
+
+
 class ElementResolver:
     """Resolves a stable element id to the element it currently names.
 
@@ -1312,11 +1321,18 @@ class ElementResolver:
     on Model / Document. Phase 1 backs this with a rebuild-on-demand
     resolver; the persistent-incremental index is Phase 4
     (REFERENCE_GRAPH.md §2.4). Mirrors the Rust ``ElementResolver``
-    trait — a single ``resolve`` method.
+    trait — a ``resolve`` method, plus a defaulted ``resolve_concept``.
     """
 
     def resolve(self, ref: "ElementRef") -> "Element | None":
         raise NotImplementedError
+
+    def resolve_concept(self, concept_id: str) -> "ConceptDef | None":
+        """Resolve a concept pack by id from the workspace registry
+        (CONCEPTS.md). Defaulted to ``None`` so resolver-unaware paths (and
+        tests with no concept registry) treat a ``GeneratedElem`` as empty,
+        never an error. Mirrors the Rust ``ElementResolver::resolve_concept``."""
+        return None
 
 
 class NullResolver(ElementResolver):
@@ -1648,6 +1664,68 @@ class RecordedElem(LiveElement):
         """Resolver-free bounds are degenerate (geometry is replayed from
         inputs); resolver-aware bounds land with the render wiring, like a
         reference. Mirrors the Rust placeholder."""
+        return (0.0, 0.0, 0.0, 0.0)
+
+
+@dataclass(frozen=True)
+class GeneratedElem(LiveElement):
+    """A generated (parametric concept-instance) live element (CONCEPTS.md §6):
+    stores a concept pack id + parameter values; its geometry is produced by
+    evaluating the concept's generator expression with the parameters bound
+    under ``param``. Unlike Recorded / Reference it has no by-id inputs — a
+    generator is self-contained — so it needs only the concept registry, not
+    element resolution. Mirrors the Rust ``GeneratedElem``.
+    """
+    # The concept pack this instance is generated from.
+    concept_id: str = ""
+    # Parameter values, bound under ``param`` when the generator runs.
+    params: dict = dataclasses.field(default_factory=dict)
+    # Own paint, like a recorded element.
+    fill: Fill | None = None
+    stroke: Stroke | None = None
+    # Common props, mirroring RecordedElem.
+    id: str | None = None
+    name: str | None = None
+    opacity: float = 1.0
+    transform: Transform | None = None
+    locked: bool = False
+    visibility: Visibility = Visibility.PREVIEW
+    blend_mode: BlendMode = BlendMode.NORMAL
+    mask: "Mask | None" = None
+
+    def evaluate_with(self, precision: float, resolver: ElementResolver,
+                      visiting: set):
+        """Resolve the concept via the registry, evaluate its generator with
+        ``params`` bound under ``param``, and turn the resulting list of
+        [x, y] points into a ring. An unknown concept, or a generator that does
+        not produce a point list, yields an empty set — never an error. Pure and
+        deterministic. Mirrors the Rust ``GeneratedElem::evaluate_with``.
+        """
+        cdef = resolver.resolve_concept(self.concept_id)
+        if cdef is None:
+            return []
+        from workspace_interpreter.expr import evaluate as _evaluate
+        from workspace_interpreter.expr_types import ValueType
+        result = _evaluate(cdef.generator, {"param": self.params})
+        if result.type != ValueType.LIST:
+            return []
+        ring = []
+        for item in result.value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                try:
+                    ring.append((float(item[0]), float(item[1])))
+                except (TypeError, ValueError):
+                    continue
+        return [] if len(ring) < 2 else [ring]
+
+    def dependencies(self) -> list[ElementRef]:
+        """A generated element is self-contained — no by-id inputs."""
+        return []
+
+    def bounds(self) -> tuple[float, float, float, float]:
+        """Resolver-free bounds are degenerate (geometry comes from the
+        concept generator); resolver-aware bounds land with the render
+        wiring, like a reference. Mirrors the Rust placeholder."""
         return (0.0, 0.0, 0.0, 0.0)
 
 
