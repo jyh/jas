@@ -1,14 +1,15 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increments 1–2 + 3a built, **3b: the `LiveVariant::Generated` document arm is ported
-to all four apps** — the generator engine + format + cross-language gate (`regular_polygon`,
-`spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod` parity primitives, the concept
-**registry** (concepts bundled into `workspace.json`, loadable in every app), and the Generated
-arm (model + eval + codecs + tests) in **Rust, Swift, OCaml, and Python** — pinned by a shared
-cross-language round-trip golden (`expected/generated_polygon.json`, byte-identical across all
-four through both test_json and binary). Remaining on 3b: sibling render-resolver wiring (Rust
-done; Swift/OCaml/Python pending); a creation action. The fitter, operations, and constraints
-follow (§7). · **Implements:** `VISION.md`
+**Status:** increments 1–2 + 3a + 3b built — the generator engine + format + cross-language gate
+(`regular_polygon`, `spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod` parity
+primitives, the concept **registry**, the **`LiveVariant::Generated` document arm** (model + eval
++ codecs + tests) in all four apps (golden-pinned, byte-identical through test_json and binary),
+and **Concepts-panel Slice 1 functional end-to-end in all four native apps**: open Concepts →
+select a concept → Place → a default-param `Generated` instance is placed and renders (the
+registry-driven panel + `data.concepts` + the native `place_concept_instance` + render-resolver
+wiring, in Rust/Swift/OCaml/Python; Flask exposes the list, no interactive editor). Remaining:
+**Slice 2** (live per-instance param editing — the §6.4 parametric heart); then operations, the
+fitter, constraints (§7). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -183,19 +184,17 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    `string -> (params -> points) option`, since `lib/geometry` can't import the evaluator — the
    caller builds it, geometry stays decoupled). All pinned by the shared golden
    `expected/generated_polygon.json` (byte-identical through test_json and binary).
-   **Remaining:** wire the production render-resolver to the registry (**Rust ✅** —
-   `RenderResolver.resolve_concept` reads the cached `Workspace` registry, so a `Generated`
-   instance evaluates its concept's geometry on the canvas render path; Swift/OCaml/Python
-   pending); and a
-   creation action/UI — decided to be a **Concepts panel** modeled on the Symbols panel: a
-   registry-driven list of concept packs + a Place Instance action that appends a default-param
-   `Generated` element to the active layer (per-instance live param editing is a follow-on slice).
-   **Slice-1 declarative foundation done:** `workspace/panels/concepts.yaml` (the generic panel
-   spec), the `concepts_panel_select` (generic `set_panel_state`) + `place_concept_instance`
-   (native `log`-stub, like `place_instance`) actions, and the Window-menu entry. Remaining for
-   Slice 1: expose `data.concepts` (a registry-derived list) per app, implement
-   `place_concept_instance` natively (build + append the `Generated` element, id value-in-op),
-   and the sibling render wiring. (SVG `data-jas-params` is not byte-compared by any fixture; its
+   The render-resolver wiring is done in all four apps (each production resolver reads the cached
+   `Workspace` concept registry, so a `Generated` instance draws its geometry on the canvas). The
+   creation action is a **Concepts panel** modeled on the Symbols panel: a registry-driven list +
+   a Place Instance action that appends a default-param `Generated` element. **Slice 1 is complete
+   end-to-end in all four native apps** — `workspace/panels/concepts.yaml`, the `concepts_panel_select`
+   (generic) + `place_concept_instance` (native, id value-in-op, one undo) actions, the Window-menu
+   entry, `data.concepts` exposed per app, and the native place effect + render wiring — open
+   Concepts → select → Place → it renders. (Flask exposes the list but has no interactive editor.)
+   **Remaining:** Slice 2 — live per-instance param editing (the §6.4 parametric heart); and an
+   `op_apply` replay arm for `place_concept_instance` (parity, no fixture exercises it yet).
+   (SVG `data-jas-params` is not byte-compared by any fixture; its
    serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.

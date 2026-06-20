@@ -1369,6 +1369,22 @@ let make_recorded ?(id = None) ?(opacity = 1.0) ?(transform = None)
     rec_mask = None;
   })
 
+let make_generated ?(id = None) ?(opacity = 1.0) ?(transform = None)
+    ?(locked = false) concept_id params =
+  Live (Generated {
+    gen_concept_id = concept_id;
+    gen_params = params;
+    gen_id = id;
+    gen_fill = None;
+    gen_stroke = None;
+    gen_opacity = opacity;
+    gen_transform = transform;
+    gen_locked = locked;
+    gen_visibility = Preview;
+    gen_blend_mode = Normal;
+    gen_mask = None;
+  })
+
 let is_locked = function
   | Line { locked; _ } | Rect { locked; _ } | Circle { locked; _ }
   | Ellipse { locked; _ } | Polyline { locked; _ } | Polygon { locked; _ }

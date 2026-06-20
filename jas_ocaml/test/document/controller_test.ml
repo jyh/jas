@@ -1182,4 +1182,39 @@ let () =
             | Jas.Element.Layer l -> Array.length l.children | _ -> 0 in
           assert (after = before + 1));
       ]);
+
+    ("Concepts", [
+      Alcotest.test_case "place_concept_instance appends a Generated with id + params"
+        `Quick (fun () ->
+        let layer = make_layer ~name:"L" [||] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        let params = `Assoc [ ("sides", `Int 5); ("radius", `Int 30) ] in
+        ctrl#place_concept_instance "regular_polygon" params "gp1";
+        let children = Jas.Document.children_of ctrl#document.Jas.Document.layers.(0) in
+        assert (Array.length children = 1);
+        (match children.(0) with
+         | Jas.Element.Live (Jas.Element.Generated g) ->
+           assert (g.Jas.Element.gen_concept_id = "regular_polygon");
+           assert (g.Jas.Element.gen_id = Some "gp1");
+           assert (g.Jas.Element.gen_params = params)
+         | _ -> assert false));
+
+      Alcotest.test_case "default_params reads the concept's registry defaults"
+        `Quick (fun () ->
+        match Jas.Concepts_panel.default_params "gear" with
+        | `Assoc pairs -> assert (List.mem_assoc "teeth" pairs)
+        | _ -> assert false);
+
+      Alcotest.test_case "concept_resolver evaluates a generator; unknown -> None"
+        `Quick (fun () ->
+        (match Jas.Concepts_panel.concept_resolver "regular_polygon" with
+         | None -> assert false
+         | Some f ->
+           let pts = f (`Assoc [ ("sides", `Int 4); ("radius", `Int 10) ]) in
+           assert (List.length pts = 4);
+           let (x0, y0) = List.hd pts in
+           assert (Float.abs (x0 -. 10.0) < 1e-9 && Float.abs y0 < 1e-9));
+        assert (Jas.Concepts_panel.concept_resolver "no_such_concept" = None));
+    ]);
   ]
