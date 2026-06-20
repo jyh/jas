@@ -496,6 +496,21 @@ public struct IdIndexResolver: ElementResolver {
     private let index: IdIndex
     public init(index: IdIndex) { self.index = index }
     public func resolve(_ id: ElementRef) -> Element? { index[id.id] }
+    public func resolveConcept(_ conceptId: String) -> ConceptDef? {
+        conceptDefFromRegistry(conceptId)
+    }
+}
+
+/// Resolve a concept pack from the bundled workspace registry (CONCEPTS.md 3b),
+/// so a placed Generated instance evaluates its concept's geometry on the render
+/// path. Mirrors Rust `RenderResolver.resolve_concept` (reads the cached
+/// workspace). Concepts are static workspace data, so this is cheap.
+func conceptDefFromRegistry(_ conceptId: String) -> ConceptDef? {
+    guard let ws = WorkspaceData.load(),
+          let c = ws.concept(conceptId),
+          let generator = c["generator"] as? String else { return nil }
+    let closed = (c["closed"] as? Bool) ?? true
+    return ConceptDef(generator: generator, closed: closed)
 }
 
 // MARK: - RebuildResolver (REFERENCE_GRAPH.md §2.4 — rebuild-on-demand)
@@ -517,6 +532,9 @@ public struct RebuildResolver: ElementResolver {
     }
 
     public func resolve(_ id: ElementRef) -> Element? { inner.resolve(id) }
+    public func resolveConcept(_ conceptId: String) -> ConceptDef? {
+        inner.resolveConcept(conceptId)
+    }
 }
 
 // MARK: - Private helpers

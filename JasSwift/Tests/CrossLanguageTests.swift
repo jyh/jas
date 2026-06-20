@@ -1869,3 +1869,23 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     var v2 = VisitSet()
     #expect(ge.evaluateWith(precision: 1.0, resolver: NullResolver(), visiting: &v2).isEmpty)
 }
+
+// MARK: - Concept render wiring (CONCEPTS.md 3b)
+
+/// The production render resolver resolves concept packs from the bundled
+/// workspace registry, so a placed Generated instance evaluates its concept's
+/// geometry on the canvas render path. Mirrors the Rust render-wiring test.
+@Test func renderResolverResolvesConcepts() {
+    let resolver = RebuildResolver(document: Document())
+    let def = resolver.resolveConcept("regular_polygon")
+    #expect(def != nil)
+    #expect((def?.generator.contains("cos(")) == true)
+    #expect(resolver.resolveConcept("no_such_concept") == nil)
+
+    let ge = GeneratedElem(conceptId: "regular_polygon",
+                           params: ["sides": 4, "radius": 10])
+    var visiting = VisitSet()
+    let ps = ge.evaluateWith(precision: 1.0, resolver: resolver, visiting: &visiting)
+    #expect(ps.count == 1)
+    #expect(ps.first?.count == 4)
+}
