@@ -2539,26 +2539,12 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         key = event.key()
         meta = (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) != Qt.NoModifier
         if key in (Qt.Key_Delete, Qt.Key_Backspace):
-            # Delete panel-selected elements (prevent last layer)
-            m = get_model()
-            if m is not None and panel_selection:
-                doc = m.document
-                paths = list(panel_selection)
-                # Prevent deleting the last layer
-                top_deletes = sum(1 for p in paths if len(p) == 1)
-                if top_deletes < len(doc.layers):
-                    # Reference-aware confirm (mirrors the main delete): warn
-                    # before orphaning live instances; Cancel aborts (no dialog
-                    # when nothing would orphan).
-                    if not _confirm_panel_delete_if_orphans(m, paths, widget):
-                        return
-                    paths.sort(reverse=True)
-                    new_doc = doc
-                    for p in paths:
-                        new_doc = new_doc.delete_element(p)
-                    m.edit_document(new_doc)
-                    panel_selection.clear()
-                    _rebuild()
+            # Delete panel-selected elements. Route through the already-journaled
+            # _do_delete() helper (same path as the context-menu Delete) so the
+            # gesture records a delete_at op per element through op_apply and
+            # names a single undo step, matching Rust/Swift. _do_delete applies
+            # the same last-layer guard and reference-aware orphan confirm.
+            _do_delete()
         elif key == Qt.Key_A and meta:
             # Select all visible rows in panel selection
             panel_selection.clear()
@@ -2969,6 +2955,12 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
         _add_row(layout, *r)
 
     layout.addStretch()
+    # Test accessors (no production effect): expose the closure-local panel
+    # selection set and the keyboard handler so production-route tests can
+    # drive the real in-panel keyboard Delete path (_on_key -> _do_delete ->
+    # op_apply) without re-implementing it.
+    widget._jas_panel_selection = panel_selection
+    widget._jas_on_key = _on_key
     return widget
 
 

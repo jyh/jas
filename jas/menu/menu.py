@@ -4,6 +4,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
 
 from document.model import Model
+from document.op_apply import op_apply
 from tools.tool import PASTE_OFFSET
 
 
@@ -708,6 +709,26 @@ def _confirm_delete_if_orphans(model: Model, parent=None) -> bool:
     return reply == QMessageBox.Ok
 
 
+def _route_delete_selection(model: Model, txn_name: str) -> None:
+    """OP_LOG.md §9 Phase P4 — route a native menu/keyboard Delete (or the
+    delete-half of Cut) through the SHARED op_apply dispatcher
+    (apply_delete_selection, the SAME Document.delete_selection body) so the
+    gesture JOURNALS a real delete_selection op in ONE named undo step (targets
+    carry the pre-deletion selection ids). The synchronous orphan QMessageBox IS
+    Python's confirm path (handled by the caller); only the mutation routes here.
+    Owns its own transaction (no surrounding snapshot effect), but only if none
+    is already open (the same ownership rule edit_document used), so a reentrant
+    caller's bracket is preserved. Mirrors the Swift JasCommands
+    delete_orphan_confirm_ok / cut_orphan_confirm_ok."""
+    owns = not model.in_txn
+    if owns:
+        model.begin_txn()
+        model.name_txn(txn_name)
+    op_apply(model, {"op": "delete_selection"})
+    if owns:
+        model.commit_txn()
+
+
 def _delete_selection(model: Model, window=None) -> None:
     """Delete all selected elements (reference-aware).
 
@@ -719,8 +740,7 @@ def _delete_selection(model: Model, window=None) -> None:
         return
     if not _confirm_delete_if_orphans(model, window):
         return
-    # Undoable edit (one self-bracketed undo step).
-    model.edit_document(doc.delete_selection())
+    _route_delete_selection(model, "delete_selection")
 
 
 def _select_all(model: Model) -> None:
@@ -996,9 +1016,10 @@ def _cut_selection(model: Model, parent=None) -> None:
         if reply != QMessageBox.Ok:
             return
     _copy_selection(model)
-    # Undoable edit (one self-bracketed undo step). _copy_selection only writes
-    # to the system clipboard, so it carries no document mutation to bracket.
-    model.edit_document(model.document.delete_selection())
+    # The clipboard copy is a non-document side effect (no op). The delete-half
+    # routes through op_apply, journaling a real delete_selection op in one named
+    # undo step. Mirrors the Swift cut_orphan_confirm_ok.
+    _route_delete_selection(model, "cut_selection")
 
 
 def _translate_element(elem, dx: float, dy: float):

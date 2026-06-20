@@ -6,50 +6,22 @@ Used by:
 - workspace/dock_panel.py — _dispatch_yaml_action (panel buttons and
   YAML-driven menus).
 
-Each handler closes over the jas Model so it can replace
-``model.document`` via ``dataclasses.replace`` (immutable frozen
-dataclass). Semantics match the Rust / Swift / OCaml artboard doc
-helpers and the ARTBOARDS.md spec.
+Each handler closes over the jas Model. OP_LOG.md §9: every handler resolves its
+YAML exprs to RESOLVED literals (replay has no eval context), builds the per-verb
+op JSON, and routes through the SHARED ``op_apply`` dispatcher — the SAME
+Artboard-helper / print-config mutation body, now JOURNALING a real op so each
+gesture replays byte-identically (checkpoint_equivalence). VALUE-IN-OP:
+create/duplicate mint the id ONCE here (production entropy) and journal it as a
+LITERAL, so replay reads it VERBATIM and never re-mints. Semantics match the Rust
+/ Swift / OCaml artboard doc helpers and the ARTBOARDS.md / PRINT.md specs.
 """
 
 from __future__ import annotations
 
-import dataclasses
-
 from workspace_interpreter.expr import evaluate
 
-from document.artboard import (
-    Artboard, generate_artboard_id, next_artboard_name,
-)
-
-
-def _apply_artboard_override(ab: Artboard, field: str, value) -> Artboard:
-    """Return a new Artboard with one field replaced. Matches
-    apply_artboard_override() across Rust / Swift / OCaml — unknown
-    fields silently no-op."""
-    if field == "name" and isinstance(value, str):
-        return dataclasses.replace(ab, name=value)
-    if field == "x" and isinstance(value, (int, float)):
-        return dataclasses.replace(ab, x=float(value))
-    if field == "y" and isinstance(value, (int, float)):
-        return dataclasses.replace(ab, y=float(value))
-    if field == "width" and isinstance(value, (int, float)):
-        return dataclasses.replace(ab, width=float(value))
-    if field == "height" and isinstance(value, (int, float)):
-        return dataclasses.replace(ab, height=float(value))
-    if field == "fill" and isinstance(value, str):
-        return dataclasses.replace(ab, fill=value)
-    if field == "show_center_mark" and isinstance(value, bool):
-        return dataclasses.replace(ab, show_center_mark=value)
-    if field == "show_cross_hairs" and isinstance(value, bool):
-        return dataclasses.replace(ab, show_cross_hairs=value)
-    if field == "show_video_safe_areas" and isinstance(value, bool):
-        return dataclasses.replace(ab, show_video_safe_areas=value)
-    if field == "video_ruler_pixel_aspect_ratio" and isinstance(value, (int, float)):
-        return dataclasses.replace(
-            ab, video_ruler_pixel_aspect_ratio=float(value)
-        )
-    return ab
+from document.artboard import generate_artboard_id, next_artboard_name
+from document.op_apply import op_apply
 
 
 def _mint_artboard_id(existing_ids: set) -> str:
@@ -60,42 +32,6 @@ def _mint_artboard_id(existing_ids: set) -> str:
         if c not in existing_ids:
             return c
     return ""
-
-
-def _move_up(artboards: tuple, selected_ids: list) -> tuple[tuple, bool]:
-    """Swap-with-neighbor-skipping-selected for Move Up.
-    Returns (new_tuple, changed)."""
-    selected = set(selected_ids)
-    out = list(artboards)
-    changed = False
-    for i in range(len(out)):
-        if out[i].id not in selected:
-            continue
-        if i == 0:
-            continue
-        if out[i - 1].id in selected:
-            continue
-        out[i - 1], out[i] = out[i], out[i - 1]
-        changed = True
-    return tuple(out), changed
-
-
-def _move_down(artboards: tuple, selected_ids: list) -> tuple[tuple, bool]:
-    """Symmetric — iterate bottom-up."""
-    selected = set(selected_ids)
-    out = list(artboards)
-    changed = False
-    n = len(out)
-    for i in range(n - 1, -1, -1):
-        if out[i].id not in selected:
-            continue
-        if i + 1 >= n:
-            continue
-        if out[i + 1].id in selected:
-            continue
-        out[i], out[i + 1] = out[i + 1], out[i]
-        changed = True
-    return tuple(out), changed
 
 
 def _extract_id_list(val) -> list:
@@ -111,42 +47,35 @@ def build_artboard_handlers(model) -> dict:
     Rust / Swift / OCaml semantics."""
 
     def doc_create_artboard(spec, call_ctx, _store):
-        overrides: dict = {}
-        if isinstance(spec, dict):
-            for k, v in spec.items():
-                if isinstance(v, str):
-                    r = evaluate(v, call_ctx)
-                    overrides[k] = r.value
-                else:
-                    overrides[k] = v
+        # OP_LOG.md §9 VALUE-IN-OP — mint the id ONCE here (production entropy)
+        # and journal it as a LITERAL so replay reads it VERBATIM and never
+        # re-mints. The default name (derived from the live doc) plus each
+        # RESOLVED override are journaled as a flat `fields` literal object;
+        # routed through the SHARED op_apply dispatcher (apply_create_artboard).
         existing = {a.id for a in model.document.artboards}
         new_id = _mint_artboard_id(existing)
         if not new_id:
             return None
-        default_name = next_artboard_name(model.document.artboards)
-        ab = Artboard.default_with_id(new_id)
-        ab = dataclasses.replace(ab, name=default_name)
-        for field, value in overrides.items():
-            ab = _apply_artboard_override(ab, field, value)
-        new_artboards = model.document.artboards + (ab,)
-        model.document = dataclasses.replace(
-            model.document, artboards=new_artboards
-        )
+        fields: dict = {"name": next_artboard_name(model.document.artboards)}
+        if isinstance(spec, dict):
+            for k, v in spec.items():
+                if isinstance(v, str):
+                    r = evaluate(v, call_ctx)
+                    fields[k] = r.value
+                else:
+                    fields[k] = v
+        op_apply(model, {"op": "create_artboard", "id": new_id, "fields": fields})
         return new_id
 
     def doc_delete_artboard_by_id(value, call_ctx, _store):
+        # OP_LOG.md §9 — resolve the id literal, route through the SHARED op_apply
+        # dispatcher (apply_delete_artboard_by_id). A missing id is a no-op that
+        # journals nothing.
         id_expr = value if isinstance(value, str) else ""
         r = evaluate(id_expr, call_ctx)
         if r.type.name != "STRING":
             return None
-        target = r.value
-        new_artboards = tuple(
-            a for a in model.document.artboards if a.id != target
-        )
-        if len(new_artboards) != len(model.document.artboards):
-            model.document = dataclasses.replace(
-                model.document, artboards=new_artboards
-            )
+        op_apply(model, {"op": "delete_artboard_by_id", "id": r.value})
         return None
 
     def doc_duplicate_artboard(spec, call_ctx, _store):
@@ -174,27 +103,22 @@ def build_artboard_handlers(model) -> dict:
             r = evaluate(oy_expr, call_ctx)
             if r.type.name == "NUMBER":
                 oy = float(r.value)
-        source = next(
-            (a for a in model.document.artboards if a.id == target), None
-        )
-        if source is None:
+        # Resolve the source up front: a missing source short-circuits BEFORE we
+        # mint, so a no-op duplicate journals nothing (matching the op_apply arm).
+        # OP_LOG.md §9 VALUE-IN-OP: mint new_id + derive name HERE (the ONLY mint
+        # / derive) and journal both as literals; route through the SHARED
+        # op_apply dispatcher (apply_duplicate_artboard).
+        if not any(a.id == target for a in model.document.artboards):
             return None
         existing = {a.id for a in model.document.artboards}
         new_id = _mint_artboard_id(existing)
         if not new_id:
             return None
         dup_name = next_artboard_name(model.document.artboards)
-        dup = dataclasses.replace(
-            source,
-            id=new_id,
-            name=dup_name,
-            x=source.x + ox,
-            y=source.y + oy,
-        )
-        new_artboards = model.document.artboards + (dup,)
-        model.document = dataclasses.replace(
-            model.document, artboards=new_artboards
-        )
+        op_apply(model, {
+            "op": "duplicate_artboard", "id": target, "new_id": new_id,
+            "name": dup_name, "offset_x": ox, "offset_y": oy,
+        })
         return new_id
 
     def doc_set_artboard_field(spec, call_ctx, _store):
@@ -213,14 +137,11 @@ def build_artboard_handlers(model) -> dict:
             value = vr.value
         else:
             value = value_expr
-        target = id_val.value
-        new_artboards = tuple(
-            _apply_artboard_override(a, field, value) if a.id == target else a
-            for a in model.document.artboards
-        )
-        model.document = dataclasses.replace(
-            model.document, artboards=new_artboards
-        )
+        # OP_LOG.md §9 — RESOLVED literal value routed through the SHARED op_apply
+        # dispatcher (apply_set_artboard_field). A missing artboard / type
+        # mismatch is a no-op inside the arm (journals nothing).
+        op_apply(model, {"op": "set_artboard_field",
+                         "id": id_val.value, "field": field, "value": value})
         return None
 
     def doc_set_artboard_options_field(spec, call_ctx, _store):
@@ -237,430 +158,75 @@ def build_artboard_handlers(model) -> dict:
             value = value_expr
         if not isinstance(value, bool):
             return None
-        opts = model.document.artboard_options
-        if field == "fade_region_outside_artboard":
-            new_opts = dataclasses.replace(
-                opts, fade_region_outside_artboard=value
-            )
-        elif field == "update_while_dragging":
-            new_opts = dataclasses.replace(opts, update_while_dragging=value)
-        else:
-            return None
-        model.document = dataclasses.replace(
-            model.document, artboard_options=new_opts
-        )
+        # OP_LOG.md §9 — route through the SHARED op_apply dispatcher
+        # (apply_set_artboard_options_field). A non-bool / unknown field is a
+        # no-op inside the arm.
+        op_apply(model, {"op": "set_artboard_options_field",
+                         "field": field, "value": value})
         return None
 
     def doc_move_artboards_up(value, call_ctx, _store):
+        # OP_LOG.md §9 — resolve the ids list literal, route through the SHARED
+        # op_apply dispatcher (apply_move_artboards up). A boundary no-op
+        # (top/bottom artboard) journals nothing.
         ids_expr = value if isinstance(value, str) else ""
         r = evaluate(ids_expr, call_ctx)
         ids = _extract_id_list(r)
-        new_artboards, changed = _move_up(model.document.artboards, ids)
-        if changed:
-            model.document = dataclasses.replace(
-                model.document, artboards=new_artboards
-            )
+        op_apply(model, {"op": "move_artboards_up", "ids": ids})
         return None
 
     def doc_move_artboards_down(value, call_ctx, _store):
         ids_expr = value if isinstance(value, str) else ""
         r = evaluate(ids_expr, call_ctx)
         ids = _extract_id_list(r)
-        new_artboards, changed = _move_down(model.document.artboards, ids)
-        if changed:
-            model.document = dataclasses.replace(
-                model.document, artboards=new_artboards
-            )
+        op_apply(model, {"op": "move_artboards_down", "ids": ids})
         return None
 
-    # PRINT.md §1A
-    def doc_set_document_setup_field(spec, call_ctx, _store):
-        from document.print_preferences import FlattenerPreset, _enum_from_string
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        s = model.document.document_setup
-        # Phase 1A bleed numerics + Phase 6 grid_size.
-        num_fields = {
-            "bleed_top", "bleed_right", "bleed_bottom", "bleed_left",
-            "grid_size",
-        }
-        bool_fields = {
-            "bleed_uniform", "show_images_outline", "highlight_substituted_glyphs",
-            "simulate_colored_paper", "discard_white_overprint",
-        }
-        str_fields = {"grid_color", "paper_color"}
-        if field in num_fields:
-            if not isinstance(value, (int, float)):
+    # PRINT.md §1A-§6 — the eight print-config field setters (OP_LOG.md §9
+    # Phase P1). Each evaluates its YAML `value` expr to a RESOLVED literal,
+    # builds a {op, field, value[, index]} op, and routes through the SHARED
+    # op_apply dispatcher (apply_print_config_field — the SAME field-match +
+    # type-coerce + replace body the per-field switches drove before P1). Routing
+    # through op_apply JOURNALS the edit as a real op so it replays
+    # byte-identically (checkpoint_equivalence). set_output_ink_field also carries
+    # an `index`; a missing index on the ink verb skips. A type mismatch / unknown
+    # field is a no-op inside op_apply that journals nothing. Factory: one closure
+    # per print-config verb, all sharing this body. Mirrors the Rust / Swift ports.
+    def _make_print_config_handler(verb):
+        def handler(spec, call_ctx, _store):
+            if not isinstance(spec, dict):
                 return None
-            new_s = dataclasses.replace(s, **{field: float(value)})
-        elif field in bool_fields:
-            if not isinstance(value, bool):
+            field = spec.get("field")
+            if not isinstance(field, str):
                 return None
-            new_s = dataclasses.replace(s, **{field: value})
-        elif field in str_fields:
-            if not isinstance(value, str):
-                return None
-            new_s = dataclasses.replace(s, **{field: value})
-        elif field == "transparency_flattener_preset":
-            if not isinstance(value, str):
-                return None
-            new_s = dataclasses.replace(
-                s,
-                transparency_flattener_preset=_enum_from_string(
-                    FlattenerPreset, value, s.transparency_flattener_preset))
-        else:
-            return None
-        model.document = dataclasses.replace(model.document, document_setup=new_s)
-        return None
-
-    # PRINT.md §1B
-    def doc_set_print_preferences_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            ArtboardRangeMode, MediaSize, Orientation, PrintLayers, ScalingMode,
-            _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        # Field → (expected python type or enum class, optional cast).
-        if field in {"copies"}:
-            if not isinstance(value, (int, float)):
-                return None
-            new_p = dataclasses.replace(p, **{field: max(0, int(value))})
-        elif field in {"media_width", "media_height", "placement_x", "placement_y",
-                       "custom_scale", "tile_overlap_h", "tile_overlap_v"}:
-            if not isinstance(value, (int, float)):
-                return None
-            new_p = dataclasses.replace(p, **{field: float(value)})
-        elif field in {"collate", "reverse_order", "ignore_artboards",
-                       "skip_blank_artboards", "auto_rotate", "transverse"}:
-            if not isinstance(value, bool):
-                return None
-            new_p = dataclasses.replace(p, **{field: value})
-        elif field in {"preset_name", "artboard_range", "tile_range"}:
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, **{field: value})
-        elif field == "printer_name":
-            if value is None:
-                new_p = dataclasses.replace(p, printer_name=None)
-            elif isinstance(value, str):
-                new_p = dataclasses.replace(
-                    p, printer_name=value if value else None)
+            value_expr = spec.get("value")
+            if isinstance(value_expr, str):
+                vr = evaluate(value_expr, call_ctx)
+                value = vr.value
             else:
-                return None
-        elif field == "artboard_range_mode":
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, artboard_range_mode=_enum_from_string(
-                ArtboardRangeMode, value, p.artboard_range_mode))
-        elif field == "media_size":
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, media_size=_enum_from_string(
-                MediaSize, value, p.media_size))
-        elif field == "orientation":
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, orientation=_enum_from_string(
-                Orientation, value, p.orientation))
-        elif field == "print_layers":
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, print_layers=_enum_from_string(
-                PrintLayers, value, p.print_layers))
-        elif field == "scaling_mode":
-            if not isinstance(value, str):
-                return None
-            new_p = dataclasses.replace(p, scaling_mode=_enum_from_string(
-                ScalingMode, value, p.scaling_mode))
-        else:
+                value = value_expr
+            op = {"op": verb, "field": field, "value": value}
+            if verb == "set_output_ink_field":
+                index = spec.get("index")
+                if not isinstance(index, int):
+                    return None
+                op["index"] = index
+            op_apply(model, op)
             return None
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
+        return handler
 
-    # PRINT.md §Phase 2
-    def doc_set_marks_and_bleed_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            PrinterMarkType, _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        m = p.marks_and_bleed
-        if field in {"all_printer_marks", "trim_marks", "registration_marks",
-                     "color_bars", "page_information", "use_document_bleed"}:
-            if not isinstance(value, bool):
-                return None
-            new_m = dataclasses.replace(m, **{field: value})
-        elif field in {"trim_mark_weight", "mark_offset",
-                       "bleed_top", "bleed_right", "bleed_bottom", "bleed_left"}:
-            if not isinstance(value, (int, float)):
-                return None
-            new_m = dataclasses.replace(m, **{field: float(value)})
-        elif field == "printer_mark_type":
-            if not isinstance(value, str):
-                return None
-            new_m = dataclasses.replace(m, printer_mark_type=_enum_from_string(
-                PrinterMarkType, value, m.printer_mark_type))
-        else:
-            return None
-        new_p = dataclasses.replace(p, marks_and_bleed=new_m)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
-
-    # PRINT.md §Phase 3
-    def doc_set_output_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            OutputMode, Emulsion, ImagePolarity, _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        o = p.output
-        if field == "mode":
-            if not isinstance(value, str):
-                return None
-            new_o = dataclasses.replace(o, mode=_enum_from_string(
-                OutputMode, value, o.mode))
-        elif field == "emulsion":
-            if not isinstance(value, str):
-                return None
-            new_o = dataclasses.replace(o, emulsion=_enum_from_string(
-                Emulsion, value, o.emulsion))
-        elif field == "image_polarity":
-            if not isinstance(value, str):
-                return None
-            new_o = dataclasses.replace(o, image_polarity=_enum_from_string(
-                ImagePolarity, value, o.image_polarity))
-        elif field == "printer_resolution":
-            if not isinstance(value, str):
-                return None
-            new_o = dataclasses.replace(o, printer_resolution=value)
-        elif field in {"convert_spot_to_process", "overprint_black"}:
-            if not isinstance(value, bool):
-                return None
-            new_o = dataclasses.replace(o, **{field: value})
-        else:
-            return None
-        new_p = dataclasses.replace(p, output=new_o)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
-
-    # PRINT.md §Phase 3 — per-row update on Output.inks
-    def doc_set_output_ink_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            DotShape, _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        index = spec.get("index")
-        if not isinstance(field, str) or not isinstance(index, int):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        o = p.output
-        inks = list(o.inks)
-        if index < 0 or index >= len(inks):
-            return None
-        ink = inks[index]
-        if field == "name":
-            if not isinstance(value, str):
-                return None
-            new_ink = dataclasses.replace(ink, name=value)
-        elif field == "print":
-            if not isinstance(value, bool):
-                return None
-            new_ink = dataclasses.replace(ink, print=value)
-        elif field in {"frequency", "angle"}:
-            if not isinstance(value, (int, float)):
-                return None
-            new_ink = dataclasses.replace(ink, **{field: float(value)})
-        elif field == "dot_shape":
-            if not isinstance(value, str):
-                return None
-            new_ink = dataclasses.replace(ink, dot_shape=_enum_from_string(
-                DotShape, value, ink.dot_shape))
-        else:
-            return None
-        inks[index] = new_ink
-        new_o = dataclasses.replace(o, inks=tuple(inks))
-        new_p = dataclasses.replace(p, output=new_o)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
-
-    # PRINT.md §Phase 4
-    def doc_set_graphics_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            FontDownload, PostScriptLevel, DataFormat, _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        g = p.graphics
-        if field == "flatness":
-            if not isinstance(value, (int, float)):
-                return None
-            new_g = dataclasses.replace(g, flatness=float(value))
-        elif field == "font_download":
-            if not isinstance(value, str):
-                return None
-            new_g = dataclasses.replace(g, font_download=_enum_from_string(
-                FontDownload, value, g.font_download))
-        elif field == "postscript_level":
-            if not isinstance(value, str):
-                return None
-            new_g = dataclasses.replace(g, postscript_level=_enum_from_string(
-                PostScriptLevel, value, g.postscript_level))
-        elif field == "data_format":
-            if not isinstance(value, str):
-                return None
-            new_g = dataclasses.replace(g, data_format=_enum_from_string(
-                DataFormat, value, g.data_format))
-        elif field == "compatible_gradient_printing":
-            if not isinstance(value, bool):
-                return None
-            new_g = dataclasses.replace(g, compatible_gradient_printing=value)
-        elif field == "raster_effects_resolution":
-            if not isinstance(value, (int, float)):
-                return None
-            new_g = dataclasses.replace(g, raster_effects_resolution=float(value))
-        else:
-            return None
-        new_p = dataclasses.replace(p, graphics=new_g)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
-
-    # PRINT.md §Phase 5
-    def doc_set_color_management_field(spec, call_ctx, _store):
-        from document.print_preferences import (
-            ColorHandling, RenderingIntent, _enum_from_string,
-        )
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        c = p.color_management
-        if field in {"document_profile", "printer_profile"}:
-            if not isinstance(value, str):
-                return None
-            new_c = dataclasses.replace(c, **{field: value})
-        elif field == "color_handling":
-            if not isinstance(value, str):
-                return None
-            new_c = dataclasses.replace(c, color_handling=_enum_from_string(
-                ColorHandling, value, c.color_handling))
-        elif field == "rendering_intent":
-            if not isinstance(value, str):
-                return None
-            new_c = dataclasses.replace(c, rendering_intent=_enum_from_string(
-                RenderingIntent, value, c.rendering_intent))
-        elif field == "preserve_rgb_numbers":
-            if not isinstance(value, bool):
-                return None
-            new_c = dataclasses.replace(c, preserve_rgb_numbers=value)
-        else:
-            return None
-        new_p = dataclasses.replace(p, color_management=new_c)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
-
-    # PRINT.md §Phase 6
-    def doc_set_advanced_field(spec, call_ctx, _store):
-        from document.print_preferences import FlattenerPreset, _enum_from_string
-        if not isinstance(spec, dict):
-            return None
-        field = spec.get("field")
-        if not isinstance(field, str):
-            return None
-        value_expr = spec.get("value")
-        if isinstance(value_expr, str):
-            vr = evaluate(value_expr, call_ctx)
-            value = vr.value
-        else:
-            value = value_expr
-        p = model.document.print_preferences
-        a = p.advanced
-        if field == "print_as_bitmap":
-            if not isinstance(value, bool):
-                return None
-            new_a = dataclasses.replace(a, print_as_bitmap=value)
-        elif field == "overprint_flattener_preset":
-            if not isinstance(value, str):
-                return None
-            new_a = dataclasses.replace(a, overprint_flattener_preset=_enum_from_string(
-                FlattenerPreset, value, a.overprint_flattener_preset))
-        else:
-            return None
-        new_p = dataclasses.replace(p, advanced=new_a)
-        model.document = dataclasses.replace(
-            model.document, print_preferences=new_p)
-        return None
+    doc_set_document_setup_field = _make_print_config_handler(
+        "set_document_setup_field")
+    doc_set_print_preferences_field = _make_print_config_handler(
+        "set_print_preferences_field")
+    doc_set_marks_and_bleed_field = _make_print_config_handler(
+        "set_marks_and_bleed_field")
+    doc_set_output_field = _make_print_config_handler("set_output_field")
+    doc_set_output_ink_field = _make_print_config_handler("set_output_ink_field")
+    doc_set_graphics_field = _make_print_config_handler("set_graphics_field")
+    doc_set_color_management_field = _make_print_config_handler(
+        "set_color_management_field")
+    doc_set_advanced_field = _make_print_config_handler("set_advanced_field")
 
     # PRINT.md §1B
     def geometry_export_pdf(_spec, _call_ctx, _store):
