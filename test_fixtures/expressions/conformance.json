@@ -442,5 +442,80 @@
     },
     "expected": 42,
     "type": "number"
+  },
+  {
+    "expr": "sin(0)",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "sin(90)",
+    "expected": 1,
+    "type": "number"
+  },
+  {
+    "expr": "sin(30)",
+    "expected": 0.5,
+    "type": "number"
+  },
+  {
+    "expr": "cos(0)",
+    "expected": 1,
+    "type": "number"
+  },
+  {
+    "expr": "cos(180)",
+    "expected": -1,
+    "type": "number"
+  },
+  {
+    "expr": "cos(60)",
+    "expected": 0.5,
+    "type": "number"
+  },
+  {
+    "expr": "tan(45)",
+    "expected": 1,
+    "type": "number"
+  },
+  {
+    "expr": "pow(2, 10)",
+    "expected": 1024,
+    "type": "number"
+  },
+  {
+    "expr": "pow(9, 0.5)",
+    "expected": 3,
+    "type": "number"
+  },
+  {
+    "expr": "fold(range(0, 5), 0, fun (acc, i) -> acc + 1)",
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "fold(range(1, 5), 0, fun (acc, i) -> acc + i)",
+    "expected": 10,
+    "type": "number"
+  },
+  {
+    "expr": "fold(range(0, 10, 2), 0, fun (acc, i) -> acc + i)",
+    "expected": 20,
+    "type": "number"
+  },
+  {
+    "expr": "fold([10, 20, 30], 0, fun (acc, x) -> acc + x)",
+    "expected": 60,
+    "type": "number"
+  },
+  {
+    "expr": "fold(map(range(1, 4), fun i -> i * i), 0, fun (acc, x) -> acc + x)",
+    "expected": 14,
+    "type": "number"
+  },
+  {
+    "expr": "fold(map(range(0, 4), fun i -> cos(90 * i)), 0, fun (acc, x) -> acc + x)",
+    "expected": 0,
+    "type": "number"
   }
 ]

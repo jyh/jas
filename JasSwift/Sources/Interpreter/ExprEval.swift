@@ -1329,6 +1329,66 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .number((dx * dx + dy * dy).squareRoot())
 
+    // ── Geometry generators (trig in DEGREES, pow, range, fold) ──
+
+    // sin/cos/tan take DEGREES (the app's artist-facing convention).
+    case "sin", "cos", "tan":
+        guard args.count == 1 else { return .null }
+        let a = evalNode(args[0], ctx)
+        guard case .number(let n) = a else { return .null }
+        let rad = n * Double.pi / 180.0
+        switch name {
+        case "sin": return .number(sin(rad))
+        case "cos": return .number(cos(rad))
+        default: return .number(tan(rad))
+        }
+
+    // pow(base, exp) -> Number | Null (Null on a non-finite result).
+    case "pow":
+        guard args.count == 2 else { return .null }
+        let vb = evalNode(args[0], ctx)
+        let ve = evalNode(args[1], ctx)
+        guard case .number(let base) = vb, case .number(let exp) = ve else {
+            return .null
+        }
+        let r = pow(base, exp)
+        return r.isFinite ? .number(r) : .null
+
+    // range(start, end) or range(start, end, step); end-exclusive.
+    case "range":
+        guard args.count == 2 || args.count == 3 else { return .null }
+        var nums: [Double] = []
+        for a in args {
+            let v = evalNode(a, ctx)
+            guard case .number(let n) = v else { return .null }
+            nums.append(n)
+        }
+        let start = nums[0], end = nums[1]
+        let step = nums.count == 3 ? nums[2] : 1.0
+        guard step != 0 else { return .null }
+        var out: [AnyJSON] = []
+        var n = start
+        if step > 0 {
+            while n < end { out.append(AnyJSON(n)); n += step }
+        } else {
+            while n > end { out.append(AnyJSON(n)); n += step }
+        }
+        return .list(out)
+
+    // fold(list, init, fn) — left fold; fn is called as fn(acc, item).
+    case "fold":
+        guard args.count == 3 else { return .null }
+        let lst = evalNode(args[0], ctx)
+        var acc = evalNode(args[1], ctx)
+        let callable = evalNode(args[2], ctx)
+        guard case .list(let items) = lst else { return .null }
+        guard case .closure = callable else { return .null }
+        for item in items {
+            let itemVal = Value.fromJson(item.value)
+            acc = applyClosure(callable, [acc, itemVal], ctx)
+        }
+        return acc
+
     // brush_type_of(slug) — look up a brush in brush_libraries by
     // "lib_id/brush_slug" and return its `type` field as a string.
     // Returns .null if the slug doesn't resolve. Consumed by

@@ -903,6 +903,110 @@ fn eval_func(
             Value::Number(dx.hypot(dy))
         }
 
+        // ── Geometry generators (trig in DEGREES, pow, range, fold) ──
+
+        // sin/cos/tan take DEGREES (the app's artist-facing convention).
+        "sin" | "cos" | "tan" => {
+            if args.len() != 1 {
+                return Value::Null;
+            }
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => {
+                    let rad = n.to_radians();
+                    Value::Number(match name {
+                        "sin" => rad.sin(),
+                        "cos" => rad.cos(),
+                        _ => rad.tan(),
+                    })
+                }
+                _ => Value::Null,
+            }
+        }
+
+        // pow(base, exp) -> Number | Null (Null on a non-finite result,
+        // e.g. negative base with a fractional exponent).
+        "pow" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let base = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let exp = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let r = base.powf(exp);
+            if r.is_finite() {
+                Value::Number(r)
+            } else {
+                Value::Null
+            }
+        }
+
+        // range(start, end) or range(start, end, step); end-exclusive.
+        "range" => {
+            if args.len() != 2 && args.len() != 3 {
+                return Value::Null;
+            }
+            let mut nums = Vec::with_capacity(args.len());
+            for a in args {
+                match eval_inner(a, ctx, scope, store_cb) {
+                    Value::Number(n) => nums.push(n),
+                    _ => return Value::Null,
+                }
+            }
+            let start = nums[0];
+            let end = nums[1];
+            let step = if nums.len() == 3 { nums[2] } else { 1.0 };
+            if step == 0.0 {
+                return Value::Null;
+            }
+            let mut out: Vec<serde_json::Value> = Vec::new();
+            let mut n = start;
+            if step > 0.0 {
+                while n < end {
+                    out.push(value_to_json(&Value::Number(n)));
+                    n += step;
+                }
+            } else {
+                while n > end {
+                    out.push(value_to_json(&Value::Number(n)));
+                    n += step;
+                }
+            }
+            Value::List(out)
+        }
+
+        // fold(list, init, fn) — left fold; fn is called as fn(acc, item).
+        "fold" => {
+            if args.len() != 3 {
+                return Value::Null;
+            }
+            let lst = eval_inner(&args[0], ctx, scope, store_cb);
+            let mut acc = eval_inner(&args[1], ctx, scope, store_cb);
+            let callable = eval_inner(&args[2], ctx, scope, store_cb);
+            let items = match lst {
+                Value::List(a) => a,
+                _ => return Value::Null,
+            };
+            if !matches!(callable, Value::Closure { .. }) {
+                return Value::Null;
+            }
+            for item in &items {
+                let item_val = Value::from_json(item);
+                acc = apply_closure_values(
+                    &callable,
+                    vec![acc, item_val],
+                    ctx,
+                    scope,
+                    store_cb,
+                );
+            }
+            acc
+        }
+
         // ── Document-aware primitives ─────────────────────────
         //
         // Available only during a tool dispatch that has registered a

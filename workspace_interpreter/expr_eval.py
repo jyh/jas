@@ -564,6 +564,68 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         import math
         return Value.number(math.hypot(va.value, vb.value))
 
+    # ── Geometry generators (trig in DEGREES, pow, range, fold) ──
+
+    if name in ("sin", "cos", "tan"):
+        if len(node.args) != 1:
+            return Value.null()
+        a = eval_node(node.args[0], ctx)
+        if a.type != ValueType.NUMBER:
+            return Value.null()
+        import math
+        rad = math.radians(a.value)  # angles are degrees, matching the UI
+        fn = {"sin": math.sin, "cos": math.cos, "tan": math.tan}[name]
+        return Value.number(fn(rad))
+
+    if name == "pow":
+        if len(node.args) != 2:
+            return Value.null()
+        base = eval_node(node.args[0], ctx)
+        exp = eval_node(node.args[1], ctx)
+        if base.type != ValueType.NUMBER or exp.type != ValueType.NUMBER:
+            return Value.null()
+        import math
+        try:
+            return Value.number(math.pow(base.value, exp.value))
+        except (ValueError, OverflowError):
+            return Value.null()
+
+    if name == "range":
+        # range(start, end) or range(start, end, step); end-exclusive.
+        if len(node.args) not in (2, 3):
+            return Value.null()
+        vals = [eval_node(a, ctx) for a in node.args]
+        if any(v.type != ValueType.NUMBER for v in vals):
+            return Value.null()
+        start, end = vals[0].value, vals[1].value
+        step = vals[2].value if len(node.args) == 3 else 1
+        if step == 0:
+            return Value.null()
+        out = []
+        n = start
+        if step > 0:
+            while n < end:
+                out.append(n)
+                n += step
+        else:
+            while n > end:
+                out.append(n)
+                n += step
+        return Value.list_(out)
+
+    if name == "fold":
+        # fold(list, init, fn) — left fold; fn is called as fn(acc, item).
+        if len(node.args) != 3:
+            return Value.null()
+        lst = eval_node(node.args[0], ctx)
+        acc = eval_node(node.args[1], ctx)
+        fn = eval_node(node.args[2], ctx)
+        if lst.type != ValueType.LIST or fn.type != ValueType.CLOSURE:
+            return Value.null()
+        for item in lst.value:
+            acc = _apply_closure(fn, [acc, Value.from_python(item)], ctx)
+        return acc
+
     # brush_type_of(slug) -- look up a brush in brush_libraries by
     # "lib_id/brush_slug" and return its `type` field as a string.
     # Returns Value.null() if the slug does not resolve. Consumed by

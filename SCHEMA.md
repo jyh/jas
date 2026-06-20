@@ -1660,6 +1660,54 @@ If a color function receives `null`, it treats it as `#000000`.
 If it receives a non-color, non-null value, it is an evaluation error
 (return `null` or `0` as appropriate for the return type).
 
+**Math functions** — take `number` arguments, return `number` (or `null` on a
+type/arity mismatch or a non-finite result):
+
+| Function          | Description                                       |
+|-------------------|---------------------------------------------------|
+| `min(a, b, …)`    | Smallest of the numeric arguments.                |
+| `max(a, b, …)`    | Largest of the numeric arguments.                 |
+| `abs(x)`          | Absolute value.                                   |
+| `sqrt(x)`         | Square root (`null` if `x < 0`).                  |
+| `pow(base, exp)`  | `base` raised to `exp`.                           |
+| `hypot(x, y)`     | Euclidean distance `√(x² + y²)`.                  |
+| `sin(deg)`        | Sine. **Argument is in degrees.**                 |
+| `cos(deg)`        | Cosine. **Argument is in degrees.**               |
+| `tan(deg)`        | Tangent. **Argument is in degrees.**              |
+
+**Angle units:** `sin`/`cos`/`tan` take angles in **degrees** (a full turn is
+360), matching the artist-facing convention used everywhere else in the app
+(HSB hue, the Rotate and Shear tools). Geometry code converts to radians
+internally; expression authors never write radians.
+
+**List functions** — generate and consume `list` values, the basis for
+parametric/concept geometry generators:
+
+| Function                  | Returns | Description                                                    |
+|---------------------------|---------|---------------------------------------------------------------|
+| `range(start, end)`       | `list`  | Numbers `start, start+1, …` up to but **excluding** `end`.    |
+| `range(start, end, step)` | `list`  | As above with an explicit `step` (`null` if `step == 0`).     |
+| `map(list, fn)`           | `list`  | Apply the 1-argument closure `fn` to each item.               |
+| `filter(list, pred)`      | `list`  | Keep items for which the 1-argument closure `pred` is truthy. |
+| `any(list, pred)`         | `bool`  | True if `pred` is truthy for any item.                        |
+| `all(list, pred)`         | `bool`  | True if `pred` is truthy for every item.                      |
+| `fold(list, init, fn)`    | any     | Left fold: `fn(acc, item)` across the list, starting at `init`. |
+
+The list functions all take the **list first**, then the closure; `fold`'s
+closure receives the accumulator first (`fun (acc, item) -> …`). Composed, they
+let a concept's geometry be expressed as data with no native code (`VISION.md`
+§6.3) — e.g. the vertices of a regular `n`-gon of radius `r`:
+
+```
+map(range(0, n), fun i ->
+  let a = 360 * i / n in
+  [r * cos(a), r * sin(a)])
+```
+
+Every function above is pinned across all five interpreters by the conformance
+corpus (`workspace/tests/expressions.yaml`; see "Expression Conformance Tests"
+below).
+
 #### Comparison Operators
 
 **`==` and `!=`** — strict typed equality.

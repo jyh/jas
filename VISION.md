@@ -183,12 +183,14 @@ the one-way DAG covers most cases but constraint solving is a separate, harder l
 ### 6.3 Domains as declarative packs
 Concepts (fitter + generator + operations + constraints) ship as data, interpreted identically
 by all apps; breadth becomes content, not releases — authorable by the team, the community, or
-the AI. **Today:** tools already migrated native→data (all but Type/TypeOnPath). The
-**decisive gap:** the expression language cannot yet *generate* geometry (no `sin`/`cos`/
-`range`/`fold`) — a gear generator can't be data today. **Benefit:** N domains cost ~one
-engine, propagated to five apps for free. **Downside:** requires extending the expression
-language (deterministically, no JS) and adding a constraint representation; the language must
-be pinned by a shared conformance corpus *before* it is extended (see §11).
+the AI. **Today:** tools already migrated native→data (all but Type/TypeOnPath), and the
+expression language can now **generate geometry** — `sin`/`cos`/`tan` (degrees), `pow`,
+`range`, and `fold` shipped across all five interpreters and pinned by the conformance corpus
+(§10 item 3), so a gear/n-gon generator is now expressible as data. **Remaining gap:** a
+**constraint representation** and the pack format itself (fitter + generator + operations +
+constraints as one declarative unit). **Benefit:** N domains cost ~one engine, propagated to
+five apps for free. **Downside:** still needs a constraint representation (deterministic, no
+JS); the language is now pinned by the shared corpus, so further extensions stay safe.
 
 ### 6.4 Liveness as the bridge between brainstorm-speed and CAD-precision
 A gesture produces a *live operation with inferred parameters*; the panel later tunes the same
@@ -345,13 +347,13 @@ Everything stands on three things — build them first:
    and self-checked in all four native apps **plus** the Python reference, CI-gated (with a
    freshness check). The closure lexical-scoping divergence it was meant to pin is fixed in OCaml
    **and** Rust — the gate immediately caught a second leak a manual survey had missed.
-   **The top remaining critical-path item is now extending the language with geometry generators**
-   (`sin`/`cos`/`range`/`fold`) — the unlock for concept packs (6.3) — which the now-pinned corpus
-   makes safe to do.
+   **Geometry generators now ship on top of it** — `sin`/`cos`/`tan` (degrees), `pow`, `range`,
+   `fold`, pinned by the corpus across all five interpreters — so the next critical-path item is
+   the **concept-pack format + constraint representation** (6.3).
 
 The live dependency graph (6.2 — ✅ shipped) and the operation-log spine (§5 item 5 / §10 item 2
-— ✅ shipped) are both in. The open chain, in dependency order: geometry generators in the expression
-language (the conformance gate that pins them is now in) → concept-pack format (6.3) →
+— ✅ shipped) are both in. The open chain, in dependency order: the concept-pack format + a constraint
+representation (6.3 — the geometry-generator functions it needs now ship, pinned by the corpus) →
 capture/replay sessions (§9 regime 2, now unblocked by the journal) and the gesture/lens layer
 (6.4) → the AI operation API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
 deferred-but-ready throughout.
