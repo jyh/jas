@@ -1,0 +1,21 @@
+id: spiral
+name: Spiral
+description: >
+  An Archimedean spiral centered on the origin, sampled as an open polyline. The
+  generator walks `steps` samples, advancing the angle by `angle_step` degrees and
+  the radius by `growth` units per sample, starting from radius `r0` at angle 0.
+  Because the radius grows linearly with the angle, successive turns are evenly
+  spaced. The point list is left open (a polyline, not a closed polygon) — this is
+  the concept that exercises the `closed: false` path of the format. Unlike a
+  closed polygon, the first and last samples are not joined.
+params:
+  - { name: steps,      type: number, default: 64 }
+  - { name: angle_step, type: number, default: 30 }
+  - { name: r0,         type: number, default: 5 }
+  - { name: growth,     type: number, default: 2 }
+closed: false
+generator: |
+  map(range(0, param.steps), fun i ->
+    let a = param.angle_step * i in
+    let r = param.r0 + param.growth * i in
+    [r * cos(a), r * sin(a)])

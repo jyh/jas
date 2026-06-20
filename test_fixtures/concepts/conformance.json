@@ -1,0 +1,149 @@
+[
+  {
+    "concept": "regular_polygon",
+    "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])",
+    "params": {
+      "sides": 4,
+      "radius": 10
+    },
+    "closed": true,
+    "expected": [
+      [
+        10,
+        0
+      ],
+      [
+        0,
+        10
+      ],
+      [
+        -10,
+        0
+      ],
+      [
+        0,
+        -10
+      ]
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])",
+    "params": {
+      "sides": 3,
+      "radius": 10
+    },
+    "closed": true,
+    "expected": [
+      [
+        10,
+        0
+      ],
+      [
+        -5,
+        8.660254038
+      ],
+      [
+        -5,
+        -8.660254038
+      ]
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])",
+    "params": {
+      "sides": 6,
+      "radius": 50
+    },
+    "closed": true,
+    "expected": [
+      [
+        50,
+        0
+      ],
+      [
+        25,
+        43.301270189
+      ],
+      [
+        -25,
+        43.301270189
+      ],
+      [
+        -50,
+        0
+      ],
+      [
+        -25,
+        -43.301270189
+      ],
+      [
+        25,
+        -43.301270189
+      ]
+    ]
+  },
+  {
+    "concept": "spiral",
+    "generator": "map(range(0, param.steps), fun i ->\n  let a = param.angle_step * i in\n  let r = param.r0 + param.growth * i in\n  [r * cos(a), r * sin(a)])",
+    "params": {
+      "steps": 4,
+      "angle_step": 90,
+      "r0": 10,
+      "growth": 5
+    },
+    "closed": false,
+    "expected": [
+      [
+        10,
+        0
+      ],
+      [
+        0,
+        15
+      ],
+      [
+        -20,
+        0
+      ],
+      [
+        0,
+        -25
+      ]
+    ]
+  },
+  {
+    "concept": "spiral",
+    "generator": "map(range(0, param.steps), fun i ->\n  let a = param.angle_step * i in\n  let r = param.r0 + param.growth * i in\n  [r * cos(a), r * sin(a)])",
+    "params": {
+      "steps": 5,
+      "angle_step": 72,
+      "r0": 4,
+      "growth": 3
+    },
+    "closed": false,
+    "expected": [
+      [
+        4,
+        0
+      ],
+      [
+        2.163118961,
+        6.657395614
+      ],
+      [
+        -8.090169944,
+        5.877852523
+      ],
+      [
+        -10.517220927,
+        -7.64120828
+      ],
+      [
+        4.94427191,
+        -15.216904261
+      ]
+    ]
+  }
+]
