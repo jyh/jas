@@ -120,6 +120,22 @@ impl crate::geometry::live::ElementResolver for RenderResolver {
     ) -> Option<std::rc::Rc<Element>> {
         CURRENT_REF_INDEX.with(|c| c.borrow().get(&id.0).cloned())
     }
+
+    /// Resolve a concept pack from the bundled workspace registry so a
+    /// `Generated` instance renders its concept's geometry on canvas
+    /// (CONCEPTS.md 3b). Concepts are static workspace data and `Workspace::load`
+    /// is cached, so this is cheap.
+    fn resolve_concept(
+        &self,
+        concept_id: &str,
+    ) -> Option<crate::geometry::live::ConceptDef> {
+        let ws = crate::interpreter::workspace::Workspace::load()?;
+        let c = ws.concept(concept_id)?;
+        Some(crate::geometry::live::ConceptDef {
+            generator: c.get("generator")?.as_str()?.to_string(),
+            closed: c.get("closed").and_then(|v| v.as_bool()).unwrap_or(true),
+        })
+    }
 }
 
 /// Look up a brush by its "<library>/<brush>" slug in the current
@@ -2373,6 +2389,29 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_resolver_resolves_concepts_from_registry() {
+        // The production render resolver resolves concept packs from the bundled
+        // workspace registry, so a Generated instance evaluates to its concept's
+        // geometry on the canvas render path (CONCEPTS.md 3b).
+        use crate::geometry::live::ElementResolver;
+        let def = RenderResolver
+            .resolve_concept("regular_polygon")
+            .expect("regular_polygon registered in the workspace");
+        assert!(def.generator.contains("cos("));
+        assert!(RenderResolver.resolve_concept("no_such_concept").is_none());
+
+        let ge = crate::geometry::live::GeneratedElem::new(
+            "regular_polygon".into(),
+            serde_json::json!({ "sides": 4, "radius": 10 }),
+            crate::geometry::element::CommonProps::default(),
+        );
+        let mut visiting = crate::geometry::live::VisitSet::new();
+        let ps = ge.evaluate_with(1.0, &RenderResolver, &mut visiting);
+        assert_eq!(ps.len(), 1, "one ring");
+        assert_eq!(ps[0].len(), 4, "a square has 4 vertices");
+    }
 
     #[test]
     fn css_color_opaque_black() {
