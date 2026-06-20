@@ -8968,7 +8968,7 @@ fn pdf_filename_for_tab(filename: &str) -> String {
 /// tab is active and the widget is read-only.
 ///
 /// YAML:
-/// ```
+/// ```text
 /// - id: print_tabs
 ///   type: tabs
 ///   layout: left_rail            # default; only left_rail in Phase 1B
