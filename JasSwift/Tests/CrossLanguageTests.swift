@@ -267,6 +267,10 @@ private func assertJsonRoundtrip(_ name: String) {
         // `instance_transform` key) round-trips through test_json distinct from
         // the render CTM (the `transform` key). (SYMBOLS.md §4 / Fork F2.)
         "reference_instance_transform",
+        // CONCEPTS.md 3b: a Generated concept-instance (concept id + params)
+        // round-trips through test_json byte-identically to the Rust-authored
+        // golden — the cross-language pin for the generated kind.
+        "generated_polygon",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -1816,4 +1820,52 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         return
     }
     #expect(items.count == 4)
+}
+
+// MARK: - Generated live element (concept instance, CONCEPTS.md 3b)
+
+@Test func generatedLiveVariantRoundTripsAndSerializes() throws {
+    let ge = GeneratedElem(
+        conceptId: "regular_polygon",
+        params: ["sides": 6, "radius": 50],
+        id: "poly1")
+    let layer = Layer(name: "Layer", children: [.live(.generated(ge))])
+    let doc = Document(layers: [layer], artboards: [])
+
+    let json = documentToTestJson(doc)
+    #expect(json.contains("\"kind\":\"generated\""))
+    #expect(json.contains("\"concept\":\"regular_polygon\""))
+    #expect(json.contains("\"params\""))
+
+    // test_json round-trip (parse → emit byte-identical).
+    let back = testJsonToDocument(json)
+    #expect(documentToTestJson(back) == json)
+
+    // binary round-trip.
+    let bytes = documentToBinary(doc, compress: false)
+    let backBin = try binaryToDocument(bytes)
+    #expect(documentToTestJson(backBin) == json)
+}
+
+@Test func generatedEvaluatesViaConceptResolver() {
+    struct OneConcept: ElementResolver {
+        func resolve(_ id: ElementRef) -> Element? { nil }
+        func resolveConcept(_ conceptId: String) -> ConceptDef? {
+            conceptId == "regular_polygon"
+                ? ConceptDef(generator: "map(range(0, param.sides), fun i -> "
+                    + "let a = 360 * i / param.sides in "
+                    + "[param.radius * cos(a), param.radius * sin(a)])", closed: true)
+                : nil
+        }
+    }
+    let ge = GeneratedElem(conceptId: "regular_polygon", params: ["sides": 4, "radius": 10])
+    var visiting = VisitSet()
+    let ps = ge.evaluateWith(precision: 1.0, resolver: OneConcept(), visiting: &visiting)
+    #expect(ps.count == 1)
+    #expect(ps.first?.count == 4)
+    if let p0 = ps.first?.first {
+        #expect(abs(p0.0 - 10.0) < 1e-9 && abs(p0.1) < 1e-9)
+    }
+    var v2 = VisitSet()
+    #expect(ge.evaluateWith(precision: 1.0, resolver: NullResolver(), visiting: &v2).isEmpty)
 }

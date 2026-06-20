@@ -1,12 +1,13 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increments 1–2 + 3a built, **3b Rust lead landed** — the generator engine +
+**Status:** increments 1–2 + 3a built, **3b Rust + Swift landed** — the generator engine +
 format + cross-language gate (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3
 flagship), the `floor`/`mod` parity primitives, the concept **registry** (concepts bundled
 into `workspace.json`, loadable in every app), and the **`LiveVariant::Generated` document
-arm in the Rust lead** (model + eval + codecs + tests). Remaining on 3b: propagate to
-Swift/OCaml/Python, a shared round-trip fixture, render-resolver wiring, a creation action.
-The fitter, operations, and constraints follow (§7). · **Implements:** `VISION.md`
+arm in Rust and Swift** (model + eval + codecs + tests) pinned by a shared cross-language
+round-trip golden (`expected/generated_polygon.json`, byte-identical in both). Remaining on
+3b: propagate to OCaml + Python, render-resolver wiring, a creation action. The fitter,
+operations, and constraints follow (§7). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -176,9 +177,12 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    of §6.4). **Rust lead ✅:** the `GeneratedElem` model, the 13 `LiveElement` dispatch
    methods, `evaluate_with` (concept resolved via a registry-extended `ElementResolver`
    → generator → points → geometry), the test_json/binary/SVG codecs, and round-trip +
-   eval tests. **Remaining:** propagate to Swift/OCaml/Python; a shared cross-language
-   round-trip fixture; wire the production render-resolver's `resolve_concept` to the
-   registry so an instance renders on canvas; and a creation action/UI.
+   eval tests. **Rust + Swift ✅** — propagated to Swift (the inline-common `RecordedElem`
+   layout) and pinned by the shared golden `expected/generated_polygon.json`, round-tripped
+   byte-identically in both. **Remaining:** propagate to OCaml + Python (against the same
+   golden); wire the production render-resolver's `resolve_concept` to the registry so an
+   instance renders on canvas; and a creation action/UI. (SVG `data-jas-params` is not
+   byte-compared by any fixture; its serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic

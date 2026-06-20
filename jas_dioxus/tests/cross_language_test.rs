@@ -93,6 +93,20 @@ fn json_roundtrip_all_fixtures() {
     }
 }
 
+// --- Generated concept-instance JSON roundtrip (cross-language golden) ---
+//
+// expected/generated_polygon.json is a Document with one Generated LiveVariant.
+// Every app that supports the `generated` kind parses it, re-emits, and must
+// reproduce it byte-identically (CONCEPTS.md 3b). Authored from the Rust emit;
+// Swift/OCaml/Python pin the same golden.
+#[test]
+fn json_roundtrip_generated_polygon() {
+    let golden = read_fixture("expected/generated_polygon.json");
+    let doc = test_json_to_document(&golden);
+    assert_eq!(document_to_test_json(&doc), golden,
+        "generated_polygon JSON roundtrip mismatch");
+}
+
 // --- Align panel parity fixture ---
 //
 // Runs each vector in test_fixtures/algorithms/align.json through

@@ -2683,6 +2683,7 @@ private func elementTypeLabel(_ elem: Element) -> String {
         case .compoundShape: return "Compound Shape"
         case .reference: return "Reference"
         case .recorded: return "Recorded"
+        case .generated: return "Generated"
         }
     }
 }
