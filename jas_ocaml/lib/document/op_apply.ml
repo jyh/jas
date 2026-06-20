@@ -167,10 +167,39 @@ let rec serde_element_to_test_json (el : Yojson.Safe.t) : Yojson.Safe.t option =
      | _ -> None)
   | _ -> None
 
+(* ── Element value-in-op production fast path (OP_LOG.md section 9 Phase P4) ───
+   The cross-language fixtures carry [element] as the RUST SERDE externally-tagged
+   shape (a disk-shareable, app-agnostic dict). The OCaml PRODUCTION inserting
+   handlers (doc.insert_after / doc.insert_at) already hold a live
+   [Element.element] from a preceding NON-journaled clone_at / create_layer
+   binder, and OCaml — like Swift — has NO serde-shape ENCODER (only the decoder
+   above). So production stashes the live element HERE and carries an opaque
+   marker dict (an [__element_ref__] key mapping to a token) under the SAME
+   [element] key; the journal replays that SAME marker in-process and
+   re-resolves the SAME element, so
+   checkpoint_equivalence holds. This is additive and fixture-neutral: a fixture
+   never stores an [__element_ref__] marker (it carries the serde dict), so the
+   byte-gated dispatch arms below are UNCHANGED. Mirrors the Swift
+   [parseSerdeElement] value-in-op fast path. *)
+let element_value_stash : (string, Element.element) Hashtbl.t = Hashtbl.create 16
+let next_value_token = ref 0
+
+(* Stash a live element for value-in-op carriage and return the marker JSON the
+   production handler puts under the [element] key of the op. *)
+let stash_element_value (el : Element.element) : Yojson.Safe.t =
+  let token = Printf.sprintf "__opval_elem_%d__" !next_value_token in
+  incr next_value_token;
+  Hashtbl.replace element_value_stash token el;
+  `Assoc [ ("__element_ref__", `String token) ]
+
 (* Deserialize the [element] op param into an [Element.element]. Returns [None]
-   if absent or not a recognized variant (a malformed payload skips the op). *)
+   if absent or not a recognized variant (a malformed payload skips the op).
+   The value-in-op marker fast path runs FIRST (production carriage), then the
+   serde-shape conversion (the fixture path). *)
 let parse_element (op : Yojson.Safe.t) : Element.element option =
   match member "element" op with
+  | `Assoc [ ("__element_ref__", `String token) ] ->
+    Hashtbl.find_opt element_value_stash token
   | `Null -> None
   | el ->
     (match serde_element_to_test_json el with

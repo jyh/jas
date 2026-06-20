@@ -301,11 +301,19 @@ let cut_selection (model : Model.model) (parent : GWindow.window) () =
       | _ -> confirm_cut_orphans (List.length orphaned) parent
     in
     if proceed then begin
-      (* Undoable edit (one self-bracketed undo step) via edit_document
-         (OP_LOG.md Increment 1). copy_selection only writes the system
-         clipboard, so it carries no document mutation to bracket. *)
+      (* OP_LOG.md section 9 Phase P4 — route the delete-half of the cut through
+         the SHARED [Op_apply.op_apply] dispatcher ([apply_delete_selection], the
+         SAME [Document.delete_selection] body) so the gesture JOURNALS a real
+         [delete_selection] op (one named undo step). [copy_selection] is a
+         non-document side effect (clipboard only — no op). The synchronous
+         orphan confirm above IS the confirm path; only the mutation routes here.
+         Mirrors the Swift [cut_orphan_confirm_ok]. *)
       copy_selection model ();
-      model#edit_document (Document.delete_selection model#document)
+      let ctrl = new Controller.controller ~model () in
+      model#with_txn (fun () ->
+        model#name_txn "cut_orphan_confirm_ok";
+        Op_apply.op_apply model ctrl
+          (`Assoc [ ("op", `String "delete_selection") ]))
     end
   end
 

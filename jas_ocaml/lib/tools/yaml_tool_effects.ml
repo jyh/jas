@@ -514,7 +514,15 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
            ("size", `Float size);
          ] in
          let s = Yojson.Safe.to_string overrides in
-         ctrl#set_selection_stroke_brush_overrides (Some s)
+         (* OP_LOG.md section 9 Phase P6 — route the brush-overrides write on the
+            selection through the SHARED [Op_apply.op_apply] dispatcher
+            ([set_attr_on_selection], the SAME set_selection_stroke_brush_overrides
+            mutator) so this dialog-confirm gesture JOURNALS a real op. Mirrors
+            the Swift [brush_options_confirm] instance_edit route. *)
+         Op_apply.op_apply ctrl#model ctrl
+           (`Assoc [ ("op", `String "set_attr_on_selection");
+                     ("attr", `String "stroke_brush_overrides");
+                     ("value", `String s) ])
        | _ -> ());
       `Null
     end
@@ -580,7 +588,14 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
 
   (* Phase 1 supports brush attributes only; other attrs ignored.
      Used by apply_brush_to_selection / remove_brush_from_selection
-     in actions.yaml. Mirrors the JS Phase 1.8 effect. *)
+     in actions.yaml. Mirrors the JS Phase 1.8 effect.
+     OP_LOG.md section 9 Phase P6: route through the SHARED [Op_apply.op_apply]
+     dispatcher ([apply_set_attr_on_selection], the SAME Controller brush
+     mutator) so the brush-apply / remove gesture JOURNALS a real
+     [set_attr_on_selection] op (verb + RESOLVED literal value + targets). The
+     op carries the RESOLVED value: an empty / null resolved value maps to a
+     CLEAR, encoded as the empty string (the arm reads a present-but-empty
+     [value] as None / clear). Mirrors Rust [doc.set_attr_on_selection]. *)
   let doc_set_attr_on_selection spec ctx store =
     (match spec with
      | `Assoc args ->
@@ -589,18 +604,18 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
          | _ -> "" in
        let value =
          match List.assoc_opt "value" args with
-         | None | Some `Null -> None
+         | None | Some `Null -> ""
          | Some (`String s) ->
            let eval_ctx = State_store.eval_context ~extra:ctx store in
            (match Expr_eval.evaluate s eval_ctx with
-            | Expr_eval.Str rs when rs <> "" -> Some rs
-            | _ -> None)
-         | _ -> None
+            | Expr_eval.Str rs -> rs
+            | _ -> "")
+         | _ -> ""
        in
-       (match attr with
-        | "stroke_brush" -> ctrl#set_selection_stroke_brush value
-        | "stroke_brush_overrides" -> ctrl#set_selection_stroke_brush_overrides value
-        | _ -> ())
+       if attr <> "" then
+         Op_apply.op_apply ctrl#model ctrl
+           (`Assoc [ ("op", `String "set_attr_on_selection");
+                     ("attr", `String attr); ("value", `String value) ])
      | _ -> ());
     `Null
   in
@@ -3875,476 +3890,55 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
   in
 
   (* doc.set_document_setup_field — PRINT.md §1A *)
-  let doc_set_document_setup_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let s = doc.document_setup in
-          let new_setup =
-            let num_val () = eval_number (Some v) store ctx in
-            let bool_val () = eval_bool (Some v) store ctx in
-            let str_val () = eval_str (Some v) in
-            match field with
-            | "bleed_top" -> Some { s with bleed_top = num_val () }
-            | "bleed_right" -> Some { s with bleed_right = num_val () }
-            | "bleed_bottom" -> Some { s with bleed_bottom = num_val () }
-            | "bleed_left" -> Some { s with bleed_left = num_val () }
-            | "bleed_uniform" -> Some { s with bleed_uniform = bool_val () }
-            | "show_images_outline" -> Some { s with show_images_outline = bool_val () }
-            | "highlight_substituted_glyphs" ->
-              Some { s with highlight_substituted_glyphs = bool_val () }
-            (* Phase 6 additions. *)
-            | "grid_size" -> Some { s with grid_size = num_val () }
-            | "grid_color" ->
-              (match str_val () with
-               | Some str -> Some { s with grid_color = str }
-               | None -> None)
-            | "paper_color" ->
-              (match str_val () with
-               | Some str -> Some { s with paper_color = str }
-               | None -> None)
-            | "simulate_colored_paper" ->
-              Some { s with simulate_colored_paper = bool_val () }
-            | "transparency_flattener_preset" ->
-              (match str_val () with
-               | Some str -> Some { s with transparency_flattener_preset =
-                                  Print_preferences.flattener_preset_of_string str }
-               | None -> None)
-            | "discard_white_overprint" ->
-              Some { s with discard_white_overprint = bool_val () }
-            | _ -> None
-          in
-          (match new_setup with
-           | Some ns -> ctrl#set_document { doc with document_setup = ns }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
+  (* The eight print-config field setters (PRINT.md sections 1-6) — OP_LOG.md
+     section 9 Phase P1. Each evaluates its YAML [value] expr to a RESOLVED
+     literal (via [resolve_value_or_expr], the same eval -> [value_to_json]
+     path), builds a [{op, field, value[, index]}] op, and routes through the
+     SHARED [Op_apply.op_apply] dispatcher (which calls
+     [Op_apply.apply_print_config_field], the SAME field-match + type-coerce +
+     set_document body the per-field switches drove before P1). Routing through
+     [op_apply] JOURNALS the edit as a real op so it replays byte-identically
+     (checkpoint_equivalence) and a no-net-change edit drops out at commit.
+     [set_output_ink_field] also carries an [index]; a missing index on the ink
+     verb skips (preserving the old early-return). A type mismatch / unknown
+     field is a no-op inside [op_apply] that journals nothing. One factory; one
+     closure per print-config verb sharing this body. Collapses eight
+     near-identical handlers into one (mirrors the Swift [printConfigHandler]
+     factory). *)
+  let make_print_config_handler verb : Yojson.Safe.t -> _ -> _ -> Yojson.Safe.t =
+    fun spec ctx store ->
+      (match spec with
+       | `Assoc args ->
+         (match List.assoc_opt "field" args with
+          | Some (`String field) ->
+            let value = resolve_value_or_expr (List.assoc_opt "value" args) store ctx in
+            (match value with
+             | `Null -> ()
+             | _ ->
+               let op = [ ("op", `String verb); ("field", `String field);
+                          ("value", value) ] in
+               let op = match verb, List.assoc_opt "index" args with
+                 | "set_output_ink_field", Some (`Int idx) -> op @ [ ("index", `Int idx) ]
+                 | "set_output_ink_field", _ ->
+                   (* The ink verb requires an index; without one, skip (the old
+                      early-return). A sentinel out-of-range index makes the arm
+                      bail without mutating. *)
+                   op @ [ ("index", `Int (-1)) ]
+                 | _ -> op
+               in
+               journal_op (`Assoc op))
+          | _ -> ())
+       | _ -> ());
+      `Null
   in
-
-  (* doc.set_advanced_field — PRINT.md §Phase 6. *)
-  let doc_set_advanced_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let a = p.advanced in
-          let na : Print_preferences.advanced option =
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "print_as_bitmap" -> Some { a with print_as_bitmap = bool_v () }
-            | "overprint_flattener_preset" ->
-              (match str_v () with
-               | Some s -> Some { a with overprint_flattener_preset =
-                                  Print_preferences.flattener_preset_of_string s }
-               | None -> None)
-            | _ -> None
-          in
-          (match na with
-           | Some new_a ->
-             let new_p = { p with advanced = new_a } in
-             ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_print_preferences_field — PRINT.md §1B *)
-  let doc_set_print_preferences_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let np : Print_preferences.t option =
-            let num () = eval_number (Some v) store ctx in
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "preset_name" ->
-              (match str_v () with Some s -> Some { p with preset_name = s } | None -> None)
-            | "printer_name" ->
-              (match str_v () with
-               | Some "" -> Some { p with printer_name = None }
-               | Some s -> Some { p with printer_name = Some s }
-               | None -> None)
-            | "copies" -> Some { p with copies = max 0 (int_of_float (num ())) }
-            | "collate" -> Some { p with collate = bool_v () }
-            | "reverse_order" -> Some { p with reverse_order = bool_v () }
-            | "artboard_range_mode" ->
-              (match str_v () with
-               | Some s -> Some { p with artboard_range_mode =
-                                Print_preferences.artboard_range_mode_of_string s }
-               | None -> None)
-            | "artboard_range" ->
-              (match str_v () with Some s -> Some { p with artboard_range = s } | None -> None)
-            | "ignore_artboards" -> Some { p with ignore_artboards = bool_v () }
-            | "skip_blank_artboards" -> Some { p with skip_blank_artboards = bool_v () }
-            | "media_size" ->
-              (match str_v () with
-               | Some s -> Some { p with media_size = Print_preferences.media_size_of_string s }
-               | None -> None)
-            | "media_width" -> Some { p with media_width = num () }
-            | "media_height" -> Some { p with media_height = num () }
-            | "orientation" ->
-              (match str_v () with
-               | Some s -> Some { p with orientation = Print_preferences.orientation_of_string s }
-               | None -> None)
-            | "auto_rotate" -> Some { p with auto_rotate = bool_v () }
-            | "transverse" -> Some { p with transverse = bool_v () }
-            | "print_layers" ->
-              (match str_v () with
-               | Some s -> Some { p with print_layers = Print_preferences.print_layers_of_string s }
-               | None -> None)
-            | "placement_x" -> Some { p with placement_x = num () }
-            | "placement_y" -> Some { p with placement_y = num () }
-            | "scaling_mode" ->
-              (match str_v () with
-               | Some s -> Some { p with scaling_mode = Print_preferences.scaling_mode_of_string s }
-               | None -> None)
-            | "custom_scale" -> Some { p with custom_scale = num () }
-            | "tile_overlap_h" -> Some { p with tile_overlap_h = num () }
-            | "tile_overlap_v" -> Some { p with tile_overlap_v = num () }
-            | "tile_range" ->
-              (match str_v () with Some s -> Some { p with tile_range = s } | None -> None)
-            | _ -> None
-          in
-          (match np with
-           | Some new_p -> ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_marks_and_bleed_field — PRINT.md §Phase 2. Same wiring
-     shape as doc.set_print_preferences_field above; dispatches by
-     field name onto the marks_and_bleed sub-record and then rebuilds
-     print_preferences with the new value. *)
-  let doc_set_marks_and_bleed_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let m = p.marks_and_bleed in
-          let nm : Print_preferences.marks_and_bleed option =
-            let num () = eval_number (Some v) store ctx in
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "all_printer_marks" -> Some { m with all_printer_marks = bool_v () }
-            | "trim_marks" -> Some { m with trim_marks = bool_v () }
-            | "registration_marks" -> Some { m with registration_marks = bool_v () }
-            | "color_bars" -> Some { m with color_bars = bool_v () }
-            | "page_information" -> Some { m with page_information = bool_v () }
-            | "printer_mark_type" ->
-              (match str_v () with
-               | Some s -> Some { m with printer_mark_type =
-                                  Print_preferences.printer_mark_type_of_string s }
-               | None -> None)
-            | "trim_mark_weight" -> Some { m with trim_mark_weight = num () }
-            | "mark_offset" -> Some { m with mark_offset = num () }
-            | "use_document_bleed" -> Some { m with use_document_bleed = bool_v () }
-            | "bleed_top" -> Some { m with bleed_top = num () }
-            | "bleed_right" -> Some { m with bleed_right = num () }
-            | "bleed_bottom" -> Some { m with bleed_bottom = num () }
-            | "bleed_left" -> Some { m with bleed_left = num () }
-            | _ -> None
-          in
-          (match nm with
-           | Some new_m ->
-             let new_p = { p with marks_and_bleed = new_m } in
-             ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_output_field — PRINT.md §Phase 3. Same wiring shape as
-     doc.set_marks_and_bleed_field; dispatches by field name onto
-     the output sub-record and rebuilds print_preferences. *)
-  let doc_set_output_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let o = p.output in
-          let no : Print_preferences.output option =
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "mode" ->
-              (match str_v () with
-               | Some s -> Some { o with mode = Print_preferences.output_mode_of_string s }
-               | None -> None)
-            | "emulsion" ->
-              (match str_v () with
-               | Some s -> Some { o with emulsion = Print_preferences.emulsion_of_string s }
-               | None -> None)
-            | "image_polarity" ->
-              (match str_v () with
-               | Some s -> Some { o with image_polarity = Print_preferences.image_polarity_of_string s }
-               | None -> None)
-            | "printer_resolution" ->
-              (match str_v () with
-               | Some s -> Some { o with printer_resolution = s }
-               | None -> None)
-            | "convert_spot_to_process" -> Some { o with convert_spot_to_process = bool_v () }
-            | "overprint_black" -> Some { o with overprint_black = bool_v () }
-            | _ -> None
-          in
-          (match no with
-           | Some new_o ->
-             let new_p = { p with output = new_o } in
-             ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_output_ink_field — PRINT.md §Phase 3. Updates one cell
-     of the output.inks table at the given index. *)
-  let doc_set_output_ink_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       let index_opt = List.assoc_opt "index" args in
-       (match field_opt, value_opt, index_opt with
-        | Some (`String field), Some v, Some (`Int idx) ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let o = p.output in
-          let inks = o.inks in
-          if idx < 0 || idx >= List.length inks then ()
-          else begin
-            let ink = List.nth inks idx in
-            let new_ink_opt : Print_preferences.ink_override option =
-              let num () = eval_number (Some v) store ctx in
-              let bool_v () = eval_bool (Some v) store ctx in
-              let str_v () = eval_str (Some v) in
-              match field with
-              | "name" ->
-                (match str_v () with
-                 | Some s -> Some { ink with name = s }
-                 | None -> None)
-              | "print" -> Some { ink with print = bool_v () }
-              | "frequency" -> Some { ink with frequency = num () }
-              | "angle" -> Some { ink with angle = num () }
-              | "dot_shape" ->
-                (match str_v () with
-                 | Some s -> Some { ink with dot_shape = Print_preferences.dot_shape_of_string s }
-                 | None -> None)
-              | _ -> None
-            in
-            (match new_ink_opt with
-             | Some new_ink ->
-               let new_inks = List.mapi (fun i x ->
-                 if i = idx then new_ink else x
-               ) inks in
-               let new_o = { o with inks = new_inks } in
-               let new_p = { p with output = new_o } in
-               ctrl#set_document { doc with print_preferences = new_p }
-             | None -> ())
-          end
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_graphics_field — PRINT.md §Phase 4. Same wiring shape
-     as doc.set_output_field; dispatches by field name onto the
-     graphics sub-record and rebuilds print_preferences. *)
-  let doc_set_graphics_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let g = p.graphics in
-          let ng : Print_preferences.graphics option =
-            let num () = eval_number (Some v) store ctx in
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "flatness" -> Some { g with flatness = num () }
-            | "font_download" ->
-              (match str_v () with
-               | Some s -> Some { g with font_download = Print_preferences.font_download_of_string s }
-               | None -> None)
-            | "postscript_level" ->
-              (match str_v () with
-               | Some s -> Some { g with postscript_level = Print_preferences.postscript_level_of_string s }
-               | None -> None)
-            | "data_format" ->
-              (match str_v () with
-               | Some s -> Some { g with data_format = Print_preferences.data_format_of_string s }
-               | None -> None)
-            | "compatible_gradient_printing" ->
-              Some { g with compatible_gradient_printing = bool_v () }
-            | "raster_effects_resolution" ->
-              Some { g with raster_effects_resolution = num () }
-            | _ -> None
-          in
-          (match ng with
-           | Some new_g ->
-             let new_p = { p with graphics = new_g } in
-             ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
-
-  (* doc.set_color_management_field — PRINT.md §Phase 5. *)
-  let doc_set_color_management_field spec ctx store =
-    let eval_str v_opt =
-      match v_opt with
-      | None -> None
-      | Some (`String s) ->
-        let eval_ctx = State_store.eval_context ~extra:ctx store in
-        (match Expr_eval.evaluate s eval_ctx with
-         | Expr_eval.Str s -> Some s
-         | _ -> Some s)
-      | _ -> None
-    in
-    (match spec with
-     | `Assoc args ->
-       let field_opt = List.assoc_opt "field" args in
-       let value_opt = List.assoc_opt "value" args in
-       (match field_opt, value_opt with
-        | Some (`String field), Some v ->
-          let doc = ctrl#document in
-          let p = doc.print_preferences in
-          let c = p.color_management in
-          let nc : Print_preferences.color_management option =
-            let bool_v () = eval_bool (Some v) store ctx in
-            let str_v () = eval_str (Some v) in
-            match field with
-            | "document_profile" ->
-              (match str_v () with
-               | Some s -> Some { c with document_profile = s }
-               | None -> None)
-            | "color_handling" ->
-              (match str_v () with
-               | Some s -> Some { c with color_handling = Print_preferences.color_handling_of_string s }
-               | None -> None)
-            | "printer_profile" ->
-              (match str_v () with
-               | Some s -> Some { c with printer_profile = s }
-               | None -> None)
-            | "rendering_intent" ->
-              (match str_v () with
-               | Some s -> Some { c with rendering_intent = Print_preferences.rendering_intent_of_string s }
-               | None -> None)
-            | "preserve_rgb_numbers" -> Some { c with preserve_rgb_numbers = bool_v () }
-            | _ -> None
-          in
-          (match nc with
-           | Some new_c ->
-             let new_p = { p with color_management = new_c } in
-             ctrl#set_document { doc with print_preferences = new_p }
-           | None -> ())
-        | _ -> ())
-     | _ -> ());
-    `Null
-  in
+  let doc_set_document_setup_field = make_print_config_handler "set_document_setup_field" in
+  let doc_set_advanced_field = make_print_config_handler "set_advanced_field" in
+  let doc_set_print_preferences_field = make_print_config_handler "set_print_preferences_field" in
+  let doc_set_marks_and_bleed_field = make_print_config_handler "set_marks_and_bleed_field" in
+  let doc_set_output_field = make_print_config_handler "set_output_field" in
+  let doc_set_output_ink_field = make_print_config_handler "set_output_ink_field" in
+  let doc_set_graphics_field = make_print_config_handler "set_graphics_field" in
+  let doc_set_color_management_field = make_print_config_handler "set_color_management_field" in
 
   (* geometry.export_pdf — PRINT.md §1B. Generates a PDF and prompts
      for a save location via GtkFileChooserDialog. *)

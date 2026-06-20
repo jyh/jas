@@ -258,28 +258,20 @@ let set_active_color_live color ~fill_on_top (m : Model.model) =
     end
   end
 
-(** Dispatch a layers action through the compiled YAML effects (Phase 3).
-    Wires snapshot, doc.set, doc.delete_at, doc.clone_at, doc.insert_after
-    to operate on the active Model. Injects active_document rollups and
-    (optionally) panel.layers_panel_selection from the caller — needed by
-    Group B actions (delete_layer_selection, duplicate_layer_selection). *)
-let dispatch_yaml_action
-    ?(panel_selection : int list list = [])
-    ?(on_selection_changed : (int list list -> unit) option = None)
-    ?(params : (string * Yojson.Safe.t) list = [])
-    ?(on_close_dialog : (unit -> unit) option = None)
-    (action_name : string) (m : Model.model) : unit =
-  ignore on_selection_changed;  (* reserved for future bidirectional sync *)
-  match Workspace_loader.load () with
-  | None -> ()
-  | Some ws ->
-    match Workspace_loader.json_member "actions" ws.data with
-    | Some (`Assoc actions_map) ->
-      (match List.assoc_opt action_name actions_map with
-       | Some (`Assoc action_def) ->
-         let effects = match List.assoc_opt "effects" action_def with
-           | Some (`List e) -> e | _ -> []
-         in
+(** Build the Layers-panel platform-effect registry and run [effects] through
+    the shared [Effects.run_effects] pipeline, naming the owning transaction
+    [action_name] (OP_LOG.md section 9). Extracted from [dispatch_yaml_action] so
+    the registry construction has a SINGLE home: the production dispatch and the
+    test seam [run_action_effects_for_test] share ONE registry, so a production-
+    route test exercises exactly the same handlers a panel / menu gesture does.
+    Mirrors the Swift [runLayersPanelEffects]. *)
+let run_action_effects
+    ~(panel_selection : int list list)
+    ~(on_selection_changed : (int list list -> unit) option)
+    ~(params : (string * Yojson.Safe.t) list)
+    ~(on_close_dialog : (unit -> unit) option)
+    ~(action_name : string) (effects : Yojson.Safe.t list) (m : Model.model)
+    : unit =
          let active_doc =
            Active_document_view.build ~panel_selection (Some m)
          in
@@ -307,6 +299,16 @@ let dispatch_yaml_action
             (or for clones, by a marker in the returned JSON). *)
          let element_stash : (string, Element.element) Hashtbl.t = Hashtbl.create 4 in
          let next_stash_id = ref 0 in
+         (* OP_LOG.md section 9: the verb33 doc.* handlers below route through the
+            SHARED [Op_apply.op_apply] dispatcher (the same path the tool gestures
+            use), so each panel/menu gesture JOURNALS a real op (verb + RESOLVED
+            params) into the transaction the [snapshot] handler opened — matching
+            Rust [run_yaml_effect] / Swift [runLayersPanelEffects]. The mutation
+            is byte-identical (op_apply calls the SAME Document / Artboard mutators
+            these handlers used before routing); the only added effect is
+            [record_op]. A shared Controller is reused across handlers (it is a
+            thin wrapper over the model). *)
+         let ctrl = new Controller.controller ~model:m () in
          let snapshot_h : Effects.platform_effect = fun _ _ _ ->
            (* OP_LOG.md Increment 1: the action [snapshot] effect OPENS the
               undo transaction ([begin_txn] pushes the pre-edit checkpoint
@@ -410,7 +412,15 @@ let dispatch_yaml_action
            | _ -> []
          in
          (* doc.wrap_in_group: { paths }. Wraps elements at given paths in
-            a new Group at the topmost source position. *)
+            a new Group at the topmost source position.
+            OP_LOG.md section 9 Phase P5 — route through the SHARED
+            [Op_apply.op_apply] dispatcher ([apply_wrap_in_group], the SAME
+            collect / reverse-delete / insert-at-topmost body) so the multi-step
+            wrap JOURNALS as ONE [wrap_in_group] op carrying the RESOLVED plain
+            index arrays. The top-level-only guard is preserved (the op_apply arm
+            is more general but produces byte-identical results for the top-level
+            case the YAML action always passes). Mirrors the Swift
+            [docWrapInGroupHandler]. *)
          let doc_wrap_in_group_h : Effects.platform_effect = fun spec call_ctx _ ->
            let paths_expr = match spec with
              | `Assoc pairs ->
@@ -430,30 +440,14 @@ let dispatch_yaml_action
               if paths <> [] then begin
                 let sorted = List.sort compare paths in
                 let top_path = List.hd sorted in
-                (* Top-level only for now — nested wrap_in_group requires
-                   Document.insert_element_at which doesn't exist yet. *)
-                if List.length top_path = 1 then begin
-                  let insert_idx = List.hd top_path in
-                  let d = m#document in
-                  let children = List.filter_map (fun p ->
-                    try Some (Document.get_element d p) with _ -> None
-                  ) sorted in
-                  if children <> [] then begin
-                    let rev_sorted = List.rev sorted in
-                    let new_doc = List.fold_left (fun acc p ->
-                      Document.delete_element acc p
-                    ) d rev_sorted in
-                    let new_group = Element.make_group (Array.of_list children) in
-                    let layers = new_doc.Document.layers in
-                    let n = Array.length layers in
-                    let clamped = max 0 (min insert_idx n) in
-                    let new_layers = Array.init (n + 1) (fun i ->
-                      if i < clamped then layers.(i)
-                      else if i = clamped then new_group
-                      else layers.(i - 1)) in
-                    m#set_document { new_doc with Document.layers = new_layers }
-                  end
-                end
+                (* Top-level only for now — preserve the prior guard so input the
+                   prior handler ignored still journals nothing. *)
+                if List.length top_path = 1 then
+                  let paths_json = `List (List.map (fun p ->
+                    `List (List.map (fun i -> `Int i) p)) sorted) in
+                  Op_apply.op_apply m ctrl
+                    (`Assoc [ ("op", `String "wrap_in_group");
+                              ("paths", paths_json) ])
               end);
            `Null
          in
@@ -483,29 +477,30 @@ let dispatch_yaml_action
               in
               if paths <> [] then begin
                 let sorted = List.sort compare paths in
+                (* Resolve the name FIRST (against the live doc) and journal the
+                   LITERAL — replay must NOT re-derive a possibly-colliding name
+                   from the mutated tree. OP_LOG.md section 9 Phase P5. *)
                 let name = match Expr_eval.evaluate name_expr eval_ctx with
                   | Expr_eval.Str s -> s
                   | _ -> "Layer"
                 in
-                let d = m#document in
-                let children = List.filter_map (fun p ->
-                  try Some (Document.get_element d p) with _ -> None
-                ) sorted in
-                if children <> [] then begin
-                  let rev_sorted = List.rev sorted in
-                  let new_doc = List.fold_left (fun acc p ->
-                    Document.delete_element acc p
-                  ) d rev_sorted in
-                  let new_layer = Element.make_layer ~name (Array.of_list children) in
-                  let layers = new_doc.Document.layers in
-                  let new_layers = Array.append layers [|new_layer|] in
-                  m#set_document { new_doc with Document.layers = new_layers }
-                end
+                let paths_json = `List (List.map (fun p ->
+                  `List (List.map (fun i -> `Int i) p)) sorted) in
+                Op_apply.op_apply m ctrl
+                  (`Assoc [ ("op", `String "wrap_in_layer");
+                            ("paths", paths_json); ("name", `String name) ])
               end);
            `Null
          in
          (* doc.unpack_group_at: path. Replaces a Group with its
-            children in place. Top-level only for now. *)
+            children in place. Top-level only for now.
+            OP_LOG.md section 9 Phase P5 — route through the SHARED
+            [Op_apply.op_apply] dispatcher ([apply_unpack_group_at], the SAME
+            extract / delete / re-insert-ascending body) so the multi-step
+            extraction JOURNALS as ONE [unpack_group_at] op carrying the RESOLVED
+            plain index path. The top-level + range + Group guard is preserved
+            (op_apply also no-ops a non-Group target). Mirrors the Swift
+            [docUnpackGroupAtHandler]. *)
          let doc_unpack_group_at_h : Effects.platform_effect = fun value call_ctx _ ->
            let path_expr = match value with `String s -> s | _ -> "" in
            let eval_ctx = `Assoc call_ctx in
@@ -513,17 +508,11 @@ let dispatch_yaml_action
            (match path_val with
             | Expr_eval.Path [idx] when
                 idx >= 0 && idx < Array.length m#document.Document.layers ->
-              let d = m#document in
-              (match d.Document.layers.(idx) with
-               | Element.Group { children; _ } ->
-                 let n = Array.length d.Document.layers in
-                 let k = Array.length children in
-                 let new_layers = Array.init (n - 1 + k) (fun i ->
-                   if i < idx then d.Document.layers.(i)
-                   else if i < idx + k then children.(i - idx)
-                   else d.Document.layers.(i - k + 1))
-                 in
-                 m#set_document { d with Document.layers = new_layers }
+              (match m#document.Document.layers.(idx) with
+               | Element.Group _ ->
+                 Op_apply.op_apply m ctrl
+                   (`Assoc [ ("op", `String "unpack_group_at");
+                             ("path", `List [ `Int idx ]) ])
                | _ -> ())
             | _ -> ());
            `Null
@@ -563,20 +552,30 @@ let dispatch_yaml_action
            in
            (match parent_val, resolve_elem () with
             | Expr_eval.Path [], Some elem ->
-              (* Top-level insert *)
-              let d = m#document in
-              let n = Array.length d.Document.layers in
-              let insert_idx = max 0 (min idx n) in
-              let new_layers = Array.init (n + 1) (fun i ->
-                if i < insert_idx then d.Document.layers.(i)
-                else if i = insert_idx then elem
-                else d.Document.layers.(i - 1))
-              in
-              m#set_document { d with Document.layers = new_layers }
+              (* Top-level insert. OP_LOG.md section 9 Phase P4 — VALUE-IN-OP: the
+                 resolved Layer (from a preceding NON-journaled doc.create_layer
+                 binder) is carried VERBATIM in the op via [Op_apply.stash_element_value]
+                 and routed through the SHARED [Op_apply.op_apply] dispatcher
+                 ([apply_insert_element_at], the SAME [Document.insert_element_at]
+                 top-level body, which clamps the index). Mirrors the Swift
+                 [docInsertAtHandler]. *)
+              let element_json = Op_apply.stash_element_value elem in
+              Op_apply.op_apply m ctrl
+                (`Assoc [ ("op", `String "insert_at");
+                          ("parent_path", `List []);
+                          ("index", `Int idx);
+                          ("element", element_json) ])
             | _ -> ());
            `Null
          in
-         (* doc.delete_at: deletes element at path, stashes + returns a ref. *)
+         (* doc.delete_at: deletes element at path, stashes + returns a ref.
+            OP_LOG.md section 9 Phase P4 — route through the SHARED
+            [Op_apply.op_apply] dispatcher ([apply_delete_element_at], the SAME
+            [Document.delete_element] body) so the deletion JOURNALS a real
+            [delete_at] op. The to-be-removed element is resolved for the optional
+            [as:] return-binding BEFORE op_apply mutates (op_apply returns unit),
+            preserving the Phase-3 return-binding contract. Mirrors the Swift
+            [docDeleteAtHandler]. *)
          let doc_delete_at_h : Effects.platform_effect = fun value call_ctx _ ->
            let path_expr = match value with `String s -> s | _ -> "" in
            let eval_ctx = `Assoc call_ctx in
@@ -584,13 +583,10 @@ let dispatch_yaml_action
            match path_val with
            | Expr_eval.Path [idx] when idx >= 0
               && idx < Array.length m#document.Document.layers ->
-             let d = m#document in
-             let elem = d.Document.layers.(idx) in
-             let new_layers = Array.init (Array.length d.Document.layers - 1) (fun i ->
-               if i < idx then d.Document.layers.(i)
-               else d.Document.layers.(i + 1))
-             in
-             m#set_document { d with Document.layers = new_layers };
+             let elem = m#document.Document.layers.(idx) in
+             Op_apply.op_apply m ctrl
+               (`Assoc [ ("op", `String "delete_at");
+                         ("path", `List [ `Int idx ]) ]);
              let stash_id = Printf.sprintf "__elem_%d__" !next_stash_id in
              incr next_stash_id;
              Hashtbl.add element_stash stash_id elem;
@@ -644,16 +640,19 @@ let dispatch_yaml_action
              | _ -> None
            in
            (match path_val, resolve_elem () with
-            | Expr_eval.Path [idx], Some elem when idx >= 0 ->
-              let d = m#document in
-              let n = Array.length d.Document.layers in
-              let insert_pos = min (idx + 1) n in
-              let new_layers = Array.init (n + 1) (fun i ->
-                if i < insert_pos then d.Document.layers.(i)
-                else if i = insert_pos then elem
-                else d.Document.layers.(i - 1))
-              in
-              m#set_document { d with Document.layers = new_layers }
+            | Expr_eval.Path [idx], Some elem when idx >= 0
+              && idx < Array.length m#document.Document.layers ->
+              (* OP_LOG.md section 9 Phase P4 — VALUE-IN-OP: the resolved Element
+                 (from a preceding NON-journaled doc.clone_at binder) is carried
+                 VERBATIM in the op via [Op_apply.stash_element_value] and routed
+                 through the SHARED [Op_apply.op_apply] dispatcher
+                 ([apply_insert_element_after] -> [Document.insert_element_after]).
+                 Mirrors the Swift [docInsertAfterHandler]. *)
+              let element_json = Op_apply.stash_element_value elem in
+              Op_apply.op_apply m ctrl
+                (`Assoc [ ("op", `String "insert_after");
+                          ("path", `List [ `Int idx ]);
+                          ("element", element_json) ])
             | _ -> ());
            `Null
          in
@@ -790,35 +789,29 @@ let dispatch_yaml_action
          (* ── Artboard handlers (ARTBOARDS.md) ────────────────────
             Mirror jas_dioxus / JasSwift artboard doc.* effects:
             create, delete-by-id, duplicate, set-field, set-options-
-            field, move-up, move-down. Each clones the artboards
-            list, mutates, and calls m#set_document. *)
-         let with_artboards new_artboards =
-           let d = m#document in
-           m#set_document { d with Document.artboards = new_artboards }
-         in
-         let apply_artboard_override (ab : Artboard.artboard) field v =
-           match field, v with
-           | "name", Expr_eval.Str s -> { ab with Artboard.name = s }
-           | "x", Expr_eval.Number n -> { ab with Artboard.x = n }
-           | "y", Expr_eval.Number n -> { ab with Artboard.y = n }
-           | "width", Expr_eval.Number n -> { ab with Artboard.width = n }
-           | "height", Expr_eval.Number n -> { ab with Artboard.height = n }
-           | "fill", Expr_eval.Str s ->
-             { ab with Artboard.fill = Artboard.fill_from_canonical s }
-           | "show_center_mark", Expr_eval.Bool b ->
-             { ab with Artboard.show_center_mark = b }
-           | "show_cross_hairs", Expr_eval.Bool b ->
-             { ab with Artboard.show_cross_hairs = b }
-           | "show_video_safe_areas", Expr_eval.Bool b ->
-             { ab with Artboard.show_video_safe_areas = b }
-           | "video_ruler_pixel_aspect_ratio", Expr_eval.Number n ->
-             { ab with Artboard.video_ruler_pixel_aspect_ratio = n }
-           | _ -> ab
+            field, move-up, move-down. OP_LOG.md section 9 Phase P2/P3 — each
+            resolves its YAML exprs to RESOLVED literals, builds the per-verb op,
+            and routes through the SHARED [Op_apply.op_apply] dispatcher (the SAME
+            Artboard-helper mutation body these handlers used before routing) so
+            the edit JOURNALS a real op and replays byte-identically. *)
+         (* OP_LOG.md section 9 Phase P3 — VALUE-IN-OP: mint the id ONCE here
+            (production entropy / collision retry) and journal it as a LITERAL, so
+            replay reads it VERBATIM and never re-mints. Build a RESOLVED flat
+            [fields] object (the default name derived from the live doc plus each
+            YAML expr evaluated to a literal) and route through the SHARED
+            [Op_apply.op_apply] dispatcher ([apply_create_artboard], the SAME
+            default-with-id + field-override + append body). Mirrors the Swift
+            [docCreateArtboardHandler]. *)
+         let resolve_override_literal eval_ctx ev =
+           match ev with
+           | `String s -> Expr_eval.value_to_json (Expr_eval.evaluate s eval_ctx)
+           | (`Int _ | `Float _ | `Bool _) as lit -> lit
+           | _ -> `Null
          in
          let doc_create_artboard_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
            let d = m#document in
-           (* Mint unique id. *)
+           (* Mint unique id (the ONLY mint; op_apply replays the recorded literal). *)
            let existing = List.map (fun (a : Artboard.artboard) -> a.id) d.Document.artboards in
            let rec mint n =
              if n > 100 then None
@@ -829,37 +822,37 @@ let dispatch_yaml_action
            (match mint 0 with
             | None -> ()
             | Some id ->
-              let ab0 = Artboard.default_with_id id in
-              let ab0 = { ab0 with Artboard.name = Artboard.next_name d.Document.artboards } in
-              let ab = match value with
+              (* Default name (derived from the live doc) + each YAML expr as a
+                 resolved literal. A [name] override in [value] replaces it. *)
+              let base_fields = [ ("name", `String (Artboard.next_name d.Document.artboards)) ] in
+              let override_fields = match value with
                 | `Assoc pairs ->
-                  List.fold_left (fun ab (k, ev) ->
-                    let vv = match ev with
-                      | `String s -> Expr_eval.evaluate s eval_ctx
-                      | `Int n -> Expr_eval.Number (float_of_int n)
-                      | `Float n -> Expr_eval.Number n
-                      | `Bool b -> Expr_eval.Bool b
-                      | _ -> Expr_eval.Null
-                    in
-                    apply_artboard_override ab k vv
-                  ) ab0 pairs
-                | _ -> ab0
+                  List.filter_map (fun (k, ev) ->
+                    match resolve_override_literal eval_ctx ev with
+                    | `Null -> None
+                    | lit -> Some (k, lit)) pairs
+                | _ -> []
               in
-              with_artboards (d.Document.artboards @ [ab]));
+              (* Later (override) entries win; op_apply folds fields in order. *)
+              let dedup_first =
+                List.filter (fun (k, _) -> not (List.mem_assoc k override_fields)) base_fields in
+              let fields = `Assoc (dedup_first @ override_fields) in
+              Op_apply.op_apply m ctrl
+                (`Assoc [ ("op", `String "create_artboard");
+                          ("id", `String id); ("fields", fields) ]));
            `Null
          in
+         (* OP_LOG.md section 9 Phase P2 — route through the SHARED
+            [Op_apply.op_apply] dispatcher ([apply_delete_artboard_by_id], the
+            SAME filter-by-id body). A no-op (missing id) journals nothing. *)
          let doc_delete_artboard_by_id_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
            let id_expr = match value with `String s -> s | _ -> "" in
            (match Expr_eval.evaluate id_expr eval_ctx with
             | Expr_eval.Str target ->
-              let d = m#document in
-              let filtered = List.filter
-                (fun (a : Artboard.artboard) -> a.id <> target)
-                d.Document.artboards
-              in
-              if List.length filtered <> List.length d.Document.artboards then
-                with_artboards filtered
+              Op_apply.op_apply m ctrl
+                (`Assoc [ ("op", `String "delete_artboard_by_id");
+                          ("id", `String target) ])
             | _ -> ());
            `Null
          in
@@ -887,11 +880,17 @@ let dispatch_yaml_action
            (match Expr_eval.evaluate id_expr eval_ctx with
             | Expr_eval.Str target ->
               let d = m#document in
+              (* Resolve the source up front: a missing source short-circuits
+                 BEFORE we mint, so a no-op duplicate journals nothing (matching
+                 the op_apply arm). OP_LOG.md section 9 Phase P3 — VALUE-IN-OP:
+                 mint new_id + derive name HERE (the ONLY mint / derive) and
+                 journal both as literals; op_apply reads them VERBATIM. Mirrors
+                 the Swift [docDuplicateArtboardHandler]. *)
               (match List.find_opt
                        (fun (a : Artboard.artboard) -> a.id = target)
                        d.Document.artboards with
                | None -> ()
-               | Some source ->
+               | Some _source ->
                  let existing = List.map
                    (fun (a : Artboard.artboard) -> a.id)
                    d.Document.artboards in
@@ -904,16 +903,24 @@ let dispatch_yaml_action
                  (match mint 0 with
                   | None -> ()
                   | Some new_id ->
-                    let dup = {
-                      source with
-                      Artboard.id = new_id;
-                      name = Artboard.next_name d.Document.artboards;
-                      x = source.x +. ox;
-                      y = source.y +. oy;
-                    } in
-                    with_artboards (d.Document.artboards @ [dup])))
+                    Op_apply.op_apply m ctrl
+                      (`Assoc [ ("op", `String "duplicate_artboard");
+                                ("id", `String target); ("new_id", `String new_id);
+                                ("name", `String (Artboard.next_name d.Document.artboards));
+                                ("offset_x", `Float ox); ("offset_y", `Float oy) ])))
             | _ -> ());
            `Null
+         in
+         (* OP_LOG.md section 9 Phase P2 — resolve the [value] expr to a RESOLVED
+            literal and route through the SHARED [Op_apply.op_apply] dispatcher
+            ([apply_set_artboard_field], the SAME per-field by-id update body); the
+            arm records [targets:[id]] on an effective change. Mirrors the Swift
+            [docSetArtboardFieldHandler]. *)
+         let resolve_field_literal eval_ctx v_opt =
+           match v_opt with
+           | Some (`String s) -> Expr_eval.value_to_json (Expr_eval.evaluate s eval_ctx)
+           | Some ((`Int _ | `Float _ | `Bool _) as lit) -> lit
+           | _ -> `Null
          in
          let doc_set_artboard_field_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
@@ -923,50 +930,33 @@ let dispatch_yaml_action
                 | Some (`String s) -> s | _ -> "" in
               let field = match List.assoc_opt "field" pairs with
                 | Some (`String s) -> s | _ -> "" in
-              let v_eval = match List.assoc_opt "value" pairs with
-                | Some (`String s) -> Expr_eval.evaluate s eval_ctx
-                | Some (`Int n) -> Expr_eval.Number (float_of_int n)
-                | Some (`Float n) -> Expr_eval.Number n
-                | Some (`Bool b) -> Expr_eval.Bool b
-                | _ -> Expr_eval.Null
-              in
-              (match Expr_eval.evaluate id_expr eval_ctx with
-               | Expr_eval.Str target ->
-                 let d = m#document in
-                 let new_abs = List.map
-                   (fun (a : Artboard.artboard) ->
-                     if a.id = target then apply_artboard_override a field v_eval
-                     else a)
-                   d.Document.artboards in
-                 with_artboards new_abs
+              let v_json = resolve_field_literal eval_ctx (List.assoc_opt "value" pairs) in
+              (match Expr_eval.evaluate id_expr eval_ctx, v_json with
+               | Expr_eval.Str target, (_ as lit) when lit <> `Null ->
+                 Op_apply.op_apply m ctrl
+                   (`Assoc [ ("op", `String "set_artboard_field");
+                             ("id", `String target); ("field", `String field);
+                             ("value", v_json) ])
                | _ -> ())
             | _ -> ());
            `Null
          in
+         (* OP_LOG.md section 9 Phase P2 — document-global artboard-options field
+            (bool only). Route through the SHARED [Op_apply.op_apply] dispatcher
+            ([apply_set_artboard_options_field]); document-global, so empty
+            targets. Mirrors the Swift [docSetArtboardOptionsFieldHandler]. *)
          let doc_set_artboard_options_field_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
            (match value with
             | `Assoc pairs ->
               let field = match List.assoc_opt "field" pairs with
                 | Some (`String s) -> s | _ -> "" in
-              let v = match List.assoc_opt "value" pairs with
-                | Some (`String s) -> Expr_eval.evaluate s eval_ctx
-                | Some (`Bool b) -> Expr_eval.Bool b
-                | _ -> Expr_eval.Null
-              in
-              (match v with
-               | Expr_eval.Bool flag ->
-                 let d = m#document in
-                 let new_opts = match field with
-                   | "fade_region_outside_artboard" ->
-                     { d.Document.artboard_options with
-                       Artboard.fade_region_outside_artboard = flag }
-                   | "update_while_dragging" ->
-                     { d.Document.artboard_options with
-                       Artboard.update_while_dragging = flag }
-                   | _ -> d.Document.artboard_options
-                 in
-                 m#set_document { d with Document.artboard_options = new_opts }
+              let v_json = resolve_field_literal eval_ctx (List.assoc_opt "value" pairs) in
+              (match v_json with
+               | `Bool _ ->
+                 Op_apply.op_apply m ctrl
+                   (`Assoc [ ("op", `String "set_artboard_options_field");
+                             ("field", `String field); ("value", v_json) ])
                | _ -> ())
             | _ -> ());
            `Null
@@ -981,48 +971,29 @@ let dispatch_yaml_action
                | _ -> None) items
            | _ -> []
          in
-         let move_artboards up ids =
-           let d = m#document in
-           let arr = Array.of_list d.Document.artboards in
-           let n = Array.length arr in
-           let selected = List.fold_left (fun set s -> s :: set) [] ids in
-           let is_selected i =
-             i >= 0 && i < n && List.mem arr.(i).Artboard.id selected
-           in
-           let changed = ref false in
-           if up then
-             for i = 0 to n - 1 do
-               if is_selected i && i > 0 && not (is_selected (i - 1)) then begin
-                 let tmp = arr.(i - 1) in
-                 arr.(i - 1) <- arr.(i);
-                 arr.(i) <- tmp;
-                 changed := true
-               end
-             done
-           else
-             for i = n - 1 downto 0 do
-               if is_selected i && i < n - 1 && not (is_selected (i + 1)) then begin
-                 let tmp = arr.(i + 1) in
-                 arr.(i + 1) <- arr.(i);
-                 arr.(i) <- tmp;
-                 changed := true
-               end
-             done;
-           if !changed then
-             with_artboards (Array.to_list arr)
+         (* OP_LOG.md section 9 Phase P2 — resolve the ids list expr to literal
+            strings, build a [{op, ids}] op, and route through the SHARED
+            [Op_apply.op_apply] dispatcher
+            ([apply_move_artboards_up/down], the SAME swap-with-neighbor-
+            skipping-selected body). A boundary no-op journals nothing. Mirrors
+            the Swift [moveArtboards]. *)
+         let move_artboards verb ids =
+           Op_apply.op_apply m ctrl
+             (`Assoc [ ("op", `String verb);
+                       ("ids", `List (List.map (fun s -> `String s) ids)) ])
          in
          let doc_move_artboards_up_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
            let ids_expr = match value with `String s -> s | _ -> "" in
            let ids = extract_id_list (Expr_eval.evaluate ids_expr eval_ctx) in
-           move_artboards true ids;
+           move_artboards "move_artboards_up" ids;
            `Null
          in
          let doc_move_artboards_down_h : Effects.platform_effect = fun value call_ctx _ ->
            let eval_ctx = `Assoc call_ctx in
            let ids_expr = match value with `String s -> s | _ -> "" in
            let ids = extract_id_list (Expr_eval.evaluate ids_expr eval_ctx) in
-           move_artboards false ids;
+           move_artboards "move_artboards_down" ids;
            `Null
          in
          let base_platform_effects = [
@@ -1082,8 +1053,47 @@ let dispatch_yaml_action
            (match on_selection_changed with
             | Some cb -> cb []
             | None -> ())
+
+(** Dispatch a layers action through the compiled YAML effects (Phase 3).
+    Wires snapshot, doc.set, doc.delete_at, doc.clone_at, doc.insert_after
+    to operate on the active Model. Injects active_document rollups and
+    (optionally) panel.layers_panel_selection from the caller — needed by
+    Group B actions (delete_layer_selection, duplicate_layer_selection). *)
+let dispatch_yaml_action
+    ?(panel_selection : int list list = [])
+    ?(on_selection_changed : (int list list -> unit) option = None)
+    ?(params : (string * Yojson.Safe.t) list = [])
+    ?(on_close_dialog : (unit -> unit) option = None)
+    (action_name : string) (m : Model.model) : unit =
+  match Workspace_loader.load () with
+  | None -> ()
+  | Some ws ->
+    match Workspace_loader.json_member "actions" ws.data with
+    | Some (`Assoc actions_map) ->
+      (match List.assoc_opt action_name actions_map with
+       | Some (`Assoc action_def) ->
+         let effects = match List.assoc_opt "effects" action_def with
+           | Some (`List e) -> e | _ -> []
+         in
+         run_action_effects ~panel_selection ~on_selection_changed ~params
+           ~on_close_dialog ~action_name effects m
        | _ -> ())
     | _ -> ()
+
+(** TEST SEAM (OP_LOG.md section 9 production-route proofs). Run an arbitrary
+    [effects] list through the SAME Layers-panel platform-effect registry +
+    owner-bracket the production [dispatch_yaml_action] uses, so a production-
+    route test drives the REAL handlers (not a hand-rolled copy). Used to reach
+    the artboard duplicate / delete / reorder handlers, whose production actions
+    read an artboard-panel selection the renderer-free unit context does not
+    populate. Mirrors the Swift [LayersPanel.runEffectsForTest]. *)
+let run_action_effects_for_test
+    ?(panel_selection : int list list = [])
+    ?(params : (string * Yojson.Safe.t) list = [])
+    (action_name : string) (effects : Yojson.Safe.t list) (m : Model.model)
+    : unit =
+  run_action_effects ~panel_selection ~on_selection_changed:None ~params
+    ~on_close_dialog:None ~action_name effects m
 
 (** Dispatch a menu command for a panel kind. *)
 let panel_dispatch kind cmd addr layout ~fill_on_top ~get_model

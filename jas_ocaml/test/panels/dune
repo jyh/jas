@@ -7,3 +7,8 @@
  (name boolean_apply_test)
  (modules boolean_apply_test)
  (libraries jas alcotest))
+
+(test
+ (name production_route_journal_test)
+ (modules production_route_journal_test)
+ (libraries jas alcotest))
