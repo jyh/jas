@@ -15,6 +15,10 @@ val load : unit -> workspace option
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 val panel : workspace -> string -> Yojson.Safe.t option
+
+(** [concept ws id] returns the concept pack [id] from the registry, or [None]. *)
+val concept : workspace -> string -> Yojson.Safe.t option
+
 val panel_menu : workspace -> string -> Yojson.Safe.t list
 val panel_content : workspace -> string -> Yojson.Safe.t option
 val state_defaults : workspace -> (string * Yojson.Safe.t) list

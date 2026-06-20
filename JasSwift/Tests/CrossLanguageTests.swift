@@ -1788,3 +1788,32 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(failures.isEmpty,
         "concept conformance failures:\n\(failures.joined(separator: "\n"))")
 }
+
+// MARK: - Concept registry (increment 3a)
+
+/// The concept packs are bundled into workspace.json and loadable via
+/// WorkspaceData. Registry -> evaluator round-trip confirms the bundled
+/// generator yields geometry. See CONCEPTS.md §6/§7.
+@Test func conceptRegistry() throws {
+    guard let ws = WorkspaceData.load() else {
+        Issue.record("workspace failed to load")
+        return
+    }
+    let gear = ws.concept("gear")
+    #expect(gear != nil)
+    #expect((gear?["closed"] as? Bool) == true)
+    #expect(((gear?["generator"] as? String) ?? "").contains("mod("))
+    #expect(ws.concept("no_such_concept") == nil)
+
+    guard let poly = ws.concept("regular_polygon"),
+          let generator = poly["generator"] as? String else {
+        Issue.record("regular_polygon not registered")
+        return
+    }
+    let result = evaluate(generator, context: ["param": ["sides": 4, "radius": 10]])
+    guard case .list(let items) = result else {
+        Issue.record("generator did not return a list")
+        return
+    }
+    #expect(items.count == 4)
+}

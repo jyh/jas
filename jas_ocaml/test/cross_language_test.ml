@@ -1153,6 +1153,29 @@ let assert_concept_conformance () =
     assert false
   end
 
+(* Concept registry (increment 3a): the concept packs are bundled into
+   workspace.json and loadable via Workspace_loader. See CONCEPTS.md §6/§7. *)
+let assert_concept_registry () =
+  let open Yojson.Safe.Util in
+  match Jas.Workspace_loader.load () with
+  | None -> failwith "workspace failed to load"
+  | Some ws ->
+    (match Jas.Workspace_loader.concept ws "gear" with
+     | None -> failwith "gear concept not registered"
+     | Some gear ->
+       assert (gear |> member "closed" |> to_bool = true);
+       assert (String.length (gear |> member "generator" |> to_string) > 0));
+    assert (Jas.Workspace_loader.concept ws "no_such_concept" = None);
+    (* Registry -> evaluator round-trip: the bundled generator yields geometry. *)
+    (match Jas.Workspace_loader.concept ws "regular_polygon" with
+     | None -> failwith "regular_polygon not registered"
+     | Some poly ->
+       let g = poly |> member "generator" |> to_string in
+       let ctx = `Assoc [("param", `Assoc [("sides", `Int 4); ("radius", `Int 10)])] in
+       match Jas.Expr_eval.evaluate g ctx with
+       | Jas.Expr_eval.List items -> assert (List.length items = 4)
+       | _ -> failwith "generator did not return a list")
+
 let () =
   Alcotest.run "Cross_language" [
     (* Expression-language conformance (shared corpus) *)
@@ -1165,6 +1188,12 @@ let () =
     "Concept conformance", [
       Alcotest.test_case "concept_conformance all cases" `Quick
         assert_concept_conformance;
+    ];
+
+    (* Concept registry: concepts load from workspace.json (increment 3a) *)
+    "Concept registry", [
+      Alcotest.test_case "concept_registry loads + evaluates" `Quick
+        assert_concept_registry;
     ];
 
     (* Binary round-trip *)

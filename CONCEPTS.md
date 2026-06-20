@@ -1,9 +1,10 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increments 1–2 built — the generator engine + format + cross-language
-gate (`regular_polygon`, `spiral`) and the `floor`/`mod` parity primitives +
-`star`/`gear` (the §6.3 flagship); document/`LiveElement` integration, the fitter,
-operations, and constraints are **designed-but-deferred** (§7). · **Implements:** `VISION.md`
+**Status:** increments 1–2 + 3a built — the generator engine + format + cross-language
+gate (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod`
+parity primitives, and the concept **registry** (concepts bundled into `workspace.json`,
+loadable in every app). Next is **3b**, the `LiveVariant::Generated` document arm; the
+fitter, operations, and constraints follow (§7). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -147,9 +148,12 @@ LiveVariant::Generated { concept_id: String, params: <json map>, common }
   methods + the eval dispatch + the three codecs, propagated Rust → Swift →
   OCaml → Python.
 
-This needs a per-app **concept registry** (load `workspace/concepts/*.yaml` from
-the compiled `workspace.json`) which increment 1 deliberately omits — the corpus
-inlines the generator instead, so the engine is pinned before the wiring.
+This needs a per-app **concept registry** (load the concepts from the compiled
+`workspace.json`). **Increment 3a — ✅ done:** the loader now bundles
+`workspace/concepts/*.yaml` into `workspace.json` under a `concepts` key, and every
+app exposes a `concept(id)` accessor (Python `loader.concept`, Rust/OCaml/Swift
+`Workspace*.concept`), each with a load test that resolves a concept and evaluates
+its generator to geometry. The `Generated` element arm (3b) builds on this.
 
 ---
 
@@ -162,9 +166,12 @@ inlines the generator instead, so the engine is pinned before the wiring.
    the host `%`, whose sign convention differs) were added to the math family and
    corpus-pinned; `star` and `gear` are authored and gated across all five apps.
    This completed the `VISION.md` §6.3 flagship example as data.
-3. **`LiveVariant::Generated` arm + concept registry (§6).** A concept instance
-   lives in a document, renders, round-trips; parameters are editable (the live
-   "tune the same parameters without redoing anything" of §6.4).
+3. **Concept registry + the `LiveVariant::Generated` arm (§6).** (a) ✅ **done** —
+   the registry: concepts compiled into `workspace.json` + a per-app `concept(id)`
+   accessor, each with a load-and-evaluate test (increment 3a). (b) the `Generated`
+   element arm so a concept instance lives in a document, renders, round-trips, with
+   editable parameters (the live "tune the same parameters without redoing anything"
+   of §6.4).
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
