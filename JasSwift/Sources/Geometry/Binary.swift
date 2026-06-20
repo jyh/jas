@@ -693,6 +693,17 @@ private func packElement(_ elem: Element) -> MsgValue {
             let opsJson = recordedOpsCanonical(rec.ops)
             return .array([vint(tagLive)] + common +
                           [vstr("recorded"), vstr(inputsJson), vstr(opsJson)])
+        case .generated(let gen):
+            // GeneratedElem has its own id but no name field (name packs nil).
+            let common = packCommon(locked: gen.locked, opacity: gen.opacity,
+                                    visibility: gen.visibility, transform: gen.transform,
+                                    name: nil, id: gen.id)
+            // The concept id + params ride slots 8/9 as canonical JSON strings
+            // (CONCEPTS.md), mirroring the Rust binary codec.
+            // [tag, common(1..6), kind(7), concept(8), params-json(9)].
+            let paramsJson = canonicalRecordedValue(gen.params)
+            return .array([vint(tagLive)] + common +
+                          [vstr("generated"), vstr(gen.conceptId), vstr(paramsJson)])
         }
     }
 }
@@ -962,6 +973,17 @@ private func unpackElement(_ v: MsgValue) -> Element {
             let ops = decodeRecordedOps(opsJson)
             return .live(.recorded(RecordedElem(
                 ops: ops, inputs: inputs, id: id,
+                transform: xform, opacity: opacity,
+                locked: locked, visibility: vis)))
+        case "generated":
+            // Decode the concept id + params from slots 8/9 (CONCEPTS.md),
+            // mirroring the Rust binary codec.
+            let conceptId = asStr(arr[8])
+            let paramsJson = asStr(arr[9])
+            let params = (try? JSONSerialization.jsonObject(
+                with: Data(paramsJson.utf8))) as? [String: Any] ?? [:]
+            return .live(.generated(GeneratedElem(
+                conceptId: conceptId, params: params, id: id,
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis)))
         default: fatalError("unknown live kind: \(kind)")

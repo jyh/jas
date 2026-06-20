@@ -455,6 +455,15 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             return "\(indent)<g data-jas-live=\"recorded\"" +
                 " data-jas-inputs=\"\(escapeXml(inputs))\"" +
                 "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idAttr(rec.id))></g>"
+        case .generated(let gen):
+            // CONCEPTS.md §6: a generated element exports as a data-jas-live
+            // group carrying the concept id + params JSON. Full SVG round-trip
+            // is deferred. Mirrors Rust's element_svg generated arm.
+            let params = canonicalRecordedValue(gen.params)
+            return "\(indent)<g data-jas-live=\"generated\"" +
+                " data-jas-concept=\"\(escapeXml(gen.conceptId))\"" +
+                " data-jas-params=\"\(escapeXml(params))\"" +
+                "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idAttr(gen.id))></g>"
         }
     }
 }

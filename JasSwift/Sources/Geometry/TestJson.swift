@@ -489,6 +489,13 @@ package func elementJson(_ elem: Element) -> String {
             o.raw("inputs", jsonArray(inputs))
             let ops = rec.ops.map { canonicalRecordedOp($0) }
             o.raw("ops", jsonArray(ops))
+        case .generated(let gen):
+            // CONCEPTS.md §6: a generated element serializes its common props,
+            // the concept id, and the parameter values, canonicalized so it
+            // serializes byte-identically across apps.
+            commonFields(o, gen.opacity, gen.transform, gen.locked, gen.visibility, nil, gen.id)
+            o.str("concept", gen.conceptId)
+            o.raw("params", canonicalRecordedValue(gen.params))
         }
     }
     return o.build()
@@ -1054,6 +1061,15 @@ package func parseElement(_ v: Any?) -> Element {
             let ops = (d["ops"] as? [[String: Any]] ?? []).map { parseRecordedOp($0) }
             return .live(.recorded(RecordedElem(
                 ops: ops, inputs: inputs, id: id,
+                transform: transform, opacity: opacity,
+                locked: locked, visibility: visibility)))
+        case "generated":
+            // CONCEPTS.md §6: read the concept id + parameter values back into
+            // a GeneratedElem.
+            let conceptId = d["concept"] as? String ?? ""
+            let params = d["params"] as? [String: Any] ?? [:]
+            return .live(.generated(GeneratedElem(
+                conceptId: conceptId, params: params, id: id,
                 transform: transform, opacity: opacity,
                 locked: locked, visibility: visibility)))
         default:

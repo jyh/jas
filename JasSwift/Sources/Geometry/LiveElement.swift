@@ -35,8 +35,28 @@ public struct ElementRef: Hashable, Comparable {
 /// geometry layer evaluate by-id references without depending on
 /// Model/Document. Phase 1 backs this with a rebuild-on-demand resolver; the
 /// persistent-incremental index is Phase 4 (REFERENCE_GRAPH.md §2.4).
+/// A resolved concept definition the geometry layer needs to evaluate a
+/// `Generated` element: the generator expression and whether its point list
+/// closes into a polygon (CONCEPTS.md). Mirrors Rust `ConceptDef`.
+public struct ConceptDef {
+    public let generator: String
+    public let closed: Bool
+    public init(generator: String, closed: Bool) {
+        self.generator = generator
+        self.closed = closed
+    }
+}
+
 public protocol ElementResolver {
     func resolve(_ id: ElementRef) -> Element?
+    /// Resolve a concept pack by id from the workspace registry (CONCEPTS.md).
+    /// Defaulted to nil so resolver-unaware paths (and tests with no concept
+    /// registry) treat a `Generated` element as empty, never a trap.
+    func resolveConcept(_ conceptId: String) -> ConceptDef?
+}
+
+public extension ElementResolver {
+    func resolveConcept(_ conceptId: String) -> ConceptDef? { nil }
 }
 
 /// A resolver that resolves nothing. Used on the resolver-unaware call paths
@@ -925,6 +945,8 @@ public func elementToPolygonSetWith(
             return r.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         case .recorded(let rec):
             return rec.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
+        case .generated(let gen):
+            return gen.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
     case .path(let p):
         return flattenPathToRings(p.d)
@@ -1059,6 +1081,108 @@ public func flattenPathToRings(_ d: [PathCommand]) -> BoolPolygonSet {
     return rings
 }
 
+// MARK: - GeneratedElem — parametric concept instance (CONCEPTS.md §6)
+
+/// A `Generated` live element: a parametric concept instance. It stores the
+/// concept pack id and the parameter values; its geometry is produced by
+/// evaluating the concept's generator expression with the parameters bound under
+/// `param`. Unlike `Recorded`/`Reference` it has no by-id inputs — a generator is
+/// self-contained — so it needs only the concept registry, not element
+/// resolution. Mirrors Rust `GeneratedElem`. Common props are carried inline,
+/// matching `RecordedElem`'s layout.
+public struct GeneratedElem: Equatable {
+    /// The concept pack this instance is generated from.
+    public var conceptId: String
+    /// Parameter values, bound under `param` when the generator runs.
+    public var params: [String: Any]
+    public var fill: Fill?
+    public var stroke: Stroke?
+    public var id: String?
+    public var transform: Transform?
+    public var opacity: Double
+    public var locked: Bool
+    public var visibility: Visibility
+    public var blendMode: BlendMode
+    public var mask: Mask?
+
+    public init(
+        conceptId: String,
+        params: [String: Any],
+        fill: Fill? = nil,
+        stroke: Stroke? = nil,
+        id: String? = nil,
+        transform: Transform? = nil,
+        opacity: Double = 1.0,
+        locked: Bool = false,
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal,
+        mask: Mask? = nil
+    ) {
+        self.conceptId = conceptId
+        self.params = params
+        self.fill = fill
+        self.stroke = stroke
+        self.id = id
+        self.transform = transform
+        self.opacity = opacity
+        self.locked = locked
+        self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
+    }
+
+    /// A generated element owns no children and has no by-id dependencies — it is
+    /// self-contained (its inputs are the concept id + parameters).
+    public var dependencies: [ElementRef] { [] }
+
+    /// Manual `Equatable`: `params` is `[String: Any]` (not Equatable), so compare
+    /// it by canonical JSON (the same deterministic serialization the codec
+    /// emits), and every other field structurally.
+    public static func == (lhs: GeneratedElem, rhs: GeneratedElem) -> Bool {
+        lhs.conceptId == rhs.conceptId
+            && lhs.fill == rhs.fill
+            && lhs.stroke == rhs.stroke
+            && lhs.id == rhs.id
+            && lhs.transform == rhs.transform
+            && lhs.opacity == rhs.opacity
+            && lhs.locked == rhs.locked
+            && lhs.visibility == rhs.visibility
+            && lhs.blendMode == rhs.blendMode
+            && lhs.mask == rhs.mask
+            && canonicalRecordedValue(lhs.params) == canonicalRecordedValue(rhs.params)
+    }
+
+    /// Resolve the concept via the registry, evaluate its generator with `params`
+    /// bound under `param`, and turn the resulting list of [x,y] points into a
+    /// ring. An unknown concept, or a generator that does not produce a point
+    /// list, yields an empty set — never a trap. Mirrors Rust
+    /// `GeneratedElem::evaluate_with`.
+    public func evaluateWith(
+        precision: Double, resolver: ElementResolver, visiting: inout VisitSet
+    ) -> BoolPolygonSet {
+        guard let def = resolver.resolveConcept(conceptId) else { return [] }
+        let result = evaluate(def.generator, context: ["param": params])
+        guard case .list(let items) = result else { return [] }
+        var ring: [(Double, Double)] = []
+        for item in items {
+            guard let coords = item.value as? [Any], coords.count == 2,
+                  let x = generatedNum(coords[0]), let y = generatedNum(coords[1]) else {
+                continue
+            }
+            ring.append((x, y))
+        }
+        return ring.count < 2 ? [] : [ring]
+    }
+}
+
+/// Read a numeric value from an `Any` (NSNumber / Double / Int), or nil.
+private func generatedNum(_ v: Any) -> Double? {
+    if let d = v as? Double { return d }
+    if let n = v as? NSNumber { return n.doubleValue }
+    if let i = v as? Int { return Double(i) }
+    return nil
+}
+
 // MARK: - LiveVariant
 
 /// Closed-world enum over all known LiveKinds. Adding a new kind adds
@@ -1068,12 +1192,14 @@ public enum LiveVariant: Equatable {
     case compoundShape(CompoundShape)
     case reference(ReferenceElem)
     case recorded(RecordedElem)
+    case generated(GeneratedElem)
 
     public var kind: String {
         switch self {
         case .compoundShape: return "compound_shape"
         case .reference: return "reference"
         case .recorded: return "recorded"
+        case .generated: return "generated"
         }
     }
 
@@ -1082,6 +1208,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape: return 1
         case .reference: return 1
         case .recorded: return 1
+        case .generated: return 1
         }
     }
 
@@ -1094,6 +1221,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.id
         case .reference(let r): return r.id
         case .recorded(let rec): return rec.id
+        case .generated(let gen): return gen.id
         }
     }
 
@@ -1102,6 +1230,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.fill
         case .reference(let r): return r.fill
         case .recorded(let rec): return rec.fill
+        case .generated(let gen): return gen.fill
         }
     }
 
@@ -1110,6 +1239,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.stroke
         case .reference(let r): return r.stroke
         case .recorded(let rec): return rec.stroke
+        case .generated(let gen): return gen.stroke
         }
     }
 
@@ -1118,6 +1248,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.opacity
         case .reference(let r): return r.opacity
         case .recorded(let rec): return rec.opacity
+        case .generated(let gen): return gen.opacity
         }
     }
 
@@ -1126,6 +1257,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.transform
         case .reference(let r): return r.transform
         case .recorded(let rec): return rec.transform
+        case .generated(let gen): return gen.transform
         }
     }
 
@@ -1134,6 +1266,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.locked
         case .reference(let r): return r.locked
         case .recorded(let rec): return rec.locked
+        case .generated(let gen): return gen.locked
         }
     }
 
@@ -1142,6 +1275,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.visibility
         case .reference(let r): return r.visibility
         case .recorded(let rec): return rec.visibility
+        case .generated(let gen): return gen.visibility
         }
     }
 
@@ -1150,6 +1284,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.blendMode
         case .reference(let r): return r.blendMode
         case .recorded(let rec): return rec.blendMode
+        case .generated(let gen): return gen.blendMode
         }
     }
 
@@ -1158,6 +1293,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape(let cs): return cs.mask
         case .reference(let r): return r.mask
         case .recorded(let rec): return rec.mask
+        case .generated(let gen): return gen.mask
         }
     }
 
@@ -1168,6 +1304,8 @@ public enum LiveVariant: Equatable {
         case .reference: return []
         // A recorded element owns no children; its inputs are by-id edges.
         case .recorded: return []
+        // A generated element owns no children; its geometry comes from the generator.
+        case .generated: return []
         }
     }
 
@@ -1181,6 +1319,7 @@ public enum LiveVariant: Equatable {
         case .compoundShape: return []
         case .reference(let r): return r.dependencies
         case .recorded(let rec): return rec.dependencies
+        case .generated(let gen): return gen.dependencies
         }
     }
 
@@ -1193,6 +1332,8 @@ public enum LiveVariant: Equatable {
         // Likewise degenerate for a recorded element — its geometry is
         // replayed from inputs (mirrors ReferenceElem; Rust stubs the same).
         case .recorded: return (0, 0, 0, 0)
+        // Degenerate too for a generated element — geometry comes from the generator.
+        case .generated: return (0, 0, 0, 0)
         }
     }
 
@@ -1212,6 +1353,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.locked = locked
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.locked = locked
+            return .generated(updated)
         }
     }
 
@@ -1229,6 +1374,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.visibility = visibility
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.visibility = visibility
+            return .generated(updated)
         }
     }
 
@@ -1246,6 +1395,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.transform = transform
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.transform = transform
+            return .generated(updated)
         }
     }
 
@@ -1263,6 +1416,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.fill = fill
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.fill = fill
+            return .generated(updated)
         }
     }
 
@@ -1280,6 +1437,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.stroke = stroke
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.stroke = stroke
+            return .generated(updated)
         }
     }
 
@@ -1297,6 +1458,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.mask = mask
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.mask = mask
+            return .generated(updated)
         }
     }
 
@@ -1320,6 +1485,10 @@ public enum LiveVariant: Equatable {
             var updated = rec
             updated.id = id
             return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.id = id
+            return .generated(updated)
         }
     }
 }

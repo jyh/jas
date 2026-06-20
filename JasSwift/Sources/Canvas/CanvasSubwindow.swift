@@ -1634,6 +1634,13 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                                   resolver: _currentRefResolver, visiting: &visiting)
             liveFill = rec.fill
             liveStroke = rec.stroke
+        case .generated(let gen):
+            // A generated element renders its concept's evaluated geometry,
+            // resolving the concept via the resolver's registry (CONCEPTS.md).
+            ps = gen.evaluateWith(precision: DEFAULT_PRECISION,
+                                  resolver: _currentRefResolver, visiting: &visiting)
+            liveFill = gen.fill
+            liveStroke = gen.stroke
         }
         var fillOp = 1.0
         var strokeOp = 1.0
@@ -1790,6 +1797,9 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
                                 resolver: _currentRefResolver, visiting: &visiting)
         case .recorded(let rec):
             ps = rec.evaluateWith(precision: DEFAULT_PRECISION,
+                                  resolver: _currentRefResolver, visiting: &visiting)
+        case .generated(let gen):
+            ps = gen.evaluateWith(precision: DEFAULT_PRECISION,
                                   resolver: _currentRefResolver, visiting: &visiting)
         }
         for ring in ps where ring.count >= 2 {
