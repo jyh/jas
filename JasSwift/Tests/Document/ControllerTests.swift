@@ -874,6 +874,25 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(out.selection.first?.path == [0, 0])
 }
 
+@Test func placeConceptInstanceAppendsGeneratedAndSelects() {
+    // placeConceptInstance appends a Generated element (concept id + default
+    // params) to the active layer and selects it (CONCEPTS.md §6).
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 6, "radius": 50], elemId: "g1")
+    let out = ctrl.document
+    if case .live(.generated(let g)) = out.getElement([0, 0]) {
+        #expect(g.conceptId == "regular_polygon")
+        #expect(g.id == "g1")
+        #expect((g.params["sides"] as? Int) == 6)
+    } else {
+        Issue.record("expected a Generated at [0,0]")
+    }
+    #expect(out.selection.count == 1)
+    #expect(out.selection.first?.path == [0, 0])
+}
+
 @Test func placeInstanceDanglingMasterOk() {
     // It is fine if the master does not exist; the instance still appears
     // (renders empty until the master exists — dangling is handled).

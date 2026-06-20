@@ -67,6 +67,20 @@ class WorkspaceData {
         (data["concepts"] as? [String: Any])?[id] as? [String: Any]
     }
 
+    /// The concept registry as a sorted list of `{id, name, description}` for the
+    /// Concepts panel's `data.concepts` foreach (CONCEPTS.md §6).
+    func conceptsList() -> [[String: Any]] {
+        guard let map = data["concepts"] as? [String: Any] else { return [] }
+        return map.keys.sorted().map { id in
+            let c = map[id] as? [String: Any] ?? [:]
+            return [
+                "id": id,
+                "name": (c["name"] as? String) ?? id,
+                "description": (c["description"] as? String) ?? "",
+            ]
+        }
+    }
+
     /// Get the panel menu items for a content id.
     func panelMenu(_ contentId: String) -> [[String: Any]] {
         guard let panel = panel(contentId),

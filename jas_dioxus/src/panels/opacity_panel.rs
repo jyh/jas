@@ -138,6 +138,7 @@ mod tests {
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
             symbols_selected: None,
+            concepts_selected: None,
         }
     }
 
