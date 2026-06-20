@@ -42,12 +42,28 @@ pub(crate) const DEFAULT_PRECISION: f64 = 0.0283;
 #[serde(transparent)]
 pub struct ElementRef(pub String);
 
+/// A resolved concept definition the geometry layer needs to evaluate a
+/// `Generated` element: the generator expression and whether its point list
+/// closes into a polygon (CONCEPTS.md).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConceptDef {
+    pub generator: String,
+    pub closed: bool,
+}
+
 /// Resolves a stable element id to the element it currently names. Lets the
 /// geometry layer evaluate by-id references without depending on
 /// Model/Document. Phase 1 backs this with a rebuild-on-demand resolver; the
 /// persistent-incremental index is Phase 4 (REFERENCE_GRAPH.md §2.4).
 pub trait ElementResolver {
     fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>>;
+
+    /// Resolve a concept pack by id from the workspace registry (CONCEPTS.md).
+    /// Defaulted to `None` so resolver-unaware paths (and tests with no concept
+    /// registry) treat a `Generated` element as empty, never a panic.
+    fn resolve_concept(&self, _concept_id: &str) -> Option<ConceptDef> {
+        None
+    }
 }
 
 /// A resolver that resolves nothing. Used on the resolver-unaware call paths
@@ -655,6 +671,88 @@ impl LiveElement for RecordedElem {
     fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
 }
 
+/// A `Generated` live element: a parametric concept instance. It stores the
+/// concept pack id and the parameter values; its geometry is produced by
+/// evaluating the concept's generator expression with the parameters bound under
+/// `param` (CONCEPTS.md §6). Unlike `Recorded`/`Reference` it has no by-id inputs
+/// — a generator is self-contained — so it needs only the concept registry, not
+/// element resolution.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GeneratedElem {
+    /// The concept pack this instance is generated from.
+    pub concept_id: String,
+    /// Parameter values, bound under `param` when the generator runs.
+    pub params: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Fill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<Stroke>,
+    pub common: CommonProps,
+}
+
+impl GeneratedElem {
+    pub fn new(concept_id: String, params: serde_json::Value, common: CommonProps) -> Self {
+        Self { concept_id, params, fill: None, stroke: None, common }
+    }
+
+    /// Resolve the concept via the registry, evaluate its generator with `params`
+    /// bound under `param`, and turn the resulting list of [x,y] points into a
+    /// ring. An unknown concept, or a generator that does not produce a point
+    /// list, yields an empty set — never a panic. Pure and deterministic.
+    pub fn evaluate_with(
+        &self,
+        _precision: f64,
+        resolver: &dyn ElementResolver,
+        _visiting: &mut VisitSet,
+    ) -> PolygonSet {
+        let def = match resolver.resolve_concept(&self.concept_id) {
+            Some(d) => d,
+            None => return PolygonSet::new(),
+        };
+        let ctx = serde_json::json!({ "param": self.params.clone() });
+        let items = match crate::interpreter::expr::eval(&def.generator, &ctx) {
+            crate::interpreter::expr_types::Value::List(items) => items,
+            _ => return PolygonSet::new(),
+        };
+        let ring: Vec<(f64, f64)> = items
+            .iter()
+            .filter_map(|p| {
+                let a = p.as_array()?;
+                if a.len() != 2 {
+                    return None;
+                }
+                Some((a[0].as_f64()?, a[1].as_f64()?))
+            })
+            .collect();
+        if ring.len() < 2 {
+            PolygonSet::new()
+        } else {
+            vec![ring]
+        }
+    }
+}
+
+impl LiveElement for GeneratedElem {
+    fn kind(&self) -> &'static str { "generated" }
+    fn kind_schema_version(&self) -> u32 { 1 }
+    fn common(&self) -> &CommonProps { &self.common }
+    fn common_mut(&mut self) -> &mut CommonProps { &mut self.common }
+    fn fill(&self) -> Option<&Fill> { self.fill.as_ref() }
+    fn stroke(&self) -> Option<&Stroke> { self.stroke.as_ref() }
+    /// A generated element owns no children and has no by-id dependencies — it is
+    /// self-contained (its inputs are the concept id + parameters).
+    fn children(&self) -> &[Rc<Element>] { &[] }
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> { None }
+    fn dependencies(&self) -> Vec<ElementRef> { Vec::new() }
+    /// Resolver-free bounds are degenerate (geometry comes from the generator);
+    /// resolver-aware bounds land with the render wiring, like ReferenceElem.
+    fn bounds(&self) -> Bounds { (0.0, 0.0, 0.0, 0.0) }
+    /// Expand/release are no-ops until the resolver-aware expand path lands
+    /// (mirrors ReferenceElem / RecordedElem — no static source tree).
+    fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
+    fn release(&self) -> Vec<Rc<Element>> { Vec::new() }
+}
+
 /// Normalize a captured journal op-segment into a recorded recipe
 /// (RECORDED_ELEMENTS.md §1/§4): rewrite the captured ops into the input-addressed
 /// `copy`/`translate` form `evaluate_with` consumes, tracking the working set as
@@ -788,6 +886,7 @@ pub enum LiveVariant {
     CompoundShape(CompoundShape),
     Reference(ReferenceElem),
     Recorded(RecordedElem),
+    Generated(GeneratedElem),
 }
 
 impl LiveElement for LiveVariant {
@@ -796,6 +895,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.kind(),
             LiveVariant::Reference(r) => r.kind(),
             LiveVariant::Recorded(rec) => rec.kind(),
+            LiveVariant::Generated(ge) => ge.kind(),
         }
     }
     fn kind_schema_version(&self) -> u32 {
@@ -803,6 +903,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.kind_schema_version(),
             LiveVariant::Reference(r) => r.kind_schema_version(),
             LiveVariant::Recorded(rec) => rec.kind_schema_version(),
+            LiveVariant::Generated(ge) => ge.kind_schema_version(),
         }
     }
     fn common(&self) -> &CommonProps {
@@ -810,6 +911,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.common(),
             LiveVariant::Reference(r) => r.common(),
             LiveVariant::Recorded(rec) => rec.common(),
+            LiveVariant::Generated(ge) => ge.common(),
         }
     }
     fn common_mut(&mut self) -> &mut CommonProps {
@@ -817,6 +919,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.common_mut(),
             LiveVariant::Reference(r) => r.common_mut(),
             LiveVariant::Recorded(rec) => rec.common_mut(),
+            LiveVariant::Generated(ge) => ge.common_mut(),
         }
     }
     fn fill(&self) -> Option<&Fill> {
@@ -824,6 +927,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.fill(),
             LiveVariant::Reference(r) => r.fill(),
             LiveVariant::Recorded(rec) => rec.fill(),
+            LiveVariant::Generated(ge) => ge.fill(),
         }
     }
     fn stroke(&self) -> Option<&Stroke> {
@@ -831,6 +935,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.stroke(),
             LiveVariant::Reference(r) => r.stroke(),
             LiveVariant::Recorded(rec) => rec.stroke(),
+            LiveVariant::Generated(ge) => ge.stroke(),
         }
     }
     fn children(&self) -> &[Rc<Element>] {
@@ -838,6 +943,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.children(),
             LiveVariant::Reference(r) => r.children(),
             LiveVariant::Recorded(rec) => rec.children(),
+            LiveVariant::Generated(ge) => ge.children(),
         }
     }
     fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> {
@@ -845,6 +951,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.children_mut(),
             LiveVariant::Reference(r) => r.children_mut(),
             LiveVariant::Recorded(rec) => rec.children_mut(),
+            LiveVariant::Generated(ge) => ge.children_mut(),
         }
     }
     fn dependencies(&self) -> Vec<ElementRef> {
@@ -852,6 +959,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.dependencies(),
             LiveVariant::Reference(r) => r.dependencies(),
             LiveVariant::Recorded(rec) => rec.dependencies(),
+            LiveVariant::Generated(ge) => ge.dependencies(),
         }
     }
     fn bounds(&self) -> Bounds {
@@ -859,6 +967,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.bounds(),
             LiveVariant::Reference(r) => r.bounds(),
             LiveVariant::Recorded(rec) => rec.bounds(),
+            LiveVariant::Generated(ge) => ge.bounds(),
         }
     }
     fn invalidate(&mut self) {
@@ -866,6 +975,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.invalidate(),
             LiveVariant::Reference(r) => r.invalidate(),
             LiveVariant::Recorded(rec) => rec.invalidate(),
+            LiveVariant::Generated(ge) => ge.invalidate(),
         }
     }
     fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
@@ -873,6 +983,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.expand(precision),
             LiveVariant::Reference(r) => r.expand(precision),
             LiveVariant::Recorded(rec) => rec.expand(precision),
+            LiveVariant::Generated(ge) => ge.expand(precision),
         }
     }
     fn release(&self) -> Vec<Rc<Element>> {
@@ -880,6 +991,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::CompoundShape(cs) => cs.release(),
             LiveVariant::Reference(r) => r.release(),
             LiveVariant::Recorded(rec) => rec.release(),
+            LiveVariant::Generated(ge) => ge.release(),
         }
     }
 }
@@ -946,6 +1058,7 @@ pub(crate) fn element_to_polygon_set_with(
             LiveVariant::CompoundShape(cs) => cs.evaluate_with(precision, resolver, visiting),
             LiveVariant::Reference(r) => r.evaluate_with(precision, resolver, visiting),
             LiveVariant::Recorded(rec) => rec.evaluate_with(precision, resolver, visiting),
+            LiveVariant::Generated(ge) => ge.evaluate_with(precision, resolver, visiting),
         },
         Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
         Element::TextPath(tp) => {
@@ -1508,6 +1621,87 @@ mod tests {
         let back = binary_to_document(&bytes).unwrap();
         assert_eq!(document_to_test_json(&back), json,
             "recorded element survives the binary round-trip");
+    }
+
+    #[test]
+    fn generated_live_variant_round_trips_and_serializes() {
+        // GeneratedElem as a real LiveVariant in a document: it survives the
+        // test_json and binary round-trips and serializes kind=generated +
+        // concept + params (CONCEPTS.md §6).
+        use crate::document::document::Document;
+        use crate::geometry::binary::{binary_to_document, document_to_binary};
+        use crate::geometry::element::LayerElem;
+        use crate::geometry::test_json::{document_to_test_json, test_json_to_document};
+
+        let mut common = CommonProps::default();
+        common.id = Some("poly1".into());
+        let ge = GeneratedElem::new(
+            "regular_polygon".into(),
+            serde_json::json!({"sides": 6, "radius": 50}),
+            common,
+        );
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Generated(ge)))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], artboards: vec![], ..Document::default() };
+
+        let json = document_to_test_json(&doc);
+        assert!(json.contains("\"kind\":\"generated\""), "serializes kind=generated");
+        assert!(json.contains("\"concept\":\"regular_polygon\""), "serializes the concept id");
+        assert!(json.contains("\"params\""), "serializes the params");
+
+        // test_json round-trip (parse → emit is byte-identical).
+        let back = test_json_to_document(&json);
+        assert_eq!(document_to_test_json(&back), json,
+            "generated element survives the test_json round-trip");
+
+        // binary round-trip.
+        let bytes = document_to_binary(&doc, false);
+        let back_bin = binary_to_document(&bytes).unwrap();
+        assert_eq!(document_to_test_json(&back_bin), json,
+            "generated element survives the binary round-trip");
+    }
+
+    #[test]
+    fn generated_evaluates_via_concept_resolver() {
+        // A resolver supplying one concept generator; the Generated element
+        // evaluates through it to the concept's geometry (registry → generator →
+        // points). With no concept (NullResolver) it evaluates empty, never panics.
+        struct OneConcept;
+        impl ElementResolver for OneConcept {
+            fn resolve(&self, _id: &ElementRef) -> Option<Rc<Element>> { None }
+            fn resolve_concept(&self, id: &str) -> Option<ConceptDef> {
+                if id == "regular_polygon" {
+                    Some(ConceptDef {
+                        generator: "map(range(0, param.sides), fun i -> \
+                            let a = 360 * i / param.sides in \
+                            [param.radius * cos(a), param.radius * sin(a)])".into(),
+                        closed: true,
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+
+        let ge = GeneratedElem::new(
+            "regular_polygon".into(),
+            serde_json::json!({"sides": 4, "radius": 10}),
+            CommonProps::default(),
+        );
+        let mut visiting = VisitSet::new();
+        let ps = ge.evaluate_with(1.0, &OneConcept, &mut visiting);
+        assert_eq!(ps.len(), 1, "one ring");
+        assert_eq!(ps[0].len(), 4, "a square has 4 vertices");
+        assert!((ps[0][0].0 - 10.0).abs() < 1e-9 && ps[0][0].1.abs() < 1e-9,
+            "first vertex on +x at radius 10");
+
+        // Unknown concept (NullResolver) → empty, no panic.
+        let mut v2 = VisitSet::new();
+        assert!(ge.evaluate_with(1.0, &NullResolver, &mut v2).is_empty());
     }
 
     #[test]

@@ -170,6 +170,13 @@ fn normalize_element(elem: &Element) -> Element {
                     ..rec.clone()
                 }),
             ),
+            crate::geometry::live::LiveVariant::Generated(ge) => Element::Live(
+                crate::geometry::live::LiveVariant::Generated(crate::geometry::live::GeneratedElem {
+                    fill: ge.fill.as_ref().map(normalize_fill),
+                    stroke: ge.stroke.as_ref().map(normalize_stroke),
+                    ..ge.clone()
+                }),
+            ),
         },
     }
 }

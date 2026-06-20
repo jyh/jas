@@ -555,6 +555,19 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     common_attrs_no_name(&rec.common),
                 )
             }
+            crate::geometry::live::LiveVariant::Generated(ge) => {
+                // Generated elements export as a data-jas-live group carrying the
+                // concept id + params JSON. Full SVG round-trip is deferred
+                // (CONCEPTS.md); no current fixture exercises it.
+                let params = serde_json::to_string(&ge.params).unwrap_or_default();
+                format!(
+                    "{}<g data-jas-live=\"generated\" data-jas-concept=\"{}\" data-jas-params=\"{}\"{}></g>",
+                    indent,
+                    escape_xml(&ge.concept_id),
+                    escape_xml(&params),
+                    common_attrs_no_name(&ge.common),
+                )
+            }
         },
     }
 }

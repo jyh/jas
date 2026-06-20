@@ -7107,6 +7107,7 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
             crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
             crate::geometry::live::LiveVariant::Reference(_) => "Reference",
             crate::geometry::live::LiveVariant::Recorded(_) => "Recorded",
+            crate::geometry::live::LiveVariant::Generated(_) => "Generated",
         },
     }
 }

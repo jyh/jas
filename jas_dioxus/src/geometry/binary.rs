@@ -482,6 +482,14 @@ fn pack_element(elem: &Element) -> Value {
                 Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
                                   vstr("recorded"), vstr(&inputs_json), vstr(&ops_json)])
             }
+            crate::geometry::live::LiveVariant::Generated(ge) => {
+                let (locked, opacity, vis, xform, name, id) = pack_common(&ge.common);
+                // The concept id + params ride slots 8/9 (params as a canonical
+                // JSON string). [tag, common(1..6), kind(7), concept(8), params(9)].
+                let params_json = serde_json::to_string(&ge.params).unwrap_or_default();
+                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("generated"), vstr(&ge.concept_id), vstr(&params_json)])
+            }
         },
     }
 }
@@ -897,6 +905,14 @@ fn unpack_element(v: &Value) -> Element {
                     let ops = serde_json::from_str(as_str(&arr[9])).unwrap_or_default();
                     Element::Live(crate::geometry::live::LiveVariant::Recorded(
                         crate::geometry::live::RecordedElem::new(ops, inputs, common),
+                    ))
+                }
+                "generated" => {
+                    let concept_id = as_str(&arr[8]).to_string();
+                    let params = serde_json::from_str(as_str(&arr[9]))
+                        .unwrap_or(serde_json::Value::Object(Default::default()));
+                    Element::Live(crate::geometry::live::LiveVariant::Generated(
+                        crate::geometry::live::GeneratedElem::new(concept_id, params, common),
                     ))
                 }
                 other => panic!("unknown live kind: {}", other),
