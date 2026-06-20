@@ -113,7 +113,10 @@ fn element_dependencies(elem: &Element) -> Vec<ElementRef> {
             // decision here rather than silently defaulting to no edges.
             // Recorded joins Reference here: its dependencies() are the recipe's
             // input ids (by-id edges), so the reference graph tracks them.
-            LiveVariant::Reference(_) | LiveVariant::CompoundShape(_) | LiveVariant::Recorded(_) => v.dependencies(),
+            // Generated joins here too: its dependencies() are empty (a concept
+            // generator is self-contained, with no by-id inputs).
+            LiveVariant::Reference(_) | LiveVariant::CompoundShape(_)
+            | LiveVariant::Recorded(_) | LiveVariant::Generated(_) => v.dependencies(),
         },
         _ => Vec::new(),
     }

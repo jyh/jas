@@ -629,6 +629,15 @@ fn element_json(elem: &Element) -> String {
                 }).collect();
                 o.raw("ops", json_array(&ops));
             }
+            crate::geometry::live::LiveVariant::Generated(ge) => {
+                o.str_val("type", "live");
+                o.str_val("kind", "generated");
+                common_fields(&mut o, &ge.common);
+                o.str_val("concept", &ge.concept_id);
+                // params canonicalized so the element serializes byte-identically
+                // across apps (sorted keys, fixed floats).
+                o.raw("params", canonical_value(&ge.params));
+            }
         },
     }
     o.build()
@@ -1262,6 +1271,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
                     // `instance_transform` key (absent ⇒ None / null ⇒ None).
                     re.transform = parse_transform_opt(&v["instance_transform"]);
                     Element::Live(crate::geometry::live::LiveVariant::Reference(re))
+                }
+                "generated" => {
+                    let concept_id = v["concept"].as_str().unwrap_or("").to_string();
+                    let params = v["params"].clone();
+                    Element::Live(crate::geometry::live::LiveVariant::Generated(
+                        crate::geometry::live::GeneratedElem::new(concept_id, params, common),
+                    ))
                 }
                 other => panic!("Unknown live kind: {}", other),
             }

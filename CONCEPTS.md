@@ -1,10 +1,12 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increments 1–2 + 3a built — the generator engine + format + cross-language
-gate (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod`
-parity primitives, and the concept **registry** (concepts bundled into `workspace.json`,
-loadable in every app). Next is **3b**, the `LiveVariant::Generated` document arm; the
-fitter, operations, and constraints follow (§7). · **Implements:** `VISION.md`
+**Status:** increments 1–2 + 3a built, **3b Rust lead landed** — the generator engine +
+format + cross-language gate (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3
+flagship), the `floor`/`mod` parity primitives, the concept **registry** (concepts bundled
+into `workspace.json`, loadable in every app), and the **`LiveVariant::Generated` document
+arm in the Rust lead** (model + eval + codecs + tests). Remaining on 3b: propagate to
+Swift/OCaml/Python, a shared round-trip fixture, render-resolver wiring, a creation action.
+The fitter, operations, and constraints follow (§7). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -171,7 +173,12 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    accessor, each with a load-and-evaluate test (increment 3a). (b) the `Generated`
    element arm so a concept instance lives in a document, renders, round-trips, with
    editable parameters (the live "tune the same parameters without redoing anything"
-   of §6.4).
+   of §6.4). **Rust lead ✅:** the `GeneratedElem` model, the 13 `LiveElement` dispatch
+   methods, `evaluate_with` (concept resolved via a registry-extended `ElementResolver`
+   → generator → points → geometry), the test_json/binary/SVG codecs, and round-trip +
+   eval tests. **Remaining:** propagate to Swift/OCaml/Python; a shared cross-language
+   round-trip fixture; wire the production render-resolver's `resolve_concept` to the
+   registry so an instance renders on canvas; and a creation action/UI.
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic

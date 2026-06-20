@@ -2786,6 +2786,14 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
                 new_rec.common.transform = Some(existing.translated(dx, dy));
                 Element::Live(super::live::LiveVariant::Recorded(new_rec))
             }
+            // A generated element's geometry comes from its concept; its own
+            // move rides on common.transform, like a reference.
+            super::live::LiveVariant::Generated(ge) => {
+                let mut new_ge = ge.clone();
+                let existing = new_ge.common.transform.unwrap_or_default();
+                new_ge.common.transform = Some(existing.translated(dx, dy));
+                Element::Live(super::live::LiveVariant::Generated(new_ge))
+            }
         },
     }
 }
@@ -2853,6 +2861,12 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
                     ..rec.clone()
                 }),
             ),
+            super::live::LiveVariant::Generated(ge) => Element::Live(
+                super::live::LiveVariant::Generated(super::live::GeneratedElem {
+                    fill,
+                    ..ge.clone()
+                }),
+            ),
         },
     }
 }
@@ -2907,6 +2921,12 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
                 super::live::LiveVariant::Recorded(super::live::RecordedElem {
                     stroke,
                     ..rec.clone()
+                }),
+            ),
+            super::live::LiveVariant::Generated(ge) => Element::Live(
+                super::live::LiveVariant::Generated(super::live::GeneratedElem {
+                    stroke,
+                    ..ge.clone()
                 }),
             ),
         },
