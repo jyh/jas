@@ -389,6 +389,16 @@ let rec element_svg indent (elem : Element.element) =
       "%s<g data-jas-live=\"recorded\" data-jas-inputs=\"%s\"%s%s%s></g>"
       indent (escape_xml inputs) (id_attr rec_.rec_id)
       (opacity_attr rec_.rec_opacity) (transform_attr rec_.rec_transform)
+  | Live (Generated gen) ->
+    (* A generated element exports as a data-jas-live group carrying the concept
+       id + params JSON. Full SVG round-trip is deferred (CONCEPTS.md); no
+       current fixture exercises it (params not byte-compared). *)
+    Printf.sprintf
+      "%s<g data-jas-live=\"generated\" data-jas-concept=\"%s\" data-jas-params=\"%s\"%s%s%s></g>"
+      indent (escape_xml gen.gen_concept_id)
+      (escape_xml (Yojson.Safe.to_string gen.gen_params))
+      (id_attr gen.gen_id) (opacity_attr gen.gen_opacity)
+      (transform_attr gen.gen_transform)
 
 (* Marks-and-Bleed + DocumentSetup SVG persistence (PRINT.md §Phase 2).
    Stored as <jas:document-setup> and <jas:print-preferences> children

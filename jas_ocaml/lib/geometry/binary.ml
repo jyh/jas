@@ -427,6 +427,15 @@ let rec pack_element = function
              ~visibility:rec_.rec_visibility ~transform:rec_.rec_transform
              ~name:None ~id:rec_.rec_id @
            [vstr "recorded"; vstr inputs_json; vstr ops_json])
+  | Live (Generated gen) ->
+    (* [tag, common(1..6), kind(7), concept(8), params-json(9)], mirroring the
+       recorded codec (CONCEPTS.md). *)
+    let params_json = Yojson.Safe.to_string gen.gen_params in
+    vlist (vint tag_live ::
+           pack_common ~locked:gen.gen_locked ~opacity:gen.gen_opacity
+             ~visibility:gen.gen_visibility ~transform:gen.gen_transform
+             ~name:None ~id:gen.gen_id @
+           [vstr "generated"; vstr gen.gen_concept_id; vstr params_json])
 
 let pack_selection sel =
   let entries = PathMap.fold (fun _path es acc ->
@@ -806,6 +815,21 @@ let rec unpack_element v =
         rec_visibility = visibility;
         rec_blend_mode = Element.Normal;
         rec_mask = None })
+    else if kind = "generated" then
+      (* The concept id + params ride slots 8/9 (CONCEPTS.md), mirroring the
+         recorded codec. *)
+      Live (Generated {
+        gen_concept_id = as_str (List.nth arr 8);
+        gen_params = Yojson.Safe.from_string (as_str (List.nth arr 9));
+        gen_fill = None;
+        gen_stroke = None;
+        gen_id = id;
+        gen_opacity = opacity;
+        gen_transform = transform;
+        gen_locked = locked;
+        gen_visibility = visibility;
+        gen_blend_mode = Element.Normal;
+        gen_mask = None })
     else failwith (Printf.sprintf "unknown live kind: %s" kind)
   else failwith (Printf.sprintf "unknown element tag: %d" tag)
 

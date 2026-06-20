@@ -153,6 +153,7 @@ let opacity_of (e : Element.element) : float =
   | Element.Live (Compound_shape cs) -> cs.opacity
   | Element.Live (Reference r) -> r.Element.ref_opacity
   | Element.Live (Recorded rec_) -> rec_.Element.rec_opacity
+  | Element.Live (Generated gen) -> gen.Element.gen_opacity
 
 let stroke_brush_of (e : Element.element) : string option =
   match e with
@@ -193,6 +194,8 @@ let with_opacity (e : Element.element) (op : float) : Element.element =
     Live (Reference { r with ref_opacity = op })
   | Live (Recorded rec_) ->
     Live (Recorded { rec_ with rec_opacity = op })
+  | Live (Generated gen) ->
+    Live (Generated { gen with gen_opacity = op })
 
 let with_blend_mode (e : Element.element) (bm : Element.blend_mode)
   : Element.element =
@@ -214,6 +217,8 @@ let with_blend_mode (e : Element.element) (bm : Element.blend_mode)
     Live (Reference { r with ref_blend_mode = bm })
   | Live (Recorded rec_) ->
     Live (Recorded { rec_ with rec_blend_mode = bm })
+  | Live (Generated gen) ->
+    Live (Generated { gen with gen_blend_mode = bm })
 
 (* ───────────────────────────────────────────────────────────────── *)
 (* Extract                                                              *)

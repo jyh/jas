@@ -800,6 +800,7 @@ and live_variant =
   | Compound_shape of compound_shape
   | Reference of reference_elem
   | Recorded of recorded_elem
+  | Generated of generated_elem
 
 and compound_operation =
   | Op_union
@@ -866,6 +867,26 @@ and recorded_elem = {
   rec_visibility : visibility;
   rec_blend_mode : blend_mode;
   rec_mask : mask option;
+}
+
+(* A generated (parametric concept-instance) live element (CONCEPTS.md section 6):
+   it stores a concept pack id and the parameter values; its geometry is produced
+   by evaluating the concept's generator expression with the parameters bound under
+   [param]. Unlike [reference_elem] / [recorded_elem] it has no by-id inputs — a
+   generator is self-contained — so it needs only the concept registry, not element
+   resolution. Common props are flattened in-line, matching the other live variants. *)
+and generated_elem = {
+  gen_concept_id : string;
+  gen_params : Yojson.Safe.t;
+  gen_fill : fill option;
+  gen_stroke : stroke option;
+  gen_id : string option;
+  gen_transform : transform option;
+  gen_opacity : float;
+  gen_locked : bool;
+  gen_visibility : visibility;
+  gen_blend_mode : blend_mode;
+  gen_mask : mask option;
 }
 
 (* One normalized recipe op: the verb, its flat params (JSON), and the
@@ -1208,6 +1229,7 @@ let transform_of elem =
   | Live (Compound_shape cs) -> cs.transform
   | Live (Reference r) -> r.ref_transform
   | Live (Recorded rec_) -> rec_.rec_transform
+  | Live (Generated gen) -> gen.gen_transform
 
 let make_line ?(stroke = None) ?(width_points = []) ?(opacity = 1.0) ?(transform = None) ?(locked = false) x1 y1 x2 y2 =
   Line { name = None; id = None; x1; y1; x2; y2; stroke; width_points; opacity; transform; locked; visibility = Preview; blend_mode = Normal; mask = None; stroke_gradient = None }
@@ -1355,6 +1377,7 @@ let is_locked = function
   | Live (Compound_shape cs) -> cs.locked
   | Live (Reference r) -> r.ref_locked
   | Live (Recorded rec_) -> rec_.rec_locked
+  | Live (Generated gen) -> gen.gen_locked
 
 let set_locked v = function
   | Line r -> Line { r with locked = v }
@@ -1371,6 +1394,7 @@ let set_locked v = function
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with locked = v })
   | Live (Reference r) -> Live (Reference { r with ref_locked = v })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_locked = v })
+  | Live (Generated gen) -> Live (Generated { gen with gen_locked = v })
 
 let get_visibility = function
   | Line { visibility; _ } | Rect { visibility; _ } | Circle { visibility; _ }
@@ -1381,6 +1405,7 @@ let get_visibility = function
   | Live (Compound_shape cs) -> cs.visibility
   | Live (Reference r) -> r.ref_visibility
   | Live (Recorded rec_) -> rec_.rec_visibility
+  | Live (Generated gen) -> gen.gen_visibility
 
 let get_blend_mode = function
   | Line { blend_mode; _ } | Rect { blend_mode; _ } | Circle { blend_mode; _ }
@@ -1391,6 +1416,7 @@ let get_blend_mode = function
   | Live (Compound_shape cs) -> cs.blend_mode
   | Live (Reference r) -> r.ref_blend_mode
   | Live (Recorded rec_) -> rec_.rec_blend_mode
+  | Live (Generated gen) -> gen.gen_blend_mode
 
 let set_visibility v = function
   | Line r -> Line { r with visibility = v }
@@ -1407,6 +1433,7 @@ let set_visibility v = function
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with visibility = v })
   | Live (Reference r) -> Live (Reference { r with ref_visibility = v })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_visibility = v })
+  | Live (Generated gen) -> Live (Generated { gen with gen_visibility = v })
 
 let get_transform = function
   | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
@@ -1417,6 +1444,7 @@ let get_transform = function
   | Live (Compound_shape cs) -> cs.transform
   | Live (Reference r) -> r.ref_transform
   | Live (Recorded rec_) -> rec_.rec_transform
+  | Live (Generated gen) -> gen.gen_transform
 
 let set_transform t = function
   | Line r -> Line { r with transform = t }
@@ -1433,6 +1461,7 @@ let set_transform t = function
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with transform = t })
   | Live (Reference r) -> Live (Reference { r with ref_transform = t })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_transform = t })
+  | Live (Generated gen) -> Live (Generated { gen with gen_transform = t })
 
 (** Pre-pend a world-space [translate(dx, dy)] to an existing
     transform matrix. If the element has no current transform,
@@ -1473,6 +1502,7 @@ let with_fill elem f =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with fill = f })
   | Live (Reference r) -> Live (Reference { r with ref_fill = f })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_fill = f })
+  | Live (Generated gen) -> Live (Generated { gen with gen_fill = f })
   | Line _ | Group _ | Layer _ -> elem
 
 let with_stroke elem s =
@@ -1489,6 +1519,7 @@ let with_stroke elem s =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with stroke = s })
   | Live (Reference r) -> Live (Reference { r with ref_stroke = s })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_stroke = s })
+  | Live (Generated gen) -> Live (Generated { gen with gen_stroke = s })
   | Group _ | Layer _ -> elem
 
 (* Path-only — Phase 1 brush model lives on PathElem alone. Other
@@ -1549,6 +1580,7 @@ let with_mask elem (m : mask option) =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with mask = m })
   | Live (Reference r) -> Live (Reference { r with ref_mask = m })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_mask = m })
+  | Live (Generated gen) -> Live (Generated { gen with gen_mask = m })
 
 (** Return the opacity mask attached to [elem], if any. *)
 let get_mask elem : mask option =
@@ -1560,6 +1592,7 @@ let get_mask elem : mask option =
   | Live (Compound_shape cs) -> cs.mask
   | Live (Reference r) -> r.ref_mask
   | Live (Recorded rec_) -> rec_.rec_mask
+  | Live (Generated gen) -> gen.gen_mask
 
 let with_width_points elem wp =
   match elem with
@@ -1621,6 +1654,7 @@ let id_of = function
   | Live (Compound_shape cs) -> cs.id
   | Live (Reference r) -> r.ref_id
   | Live (Recorded rec_) -> rec_.rec_id
+  | Live (Generated gen) -> gen.gen_id
 
 (* Return a copy of [elem] with its id set (additive identity). *)
 let with_id elem (i : string option) =
@@ -1639,6 +1673,7 @@ let with_id elem (i : string option) =
   | Live (Compound_shape cs) -> Live (Compound_shape { cs with id = i })
   | Live (Reference r) -> Live (Reference { r with ref_id = i })
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_id = i })
+  | Live (Generated gen) -> Live (Generated { gen with gen_id = i })
 
 (* Recursively clear the stable id on [elem] and all of its descendants,
    returning a fresh element. A DUPLICATED element must not inherit the

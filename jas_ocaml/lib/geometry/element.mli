@@ -542,6 +542,10 @@ and live_variant =
       input-addressed op-segment replayed against the current inputs.
       See [recorded_elem] and RECORDED_ELEMENTS.md. *)
   | Recorded of recorded_elem
+  (** A generated (parametric concept-instance) live element: a concept
+      pack id + parameter values, evaluated through the concept's
+      generator expression. See [generated_elem] and CONCEPTS.md. *)
+  | Generated of generated_elem
 
 (** Which boolean operation a compound shape evaluates to. Only the
     four Shape Mode operations can be compound. *)
@@ -613,6 +617,25 @@ and recorded_elem = {
   rec_visibility : visibility;
   rec_blend_mode : blend_mode;
   rec_mask : mask option;
+}
+
+(** A generated (parametric concept-instance) live element (CONCEPTS.md
+    section 6): a concept pack id and parameter values; its geometry is
+    produced by evaluating the concept's generator expression with the
+    parameters bound under [param]. Self-contained (no by-id inputs).
+    Common props are flattened in-line, matching the other live variants. *)
+and generated_elem = {
+  gen_concept_id : string;
+  gen_params : Yojson.Safe.t;
+  gen_fill : fill option;
+  gen_stroke : stroke option;
+  gen_id : string option;
+  gen_transform : transform option;
+  gen_opacity : float;
+  gen_locked : bool;
+  gen_visibility : visibility;
+  gen_blend_mode : blend_mode;
+  gen_mask : mask option;
 }
 
 (** One normalized recipe op (RECORDED_ELEMENTS.md): the verb, its flat
