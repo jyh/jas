@@ -270,10 +270,8 @@ pub(crate) fn make_keydown_handler(
                         };
                         let Some(tab) = st.tab_mut() else { return; };
                         tab.clipboard = elements;
-                        tab.model.with_txn(|m| {
-                            let new_doc = m.document().delete_selection();
-                            m.set_document(new_doc);
-                        });
+                        crate::document::op_apply::journal_delete_selection(
+                            &mut tab.model, "cut_selection");
                     }));
                 } else {
                     let live_state = {
@@ -614,10 +612,8 @@ pub(crate) fn make_keydown_handler(
                 if orphan_count == 0 {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| {
-                                let new_doc = m.document().delete_selection();
-                                m.set_document(new_doc);
-                            });
+                            crate::document::op_apply::journal_delete_selection(
+                                &mut tab.model, "delete_selection");
                         }
                     }));
                 } else {
