@@ -19,6 +19,16 @@ type element_resolver = Element.element_ref -> Element.element option
     resolved through it is treated as dangling. *)
 val null_resolver : element_resolver
 
+(** Resolves a concept pack id to its generator — a closure from the instance's
+    parameters (a JSON object) to the generated [x,y] point list. Built by a
+    layer that has the expression evaluator + workspace registry, so the
+    geometry layer stays decoupled from both (CONCEPTS.md). The OCaml analogue
+    of Rust's [resolver.resolve_concept] + [expr::eval]. *)
+type concept_resolver = string -> (Yojson.Safe.t -> (float * float) list) option
+
+(** A concept resolver that resolves nothing (Generated -> empty geometry). *)
+val null_concept_resolver : concept_resolver
+
 (** The cycle-guard set threaded through evaluation. Carried as an
     explicit parameter so all five apps break reference cycles
     identically (REFERENCE_GRAPH.md section 3). *)
@@ -98,6 +108,7 @@ val element_to_polygon_set :
     except by-id references resolve through the resolver, with the visit
     set breaking cycles. *)
 val element_to_polygon_set_with :
+  ?concept_resolver:concept_resolver ->
   Element.element -> float -> element_resolver ->
   VisitSet.t ref -> Boolean.polygon_set
 
@@ -141,6 +152,13 @@ val reference_evaluate :
 val recorded_evaluate :
   Element.recorded_elem -> float -> element_resolver ->
   VisitSet.t ref -> Boolean.polygon_set
+
+(** Resolver-aware evaluation of a generated (concept-instance) element:
+    resolve the concept's generator via [concept_resolver], run it over the
+    instance parameters, and return the resulting ring (empty if unresolved or
+    fewer than two points). Mirrors Rust [GeneratedElem::evaluate_with]. *)
+val generated_evaluate :
+  Element.generated_elem -> float -> concept_resolver -> Boolean.polygon_set
 
 (** Normalize a captured journal op-segment into a recorded recipe
     (RECORDED_ELEMENTS.md section 1 / section 4): rewrite selection-relative

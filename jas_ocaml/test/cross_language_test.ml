@@ -90,7 +90,11 @@ let json_roundtrip_names =
                         field is set (the "instance_transform" key)
                         round-trips through test_json distinct from
                         [ref_transform] (SYMBOLS.md section 4 / Fork F2). *)
-                     "reference_instance_transform"]
+                     "reference_instance_transform";
+                     (* CONCEPTS.md 3b: a Generated concept-instance (concept id
+                        + params) round-trips byte-identically to the
+                        Rust-authored golden — the cross-language pin. *)
+                     "generated_polygon"]
 (* Binary fixtures. Includes the id-bearing "element_ids" fixture and the Live
    element fixtures (REFERENCE_GRAPH.md Phase 2b): reference + compound now
    serialize through binary (TAG_LIVE, kind-discriminated), so both the
@@ -1176,6 +1180,41 @@ let assert_concept_registry () =
        | Jas.Expr_eval.List items -> assert (List.length items = 4)
        | _ -> failwith "generator did not return a list")
 
+(* A Generated element evaluates through a concept_resolver to the concept's
+   geometry (CONCEPTS.md 3b). Mirrors the Rust generated_evaluates_via_concept_resolver. *)
+let assert_generated_element_evaluates () =
+  let generator =
+    "map(range(0, param.sides), fun i -> \
+     let a = 360 * i / param.sides in \
+     [param.radius * cos(a), param.radius * sin(a)])"
+  in
+  let num = function `Float f -> f | `Int i -> float_of_int i | _ -> nan in
+  let concept_resolver : Jas.Live.concept_resolver = fun id ->
+    if id = "regular_polygon" then
+      Some (fun params ->
+        match Jas.Expr_eval.evaluate generator (`Assoc [ ("param", params) ]) with
+        | Jas.Expr_eval.List items ->
+          List.filter_map (function `List [ a; b ] -> Some (num a, num b) | _ -> None) items
+        | _ -> [])
+    else None
+  in
+  let gen : Jas.Element.generated_elem =
+    let open Jas.Element in
+    { gen_concept_id = "regular_polygon";
+      gen_params = `Assoc [ ("sides", `Int 4); ("radius", `Int 10) ];
+      gen_fill = None; gen_stroke = None; gen_id = None; gen_transform = None;
+      gen_opacity = 1.0; gen_locked = false; gen_visibility = Preview;
+      gen_blend_mode = Normal; gen_mask = None }
+  in
+  let ps = Jas.Live.generated_evaluate gen 0.1 concept_resolver in
+  assert (List.length ps = 1);
+  let ring = List.hd ps in
+  assert (Array.length ring = 4);
+  let (x0, y0) = ring.(0) in
+  assert (Float.abs (x0 -. 10.0) < 1e-9 && Float.abs y0 < 1e-9);
+  (* Unknown concept (null resolver) -> empty, never a failure. *)
+  assert (Jas.Live.generated_evaluate gen 0.1 Jas.Live.null_concept_resolver = [])
+
 let () =
   Alcotest.run "Cross_language" [
     (* Expression-language conformance (shared corpus) *)
@@ -1194,6 +1233,12 @@ let () =
     "Concept registry", [
       Alcotest.test_case "concept_registry loads + evaluates" `Quick
         assert_concept_registry;
+    ];
+
+    (* Generated element evaluation (CONCEPTS.md 3b) *)
+    "Generated element", [
+      Alcotest.test_case "generated_element evaluates via concept_resolver" `Quick
+        assert_generated_element_evaluates;
     ];
 
     (* Binary round-trip *)

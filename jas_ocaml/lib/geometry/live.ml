@@ -21,6 +21,18 @@ type element_resolver = element_ref -> element option
    treated as dangling. *)
 let null_resolver : element_resolver = fun _ -> None
 
+(* Resolves a concept pack id to its generator: a function from the instance's
+   parameters (a JSON object) to the generated [x,y] point list. The closure is
+   built by a layer that has the expression evaluator + the workspace registry
+   (CONCEPTS.md), so the geometry layer stays decoupled from both — the OCaml
+   analogue of Rust's resolver.resolve_concept + expr::eval. OCaml's
+   [element_resolver] is a bare function, so concept resolution rides a SEPARATE
+   optional resolver threaded through evaluation; resolver-unaware paths use
+   [null_concept_resolver] (Generated -> empty, never a crash). *)
+type concept_resolver = string -> (Yojson.Safe.t -> (float * float) list) option
+
+let null_concept_resolver : concept_resolver = fun _ -> None
+
 (* The cycle-guard set threaded through evaluation. Carried as an
    explicit parameter (never instance / thread state) so all five apps
    break reference cycles identically (REFERENCE_GRAPH.md section 3). *)
@@ -37,6 +49,9 @@ let dependencies (lv : live_variant) : element_ref list =
   (* A recorded element rebinds its inputs by stable id (by-id edges), so
      the reference graph tracks them — like a reference. *)
   | Recorded rec_ -> rec_.rec_inputs
+  (* A generated element is self-contained (concept id + params); no by-id
+     inputs, so no dependency edges. *)
+  | Generated _ -> []
 
 (* ------------------------------------------------------------------ *)
 (* Render-scoped resolver (REFERENCE_GRAPH.md Phase 1b)               *)
@@ -67,6 +82,7 @@ let resolver_id (elem : element) : element_ref option =
   | Live (Compound_shape cs) -> cs.id
   | Live (Reference r) -> r.ref_id
   | Live (Recorded rec_) -> rec_.rec_id
+  | Live (Generated gen) -> gen.gen_id
 
 (* Persistent id->element index (REFERENCE_GRAPH.md section 2.4, Phase 4b).
    [Map.Make(String)] gives O(log n) lookup/insert, O(1) structure-sharing
@@ -342,7 +358,8 @@ let clear_recompute_cache_for_test () =
    [visiting] breaking cycles. The 2-arg [element_to_polygon_set]
    wrapper below passes [null_resolver], so existing call sites are
    behavior-identical. *)
-let rec element_to_polygon_set_with elem precision resolver visiting =
+let rec element_to_polygon_set_with
+    ?(concept_resolver = null_concept_resolver) elem precision resolver visiting =
   match elem with
   | Rect { x; y; width; height; _ } ->
     [| (x, y); (x +. width, y); (x +. width, y +. height); (x, y +. height) |]
@@ -358,11 +375,12 @@ let rec element_to_polygon_set_with elem precision resolver visiting =
   | Ellipse { cx; cy; rx; ry; _ } -> [ellipse_to_ring cx cy rx ry precision]
   | Group { children; _ } | Layer { children; _ } ->
     Array.fold_left (fun acc child ->
-      acc @ element_to_polygon_set_with child precision resolver visiting
+      acc @ element_to_polygon_set_with ~concept_resolver child precision resolver visiting
     ) [] children
   | Live (Compound_shape cs) -> evaluate_with cs precision resolver visiting
   | Live (Reference r) -> reference_evaluate_with r precision resolver visiting
   | Live (Recorded rec_) -> recorded_evaluate_with rec_ precision resolver visiting
+  | Live (Generated gen) -> generated_evaluate_with gen precision concept_resolver
   | Path { d; _ } | Text_path { d; _ } -> flatten_path_to_rings d
   (* Line has zero area; Text glyph flattening deferred. *)
   | Line _ | Text _ -> []
@@ -567,6 +585,25 @@ and recorded_evaluate_with (rec_ : recorded_elem) precision _resolver visiting =
       | None -> acc
     ) [] ordered
   end
+
+(* Evaluate a generated (concept-instance) element: resolve its concept's
+   generator via [concept_resolver] (a params -> points closure built by a layer
+   with the expression evaluator + registry), run it over [gen_params], and
+   return the resulting ring. An unresolved concept, or a generator producing
+   fewer than two points, yields an empty set — never a failure. Pure and
+   deterministic. Mirrors Rust GeneratedElem::evaluate_with. *)
+and generated_evaluate_with (gen : generated_elem) _precision
+    (concept_resolver : concept_resolver) =
+  match concept_resolver gen.gen_concept_id with
+  | None -> []
+  | Some gen_fn ->
+    let points = gen_fn gen.gen_params in
+    if List.length points < 2 then [] else [ Array.of_list points ]
+
+(* Resolver-aware generated-element evaluation, exposed for tests / future render
+   wiring. Mirrors Rust GeneratedElem::evaluate_with. *)
+let generated_evaluate gen precision concept_resolver =
+  generated_evaluate_with gen precision concept_resolver
 
 (* Convenience wrapper that resolves no references — see
    [element_to_polygon_set_with] for the resolver-aware form used when a
@@ -777,4 +814,8 @@ let () =
     (* Resolver-free bounds are degenerate for a recorded element too — its
        geometry is replayed from inputs; resolver-aware bounds land with the
        render wiring, like Reference. *)
-    | Recorded _ -> (0.0, 0.0, 0.0, 0.0))
+    | Recorded _ -> (0.0, 0.0, 0.0, 0.0)
+    (* Resolver-free bounds are degenerate for a generated element — its
+       geometry comes from the concept generator (CONCEPTS.md); resolver-aware
+       bounds land with the render wiring, like Reference / Recorded. *)
+    | Generated _ -> (0.0, 0.0, 0.0, 0.0))

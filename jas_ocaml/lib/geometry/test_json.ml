@@ -528,6 +528,18 @@ let rec element_json = function
     ) rec_.rec_ops in
     json_raw o "ops" (json_array ops);
     json_build o
+  | Live (Generated gen) ->
+    let o = json_obj () in
+    json_str o "type" "live";
+    json_str o "kind" "generated";
+    common_fields o ~opacity:gen.gen_opacity ~transform:gen.gen_transform
+      ~locked:gen.gen_locked ~visibility:gen.gen_visibility
+      ~name:None ~id:gen.gen_id ();
+    json_str o "concept" gen.gen_concept_id;
+    (* params canonicalized so the element serializes byte-identically across
+       apps (sorted keys, fixed floats). *)
+    json_raw o "params" (canonical_value gen.gen_params);
+    json_build o
 
 (* ------------------------------------------------------------------ *)
 (* Selection serializer                                               *)
@@ -1124,6 +1136,20 @@ let rec parse_element j =
          rec_visibility = visibility;
          rec_blend_mode = Normal;
          rec_mask = None;
+       })
+     | "generated" ->
+       Live (Generated {
+         gen_concept_id = j |> member "concept" |> to_string;
+         gen_params = j |> member "params";
+         gen_fill = None;
+         gen_stroke = None;
+         gen_id = id;
+         gen_transform = transform;
+         gen_opacity = opacity;
+         gen_locked = locked;
+         gen_visibility = visibility;
+         gen_blend_mode = Normal;
+         gen_mask = None;
        })
      | other -> failwith (Printf.sprintf "Unknown live kind: %s" other))
   | _ -> failwith (Printf.sprintf "Unknown element type: %s" typ)

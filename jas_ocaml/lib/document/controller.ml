@@ -1057,6 +1057,7 @@ let element_fill = function
   | Element.Live (Element.Compound_shape cs) -> Some cs.fill
   | Element.Live (Element.Reference r) -> Some r.Element.ref_fill
   | Element.Live (Element.Recorded rec_) -> Some rec_.Element.rec_fill
+  | Element.Live (Element.Generated gen) -> Some gen.Element.gen_fill
   | Element.Line _ | Element.Group _ | Element.Layer _ -> None
 
 let element_stroke = function
@@ -1068,6 +1069,7 @@ let element_stroke = function
   | Element.Live (Element.Compound_shape cs) -> Some cs.stroke
   | Element.Live (Element.Reference r) -> Some r.Element.ref_stroke
   | Element.Live (Element.Recorded rec_) -> Some rec_.Element.rec_stroke
+  | Element.Live (Element.Generated gen) -> Some gen.Element.gen_stroke
   | Element.Group _ | Element.Layer _ -> None
 
 let selection_fill_summary (doc : Document.document) =
