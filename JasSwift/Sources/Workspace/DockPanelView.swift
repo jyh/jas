@@ -298,7 +298,7 @@ public struct PanelGroupView: View {
             "state": stateMap,
             "panel": panelMap,
             "icons": icons,
-            "data": ["swatch_libraries": swatchLibs] as [String: Any],
+            "data": ["swatch_libraries": swatchLibs, "concepts": ws.conceptsList()] as [String: Any],
             "active_document": buildActiveDocumentView(
                 model: model,
                 layersPanelSelection: layersPanelSelection

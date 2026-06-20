@@ -220,6 +220,27 @@ class DictResolver:
     def resolve(self, ref: "ElementRef") -> "Element | None":
         return self._index.get(ref)
 
+    def resolve_concept(self, concept_id: str):
+        """Resolve a concept pack from the workspace registry (CONCEPTS.md §6) so
+        a placed Generated instance evaluates its geometry on the render path.
+        The loader import is lazy to keep this geometry module decoupled from the
+        interpreter at load time. Mirrors the Rust ``RenderResolver`` reading the
+        cached workspace; returns ``None`` when the concept is unknown.
+        """
+        from geometry.element import ConceptDef
+        import os
+        try:
+            from workspace_interpreter.loader import load_workspace, concept as _concept
+            ws_dir = os.path.join(
+                os.path.dirname(__file__), "..", "..", "workspace")
+            c = _concept(load_workspace(ws_dir), concept_id)
+        except Exception:
+            return None
+        if c is None:
+            return None
+        return ConceptDef(
+            generator=c["generator"], closed=bool(c.get("closed", True)))
+
 
 def _collect_ref_ids(elem: "Element", out: dict[str, "Element"]) -> None:
     """Index ``elem`` (and its descendants) by stable id into ``out``.

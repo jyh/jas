@@ -616,3 +616,23 @@ def test_generated_evaluates_via_concept_resolver():
     # Unknown concept (NullResolver) -> empty, no error.
     assert element_to_polygon_set_with(
         ge, DEFAULT_PRECISION, NullResolver(), set()) == []
+
+
+def test_dict_resolver_resolves_concepts_from_registry():
+    # The production DictResolver resolves concept packs from the workspace
+    # registry, so a placed Generated instance evaluates its geometry on the
+    # render path (CONCEPTS.md 3b render wiring; mirrors Rust/Swift).
+    from geometry.live import DictResolver
+    from geometry.element import GeneratedElem
+
+    r = DictResolver({})
+    d = r.resolve_concept("regular_polygon")
+    assert d is not None
+    assert "cos(" in d.generator
+    assert r.resolve_concept("no_such_concept") is None
+
+    ge = GeneratedElem(concept_id="regular_polygon",
+                       params={"sides": 4, "radius": 10})
+    ps = ge.evaluate_with(1.0, r, set())
+    assert len(ps) == 1
+    assert len(ps[0]) == 4

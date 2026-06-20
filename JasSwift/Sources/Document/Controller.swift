@@ -172,6 +172,16 @@ public class Controller {
         addElement(reference)
     }
 
+    /// Append a new generated instance of `conceptId` (with the given default
+    /// `params`) to the active layer and select it (CONCEPTS.md §6). The element
+    /// id is minted by the initiator (value-in-op). Mirrors Rust
+    /// `Controller::place_concept_instance`.
+    public func placeConceptInstance(conceptId: String, params: [String: Any], elemId: String) {
+        let generated = Element.live(.generated(GeneratedElem(
+            conceptId: conceptId, params: params, id: elemId)))
+        addElement(generated)
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance
     /// at `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md
     /// §7, Fork S6 — the inverse of Make Symbol). The target id is resolved by

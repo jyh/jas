@@ -235,6 +235,9 @@ pub(crate) struct AppState {
     /// deletion. The target of Place Instance and Delete Symbol
     /// (SYMBOLS.md §8).
     pub(crate) symbols_selected: Option<String>,
+    /// Id of the panel-selected concept in the Concepts panel, or None.
+    /// The target of Place Instance (CONCEPTS.md §6).
+    pub(crate) concepts_selected: Option<String>,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -731,6 +734,7 @@ impl AppState {
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
             symbols_selected: None,
+            concepts_selected: None,
         }
     }
 

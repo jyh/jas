@@ -298,6 +298,19 @@ class Controller:
         from geometry.element import ReferenceElem
         self.add_element(ReferenceElem(target=master_id, id=ref_id))
 
+    def place_concept_instance(
+        self, concept_id: str, params: dict, elem_id: str
+    ) -> None:
+        """Place a generated instance of ``concept_id`` (with the given default
+        ``params``) on the active layer via ``add_element`` (auto-selects). The
+        element carries ``id = elem_id``, minted by the initiator. Mirrors the
+        Rust ``Controller::place_concept_instance``.
+        """
+        from geometry.element import GeneratedElem
+        self.add_element(
+            GeneratedElem(concept_id=concept_id, params=params, id=elem_id)
+        )
+
     def detach(self, path: ElementPath) -> None:
         """Detach (break the link / expand): replace the ``ReferenceElem``
         instance at ``path`` with an INDEPENDENT copy of its resolved target

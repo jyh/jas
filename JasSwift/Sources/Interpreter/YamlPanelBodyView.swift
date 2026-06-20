@@ -971,6 +971,12 @@ struct YamlElementView: View {
             // active panel, so SymbolsPanel reads / writes it directly.
             SymbolsPanel.dispatchSymbolAction(name, model: model)
             return
+        case "place_concept_instance":
+            // Concepts panel: native intercept (the YAML action is a `log`
+            // stub). Build a Generated element from the panel-selected concept
+            // + its default params, id minted value-in-op. Mirrors the Rust arm.
+            ConceptsPanel.dispatch(name, model: model)
+            return
         default:
             break
         }

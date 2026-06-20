@@ -663,6 +663,48 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 }
                 return Vec::new();
             }
+            // ── Concepts panel (CONCEPTS.md §6) ──
+            // Track the panel-selected concept natively (mirrors symbols), in
+            // addition to the generic set_panel_state that drives the panel UI.
+            "concepts_panel_select" => {
+                st.concepts_selected = params
+                    .get("concept_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                return Vec::new();
+            }
+            // Place a generated instance of the panel-selected concept, with the
+            // concept's declared default params, minting a fresh id (value-in-op).
+            "place_concept_instance" => {
+                let Some(concept_id) = st.concepts_selected.clone() else {
+                    return Vec::new();
+                };
+                let params = crate::interpreter::workspace::Workspace::load()
+                    .and_then(|w| w.concept(&concept_id).cloned())
+                    .map(|c| {
+                        let mut obj = serde_json::Map::new();
+                        if let Some(ps) = c.get("params").and_then(|p| p.as_array()) {
+                            for p in ps {
+                                if let (Some(name), Some(def)) = (
+                                    p.get("name").and_then(|n| n.as_str()),
+                                    p.get("default"),
+                                ) {
+                                    obj.insert(name.to_string(), def.clone());
+                                }
+                            }
+                        }
+                        serde_json::Value::Object(obj)
+                    })
+                    .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+                if let Some(tab) = st.tab_mut() {
+                    let existing = existing_ids(&tab.model);
+                    let Some(elem_id) = mint(&existing) else { return Vec::new(); };
+                    tab.model.with_txn(|m| {
+                        Controller::place_concept_instance(m, &concept_id, params.clone(), &elem_id)
+                    });
+                }
+                return Vec::new();
+            }
             // Delete the panel-selected master. Reference-aware: warn via
             // a confirm dialog when it still has instances.
             "delete_symbol_action" => {

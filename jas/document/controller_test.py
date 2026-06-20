@@ -922,6 +922,22 @@ class SymbolOpsTest(absltest.TestCase):
         self.assertEqual(len(doc.selection), 1)
         self.assertEqual(next(iter(doc.selection)).path, (0, 0))
 
+    def test_place_concept_instance_appends_generated_and_selects(self):
+        # place_concept_instance appends a Generated element (concept id +
+        # default params) to the active layer and selects it (CONCEPTS.md §6).
+        from geometry.element import GeneratedElem
+        ctrl = Controller(model=Model())
+        ctrl.place_concept_instance(
+            "regular_polygon", {"sides": 6, "radius": 50}, "g1")
+        doc = ctrl.document
+        el = doc.get_element((0, 0))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.concept_id, "regular_polygon")
+        self.assertEqual(el.params, {"sides": 6, "radius": 50})
+        self.assertEqual(el.id, "g1")
+        self.assertEqual(len(doc.selection), 1)
+        self.assertEqual(next(iter(doc.selection)).path, (0, 0))
+
     def test_place_instance_dangling_master_ok(self):
         # It is fine if the master does not exist; the instance still appears
         # (renders empty until the master exists — dangling is handled).

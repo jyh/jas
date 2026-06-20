@@ -353,6 +353,28 @@ impl Controller {
         Self::add_element(model, reference);
     }
 
+    /// Append a new generated instance of `concept_id` (with the given default
+    /// `params`) to the active layer and select it (CONCEPTS.md §6). The element
+    /// id is minted by the caller (value-in-op). Mirrors `place_instance`.
+    pub fn place_concept_instance(
+        model: &mut Model,
+        concept_id: &str,
+        params: serde_json::Value,
+        elem_id: &str,
+    ) {
+        let generated = Element::Live(crate::geometry::live::LiveVariant::Generated(
+            crate::geometry::live::GeneratedElem::new(
+                concept_id.to_string(),
+                params,
+                crate::geometry::element::CommonProps {
+                    id: Some(elem_id.to_string()),
+                    ..crate::geometry::element::CommonProps::default()
+                },
+            ),
+        ));
+        Self::add_element(model, generated);
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance at
     /// `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md §7,
     /// Fork S6 — the inverse of Make Symbol). The target id is resolved by a
@@ -3681,6 +3703,28 @@ mod tests {
         assert_eq!(re.target.0, "m1");
         assert_eq!(re.common.id.as_deref(), Some("i2"));
         // The new instance is the selection (auto-select via add_element).
+        assert_eq!(doc.selection.len(), 1);
+        assert_eq!(doc.selection[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn place_concept_instance_appends_generated_and_selects() {
+        // place_concept_instance appends a Generated element (concept id +
+        // default params) to the active layer and selects it (CONCEPTS.md §6).
+        let mut model = Model::default();
+        let params = serde_json::json!({ "radius": 50.0, "sides": 6.0 });
+        Controller::place_concept_instance(&mut model, "regular_polygon", params.clone(), "g1");
+        let doc = model.document();
+        let el = doc.get_element(&vec![0, 0]).expect("appended element");
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Generated(g),
+        ) = el
+        else {
+            panic!("expected a generated element");
+        };
+        assert_eq!(g.concept_id, "regular_polygon");
+        assert_eq!(g.params, params);
+        assert_eq!(g.common.id.as_deref(), Some("g1"));
         assert_eq!(doc.selection.len(), 1);
         assert_eq!(doc.selection[0].path, vec![0, 0]);
     }
