@@ -374,6 +374,20 @@ class DockPanelWidget(QWidget):
                     data["swatch_libraries"] = ws["swatch_libraries"]
                 if "brush_libraries" in ws:
                     data["brush_libraries"] = ws["brush_libraries"]
+                # data.concepts: the concept-pack registry as a sorted list, so
+                # the Concepts panel's `foreach source: data.concepts` resolves
+                # (CONCEPTS.md §6). Mirrors the Flask/Rust/Swift exposure.
+                if "concepts" in ws:
+                    data["concepts"] = [
+                        {
+                            "id": c["id"],
+                            "name": c.get("name", c["id"]),
+                            "description": c.get("description", ""),
+                        }
+                        for c in sorted(
+                            ws["concepts"].values(), key=lambda c: c["id"]
+                        )
+                    ]
                 if data:
                     ctx["data"] = data
             # Pass model accessor so panels (e.g. layers) can read/write the document
