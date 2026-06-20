@@ -34,7 +34,16 @@ _DATA_KEYS = ("swatch_libraries", "brush_libraries")
 
 def _collect_workspace_data(ws: dict) -> dict:
     """Gather the workspace top-level keys exposed to YAML data scope."""
-    return {k: ws[k] for k in _DATA_KEYS if k in ws}
+    data = {k: ws[k] for k in _DATA_KEYS if k in ws}
+    # Concept packs are exposed as a sorted list of {id, name, description} so the
+    # Concepts panel's `foreach source: data.concepts` renders one row per concept
+    # (CONCEPTS.md §6). The registry itself is a dict keyed by id.
+    concepts = ws.get("concepts", {}) or {}
+    data["concepts"] = [
+        {"id": cid, "name": c.get("name", cid), "description": c.get("description", "")}
+        for cid, c in sorted(concepts.items())
+    ]
+    return data
 
 
 def _resolve_brand(ws: dict, workspace_path: str | None) -> None:
