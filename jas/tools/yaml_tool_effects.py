@@ -490,7 +490,25 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         elif mode == "instance_edit":
             import json as _json
             overrides = {"angle": angle, "roundness": roundness, "size": size}
-            controller.set_selection_stroke_brush_overrides(_json.dumps(overrides))
+            # OP_LOG.md §9 Phase P6 — route the brush-overrides write on the
+            # selection through the SHARED op_apply dispatcher
+            # (set_attr_on_selection, the SAME set_selection_stroke_brush_overrides
+            # mutator) so this dialog-confirm gesture JOURNALS a real op. The
+            # brush_options_confirm action emits no `snapshot`, so this owns its
+            # own one-step named transaction (the write was previously a
+            # self-bracketing edit_document) — but only if no transaction is
+            # already open (the same ownership rule edit_document used), so a
+            # reentrant caller's bracket is preserved. Mirrors the Swift port.
+            ovr_json = _json.dumps(overrides)
+            model = controller.model
+            owns = not model.in_txn
+            if owns:
+                model.begin_txn()
+                model.name_txn("brush_options_confirm")
+            op_apply(model, {"op": "set_attr_on_selection",
+                             "attr": "stroke_brush_overrides", "value": ovr_json})
+            if owns:
+                model.commit_txn()
 
         return None
 
@@ -546,23 +564,28 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     def doc_set_attr_on_selection(spec, ctx, store):
         """Phase 1 supports brush attributes only; other attrs ignored.
         Used by apply_brush_to_selection / remove_brush_from_selection.
-        Mirrors the JS Phase 1.8 effect."""
+
+        OP_LOG.md §9 Phase P6 — route through the SHARED op_apply dispatcher
+        (apply_set_attr_on_selection, the SAME Controller brush mutator) so the
+        brush-apply gesture JOURNALS a real set_attr_on_selection op (verb +
+        RESOLVED literal value + targets). The op carries the RESOLVED value: an
+        empty/null resolved value maps to a CLEAR, encoded as the empty string
+        (the arm reads a present-but-empty `value` as None/clear; an ABSENT
+        `value` key would hard-skip). Mirrors the Rust doc.set_attr_on_selection.
+        """
         if not isinstance(spec, dict):
             return None
         attr = spec.get("attr")
         if not isinstance(attr, str) or not attr:
             return None
-        value = None
+        value = ""
         raw = spec.get("value")
         if raw is not None:
             v = _eval_value(raw, store, ctx)
             if v.type == ValueType.STRING and v.value:
                 value = v.value
-        if attr == "stroke_brush":
-            controller.set_selection_stroke_brush(value)
-        elif attr == "stroke_brush_overrides":
-            controller.set_selection_stroke_brush_overrides(value)
-        # Phase 1: other attrs ignored
+        op_apply(controller.model, {
+            "op": "set_attr_on_selection", "attr": attr, "value": value})
         return None
 
     def doc_copy_selection(spec, ctx, store):

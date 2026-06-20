@@ -688,9 +688,25 @@ def parse_element(op: dict):
     """Deserialize the ``element`` op param (Rust serde externally-tagged JSON)
     into an Element. Returns ``None`` if the field is absent or is not a
     recognized variant (a malformed payload skips the op). Mirrors the Rust
-    ``parse_element`` (serde_json::from_value) via the Swift conversion strategy."""
+    ``parse_element`` (serde_json::from_value) via the Swift conversion strategy.
+
+    VALUE-IN-OP — production fast path (OP_LOG.md §9): the cross-language
+    fixtures carry ``element`` as a serde-externally-tagged dict (the portable,
+    disk-shareable form Rust emits via ``serde_json::to_value``); the PYTHON
+    production handlers (``doc.insert_after`` / ``doc.insert_at``) already hold an
+    in-memory :class:`Element` (Python's :class:`Layer` / :class:`Group` /
+    :class:`Path` ... built by a preceding NON-journaled ``doc.clone_at`` /
+    ``doc.create_layer`` binder), so they pass that ``Element`` VERBATIM under the
+    SAME ``element`` key. This fast path returns it directly — additive and
+    fixture-neutral (a fixture never stores a live Element value), so the
+    byte-gated dispatch arms are unchanged. The in-process journal replays the
+    same op dict (which holds the Element), so checkpoint_equivalence holds in
+    process. Mirrors the Swift ``parseSerdeElement`` fast path."""
+    from geometry.element import Element
     from geometry.test_json import parse_element_json
     el = op.get("element")
+    if isinstance(el, Element):
+        return el
     conv = _serde_element_to_test_json(el)
     if conv is None:
         return None

@@ -354,6 +354,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
     from workspace_interpreter.state_store import StateStore
     from workspace_interpreter.effects import run_effects
     from workspace_interpreter.expr import evaluate
+    from document.op_apply import op_apply
     import os
 
     # Locate workspace.json — the compiled actions catalog.
@@ -473,12 +474,13 @@ def _dispatch_yaml_layers_action(action_name: str, model,
                 elem = ctx_val
         if elem is None:
             return None
-        layers = list(model.document.layers)
-        insert_idx = max(0, min(idx, len(layers)))
-        layers.insert(insert_idx, elem)
-        model.document = dataclasses.replace(
-            model.document, layers=tuple(layers)
-        )
+        # OP_LOG.md §9 VALUE-IN-OP — the resolved Layer (from the preceding
+        # NON-journaled doc.create_layer binder) is carried VERBATIM under
+        # `element` and routed through the SHARED op_apply dispatcher
+        # (insert_element_at, the SAME top-level [Layer] insert body, which clamps
+        # the index). Top-level insert only (parent_path is empty).
+        op_apply(model, {"op": "insert_at", "parent_path": [],
+                         "index": int(idx), "element": elem})
         return None
 
     # doc.delete_at: "path(...)". Deletes the element at the given path
@@ -486,6 +488,12 @@ def _dispatch_yaml_layers_action(action_name: str, model,
     # duplicate_layer_selection's clone-then-insert chain can thread it
     # through the as:-binding ctx.
     def doc_delete_at_handler(value, call_ctx, _store):
+        # OP_LOG.md §9 — route through the SHARED op_apply dispatcher
+        # (apply_delete_element_at, the SAME Document.delete_element body) so the
+        # gesture JOURNALS a real delete_at op. The optional as:-bound removed
+        # element is resolved from the LIVE doc BEFORE op_apply mutates it
+        # (op_apply has no return value), preserving the duplicate_layer
+        # clone-then-insert chain's return-binding contract.
         path_expr = value if isinstance(value, str) else ""
         v = evaluate(path_expr, call_ctx)
         if v.type.name != "PATH":
@@ -498,7 +506,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             elem = doc.get_element(indices)
         except Exception:
             return None
-        model.document = doc.delete_element(indices)
+        op_apply(model, {"op": "delete_at", "path": list(indices)})
         return elem
 
     def doc_clone_at_handler(value, call_ctx, _store):
@@ -536,11 +544,21 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             elem = el_spec
         if elem is None:
             return None
-        model.document = model.document.insert_element_after(indices, elem)
+        # OP_LOG.md §9 VALUE-IN-OP — the resolved Element (from the preceding
+        # NON-journaled doc.clone_at binder) is carried VERBATIM under `element`
+        # and routed through the SHARED op_apply dispatcher
+        # (apply_insert_element_after -> Document.insert_element_after). The
+        # parse_element fast path returns the live Element untouched, so the
+        # in-process journal replays it byte-identically.
+        op_apply(model, {"op": "insert_after",
+                         "path": list(indices), "element": elem})
         return None
 
     def doc_unpack_group_at_handler(value, call_ctx, _store):
-        from geometry.element import Group as _Group
+        # OP_LOG.md §9 — route the multi-step group extraction through the SHARED
+        # op_apply dispatcher (apply_unpack_group_at) so it JOURNALS as ONE
+        # unpack_group_at op carrying the RESOLVED plain index path. A non-Group
+        # target (or empty path) is a no-op inside the arm.
         path_expr = value if isinstance(value, str) else ""
         v = evaluate(path_expr, call_ctx)
         if v.type.name != "PATH":
@@ -548,63 +566,61 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         indices = tuple(v.value)
         if not indices:
             return None
-        doc = model.document
-        try:
-            elem = doc.get_element(indices)
-        except Exception:
-            return None
-        if not isinstance(elem, _Group):
-            return None
-        children = list(elem.children)
-        new_doc = doc.delete_element(indices)
-        # Insert each child at the group's position in reverse order so
-        # they end up in the original child order at the parent site.
-        for child in reversed(children):
-            new_doc = new_doc.insert_element_after(
-                indices[:-1] + (indices[-1] - 1,) if indices[-1] > 0 else indices,
-                child,
-            ) if indices[-1] == 0 else new_doc.insert_element_after(
-                indices[:-1] + (indices[-1] - 1,), child
-            )
-        model.document = new_doc
+        op_apply(model, {"op": "unpack_group_at", "path": list(indices)})
         return None
 
     def doc_wrap_in_layer_handler(spec, call_ctx, _store):
-        import dataclasses as _dc
-        from geometry.element import Layer as _Layer
+        # OP_LOG.md §9 — route the multi-step wrap through the SHARED op_apply
+        # dispatcher (apply_wrap_in_layer) so it JOURNALS as ONE wrap_in_layer op.
+        # CRITICAL: the `name` expr is resolved against the LIVE doc FIRST and
+        # journaled as the RESOLVED LITERAL — replay must NOT re-derive a
+        # possibly-colliding name from the (now-mutated) tree. The __path__
+        # markers are normalized to plain index arrays for the op.
         if not isinstance(spec, dict):
             return None
         paths_expr = spec.get("paths", "[]")
         v = evaluate(str(paths_expr), call_ctx)
         if v.type.name != "LIST":
             return None
-        # Decode list of __path__ markers into index tuples.
+        # Decode list of __path__ markers into plain index arrays.
         paths = []
         for item in v.value:
             if isinstance(item, dict) and "__path__" in item:
                 indices = item["__path__"]
                 if isinstance(indices, (list, tuple)):
-                    paths.append(tuple(int(i) for i in indices))
+                    paths.append([int(i) for i in indices])
         if not paths:
             return None
-        # Resolve name expression (defaults to "'Layer'").
+        # Resolve name expression (defaults to "'Layer'") — RESOLVED literal.
         name_expr = spec.get("name", "'Layer'")
         nm = evaluate(str(name_expr), call_ctx)
         name = nm.value if nm.type.name == "STRING" else "Layer"
-        # Collect elements in document order, then remove sources from
-        # bottom-up so earlier indices stay valid.
-        sorted_paths = sorted(paths)
-        try:
-            elems = tuple(model.document.get_element(pp) for pp in sorted_paths)
-        except Exception:
+        op_apply(model, {"op": "wrap_in_layer", "paths": paths, "name": name})
+        return None
+
+    def doc_wrap_in_group_handler(spec, call_ctx, _store):
+        # OP_LOG.md §9 — wrap nested same-parent elements into a new Group at the
+        # topmost source position, routed through the SHARED op_apply dispatcher
+        # (apply_wrap_in_group). Parity fix: Python previously had NO
+        # doc.wrap_in_group production handler (the new_group action's effect was
+        # silently dropped as an unknown effect — a no-op), so this site both
+        # WORKS for the first time and journals one wrap_in_group op carrying the
+        # RESOLVED plain index arrays. Matches the Rust / Swift / OCaml semantics.
+        if not isinstance(spec, dict):
             return None
-        new_doc = model.document
-        for pp in sorted(sorted_paths, reverse=True):
-            new_doc = new_doc.delete_element(pp)
-        new_layer = _Layer(name=name, children=elems)
-        model.document = _dc.replace(
-            new_doc, layers=new_doc.layers + (new_layer,)
-        )
+        paths_expr = spec.get("paths", "[]")
+        v = evaluate(str(paths_expr), call_ctx)
+        if v.type.name != "LIST":
+            return None
+        paths = []
+        for item in v.value:
+            if isinstance(item, dict) and "__path__" in item:
+                indices = item["__path__"]
+                if isinstance(indices, (list, tuple)):
+                    paths.append([int(i) for i in indices])
+        if not paths:
+            return None
+        op_apply(model, {"op": "wrap_in_group", "paths": paths})
         return None
 
     # list_push: {target, value}. Phase 3 Group D (enter_isolation_mode).
@@ -650,6 +666,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "doc.insert_after": doc_insert_after_handler,
         "doc.unpack_group_at": doc_unpack_group_at_handler,
         "doc.wrap_in_layer": doc_wrap_in_layer_handler,
+        "doc.wrap_in_group": doc_wrap_in_group_handler,
         "list_push": list_push_handler,
         "pop": pop_handler,
         **build_artboard_handlers(model),

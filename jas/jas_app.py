@@ -1053,11 +1053,13 @@ class MainWindow(QMainWindow):
         # Reference-aware delete: a delete that would orphan a live
         # reference asks for confirmation first (shared with Edit>Delete
         # so both entry points warn identically). Cancel aborts.
-        from menu.menu import _confirm_delete_if_orphans
+        from menu.menu import _confirm_delete_if_orphans, _route_delete_selection
         if not _confirm_delete_if_orphans(m, self):
             return
-        # Undoable edit (one self-bracketed undo step).
-        m.edit_document(doc.delete_selection())
+        # OP_LOG.md §9 — route the keyboard Delete through the SHARED op_apply
+        # dispatcher (one named delete_selection op / one undo step), matching the
+        # Edit > Delete menu path.
+        _route_delete_selection(m, "delete_selection")
 
     def _zoom_in(self):
         """Zoom in by zoom_step centered at viewport center.
