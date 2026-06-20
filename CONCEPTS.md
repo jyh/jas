@@ -187,7 +187,15 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    `RenderResolver.resolve_concept` reads the cached `Workspace` registry, so a `Generated`
    instance evaluates its concept's geometry on the canvas render path; Swift/OCaml/Python
    pending); and a
-   creation action/UI. (SVG `data-jas-params` is not byte-compared by any fixture; its
+   creation action/UI — decided to be a **Concepts panel** modeled on the Symbols panel: a
+   registry-driven list of concept packs + a Place Instance action that appends a default-param
+   `Generated` element to the active layer (per-instance live param editing is a follow-on slice).
+   **Slice-1 declarative foundation done:** `workspace/panels/concepts.yaml` (the generic panel
+   spec), the `concepts_panel_select` (generic `set_panel_state`) + `place_concept_instance`
+   (native `log`-stub, like `place_instance`) actions, and the Window-menu entry. Remaining for
+   Slice 1: expose `data.concepts` (a registry-derived list) per app, implement
+   `place_concept_instance` natively (build + append the `Generated` element, id value-in-op),
+   and the sibling render wiring. (SVG `data-jas-params` is not byte-compared by any fixture; its
    serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
