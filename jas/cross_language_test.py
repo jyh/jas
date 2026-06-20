@@ -124,6 +124,10 @@ class CrossLanguageTest(absltest.TestCase):
             # (the instance_transform key) round-trips through test_json
             # distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            # CONCEPTS.md 3b: a Generated concept-instance (concept id + params)
+            # round-trips byte-identically to the Rust-authored golden — the
+            # cross-language pin for the generated kind.
+            "generated_polygon",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -158,6 +162,9 @@ class CrossLanguageTest(absltest.TestCase):
             # round-trips through binary distinct from the render CTM
             # (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            # CONCEPTS.md 3b: a Generated concept-instance round-trips through
+            # the binary codec (concept slot 8, params-json slot 9).
+            "generated_polygon",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")

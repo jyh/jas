@@ -578,3 +578,41 @@ def test_resolver_from_document_resolves_master_from_symbols():
     assert len(doc.layers[0].children) == 1, "layer holds only the instance"
     assert doc.layers[0].children[0] is instance
     assert len(doc.symbols) == 1, "the master lives only in doc.symbols"
+
+
+# ── GeneratedElem (CONCEPTS.md §6) ──────────────────────────────
+# Mirror the jas_dioxus live.rs generated tests for cross-language parity.
+
+def test_generated_evaluates_via_concept_resolver():
+    # A resolver supplying one concept generator; the Generated element
+    # evaluates through it to the concept's geometry (registry -> generator ->
+    # points). With no concept (NullResolver) it evaluates empty, never raises.
+    from geometry.element import GeneratedElem, ConceptDef, NullResolver
+    from geometry.live import element_to_polygon_set_with, DEFAULT_PRECISION
+
+    class _ConceptResolver:
+        def resolve(self, ref):
+            return None
+
+        def resolve_concept(self, concept_id):
+            if concept_id == "regular_polygon":
+                return ConceptDef(
+                    generator=(
+                        "map(range(0, param.sides), fun i -> "
+                        "let a = 360 * i / param.sides in "
+                        "[param.radius * cos(a), param.radius * sin(a)])"),
+                    closed=True)
+            return None
+
+    ge = GeneratedElem(concept_id="regular_polygon",
+                       params={"sides": 4, "radius": 10})
+    ps = element_to_polygon_set_with(
+        ge, DEFAULT_PRECISION, _ConceptResolver(), set())
+    assert len(ps) == 1, "one ring"
+    assert len(ps[0]) == 4, "a square has 4 vertices"
+    assert abs(ps[0][0][0] - 10.0) < 1e-9 and abs(ps[0][0][1]) < 1e-9, \
+        "first vertex on +x at radius 10"
+
+    # Unknown concept (NullResolver) -> empty, no error.
+    assert element_to_polygon_set_with(
+        ge, DEFAULT_PRECISION, NullResolver(), set()) == []

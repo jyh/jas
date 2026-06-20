@@ -1,13 +1,14 @@
 # Concept Packs — domains as declarative data
 
-**Status:** increments 1–2 + 3a built, **3b Rust + Swift landed** — the generator engine +
-format + cross-language gate (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3
-flagship), the `floor`/`mod` parity primitives, the concept **registry** (concepts bundled
-into `workspace.json`, loadable in every app), and the **`LiveVariant::Generated` document
-arm in Rust and Swift** (model + eval + codecs + tests) pinned by a shared cross-language
-round-trip golden (`expected/generated_polygon.json`, byte-identical in both). Remaining on
-3b: propagate to OCaml + Python, render-resolver wiring, a creation action. The fitter,
-operations, and constraints follow (§7). · **Implements:** `VISION.md`
+**Status:** increments 1–2 + 3a built, **3b: Rust + Swift + Python landed (OCaml in flight)** —
+the generator engine + format + cross-language gate (`regular_polygon`, `spiral`, `star`,
+`gear`, the §6.3 flagship), the `floor`/`mod` parity primitives, the concept **registry**
+(concepts bundled into `workspace.json`, loadable in every app), and the **`LiveVariant::Generated`
+document arm** (model + eval + codecs + tests) in Rust, Swift, and Python — pinned by a shared
+cross-language round-trip golden (`expected/generated_polygon.json`, byte-identical across all,
+through both test_json and binary). Remaining on 3b: the OCaml port; sibling render-resolver
+wiring (Rust done); a creation action. The fitter, operations, and constraints follow (§7). ·
+**Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -177,9 +178,10 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    of §6.4). **Rust lead ✅:** the `GeneratedElem` model, the 13 `LiveElement` dispatch
    methods, `evaluate_with` (concept resolved via a registry-extended `ElementResolver`
    → generator → points → geometry), the test_json/binary/SVG codecs, and round-trip +
-   eval tests. **Rust + Swift ✅** — propagated to Swift (the inline-common `RecordedElem`
-   layout) and pinned by the shared golden `expected/generated_polygon.json`, round-tripped
-   byte-identically in both. **Remaining:** propagate to OCaml + Python (against the same
+   eval tests. **Rust + Swift + Python ✅** — propagated to Swift (inline-common `RecordedElem`
+   layout) and Python (`LiveElement` dataclass + class-based resolver), pinned by the shared
+   golden `expected/generated_polygon.json` (Python pins both the json and binary roundtrips).
+   **Remaining:** the **OCaml** port (against the same
    golden); wire the production render-resolver to the registry (**Rust ✅** —
    `RenderResolver.resolve_concept` reads the cached `Workspace` registry, so a `Generated`
    instance evaluates its concept's geometry on the canvas render path; siblings pending); and a
