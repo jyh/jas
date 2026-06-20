@@ -1105,8 +1105,11 @@ fn apply_closure_values(
             return Value::Null;
         }
 
-        // Namespace ctx: caller overrides captured (fresh state/panel reads).
-        let call_ctx = merge_contexts(captured_ctx, ctx);
+        // Namespace ctx: refresh ONLY the runtime-context namespaces
+        // (state/panel/…) from the caller. Caller-side user bindings (which
+        // `let` injects into the JSON ctx for path resolution) must NOT leak
+        // in — that would be dynamic scoping and diverge from the other apps.
+        let call_ctx = merge_namespaces(captured_ctx, ctx);
 
         // User scope: captured only. Do NOT overlay caller's scope —
         // that would be dynamic scoping (Phase 3 §4 closure-capture contract).
@@ -1138,7 +1141,19 @@ fn val_to_f64(v: &Value) -> f64 {
 }
 
 /// Merge two JSON contexts. The second context's top-level keys override the first.
-fn merge_contexts(
+/// Runtime-context namespace keys — the only keys refreshed from the caller
+/// when a closure is applied. Must match the namespace set in the Python /
+/// Swift / OCaml interpreters (`_NAMESPACE_KEYS` / `namespaceKeys`).
+const NAMESPACE_KEYS: &[&str] = &[
+    "state", "panel", "theme", "dialog", "param", "event", "node", "prop",
+    "active_document", "workspace", "data",
+];
+
+/// Overlay only the runtime-context namespaces from `overlay` onto `base`.
+/// Unlike a full merge, caller-side user bindings do NOT leak into the closure
+/// body (lexical scoping); only `state`/`panel`/… are read live from the call
+/// site so runtime-context reads stay current.
+fn merge_namespaces(
     base: &serde_json::Value,
     overlay: &serde_json::Value,
 ) -> serde_json::Value {
@@ -1146,8 +1161,10 @@ fn merge_contexts(
     if let (serde_json::Value::Object(rmap), serde_json::Value::Object(omap)) =
         (&mut result, overlay)
     {
-        for (k, v) in omap {
-            rmap.insert(k.clone(), v.clone());
+        for key in NAMESPACE_KEYS {
+            if let Some(v) = omap.get(*key) {
+                rmap.insert((*key).to_string(), v.clone());
+            }
         }
     }
     result
@@ -1787,6 +1804,16 @@ mod tests {
             &json!({"state": {"x": 42}}),
         );
         assert_eq!(r, Value::Number(42.0));
+    }
+
+    #[test]
+    fn closure_does_not_leak_caller_binding() {
+        // `x` is bound only in the CALLER's scope, never captured by `f`.
+        // Lexical scoping => x is unbound in f's body => Null. A dynamic-scope
+        // leak (the caller's let-binding reaching the closure via the JSON ctx
+        // merge) would wrongly resolve x to 99.
+        let r = eval("let f = fun _ -> x in let x = 99 in f(null)", &json!({}));
+        assert_eq!(r, Value::Null);
     }
 
     // ── brush_type_of(slug) ── Blob Brush dialog gating helper.

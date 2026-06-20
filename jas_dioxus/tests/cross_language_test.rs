@@ -205,3 +205,65 @@ fn align_fixture_matches_expected() {
         }
     }
 }
+
+// --- Expression-language conformance (shared corpus) ---
+//
+// Loads the compiled corpus from test_fixtures/expressions/conformance.json
+// (generated from workspace/tests/expressions.yaml — the same corpus the Python
+// conformance test reads) and asserts this app's evaluator produces the expected
+// result type and value for every case. Pins cross-language expression
+// equivalence, including the closure lexical-scoping contract.
+
+#[test]
+fn expression_conformance() {
+    use jas_dioxus::interpreter::expr;
+    use jas_dioxus::interpreter::expr_types::Value;
+
+    let raw = read_fixture("expressions/conformance.json");
+    let cases: serde_json::Value =
+        serde_json::from_str(&raw).expect("conformance.json parses as JSON");
+    let cases = cases.as_array().expect("corpus is a JSON array");
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let src = case["expr"].as_str().expect("expr is a string");
+        // Build the eval context from the optional state/data namespaces.
+        let mut ctx = serde_json::Map::new();
+        if let Some(s) = case.get("state") {
+            ctx.insert("state".to_string(), s.clone());
+        }
+        if let Some(d) = case.get("data") {
+            ctx.insert("data".to_string(), d.clone());
+        }
+        let ctx = serde_json::Value::Object(ctx);
+
+        let result = expr::eval(src, &ctx);
+        let ty = case["type"].as_str().expect("type is a string");
+        let expected = &case["expected"];
+
+        let ok = match ty {
+            "null" => matches!(&result, Value::Null),
+            "bool" => matches!(&result, Value::Bool(b) if *b == expected.as_bool().unwrap()),
+            "number" => match &result {
+                Value::Number(n) => (n - expected.as_f64().unwrap()).abs() < 1e-9,
+                _ => false,
+            },
+            "string" => matches!(&result, Value::Str(s) if s == expected.as_str().unwrap()),
+            "color" => matches!(&result, Value::Color(c) if c == expected.as_str().unwrap()),
+            "list" => matches!(&result, Value::List(_)),
+            other => panic!("unknown expected type {other:?} for expr {src:?}"),
+        };
+        if !ok {
+            failures.push(format!(
+                "  {src:?} -> expected {ty} {expected}, got {result:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "expression conformance failures ({} of {}):\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n"),
+    );
+}

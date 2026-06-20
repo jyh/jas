@@ -1679,3 +1679,56 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         #expect(actual == expected, "Hit test '\(name)' failed: expected \(expected), got \(actual)")
     }
 }
+
+// MARK: - Expression-language conformance (shared corpus)
+
+/// Loads the compiled corpus from test_fixtures/expressions/conformance.json
+/// (generated from workspace/tests/expressions.yaml — the same corpus the
+/// Python conformance test reads) and asserts this app's evaluator produces the
+/// expected result type and value for every case. Pins cross-language
+/// expression equivalence, including the closure lexical-scoping contract.
+@Test func expressionConformance() throws {
+    let raw = readFixture("expressions/conformance.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = raw.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    var failures: [String] = []
+    for tc in cases {
+        let expr = tc["expr"] as! String
+        // Build the eval context from the optional state/data namespaces.
+        var ctx: [String: Any] = [:]
+        if let s = tc["state"] { ctx["state"] = s }
+        if let d = tc["data"] { ctx["data"] = d }
+
+        let result = evaluate(expr, context: ctx)
+        let ty = tc["type"] as! String
+        let expected = tc["expected"]
+
+        let ok: Bool
+        switch ty {
+        case "null":
+            if case .null = result { ok = true } else { ok = false }
+        case "bool":
+            if case .bool(let b) = result { ok = b == (expected as! Bool) } else { ok = false }
+        case "number":
+            if case .number(let n) = result {
+                ok = abs(n - (expected as! NSNumber).doubleValue) < 1e-9
+            } else { ok = false }
+        case "string":
+            if case .string(let s) = result { ok = s == (expected as! String) } else { ok = false }
+        case "color":
+            if case .color(let c) = result { ok = c == (expected as! String) } else { ok = false }
+        case "list":
+            if case .list = result { ok = true } else { ok = false }
+        default:
+            Issue.record("Unknown expected type \(ty) for expr \(expr)")
+            continue
+        }
+        if !ok {
+            failures.append("  \(expr) -> expected \(ty) \(expected ?? "null"), got \(result)")
+        }
+    }
+    #expect(failures.isEmpty,
+        "expression conformance failures (\(failures.count) of \(cases.count)):\n\(failures.joined(separator: "\n"))")
+}
