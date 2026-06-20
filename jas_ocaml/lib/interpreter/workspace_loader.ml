@@ -49,6 +49,13 @@ let panel (ws : workspace) (content_id : string) : Yojson.Safe.t option =
   | Some panels -> json_member content_id panels
   | None -> None
 
+(** Get a concept pack by id from the concept registry (CONCEPTS.md): the spec
+    carries params, closed, and the generator expression. *)
+let concept (ws : workspace) (id : string) : Yojson.Safe.t option =
+  match json_member "concepts" ws.data with
+  | Some concepts -> json_member id concepts
+  | None -> None
+
 (** Get the panel menu items for a panel content id.
     Returns a list of JSON menu item objects. *)
 let panel_menu (ws : workspace) (content_id : string) : Yojson.Safe.t list =

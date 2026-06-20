@@ -61,6 +61,12 @@ class WorkspaceData {
         (data["panels"] as? [String: Any])?[contentId] as? [String: Any]
     }
 
+    /// Get a concept pack by id from the concept registry (CONCEPTS.md): the
+    /// spec carries `params`, `closed`, and the `generator` expression.
+    func concept(_ id: String) -> [String: Any]? {
+        (data["concepts"] as? [String: Any])?[id] as? [String: Any]
+    }
+
     /// Get the panel menu items for a content id.
     func panelMenu(_ contentId: String) -> [[String: Any]] {
         guard let panel = panel(contentId),

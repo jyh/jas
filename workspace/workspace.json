@@ -24580,6 +24580,104 @@
       ]
     }
   },
+  "concepts": {
+    "gear": {
+      "id": "gear",
+      "name": "Gear",
+      "description": "A square-toothed cog with `teeth` evenly spaced teeth, centered on the origin. Each tooth occupies an angular sector of 360/teeth degrees and contributes four vertices \u2014 a rise from the `root` radius to the `outer` (tooth-tip) radius at the sector start, a flat tooth top across the first half of the sector at `outer`, a fall back to `root`, and a valley floor across the second half at `root`. The vertex's role within its tooth is selected by mod(k, 4) and its tooth index by floor(k / 4); the result is a closed square-wave gear outline. This is the `VISION.md` \u00a76.3 flagship example expressed entirely as data \u2014 it exercises both parity primitives (mod and floor) on top of the trig/range/map generators.\n",
+      "params": [
+        {
+          "name": "teeth",
+          "type": "number",
+          "default": 12
+        },
+        {
+          "name": "outer",
+          "type": "number",
+          "default": 50
+        },
+        {
+          "name": "root",
+          "type": "number",
+          "default": 38
+        }
+      ],
+      "closed": true,
+      "generator": "map(range(0, param.teeth * 4), fun k ->\n  let step = 360 / param.teeth in\n  let t = floor(k / 4) in\n  let p = mod(k, 4) in\n  let a = t * step + (if p >= 2 then step / 2 else 0) in\n  let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in\n  [r * cos(a), r * sin(a)])\n"
+    },
+    "regular_polygon": {
+      "id": "regular_polygon",
+      "name": "Regular Polygon",
+      "description": "A regular N-sided polygon centered on the origin, with its first vertex on the +x axis. The generator places `sides` vertices at equal angular steps of 360/sides degrees around a circle of radius `radius`, walking counter-clockwise from angle 0. The resulting point list is closed into a filled polygon. With `sides = 3` it is an equilateral triangle, `4` a square (corner-up on the axes), `6` a hexagon, and so on. It is the simplest concept: a pure parametric generator with no inputs and no constraints.\n",
+      "params": [
+        {
+          "name": "sides",
+          "type": "number",
+          "default": 6
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "default": 50
+        }
+      ],
+      "closed": true,
+      "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])\n"
+    },
+    "spiral": {
+      "id": "spiral",
+      "name": "Spiral",
+      "description": "An Archimedean spiral centered on the origin, sampled as an open polyline. The generator walks `steps` samples, advancing the angle by `angle_step` degrees and the radius by `growth` units per sample, starting from radius `r0` at angle 0. Because the radius grows linearly with the angle, successive turns are evenly spaced. The point list is left open (a polyline, not a closed polygon) \u2014 this is the concept that exercises the `closed: false` path of the format. Unlike a closed polygon, the first and last samples are not joined.\n",
+      "params": [
+        {
+          "name": "steps",
+          "type": "number",
+          "default": 64
+        },
+        {
+          "name": "angle_step",
+          "type": "number",
+          "default": 30
+        },
+        {
+          "name": "r0",
+          "type": "number",
+          "default": 5
+        },
+        {
+          "name": "growth",
+          "type": "number",
+          "default": 2
+        }
+      ],
+      "closed": false,
+      "generator": "map(range(0, param.steps), fun i ->\n  let a = param.angle_step * i in\n  let r = param.r0 + param.growth * i in\n  [r * cos(a), r * sin(a)])\n"
+    },
+    "star": {
+      "id": "star",
+      "name": "Star",
+      "description": "An N-pointed star centered on the origin. The generator walks 2*points vertices around the center, alternating between the `outer` radius (the star's tips) and the `inner` radius (the valleys between tips) using mod(k, 2) to pick the radius by vertex parity. The first tip sits on the +x axis. The point list is closed into a filled star polygon. A larger `outer`/`inner` ratio makes sharper points; equal radii degenerate to a regular 2*points-gon. This is the simplest concept that needs a parity primitive.\n",
+      "params": [
+        {
+          "name": "points",
+          "type": "number",
+          "default": 5
+        },
+        {
+          "name": "outer",
+          "type": "number",
+          "default": 50
+        },
+        {
+          "name": "inner",
+          "type": "number",
+          "default": 20
+        }
+      ],
+      "closed": true,
+      "generator": "map(range(0, param.points * 2), fun k ->\n  let a = 360 * k / (param.points * 2) in\n  let r = if mod(k, 2) == 0 then param.outer else param.inner in\n  [r * cos(a), r * sin(a)])\n"
+    }
+  },
   "dialogs": {
     "appearance_save_as": {
       "summary": "Save Appearance As",

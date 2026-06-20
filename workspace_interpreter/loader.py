@@ -67,7 +67,7 @@ def load_workspace(path: str) -> dict:
         # Dirs where each file is one entity keyed by its ``id`` field
         # (panels, tools). Dirs where each file's contents merge into
         # the parent dict (dialogs, templates).
-        keyed_subdirs = ("panels", "tools")
+        keyed_subdirs = ("panels", "tools", "concepts")
         merged_subdirs = ("dialogs", "templates")
         for subdir in keyed_subdirs + merged_subdirs:
             subdir_path = os.path.join(path, subdir)
@@ -381,6 +381,17 @@ def collect_element_ids(element: dict) -> list[str]:
     if isinstance(content, dict):
         ids.extend(collect_element_ids(content))
     return ids
+
+
+def concepts(ws: dict) -> dict:
+    """The concept-pack registry from a loaded workspace: concept_id -> spec
+    (id, name, description, params, closed, generator). See CONCEPTS.md."""
+    return ws.get("concepts", {}) or {}
+
+
+def concept(ws: dict, concept_id: str):
+    """A single concept pack by id, or None if not registered."""
+    return concepts(ws).get(concept_id)
 
 
 def state_defaults(state_defs: dict) -> dict:

@@ -62,3 +62,39 @@ def test_concept_generates(case):
         assert abs(x - ex) < 1e-9 and abs(y - ey) < 1e-9, (
             f"{case['concept']} point {i}: expected ({ex}, {ey}), got ({x}, {y})"
         )
+
+
+# ── Concept registry (increment 3a): concepts are bundled into workspace.json
+#    and loadable as a registry. See CONCEPTS.md §6/§7. ──
+
+class TestConceptRegistry:
+    def _ws(self):
+        from workspace_interpreter.loader import load_workspace
+        ws_dir = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
+        return load_workspace(ws_dir)
+
+    def test_registry_has_concepts(self):
+        from workspace_interpreter.loader import concepts
+        reg = concepts(self._ws())
+        assert {"regular_polygon", "spiral", "star", "gear"} <= set(reg.keys())
+
+    def test_registry_concept_fields(self):
+        from workspace_interpreter.loader import concept
+        gear = concept(self._ws(), "gear")
+        assert gear is not None
+        assert gear["closed"] is True
+        assert "mod(" in gear["generator"]
+        assert [p["name"] for p in gear["params"]] == ["teeth", "outer", "root"]
+
+    def test_registry_generator_evaluates(self):
+        # Registry -> evaluator round-trip: the bundled generator produces
+        # geometry. This is the foundation the document Generated arm builds on.
+        from workspace_interpreter.loader import concept
+        poly = concept(self._ws(), "regular_polygon")
+        result = evaluate(poly["generator"], {"param": {"sides": 4, "radius": 10}})
+        assert result.type == ValueType.LIST
+        assert len(result.value) == 4
+
+    def test_registry_unknown_concept_is_none(self):
+        from workspace_interpreter.loader import concept
+        assert concept(self._ws(), "no_such_concept") is None

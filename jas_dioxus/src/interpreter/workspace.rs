@@ -44,6 +44,12 @@ impl Workspace {
         self.data.get("panels")?.get(content_id)
     }
 
+    /// Get a concept pack by id from the concept registry (CONCEPTS.md):
+    /// the spec carries `params`, `closed`, and the `generator` expression.
+    pub fn concept(&self, id: &str) -> Option<&serde_json::Value> {
+        self.data.get("concepts")?.get(id)
+    }
+
     /// Get the icons map.
     pub fn icons(&self) -> &serde_json::Value {
         self.data.get("icons").unwrap_or(&serde_json::Value::Null)
@@ -178,6 +184,27 @@ mod tests {
         let ws = Workspace::load().unwrap();
         assert!(ws.panel("color_panel_content").is_some());
         assert!(ws.panel("layers_panel_content").is_some());
+    }
+
+    #[test]
+    fn concept_registry_loads_and_evaluates() {
+        let ws = Workspace::load().unwrap();
+        // The concept packs are bundled into workspace.json (CONCEPTS.md 3a).
+        let gear = ws.concept("gear").expect("gear concept registered");
+        assert_eq!(gear.get("closed").and_then(|v| v.as_bool()), Some(true));
+        assert!(gear.get("generator").and_then(|v| v.as_str()).unwrap_or("").contains("mod("));
+        assert!(ws.concept("no_such_concept").is_none());
+
+        // Registry -> evaluator round-trip: the bundled generator yields geometry.
+        let poly = ws.concept("regular_polygon").unwrap();
+        let generator = poly.get("generator").and_then(|v| v.as_str()).unwrap();
+        let ctx = serde_json::json!({ "param": { "sides": 4, "radius": 10 } });
+        match crate::interpreter::expr::eval(generator, &ctx) {
+            crate::interpreter::expr_types::Value::List(items) => {
+                assert_eq!(items.len(), 4);
+            }
+            other => panic!("expected a list of points, got {other:?}"),
+        }
     }
 
     #[test]
