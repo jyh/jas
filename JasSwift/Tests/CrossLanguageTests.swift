@@ -1732,3 +1732,59 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(failures.isEmpty,
         "expression conformance failures (\(failures.count) of \(cases.count)):\n\(failures.joined(separator: "\n"))")
 }
+
+// MARK: - Concept-generator conformance (shared corpus)
+
+/// Loads test_fixtures/concepts/conformance.json (compiled from
+/// workspace/concepts/*.yaml + workspace/tests/concepts.yaml). Evaluates each
+/// concept's generator expression with its parameters bound under `param` and
+/// asserts the resulting [x,y] points match the expected geometry (1e-9). A
+/// generator is just an expression, so this reuses the evaluator. See CONCEPTS.md.
+@Test func conceptConformance() throws {
+    func num(_ v: Any?) -> Double? {
+        if let d = v as? Double { return d }
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let i = v as? Int { return Double(i) }
+        return nil
+    }
+
+    let raw = readFixture("concepts/conformance.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = raw.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    var failures: [String] = []
+    for tc in cases {
+        let concept = tc["concept"] as? String ?? "?"
+        let generator = tc["generator"] as! String
+        let params = tc["params"] as! [String: Any]
+
+        let result = evaluate(generator, context: ["param": params])
+        guard case .list(let items) = result else {
+            failures.append("\(concept): generator returned non-list")
+            continue
+        }
+        let expected = tc["expected"] as! [[Any]]
+        if items.count != expected.count {
+            failures.append("\(concept): point count — expected \(expected.count), got \(items.count)")
+            continue
+        }
+        for (i, pair) in zip(items, expected).enumerated() {
+            let (item, exp) = pair
+            guard let coords = item.value as? [Any], coords.count == 2,
+                  let px = num(coords[0]), let py = num(coords[1]) else {
+                failures.append("\(concept) point \(i): not a 2-element numeric list")
+                continue
+            }
+            guard let ex = num(exp[0]), let ey = num(exp[1]) else {
+                failures.append("\(concept) point \(i): malformed expected")
+                continue
+            }
+            if abs(px - ex) >= 1e-9 || abs(py - ey) >= 1e-9 {
+                failures.append("\(concept) point \(i): expected (\(ex), \(ey)), got (\(px), \(py))")
+            }
+        }
+    }
+    #expect(failures.isEmpty,
+        "concept conformance failures:\n\(failures.joined(separator: "\n"))")
+}

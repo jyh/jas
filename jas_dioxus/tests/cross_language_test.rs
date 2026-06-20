@@ -267,3 +267,74 @@ fn expression_conformance() {
         failures.join("\n"),
     );
 }
+
+// --- Concept-generator conformance (shared corpus) ---
+//
+// Loads test_fixtures/concepts/conformance.json (compiled from
+// workspace/concepts/*.yaml + workspace/tests/concepts.yaml). For each case,
+// evaluates the concept's generator expression with its parameters bound under
+// `param` and asserts the resulting list of [x,y] points matches the expected
+// geometry (component-wise, 1e-9). A concept generator is just an expression, so
+// this reuses the evaluator — pinning concept geometry across all apps. See
+// CONCEPTS.md.
+
+#[test]
+fn concept_conformance() {
+    use jas_dioxus::interpreter::expr;
+    use jas_dioxus::interpreter::expr_types::Value;
+
+    let raw = read_fixture("concepts/conformance.json");
+    let cases: serde_json::Value =
+        serde_json::from_str(&raw).expect("conformance.json parses as JSON");
+    let cases = cases.as_array().expect("corpus is a JSON array");
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let concept = case["concept"].as_str().unwrap_or("?");
+        let generator = case["generator"].as_str().expect("generator is a string");
+        // Bind the parameters under the `param` namespace.
+        let mut ctx = serde_json::Map::new();
+        ctx.insert("param".to_string(), case["params"].clone());
+        let ctx = serde_json::Value::Object(ctx);
+
+        let result = expr::eval(generator, &ctx);
+        let pts = match &result {
+            Value::List(items) => items,
+            other => {
+                failures.push(format!("{concept}: generator returned non-list {other:?}"));
+                continue;
+            }
+        };
+        let expected = case["expected"].as_array().expect("expected is an array");
+        if pts.len() != expected.len() {
+            failures.push(format!(
+                "{concept}: point count — expected {}, got {}",
+                expected.len(),
+                pts.len()
+            ));
+            continue;
+        }
+        for (i, (p, e)) in pts.iter().zip(expected.iter()).enumerate() {
+            let pa = p.as_array().filter(|a| a.len() == 2);
+            let (px, py) = match pa {
+                Some(a) => (a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN)),
+                None => {
+                    failures.push(format!("{concept} point {i}: not a 2-element list: {p}"));
+                    continue;
+                }
+            };
+            let ea = e.as_array().unwrap();
+            let (ex, ey) = (ea[0].as_f64().unwrap(), ea[1].as_f64().unwrap());
+            if (px - ex).abs() >= 1e-9 || (py - ey).abs() >= 1e-9 {
+                failures.push(format!(
+                    "{concept} point {i}: expected ({ex}, {ey}), got ({px}, {py})"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "concept conformance failures:\n{}",
+        failures.join("\n"),
+    );
+}

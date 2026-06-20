@@ -1,0 +1,18 @@
+id: regular_polygon
+name: Regular Polygon
+description: >
+  A regular N-sided polygon centered on the origin, with its first vertex on the
+  +x axis. The generator places `sides` vertices at equal angular steps of
+  360/sides degrees around a circle of radius `radius`, walking counter-clockwise
+  from angle 0. The resulting point list is closed into a filled polygon. With
+  `sides = 3` it is an equilateral triangle, `4` a square (corner-up on the axes),
+  `6` a hexagon, and so on. It is the simplest concept: a pure parametric
+  generator with no inputs and no constraints.
+params:
+  - { name: sides,  type: number, default: 6 }
+  - { name: radius, type: number, default: 50 }
+closed: true
+generator: |
+  map(range(0, param.sides), fun i ->
+    let a = 360 * i / param.sides in
+    [param.radius * cos(a), param.radius * sin(a)])

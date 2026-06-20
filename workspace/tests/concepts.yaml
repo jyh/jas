@@ -1,0 +1,33 @@
+# Concept-generator conformance tests.
+# Every interpreter MUST reproduce these geometries. Each case names a concept
+# (workspace/concepts/<id>.yaml), overrides parameters (omitted params fall back
+# to the concept's declared defaults), and pins the expected list of [x, y]
+# points. Points are compared component-wise within 1e-9 (trig is not exact);
+# the point count is part of the contract. See CONCEPTS.md.
+
+tests:
+  # Square: 4 vertices on the axes at radius 10.
+  - concept: regular_polygon
+    params: { sides: 4, radius: 10 }
+    expected: [[10, 0], [0, 10], [-10, 0], [0, -10]]
+
+  # Equilateral triangle, first vertex on +x.
+  - concept: regular_polygon
+    params: { sides: 3, radius: 10 }
+    expected: [[10, 0], [-5, 8.660254038], [-5, -8.660254038]]
+
+  # Defaults (sides: 6, radius: 50) — exercises param-default merging.
+  - concept: regular_polygon
+    expected: [[50, 0], [25, 43.301270189], [-25, 43.301270189],
+               [-50, 0], [-25, -43.301270189], [25, -43.301270189]]
+
+  # Open spiral, 4 samples, 90° step, r0 10, growth 5 (radius 10,15,20,25).
+  - concept: spiral
+    params: { steps: 4, angle_step: 90, r0: 10, growth: 5 }
+    expected: [[10, 0], [0, 15], [-20, 0], [0, -25]]
+
+  # Open spiral, 5 samples, 72° step, r0 4, growth 3.
+  - concept: spiral
+    params: { steps: 5, angle_step: 72, r0: 4, growth: 3 }
+    expected: [[4, 0], [2.163118961, 6.657395614], [-8.090169944, 5.877852523],
+               [-10.517220927, -7.64120828], [4.94427191, -15.216904261]]

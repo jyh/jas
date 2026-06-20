@@ -1105,12 +1105,66 @@ let assert_expression_conformance () =
     assert false
   end
 
+(* Concept-generator conformance (shared corpus).
+   Loads test_fixtures/concepts/conformance.json (compiled from
+   workspace/concepts/*.yaml + workspace/tests/concepts.yaml). Evaluates each
+   concept's generator expression with its params bound under `param` and
+   asserts the resulting [x,y] points match the expected geometry (1e-9). A
+   generator is just an expression, so this reuses the evaluator. See CONCEPTS.md. *)
+let assert_concept_conformance () =
+  let open Yojson.Safe.Util in
+  let json_str = read_fixture "concepts/conformance.json" in
+  let cases = Yojson.Safe.from_string json_str |> to_list in
+  let num_of = function
+    | `Int i -> float_of_int i
+    | `Float f -> f
+    | `Intlit s -> float_of_string s
+    | _ -> nan
+  in
+  let failures = ref [] in
+  let add s = failures := s :: !failures in
+  List.iter (fun tc ->
+    let concept = tc |> member "concept" |> to_string in
+    let generator = tc |> member "generator" |> to_string in
+    let ctx = `Assoc [("param", tc |> member "params")] in
+    let result = Jas.Expr_eval.evaluate generator ctx in
+    let expected = tc |> member "expected" |> to_list in
+    match result with
+    | Jas.Expr_eval.List items ->
+      if List.length items <> List.length expected then
+        add (Printf.sprintf "%s: point count expected %d got %d" concept
+               (List.length expected) (List.length items))
+      else
+        List.iteri (fun i (item, exp) ->
+          match item, exp with
+          | `List [a; b], `List [ea; eb] ->
+            let px, py = num_of a, num_of b in
+            let ex, ey = num_of ea, num_of eb in
+            if Float.abs (px -. ex) >= 1e-9 || Float.abs (py -. ey) >= 1e-9 then
+              add (Printf.sprintf "%s point %d: expected (%g,%g) got (%g,%g)"
+                     concept i ex ey px py)
+          | _ -> add (Printf.sprintf "%s point %d: not a 2-element point" concept i)
+        ) (List.combine items expected)
+    | _ -> add (Printf.sprintf "%s: generator returned non-list" concept)
+  ) cases;
+  if !failures <> [] then begin
+    Printf.eprintf "concept conformance failures:\n%s\n"
+      (String.concat "\n" (List.rev !failures));
+    assert false
+  end
+
 let () =
   Alcotest.run "Cross_language" [
     (* Expression-language conformance (shared corpus) *)
     "Expression conformance", [
       Alcotest.test_case "expression_conformance all cases" `Quick
         assert_expression_conformance;
+    ];
+
+    (* Concept-generator conformance (shared corpus) *)
+    "Concept conformance", [
+      Alcotest.test_case "concept_conformance all cases" `Quick
+        assert_concept_conformance;
     ];
 
     (* Binary round-trip *)
