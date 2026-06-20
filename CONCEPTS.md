@@ -180,9 +180,11 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    eval tests. **Rust + Swift ✅** — propagated to Swift (the inline-common `RecordedElem`
    layout) and pinned by the shared golden `expected/generated_polygon.json`, round-tripped
    byte-identically in both. **Remaining:** propagate to OCaml + Python (against the same
-   golden); wire the production render-resolver's `resolve_concept` to the registry so an
-   instance renders on canvas; and a creation action/UI. (SVG `data-jas-params` is not
-   byte-compared by any fixture; its serialization stays per-app-native.)
+   golden); wire the production render-resolver to the registry (**Rust ✅** —
+   `RenderResolver.resolve_concept` reads the cached `Workspace` registry, so a `Generated`
+   instance evaluates its concept's geometry on the canvas render path; siblings pending); and a
+   creation action/UI. (SVG `data-jas-params` is not byte-compared by any fixture; its
+   serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
