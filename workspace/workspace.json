@@ -5775,6 +5775,34 @@
           "log": "delete_symbol_orphan_confirm_ok"
         }
       ]
+    },
+    "concepts_panel_select": {
+      "description": "Panel-select a concept in the Concepts panel by id. Replaces the single-concept selection with this id, which becomes the target of Place Instance. The selection keys on the stable concept id. Clicking empty panel area is a no-op (no row dispatches this).\n",
+      "category": "concepts",
+      "params": {
+        "concept_id": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "concepts",
+            "key": "selected_concept",
+            "value": "param.concept_id"
+          }
+        }
+      ]
+    },
+    "place_concept_instance": {
+      "description": "Append a new generated instance of the panel-selected concept to the active layer and select it (CONCEPTS.md \u00a76). The instance is created with the concept's declared default parameters; a fresh element id is minted by the initiator (value-in-op) and carried in the operation, never minted inside the shared core. Enabled only when a concept is panel-selected. Single undo op.\n",
+      "category": "concepts",
+      "enabled_when": "panel.selected_concept != null",
+      "effects": [
+        {
+          "log": "place_concept_instance"
+        }
+      ]
     }
   },
   "version": 1,
@@ -8250,6 +8278,14 @@
           "action": "toggle_panel",
           "params": {
             "panel": "align"
+          }
+        },
+        {
+          "id": "menu_concepts",
+          "label": "Co&ncepts",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "concepts"
           }
         }
       ]
@@ -14248,6 +14284,138 @@
               "brightness": "panel.b",
               "disabled": "if state.fill_on_top then state.fill_color == null else state.stroke_color == null"
             }
+          }
+        ]
+      }
+    },
+    "concepts_panel_content": {
+      "id": "concepts_panel_content",
+      "type": "panel",
+      "summary": "Concepts",
+      "description": "Concepts panel \u2014 the library of parametric concept packs that ship with the application (CONCEPTS.md \u00a76; VISION.md \u00a76.3). A concept (regular polygon, star, gear, spiral, \u2026) is data: a declared set of parameters plus a generator expression that turns those parameters into geometry. Placing a concept inserts a live \"generated\" instance onto the canvas \u2014 an element that stores the concept id and its parameter values and re-derives its geometry from the generator whenever the parameters change. This is the drawing analogue of the Symbols panel's \"place a reusable master\", except a concept's reusable master is a shipped, registry-backed *generator* rather than a document-local element, and an instance carries editable parameters rather than just a transform.\nThis first slice is a TEXT LIST modeled directly on the Symbols panel \u2014 a scrolling foreach over the registry-derived concept list, one row per concept, plus a footer with a Place action. Per-instance parameter editing (changing a gear's tooth count and watching it re-generate live \u2014 the \u00a76.4 \"tune the same parameters without redoing anything\" promise), thumbnails, and drag-to-place are deferred to a later slice.\n=== Data source ===\nThe list is driven by ``data.concepts`` \u2014 a read-only list of the registered concept packs (id, name, description), derived from the ``concepts`` section of the compiled workspace and exposed under the workspace ``data.*`` namespace like the swatch and brush libraries. It is shipped data, not document state, so the panel offers no \"New\" or \"Delete\" of concepts (promoting canvas art *into* a concept is the fitter, deliberately deferred).\n=== Row Layout ===\nEach row shows the concept's user-visible NAME, left-aligned. Clicking a row panel-selects that concept as the sole selection; the selection keys on the stable concept id.\n=== Panel Selection ===\nPanel-selection is a single concept id (or none). Clicking a row replaces the selection with that concept. The panel-selected concept is the target of Place Instance.\n=== Actions (footer) ===\nPLACE_INSTANCE_BUTTON appends a new generated instance of the panel-selected concept to the active layer and selects it. The instance is created with the concept's declared default parameters; a fresh element id is minted by the initiator and carried in the operation (value-in-op), never minted inside the shared core. Enabled only when a concept is panel-selected (``panel.selected_concept != null``).\n=== Deferrals (this slice) ===\nPer-instance parameter editing, thumbnail previews, drag-to-place onto the canvas, multi-select, and a search/filter field are all deferred. The fitter (\"this drawing is a gear\") and per-concept operations are separate, later work.\n",
+      "state": {
+        "selected_concept": {
+          "type": "string",
+          "default": null,
+          "nullable": true,
+          "description": "Id of the panel-selected concept, or null when none is selected"
+        }
+      },
+      "init": {
+        "selected_concept": "null"
+      },
+      "menu": [
+        {
+          "label": "Place Instance",
+          "action": "place_concept_instance",
+          "enabled_when": "panel.selected_concept != null",
+          "description": "Place a new instance of the panel-selected concept on the active layer"
+        },
+        "separator",
+        {
+          "label": "Close Concepts",
+          "action": "close_panel",
+          "params": {
+            "panel": "concepts"
+          },
+          "description": "Close the Concepts panel"
+        }
+      ],
+      "content": {
+        "type": "container",
+        "id": "concepts_root",
+        "layout": "column",
+        "style": {
+          "padding": 0,
+          "gap": 0
+        },
+        "children": [
+          {
+            "id": "concepts_list",
+            "type": "container",
+            "layout": "column",
+            "style": {
+              "flex": 1,
+              "overflow_y": "auto",
+              "padding": 0,
+              "gap": 0
+            },
+            "foreach": {
+              "source": "data.concepts",
+              "as": "concept"
+            },
+            "do": {
+              "type": "container",
+              "layout": "row",
+              "style": {
+                "height": 24,
+                "padding": "0 6",
+                "gap": 4,
+                "alignment": "center"
+              },
+              "bind": {
+                "background": "if concept.id == panel.selected_concept then '{{theme.colors.selection}}' else 'transparent'"
+              },
+              "children": [
+                {
+                  "id": "concept_name",
+                  "type": "text",
+                  "content": "{{concept.name}}",
+                  "style": {
+                    "flex": 1,
+                    "font_size": 11,
+                    "color": "{{theme.colors.text}}",
+                    "overflow": "hidden",
+                    "text_overflow": "ellipsis",
+                    "white_space": "nowrap"
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "concepts_panel_select",
+                      "params": {
+                        "concept_id": "concept.id"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "separator",
+            "orientation": "horizontal"
+          },
+          {
+            "id": "concepts_footer",
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "padding": "4 6",
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "id": "concept_place",
+                "type": "icon_button",
+                "icon": "symbol_place",
+                "summary": "Place Instance",
+                "description": "Place a new instance of the panel-selected concept on the active layer",
+                "style": {
+                  "size": 16
+                },
+                "bind": {
+                  "disabled": "panel.selected_concept == null"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "action": "place_concept_instance"
+                  }
+                ]
+              }
+            ]
           }
         ]
       }

@@ -3651,3 +3651,40 @@ actions:
     category: dialog
     effects:
       - log: "delete_symbol_orphan_confirm_ok"
+
+  # ── Concepts panel (CONCEPTS.md §6 / VISION.md §6.3) ──────────────
+  #
+  # concepts_panel_select is a pure panel-state set (generic effect, no native
+  # code). place_concept_instance is a `log` stub like place_instance: the real
+  # work lives in each app's native action arm, which builds a `generated`
+  # element from the panel-selected concept (concept id + the concept's declared
+  # default params), mints a fresh element id by the value-in-op rule, appends it
+  # to the active layer, and selects it — so every app applies identical minted
+  # values.
+
+  concepts_panel_select:
+    description: >
+      Panel-select a concept in the Concepts panel by id. Replaces the
+      single-concept selection with this id, which becomes the target of Place
+      Instance. The selection keys on the stable concept id. Clicking empty panel
+      area is a no-op (no row dispatches this).
+    category: concepts
+    params:
+      concept_id: { type: string }
+    effects:
+      - set_panel_state:
+          panel: concepts
+          key: selected_concept
+          value: "param.concept_id"
+
+  place_concept_instance:
+    description: >
+      Append a new generated instance of the panel-selected concept to the active
+      layer and select it (CONCEPTS.md §6). The instance is created with the
+      concept's declared default parameters; a fresh element id is minted by the
+      initiator (value-in-op) and carried in the operation, never minted inside the
+      shared core. Enabled only when a concept is panel-selected. Single undo op.
+    category: concepts
+    enabled_when: "panel.selected_concept != null"
+    effects:
+      - log: "place_concept_instance"

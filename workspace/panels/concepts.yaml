@@ -1,0 +1,140 @@
+id: concepts_panel_content
+type: panel
+summary: "Concepts"
+description: >
+  Concepts panel — the library of parametric concept packs that ship with the
+  application (CONCEPTS.md §6; VISION.md §6.3). A concept (regular polygon, star,
+  gear, spiral, …) is data: a declared set of parameters plus a generator
+  expression that turns those parameters into geometry. Placing a concept inserts
+  a live "generated" instance onto the canvas — an element that stores the concept
+  id and its parameter values and re-derives its geometry from the generator
+  whenever the parameters change. This is the drawing analogue of the Symbols
+  panel's "place a reusable master", except a concept's reusable master is a
+  shipped, registry-backed *generator* rather than a document-local element, and
+  an instance carries editable parameters rather than just a transform.
+
+  This first slice is a TEXT LIST modeled directly on the Symbols panel — a
+  scrolling foreach over the registry-derived concept list, one row per concept,
+  plus a footer with a Place action. Per-instance parameter editing (changing a
+  gear's tooth count and watching it re-generate live — the §6.4 "tune the same
+  parameters without redoing anything" promise), thumbnails, and drag-to-place are
+  deferred to a later slice.
+
+  === Data source ===
+
+  The list is driven by ``data.concepts`` — a read-only list of the registered
+  concept packs (id, name, description), derived from the ``concepts`` section of
+  the compiled workspace and exposed under the workspace ``data.*`` namespace like
+  the swatch and brush libraries. It is shipped data, not document state, so the
+  panel offers no "New" or "Delete" of concepts (promoting canvas art *into* a
+  concept is the fitter, deliberately deferred).
+
+  === Row Layout ===
+
+  Each row shows the concept's user-visible NAME, left-aligned. Clicking a row
+  panel-selects that concept as the sole selection; the selection keys on the
+  stable concept id.
+
+  === Panel Selection ===
+
+  Panel-selection is a single concept id (or none). Clicking a row replaces the
+  selection with that concept. The panel-selected concept is the target of Place
+  Instance.
+
+  === Actions (footer) ===
+
+  PLACE_INSTANCE_BUTTON appends a new generated instance of the panel-selected
+  concept to the active layer and selects it. The instance is created with the
+  concept's declared default parameters; a fresh element id is minted by the
+  initiator and carried in the operation (value-in-op), never minted inside the
+  shared core. Enabled only when a concept is panel-selected
+  (``panel.selected_concept != null``).
+
+  === Deferrals (this slice) ===
+
+  Per-instance parameter editing, thumbnail previews, drag-to-place onto the
+  canvas, multi-select, and a search/filter field are all deferred. The fitter
+  ("this drawing is a gear") and per-concept operations are separate, later work.
+
+state:
+  selected_concept:
+    type: string
+    default: null
+    nullable: true
+    description: "Id of the panel-selected concept, or null when none is selected"
+
+init:
+  selected_concept: "null"
+
+menu:
+  - label: "Place Instance"
+    action: place_concept_instance
+    enabled_when: "panel.selected_concept != null"
+    description: "Place a new instance of the panel-selected concept on the active layer"
+
+  - separator
+
+  - label: "Close Concepts"
+    action: close_panel
+    params: { panel: concepts }
+    description: "Close the Concepts panel"
+
+content:
+  type: container
+  id: concepts_root
+  layout: column
+  style: { padding: 0, gap: 0 }
+  children:
+
+    # ── Row list ──────────────────────────────────────────────
+
+    - id: concepts_list
+      type: container
+      layout: column
+      style: { flex: 1, overflow_y: auto, padding: 0, gap: 0 }
+      foreach:
+        source: "data.concepts"
+        as: concept
+      do:
+        type: container
+        layout: row
+        style: { height: 24, padding: "0 6", gap: 4, alignment: center }
+        bind:
+          background: "if concept.id == panel.selected_concept then '{{theme.colors.selection}}' else 'transparent'"
+        children:
+
+          # CONCEPT_NAME: click panel-selects this concept
+          - id: concept_name
+            type: text
+            content: "{{concept.name}}"
+            style: { flex: 1, font_size: 11, color: "{{theme.colors.text}}", overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
+            behavior:
+              - event: click
+                action: concepts_panel_select
+                params: { concept_id: "concept.id" }
+
+    # ── Separator ─────────────────────────────────────────────
+
+    - type: separator
+      orientation: horizontal
+
+    # ── Footer ────────────────────────────────────────────────
+
+    - id: concepts_footer
+      type: container
+      layout: row
+      style: { padding: "4 6", gap: 4, alignment: center }
+      children:
+
+        # PLACE_INSTANCE_BUTTON — a concept is panel-selected
+        - id: concept_place
+          type: icon_button
+          icon: symbol_place
+          summary: "Place Instance"
+          description: "Place a new instance of the panel-selected concept on the active layer"
+          style: { size: 16 }
+          bind:
+            disabled: "panel.selected_concept == null"
+          behavior:
+            - event: click
+              action: place_concept_instance
