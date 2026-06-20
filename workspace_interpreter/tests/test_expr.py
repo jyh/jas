@@ -67,7 +67,10 @@ def test_conformance(case):
     elif expected_type == ValueType.BOOL:
         assert result.value is (True if expected else False)
     elif expected_type == ValueType.NUMBER:
-        assert result.value == expected, (
+        # Tolerance, not exact equality: trig/pow results are not exact in
+        # floating point, and the native harnesses (Rust/Swift/OCaml) compare
+        # with the same 1e-9 tolerance — keep all five interpreters aligned.
+        assert abs(result.value - expected) < 1e-9, (
             f"Value mismatch for {case['expr']!r}: expected {expected}, got {result.value}"
         )
     elif expected_type == ValueType.STRING:

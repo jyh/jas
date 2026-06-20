@@ -1059,6 +1059,72 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* Geometry generators: trig in DEGREES, pow, range, fold. *)
+
+    else if name = "sin" || name = "cos" || name = "tan" then begin
+      if List.length args <> 1 then Null
+      else
+        match eval_node ~local_env ?store_cb (List.hd args) ctx with
+        | Number n ->
+          let rad = n *. Float.pi /. 180.0 in
+          Number (if name = "sin" then Float.sin rad
+                  else if name = "cos" then Float.cos rad
+                  else Float.tan rad)
+        | _ -> Null
+    end
+
+    else if name = "pow" then begin
+      if List.length args <> 2 then Null
+      else
+        let vb = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let ve = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match vb, ve with
+        | Number base, Number exp ->
+          let r = Float.pow base exp in
+          if Float.is_finite r then Number r else Null
+        | _ -> Null
+    end
+
+    (* range(start, end) or range(start, end, step); end-exclusive. *)
+    else if name = "range" then begin
+      let argc = List.length args in
+      if argc <> 2 && argc <> 3 then Null
+      else
+        let vals = List.map (fun a -> eval_node ~local_env ?store_cb a ctx) args in
+        let nums = List.filter_map (function Number n -> Some n | _ -> None) vals in
+        if List.length nums <> argc then Null
+        else
+          let start = List.nth nums 0 in
+          let stop = List.nth nums 1 in
+          let step = if argc = 3 then List.nth nums 2 else 1.0 in
+          if step = 0.0 then Null
+          else
+            let rec build n acc =
+              if (step > 0.0 && n < stop) || (step < 0.0 && n > stop) then
+                build (n +. step) (value_to_json (Number n) :: acc)
+              else List.rev acc
+            in
+            List (build start [])
+    end
+
+    (* fold(list, init, fn) — left fold; fn is called as fn(acc, item). *)
+    else if name = "fold" then begin
+      if List.length args <> 3 then Null
+      else
+        let lst = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let init = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        let callable = eval_node ~local_env ?store_cb (List.nth args 2) ctx in
+        match lst, callable with
+        | List items, Closure (params, body, captured_env)
+          when List.length params = 2 ->
+          List.fold_left (fun acc item ->
+            let item_val = value_of_json item in
+            let call_env = List.combine params [acc; item_val] @ captured_env in
+            eval_node ~local_env:call_env ?store_cb body ctx
+          ) init items
+        | _ -> Null
+    end
+
     (* brush_type_of(slug) — look up a brush in brush_libraries by
        "lib_id/brush_slug" and return its [type] field as a string.
        Returns [Null] if the slug does not resolve. Consumed by

@@ -327,3 +327,77 @@ tests:
     expected: 42
     type: number
     note: "namespace reads inside a closure resolve against the live call-site context"
+
+  # ── Geometry generators: trig (degrees), pow, range, fold ──
+  # sin/cos/tan take DEGREES (the app's artist-facing convention; internal
+  # geometry converts to radians). range(start, end[, step]) is end-exclusive.
+  # fold(list, init, fn) is a left fold with fn(acc, item) — matching the
+  # map(list, fn) argument order. List-returning generators are pinned by
+  # reducing to a scalar (fold / map+fold) so the gate compares exact numbers.
+
+  - expr: "sin(0)"
+    expected: 0
+    type: number
+
+  - expr: "sin(90)"
+    expected: 1
+    type: number
+    note: "degrees, not radians"
+
+  - expr: "sin(30)"
+    expected: 0.5
+    type: number
+
+  - expr: "cos(0)"
+    expected: 1
+    type: number
+
+  - expr: "cos(180)"
+    expected: -1
+    type: number
+
+  - expr: "cos(60)"
+    expected: 0.5
+    type: number
+
+  - expr: "tan(45)"
+    expected: 1
+    type: number
+
+  - expr: "pow(2, 10)"
+    expected: 1024
+    type: number
+
+  - expr: "pow(9, 0.5)"
+    expected: 3
+    type: number
+    note: "fractional exponent = square root"
+
+  - expr: "fold(range(0, 5), 0, fun (acc, i) -> acc + 1)"
+    expected: 5
+    type: number
+    note: "range(0,5) has 5 elements (end-exclusive)"
+
+  - expr: "fold(range(1, 5), 0, fun (acc, i) -> acc + i)"
+    expected: 10
+    type: number
+
+  - expr: "fold(range(0, 10, 2), 0, fun (acc, i) -> acc + i)"
+    expected: 20
+    type: number
+    note: "3-arg range with step: 0+2+4+6+8"
+
+  - expr: "fold([10, 20, 30], 0, fun (acc, x) -> acc + x)"
+    expected: 60
+    type: number
+    note: "fold over a list literal"
+
+  - expr: "fold(map(range(1, 4), fun i -> i * i), 0, fun (acc, x) -> acc + x)"
+    expected: 14
+    type: number
+    note: "map+range+fold: 1 + 4 + 9"
+
+  - expr: "fold(map(range(0, 4), fun i -> cos(90 * i)), 0, fun (acc, x) -> acc + x)"
+    expected: 0
+    type: number
+    note: "geometry composite: cos(0)+cos(90)+cos(180)+cos(270) = 1+0-1+0"
