@@ -16,6 +16,31 @@ generator: |
   map(range(0, param.sides), fun i ->
     let a = 360 * i / param.sides in
     [param.radius * cos(a), param.radius * sin(a)])
+# The fitter (CONCEPTS.md §10) — the dual of the generator. Reads the selected
+# shape's vertices under `shape.points` and recovers the concept on a match. A
+# regular polygon has all vertices equidistant from the centroid (equal radii)
+# AND all edges equal; when both hold it returns the flat result list
+# [sides, radius, cx, cy, rotation] (the first `params`-many entries are the
+# declared params in order, then the placement triple in degrees), else `null`.
+fitter: |
+  let pts = shape.points in
+  let n = pts.length in
+  if n < 3 then null else
+  let cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in
+  let cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in
+  let dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in
+  let r0 = dists[0] in
+  let rtol = 0.000001 * r0 + 0.0000001 in
+  let radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in
+  let edges = map(range(0, n),
+    fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],
+                   pts[mod(i + 1, n)][1] - pts[i][1])) in
+  let e0 = edges[0] in
+  let etol = 0.000001 * e0 + 0.0000001 in
+  let edges_equal = all(edges, fun e -> abs(e - e0) < etol) in
+  if radii_equal and edges_equal and r0 > 0 then
+    [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]
+  else null
 operations:
   - id: add_side
     label: "Add Side"

@@ -58,6 +58,8 @@ menubar:
       - separator
       - { id: menu_make_instance, label: "&Make Instance", action: make_instance,
           enabled_when: "active_document.selection_count == 1" }
+      - { id: menu_promote_concept, label: "&Promote to Concept", action: promote_to_concept,
+          enabled_when: "active_document.selection_count == 1" }
 
   - id: view_menu
     label: "&View"

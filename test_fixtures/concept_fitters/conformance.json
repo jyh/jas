@@ -1,0 +1,152 @@
+[
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        10,
+        0
+      ],
+      [
+        0,
+        10
+      ],
+      [
+        -10,
+        0
+      ],
+      [
+        0,
+        -10
+      ]
+    ],
+    "expected": [
+      4,
+      10,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        110,
+        20
+      ],
+      [
+        100,
+        30
+      ],
+      [
+        90,
+        20
+      ],
+      [
+        100,
+        10
+      ]
+    ],
+    "expected": [
+      4,
+      10,
+      100,
+      20,
+      0
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        10,
+        10
+      ],
+      [
+        -10,
+        10
+      ],
+      [
+        -10,
+        -10
+      ],
+      [
+        10,
+        -10
+      ]
+    ],
+    "expected": [
+      4,
+      14.142135623730951,
+      0,
+      0,
+      45
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        10,
+        0
+      ],
+      [
+        -5,
+        8.660254037844387
+      ],
+      [
+        -5,
+        -8.660254037844387
+      ]
+    ],
+    "expected": [
+      3,
+      10,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        0,
+        0
+      ],
+      [
+        20,
+        0
+      ],
+      [
+        20,
+        10
+      ],
+      [
+        0,
+        10
+      ]
+    ],
+    "expected": null
+  },
+  {
+    "concept": "regular_polygon",
+    "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null",
+    "points": [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "expected": null
+  }
+]
