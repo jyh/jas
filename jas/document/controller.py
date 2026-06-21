@@ -360,6 +360,45 @@ class Controller:
         new_elem = replace(elem, params=new_params)
         self._model.edit_document(doc.replace_element(path, new_elem))
 
+    def promote_to_concept(self, path: ElementPath, concept_id: str,
+                           params: dict, transform: "Transform") -> None:
+        """Promote the raw element at ``path`` to a live ``GeneratedElem`` of
+        ``concept_id`` with the fitted ``params`` and placement ``transform``
+        (CONCEPTS.md §10 — the fitter / ``promote``). The recovered params + the
+        origin-centered generator + the placement transform re-render the same
+        geometry the raw element drew. The original element's identity (id, name,
+        opacity, locked, visibility, blend mode, mask) is PRESERVED; only the
+        placement ``transform`` is (re)set. Every operand is value-in-op — the
+        detection already happened at production time — so this just builds the
+        element. No-op if ``path`` is missing. Mirrors the Rust
+        ``Controller::promote_to_concept``.
+        """
+        from geometry.element import GeneratedElem, Visibility, BlendMode
+        doc = self._model.document
+        try:
+            existing = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if existing is None:
+            return
+        # Preserve the raw element's identity (its common props); (re)set only
+        # the placement transform. Generated stores common props flat, so read
+        # them off the existing element with sensible defaults for kinds that do
+        # not carry a given field.
+        generated = GeneratedElem(
+            concept_id=concept_id,
+            params=dict(params) if isinstance(params, dict) else {},
+            id=getattr(existing, "id", None),
+            name=getattr(existing, "name", None),
+            opacity=getattr(existing, "opacity", 1.0),
+            transform=transform,
+            locked=getattr(existing, "locked", False),
+            visibility=getattr(existing, "visibility", Visibility.PREVIEW),
+            blend_mode=getattr(existing, "blend_mode", BlendMode.NORMAL),
+            mask=getattr(existing, "mask", None),
+        )
+        self._model.edit_document(doc.replace_element(path, generated))
+
     def detach(self, path: ElementPath) -> None:
         """Detach (break the link / expand): replace the ``ReferenceElem``
         instance at ``path`` with an INDEPENDENT copy of its resolved target
