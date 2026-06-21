@@ -93,6 +93,27 @@ class TestBuildActiveDocumentView:
         # active_document_view_selected_concept_present_for_single_generated.
         op_ids = [o["id"] for o in sc["operations"]]
         assert "add_side" in op_ids and "remove_side" in op_ids
+        # violations (CONCEPTS.md §11): valid params (sides 6, radius 50) -> none.
+        # Mirrors Rust active_document_view_selected_concept_present_for_single_generated.
+        assert sc["violations"] == []
+
+    def test_selected_concept_reports_constraint_violations(self):
+        # CONCEPTS.md §11: a Generated whose params break an invariant surfaces
+        # the violated constraint (id + message) in selected_concept.violations.
+        # Mirrors Rust active_document_view_selected_concept_reports_constraint_violations.
+        from document.controller import Controller
+        model = Model()
+        # sides = 2 violates min_sides (needs >= 3); radius is fine.
+        Controller(model=model).place_concept_instance(
+            "regular_polygon", {"sides": 2, "radius": 50}, "g1")
+        view = build_active_document_view(model)
+        sc = view["selected_concept"]
+        assert sc is not None
+        vios = sc["violations"]
+        ids = [v["id"] for v in vios]
+        assert ids == ["min_sides"]
+        # The violation carries its human-readable message.
+        assert "at least 3 sides" in vios[0]["message"]
 
     def test_next_layer_name_skips_existing(self):
         model = _make_model(["Layer 1", "Layer 2"])
