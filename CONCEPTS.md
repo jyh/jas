@@ -228,8 +228,9 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    equivalence replay test per app; the Concepts panel renders a button per
    operation. **Detailed design + the conformance gate: §9.**
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
-   tier first (geometric heuristics: a regular polygon detector), the fuzzy/AI
-   tier later (`VISION.md` §7 frontier).
+   tier first (a regular-polygon detector), the fuzzy/AI tier later (`VISION.md` §7
+   frontier). A fitter is an **expression** (the dual of the generator), needing one
+   new builtin `atan2`. **Detailed design + the conformance gate: §10.**
 6. **Constraints.** A representation for a concept's invariants (deterministic, no
    JS — `VISION.md` §6.3 downside), and a checker. Bidirectional constraint
    solving (IK) stays the separate, harder layer (`VISION.md` §6.2).
@@ -332,3 +333,106 @@ Operation **arguments** (parameterized verbs with a prompt), operations that rea
 **more than `param`** (e.g. the current geometry or sibling elements), and
 multi-instance / batch operations are out of scope for v1 — each a clean later
 generalization, none a rewrite.
+
+---
+
+## 10. The fitter — `promote` (increment 5) — design
+
+The third of a concept's four parts (`VISION.md` §5.3): its **fitter**, the dual
+of the generator. The generator answers "params → geometry"; the fitter answers
+"**geometry → params**" — *"this drawing IS a hexagon; recover its sides and
+radius."* `promote` runs the fitter over a selected raw shape and, on a match,
+replaces it with a live `Generated` instance carrying the recovered parameters —
+the `release`/`expand` inverse (`VISION.md` §5.3), and the deterministic floor of
+the §7 frontier (the fuzzy/AI tier is layered on top later, never underneath).
+
+### 10.1 The pivotal decision — a fitter is an EXPRESSION
+
+A generator is an expression (format decision 1); **by symmetry a fitter is too.**
+A capability audit of the expression engine confirmed it can express a
+regular-polygon detector — list indexing (`p[0]`), `.length`, `fold` with a list
+accumulator, `map`/`range`, `all`/`any`, `hypot`, `min`/`max`, `let`, lambdas,
+booleans, `if/then/else`, and `null` — with **exactly one missing primitive:
+`atan2(y, x)`** (to recover the placement angle). So the fitter rides the same
+corpus-pinned engine as the generator, `atan2` (degrees, mirroring `sin`/`cos`) is
+added to the math family as a small, in-pattern extension (corpus-pinned), and
+**concepts stay data, not native code.**
+
+### 10.2 The locked decisions
+
+| # | Fork | Decision |
+|---|------|----------|
+| 1 | What is a fitter? | **An expression** over a new **`shape`** namespace (`shape.points` = the selected shape's vertices as `[[x,y],…]`), evaluated by the same engine. It returns **`null` (no match)** or a flat **result list** (decision 3). |
+| 2 | The one language gap | Add **`atan2(y, x)` in degrees** to the expression language (all 5 evaluators + the expression corpus). Nothing else is missing. |
+| 3 | The fitter's output contract | **`null` \| `[<param0>, <param1>, …, cx, cy, rotation]`** — the first *K* values are the concept's *K* declared params **in `params:` order**, followed by the fixed placement triple `cx, cy, rotation` (degrees). No per-concept output map is needed: *K* is read from the concept's `params:`. |
+| 4 | How `promote` places it | The recovered params build the `Generated`; the placement triple builds **`common.transform = translate(cx,cy) · rotate(rotation)`** (applied generically at render — verified). The generator stays origin-centered/first-vertex-on-+x; the transform overlays it on the drawing. A regular polygon's CW/CCW winding yields the same vertex SET, so a convex match is visually exact either way. |
+| 5 | Op-log representation | One verb **`promote_to_concept`**, fully value-in-op: the native handler runs the fitter(s) at production time and bakes `{path, concept_id, params, transform}` into the op. Replay rebuilds the `Generated` and replaces the element — it never re-runs a fitter nor consults the registry (the OP_LOG §7 rule). |
+| 6 | Which concept? | `promote` tries **every registered concept's fitter** over the selection and takes the **first match** (registry order). With one fitter (`regular_polygon`) in v1 this is unambiguous; multi-fitter scoring/disambiguation is later work. |
+| 7 | How it is pinned | A **fitter conformance corpus** — `workspace/tests/concept_fitters.yaml` → `test_fixtures/concept_fitters/conformance.json` — self-checked in all five apps: a case is `(concept, points) → expected (null | result list)`, compared within 1e-9. Plus a **round-trip** property test: promoting a generator's own output recovers params+placement that re-render to the same geometry. |
+
+### 10.3 The format
+
+```yaml
+# appended to workspace/concepts/regular_polygon.yaml — the dual of `generator`
+fitter: |
+  let pts = shape.points in
+  let n = pts.length in
+  if n < 3 then null else
+  let cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in
+  let cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in
+  let dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in
+  let r0 = dists[0] in
+  let rtol = 0.000001 * r0 + 0.0000001 in
+  let radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in
+  let edges = map(range(0, n),
+    fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],
+                   pts[mod(i + 1, n)][1] - pts[i][1])) in
+  let e0 = edges[0] in
+  let etol = 0.000001 * e0 + 0.0000001 in
+  let edges_equal = all(edges, fun e -> abs(e - e0) < etol) in
+  if radii_equal and edges_equal and r0 > 0 then
+    [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]
+  else null
+```
+
+A regular polygon ⇔ all vertices equidistant from the centroid (equal radii) AND
+all edges equal — both expressible with the available list ops. The result is
+`[sides, radius, cx, cy, rotation]`. `fitter:` is optional — a concept with none
+can't be promoted to.
+
+### 10.4 The flow (per app)
+
+1. **Declare** — `fitter:` in the pack; the registry already carries it.
+2. **Extract** — `promote` reads the selected element's vertices (a `Polygon`/
+   `Polyline` in v1) into `shape.points`.
+3. **Detect (production-time, value-in-op)** — evaluate each registered concept's
+   `fitter` over `shape`; the first non-`null` result wins. Split it into params
+   (first *K*, by `params:` order) and the placement triple; build the transform.
+4. **Journal + apply** — build `{op: promote_to_concept, path, concept_id, params,
+   transform}` and route through `op_apply` in the one-undo bracket. The replay
+   arm calls `Controller.promote_to_concept(path, concept_id, params, transform)`,
+   which replaces the element with a `Generated { concept_id, params, common:
+   { transform } }`.
+5. **Invoke** — an `Object`-menu item "Promote to Concept", enabled for a single
+   eligible element.
+
+### 10.5 Tests first (the project rule)
+
+Authored before the promote code:
+- **`atan2` expression-corpus cases** — the language extension, gated in all 5 apps;
+- the **fitter conformance corpus** (§10.2 decision 7) — the detector, cross-language;
+- a **round-trip property test** — generate `regular_polygon{sides,radius}`, feed the
+  points back through the fitter, assert it recovers `[sides, radius, 0, 0, 0]`
+  (canonical placement) within tolerance;
+- a **controller test** — `promote_to_concept` replaces the element with the
+  expected `Generated` (params + transform);
+- an **op_apply replay test** — `promote_to_concept` journals one op and replays
+  byte-identically (checkpoint_equivalence).
+
+### 10.6 Deferrals
+
+`Path` inputs (curve sampling), **non-canonical detectors** beyond regular polygon
+(star/gear fitters, ellipse, line), **multi-fitter scoring** (when several concepts
+match), tolerance configurability, and the **fuzzy/AI tier** (`VISION.md` §7) are
+all later — the deterministic regular-polygon detector is the floor everything else
+builds on.
