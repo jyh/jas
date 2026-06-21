@@ -400,6 +400,49 @@ impl Controller {
         model.edit_document(doc.replace_element(path, new_elem));
     }
 
+    /// Apply a concept operation's RESOLVED changes to the generated instance at
+    /// `path` (CONCEPTS.md §9): merge each `name -> value` of `changes` into the
+    /// `Generated`'s params (a multi-param generalization of `set_concept_param`).
+    /// `changes` is the production-resolved effect of an operation (value-in-op),
+    /// so this performs no expression evaluation — it just writes the values. The
+    /// geometry re-derives from the generator at the next render. No-op if `path`
+    /// is not a `Generated` element or `changes` is empty / not an object.
+    pub fn apply_concept_operation(
+        model: &mut Model,
+        path: &ElementPath,
+        changes: &serde_json::Value,
+    ) {
+        let Some(changes) = changes.as_object() else {
+            return;
+        };
+        if changes.is_empty() {
+            return;
+        }
+        let doc = model.document().clone();
+        let Some(Element::Live(crate::geometry::live::LiveVariant::Generated(ge))) =
+            doc.get_element(path)
+        else {
+            return;
+        };
+        let mut new_ge = ge.clone();
+        match new_ge.params {
+            serde_json::Value::Object(ref mut map) => {
+                for (name, value) in changes {
+                    map.insert(name.clone(), value.clone());
+                }
+            }
+            _ => {
+                let mut map = serde_json::Map::new();
+                for (name, value) in changes {
+                    map.insert(name.clone(), value.clone());
+                }
+                new_ge.params = serde_json::Value::Object(map);
+            }
+        }
+        let new_elem = Element::Live(crate::geometry::live::LiveVariant::Generated(new_ge));
+        model.edit_document(doc.replace_element(path, new_elem));
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance at
     /// `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md §7,
     /// Fork S6 — the inverse of Make Symbol). The target id is resolved by a
@@ -3775,6 +3818,46 @@ mod tests {
         assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(8.0));
         // radius is untouched
         assert_eq!(g.params.get("radius").and_then(|v| v.as_f64()), Some(50.0));
+    }
+
+    #[test]
+    fn apply_concept_operation_merges_changes() {
+        // CONCEPTS.md §9: an operation's RESOLVED changes map is merged into the
+        // Generated's params (only named params change; others untouched).
+        let mut model = Model::default();
+        let params = serde_json::json!({ "radius": 50.0, "sides": 6.0 });
+        Controller::place_concept_instance(&mut model, "regular_polygon", params, "g1");
+        let path = vec![0, 0];
+        // add_side resolves to { sides: 7 } at production time.
+        let changes = serde_json::json!({ "sides": 7.0 });
+        Controller::apply_concept_operation(&mut model, &path, &changes);
+        let el = model.document().get_element(&path).expect("instance");
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Generated(g),
+        ) = el
+        else {
+            panic!("expected a generated element");
+        };
+        assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(7.0));
+        assert_eq!(g.params.get("radius").and_then(|v| v.as_f64()), Some(50.0));
+    }
+
+    #[test]
+    fn apply_concept_operation_empty_changes_is_noop() {
+        // An empty / non-object changes map mutates nothing (the no-op guard).
+        let mut model = Model::default();
+        let params = serde_json::json!({ "radius": 50.0, "sides": 6.0 });
+        Controller::place_concept_instance(&mut model, "regular_polygon", params, "g1");
+        let path = vec![0, 0];
+        Controller::apply_concept_operation(&mut model, &path, &serde_json::json!({}));
+        let el = model.document().get_element(&path).expect("instance");
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Generated(g),
+        ) = el
+        else {
+            panic!("expected a generated element");
+        };
+        assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(6.0));
     }
 
     #[test]

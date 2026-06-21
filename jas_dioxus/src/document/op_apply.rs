@@ -1441,6 +1441,21 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let value = num_field(op, "value");
             Controller::set_concept_param(model, &path, name, value);
         }
+        // Apply a concept operation (CONCEPTS.md §9). `op_id` rides as journal
+        // metadata (the semantic verb); `changes` is the production-RESOLVED
+        // param map (value-in-op) that is actually applied — replay merges it
+        // and never re-evaluates the operation's expressions nor consults the
+        // registry. Malformed/empty payloads SKIP (the controller no-ops on an
+        // empty/non-object `changes`, so nothing journals).
+        "apply_concept_operation" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return;
+            };
+            let Some(changes) = op.get("changes") else {
+                return;
+            };
+            Controller::apply_concept_operation(model, &path, changes);
+        }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return;

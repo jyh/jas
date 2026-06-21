@@ -2285,6 +2285,61 @@ mod tests {
         );
     }
 
+    /// CONCEPTS.md §9 — `apply_concept_operation` journals + replays byte-
+    /// identically. The op carries the production-RESOLVED `changes` map
+    /// value-in-op (here `{sides: 7}`, the add_side result), so replay merges it
+    /// without re-evaluating the operation's expression — the checkpoint_
+    /// equivalence gate for the operations verb.
+    #[test]
+    fn operation_apply_concept_operation_replay_is_deterministic() {
+        let setup = "rect_basic.svg";
+        let setup_svg = read_fixture(&format!("svg/{}", setup));
+        let mut model = Model::new(svg_to_document(&setup_svg), None);
+
+        model.begin_txn();
+        model.name_txn("place_concept_instance");
+        apply_op(
+            &mut model,
+            &serde_json::json!({
+                "op": "place_concept_instance",
+                "concept_id": "regular_polygon",
+                "params": { "sides": 6.0, "radius": 50.0 },
+                "elem_id": "concept-1",
+            }),
+        );
+        model.commit_txn();
+
+        // add_side, resolved at production time to { sides: 7 }, journaled with
+        // its op_id as metadata and the changes as the authoritative operand.
+        model.begin_txn();
+        model.name_txn("apply_concept_operation");
+        apply_op(
+            &mut model,
+            &serde_json::json!({
+                "op": "apply_concept_operation",
+                "path": [0, 1],
+                "op_id": "add_side",
+                "changes": { "sides": 7.0 },
+            }),
+        );
+        model.commit_txn();
+
+        let live = <DocumentOps as OpWorld>::to_test_json(&model);
+        assert!(
+            live.contains("\"sides\":7"),
+            "the operation merged sides=7: {live}"
+        );
+
+        let head = model.journal_head();
+        let replay1 = replay_journal(setup, model.journal(), head);
+        let replay2 = replay_journal(setup, model.journal(), head);
+        assert_eq!(replay1, replay2, "apply_concept_operation replay is non-deterministic");
+        assert_eq!(
+            replay1, live,
+            "apply_concept_operation journal replay != snapshot path"
+        );
+    }
+
     /// Group/layer wrapping verbs (OP_LOG.md §9 Phase P5): the highest-structural-
     /// complexity verbs. Each is a MULTI-STEP mutation that must replay as ONE
     /// deterministic op:

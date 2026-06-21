@@ -762,6 +762,79 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 }
                 return Vec::new();
             }
+            // Apply a named concept operation to the single selected generated
+            // instance (CONCEPTS.md §9). The operation's effect is RESOLVED here,
+            // at production time: look the operation up in the registry by id,
+            // evaluate its `set:` expressions with the instance's CURRENT params
+            // bound under `param`, and bake the resulting `changes` map into the
+            // op (value-in-op). Routed through op_apply inside the one-undo
+            // bracket; replay merges `changes` and never re-evaluates.
+            "apply_concept_operation" => {
+                let Some(op_id) = params
+                    .get("op_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                else {
+                    return Vec::new();
+                };
+                if let Some(tab) = st.tab_mut() {
+                    let path = {
+                        let sel = &tab.model.document().selection;
+                        if sel.len() == 1 {
+                            Some(sel[0].path.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(path) = path else { return Vec::new(); };
+                    let Some(crate::geometry::element::Element::Live(
+                        crate::geometry::live::LiveVariant::Generated(ge),
+                    )) = tab.model.document().get_element(&path).cloned()
+                    else {
+                        return Vec::new();
+                    };
+                    // Resolve the operation's `set:` expressions over the
+                    // instance's current params → the concrete `changes` map.
+                    let changes = crate::interpreter::workspace::Workspace::load()
+                        .and_then(|w| w.concept(&ge.concept_id).cloned())
+                        .and_then(|c| {
+                            let ops = c.get("operations")?.as_array()?;
+                            let operation = ops.iter().find(|o| {
+                                o.get("id").and_then(|v| v.as_str()) == Some(op_id.as_str())
+                            })?;
+                            let set = operation.get("set")?.as_object()?;
+                            let mut ctx = serde_json::Map::new();
+                            ctx.insert("param".to_string(), ge.params.clone());
+                            let ctx = serde_json::Value::Object(ctx);
+                            let mut changes = serde_json::Map::new();
+                            for (name, expr_v) in set {
+                                if let Some(src) = expr_v.as_str() {
+                                    if let super::expr_types::Value::Number(n) =
+                                        super::expr::eval(src, &ctx)
+                                    {
+                                        changes.insert(name.clone(), serde_json::json!(n));
+                                    }
+                                }
+                            }
+                            Some(changes)
+                        });
+                    if let Some(changes) = changes {
+                        if !changes.is_empty() {
+                            let op = serde_json::json!({
+                                "op": "apply_concept_operation",
+                                "path": path,
+                                "op_id": op_id,
+                                "changes": serde_json::Value::Object(changes),
+                            });
+                            tab.model.with_txn(|m| {
+                                m.name_txn("apply_concept_operation");
+                                crate::document::op_apply::op_apply(m, &op);
+                            });
+                        }
+                    }
+                }
+                return Vec::new();
+            }
             // Delete the panel-selected master. Reference-aware: warn via
             // a confirm dialog when it still has instances.
             "delete_symbol_action" => {
@@ -2011,10 +2084,27 @@ fn build_selected_concept_view(
             params_out.push(entry);
         }
     }
+    // The concept's named operations (CONCEPTS.md §9): id + label + description,
+    // so the panel can render a button per operation. Empty when the concept
+    // declares no `operations:`.
+    let mut operations_out: Vec<serde_json::Value> = Vec::new();
+    if let Some(ops) = concept.get("operations").and_then(|v| v.as_array()) {
+        for o in ops {
+            let Some(oid) = o.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            operations_out.push(serde_json::json!({
+                "id": oid,
+                "label": o.get("label").and_then(|v| v.as_str()).unwrap_or(oid),
+                "description": o.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+            }));
+        }
+    }
     serde_json::json!({
         "concept_id": concept_id,
         "name": name,
         "params": params_out,
+        "operations": operations_out,
     })
 }
 
@@ -11387,6 +11477,14 @@ mod tests {
             .find(|p| p["name"] == serde_json::json!("sides"))
             .expect("sides param");
         assert_eq!(sides["value"], serde_json::json!(6.0));
+        // operations (CONCEPTS.md §9): the concept's named edit verbs, so the
+        // panel can render a button per operation.
+        let ops = sc["operations"].as_array().expect("operations array");
+        let ids: Vec<&str> = ops.iter().filter_map(|o| o["id"].as_str()).collect();
+        assert!(
+            ids.contains(&"add_side") && ids.contains(&"remove_side"),
+            "selected_concept.operations lists the concept's verbs: {ids:?}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────
