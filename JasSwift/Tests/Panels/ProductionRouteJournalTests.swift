@@ -614,6 +614,104 @@ private func makeModelWithTwoArtboards() -> Model {
     assertCheckpointEquivalence(model, preDoc: preDoc)
 }
 
+// MARK: - Concept-pack ops (place_concept_instance / set_concept_param)
+
+@Test func productionRouteConceptOpsReplayIsDeterministic() {
+    // CONCEPTS.md §7 — the concept-pack ops journal + replay byte-identically.
+    // `place_concept_instance` appends a value-in-op `Generated` element (concept
+    // id + resolved default params + minted id); `set_concept_param` tunes one
+    // param of the `Generated` at `path`. Every operand is value-in-op, so the
+    // journal replays to the SAME document the live edit produced (the
+    // checkpoint_equivalence gate) — even though the registry the defaults came
+    // from is never consulted on replay. Mirrors Rust's
+    // `operation_concept_ops_replay_is_deterministic`.
+    //
+    // Base doc = one layer + one rect (the Swift analogue of rect_basic.svg), so
+    // the placed Generated lands at [0,1] (after the seeded rect) and is selected.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [rect])],
+        selectedLayer: 0,
+        selection: []
+    ))
+    let preDoc = model.document
+    let before = model.journal.count
+
+    // Pin the panel-selected concept so the place handler resolves its default
+    // params (sides=6, radius=50) from the registry — baked value-in-op at place
+    // time, so replay never re-consults the registry.
+    model.stateStore.initPanel("concepts_panel_content", defaults: [:])
+    model.stateStore.setPanel("concepts_panel_content", "selected_concept", "regular_polygon")
+
+    // (1) Place a hexagon via the REAL production handler (mints the id +
+    // resolves defaults + brackets one undo).
+    ConceptsPanel.dispatch("place_concept_instance", model: model)
+
+    #expect(model.journal.count == before + 1,
+            "place_concept_instance commits one transaction")
+    guard let placeTxn = model.journal.last else { Issue.record("place txn"); return }
+    #expect(placeTxn.name == "place_concept_instance")
+    #expect(placeTxn.ops.count == 1, "one place_concept_instance op")
+    guard let placeOp = placeTxn.ops.first else { Issue.record("place op"); return }
+    #expect(placeOp.op == "place_concept_instance")
+    #expect(placeOp.params["concept_id"] as? String == "regular_polygon")
+    // The minted id is journaled VALUE-IN-OP as a literal (replay never re-mints).
+    let mintedId = placeOp.params["elem_id"] as? String
+    #expect(mintedId != nil && !(mintedId!.isEmpty),
+            "the minted elem id is a journaled literal")
+    // The mutation landed: a Generated of regular_polygon sits at [0,1].
+    guard case .live(.generated(let gen)) = model.document.tryGetElement([0, 1]) else {
+        Issue.record("expected a Generated at [0,1]"); return
+    }
+    #expect(gen.conceptId == "regular_polygon")
+    #expect(gen.id == mintedId)
+
+    // (2) Tune one param (sides 6 -> 8) via the REAL production handler. The
+    // place auto-selected [0,1], so setParam targets it.
+    ConceptsPanel.setParam(model: model, name: "sides", value: 8)
+
+    #expect(model.journal.count == before + 2,
+            "set_concept_param commits a second transaction")
+    guard let setTxn = model.journal.last else { Issue.record("set txn"); return }
+    #expect(setTxn.name == "set_concept_param")
+    #expect(setTxn.ops.count == 1, "one set_concept_param op")
+    guard let setOp = setTxn.ops.first else { Issue.record("set op"); return }
+    #expect(setOp.op == "set_concept_param")
+    #expect((setOp.params["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } == [0, 1],
+            "the resolved literal path is journaled value-in-op")
+    #expect(setOp.params["name"] as? String == "sides")
+    #expect((setOp.params["value"] as? NSNumber)?.doubleValue == 8.0,
+            "the committed value is journaled value-in-op")
+
+    // The live document carries the placed + tuned instance. (Swift's recordedFmt
+    // serializes integer-valued numbers as N.0, unlike Rust's bare N.)
+    let live = documentToTestJson(model.document)
+    #expect(live.contains("\"concept\":\"regular_polygon\""),
+            "the placed Generated instance is in the document: \(live)")
+    #expect(live.contains("\"\(mintedId!)\""),
+            "the value-in-op id survives into the document")
+    #expect(live.contains("\"sides\":8.0"),
+            "set_concept_param tuned sides to 8: \(live)")
+
+    // checkpoint_equivalence: the journal replays to the SAME document the live
+    // edit produced (and deterministically — replaying twice agrees). Every
+    // operand is value-in-op, so the registry/selection/mint are NEVER consulted
+    // on replay.
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+
+    // The two undo steps round-trip (place + set are separate transactions).
+    model.undo()
+    guard case .live(.generated(let g2)) = model.document.tryGetElement([0, 1]) else {
+        Issue.record("undo of set keeps the Generated"); return
+    }
+    #expect((g2.params["sides"] as? NSNumber)?.doubleValue == 6.0,
+            "undo restores sides to the placed default")
+    model.undo()
+    #expect(model.document.layers[0].children.count == 1,
+            "undo of place removes the Generated, leaving the seeded rect")
+}
+
 // MARK: - Native menu Delete / Cut (JasCommands routes the SAME delete_selection op)
 
 @Test func productionRouteNativeMenuDeleteJournalsDeleteSelection() {
