@@ -980,6 +980,41 @@ class SymbolOpsTest(absltest.TestCase):
         self.assertIsInstance(el, GeneratedElem)
         self.assertEqual(el.params["sides"], 6.0)
 
+    def test_promote_to_concept_replaces_with_generated(self):
+        # CONCEPTS.md §10: promote replaces a raw element with a Generated
+        # instance carrying the fitted params + the placement transform, while
+        # preserving the original element's identity (id/name). Mirrors Rust
+        # promote_to_concept_replaces_with_generated.
+        from geometry.element import GeneratedElem
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Polygon(
+            points=((10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0)),
+            id="p1", name="my square"))
+        params = {"sides": 4.0, "radius": 10.0}
+        t = Transform.translate(5.0, 7.0)
+        ctrl.promote_to_concept((0, 0), "regular_polygon", params, t)
+
+        el = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.concept_id, "regular_polygon")
+        self.assertEqual(el.params["sides"], 4.0)
+        self.assertEqual(el.params["radius"], 10.0)
+        # placement transform applied …
+        self.assertEqual((el.transform.e, el.transform.f), (5.0, 7.0))
+        # … and the original identity preserved.
+        self.assertEqual(el.id, "p1")
+        self.assertEqual(el.name, "my square")
+
+    def test_promote_to_concept_missing_path_is_noop(self):
+        # A missing path mutates nothing; the rect at [0,0] is untouched. Mirrors
+        # Rust promote_to_concept_missing_path_is_noop.
+        ctrl = Controller(model=Model())
+        ctrl.add_element(Rect(x=0, y=0, width=10, height=10))
+        ctrl.promote_to_concept(
+            (9, 9), "regular_polygon", {}, Transform())
+        el = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(el, Rect)
+
     def test_place_instance_dangling_master_ok(self):
         # It is fine if the master does not exist; the instance still appears
         # (renders empty until the master exists — dangling is handled).

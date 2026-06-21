@@ -201,3 +201,102 @@ def apply_concept_operation(model, op_id: str | None) -> None:
         "op_id": op_id,
         "changes": changes,
     })
+
+
+def apply_promote_to_concept(model) -> None:
+    """Promote the single selected raw shape to a live ``Generated`` concept
+    instance (CONCEPTS.md §10 — the fitter / promote, the inverse of expand).
+    Detection is RESOLVED here, at production time: extract the selected
+    Polygon/Polyline's WORLD-space vertices (the element transform baked into the
+    points), try EVERY registered concept's ``fitter`` expression over them (bound
+    under ``shape.points``, in sorted-id order for a deterministic first match),
+    and on the first match split its flat result ``[params..., cx, cy, rotation]``
+    into the concept params (first K by declared order) + a placement transform
+    (``translate(cx,cy) · rotate(rotation)``). Everything is baked into the op
+    value-in-op and routed through ``op_apply`` (one undo step) so it JOURNALS;
+    replay rebuilds the Generated and never re-runs the fitter. No-op unless
+    exactly one Polygon/Polyline is selected and some concept matches. Mirrors the
+    Rust ``promote_to_concept`` dispatch arm."""
+    if model is None:
+        return
+    from geometry.element import Polygon, Polyline, Transform
+    doc = model.document
+    if len(doc.selection) != 1:
+        return
+    es = next(iter(doc.selection))
+    try:
+        elem = doc.get_element(es.path)
+    except (ValueError, IndexError, KeyError):
+        return
+    # Only a Polygon / Polyline carries promotable vertices in v1.
+    if not isinstance(elem, (Polygon, Polyline)):
+        return
+    raw_points = [(float(p[0]), float(p[1])) for p in elem.points]
+    if not raw_points:
+        return
+    # Bake any element transform into the points so the fitter sees WORLD space
+    # (the promoted instance re-places via its own transform).
+    t_elem = getattr(elem, "transform", None)
+    if t_elem is not None:
+        pts = [t_elem.apply_point(x, y) for (x, y) in raw_points]
+    else:
+        pts = raw_points
+    ctx = {"shape": {"points": [[x, y] for (x, y) in pts]}}
+
+    from panels.yaml_menu import get_workspace_data
+    ws = get_workspace_data()
+    registry = (ws or {}).get("concepts", {})
+    if not isinstance(registry, dict) or not registry:
+        return
+
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.expr_types import ValueType
+
+    def _num(v) -> float:
+        # A LIST value's items are themselves Values; unwrap then coerce.
+        raw = v.value if hasattr(v, "value") else v
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+
+    chosen = None  # (concept_id, params_dict, cx, cy, rotation)
+    for cid in sorted(registry.keys()):
+        concept = registry[cid]
+        if not isinstance(concept, dict):
+            continue
+        fitter = concept.get("fitter")
+        if not isinstance(fitter, str):
+            continue
+        result = evaluate(fitter, ctx)
+        if result.type != ValueType.LIST:
+            continue  # null / non-list => no match for this concept
+        items = result.value
+        param_names = [
+            p["name"] for p in (concept.get("params", []) or [])
+            if isinstance(p, dict) and "name" in p
+        ]
+        k = len(param_names)
+        if len(items) < k + 3:
+            continue  # malformed fitter output (need params + cx,cy,rot)
+        nums = [_num(v) for v in items]
+        # Store recovered param values as floats so serialization matches across
+        # apps (sides=6.0), exactly as the determinism rule requires.
+        params = {name: nums[i] for i, name in enumerate(param_names)}
+        chosen = (cid, params, nums[k], nums[k + 1], nums[k + 2])
+        break
+
+    if chosen is None:
+        return  # nothing matched: no-op
+    concept_id, params, cx, cy, rot = chosen
+    # Placement: translate(cx,cy) * rotate(rot) — rotate then translate.
+    t = Transform.translate(cx, cy).multiply(Transform.rotate(rot))
+    # VALUE-IN-OP: the concept id, recovered params, and placement transform are
+    # all baked in; replay rebuilds the Generated and re-runs the fitter NEVER.
+    _route(model, "promote_to_concept", {
+        "op": "promote_to_concept",
+        "path": list(es.path),
+        "concept_id": concept_id,
+        "params": params,
+        "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
+    })

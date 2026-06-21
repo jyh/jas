@@ -163,6 +163,11 @@ def create_menus(window: QMainWindow) -> None:
     make_instance_action.triggered.connect(
         lambda: _with_model(lambda m: _link_to_selection(m)))
 
+    promote_concept_action = object_menu.addAction("&Promote to Concept")
+    # No keyboard shortcut (matches the YAML menubar / Rust command).
+    promote_concept_action.triggered.connect(
+        lambda: _with_model(lambda m: _promote_to_concept(m)))
+
     # View menu
     view_menu = menubar.addMenu("&View")
 
@@ -823,6 +828,17 @@ def _link_to_selection(model: Model) -> None:
         controller.move_selection(PASTE_OFFSET, PASTE_OFFSET)
 
     model.with_txn(_gesture)
+
+
+def _promote_to_concept(model: Model) -> None:
+    """Promote to Concept (CONCEPTS.md §10 — the fitter / promote): detect the
+    single selected raw shape with a registered concept's fitter and replace it
+    with a live Generated instance, journaling one undo step. The detection +
+    op-routing live in ``concepts_apply.apply_promote_to_concept`` (the SAME
+    native arm the Concepts panel dispatch reaches), so the menu and the panel
+    promote identically. Mirrors the Rust Object-menu Promote to Concept."""
+    from panels.concepts_apply import apply_promote_to_concept
+    apply_promote_to_concept(model)
 
 
 def _group_selection(model: Model) -> None:

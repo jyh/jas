@@ -114,6 +114,23 @@ def str_list_field(op: dict, key: str) -> list[str]:
     return [x for x in v if isinstance(x, str)]
 
 
+def parse_transform(v: Any) -> "Transform":
+    """Parse a ``transform`` field — a 6-element matrix ``[a,b,c,d,e,f]`` — into a
+    :class:`Transform`, defaulting to identity when absent or malformed
+    (CONCEPTS.md §10 ``promote``). Hardened: a wrong-length / non-numeric array is
+    identity, never an exception. Mirrors the Rust ``parse_transform`` helper."""
+    from geometry.element import Transform
+    if not isinstance(v, list) or len(v) != 6:
+        return Transform()
+    m: list[float] = []
+    for n in v:
+        if isinstance(n, bool) or not isinstance(n, (int, float)):
+            m.append(0.0)
+        else:
+            m.append(float(n))
+    return Transform(a=m[0], b=m[1], c=m[2], d=m[3], e=m[4], f=m[5])
+
+
 # ── P1: print-config field setters (OP_LOG.md §9 Phase P1) ──────────────────
 #
 # The eight doc.* print-config verbs journal RESOLVED literals through ONE
@@ -1266,6 +1283,21 @@ def op_apply(model: Model, op: dict) -> None:
         if path is None or not isinstance(changes, dict):
             return
         ctrl.apply_concept_operation(path, changes)
+    # Promote a raw shape to a Generated concept instance (CONCEPTS.md §10 — the
+    # fitter / ``promote``). Every operand is value-in-op: the detection ran at
+    # production time, so replay just rebuilds the element. The ``transform`` is
+    # the 6-element matrix ``[a,b,c,d,e,f]`` (default identity). Malformed/missing
+    # path or concept_id SKIPS. Mirrors the Rust promote_to_concept arm.
+    elif name == "promote_to_concept":
+        path = parse_path(op.get("path"))
+        concept_id = str_field(op, "concept_id")
+        if path is None or concept_id is None:
+            return
+        params = op.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        transform = parse_transform(op.get("transform"))
+        ctrl.promote_to_concept(path, concept_id, params, transform)
     elif name == "detach":
         path = parse_path(op.get("path"))
         if path is None:
