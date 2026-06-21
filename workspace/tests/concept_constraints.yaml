@@ -1,0 +1,49 @@
+# Concept-constraint conformance tests (CONCEPTS.md §11).
+# A constraint is a concept invariant: a boolean `check` expression over the
+# instance's parameters (bound under `param`) plus a human-readable message. The
+# checker collects the constraints whose `check` is NOT truthy — those are the
+# violations. These cases pin checking across every interpreter: each names a
+# concept (workspace/concepts/<id>.yaml), supplies params (omitted params fall
+# back to declared defaults), and pins the expected list of violated constraint
+# ids (in declared order). Constraint checking IS boolean expression evaluation,
+# so this is a thin specialization of the expression corpus.
+
+tests:
+  # Gear at its defaults — every invariant holds.
+  - concept: gear
+    params: { teeth: 12, outer: 50, root: 38 }
+    expected: []
+
+  # Too few teeth (1 < 3).
+  - concept: gear
+    params: { teeth: 2, outer: 50, root: 38 }
+    expected: [min_teeth]
+
+  # Tooth-tip radius does not exceed the root radius.
+  - concept: gear
+    params: { teeth: 12, outer: 30, root: 38 }
+    expected: [outer_exceeds_root]
+
+  # Multiple violations, returned in declared order.
+  - concept: gear
+    params: { teeth: 1, outer: 10, root: 20 }
+    expected: [min_teeth, outer_exceeds_root]
+
+  # Gear from defaults (valid) — exercises param-default merging.
+  - concept: gear
+    expected: []
+
+  # Regular polygon, all invariants hold.
+  - concept: regular_polygon
+    params: { sides: 6, radius: 50 }
+    expected: []
+
+  # Too few sides.
+  - concept: regular_polygon
+    params: { sides: 2, radius: 50 }
+    expected: [min_sides]
+
+  # Non-positive radius.
+  - concept: regular_polygon
+    params: { sides: 6, radius: 0 }
+    expected: [positive_radius]
