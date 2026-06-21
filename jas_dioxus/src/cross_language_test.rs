@@ -2214,6 +2214,77 @@ mod tests {
         }
     }
 
+    /// CONCEPTS.md §7 — the concept-pack ops journal + replay byte-identically.
+    /// `place_concept_instance` appends a value-in-op `Generated` element (concept
+    /// id + resolved default params + minted id); `set_concept_param` tunes one
+    /// param of the `Generated` at `path`. Every operand is value-in-op, so the
+    /// journal replays to the SAME document the live edit produced (the
+    /// checkpoint_equivalence gate, OP_LOG.md §6) — even though the registry the
+    /// defaults came from is never consulted on replay.
+    #[test]
+    fn operation_concept_ops_replay_is_deterministic() {
+        let setup = "rect_basic.svg";
+        let setup_svg = read_fixture(&format!("svg/{}", setup));
+        let mut model = Model::new(svg_to_document(&setup_svg), None);
+
+        // Place a hexagon instance with a literal id + resolved default params.
+        model.begin_txn();
+        model.name_txn("place_concept_instance");
+        apply_op(
+            &mut model,
+            &serde_json::json!({
+                "op": "place_concept_instance",
+                "concept_id": "regular_polygon",
+                "params": { "sides": 6.0, "radius": 50.0 },
+                "elem_id": "concept-1",
+            }),
+        );
+        model.commit_txn();
+
+        // Tune one param (sides 6 -> 8). The Generated sits at [0,1], after the
+        // rect that rect_basic.svg seeds the single layer with.
+        model.begin_txn();
+        model.name_txn("set_concept_param");
+        apply_op(
+            &mut model,
+            &serde_json::json!({
+                "op": "set_concept_param",
+                "path": [0, 1],
+                "name": "sides",
+                "value": 8.0,
+            }),
+        );
+        model.commit_txn();
+
+        let live = <DocumentOps as OpWorld>::to_test_json(&model);
+        assert!(
+            live.contains("\"concept\":\"regular_polygon\""),
+            "the placed Generated instance is in the document: {live}"
+        );
+        assert!(
+            live.contains("\"concept-1\""),
+            "the value-in-op id survives into the document: {live}"
+        );
+        assert!(
+            live.contains("\"sides\":8"),
+            "set_concept_param tuned sides to 8: {live}"
+        );
+
+        // checkpoint_equivalence: the journal replays to the SAME document, twice.
+        let head = model.journal_head();
+        let replay1 = replay_journal(setup, model.journal(), head);
+        let replay2 = replay_journal(setup, model.journal(), head);
+        assert_eq!(
+            replay1, replay2,
+            "concept-op replay is non-deterministic"
+        );
+        assert_eq!(
+            replay1, live,
+            "concept-op journal replay != snapshot path (value-in-op operands must \
+             reproduce the Generated instance + tuned param byte-identically)"
+        );
+    }
+
     /// Group/layer wrapping verbs (OP_LOG.md §9 Phase P5): the highest-structural-
     /// complexity verbs. Each is a MULTI-STEP mutation that must replay as ONE
     /// deterministic op:

@@ -1412,6 +1412,35 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             };
             Controller::place_instance(model, master_id, ref_id);
         }
+        // ── Concept-pack ops (CONCEPTS.md §6-7) ──
+        // The two verbs the Concepts panel emits, given journal-replay arms so a
+        // placed/edited concept instance survives capture+replay byte-identically
+        // (the §7 determinism rule). Both carry every operand VALUE-IN-OP: the
+        // concept id, the RESOLVED default params, and the minted elem id (place);
+        // the path, param name, and committed value (set). Nothing is re-derived
+        // on replay (the registry could have changed), so replay reconstructs the
+        // exact Generated instance the live edit produced. A malformed payload
+        // SKIPS (never panics, never journals).
+        "place_concept_instance" => {
+            let (Some(concept_id), Some(elem_id)) =
+                (str_field(op, "concept_id"), str_field(op, "elem_id"))
+            else {
+                return;
+            };
+            let params = op
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+            Controller::place_concept_instance(model, concept_id, params, elem_id);
+        }
+        "set_concept_param" => {
+            let (Some(path), Some(name)) = (parse_path(op.get("path")), str_field(op, "name"))
+            else {
+                return;
+            };
+            let value = num_field(op, "value");
+            Controller::set_concept_param(model, &path, name, value);
+        }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return;
