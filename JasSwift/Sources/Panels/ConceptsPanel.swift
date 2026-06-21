@@ -57,19 +57,28 @@ public enum ConceptsPanel {
     }
 
     /// Native intercept for the Concepts panel ops (the YAML actions are
-    /// `log` stubs). One undo step via the Controller mutator.
+    /// `log` stubs). Routes through `opApply` so the placement JOURNALS as a
+    /// real `place_concept_instance` op (value-in-op: the panel-selected
+    /// concept id + its RESOLVED default params + the minted elem id),
+    /// replayable like the sibling structural verbs. `withTxn` brackets the one
+    /// undo step; the arm both mutates and records. Mirrors the Rust dispatch
+    /// arm and the native-menu delete routing.
     public static func dispatch(_ action: String, model: Model) {
         switch action {
         case "place_concept_instance":
             guard let conceptId = selectedConcept(model) else { return }
             let existing = existingIds(model.document)
             guard let elemId = mint(existing) else { return }
-            // The Controller mutator self-brackets one undo step via editDocument.
-            let controller = Controller(model: model)
-            controller.placeConceptInstance(
-                conceptId: conceptId,
-                params: defaultParams(conceptId),
-                elemId: elemId)
+            let op: [String: Any] = [
+                "op": "place_concept_instance",
+                "concept_id": conceptId,
+                "params": defaultParams(conceptId),
+                "elem_id": elemId,
+            ]
+            model.withTxn {
+                model.nameTxn("place_concept_instance")
+                opApply(model, Controller(model: model), op)
+            }
         default:
             break
         }
@@ -77,14 +86,25 @@ public enum ConceptsPanel {
 
     /// Native intercept for `set_concept_param` (the YAML action is a `log`
     /// stub): find the single selected Generated instance and write
-    /// `params[name] = value` (one undo via the Controller). Mirrors the Rust
-    /// `set_concept_param` dispatch arm. No-op unless exactly one Generated
-    /// element is selected.
+    /// `params[name] = value`. Routes through `opApply` so the edit JOURNALS as
+    /// a real `set_concept_param` op (value-in-op: the RESOLVED path, param
+    /// name, and committed value), replayable like the sibling property verbs.
+    /// `withTxn` brackets the one undo step. Mirrors the Rust `set_concept_param`
+    /// dispatch arm. No-op unless exactly one Generated element is selected.
     public static func setParam(model: Model, name: String, value: Double) {
         let doc = model.document
         guard doc.selection.count == 1, let sel = doc.selection.first else { return }
         let path = sel.path
         guard case .live(.generated) = doc.tryGetElement(path) else { return }
-        Controller(model: model).setConceptParam(path, name: name, value: value)
+        let op: [String: Any] = [
+            "op": "set_concept_param",
+            "path": path,
+            "name": name,
+            "value": value,
+        ]
+        model.withTxn {
+            model.nameTxn("set_concept_param")
+            opApply(model, Controller(model: model), op)
+        }
     }
 }

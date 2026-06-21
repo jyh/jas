@@ -1104,6 +1104,25 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
         guard let masterId = strField(op, "master_id"),
               let refId = strField(op, "ref_id") else { return }
         controller.placeInstance(masterId: masterId, refId: refId)
+    // ── Concept-pack ops (CONCEPTS.md §6-7) ──
+    // The two verbs the Concepts panel emits, given journal-replay arms so a
+    // placed/edited concept instance survives capture+replay byte-identically
+    // (the §7 determinism rule). Both carry every operand VALUE-IN-OP: the
+    // concept id, the RESOLVED default params, and the minted elem id (place);
+    // the path, param name, and committed value (set). Nothing is re-derived on
+    // replay (the registry could have changed), so replay reconstructs the
+    // exact Generated instance the live edit produced. A malformed payload SKIPS
+    // (never crashes, never journals).
+    case "place_concept_instance":
+        guard let conceptId = strField(op, "concept_id"),
+              let elemId = strField(op, "elem_id") else { return }
+        let params = (op["params"] as? [String: Any]) ?? [:]
+        controller.placeConceptInstance(
+            conceptId: conceptId, params: params, elemId: elemId)
+    case "set_concept_param":
+        guard let path = parsePath(op["path"]),
+              let pname = strField(op, "name") else { return }
+        controller.setConceptParam(path, name: pname, value: numField(op, "value"))
     case "detach":
         guard let path = parsePath(op["path"]) else { return }
         controller.detach(path)
