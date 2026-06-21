@@ -988,11 +988,22 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                  | None -> ())
               | "place_concept_instance" ->
                 (* concepts_panel_select is the generic set_panel_state; only the
-                   place arm is native (mints + builds a Generated). *)
+                   place arm is native (mints + builds a Generated). Route the
+                   placement through [Op_apply.op_apply] so it JOURNALS as a real
+                   [place_concept_instance] op (value-in-op: concept id + resolved
+                   default params + minted id), replayable like the sibling
+                   structural verbs. [with_txn] brackets one undo; the arm both
+                   mutates and records. *)
                 (match !_current_store with
                  | Some store ->
-                   Concepts_panel.place_concept_instance store m;
-                   wrote_state := true
+                   (match Concepts_panel.place_concept_op store m with
+                    | Some op ->
+                      let ctrl = new Controller.controller ~model:m () in
+                      m#with_txn (fun () ->
+                        m#name_txn "place_concept_instance";
+                        Op_apply.op_apply m ctrl op);
+                      wrote_state := true
+                    | None -> ())
                  | None -> ())
               | "delete_symbol_action" ->
                 (match !_current_store with
@@ -1122,6 +1133,11 @@ let dispatch_change_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t)
           | Some m ->
             (match action_name with
              | "set_concept_param" ->
+               (* Route the edit through [Op_apply.op_apply] so it JOURNALS as a
+                  real [set_concept_param] op (value-in-op: the resolved path,
+                  param name, and committed value), replayable like the sibling
+                  property verbs. [with_txn] brackets one undo; the arm both
+                  mutates and records. *)
                (match !_current_store,
                       List.assoc_opt "name" params_list,
                       List.assoc_opt "value" params_list with
@@ -1131,8 +1147,14 @@ let dispatch_change_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t)
                     | `Int i -> float_of_int i
                     | `Intlit s -> (try float_of_string s with _ -> 0.0)
                     | _ -> 0.0 in
-                  Concepts_panel.set_concept_param store m name v;
-                  wrote_state := true
+                  (match Concepts_panel.set_concept_param_op store m name v with
+                   | Some op ->
+                     let ctrl = new Controller.controller ~model:m () in
+                     m#with_txn (fun () ->
+                       m#name_txn "set_concept_param";
+                       Op_apply.op_apply m ctrl op);
+                     wrote_state := true
+                   | None -> ())
                 | _ -> ())
              | _ ->
                Panel_menu.dispatch_yaml_action

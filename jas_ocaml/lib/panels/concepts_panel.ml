@@ -1,8 +1,9 @@
 (** Concepts panel native glue (CONCEPTS.md section 6). The panel body (concept
     row list + Place footer) is rendered by the generic YAML interpreter from
     [workspace/panels/concepts.yaml] — a [foreach] over [data.concepts]. This
-    module supplies the native Place arm (the [place_concept_instance] action is
-    a [log] stub, like Place Instance) and the render-time concept resolver.
+    module supplies the native Place arm (which BUILDS the VALUE-IN-OP
+    [place_concept_instance] op for the panel view to route through
+    [Op_apply.op_apply]) and the render-time concept resolver.
 
     Panel-selection ([selected_concept]) is a single concept id (or none),
     written into the panel's State_store scope by the GENERIC
@@ -67,37 +68,51 @@ let default_params (concept_id : string) : Yojson.Safe.t =
             | _ -> None) params)
         | _ -> `Assoc []))
 
-(** PLACE INSTANCE: append a generated instance of the panel-selected concept to
-    the active layer (CONCEPTS.md section 6). No-op when none is selected. Mints
-    the element id (value-in-op), then [place_concept_instance] — one undo step
-    via the Controller's self-bracketing. *)
-let place_concept_instance (store : State_store.t) (m : Model.model) : unit =
+(** PLACE INSTANCE: build the VALUE-IN-OP [place_concept_instance] op for the
+    panel-selected concept (CONCEPTS.md section 6-7) — the concept id, its
+    RESOLVED default params (from the registry, baked in so replay never
+    re-consults it), and a freshly minted element id. [None] when no concept is
+    selected (or the id space is exhausted). The caller brackets one undo and
+    routes the op through [Op_apply.op_apply] so it both mutates AND journals,
+    replayable like the sibling structural verbs. *)
+let place_concept_op (store : State_store.t) (m : Model.model)
+  : Yojson.Safe.t option =
   match selected_concept store with
-  | None -> ()
+  | None -> None
   | Some concept_id ->
     let existing = existing_ids m#document in
     (match mint existing with
-     | None -> ()
+     | None -> None
      | Some elem_id ->
        let params = default_params concept_id in
-       let ctrl = new Controller.controller ~model:m () in
-       ctrl#place_concept_instance concept_id params elem_id)
+       Some (`Assoc [
+         ("op", `String "place_concept_instance");
+         ("concept_id", `String concept_id);
+         ("params", params);
+         ("elem_id", `String elem_id);
+       ]))
 
-(** SET PARAM: write [value] onto parameter [name] of the single selected
-    Generated instance so it re-generates live (CONCEPTS.md section 6.4). No-op
-    unless exactly one Generated element is selected. One undo step via the
-    Controller's self-bracketing. Mirrors the Rust [set_concept_param] arm. *)
-let set_concept_param (_store : State_store.t) (m : Model.model)
-    (name : string) (value : float) : unit =
+(** SET PARAM: build the VALUE-IN-OP [set_concept_param] op that writes [value]
+    onto parameter [name] of the single selected Generated instance so it
+    re-generates live (CONCEPTS.md section 6.4). [None] unless exactly one
+    Generated element is selected. The path / name / value are baked into the op
+    (resolved at production time, never re-derived on replay). The caller
+    brackets one undo and routes through [Op_apply.op_apply]. *)
+let set_concept_param_op (_store : State_store.t) (m : Model.model)
+    (name : string) (value : float) : Yojson.Safe.t option =
   let doc = m#document in
   match Document.PathMap.bindings doc.Document.selection with
   | [ (path, _) ] ->
     (match (try Some (Document.get_element doc path) with _ -> None) with
      | Some (Element.Live (Element.Generated _)) ->
-       let ctrl = new Controller.controller ~model:m () in
-       ctrl#set_concept_param path name value
-     | _ -> ())
-  | _ -> ()
+       Some (`Assoc [
+         ("op", `String "set_concept_param");
+         ("path", `List (List.map (fun i -> `Int i) path));
+         ("name", `String name);
+         ("value", `Float value);
+       ])
+     | _ -> None)
+  | _ -> None
 
 let num_of = function
   | `Int i -> float_of_int i

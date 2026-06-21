@@ -549,6 +549,131 @@ let artboard_tests = [
     assert ((List.hd m#document.J.Document.artboards).id = "ab1"));
 ]
 
+(* ── Concept-pack ops (place_concept_instance / set_concept_param) ─────────── *)
+
+(* A single-layer document seeded with one rect at child 0 (mirrors the Rust
+   rect_basic.svg fixture). place_concept_instance auto-selects the appended
+   Generated, which lands at [0,1] after the rect — exactly where the
+   set_concept_param production handler resolves its path from the selection. *)
+let model_with_one_rect () : J.Model.model =
+  let m = J.Model.create () in
+  let rect = J.Element.make_rect 0.0 0.0 100.0 100.0 in
+  let layer = J.Element.make_layer [| rect |] in
+  m#set_document_unbracketed { m#document with J.Document.layers = [| layer |] };
+  m
+
+(* The Concepts-panel store with [concept_id] panel-selected (the generic
+   concepts_panel_select set_panel_state the production place arm reads). *)
+let store_with_selected_concept (concept_id : string) : J.State_store.t =
+  let store = J.State_store.create () in
+  (* set_panel is a no-op until the panel scope exists; init_panel registers it
+     (the generic concepts_panel_select set_panel_state goes through the same
+     scope in production). *)
+  J.State_store.init_panel store J.Concepts_panel.content_id [];
+  J.State_store.set_panel store J.Concepts_panel.content_id
+    "selected_concept" (`String concept_id);
+  store
+
+let concept_tests = [
+  (* CONCEPTS.md section 7 — the two concept-pack verbs journal + replay
+     byte-identically. [place_concept_instance] appends a value-in-op Generated
+     element (concept id + resolved default params + minted id); [set_concept_param]
+     tunes one param of the Generated at [path]. Every operand is value-in-op, so
+     the journal replays to the SAME document the live edit produced (the
+     checkpoint_equivalence gate) — even though the registry the defaults came
+     from is never consulted on replay. Drives the EXACT yaml_panel_view
+     production bracket: build the op via the Concepts_panel op-builder, then
+     with_txn + name_txn + Op_apply.op_apply. *)
+  Alcotest.test_case "concept ops journal + replay deterministically" `Quick (fun () ->
+    let m = model_with_one_rect () in
+    let store = store_with_selected_concept "regular_polygon" in
+    let pre_doc = m#document in
+    let before = List.length m#journal in
+
+    (* Place a hexagon (regular_polygon, defaults {sides:6, radius:50}). *)
+    (match J.Concepts_panel.place_concept_op store m with
+     | Some op ->
+       let ctrl = J.Controller.create ~model:m () in
+       m#with_txn (fun () ->
+         m#name_txn "place_concept_instance";
+         J.Op_apply.op_apply m ctrl op)
+     | None -> assert false);
+    (* (1) one new named transaction journaling place_concept_instance. *)
+    assert (List.length m#journal = before + 1);
+    let place_txn = last_txn m in
+    assert (place_txn.J.Op_log.name = Some "place_concept_instance");
+    let places = ops_of_verb place_txn "place_concept_instance" in
+    assert (List.length places = 1);
+    let place_op = List.hd places in
+    assert (str_param place_op "concept_id" = Some "regular_polygon");
+    (* the minted id is journaled as a literal (value-in-op). *)
+    let placed_id = match str_param place_op "elem_id" with
+      | Some id -> assert (String.length id > 0); id
+      | None -> assert false in
+    (* mutation landed: the Generated sits at [0,1] after the rect, selected. *)
+    let gen_path = [0; 1] in
+    (match J.Document.get_element m#document gen_path with
+     | J.Element.Live (J.Element.Generated gen) ->
+       assert (gen.J.Element.gen_concept_id = "regular_polygon");
+       assert (gen.J.Element.gen_id = Some placed_id)
+     | _ -> assert false);
+
+    (* Tune one param (sides 6 -> 8) on the selected Generated. *)
+    (match J.Concepts_panel.set_concept_param_op store m "sides" 8.0 with
+     | Some op ->
+       let ctrl = J.Controller.create ~model:m () in
+       m#with_txn (fun () ->
+         m#name_txn "set_concept_param";
+         J.Op_apply.op_apply m ctrl op)
+     | None -> assert false);
+    let set_txn = last_txn m in
+    assert (set_txn.J.Op_log.name = Some "set_concept_param");
+    let sets = ops_of_verb set_txn "set_concept_param" in
+    assert (List.length sets = 1);
+    let set_op = List.hd sets in
+    (* path / name / value journaled as resolved literals (value-in-op). *)
+    (match set_op.J.Op_log.params with
+     | `Assoc kv ->
+       (match List.assoc_opt "path" kv with
+        | Some (`List [ `Int 0; `Int 1 ]) -> ()
+        | _ -> assert false)
+     | _ -> assert false);
+    assert (str_param set_op "name" = Some "sides");
+    assert (num_param set_op "value" = Some 8.0);
+    (* mutation landed: sides is now 8 on the Generated. *)
+    (match J.Document.get_element m#document gen_path with
+     | J.Element.Live (J.Element.Generated gen) ->
+       (match gen.J.Element.gen_params with
+        | `Assoc params ->
+          (match List.assoc_opt "sides" params with
+           | Some (`Float 8.0) -> ()
+           | _ -> assert false)
+        | _ -> assert false)
+     | _ -> assert false);
+
+    (* checkpoint_equivalence: the journal replays to the SAME document, twice
+       (value-in-op operands reproduce the Generated + tuned param byte-for-byte;
+       the registry the defaults came from is never re-consulted on replay). *)
+    assert_checkpoint_equivalence m pre_doc;
+    assert_checkpoint_equivalence m pre_doc;
+
+    (* one undo step per op round-trips. *)
+    m#undo;
+    (match J.Document.get_element m#document gen_path with
+     | J.Element.Live (J.Element.Generated gen) ->
+       (match gen.J.Element.gen_params with
+        | `Assoc params ->
+          (match List.assoc_opt "sides" params with
+           | Some (`Int 6) | Some (`Float 6.0) -> ()
+           | _ -> assert false)
+        | _ -> assert false)
+     | _ -> assert false);
+    m#undo;
+    (match m#document.J.Document.layers.(0) with
+     | J.Element.Layer { children; _ } -> assert (Array.length children = 1)
+     | _ -> assert false));
+]
+
 let () =
   Alcotest.run "production_route_journal" [
     "structural", structural_tests;
@@ -556,4 +681,5 @@ let () =
     "set_attr_on_selection", set_attr_tests;
     "print_config", print_config_tests;
     "artboard", artboard_tests;
+    "concept", concept_tests;
   ]

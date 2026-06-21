@@ -11,15 +11,20 @@ val selected_concept : State_store.t -> string option
     object [{ name -> default }], or [`Assoc []] when missing. *)
 val default_params : string -> Yojson.Safe.t
 
-(** PLACE INSTANCE: append a generated instance of the panel-selected concept
-    (with its default params) to the active layer, one undo step. No-op when no
-    concept is selected. *)
-val place_concept_instance : State_store.t -> Model.model -> unit
+(** PLACE INSTANCE: build the VALUE-IN-OP [place_concept_instance] op for the
+    panel-selected concept (concept id + resolved default params + a freshly
+    minted element id). [None] when no concept is selected. The caller brackets
+    one undo and routes the op through [Op_apply.op_apply] so it both mutates and
+    journals (CONCEPTS.md section 6-7). *)
+val place_concept_op : State_store.t -> Model.model -> Yojson.Safe.t option
 
-(** SET PARAM: write the float value onto the named parameter of the single
-    selected Generated instance so it re-generates live (CONCEPTS.md section
-    6.4), one undo step. No-op unless exactly one Generated element is selected. *)
-val set_concept_param : State_store.t -> Model.model -> string -> float -> unit
+(** SET PARAM: build the VALUE-IN-OP [set_concept_param] op writing the float
+    value onto the named parameter of the single selected Generated instance so
+    it re-generates live (CONCEPTS.md section 6.4). [None] unless exactly one
+    Generated element is selected. The caller brackets one undo and routes
+    through [Op_apply.op_apply]. *)
+val set_concept_param_op :
+  State_store.t -> Model.model -> string -> float -> Yojson.Safe.t option
 
 (** The render-time concept resolver (concept id -> params -> points), for the
     canvas to evaluate a Generated instance's geometry. *)
