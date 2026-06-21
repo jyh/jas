@@ -238,8 +238,10 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    eval bug). The fuzzy/AI tier stays later (`VISION.md` §7 frontier). **Detailed
    design + the conformance gate: §10.**
 6. **Constraints.** A representation for a concept's invariants (deterministic, no
-   JS — `VISION.md` §6.3 downside), and a checker. Bidirectional constraint
-   solving (IK) stays the separate, harder layer (`VISION.md` §6.2).
+   JS — `VISION.md` §6.3 downside), and a checker — declared as boolean `check`
+   expressions over `param`, surfaced advisorily (never blocking). Bidirectional
+   constraint solving (IK) stays the separate, harder layer (`VISION.md` §6.2).
+   **Detailed design + the conformance gate: §11.**
 
 ---
 
@@ -442,3 +444,71 @@ Authored before the promote code:
 match), tolerance configurability, and the **fuzzy/AI tier** (`VISION.md` §7) are
 all later — the deterministic regular-polygon detector is the floor everything else
 builds on.
+
+---
+
+## 11. Constraints (increment 6) — design
+
+The fourth and final part of a concept (`VISION.md` §5.3): its **constraints** —
+the invariants its parameters must satisfy. A gear with `teeth < 3` or
+`outer <= root` is not a gear. Constraints are *declared data* (the recurring
+discipline) and **advisory** (`VISION.md`'s deterministic-core + artist-primacy):
+the checker SURFACES violations; it never blocks the artist's edit. This closes
+the §6.3 "downside" (concepts had no invariants). Bidirectional solving — move a
+handle, back-solve the params (IK) — is the separate, harder layer (`VISION.md`
+§6.2), explicitly out of scope.
+
+### 11.1 The locked decisions
+
+| # | Fork | Decision |
+|---|------|----------|
+| 1 | What is a constraint? | **A boolean expression over `param`** (the same engine), plus a human-readable `message`. `param.teeth >= 3`. No JS — the §6.3 downside closed with the corpus-pinned language. |
+| 2 | Advisory or blocking? | **Advisory.** The checker returns the violated constraints; the panel surfaces them under the params. An edit is NEVER rejected (artist-primacy). Auto-clamping already lives in *operations* (`remove_tooth` clamps to 3); op-time enforcement is a later option, not v1. |
+| 3 | Where do constraints live? | A new `constraints:` list in the concept pack — `{id, message, check}`. Bundled into `workspace.json` by the existing loader (the registry already carries the whole concept, so no loader change). |
+| 4 | The checker | A pure function `check(concept, params) → [{id, message}]`: evaluate each `check` over `param` and collect the constraints whose result is **not truthy** (reusing each interpreter's existing `if`-truthiness, so the verdict agrees cross-language). **READ-ONLY** — no op-log verb, no mutation, no controller change. This makes §7.6 the lightest of the four parts. |
+| 5 | How it is pinned | A constraint conformance corpus — `workspace/tests/concept_constraints.yaml` → `test_fixtures/concept_constraints/conformance.json` — self-checked in all five apps: a case is `(concept, params) → expected violated ids`. Checking is boolean expression evaluation, so this is again a thin specialization of the expression gate. |
+
+### 11.2 The format
+
+```yaml
+# appended to workspace/concepts/gear.yaml
+constraints:
+  - id: min_teeth
+    message: "A gear needs at least 3 teeth."
+    check: "param.teeth >= 3"
+  - id: outer_exceeds_root
+    message: "The tooth-tip radius must exceed the root radius."
+    check: "param.outer > param.root"
+  - id: positive_root
+    message: "The root radius must be positive."
+    check: "param.root > 0"
+```
+
+Each constraint is `{id, message, check}`. `check` truthy ⇒ satisfied; not truthy
+⇒ violated (the `message` explains why, the workspace-convention English).
+`constraints:` is optional — a concept with none simply has no invariants.
+
+### 11.3 The flow (per app)
+
+1. **Declare** — constraints in the pack; the registry exposes them.
+2. **Check** — the checker evaluates each `check` over the instance's current
+   params and collects the violations `[{id, message}]`.
+3. **Surface** — `active_document.selected_concept` gains a `violations` list, so
+   the Concepts panel shows a warning block under the params when it is non-empty.
+No op-log verb — checking is read-only and recomputed from params on each render.
+
+### 11.4 Tests first (the project rule)
+
+- the **constraint corpus** (§11.1 decision 5) — the cross-language equivalence gate;
+- a **checker unit test** — valid params ⇒ no violations; an out-of-range param ⇒
+  exactly the right constraint id;
+- a **view test** — `selected_concept.violations` lists the violated constraints
+  (id + message) for a single selected `Generated`.
+
+### 11.5 Deferrals
+
+**Enforcement** (blocking or auto-clamping an edit), **cross-instance / geometric**
+constraints beyond `param` (e.g. "no self-intersection", relations between
+elements), **severity levels** (error vs warning), and **bidirectional solving /
+IK** (`VISION.md` §6.2) are all later — v1 is a declarative invariant + an advisory
+checker, nothing more.
