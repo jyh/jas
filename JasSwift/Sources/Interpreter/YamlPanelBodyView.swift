@@ -977,6 +977,22 @@ struct YamlElementView: View {
             // + its default params, id minted value-in-op. Mirrors the Rust arm.
             ConceptsPanel.dispatch(name, model: model)
             return
+        case "set_concept_param":
+            // Concepts panel Slice 2: native intercept (the YAML action is a
+            // `log` stub). The committed field value arrives as `event.value`
+            // (params.value) alongside the declared `param.name` (params.name);
+            // write it onto the single selected Generated instance so it
+            // re-generates live. Mirrors the Rust `set_concept_param` arm.
+            if let pname = params["name"] as? String {
+                let value: Double = {
+                    if let d = params["value"] as? Double { return d }
+                    if let i = params["value"] as? Int { return Double(i) }
+                    if let s = params["value"] as? String, let d = Double(s) { return d }
+                    return 0
+                }()
+                ConceptsPanel.setParam(model: model, name: pname, value: value)
+            }
+            return
         default:
             break
         }
@@ -1235,6 +1251,12 @@ struct YamlElementView: View {
                 var clamped = max(parsed, minVal)
                 if let m = maxVal { clamped = min(clamped, m) }
                 if let t = writeTarget { commitWidgetWrite(target: t, value: clamped) }
+                // Fields bound to a non-writable expression (e.g. a foreach
+                // `p.value` in the Concepts param editor) drive their effect via
+                // a `behavior: [{event: change, …}]` block instead of a
+                // write-back target. Dispatch it with the committed value as
+                // `event.value`, mirroring the Dioxus widget framework.
+                handleChangeBehavior(value: Double(clamped))
             }
         )
             .frame(maxWidth: fillsParent ? .infinity : 45)
@@ -1725,6 +1747,48 @@ struct YamlElementView: View {
                 dispatchYamlAction(
                     actionName, params: resolved,
                     actions: actions, ctx: context,
+                    store: model.stateStore, model: model
+                )
+            }
+        }
+    }
+
+    /// Dispatch a widget's `behavior: [{event: change, action: …, params: …}]`
+    /// on commit, injecting the committed numeric value as `event.value` (so
+    /// `params: { value: "event.value" }` resolves). Mirrors the Dioxus widget
+    /// framework, which already dispatches `change` with the committed value;
+    /// the Swift `number_input` otherwise only writes a panel/dialog target, so
+    /// a field bound to a non-writable expression (a foreach `p.value`) needs
+    /// this path. No-op when the widget has no `change` behavior.
+    private func handleChangeBehavior(value: Double) {
+        guard let model = model else { return }
+        guard let behavior = element["behavior"] as? [[String: Any]] else { return }
+        let ws = WorkspaceData.load()
+        let actions = ws?.data["actions"] as? [String: Any]
+        let platformEffects = alignPlatformEffects(model: model)
+        var ctxWithEvent = context
+        ctxWithEvent["event"] = ["value": value] as [String: Any]
+        if let pid = panelId { model.stateStore.setActivePanel(pid) }
+        for entry in behavior where (entry["event"] as? String) == "change" {
+            let effects = (entry["effects"] as? [Any]) ?? []
+            if !effects.isEmpty {
+                runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
+                           actions: actions, platformEffects: platformEffects)
+            }
+            if let actionName = entry["action"] as? String {
+                let rawParams = (entry["params"] as? [String: Any]) ?? [:]
+                var resolved: [String: Any] = [:]
+                for (k, v) in rawParams {
+                    if let exprStr = v as? String {
+                        let result = evaluate(exprStr, context: ctxWithEvent)
+                        resolved[k] = result.toAny() ?? exprStr
+                    } else {
+                        resolved[k] = v
+                    }
+                }
+                dispatchYamlAction(
+                    actionName, params: resolved,
+                    actions: actions, ctx: ctxWithEvent,
                     store: model.stateStore, model: model
                 )
             }

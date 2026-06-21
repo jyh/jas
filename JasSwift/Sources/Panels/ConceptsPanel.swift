@@ -74,4 +74,17 @@ public enum ConceptsPanel {
             break
         }
     }
+
+    /// Native intercept for `set_concept_param` (the YAML action is a `log`
+    /// stub): find the single selected Generated instance and write
+    /// `params[name] = value` (one undo via the Controller). Mirrors the Rust
+    /// `set_concept_param` dispatch arm. No-op unless exactly one Generated
+    /// element is selected.
+    public static func setParam(model: Model, name: String, value: Double) {
+        let doc = model.document
+        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
+        let path = sel.path
+        guard case .live(.generated) = doc.tryGetElement(path) else { return }
+        Controller(model: model).setConceptParam(path, name: name, value: value)
+    }
 }

@@ -83,6 +83,29 @@ let tests = [
     let m = make_model ~layer_names:["A"; "B"; "C"] ~selection_paths:[] in
     let view = Active_document_view.build ~panel_selection:[[1]] (Some m) in
     assert (j_int (Option.get (j_member "new_layer_insert_index" view)) = 2));
+
+  (* Concepts panel Slice 2 (piece A): selected_concept is null unless exactly
+     one Generated instance is selected; then it is the concept's param schema
+     merged with the instance's current values. *)
+  Alcotest.test_case "selected_concept_null_without_generated" `Quick (fun () ->
+    let m = make_model ~layer_names:["A"] ~selection_paths:[] in
+    let view = Active_document_view.build (Some m) in
+    assert (Option.get (j_member "selected_concept" view) = `Null));
+
+  Alcotest.test_case "selected_concept_present_for_single_generated" `Quick (fun () ->
+    let m = make_model ~layer_names:["A"] ~selection_paths:[] in
+    let ctrl = Controller.create ~model:m () in
+    (* place_concept_instance appends + selects the Generated instance. *)
+    ctrl#place_concept_instance "regular_polygon"
+      (`Assoc [ ("sides", `Int 6); ("radius", `Int 50) ]) "gp1";
+    let view = Active_document_view.build (Some m) in
+    let sc = Option.get (j_member "selected_concept" view) in
+    assert (j_string (Option.get (j_member "concept_id" sc)) = "regular_polygon");
+    let params = j_list (Option.get (j_member "params" sc)) in
+    let sides = List.find
+      (fun p -> j_member "name" p = Some (`String "sides")) params in
+    (* The instance's current value (6) is carried on the schema entry. *)
+    assert (j_int (Option.get (j_member "value" sides)) = 6));
 ]
 
 let () = Alcotest.run "active_document_view" [ "view", tests ]

@@ -375,6 +375,31 @@ impl Controller {
         Self::add_element(model, generated);
     }
 
+    /// Set one parameter of the generated concept instance at `path` to `value`
+    /// (CONCEPTS.md §6.4 — live param editing). The geometry re-derives from the
+    /// generator at the next render. No-op if `path` is not a `Generated` element.
+    pub fn set_concept_param(model: &mut Model, path: &ElementPath, name: &str, value: f64) {
+        let doc = model.document().clone();
+        let Some(Element::Live(crate::geometry::live::LiveVariant::Generated(ge))) =
+            doc.get_element(path)
+        else {
+            return;
+        };
+        let mut new_ge = ge.clone();
+        match new_ge.params {
+            serde_json::Value::Object(ref mut map) => {
+                map.insert(name.to_string(), serde_json::json!(value));
+            }
+            _ => {
+                let mut map = serde_json::Map::new();
+                map.insert(name.to_string(), serde_json::json!(value));
+                new_ge.params = serde_json::Value::Object(map);
+            }
+        }
+        let new_elem = Element::Live(crate::geometry::live::LiveVariant::Generated(new_ge));
+        model.edit_document(doc.replace_element(path, new_elem));
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance at
     /// `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md §7,
     /// Fork S6 — the inverse of Make Symbol). The target id is resolved by a
@@ -3727,6 +3752,29 @@ mod tests {
         assert_eq!(g.common.id.as_deref(), Some("g1"));
         assert_eq!(doc.selection.len(), 1);
         assert_eq!(doc.selection[0].path, vec![0, 0]);
+    }
+
+    #[test]
+    fn set_concept_param_updates_instance_and_regenerates() {
+        // Concepts panel Slice 2: changing a param on a placed Generated
+        // instance rewrites params[name]=value, so the instance re-generates
+        // (CONCEPTS.md §6.4 — "tune the same parameters").
+        let mut model = Model::default();
+        let params = serde_json::json!({ "radius": 50.0, "sides": 6.0 });
+        Controller::place_concept_instance(&mut model, "regular_polygon", params, "g1");
+        let path = vec![0, 0];
+        Controller::set_concept_param(&mut model, &path, "sides", 8.0);
+        let doc = model.document();
+        let el = doc.get_element(&path).expect("instance");
+        let crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Generated(g),
+        ) = el
+        else {
+            panic!("expected a generated element");
+        };
+        assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(8.0));
+        // radius is untouched
+        assert_eq!(g.params.get("radius").and_then(|v| v.as_f64()), Some(50.0));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import JasLib
 
 // MARK: - buildActiveDocumentView
@@ -55,6 +56,30 @@ import Testing
     let second = selection?[1]["__path__"] as? [Int]
     #expect(first == [0])
     #expect(second == [0, 2])
+}
+
+@Test func activeDocumentSelectedConceptNullWithoutGenerated() {
+    // No selection -> selected_concept is null. Concepts panel Slice 2 (A).
+    let model = Model(document: Document(layers: [Layer(children: [])]))
+    let view = buildActiveDocumentView(model: model)
+    #expect(view["selected_concept"] is NSNull)
+}
+
+@Test func activeDocumentSelectedConceptPresentForSingleGenerated() {
+    // With exactly one Generated instance selected, selected_concept is the
+    // concept's param schema merged with the instance's current values.
+    // Mirrors Rust active_document_view_selected_concept_present_for_single_generated.
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 6, "radius": 50], elemId: "g1")
+    let view = buildActiveDocumentView(model: ctrl.model)
+    let sc = view["selected_concept"] as? [String: Any]
+    #expect(sc?["concept_id"] as? String == "regular_polygon")
+    let plist = sc?["params"] as? [[String: Any]]
+    let sides = plist?.first { $0["name"] as? String == "sides" }
+    // The instance's current value (6) is carried on the schema entry.
+    #expect((sides?["value"] as? Int) == 6)
 }
 
 @Test func activeDocumentLayersRollupsPopulatedFromModel() {

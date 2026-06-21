@@ -58,6 +58,7 @@ def build_active_document_view(
             "current_artboard": {},
             "artboards_panel_selection_ids": ab_sel,
             "symbols": [],
+            "selected_concept": None,
         }
 
     doc = model.document
@@ -179,7 +180,47 @@ def build_active_document_view(
         "current_artboard": current_artboard_view,
         "artboards_panel_selection_ids": ab_sel,
         "symbols": symbols_view,
+        # Concepts panel Slice 2: the single selected Generated instance's
+        # concept (param schema merged with current values), or None.
+        "selected_concept": _selected_concept_view(doc),
     }
+
+
+def _selected_concept_view(doc):
+    """``active_document.selected_concept`` (CONCEPTS.md §6.4): ``None`` unless
+    exactly one Generated concept instance is selected; otherwise
+    ``{concept_id, name, params: [{name, value, min, max}, …]}`` — the concept's
+    registry param schema merged with the instance's current values (instance
+    value if present, else the schema default). Drives the Concepts panel's
+    PARAMS mode. Mirrors the Rust ``build_selected_concept_view``."""
+    from geometry.element import GeneratedElem
+    if len(doc.selection) != 1:
+        return None
+    es = next(iter(doc.selection))
+    try:
+        elem = doc.get_element(es.path)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if not isinstance(elem, GeneratedElem):
+        return None
+    from panels.yaml_menu import get_workspace_data
+    ws = get_workspace_data()
+    concept = (ws or {}).get("concepts", {}).get(elem.concept_id)
+    if not isinstance(concept, dict):
+        return None
+    name = concept.get("name") or elem.concept_id
+    params_out = []
+    for p in concept.get("params", []) or []:
+        if not isinstance(p, dict) or "name" not in p:
+            continue
+        pname = p["name"]
+        entry = {"name": pname, "value": elem.params.get(pname, p.get("default"))}
+        if "min" in p:
+            entry["min"] = p["min"]
+        if "max" in p:
+            entry["max"] = p["max"]
+        params_out.append(entry)
+    return {"concept_id": elem.concept_id, "name": name, "params": params_out}
 
 
 def _document_setup_view(s) -> dict:

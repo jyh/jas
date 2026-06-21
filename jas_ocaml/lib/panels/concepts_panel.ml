@@ -83,6 +83,22 @@ let place_concept_instance (store : State_store.t) (m : Model.model) : unit =
        let ctrl = new Controller.controller ~model:m () in
        ctrl#place_concept_instance concept_id params elem_id)
 
+(** SET PARAM: write [value] onto parameter [name] of the single selected
+    Generated instance so it re-generates live (CONCEPTS.md section 6.4). No-op
+    unless exactly one Generated element is selected. One undo step via the
+    Controller's self-bracketing. Mirrors the Rust [set_concept_param] arm. *)
+let set_concept_param (_store : State_store.t) (m : Model.model)
+    (name : string) (value : float) : unit =
+  let doc = m#document in
+  match Document.PathMap.bindings doc.Document.selection with
+  | [ (path, _) ] ->
+    (match (try Some (Document.get_element doc path) with _ -> None) with
+     | Some (Element.Live (Element.Generated _)) ->
+       let ctrl = new Controller.controller ~model:m () in
+       ctrl#set_concept_param path name value
+     | _ -> ())
+  | _ -> ()
+
 let num_of = function
   | `Int i -> float_of_int i
   | `Float f -> f

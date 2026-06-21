@@ -938,6 +938,21 @@ class SymbolOpsTest(absltest.TestCase):
         self.assertEqual(len(doc.selection), 1)
         self.assertEqual(next(iter(doc.selection)).path, (0, 0))
 
+    def test_set_concept_param_updates_instance_and_regenerates(self):
+        # Concepts panel Slice 2: changing a param on a placed Generated
+        # instance rewrites params[name]=value so it re-generates (CONCEPTS.md
+        # §6.4). Mirrors Rust set_concept_param_updates_instance_and_regenerates.
+        from geometry.element import GeneratedElem
+        ctrl = Controller(model=Model())
+        ctrl.place_concept_instance(
+            "regular_polygon", {"sides": 6, "radius": 50}, "g1")
+        ctrl.set_concept_param((0, 0), "sides", 8.0)
+        el = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.params["sides"], 8.0)
+        # radius is untouched
+        self.assertEqual(el.params["radius"], 50)
+
     def test_place_instance_dangling_master_ok(self):
         # It is fine if the master does not exist; the instance still appears
         # (renders empty until the master exists — dangling is handled).

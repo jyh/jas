@@ -42,6 +42,7 @@ public func buildActiveDocumentView(
             "current_artboard": [:] as [String: Any],
             "artboards_panel_selection_ids": artboardsPanelSelection,
             "symbols": [] as [Any],
+            "selected_concept": NSNull(),
         ]
     }
     var topLevelLayers: [[String: Any]] = []
@@ -176,7 +177,40 @@ public func buildActiveDocumentView(
         "current_artboard": currentArtboardJson,
         "artboards_panel_selection_ids": artboardsPanelSelection,
         "symbols": symbolsView,
+        // Concepts panel Slice 2: the single selected Generated instance's
+        // concept (param schema merged with its current values), or null.
+        "selected_concept": selectedConceptView(m.document),
     ]
+}
+
+/// Build `active_document.selected_concept` (CONCEPTS.md §6.4): null unless
+/// exactly one `Generated` concept instance is selected; otherwise
+/// `{ concept_id, name, params: [{ name, value, min, max }, …] }` — the
+/// concept's registry param schema merged with the instance's current values
+/// (instance value if present, else the schema default). Drives the Concepts
+/// panel's PARAMS mode. Mirrors Rust `build_selected_concept_view`.
+private func selectedConceptView(_ doc: Document) -> Any {
+    guard doc.selection.count == 1, let sel = doc.selection.first else { return NSNull() }
+    let path = sel.path
+    guard case .live(.generated(let gen)) = doc.tryGetElement(path) else { return NSNull() }
+    guard let concept = WorkspaceData.load()?.concept(gen.conceptId) else { return NSNull() }
+    let name = (concept["name"] as? String) ?? gen.conceptId
+    var paramsOut: [[String: Any]] = []
+    if let schema = concept["params"] as? [[String: Any]] {
+        for p in schema {
+            guard let pname = p["name"] as? String else { continue }
+            let value: Any = gen.params[pname] ?? p["default"] ?? NSNull()
+            var entry: [String: Any] = ["name": pname, "value": value]
+            if let mn = p["min"] { entry["min"] = mn }
+            if let mx = p["max"] { entry["max"] = mx }
+            paramsOut.append(entry)
+        }
+    }
+    return [
+        "concept_id": gen.conceptId,
+        "name": name,
+        "params": paramsOut,
+    ] as [String: Any]
 }
 
 private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {

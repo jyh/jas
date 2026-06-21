@@ -4,12 +4,17 @@
 (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod` parity
 primitives, the concept **registry**, the **`LiveVariant::Generated` document arm** (model + eval
 + codecs + tests) in all four apps (golden-pinned, byte-identical through test_json and binary),
-and **Concepts-panel Slice 1 functional end-to-end in all four native apps**: open Concepts →
-select a concept → Place → a default-param `Generated` instance is placed and renders (the
-registry-driven panel + `data.concepts` + the native `place_concept_instance` + render-resolver
-wiring, in Rust/Swift/OCaml/Python; Flask exposes the list, no interactive editor). Remaining:
-**Slice 2** (live per-instance param editing — the §6.4 parametric heart); then operations, the
-fitter, constraints (§7). · **Implements:** `VISION.md`
+and **Concepts-panel Slices 1 AND 2 functional end-to-end in all four native apps**: open Concepts →
+select a concept → Place → a default-param `Generated` instance is placed and renders; then **select
+it and edit its parameters in the panel and the geometry re-generates live** (the §6.4 parametric
+heart). Slice 2 = the dual-mode panel (registry list when nothing is selected; the selected
+instance's editable params otherwise) driven by `active_document.selected_concept` + the native
+`set_concept_param` effect (find the single selected `Generated`, write `params[name]=value`, one
+undo), in Rust/Swift/OCaml/Python, each with a controller + view test mirroring the same fixtures.
+Flask exposes the registry list and both panel foreaches but has no interactive editor (its legacy
+server renderer can't interpolate loop-var text). Remaining: operations, the fitter, constraints
+(§7); an `op_apply` replay arm for `place_concept_instance`/`set_concept_param` (parity, no fixture
+exercises it yet). · **Implements:** `VISION.md`
 §6.3 ("domains as declarative packs") and closes its named "decisive gap" — the
 expression language can now *generate* geometry, so a parametric concept is data.
 · **Builds on:** the geometry-generator functions (`sin`/`cos`/`tan`/`pow`/
@@ -192,10 +197,23 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    (generic) + `place_concept_instance` (native, id value-in-op, one undo) actions, the Window-menu
    entry, `data.concepts` exposed per app, and the native place effect + render wiring — open
    Concepts → select → Place → it renders. (Flask exposes the list but has no interactive editor.)
-   **Remaining:** Slice 2 — live per-instance param editing (the §6.4 parametric heart); and an
-   `op_apply` replay arm for `place_concept_instance` (parity, no fixture exercises it yet).
-   (SVG `data-jas-params` is not byte-compared by any fixture; its
-   serialization stays per-app-native.)
+   **Slice 2 is also complete end-to-end in all four native apps** — the dual-mode panel
+   (`bind.visible` on `active_document.selected_concept`: registry list when null, the selected
+   instance's editable params otherwise), the `active_document.selected_concept` view field
+   (`{concept_id, name, params:[{name,value,min,max}]}` — registry schema merged with instance
+   values; null unless exactly one `Generated` is selected), and the native `set_concept_param`
+   effect (find the single selected `Generated`, write `params[name]=value`, one undo via the
+   self-bracketing controller). The param field's committed value is injected as `event.value` by a
+   `behavior: [{event: change, action: set_concept_param}]` block — wired in each app's
+   `number_input` commit path (Rust's widget framework already dispatched `change`; Swift/OCaml/Python
+   needed the commit-time dispatch added). Each app carries a controller test
+   (`set_concept_param` updates the param in place) and a view test (`selected_concept` present for a
+   single selected `Generated`). Closing Python's Slice-1 gap, the `place_concept_instance` panel
+   action — which had only a controller method, never a native panel-dispatch arm — is now
+   intercepted natively too (`concepts_apply.py` + a `_dispatch_concepts_action` arm).
+   **Remaining:** an `op_apply` replay arm for `place_concept_instance` / `set_concept_param`
+   (parity, no fixture exercises it yet). (SVG `data-jas-params` is not byte-compared by any
+   fixture; its serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
