@@ -233,11 +233,44 @@ def _selected_concept_view(doc):
             "label": o.get("label", oid),
             "description": o.get("description", ""),
         })
+    # The concept's VIOLATED constraints (CONCEPTS.md §11): evaluate each
+    # constraint's ``check`` over the instance's params and collect the ones whose
+    # result is NOT truthy (the same truthiness ``if`` uses), in declared order.
+    # Advisory + read-only — the panel surfaces these as a warning. Empty when the
+    # concept declares no ``constraints:`` or all hold. Mirrors the Rust
+    # ``build_selected_concept_view``.
+    violations_out = []
+    constraints = concept.get("constraints", []) or []
+    if constraints:
+        from workspace_interpreter.expr import evaluate
+        from workspace_interpreter.expr_types import ValueType
+        ctx = {"param": elem.params}
+        for c in constraints:
+            if not isinstance(c, dict) or "id" not in c or "check" not in c:
+                continue
+            check = c["check"]
+            if not isinstance(check, str):
+                continue
+            result = evaluate(check, ctx)
+            if result.type == ValueType.BOOL:
+                truthy = bool(result.value)
+            elif result.type == ValueType.NUMBER:
+                truthy = result.value != 0
+            elif result.type == ValueType.NULL:
+                truthy = False
+            else:
+                truthy = True
+            if not truthy:
+                violations_out.append({
+                    "id": c["id"],
+                    "message": c.get("message", ""),
+                })
     return {
         "concept_id": elem.concept_id,
         "name": name,
         "params": params_out,
         "operations": operations_out,
+        "violations": violations_out,
     }
 
 
