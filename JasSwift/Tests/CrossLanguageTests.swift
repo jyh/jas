@@ -1965,6 +1965,45 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         "concept-operation conformance failures:\n\(failures.joined(separator: "\n"))")
 }
 
+// MARK: - Concept-constraint conformance (shared corpus)
+
+/// Loads test_fixtures/concept_constraints/conformance.json (compiled from
+/// workspace/concepts/*.yaml + workspace/tests/concept_constraints.yaml). For each
+/// case, evaluates each constraint's `check` expression with the case's params
+/// bound under `param` and collects the constraints whose result is NOT truthy
+/// (`Value.toBool`, the same truthiness `if` uses) — the violations, in declared
+/// order — then asserts they match `expected`. A constraint is just a boolean
+/// expression, so this reuses the evaluator — pinning concept CHECKING across all
+/// apps (CONCEPTS.md §11). Checking is advisory + read-only (no op-log verb).
+/// Mirrors Rust `constraints_conformance`.
+@Test func constraintsConformance() throws {
+    let raw = readFixture("concept_constraints/conformance.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = raw.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    var failures: [String] = []
+    for tc in cases {
+        let concept = tc["concept"] as? String ?? "?"
+        // Bind the current params under the `param` namespace, exactly as the
+        // checker does at view-build time.
+        let params = tc["params"] as! [String: Any]
+        let ctx: [String: Any] = ["param": params]
+
+        let constraints = tc["constraints"] as! [[String: Any]]
+        let violated: [String] = constraints.compactMap { c in
+            let check = c["check"] as! String
+            return evaluate(check, context: ctx).toBool() ? nil : (c["id"] as? String ?? "?")
+        }
+        let expected: [String] = (tc["expected"] as! [Any]).map { $0 as? String ?? "?" }
+        if violated != expected {
+            failures.append("\(concept): expected violations \(expected), got \(violated)")
+        }
+    }
+    #expect(failures.isEmpty,
+        "concept-constraint conformance failures:\n\(failures.joined(separator: "\n"))")
+}
+
 // MARK: - Concept registry (increment 3a)
 
 /// The concept packs are bundled into workspace.json and loadable via
