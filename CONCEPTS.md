@@ -219,8 +219,9 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    the journal replays byte-identically to the live snapshot, twice). Document state is unchanged
    (same controller calls); only the journal gains the replayable entry. (SVG `data-jas-params`
    is not byte-compared by any fixture; its serialization stays per-app-native.)
-4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
-   `actions.yaml`/op-log operations on the instance's `params`.
+4. **Operations.** A concept's named edit verbs (e.g. "add a tooth"), declared in
+   the concept pack as expression transforms of the instance's `params` and
+   journaled as one op-log verb. **Detailed design + the conformance gate: §9.**
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
    tier first (geometric heuristics: a regular polygon detector), the fuzzy/AI
    tier later (`VISION.md` §7 frontier).
@@ -242,3 +243,87 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
   so no one assumes runtime concept loading exists yet.
 - **No constraint representation yet** — the §6.3 downside is real and unbuilt;
   v1 concepts are pure generators with no invariants.
+
+---
+
+## 9. Operations (increment 4) — design
+
+The second of a concept's four parts (`VISION.md` §5.3, §1 here): its **edit
+verbs**. The generator answers "params → geometry"; an operation answers "this
+named edit → new params". A gear's `add_tooth` is the canonical example: a
+single, meaningful verb the artist invokes, distinct from hand-typing a number
+into the `teeth` field. Operations are **data, not native code** — the recurring
+discipline — so a new domain ships its verbs in its pack with zero app changes.
+
+### 9.1 The locked decisions
+
+| # | Fork | Decision |
+|---|------|----------|
+| 1 | What is an operation's effect? | **A `set:` map of `param-name → expression`**, each expression evaluated in the existing language with the instance's CURRENT params bound under `param` (exactly the generator's namespace). The result is the new value for that param; unnamed params are unchanged. No new evaluator, no JS — operations ride the same corpus-pinned engine as generators. |
+| 2 | Arguments? | **None in v1.** An operation is a self-contained named transform (`add_tooth`, `remove_tooth`, `add_side`). A *parameterized* operation ("set tooth count to N") is just `set_concept_param` and already exists; argument-carrying operations (with a prompt/dialog) are a later generalization. |
+| 3 | Where do operations live? | In the concept pack: a new top-level **`operations:`** list in `workspace/concepts/<id>.yaml`, bundled into `workspace.json` by the existing loader (the registry already carries the whole concept, so `concept(id).operations` needs no loader change). |
+| 4 | Op-log representation (the determinism fork) | **One verb, `apply_concept_operation`, with the effect RESOLVED at production time.** The native handler reads the instance's current params, evaluates the operation's `set:` expressions, and bakes the resulting `changes` map into the op **value-in-op** (`{path, op_id, changes}`). Replay merges `changes` — it never re-evaluates an expression nor consults the registry, so it is byte-identical and survives a later edit to the operation's definition (the OP_LOG §7 rule, exactly as `set_concept_param` bakes its committed value). `op_id` rides along as journal metadata (semantic readability for the op-log spine); `changes` is authoritative. |
+| 5 | How it is pinned | A dedicated **operations conformance corpus** — `workspace/tests/concept_operations.yaml` → `test_fixtures/concept_operations/conformance.json` — self-checked in all five apps, mirroring the concept corpus. A case is `(concept, op, params) → expected changes`; each app evaluates the operation's `set:` expressions over `params` and compares the resolved `changes` within 1e-9. Operation resolution IS expression evaluation, so this is again a thin specialization of the expression gate. |
+
+### 9.2 The format
+
+```yaml
+# appended to workspace/concepts/gear.yaml
+operations:
+  - id: add_tooth
+    label: "Add Tooth"
+    description: >
+      Add one tooth to the gear: increases `teeth` by one. The geometry
+      re-derives from the generator at the new tooth count.
+    set:
+      teeth: "param.teeth + 1"
+  - id: remove_tooth
+    label: "Remove Tooth"
+    description: >
+      Remove one tooth, clamped to the 3-tooth minimum a gear needs to be a
+      gear: sets `teeth` to max(teeth - 1, 3).
+    set:
+      teeth: "max(param.teeth - 1, 3)"
+```
+
+Each operation is `{id, label, description, set}`. `set` is a map (param name →
+expression over `param`); only the named params change. `description` follows the
+workspace convention (comprehensive, human-readable). Operations are optional — a
+concept with no `operations:` key simply offers none.
+
+### 9.3 The flow (per app)
+
+1. **Declare** — operations in the pack; the registry exposes
+   `concept(id).operations`.
+2. **Expose** — `active_document.selected_concept` gains an `operations`
+   list (`[{id, label, description}]`) alongside `params`, so the panel can
+   render a button per operation (params mode, beneath the param fields).
+3. **Invoke** — a button dispatches `apply_concept_operation { op_id }`.
+4. **Resolve (production-time, value-in-op)** — the native handler finds the
+   single selected `Generated`, looks up the operation in the registry by
+   `op_id`, evaluates each `set:` expression with `param` = the instance's
+   current params, and builds `{op: apply_concept_operation, path, op_id,
+   changes}`.
+5. **Journal + apply** — routed through `op_apply` inside the one-undo bracket
+   (the §7.3 pattern). The replay arm calls
+   `Controller.apply_concept_operation(path, changes)`, which merges `changes`
+   into the `Generated`'s params (a multi-param generalization of
+   `set_concept_param`); the geometry re-derives at the next render.
+
+### 9.4 Tests first (the project rule)
+
+Authored before any controller/op_apply code:
+- the **operations corpus** (§9.1 decision 5) — the cross-language equivalence gate;
+- a **controller test** — `apply_concept_operation` merges a `changes` map into a
+  `Generated`'s params in place;
+- an **op_apply replay test** — `apply_concept_operation` journals one op and
+  replays byte-identically (checkpoint_equivalence), reusing the §7.3 harness;
+- a **view test** — `selected_concept.operations` lists the registry's operations
+  for a single selected `Generated`.
+
+### 9.5 Deferrals
+
+Operation **arguments** (parameterized verbs with a prompt), operations that read
+**more than `param`** (e.g. the current geometry or sibling elements), and
+multi-instance / batch operations are out of scope for v1 — each a clean later
+generalization, none a rewrite.
