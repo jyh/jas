@@ -211,9 +211,14 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    single selected `Generated`). Closing Python's Slice-1 gap, the `place_concept_instance` panel
    action — which had only a controller method, never a native panel-dispatch arm — is now
    intercepted natively too (`concepts_apply.py` + a `_dispatch_concepts_action` arm).
-   **Remaining:** an `op_apply` replay arm for `place_concept_instance` / `set_concept_param`
-   (parity, no fixture exercises it yet). (SVG `data-jas-params` is not byte-compared by any
-   fixture; its serialization stays per-app-native.)
+   **The `op_apply` replay arm is done in all four native apps** — both verbs now route their
+   native handler through `op_apply` inside the one-undo bracket (so the LIVE action JOURNALS a
+   real `PrimitiveOp`, value-in-op: concept id + resolved default params + minted id for place;
+   path + name + committed value for set), with matching replay arms next to `place_instance`.
+   Each app carries a focused checkpoint_equivalence test (place a hexagon + tune sides 6→8 →
+   the journal replays byte-identically to the live snapshot, twice). Document state is unchanged
+   (same controller calls); only the journal gains the replayable entry. (SVG `data-jas-params`
+   is not byte-compared by any fixture; its serialization stays per-app-native.)
 4. **Operations.** A concept's edit verbs (e.g. "set tooth count"), as
    `actions.yaml`/op-log operations on the instance's `params`.
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
