@@ -1,0 +1,42 @@
+# Concept-fitter conformance tests (CONCEPTS.md §10).
+# A fitter is the dual of the generator: it reads a selected shape's vertices
+# (bound under `shape.points` as [[x,y],...]) and recovers the concept on a
+# match. Each case names a concept (workspace/concepts/<id>.yaml), supplies the
+# input points, and pins the expected fitter result: `null` for no match, else
+# the flat list [<param0>, <param1>, ..., cx, cy, rotation] (the first
+# `params`-many entries are the declared params in order, then the placement
+# triple in degrees). Every app evaluates the concept's fitter over the points
+# and compares to `expected` within 1e-9 (null is matched exactly; a list and a
+# null never match). See CONCEPTS.md §10.
+
+tests:
+  # Axis-aligned square (radius 10, first vertex on +x): the canonical case.
+  - concept: regular_polygon
+    points: [[10, 0], [0, 10], [-10, 0], [0, -10]]
+    expected: [4, 10, 0, 0, 0]
+
+  # The same square translated to centre (100, 20): placement recovers cx, cy.
+  - concept: regular_polygon
+    points: [[110, 20], [100, 30], [90, 20], [100, 10]]
+    expected: [4, 10, 100, 20, 0]
+
+  # A square rotated 45 degrees (corners on the diagonals): radius = sqrt(200),
+  # rotation = atan2(10, 10) = 45 — exercises the angle recovery.
+  - concept: regular_polygon
+    points: [[10, 10], [-10, 10], [-10, -10], [10, -10]]
+    expected: [4, 14.142135623730951, 0, 0, 45]
+
+  # Equilateral triangle (radius 10, first vertex on +x): the n = 3 floor.
+  - concept: regular_polygon
+    points: [[10, 0], [-5, 8.660254037844387], [-5, -8.660254037844387]]
+    expected: [3, 10, 0, 0, 0]
+
+  # A non-regular polygon (a 20x10 rectangle): unequal edges -> no match.
+  - concept: regular_polygon
+    points: [[0, 0], [20, 0], [20, 10], [0, 10]]
+    expected: null
+
+  # Degenerate (fewer than 3 vertices) -> no match.
+  - concept: regular_polygon
+    points: [[0, 0], [1, 1]]
+    expected: null

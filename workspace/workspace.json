@@ -5844,6 +5844,15 @@
           "log": "apply_concept_operation"
         }
       ]
+    },
+    "promote_to_concept": {
+      "description": "Promote the single selected raw shape to a live concept instance (CONCEPTS.md \u00a710 \u2014 the fitter / promote, the inverse of expand). A `log` stub like the other concept verbs \u2014 each app's native arm extracts the selected element's world-space vertices, tries every registered concept's `fitter` expression over them (bound under `shape.points`), and on the first match replaces the element with a `Generated` instance carrying the recovered params plus a placement transform (translate \u00b7 rotate). A no-match is a silent no-op. Enabled for a single selected element; single undo op.\n",
+      "category": "concepts",
+      "effects": [
+        {
+          "log": "promote_to_concept"
+        }
+      ]
     }
   },
   "version": 1,
@@ -8130,6 +8139,12 @@
           "id": "menu_make_instance",
           "label": "&Make Instance",
           "action": "make_instance",
+          "enabled_when": "active_document.selection_count == 1"
+        },
+        {
+          "id": "menu_promote_concept",
+          "label": "&Promote to Concept",
+          "action": "promote_to_concept",
           "enabled_when": "active_document.selection_count == 1"
         }
       ]
@@ -24994,6 +25009,7 @@
       ],
       "closed": true,
       "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])\n",
+      "fitter": "let pts = shape.points in\nlet n = pts.length in\nif n < 3 then null else\nlet cx = fold(pts, 0, fun (acc, p) -> acc + p[0]) / n in\nlet cy = fold(pts, 0, fun (acc, p) -> acc + p[1]) / n in\nlet dists = map(pts, fun p -> hypot(p[0] - cx, p[1] - cy)) in\nlet r0 = dists[0] in\nlet rtol = 0.000001 * r0 + 0.0000001 in\nlet radii_equal = all(dists, fun d -> abs(d - r0) < rtol) in\nlet edges = map(range(0, n),\n  fun i -> hypot(pts[mod(i + 1, n)][0] - pts[i][0],\n                 pts[mod(i + 1, n)][1] - pts[i][1])) in\nlet e0 = edges[0] in\nlet etol = 0.000001 * e0 + 0.0000001 in\nlet edges_equal = all(edges, fun e -> abs(e - e0) < etol) in\nif radii_equal and edges_equal and r0 > 0 then\n  [n, r0, cx, cy, atan2(pts[0][1] - cy, pts[0][0] - cx)]\nelse null\n",
       "operations": [
         {
           "id": "add_side",

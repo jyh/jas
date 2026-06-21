@@ -3735,3 +3735,18 @@ actions:
       op_id: { type: string }
     effects:
       - log: "apply_concept_operation"
+
+  promote_to_concept:
+    description: >
+      Promote the single selected raw shape to a live concept instance
+      (CONCEPTS.md §10 — the fitter / promote, the inverse of expand). A `log`
+      stub like the other concept verbs — each app's native arm extracts the
+      selected element's world-space vertices, tries every registered concept's
+      `fitter` expression over them (bound under `shape.points`), and on the
+      first match replaces the element with a `Generated` instance carrying the
+      recovered params plus a placement transform (translate · rotate). A
+      no-match is a silent no-op. Enabled for a single selected element; single
+      undo op.
+    category: concepts
+    effects:
+      - log: "promote_to_concept"
