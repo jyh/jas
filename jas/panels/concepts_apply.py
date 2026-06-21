@@ -135,3 +135,69 @@ def apply_set_concept_param(model, name: str, value: float) -> None:
         "name": name,
         "value": value,
     })
+
+
+def apply_concept_operation(model, op_id: str | None) -> None:
+    """Apply a named concept operation (CONCEPTS.md §9) to the single selected
+    generated instance. The operation's effect is RESOLVED here, at production
+    time: look the operation up in the registry by ``op_id``, evaluate its
+    ``set:`` expressions with the instance's CURRENT params bound under
+    ``param``, and bake the resulting ``changes`` map into the op (value-in-op).
+    Routed through ``op_apply`` inside the one-undo bracket so it JOURNALS;
+    replay merges ``changes`` and never re-evaluates an expression nor consults
+    the registry. No-op unless exactly one ``GeneratedElem`` is selected, the
+    operation is unknown, or the resolved ``changes`` are empty. Mirrors the Rust
+    ``apply_concept_operation`` dispatch arm."""
+    if model is None or not op_id:
+        return
+    from geometry.element import GeneratedElem
+    doc = model.document
+    if len(doc.selection) != 1:
+        return
+    es = next(iter(doc.selection))
+    try:
+        elem = doc.get_element(es.path)
+    except (ValueError, IndexError, KeyError):
+        return
+    if not isinstance(elem, GeneratedElem):
+        return
+    # Resolve the operation's ``set:`` expressions over the instance's current
+    # params -> the concrete ``changes`` map.
+    from panels.yaml_menu import get_workspace_data
+    ws = get_workspace_data()
+    concept = (ws or {}).get("concepts", {}).get(elem.concept_id)
+    if not isinstance(concept, dict):
+        return
+    operation = None
+    for o in concept.get("operations", []) or []:
+        if isinstance(o, dict) and o.get("id") == op_id:
+            operation = o
+            break
+    if operation is None:
+        return
+    set_map = operation.get("set")
+    if not isinstance(set_map, dict):
+        return
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.expr_types import ValueType
+    ctx = {"param": elem.params}
+    changes: dict = {}
+    for pname, expr_src in set_map.items():
+        if not isinstance(expr_src, str):
+            continue
+        result = evaluate(expr_src, ctx)
+        if result.type == ValueType.NUMBER:
+            # Store resolved param values as floats so serialization matches
+            # across apps (sides=7.0), exactly as the determinism rule requires.
+            changes[pname] = float(result.value)
+    if not changes:
+        return
+    # VALUE-IN-OP: ``op_id`` rides as journal metadata; the RESOLVED ``changes``
+    # map is the authoritative operand replay merges. Replay re-evaluates NOTHING
+    # and re-consults the registry NEVER.
+    _route(model, "apply_concept_operation", {
+        "op": "apply_concept_operation",
+        "path": list(es.path),
+        "op_id": op_id,
+        "changes": changes,
+    })

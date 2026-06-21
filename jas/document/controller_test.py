@@ -953,6 +953,33 @@ class SymbolOpsTest(absltest.TestCase):
         # radius is untouched
         self.assertEqual(el.params["radius"], 50)
 
+    def test_apply_concept_operation_merges_changes(self):
+        # CONCEPTS.md §9: an operation's RESOLVED changes map is merged into the
+        # Generated's params (only named params change; others untouched).
+        # Mirrors Rust apply_concept_operation_merges_changes.
+        from geometry.element import GeneratedElem
+        ctrl = Controller(model=Model())
+        ctrl.place_concept_instance(
+            "regular_polygon", {"radius": 50.0, "sides": 6.0}, "g1")
+        # add_side resolves to { sides: 7 } at production time.
+        ctrl.apply_concept_operation((0, 0), {"sides": 7.0})
+        el = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.params["sides"], 7.0)
+        self.assertEqual(el.params["radius"], 50.0)
+
+    def test_apply_concept_operation_empty_changes_is_noop(self):
+        # An empty / non-dict changes map mutates nothing (the no-op guard).
+        # Mirrors Rust apply_concept_operation_empty_changes_is_noop.
+        from geometry.element import GeneratedElem
+        ctrl = Controller(model=Model())
+        ctrl.place_concept_instance(
+            "regular_polygon", {"radius": 50.0, "sides": 6.0}, "g1")
+        ctrl.apply_concept_operation((0, 0), {})
+        el = ctrl.document.get_element((0, 0))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.params["sides"], 6.0)
+
     def test_place_instance_dangling_master_ok(self):
         # It is fine if the master does not exist; the instance still appears
         # (renders empty until the master exists — dangling is handled).

@@ -220,7 +220,25 @@ def _selected_concept_view(doc):
         if "max" in p:
             entry["max"] = p["max"]
         params_out.append(entry)
-    return {"concept_id": elem.concept_id, "name": name, "params": params_out}
+    # The concept's named operations (CONCEPTS.md §9): id + label + description,
+    # so the panel can render a button per operation. Empty when the concept
+    # declares no ``operations:``. Mirrors the Rust ``build_selected_concept_view``.
+    operations_out = []
+    for o in concept.get("operations", []) or []:
+        if not isinstance(o, dict) or "id" not in o:
+            continue
+        oid = o["id"]
+        operations_out.append({
+            "id": oid,
+            "label": o.get("label", oid),
+            "description": o.get("description", ""),
+        })
+    return {
+        "concept_id": elem.concept_id,
+        "name": name,
+        "params": params_out,
+        "operations": operations_out,
+    }
 
 
 def _document_setup_view(s) -> dict:

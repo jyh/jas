@@ -104,6 +104,76 @@ class ConceptOpsReplayTests(unittest.TestCase):
         el = model.document.get_element((0, 1))
         self.assertEqual(el.params["sides"], 6.0)
 
+    def test_apply_concept_operation_replay_is_deterministic(self):
+        # CONCEPTS.md §9 — apply_concept_operation journals + replays byte-
+        # identically. The op carries the production-RESOLVED changes map
+        # value-in-op (here {sides: 7}, the add_side result), so replay merges it
+        # without re-evaluating the operation's expression nor consulting the
+        # registry — the checkpoint_equivalence gate for the operations verb.
+        # Mirrors Rust operation_apply_concept_operation_replay_is_deterministic.
+        model = Model(document=_base_doc())
+        pre = copy.deepcopy(model.document)
+
+        # Place a hexagon instance (lands at [0,1] beside the seed rect).
+        model.begin_txn()
+        model.name_txn("place_concept_instance")
+        op_apply(model, {
+            "op": "place_concept_instance",
+            "concept_id": "regular_polygon",
+            "params": {"sides": 6.0, "radius": 50.0},
+            "elem_id": "concept-1",
+        })
+        model.commit_txn()
+
+        # add_side, resolved at production time to { sides: 7 }, journaled with
+        # its op_id as metadata and the changes as the authoritative operand.
+        model.begin_txn()
+        model.name_txn("apply_concept_operation")
+        op_apply(model, {
+            "op": "apply_concept_operation",
+            "path": [0, 1],
+            "op_id": "add_side",
+            "changes": {"sides": 7.0},
+        })
+        model.commit_txn()
+
+        # (a) the operation merged sides=7 (radius untouched).
+        el = model.document.get_element((0, 1))
+        self.assertIsInstance(el, GeneratedElem)
+        self.assertEqual(el.params["sides"], 7.0)
+        self.assertEqual(el.params["radius"], 50.0)
+
+        # (b) the journal recorded the verb (the replayable entry).
+        self.assertEqual(model.journal[1].name, "apply_concept_operation")
+        self.assertIn(
+            "apply_concept_operation",
+            [o.op for txn in model.journal[:model.journal_head] for o in txn.ops],
+        )
+
+        # checkpoint_equivalence: the journal replays to the SAME document, and
+        # two independent replays agree (replay merges the value-in-op changes;
+        # the registry / expressions are never consulted on replay).
+        live = document_to_test_json(model.document)
+
+        def _replay():
+            m = Model(document=copy.deepcopy(pre))
+            for txn in model.journal[:model.journal_head]:
+                for o in txn.ops:
+                    op_apply(m, o.params)
+            return document_to_test_json(m.document)
+
+        replay1 = _replay()
+        replay2 = _replay()
+        self.assertEqual(replay1, replay2,
+                         "apply_concept_operation replay is non-deterministic")
+        self.assertEqual(replay1, live,
+                         "apply_concept_operation journal replay != snapshot path")
+
+        # One undo round-trips the operation (one gesture = one undo step).
+        model.undo()
+        el = model.document.get_element((0, 1))
+        self.assertEqual(el.params["sides"], 6.0)
+
 
 if __name__ == "__main__":
     unittest.main()
