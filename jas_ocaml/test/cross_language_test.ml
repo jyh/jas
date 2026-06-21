@@ -1157,6 +1157,145 @@ let assert_concept_conformance () =
     assert false
   end
 
+(* Concept-fitter conformance (shared corpus).
+   Loads test_fixtures/concept_fitters/conformance.json (compiled from
+   workspace/concepts/*.yaml + workspace/tests/concept_fitters.yaml). For each
+   case, evaluates the concept's `fitter` expression with the case's points bound
+   under `shape.points` and asserts the result matches `expected` — `null` for no
+   match, else the flat [params..., cx, cy, rotation] list (1e-9). A fitter is the
+   dual of the generator and just an expression, so this reuses the evaluator —
+   pinning concept DETECTION across all apps (CONCEPTS.md §10). The production
+   promote handler runs exactly this and bakes the recovered values into the op. *)
+let assert_concept_fitters_conformance () =
+  let open Yojson.Safe.Util in
+  let json_str = read_fixture "concept_fitters/conformance.json" in
+  let cases = Yojson.Safe.from_string json_str |> to_list in
+  let num_of = function
+    | `Int i -> float_of_int i
+    | `Float f -> f
+    | `Intlit s -> float_of_string s
+    | _ -> nan
+  in
+  let failures = ref [] in
+  let add s = failures := s :: !failures in
+  List.iter (fun tc ->
+    let concept = tc |> member "concept" |> to_string in
+    let fitter = tc |> member "fitter" |> to_string in
+    (* Bind the input vertices under `shape.points`, exactly as the production
+       promote handler does at detect time. *)
+    let ctx = `Assoc [("shape", `Assoc [("points", tc |> member "points")])] in
+    let result = Jas.Expr_eval.evaluate fitter ctx in
+    match tc |> member "expected" with
+    | `Null ->
+      (* A no-match case: the fitter must evaluate to Null. *)
+      (match result with
+       | Jas.Expr_eval.Null -> ()
+       | _ -> add (Printf.sprintf "%s: expected no match (null)" concept))
+    | expected ->
+      let exp = expected |> to_list in
+      (match result with
+       | Jas.Expr_eval.List items ->
+         if List.length items <> List.length exp then
+           add (Printf.sprintf "%s: result arity %d != expected %d" concept
+                  (List.length items) (List.length exp))
+         else
+           List.iteri (fun i (g, e) ->
+             let gv = num_of g and ev = num_of e in
+             if Float.abs (gv -. ev) >= 1e-9 then
+               add (Printf.sprintf "%s output[%d]: expected %g got %g"
+                      concept i ev gv)
+           ) (List.combine items exp)
+       | _ -> add (Printf.sprintf "%s: expected a list, got a non-list" concept))
+  ) cases;
+  if !failures <> [] then begin
+    Printf.eprintf "concept-fitter conformance failures:\n%s\n"
+      (String.concat "\n" (List.rev !failures));
+    assert false
+  end
+
+(* The generator and fitter are inverses (CONCEPTS.md §10 — the round-trip
+   property). Generate a regular_polygon's vertices from the registry generator,
+   feed them back through the SAME concept's fitter, and assert it recovers
+   [sides, radius, 0, 0, 0] (canonical placement: origin-centred, first vertex on
+   +x => rotation 0). Both expressions are read from the compiled registry, so
+   this pins that a concept's two halves agree. Mirrors Rust
+   generator_fitter_round_trip. *)
+let assert_generator_fitter_round_trip () =
+  let open Yojson.Safe.Util in
+  let num_of = function
+    | `Int i -> float_of_int i | `Float f -> f
+    | `Intlit s -> float_of_string s | _ -> nan in
+  match Jas.Workspace_loader.load () with
+  | None -> failwith "workspace failed to load"
+  | Some ws ->
+    (match Jas.Workspace_loader.concept ws "regular_polygon" with
+     | None -> failwith "regular_polygon concept not registered"
+     | Some concept ->
+       let generator = concept |> member "generator" |> to_string in
+       let fitter = concept |> member "fitter" |> to_string in
+       List.iter (fun (sides, radius) ->
+         (* Generate the canonical points. *)
+         let gctx = `Assoc [("param",
+           `Assoc [("sides", `Float sides); ("radius", `Float radius)])] in
+         let pts = match Jas.Expr_eval.evaluate generator gctx with
+           | Jas.Expr_eval.List items -> `List items
+           | _ -> Printf.ksprintf failwith "generator non-list for sides=%g" sides in
+         (* Fit them back. *)
+         let fctx = `Assoc [("shape", `Assoc [("points", pts)])] in
+         let recovered = match Jas.Expr_eval.evaluate fitter fctx with
+           | Jas.Expr_eval.List items -> List.map num_of items
+           | _ -> Printf.ksprintf failwith "fitter non-list for sides=%g" sides in
+         let expected = [ sides; radius; 0.0; 0.0; 0.0 ] in
+         if List.length recovered <> List.length expected then
+           Printf.ksprintf failwith "round-trip sides=%g arity %d != %d" sides
+             (List.length recovered) (List.length expected);
+         List.iteri (fun i (g, e) ->
+           if Float.abs (g -. e) >= 1e-9 then
+             Printf.ksprintf failwith
+               "round-trip sides=%g radius=%g output[%d]: expected %g got %g"
+               sides radius i e g
+         ) (List.combine recovered expected)
+       ) [ (6.0, 50.0); (4.0, 10.0); (5.0, 25.0) ])
+
+(* CONCEPTS.md §10 — promote_to_concept journals + replays byte-identically.
+   Every operand is value-in-op (the detection ran at production time): the
+   concept id, the recovered params, and the placement transform are baked into
+   the op, so replay rebuilds the SAME Generated element that replaced the raw
+   polygon — the checkpoint_equivalence gate for the promote verb. Mirrors Rust
+   operation_promote_to_concept_replay_is_deterministic. *)
+let assert_promote_to_concept_replay () =
+  let svg = read_fixture "svg/polygon_basic.svg" in
+  let model = Jas.Model.create ~document:(Jas.Svg.svg_to_document svg) () in
+  let ctrl = Jas.Controller.create ~model () in
+  model#begin_txn;
+  model#name_txn "promote_to_concept";
+  apply_op model ctrl (`Assoc [
+    ("op", `String "promote_to_concept");
+    ("path", `List [ `Int 0; `Int 0 ]);
+    ("concept_id", `String "regular_polygon");
+    ("params", `Assoc [ ("sides", `Float 3.0); ("radius", `Float 50.0) ]);
+    ("transform", `List [ `Float 1.0; `Float 0.0; `Float 0.0; `Float 1.0;
+                          `Float 48.0; `Float 32.0 ]);
+  ]);
+  model#commit_txn;
+
+  let live = Jas.Test_json.document_to_test_json model#document in
+  (* The raw polygon was promoted to a Generated instance. *)
+  let contains needle = (try ignore (Str.search_forward (Str.regexp_string needle) live 0); true
+    with Not_found -> false) in
+  assert (contains "regular_polygon");
+  assert (contains "generated");
+
+  let head = model#journal_head in
+  let replay1 = replay_journal svg model#journal head in
+  let replay2 = replay_journal svg model#journal head in
+  assert (replay1 = replay2);
+  if replay1 <> live then begin
+    Printf.eprintf "=== promote_to_concept replay != snapshot ===\n";
+    Printf.eprintf "=== SNAPSHOT ===\n%s\n=== REPLAY ===\n%s\n" live replay1;
+    assert false
+  end
+
 (* Concept-operation conformance (shared corpus).
    Loads test_fixtures/concept_operations/conformance.json (compiled from
    workspace/concepts/*.yaml + workspace/tests/concept_operations.yaml). For each
@@ -1278,6 +1417,17 @@ let () =
     "Concept operations conformance", [
       Alcotest.test_case "concept_operations_conformance all cases" `Quick
         assert_concept_operations_conformance;
+    ];
+
+    (* Concept-fitter conformance (shared corpus) + round-trip + replay —
+       CONCEPTS.md §10 (the fitter / promote). *)
+    "Concept fitters conformance", [
+      Alcotest.test_case "concept_fitters_conformance all cases" `Quick
+        assert_concept_fitters_conformance;
+      Alcotest.test_case "generator_fitter_round_trip" `Quick
+        assert_generator_fitter_round_trip;
+      Alcotest.test_case "promote_to_concept replay is deterministic" `Quick
+        assert_promote_to_concept_replay;
     ];
 
     (* Concept registry: concepts load from workspace.json (increment 3a) *)

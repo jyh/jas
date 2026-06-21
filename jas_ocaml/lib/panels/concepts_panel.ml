@@ -185,6 +185,98 @@ let num_of = function
   | `Intlit s -> float_of_string s
   | _ -> 0.0
 
+(** PROMOTE: build the VALUE-IN-OP [promote_to_concept] op for the single
+    selected raw shape (CONCEPTS.md section 10 — the fitter / promote, the dual
+    of the generator). Extract the element's WORLD-space vertices (apply its own
+    transform so the fitter sees world coordinates — the promoted instance
+    re-places via its own transform), bind them under [shape.points], and try
+    each registered concept's [fitter] expression in a deterministic sorted-id
+    first-match order. On the first match, split its flat result
+    [[params..., cx, cy, rotation]] into the concept params (the first K, by
+    declared order) and a placement transform [translate(cx,cy) . rotate(rot)],
+    and bake everything into the op (value-in-op) so replay never re-runs the
+    fitter. [None] unless exactly one Polygon / Polyline is selected and some
+    concept matches (a no-match is a silent no-op). The caller brackets one undo
+    and routes through [Op_apply.op_apply]. *)
+let promote_to_concept_op (_store : State_store.t) (m : Model.model)
+  : Yojson.Safe.t option =
+  let doc = m#document in
+  match Document.PathMap.bindings doc.Document.selection with
+  | [ (path, _) ] ->
+    (match (try Some (Document.get_element doc path) with _ -> None) with
+     | Some elem ->
+       (* Only a Polygon / Polyline carries promotable vertices in v1. *)
+       let raw_points = match elem with
+         | Element.Polygon { points; _ } | Element.Polyline { points; _ } ->
+           Some points
+         | _ -> None in
+       (match raw_points with
+        | None -> None
+        | Some raw_points ->
+          (* Bake any element transform into the points so the fitter sees WORLD
+             space. *)
+          let pts = match Element.transform_of elem with
+            | Some t -> List.map (fun (x, y) -> Element.apply_point t x y) raw_points
+            | None -> raw_points in
+          let points_json =
+            `List (List.map (fun (x, y) -> `List [ `Float x; `Float y ]) pts) in
+          let ctx = `Assoc [ ("shape", `Assoc [ ("points", points_json) ]) ] in
+          (* Try each registered concept's fitter in sorted-id order (a
+             deterministic first-match); keep the first that matches. *)
+          (match Lazy.force workspace with
+           | None -> None
+           | Some ws ->
+             let registry = Workspace_loader.concepts ws in
+             let try_concept (concept_id, spec) =
+               match Workspace_loader.json_member "fitter" spec with
+               | Some (`String fitter) ->
+                 (match Expr_eval.evaluate fitter ctx with
+                  | Expr_eval.List items ->
+                    (* Declared params, in order — the first K of the result. *)
+                    let param_names = match Workspace_loader.json_member "params" spec with
+                      | Some (`List ps) ->
+                        List.filter_map (fun p ->
+                          match Workspace_loader.json_member "name" p with
+                          | Some (`String n) -> Some n | _ -> None) ps
+                      | _ -> [] in
+                    let k = List.length param_names in
+                    let nums = List.map num_of items in
+                    if List.length nums < k + 3 then None
+                    else begin
+                      let arr = Array.of_list nums in
+                      let params = List.mapi (fun i name ->
+                        (name, `Float arr.(i))) param_names in
+                      let cx = arr.(k) and cy = arr.(k + 1) and rot = arr.(k + 2) in
+                      Some (concept_id, `Assoc params, cx, cy, rot)
+                    end
+                  | _ -> None)
+               | _ -> None in
+             let rec first = function
+               | [] -> None
+               | c :: rest ->
+                 (match try_concept c with Some _ as r -> r | None -> first rest) in
+             (match first registry with
+              | None -> None
+              | Some (concept_id, params, cx, cy, rot) ->
+                (* Placement: translate(cx,cy) . rotate(rot) — rotate then
+                   translate. [multiply self other] is self of other (other
+                   first), so this is translate applied after rotate. *)
+                let t = Element.multiply
+                          (Element.make_translate cx cy)
+                          (Element.make_rotate rot) in
+                Some (`Assoc [
+                  ("op", `String "promote_to_concept");
+                  ("path", `List (List.map (fun i -> `Int i) path));
+                  ("concept_id", `String concept_id);
+                  ("params", params);
+                  ("transform", `List [
+                    `Float t.Element.a; `Float t.Element.b; `Float t.Element.c;
+                    `Float t.Element.d; `Float t.Element.e; `Float t.Element.f ]);
+                ])))
+        )
+     | None -> None)
+  | _ -> None
+
 (** The render-time concept resolver: given a concept id, return [Some] a
     function that evaluates the concept's generator over a params object and
     yields its [(x, y)] points, or [None] when the concept is unknown. Lets the

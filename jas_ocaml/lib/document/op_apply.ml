@@ -48,6 +48,17 @@ let val_bool (v : Yojson.Safe.t) : bool option =
 let val_str (v : Yojson.Safe.t) : string option =
   match v with `String s -> Some s | _ -> None
 
+(* Parse a [transform] field — a 6-element matrix [[a,b,c,d,e,f]] — into an
+   [Element.transform], defaulting to identity when absent or malformed
+   (CONCEPTS.md section 10, promote). Hardened: a wrong-length / non-numeric
+   array is identity, never a raise. *)
+let parse_transform (op : Yojson.Safe.t) (key : string) : Element.transform =
+  match member key op with
+  | `List [ a; b; c; d; e; f ] ->
+    let n = function `Float x -> x | `Int i -> float_of_int i | _ -> 0.0 in
+    { Element.a = n a; b = n b; c = n c; d = n d; e = n e; f = n f }
+  | _ -> Element.identity_transform
+
 (* Read a JSON array-of-strings field (the [ids] payload for the move verbs).
    Non-string entries are dropped; a missing/non-array field yields []. *)
 let str_list_field (op : Yojson.Safe.t) (key : string) : string list =
@@ -968,6 +979,20 @@ let op_apply (model : Model.model) (ctrl : Controller.controller)
           (match parse_path op "path", member "changes" op with
            | Some path, (`Assoc _ as changes) ->
              ctrl#apply_concept_operation path changes
+           | _ -> proceed := false)
+        (* Promote a raw shape to a Generated concept instance (CONCEPTS.md
+           section 10 — the fitter / promote). Every operand is value-in-op: the
+           detection ran at production time, so replay just rebuilds the element.
+           The [transform] is the 6-element matrix [[a,b,c,d,e,f]] (default
+           identity). A malformed/missing path or concept id SKIPS. *)
+        | "promote_to_concept" ->
+          (match parse_path op "path", str_field op "concept_id" with
+           | Some path, Some concept_id ->
+             let params = match member "params" op with
+               | `Assoc _ as p -> p
+               | _ -> `Assoc [] in
+             let transform = parse_transform op "transform" in
+             ctrl#promote_to_concept path concept_id params transform
            | _ -> proceed := false)
         | "detach" ->
           (match parse_path op "path" with

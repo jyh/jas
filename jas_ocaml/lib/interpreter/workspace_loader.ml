@@ -56,6 +56,17 @@ let concept (ws : workspace) (id : string) : Yojson.Safe.t option =
   | Some concepts -> json_member id concepts
   | None -> None
 
+(** The whole concept registry as [(id, spec)] pairs sorted by id, for code that
+    must iterate every concept — e.g. promote trying each concept's [fitter]
+    detector in a deterministic first-match order (CONCEPTS.md section 10).
+    Mirrors Rust [Workspace::concepts]. Empty when the workspace ships no
+    concepts. *)
+let concepts (ws : workspace) : (string * Yojson.Safe.t) list =
+  match json_member "concepts" ws.data with
+  | Some (`Assoc pairs) ->
+    List.sort (fun (a, _) (b, _) -> compare a b) pairs
+  | _ -> []
+
 (** Get the panel menu items for a panel content id.
     Returns a list of JSON menu item objects. *)
 let panel_menu (ws : workspace) (content_id : string) : Yojson.Safe.t list =

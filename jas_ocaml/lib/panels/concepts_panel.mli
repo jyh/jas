@@ -37,6 +37,18 @@ val set_concept_param_op :
 val apply_concept_operation_op :
   State_store.t -> Model.model -> string -> Yojson.Safe.t option
 
+(** PROMOTE: build the VALUE-IN-OP [promote_to_concept] op for the single
+    selected raw shape (CONCEPTS.md section 10 — the fitter / promote). Extracts
+    the element's WORLD-space vertices, tries each registered concept's [fitter]
+    over [shape.points] in sorted-id first-match order, and on a match bakes the
+    recovered params + a placement transform [translate(cx,cy) . rotate(rot)]
+    into the op. [None] unless exactly one Polygon / Polyline is selected and
+    some concept matches (no-match is a silent no-op). The caller brackets one
+    undo and routes through [Op_apply.op_apply]; replay never re-runs the
+    fitter. *)
+val promote_to_concept_op :
+  State_store.t -> Model.model -> Yojson.Safe.t option
+
 (** The render-time concept resolver (concept id -> params -> points), for the
     canvas to evaluate a Generated instance's geometry. *)
 val concept_resolver : Live.concept_resolver

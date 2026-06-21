@@ -19,6 +19,11 @@ val panel : workspace -> string -> Yojson.Safe.t option
 (** [concept ws id] returns the concept pack [id] from the registry, or [None]. *)
 val concept : workspace -> string -> Yojson.Safe.t option
 
+(** [concepts ws] returns the whole concept registry as [(id, spec)] pairs sorted
+    by id, for code that iterates every concept (e.g. promote trying each
+    concept's [fitter] in a deterministic order). Empty when none ship. *)
+val concepts : workspace -> (string * Yojson.Safe.t) list
+
 val panel_menu : workspace -> string -> Yojson.Safe.t list
 val panel_content : workspace -> string -> Yojson.Safe.t option
 val state_defaults : workspace -> (string * Yojson.Safe.t) list
