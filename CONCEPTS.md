@@ -219,9 +219,14 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    the journal replays byte-identically to the live snapshot, twice). Document state is unchanged
    (same controller calls); only the journal gains the replayable entry. (SVG `data-jas-params`
    is not byte-compared by any fixture; its serialization stays per-app-native.)
-4. **Operations.** A concept's named edit verbs (e.g. "add a tooth"), declared in
-   the concept pack as expression transforms of the instance's `params` and
-   journaled as one op-log verb. **Detailed design + the conformance gate: §9.**
+4. **Operations — ✅ done (all 4 native apps).** A concept's named edit verbs
+   (`add_tooth`/`remove_tooth` on gear, `add_side`/`remove_side` on polygon),
+   declared in the pack as `set:` expression transforms of the instance's
+   `params` and journaled as the single op-log verb `apply_concept_operation`
+   (effect RESOLVED value-in-op at production time; replay merges, never
+   re-evaluates). Pinned by the operations conformance corpus + a checkpoint_
+   equivalence replay test per app; the Concepts panel renders a button per
+   operation. **Detailed design + the conformance gate: §9.**
 5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
    tier first (geometric heuristics: a regular polygon detector), the fuzzy/AI
    tier later (`VISION.md` §7 frontier).
