@@ -58,24 +58,46 @@ class TestConceptsPanel:
         assert entry.get("type") == "string"
         assert entry.get("nullable") is True
 
-    def test_panel_foreach_over_data_concepts(self, panel):
-        # The row list iterates the registry-derived data.concepts list.
-        content = panel.get("content", {})
+    def _all_foreaches(self, content):
+        # The panel is DUAL-MODE (CONCEPTS.md §6.4): a PARAMS-mode foreach over
+        # active_document.selected_concept.params AND a LIST-mode foreach over
+        # data.concepts. Collect every foreach so a test can target the one it
+        # means rather than whichever comes first in tree order.
+        out = []
 
-        def find_foreach(el):
+        def walk(el):
             if isinstance(el, dict):
                 if "foreach" in el:
-                    return el
+                    out.append(el)
                 for c in el.get("children", []) or []:
-                    f = find_foreach(c)
-                    if f:
-                        return f
-            return None
+                    walk(c)
+                # foreach bodies live under `do:`, not `children:`.
+                if isinstance(el.get("do"), (dict, list)):
+                    do = el["do"]
+                    for d in (do if isinstance(do, list) else [do]):
+                        walk(d)
+        walk(content)
+        return out
 
-        fe = find_foreach(content)
-        assert fe is not None, "concept row list (a foreach) missing"
-        assert fe["foreach"]["source"] == "data.concepts"
+    def test_panel_foreach_over_data_concepts(self, panel):
+        # The LIST-mode row list iterates the registry-derived data.concepts.
+        foreaches = self._all_foreaches(panel.get("content", {}))
+        sources = [fe["foreach"]["source"] for fe in foreaches]
+        assert "data.concepts" in sources, \
+            f"concept row list (foreach over data.concepts) missing; saw {sources}"
+        fe = next(fe for fe in foreaches if fe["foreach"]["source"] == "data.concepts")
         assert fe["foreach"]["as"] == "concept"
+
+    def test_panel_foreach_over_selected_concept_params(self, panel):
+        # The PARAMS-mode editor iterates the selected instance's params
+        # (Concepts panel Slice 2 — live per-instance parameter editing).
+        foreaches = self._all_foreaches(panel.get("content", {}))
+        sources = [fe["foreach"]["source"] for fe in foreaches]
+        assert "active_document.selected_concept.params" in sources, \
+            f"params editor (foreach over selected_concept.params) missing; saw {sources}"
+        fe = next(fe for fe in foreaches
+                  if fe["foreach"]["source"] == "active_document.selected_concept.params")
+        assert fe["foreach"]["as"] == "p"
 
     def test_data_concepts_exposed_as_sorted_list(self):
         # The app exposes the concept registry as a data.concepts list of

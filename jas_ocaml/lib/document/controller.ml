@@ -269,6 +269,33 @@ class controller ?(model = Model.create ()) () =
         Element.make_generated ~id:(Some elem_id) concept_id params in
       self#add_element generated
 
+    (** Set one parameter on the Generated instance at [path] to [value] so the
+        concept re-generates its geometry live (CONCEPTS.md section 6.4 — tune
+        the same parameters without redoing anything). Value-in-op: the new
+        value is carried in the payload. The parameter is updated in place when
+        present (order preserved) and appended otherwise. No-op when [path] is
+        invalid or the element there is not a generated instance. *)
+    method set_concept_param (path : Document.element_path)
+        (name : string) (value : float) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some elem ->
+        match elem with
+        | Element.Live (Element.Generated gen) ->
+          let members = match gen.Element.gen_params with
+            | `Assoc kvs -> kvs | _ -> [] in
+          let new_members =
+            if List.mem_assoc name members then
+              List.map (fun (k, v) ->
+                if k = name then (k, `Float value) else (k, v)) members
+            else members @ [ (name, `Float value) ] in
+          let updated =
+            { gen with Element.gen_params = `Assoc new_members } in
+          let new_elem = Element.Live (Element.Generated updated) in
+          model#edit_document (Document.replace_element doc path new_elem)
+        | _ -> ()
+
     (** Detach (break the link / expand): replace the reference instance at
         [path] with an INDEPENDENT copy of its resolved target (SYMBOLS.md
         section 7, Fork S6 — the inverse of Make Symbol). The target id is

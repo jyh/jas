@@ -167,6 +167,57 @@ let symbols_view (doc : Document.document) : Yojson.Safe.t =
   in
   `List symbols_json
 
+(* The compiled workspace registry, loaded once (concepts are static data). *)
+let concepts_workspace = lazy (Workspace_loader.load ())
+
+(** [active_document.selected_concept] (CONCEPTS.md section 6.4): [`Null] unless
+    exactly one Generated concept instance is selected; otherwise
+    [{ concept_id, name, params: [{ name, value, min, max }, …] }] — the
+    concept's registry param schema merged with the instance's current values
+    (the instance value if present, else the schema default). Drives the
+    Concepts panel's PARAMS mode. Mirrors the Rust [build_selected_concept_view]. *)
+let selected_concept_view (doc : Document.document) : Yojson.Safe.t =
+  match Document.PathMap.bindings doc.Document.selection with
+  | [ (path, _) ] ->
+    (match (try Some (Document.get_element doc path) with _ -> None) with
+     | Some (Element.Live (Element.Generated gen)) ->
+       let concept_id = gen.Element.gen_concept_id in
+       (match Lazy.force concepts_workspace with
+        | None -> `Null
+        | Some ws ->
+          (match Workspace_loader.concept ws concept_id with
+           | None -> `Null
+           | Some spec ->
+             let name = match Workspace_loader.json_member "name" spec with
+               | Some (`String s) -> s | _ -> concept_id in
+             let inst_params = match gen.Element.gen_params with
+               | `Assoc kvs -> kvs | _ -> [] in
+             let params_out = match Workspace_loader.json_member "params" spec with
+               | Some (`List ps) ->
+                 List.filter_map (fun p ->
+                   match Workspace_loader.json_member "name" p with
+                   | Some (`String pname) ->
+                     let value = match List.assoc_opt pname inst_params with
+                       | Some v -> v
+                       | None ->
+                         (match Workspace_loader.json_member "default" p with
+                          | Some d -> d | None -> `Null) in
+                     let entry = [ ("name", `String pname); ("value", value) ] in
+                     let entry = match Workspace_loader.json_member "min" p with
+                       | Some mn -> entry @ [ ("min", mn) ] | None -> entry in
+                     let entry = match Workspace_loader.json_member "max" p with
+                       | Some mx -> entry @ [ ("max", mx) ] | None -> entry in
+                     Some (`Assoc entry)
+                   | _ -> None) ps
+               | _ -> [] in
+             `Assoc [
+               ("concept_id", `String concept_id);
+               ("name", `String name);
+               ("params", `List params_out);
+             ]))
+     | _ -> `Null)
+  | _ -> `Null
+
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
   `Assoc [
     ("top_level_layers", `List []);
@@ -178,6 +229,7 @@ let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
     ("selection_count", `Int 0);
     ("element_selection", `List []);
     ("symbols", `List []);
+    ("selected_concept", `Null);
     ("document_setup", document_setup_view Document_setup.default);
     ("print_preferences", print_preferences_view Print_preferences.default);
   ]
@@ -259,6 +311,7 @@ let build
       ("selection_count", `Int selection_count);
       ("element_selection", element_selection_json);
       ("symbols", symbols_view m#document);
+      ("selected_concept", selected_concept_view m#document);
       ("document_setup", document_setup_view m#document.Document.document_setup);
       ("print_preferences", print_preferences_view m#document.Document.print_preferences);
     ]

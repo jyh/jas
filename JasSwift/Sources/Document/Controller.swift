@@ -182,6 +182,20 @@ public class Controller {
         addElement(generated)
     }
 
+    /// Set one parameter on the `GeneratedElem` at `path` to `value`, so the
+    /// concept instance re-generates its geometry live (CONCEPTS.md §6.4 — "tune
+    /// the same parameters without redoing anything"). Value-in-op: the new
+    /// value is carried in the payload. No-op when `path` is invalid or the
+    /// element there is not a generated instance. Mirrors Rust
+    /// `Controller::set_concept_param`.
+    public func setConceptParam(_ path: ElementPath, name: String, value: Double) {
+        let doc = model.document
+        guard let elem = doc.tryGetElement(path) else { return }
+        guard case .live(.generated(var gen)) = elem else { return }
+        gen.params[name] = value
+        model.editDocument(doc.replaceElement(path, with: .live(.generated(gen))))
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance
     /// at `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md
     /// §7, Fork S6 — the inverse of Make Symbol). The target id is resolved by

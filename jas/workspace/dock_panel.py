@@ -464,6 +464,16 @@ class DockPanelWidget(QWidget):
             if self._dispatch_symbols_action(action_name, params):
                 return
 
+        # Concepts panel native arms (CONCEPTS.md §6). place_concept_instance
+        # and set_concept_param are `log` stubs in actions.yaml; the real work
+        # (mint id + default params, or write a param onto the selected
+        # Generated instance — each one undo step) lives in concepts_apply,
+        # mirroring the Rust dispatch arms. concepts_panel_select stays generic
+        # (set_panel_state). Handled before the generic YAML effect path.
+        if action_name in ("place_concept_instance", "set_concept_param"):
+            if self._dispatch_concepts_action(action_name, params):
+                return
+
         # Look up the action in the workspace
         ws = get_workspace_data()
         if ws and action_name in ws.get("actions", {}):
@@ -767,6 +777,57 @@ class DockPanelWidget(QWidget):
             if master_id is not None:
                 apply_delete_symbol(model, master_id)
                 store.set_panel(pid, "selected_symbol", None)
+            self.rebuild()
+            return True
+
+        return True
+
+    def _dispatch_concepts_action(self, action_name: str, params: dict) -> bool:
+        """Native arms for the Concepts panel (CONCEPTS.md §6), modeled on
+        ``_dispatch_symbols_action``. Returns True when handled (the caller
+        then skips the generic YAML effect path).
+
+        ``place_concept_instance`` reads the panel-selected concept id from the
+        panel content scope (``concepts_panel_content``, key
+        ``selected_concept``) and appends a default-param Generated instance.
+        ``set_concept_param`` writes ``params.value`` onto the parameter named
+        ``params.name`` of the single selected Generated instance so it
+        re-generates live. Each is one undo step. Mirrors the Rust dispatch
+        arms (value-in-op minting; one snapshot per op)."""
+        store = self._state_store
+        if store is None:
+            return True
+        model = self._get_model() if self._get_model else None
+        if model is None:
+            return True
+        from panels.concepts_apply import (
+            apply_place_concept_instance, apply_set_concept_param,
+        )
+
+        if action_name == "place_concept_instance":
+            concept_id = store.get_panel("concepts_panel_content", "selected_concept")
+            apply_place_concept_instance(
+                model, concept_id if isinstance(concept_id, str) else None)
+            self.rebuild()
+            return True
+
+        if action_name == "set_concept_param":
+            name = params.get("name") if params else None
+            raw = params.get("value") if params else None
+            value: float
+            if isinstance(raw, bool):
+                value = float(raw)
+            elif isinstance(raw, (int, float)):
+                value = float(raw)
+            elif isinstance(raw, str):
+                try:
+                    value = float(raw)
+                except ValueError:
+                    return True
+            else:
+                return True
+            if isinstance(name, str):
+                apply_set_concept_param(model, name, value)
             self.rebuild()
             return True
 

@@ -67,6 +67,28 @@ class TestBuildActiveDocumentView:
         assert view["top_level_layers"][0]["name"] == "A"
         assert view["top_level_layers"][1]["name"] == "B"
 
+    def test_selected_concept_none_without_generated(self):
+        # No Generated selected -> selected_concept is None (Concepts Slice 2 A).
+        model = _make_model(["A"])
+        view = build_active_document_view(model)
+        assert view["selected_concept"] is None
+
+    def test_selected_concept_present_for_single_generated(self):
+        # With exactly one Generated instance selected, selected_concept is the
+        # concept's param schema merged with the instance's current values.
+        # Mirrors Rust active_document_view_selected_concept_present_for_single_generated.
+        from document.controller import Controller
+        model = Model()
+        Controller(model=model).place_concept_instance(
+            "regular_polygon", {"sides": 6, "radius": 50}, "g1")
+        view = build_active_document_view(model)
+        sc = view["selected_concept"]
+        assert sc is not None
+        assert sc["concept_id"] == "regular_polygon"
+        sides = next(p for p in sc["params"] if p["name"] == "sides")
+        # The instance's current value (6) is carried on the schema entry.
+        assert sides["value"] == 6
+
     def test_next_layer_name_skips_existing(self):
         model = _make_model(["Layer 1", "Layer 2"])
         view = build_active_document_view(model)

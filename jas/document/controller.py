@@ -311,6 +311,28 @@ class Controller:
             GeneratedElem(concept_id=concept_id, params=params, id=elem_id)
         )
 
+    def set_concept_param(self, path: ElementPath, name: str,
+                          value: float) -> None:
+        """Set one parameter on the ``GeneratedElem`` at ``path`` to ``value``
+        so the concept instance re-generates its geometry live (CONCEPTS.md
+        §6.4 — "tune the same parameters without redoing anything").
+        Value-in-op: the new value is carried in the payload. No-op when
+        ``path`` is invalid or the element there is not a generated instance.
+        Mirrors the Rust ``Controller::set_concept_param``.
+        """
+        from geometry.element import GeneratedElem
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if not isinstance(elem, GeneratedElem):
+            return
+        new_params = dict(elem.params)
+        new_params[name] = value
+        new_elem = replace(elem, params=new_params)
+        self._model.edit_document(doc.replace_element(path, new_elem))
+
     def detach(self, path: ElementPath) -> None:
         """Detach (break the link / expand): replace the ``ReferenceElem``
         instance at ``path`` with an INDEPENDENT copy of its resolved target

@@ -1067,6 +1067,81 @@ let dispatch_double_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) :
     end
   ) behaviors
 
+(** Dispatch a value-change commit on a YAML element by walking its [behavior]
+    array for [event: change] entries. The committed [value] is injected as
+    [event.value] (so params like [value: "event.value"] resolve) and action
+    params are evaluated against that augmented context (so a Concepts-panel
+    foreach [p.name] resolves to the row's parameter name). The
+    [set_concept_param] native arm writes the value onto the single selected
+    Generated instance; other actions fall through to
+    [Panel_menu.dispatch_yaml_action]. Mirrors [dispatch_click_behaviors] for
+    the change event. Returns true iff any panel-local state was written. *)
+let dispatch_change_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t)
+    (value : float) : bool =
+  let open Yojson.Safe.Util in
+  let wrote_state = ref false in
+  let behaviors = match el |> member "behavior" with
+    | `List bs -> bs | _ -> [] in
+  (* Expose the committed value under [event.value], overlaying any existing
+     [event] binding, for param / effect resolution. *)
+  let ctx_ev =
+    let event_json = `Assoc [ ("value", `Float value) ] in
+    match ctx with
+    | `Assoc pairs ->
+      `Assoc (("event", event_json) :: List.remove_assoc "event" pairs)
+    | _ -> `Assoc [ ("event", event_json) ]
+  in
+  List.iter (fun b ->
+    let event = b |> member "event" |> to_string_option
+                |> Option.value ~default:"" in
+    if event = "change" then begin
+      let resolve_value v =
+        match v with
+        | `String expr_str ->
+          (try Effects.value_to_json (Expr_eval.evaluate expr_str ctx_ev)
+           with _ -> v)
+        | _ -> v
+      in
+      (match b |> member "effects" with
+       | `List effects ->
+         List.iter (fun e ->
+           match e |> member "set" with
+           | `Assoc pairs ->
+             List.iter (fun (k, v) ->
+               _write_back_bind ("state." ^ k) (resolve_value v);
+               wrote_state := true) pairs
+           | _ -> ()) effects
+       | _ -> ());
+      (match b |> member "action" |> to_string_option with
+       | Some action_name when action_name <> "" ->
+         let params_list = match b |> member "params" with
+           | `Assoc pairs -> List.map (fun (k, v) -> (k, resolve_value v)) pairs
+           | _ -> [] in
+         (match !_get_model_ref () with
+          | None -> ()
+          | Some m ->
+            (match action_name with
+             | "set_concept_param" ->
+               (match !_current_store,
+                      List.assoc_opt "name" params_list,
+                      List.assoc_opt "value" params_list with
+                | Some store, Some (`String name), Some vjson ->
+                  let v = match vjson with
+                    | `Float f -> f
+                    | `Int i -> float_of_int i
+                    | `Intlit s -> (try float_of_string s with _ -> 0.0)
+                    | _ -> 0.0 in
+                  Concepts_panel.set_concept_param store m name v;
+                  wrote_state := true
+                | _ -> ())
+             | _ ->
+               Panel_menu.dispatch_yaml_action
+                 ~params:params_list action_name m))
+       | _ -> ())
+    end
+  ) behaviors;
+  !wrote_state
+
 (** Layers-panel mutable state — collapsed rows, panel selection, rename
     state, drag source/target, search filter, hidden type filter, saved
     lock states for toggle-all, solo state, and the rerender callback —
@@ -1971,7 +2046,11 @@ and render_number_input ~packing ~ctx el =
                 && List.mem (String.sub expr 6 (String.length expr - 6))
                      ["h"; "s"; "b"; "r"; "g"; "bl"; "c"; "m"; "y"; "k"] ->
            commit_color_panel_to_recent st pid
-         | _ -> ())
+         | _ -> ());
+        (* Concepts param editor (and any number_input carrying a change
+           behavior): dispatch it with the committed, clamped value as
+           [event.value] so set_concept_param re-generates the instance live. *)
+        ignore (dispatch_change_behaviors el ctx cv)
       | _ -> ()
     in
     (match bind_expr with

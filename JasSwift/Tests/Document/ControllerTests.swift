@@ -893,6 +893,24 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(out.selection.first?.path == [0, 0])
 }
 
+@Test func setConceptParamUpdatesInstanceAndRegenerates() {
+    // Concepts panel Slice 2: changing a param on a placed Generated instance
+    // rewrites params[name]=value, so it re-generates (CONCEPTS.md §6.4).
+    // Mirrors Rust set_concept_param_updates_instance_and_regenerates.
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 6, "radius": 50], elemId: "g1")
+    ctrl.setConceptParam([0, 0], name: "sides", value: 8)
+    if case .live(.generated(let g)) = ctrl.document.getElement([0, 0]) {
+        #expect((g.params["sides"] as? Double) == 8)
+        // radius is untouched
+        #expect((g.params["radius"] as? Int) == 50)
+    } else {
+        Issue.record("expected a Generated at [0,0]")
+    }
+}
+
 @Test func placeInstanceDanglingMasterOk() {
     // It is fine if the master does not exist; the instance still appears
     // (renders empty until the master exists — dangling is handled).

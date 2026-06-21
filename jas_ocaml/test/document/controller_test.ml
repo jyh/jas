@@ -1200,6 +1200,28 @@ let () =
            assert (g.Jas.Element.gen_params = params)
          | _ -> assert false));
 
+      Alcotest.test_case "set_concept_param updates the instance param in place"
+        `Quick (fun () ->
+        (* Concepts panel Slice 2: changing a param on a placed Generated
+           instance rewrites params[name]=value so it re-generates
+           (CONCEPTS.md section 6.4). Mirrors Rust
+           set_concept_param_updates_instance_and_regenerates. *)
+        let layer = make_layer ~name:"L" [||] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        let params = `Assoc [ ("sides", `Int 6); ("radius", `Int 50) ] in
+        ctrl#place_concept_instance "regular_polygon" params "gp1";
+        ctrl#set_concept_param [0; 0] "sides" 8.0;
+        (match Jas.Document.get_element ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Generated g) ->
+           (match g.Jas.Element.gen_params with
+            | `Assoc kvs ->
+              assert (List.assoc "sides" kvs = `Float 8.0);
+              (* radius is untouched *)
+              assert (List.assoc "radius" kvs = `Int 50)
+            | _ -> assert false)
+         | _ -> assert false));
+
       Alcotest.test_case "default_params reads the concept's registry defaults"
         `Quick (fun () ->
         match Jas.Concepts_panel.default_params "gear" with

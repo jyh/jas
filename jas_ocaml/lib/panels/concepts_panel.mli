@@ -16,6 +16,11 @@ val default_params : string -> Yojson.Safe.t
     concept is selected. *)
 val place_concept_instance : State_store.t -> Model.model -> unit
 
+(** SET PARAM: write the float value onto the named parameter of the single
+    selected Generated instance so it re-generates live (CONCEPTS.md section
+    6.4), one undo step. No-op unless exactly one Generated element is selected. *)
+val set_concept_param : State_store.t -> Model.model -> string -> float -> unit
+
 (** The render-time concept resolver (concept id -> params -> points), for the
     canvas to evaluate a Generated instance's geometry. *)
 val concept_resolver : Live.concept_resolver

@@ -3569,22 +3569,49 @@ def _wire_click(widget, action, params, condition, effects, store, ctx, dispatch
 
 
 def _wire_change(widget, action, params, condition, effects, store, ctx, dispatch_fn):
-    """Wire value change events (sliders, inputs)."""
+    """Wire value change events (sliders, inputs).
+
+    The committed value is injected as ``event.value`` so effects and action
+    params that read it resolve. ``action`` params are evaluated against the
+    per-widget eval context (like ``_wire_click``) with ``event.value``
+    available — so a Concepts-panel foreach ``p.name`` resolves to the row's
+    parameter name and ``value: "event.value"`` to the committed number. A
+    QSpinBox commits once on ``editingFinished`` (Enter / focus loss / arrow),
+    matching the panel/dialog writeback path and avoiding a dispatch on every
+    programmatic binding refresh (which would loop edit → rebuild → refresh);
+    sliders fire live on drag."""
+    widget_pid = ctx.get("_panel_id")
+
+    def _action_ctx(value):
+        # Strip scope namespaces from the wire-time ctx so they don't shadow
+        # freshly-evaluated store state (mirrors _wire_click), then expose the
+        # committed value under event.value.
+        extra = {k: v for k, v in ctx.items()
+                 if k not in ("state", "panel", "dialog", "param", "tool", "active_document")}
+        ec = store.eval_context(extra)
+        if widget_pid:
+            ec["panel"] = store.get_panel_state(widget_pid)
+        ec["event"] = {"value": value}
+        return ec
+
     def on_change(value):
         if effects:
             from workspace_interpreter.effects import run_effects
             change_ctx = dict(ctx)
             change_ctx["event"] = {"value": value}
             run_effects(effects, change_ctx, store)
-        if action:
-            resolved_params = dict(params)
-            resolved_params["value"] = value
+        if action and dispatch_fn:
+            ec = _action_ctx(value)
+            resolved_params = {k: evaluate(str(v), ec).value for k, v in params.items()}
             dispatch_fn(action, resolved_params)
 
     if isinstance(widget, QSlider):
         widget.valueChanged.connect(on_change)
     elif isinstance(widget, QSpinBox):
-        widget.valueChanged.connect(on_change)
+        def _on_spin_finished():
+            widget.interpretText()
+            on_change(widget.value())
+        widget.editingFinished.connect(_on_spin_finished)
     elif isinstance(widget, QLineEdit):
         widget.textChanged.connect(on_change)
 

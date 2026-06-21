@@ -705,6 +705,39 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 }
                 return Vec::new();
             }
+            // Set one param of the single selected generated instance and let it
+            // re-generate live (Slice 2). The committed field value rides as
+            // param.value (event.value); param.name is the parameter.
+            "set_concept_param" => {
+                let Some(name) = params
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                else {
+                    return Vec::new();
+                };
+                let Some(value) = params.get("value").and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+                }) else {
+                    return Vec::new();
+                };
+                if let Some(tab) = st.tab_mut() {
+                    let path = {
+                        let sel = &tab.model.document().selection;
+                        if sel.len() == 1 {
+                            Some(sel[0].path.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(path) = path {
+                        tab.model
+                            .with_txn(|m| Controller::set_concept_param(m, &path, &name, value));
+                    }
+                }
+                return Vec::new();
+            }
             // Delete the panel-selected master. Reference-aware: warn via
             // a confirm dialog when it still has instances.
             "delete_symbol_action" => {
@@ -1915,6 +1948,52 @@ fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json
     })
 }
 
+/// Build `active_document.selected_concept` for a selected `Generated` instance:
+/// the concept's display name + its declared param schema (name/min/max) merged
+/// with the instance's current values (CONCEPTS.md §6.4, Slice 2). Null if the
+/// concept is not registered.
+fn build_selected_concept_view(
+    concept_id: &str,
+    instance_params: &serde_json::Value,
+) -> serde_json::Value {
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return serde_json::Value::Null;
+    };
+    let Some(concept) = ws.concept(concept_id) else {
+        return serde_json::Value::Null;
+    };
+    let name = concept
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(concept_id);
+    let mut params_out: Vec<serde_json::Value> = Vec::new();
+    if let Some(schema) = concept.get("params").and_then(|v| v.as_array()) {
+        for p in schema {
+            let Some(pname) = p.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let value = instance_params
+                .get(pname)
+                .cloned()
+                .or_else(|| p.get("default").cloned())
+                .unwrap_or(serde_json::Value::Null);
+            let mut entry = serde_json::json!({ "name": pname, "value": value });
+            if let Some(min) = p.get("min") {
+                entry["min"] = min.clone();
+            }
+            if let Some(max) = p.get("max") {
+                entry["max"] = max.clone();
+            }
+            params_out.push(entry);
+        }
+    }
+    serde_json::json!({
+        "concept_id": concept_id,
+        "name": name,
+        "params": params_out,
+    })
+}
+
 pub(crate) fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
@@ -2072,6 +2151,19 @@ pub(crate) fn build_active_document_view(
                 Some(Element::Live(_))
             )
         });
+    // Concepts panel (Slice 2): when exactly one generated concept instance is
+    // selected, expose its concept id + param schema merged with current values
+    // so the panel switches to PARAMS mode; null otherwise.
+    let selected_concept: serde_json::Value = if canvas_selection.len() == 1 {
+        match tab.model.document().get_element(&canvas_selection[0].path) {
+            Some(Element::Live(crate::geometry::live::LiveVariant::Generated(ge))) => {
+                build_selected_concept_view(&ge.concept_id, &ge.params)
+            }
+            _ => serde_json::Value::Null,
+        }
+    } else {
+        serde_json::Value::Null
+    };
     // Artboard view (ARTBOARDS.md §Artboard data model).
     let doc = tab.model.document();
     let artboards_json: Vec<serde_json::Value> = doc
@@ -2228,6 +2320,8 @@ pub(crate) fn build_active_document_view(
     // list is attached here (SYMBOLS.md §8).
     if let serde_json::Value::Object(m) = &mut view {
         m.insert("symbols".to_string(), serde_json::Value::Array(symbols_json));
+        // Concepts panel Slice 2: attached here too (macro recursion ceiling).
+        m.insert("selected_concept".to_string(), selected_concept);
     }
     view
 }
@@ -11237,6 +11331,38 @@ mod tests {
             {"__path__": [0, 2]},
         ]);
         assert_eq!(view["element_selection"], expected);
+    }
+
+    #[test]
+    fn active_document_view_selected_concept_present_for_single_generated() {
+        // Concepts panel Slice 2 (piece A): with exactly one Generated
+        // instance selected, active_document.selected_concept is the concept's
+        // param schema merged with the instance's current values; null
+        // otherwise (CONCEPTS.md §6.4).
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        // Nothing selected → null.
+        assert_eq!(
+            build_active_document_view(&st)["selected_concept"],
+            serde_json::Value::Null
+        );
+        // Place a Generated instance (place selects it).
+        let params = serde_json::json!({ "radius": 50.0, "sides": 6.0 });
+        crate::document::controller::Controller::place_concept_instance(
+            &mut st.tabs[st.active_tab].model,
+            "regular_polygon",
+            params,
+            "g1",
+        );
+        let view = build_active_document_view(&st);
+        let sc = &view["selected_concept"];
+        assert_eq!(sc["concept_id"], serde_json::json!("regular_polygon"));
+        // params is the schema list, each carrying the instance's value.
+        let plist = sc["params"].as_array().expect("params array");
+        let sides = plist
+            .iter()
+            .find(|p| p["name"] == serde_json::json!("sides"))
+            .expect("sides param");
+        assert_eq!(sides["value"], serde_json::json!(6.0));
     }
 
     // ─────────────────────────────────────────────────────────────
