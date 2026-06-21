@@ -65,31 +65,57 @@ def default_params(concept_id: str) -> dict:
     return out
 
 
+def _route(model, txn_name: str, op: dict) -> None:
+    """OP_LOG.md §9 — route a Concepts-panel gesture through the SHARED
+    ``op_apply`` dispatcher so it JOURNALS a real op in ONE named undo step. The
+    dispatcher calls the SAME ``Controller`` mutator the handler called directly
+    before, so the document is byte-identical; the journal now gains the
+    replayable entry. Owns its own transaction (no surrounding snapshot effect),
+    but only if none is already open, so a reentrant caller's bracket is
+    preserved. Mirrors the Rust ``with_txn`` + ``op_apply`` bracket and Python's
+    ``menu._route_delete_selection``."""
+    from document.op_apply import op_apply
+    owns = not model.in_txn
+    if owns:
+        model.begin_txn()
+        model.name_txn(txn_name)
+    op_apply(model, op)
+    if owns:
+        model.commit_txn()
+
+
 def apply_place_concept_instance(model, concept_id: str | None) -> None:
     """Place Instance: append a new default-param generated instance of
     ``concept_id`` to the active layer and select it (CONCEPTS.md §6). Mints
-    ``elem_id``, then ``Controller.place_concept_instance`` (one undo step).
-    No-op when no concept is panel-selected. Mirrors the Rust
-    ``place_concept_instance`` arm."""
+    ``elem_id`` and resolves the registry defaults HERE (value-in-op, UI-layer
+    concerns), then routes a ``place_concept_instance`` op through ``op_apply``
+    (one undo step) so the placement JOURNALS. No-op when no concept is
+    panel-selected. Mirrors the Rust ``place_concept_instance`` dispatch arm."""
     if model is None or not concept_id:
         return
-    from document.controller import Controller
     existing = _gather_existing_ids(model.document)
     elem_id = _mint(existing)
     if elem_id is None:
         return
-    # The Controller mutator self-brackets via edit_document (one undo step).
-    Controller(model=model).place_concept_instance(
-        concept_id, default_params(concept_id), elem_id)
+    # VALUE-IN-OP: bake the concept id, the resolved default params, and the
+    # minted id into the op; replay re-derives NONE of them.
+    _route(model, "place_concept_instance", {
+        "op": "place_concept_instance",
+        "concept_id": concept_id,
+        "params": default_params(concept_id),
+        "elem_id": elem_id,
+    })
 
 
 def apply_set_concept_param(model, name: str, value: float) -> None:
     """Set one parameter on the single selected generated instance to ``value``
-    so it re-generates live (CONCEPTS.md §6.4). No-op unless exactly one
-    ``GeneratedElem`` is selected. Mirrors the Rust ``set_concept_param`` arm."""
+    so it re-generates live (CONCEPTS.md §6.4). Resolves the selected path HERE
+    (the live selection is a UI-layer concern), then routes a
+    ``set_concept_param`` op through ``op_apply`` (one undo step) so the edit
+    JOURNALS. No-op unless exactly one ``GeneratedElem`` is selected. Mirrors the
+    Rust ``set_concept_param`` dispatch arm."""
     if model is None or not name:
         return
-    from document.controller import Controller
     from geometry.element import GeneratedElem
     doc = model.document
     if len(doc.selection) != 1:
@@ -101,5 +127,11 @@ def apply_set_concept_param(model, name: str, value: float) -> None:
         return
     if not isinstance(elem, GeneratedElem):
         return
-    # The Controller mutator self-brackets via edit_document (one undo step).
-    Controller(model=model).set_concept_param(es.path, name, value)
+    # VALUE-IN-OP: bake the resolved path, param name, and committed value into
+    # the op; replay re-consults NEITHER the live selection NOR the element.
+    _route(model, "set_concept_param", {
+        "op": "set_concept_param",
+        "path": list(es.path),
+        "name": name,
+        "value": value,
+    })

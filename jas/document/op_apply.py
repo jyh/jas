@@ -1228,6 +1228,31 @@ def op_apply(model: Model, op: dict) -> None:
         if master_id is None or ref_id is None:
             return
         ctrl.place_instance(master_id, ref_id)
+    # ── Concept-pack ops (CONCEPTS.md §6-7) ──
+    # The two verbs the Concepts panel emits, given journal-replay arms so a
+    # placed/edited concept instance survives capture+replay byte-identically
+    # (the §7 determinism rule). Both carry every operand VALUE-IN-OP: the
+    # concept id, the RESOLVED default params, and the minted elem id (place);
+    # the path, param name, and committed value (set). Nothing is re-derived on
+    # replay (the registry could have changed), so replay reconstructs the exact
+    # Generated instance the live edit produced. A malformed payload SKIPS (never
+    # raises, never journals). Mirrors the Rust place_concept_instance /
+    # set_concept_param arms.
+    elif name == "place_concept_instance":
+        concept_id = str_field(op, "concept_id")
+        elem_id = str_field(op, "elem_id")
+        if concept_id is None or elem_id is None:
+            return
+        params = op.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        ctrl.place_concept_instance(concept_id, params, elem_id)
+    elif name == "set_concept_param":
+        path = parse_path(op.get("path"))
+        cname = str_field(op, "name")
+        if path is None or cname is None:
+            return
+        ctrl.set_concept_param(path, cname, num_field(op, "value"))
     elif name == "detach":
         path = parse_path(op.get("path"))
         if path is None:
