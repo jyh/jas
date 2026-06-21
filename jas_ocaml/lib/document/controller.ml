@@ -330,6 +330,48 @@ class controller ?(model = Model.create ()) () =
          | _ -> ())
       | _ -> ()
 
+    (** Promote the raw element at [path] to a live [Generated] instance of
+        [concept_id] with the fitted [params] and placement [transform]
+        (CONCEPTS.md section 10 — the fitter / promote). The recovered params,
+        the origin-centered generator, and the placement transform re-render the
+        SAME geometry the raw element drew. The original element's identity (id,
+        name, opacity, locked, visibility, blend mode, mask) is PRESERVED; only
+        the placement transform is set. Every operand is value-in-op — the
+        detection already happened at production time — so this just builds the
+        element with no expression evaluation. No-op when [path] is missing. *)
+    method promote_to_concept (path : Document.element_path)
+        (concept_id : string) (params : Yojson.Safe.t)
+        (transform : Element.transform) =
+      let doc = model#document in
+      match (try Some (Document.get_element doc path) with _ -> None) with
+      | None -> ()
+      | Some existing ->
+        (* Preserve the raw element's identity; (re)set only the placement. The
+           generated_elem flattens common props inline, so copy each from the
+           original. Opacity has no generic getter (only the shape variants carry
+           one); read it from the promotable types and fall back to 1.0. The
+           generated variant carries no name field (a pre-existing structural
+           limitation shared with place_concept_instance / make_generated), so an
+           original name is not retained — id and the visual common props are. *)
+        let opacity = match existing with
+          | Element.Polygon { opacity; _ } | Element.Polyline { opacity; _ } ->
+            opacity
+          | _ -> 1.0 in
+        let generated = Element.Live (Element.Generated {
+          Element.gen_concept_id = concept_id;
+          gen_params = params;
+          gen_fill = None;
+          gen_stroke = None;
+          gen_id = Element.id_of existing;
+          gen_transform = Some transform;
+          gen_opacity = opacity;
+          gen_locked = Element.is_locked existing;
+          gen_visibility = Element.get_visibility existing;
+          gen_blend_mode = Element.get_blend_mode existing;
+          gen_mask = Element.get_mask existing;
+        }) in
+        model#edit_document (Document.replace_element doc path generated)
+
     (** Detach (break the link / expand): replace the reference instance at
         [path] with an INDEPENDENT copy of its resolved target (SYMBOLS.md
         section 7, Fork S6 — the inverse of Make Symbol). The target id is

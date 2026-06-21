@@ -565,9 +565,11 @@ let parse (source : string) : ast option =
 (* ================================================================== *)
 
 (* Drill into a scope-bound value using a sequence of segments.
-   Handles Path properties (.depth/.parent/.id/.indices). *)
-let drill_value_by_segs (v : value) (segs : string list) : value =
+   Handles Path properties (.depth/.parent/.id/.indices), List drilling
+   (.length / numeric index, recursing into nested JSON), and String .length. *)
+let rec drill_value_by_segs (v : value) (segs : string list) : value =
   match v, segs with
+  | _, [] -> v
   | Path indices, [member] ->
     (match member with
      | "depth" -> Number (float_of_int (List.length indices))
@@ -581,6 +583,20 @@ let drill_value_by_segs (v : value) (segs : string list) : value =
      | "id" -> Str (String.concat "." (List.map string_of_int indices))
      | "indices" -> List (List.map (fun i -> `Int i) indices)
      | _ -> Null)
+  (* Drill a scope-bound LIST value (e.g. [let pts = shape.points in pts.length]
+     or [p.0]): [.length] is the element count, a numeric segment indexes (and
+     may continue drilling into nested JSON). Without this, dot-accessing a
+     let-bound list returned Null even though index-access ([pts[0]]) worked,
+     which silently broke any concept fitter that bound the points with [let]. *)
+  | List lst, seg :: rest ->
+    if seg = "length" && rest = [] then Number (float_of_int (List.length lst))
+    else begin
+      match int_of_string_opt seg with
+      | Some idx when idx >= 0 && idx < List.length lst ->
+        drill_value_by_segs (value_of_json (List.nth lst idx)) rest
+      | _ -> Null
+    end
+  | Str s, ["length"] -> Number (float_of_int (String.length s))
   | _ -> Null
 
 let resolve_path (segments : string list) (ctx : Yojson.Safe.t) : value =

@@ -1261,6 +1261,53 @@ let () =
             | _ -> assert false)
          | _ -> assert false));
 
+      Alcotest.test_case "promote_to_concept replaces with a Generated"
+        `Quick (fun () ->
+        (* CONCEPTS.md section 10: promote replaces a raw element with a Generated
+           instance carrying the fitted params + the placement transform, while
+           preserving the original element's id. Mirrors Rust
+           promote_to_concept_replaces_with_generated. *)
+        let poly = make_polygon
+          [ (10.0, 0.0); (0.0, 10.0); (-10.0, 0.0); (0.0, -10.0) ] in
+        let poly = Jas.Element.with_id poly (Some "p1") in
+        let layer = make_layer ~name:"L" [| poly |] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        let params = `Assoc [ ("sides", `Float 4.0); ("radius", `Float 10.0) ] in
+        let t = Jas.Element.make_translate 5.0 7.0 in
+        ctrl#promote_to_concept [0; 0] "regular_polygon" params t;
+        (match Jas.Document.get_element ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Generated g) ->
+           assert (g.Jas.Element.gen_concept_id = "regular_polygon");
+           (match g.Jas.Element.gen_params with
+            | `Assoc kvs ->
+              assert (List.assoc "sides" kvs = `Float 4.0);
+              assert (List.assoc "radius" kvs = `Float 10.0)
+            | _ -> assert false);
+           (* placement transform applied … *)
+           (match g.Jas.Element.gen_transform with
+            | Some gt ->
+              assert (gt.Jas.Element.e = 5.0 && gt.Jas.Element.f = 7.0)
+            | None -> assert false);
+           (* … and the original id preserved. *)
+           assert (g.Jas.Element.gen_id = Some "p1")
+         | _ -> assert false));
+
+      Alcotest.test_case "promote_to_concept missing path is a no-op"
+        `Quick (fun () ->
+        (* A missing path mutates nothing. Mirrors Rust
+           promote_to_concept_missing_path_is_noop. *)
+        let rect = make_rect 0.0 0.0 10.0 10.0 in
+        let layer = make_layer ~name:"L" [| rect |] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        ctrl#promote_to_concept [9; 9] "regular_polygon" (`Assoc [])
+          Jas.Element.identity_transform;
+        (* The rect at [0,0] is untouched. *)
+        (match Jas.Document.get_element ctrl#document [0; 0] with
+         | Jas.Element.Rect _ -> ()
+         | _ -> assert false));
+
       Alcotest.test_case "default_params reads the concept's registry defaults"
         `Quick (fun () ->
         match Jas.Concepts_panel.default_params "gear" with

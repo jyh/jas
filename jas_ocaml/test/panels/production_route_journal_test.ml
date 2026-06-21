@@ -65,6 +65,11 @@ let bool_param (op : J.Op_log.primitive_op) (key : string) : bool option =
   match Yojson.Safe.Util.member key op.J.Op_log.params with
   | `Bool b -> Some b | _ -> None
 
+(* Coerce a JSON number to a float (Int / Float / Intlit). *)
+let num_of = function
+  | `Int i -> float_of_int i | `Float f -> f
+  | `Intlit s -> float_of_string s | _ -> nan
+
 let mk_layer name : J.Element.element =
   J.Element.Layer {
     name = Some name; id = None; children = [||];
@@ -574,6 +579,26 @@ let store_with_selected_concept (concept_id : string) : J.State_store.t =
     "selected_concept" (`String concept_id);
   store
 
+(* Drive a concept verb through the REAL panel click-dispatch entry point
+   ([Yaml_panel_view.dispatch_click_behaviors]) — NOT the op-builder directly —
+   so the test guards against a dispatch-gate / routing gap (the latent bug the
+   Rust lead fixed). Wires the module-global model + store hooks, builds a
+   synthetic click behavior carrying [action] (+ optional [params]), dispatches,
+   and restores the globals so tests stay independent. *)
+let dispatch_concept_action (m : J.Model.model) (store : J.State_store.t)
+    ?(params = []) (action : string) : unit =
+  let saved_model = !J.Yaml_panel_view._get_model_ref in
+  let saved_store = !J.Yaml_panel_view._current_store in
+  J.Yaml_panel_view._get_model_ref := (fun () -> Some m);
+  J.Yaml_panel_view._current_store := Some store;
+  let behavior = `Assoc [
+    ("behavior", `List [ `Assoc (
+      [ ("event", `String "click"); ("action", `String action) ]
+      @ (if params = [] then [] else [ ("params", `Assoc params) ])) ]) ] in
+  ignore (J.Yaml_panel_view.dispatch_click_behaviors behavior (`Assoc []));
+  J.Yaml_panel_view._get_model_ref := saved_model;
+  J.Yaml_panel_view._current_store := saved_store
+
 let concept_tests = [
   (* CONCEPTS.md section 7 — the two concept-pack verbs journal + replay
      byte-identically. [place_concept_instance] appends a value-in-op Generated
@@ -756,6 +781,64 @@ let concept_tests = [
            | Some (`Int 6) | Some (`Float 6.0) -> ()
            | _ -> assert false)
         | _ -> assert false)
+     | _ -> assert false));
+
+  (* CONCEPTS.md section 6 — the full PLACE flow through the REAL click-dispatch
+     entry point (the path the panel Place button takes). Select a concept, then
+     dispatch [place_concept_instance], and a Generated is appended. This is a
+     regression guard for the dispatch-gate class of bug: if the verb did not
+     reach the native arm in [dispatch_click_behaviors] it would fall through to
+     the YAML [log] stub and append nothing. *)
+  Alcotest.test_case "place_concept_instance via dispatch_click_behaviors appends a Generated"
+    `Quick (fun () ->
+    let m = model_with_one_rect () in
+    let store = store_with_selected_concept "regular_polygon" in
+    dispatch_concept_action m store "place_concept_instance";
+    (* The Generated lands at [0,1] after the rect. *)
+    (match J.Document.get_element m#document [0; 1] with
+     | J.Element.Live (J.Element.Generated gen) ->
+       assert (gen.J.Element.gen_concept_id = "regular_polygon")
+     | _ -> assert false));
+
+  (* CONCEPTS.md section 10 — the full PROMOTE flow through the REAL
+     click-dispatch entry point. A selected regular hexagon (radius 50, centred
+     at origin, first vertex on +x — exactly what regular_polygon{sides:6,
+     radius:50} generates) is detected by the regular_polygon fitter and replaced
+     with a Generated{sides:6, radius:50} at ~identity placement. Drives
+     [dispatch_click_behaviors] (not the op-builder), proving the verb reaches the
+     native handler. *)
+  Alcotest.test_case "promote_to_concept via dispatch_click_behaviors detects + replaces"
+    `Quick (fun () ->
+    let m = J.Model.create () in
+    let pts = List.init 6 (fun i ->
+      let a = float_of_int (60 * i) *. Float.pi /. 180.0 in
+      (50.0 *. cos a, 50.0 *. sin a)) in
+    let hex = J.Element.make_polygon pts in
+    let layer = J.Element.make_layer [| hex |] in
+    m#set_document_unbracketed { m#document with J.Document.layers = [| layer |] };
+    (* Select the hexagon at [0,0]. *)
+    let ctrl = J.Controller.create ~model:m () in
+    ctrl#select_element [0; 0];
+    let store = J.State_store.create () in
+    J.State_store.init_panel store J.Concepts_panel.content_id [];
+    dispatch_concept_action m store "promote_to_concept";
+    (match J.Document.get_element m#document [0; 0] with
+     | J.Element.Live (J.Element.Generated gen) ->
+       assert (gen.J.Element.gen_concept_id = "regular_polygon");
+       (match gen.J.Element.gen_params with
+        | `Assoc params ->
+          (match List.assoc_opt "sides" params with
+           | Some v -> assert (Float.abs (num_of v -. 6.0) < 1e-9)
+           | None -> assert false);
+          (match List.assoc_opt "radius" params with
+           | Some v -> assert (Float.abs (num_of v -. 50.0) < 1e-9)
+           | None -> assert false)
+        | _ -> assert false);
+       (* Canonical placement (cx=cy=rotation~0) => ~identity transform. *)
+       (match gen.J.Element.gen_transform with
+        | Some t ->
+          assert (Float.abs t.J.Element.e < 1e-6 && Float.abs t.J.Element.f < 1e-6)
+        | None -> assert false)
      | _ -> assert false));
 ]
 

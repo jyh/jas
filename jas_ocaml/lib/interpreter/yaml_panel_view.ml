@@ -1025,6 +1025,26 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                       wrote_state := true
                     | None -> ())
                  | _ -> ())
+              | "promote_to_concept" ->
+                (* Promote the single selected raw shape to a Generated concept
+                   instance (CONCEPTS.md section 10 — the fitter / promote). The
+                   op-builder extracts the element's world-space vertices, tries
+                   each registered concept's [fitter] over [shape.points], and on
+                   the first match bakes the recovered params + a placement
+                   transform into the op (value-in-op). Route through
+                   [Op_apply.op_apply] so it JOURNALS; [with_txn] brackets one
+                   undo. A no-match yields no op and is a silent no-op. *)
+                (match !_current_store with
+                 | Some store ->
+                   (match Concepts_panel.promote_to_concept_op store m with
+                    | Some op ->
+                      let ctrl = new Controller.controller ~model:m () in
+                      m#with_txn (fun () ->
+                        m#name_txn "promote_to_concept";
+                        Op_apply.op_apply m ctrl op);
+                      wrote_state := true
+                    | None -> ())
+                 | None -> ())
               | "delete_symbol_action" ->
                 (match !_current_store with
                  | Some store ->
