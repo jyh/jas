@@ -1157,6 +1157,51 @@ let assert_concept_conformance () =
     assert false
   end
 
+(* Concept-operation conformance (shared corpus).
+   Loads test_fixtures/concept_operations/conformance.json (compiled from
+   workspace/concepts/*.yaml + workspace/tests/concept_operations.yaml). For each
+   case, binds the params under `param` and evaluates each set[name] expression,
+   asserting the resolved value matches expected[name] (1e-9). An operation's
+   effect is just expression evaluation, so this reuses the evaluator — pinning
+   concept-operation RESOLUTION across all apps (CONCEPTS.md §9). The production
+   handler bakes exactly these resolved changes into the op (value-in-op), so the
+   gate also pins what gets journaled. *)
+let assert_concept_operations_conformance () =
+  let open Yojson.Safe.Util in
+  let json_str = read_fixture "concept_operations/conformance.json" in
+  let cases = Yojson.Safe.from_string json_str |> to_list in
+  let failures = ref [] in
+  let add s = failures := s :: !failures in
+  List.iter (fun tc ->
+    let concept = tc |> member "concept" |> to_string in
+    let op = tc |> member "op" |> to_string in
+    (* Bind the current params under the `param` namespace (the generator's
+       namespace), exactly as the production handler does at resolve time. *)
+    let ctx = `Assoc [("param", tc |> member "params")] in
+    let set = tc |> member "set" |> to_assoc in
+    let expected = tc |> member "expected" in
+    List.iter (fun (name, expr_v) ->
+      let src = to_string expr_v in
+      match Jas.Expr_eval.evaluate src ctx with
+      | Jas.Expr_eval.Number got ->
+        let want = match expected |> member name with
+          | `Int i -> float_of_int i
+          | `Float f -> f
+          | `Intlit s -> float_of_string s
+          | _ -> Printf.ksprintf failwith "%s/%s: expected has no %s" concept op name in
+        if Float.abs (got -. want) >= 1e-9 then
+          add (Printf.sprintf "%s/%s param %s: expected %g got %g"
+                 concept op name want got)
+      | _ ->
+        add (Printf.sprintf "%s/%s param %s: non-numeric result" concept op name)
+    ) set
+  ) cases;
+  if !failures <> [] then begin
+    Printf.eprintf "concept-operation conformance failures:\n%s\n"
+      (String.concat "\n" (List.rev !failures));
+    assert false
+  end
+
 (* Concept registry (increment 3a): the concept packs are bundled into
    workspace.json and loadable via Workspace_loader. See CONCEPTS.md §6/§7. *)
 let assert_concept_registry () =
@@ -1227,6 +1272,12 @@ let () =
     "Concept conformance", [
       Alcotest.test_case "concept_conformance all cases" `Quick
         assert_concept_conformance;
+    ];
+
+    (* Concept-operation conformance (shared corpus) — CONCEPTS.md §9 *)
+    "Concept operations conformance", [
+      Alcotest.test_case "concept_operations_conformance all cases" `Quick
+        assert_concept_operations_conformance;
     ];
 
     (* Concept registry: concepts load from workspace.json (increment 3a) *)

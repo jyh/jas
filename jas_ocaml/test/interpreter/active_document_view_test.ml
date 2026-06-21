@@ -105,7 +105,13 @@ let tests = [
     let sides = List.find
       (fun p -> j_member "name" p = Some (`String "sides")) params in
     (* The instance's current value (6) is carried on the schema entry. *)
-    assert (j_int (Option.get (j_member "value" sides)) = 6));
+    assert (j_int (Option.get (j_member "value" sides)) = 6);
+    (* operations (CONCEPTS.md §9): the concept's named edit verbs, so the panel
+       can render a button per operation. *)
+    let ops = j_list (Option.get (j_member "operations" sc)) in
+    let ids = List.filter_map (fun o ->
+      match j_member "id" o with Some (`String s) -> Some s | _ -> None) ops in
+    assert (List.mem "add_side" ids && List.mem "remove_side" ids));
 ]
 
 let () = Alcotest.run "active_document_view" [ "view", tests ]

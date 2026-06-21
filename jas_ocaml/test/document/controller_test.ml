@@ -1222,6 +1222,45 @@ let () =
             | _ -> assert false)
          | _ -> assert false));
 
+      Alcotest.test_case "apply_concept_operation merges the resolved changes map"
+        `Quick (fun () ->
+        (* CONCEPTS.md section 9: an operation's RESOLVED changes map is merged
+           into the Generated's params (only named params change; others
+           untouched). Mirrors Rust apply_concept_operation_merges_changes. *)
+        let layer = make_layer ~name:"L" [||] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        let params = `Assoc [ ("radius", `Int 50); ("sides", `Int 6) ] in
+        ctrl#place_concept_instance "regular_polygon" params "gp1";
+        (* add_side resolves to { sides: 7 } at production time. *)
+        ctrl#apply_concept_operation [0; 0] (`Assoc [ ("sides", `Float 7.0) ]);
+        (match Jas.Document.get_element ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Generated g) ->
+           (match g.Jas.Element.gen_params with
+            | `Assoc kvs ->
+              assert (List.assoc "sides" kvs = `Float 7.0);
+              (* radius is untouched *)
+              assert (List.assoc "radius" kvs = `Int 50)
+            | _ -> assert false)
+         | _ -> assert false));
+
+      Alcotest.test_case "apply_concept_operation empty changes is a no-op"
+        `Quick (fun () ->
+        (* An empty changes map mutates nothing (the no-op guard). Mirrors Rust
+           apply_concept_operation_empty_changes_is_noop. *)
+        let layer = make_layer ~name:"L" [||] in
+        let doc = Jas.Document.make_document [|layer|] in
+        let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+        let params = `Assoc [ ("radius", `Int 50); ("sides", `Int 6) ] in
+        ctrl#place_concept_instance "regular_polygon" params "gp1";
+        ctrl#apply_concept_operation [0; 0] (`Assoc []);
+        (match Jas.Document.get_element ctrl#document [0; 0] with
+         | Jas.Element.Live (Jas.Element.Generated g) ->
+           (match g.Jas.Element.gen_params with
+            | `Assoc kvs -> assert (List.assoc "sides" kvs = `Int 6)
+            | _ -> assert false)
+         | _ -> assert false));
+
       Alcotest.test_case "default_params reads the concept's registry defaults"
         `Quick (fun () ->
         match Jas.Concepts_panel.default_params "gear" with

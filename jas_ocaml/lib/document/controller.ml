@@ -296,6 +296,40 @@ class controller ?(model = Model.create ()) () =
           model#edit_document (Document.replace_element doc path new_elem)
         | _ -> ()
 
+    (** Apply a concept operation's RESOLVED changes to the Generated instance at
+        [path] (CONCEPTS.md section 9): merge each [name -> value] of [changes]
+        into the Generated's params — a multi-param generalization of
+        [set_concept_param]. [changes] is the production-resolved effect of an
+        operation (value-in-op), so this performs no expression evaluation; it
+        just writes the values, and the geometry re-derives from the generator at
+        the next render. No-op when [path] is invalid, the element there is not a
+        Generated instance, or [changes] is empty / not an object. Each named
+        param is updated in place when present (order preserved) and appended
+        otherwise. *)
+    method apply_concept_operation (path : Document.element_path)
+        (changes : Yojson.Safe.t) =
+      match changes with
+      | `Assoc [] -> ()
+      | `Assoc change_kvs ->
+        let doc = model#document in
+        (match (try Some (Document.get_element doc path) with _ -> None) with
+         | Some (Element.Live (Element.Generated gen)) ->
+           let members = match gen.Element.gen_params with
+             | `Assoc kvs -> kvs | _ -> [] in
+           (* Merge each change into the params: overwrite in place when the
+              name already exists (order preserved), append otherwise. *)
+           let new_members =
+             List.fold_left (fun acc (name, value) ->
+               if List.mem_assoc name acc then
+                 List.map (fun (k, v) -> if k = name then (k, value) else (k, v)) acc
+               else acc @ [ (name, value) ]) members change_kvs in
+           let updated =
+             { gen with Element.gen_params = `Assoc new_members } in
+           let new_elem = Element.Live (Element.Generated updated) in
+           model#edit_document (Document.replace_element doc path new_elem)
+         | _ -> ())
+      | _ -> ()
+
     (** Detach (break the link / expand): replace the reference instance at
         [path] with an INDEPENDENT copy of its resolved target (SYMBOLS.md
         section 7, Fork S6 — the inverse of Make Symbol). The target id is
