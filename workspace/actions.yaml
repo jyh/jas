@@ -3701,3 +3701,20 @@ actions:
     enabled_when: "panel.selected_concept != null"
     effects:
       - log: "place_concept_instance"
+
+  set_concept_param:
+    description: >
+      Set one parameter of the selected generated concept instance to a new value
+      and re-generate it live (CONCEPTS.md §6.4 — "tune the same parameters without
+      redoing anything"). Dispatched by a Concepts-panel parameter field on commit:
+      `param.name` is the parameter; the field's committed numeric value is injected
+      as `param.value`. A `log` stub like the other concept mutators — each app's
+      native arm finds the single selected `Generated` element, writes
+      `params[name] = value`, and the geometry re-derives from the generator at the
+      next render. Single undo op.
+    category: concepts
+    params:
+      name: { type: string }
+      value: { type: number }
+    effects:
+      - log: "set_concept_param"
