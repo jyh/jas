@@ -237,11 +237,19 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    (a Rust dispatch gate, a Swift NSNumber/Bool eval bug, an OCaml list-dot-access
    eval bug). The fuzzy/AI tier stays later (`VISION.md` §7 frontier). **Detailed
    design + the conformance gate: §10.**
-6. **Constraints.** A representation for a concept's invariants (deterministic, no
-   JS — `VISION.md` §6.3 downside), and a checker — declared as boolean `check`
-   expressions over `param`, surfaced advisorily (never blocking). Bidirectional
-   constraint solving (IK) stays the separate, harder layer (`VISION.md` §6.2).
-   **Detailed design + the conformance gate: §11.**
+6. **Constraints — ✅ done (all 4 native apps).** A concept's invariants as boolean
+   `check` expressions over `param` (`min_teeth`/`outer_exceeds_root` on gear,
+   `min_sides`/`positive_radius` on polygon), surfaced **advisorily** — the panel
+   shows the violated constraints' messages, never blocking the edit. A read-only
+   checker (no op-log verb, no controller): `selected_concept.violations` collects
+   the constraints whose `check` is not truthy. Pinned by the constraint
+   conformance corpus + a view test per app. Bidirectional constraint solving (IK)
+   stays the separate, harder layer (`VISION.md` §6.2). **Detailed design + the
+   conformance gate: §11.**
+
+**All six increments are complete — a concept's four parts (generator, operations,
+fitter, constraints) all ship as declarative data across the 4 native apps, each
+cross-language-pinned.**
 
 ---
 
