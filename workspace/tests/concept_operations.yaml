@@ -1,0 +1,53 @@
+# Concept-operation conformance tests (CONCEPTS.md §9).
+# An operation is a named edit verb declared in a concept pack: a `set:` map of
+# param-name -> expression, evaluated with the instance's current parameters
+# bound under the `param` namespace, producing the new value for each named
+# param. These cases pin operation RESOLUTION across every interpreter: each
+# names a concept (workspace/concepts/<id>.yaml) and one of its operations,
+# supplies the current params (omitted params fall back to the concept's
+# declared defaults), and pins the expected resolved changes. Every app
+# evaluates the operation's `set:` expressions over `params` and compares the
+# result to `expected` within 1e-9. Operation resolution IS expression
+# evaluation, so this is a thin specialization of the expression corpus.
+
+tests:
+  # Gear add_tooth: teeth + 1.
+  - concept: gear
+    op: add_tooth
+    params: { teeth: 12 }
+    expected: { teeth: 13 }
+
+  # Gear remove_tooth above the floor: teeth - 1.
+  - concept: gear
+    op: remove_tooth
+    params: { teeth: 12 }
+    expected: { teeth: 11 }
+
+  # Gear remove_tooth AT the 3-tooth floor: clamps to 3 (the max(.,3) guard).
+  - concept: gear
+    op: remove_tooth
+    params: { teeth: 3 }
+    expected: { teeth: 3 }
+
+  # Gear add_tooth from defaults (teeth: 12) — exercises param-default merging.
+  - concept: gear
+    op: add_tooth
+    expected: { teeth: 13 }
+
+  # Regular polygon add_side: sides + 1.
+  - concept: regular_polygon
+    op: add_side
+    params: { sides: 5 }
+    expected: { sides: 6 }
+
+  # Regular polygon remove_side above the floor: sides - 1.
+  - concept: regular_polygon
+    op: remove_side
+    params: { sides: 6 }
+    expected: { sides: 5 }
+
+  # Regular polygon remove_side AT the 3-side floor: clamps to 3.
+  - concept: regular_polygon
+    op: remove_side
+    params: { sides: 3 }
+    expected: { sides: 3 }

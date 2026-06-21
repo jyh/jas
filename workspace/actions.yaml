@@ -3718,3 +3718,20 @@ actions:
       value: { type: number }
     effects:
       - log: "set_concept_param"
+
+  apply_concept_operation:
+    description: >
+      Apply a named concept operation to the selected generated instance
+      (CONCEPTS.md §9). Dispatched by a Concepts-panel operation button: `op_id`
+      names one of the concept's declared operations (e.g. `add_tooth`). A `log`
+      stub like the other concept mutators — each app's native arm finds the
+      single selected `Generated`, looks the operation up in the registry,
+      evaluates its `set:` expressions over the instance's current params bound
+      under `param`, and bakes the resulting param changes into one journaled
+      op (value-in-op); the geometry re-derives from the generator at the next
+      render. Single undo op.
+    category: concepts
+    params:
+      op_id: { type: string }
+    effects:
+      - log: "apply_concept_operation"
