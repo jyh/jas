@@ -26,6 +26,17 @@ val place_concept_op : State_store.t -> Model.model -> Yojson.Safe.t option
 val set_concept_param_op :
   State_store.t -> Model.model -> string -> float -> Yojson.Safe.t option
 
+(** APPLY OPERATION: build the VALUE-IN-OP [apply_concept_operation] op for the
+    named operation of the single selected Generated instance (CONCEPTS.md
+    section 9). Resolves the operation's [set:] expressions over the instance's
+    current params (bound under [param]) into a [changes] map baked into the op.
+    [None] unless exactly one Generated element is selected, the concept/operation
+    is known, and the resolved changes are non-empty. The caller brackets one undo
+    and routes through [Op_apply.op_apply]; replay merges [changes] without
+    re-evaluating. *)
+val apply_concept_operation_op :
+  State_store.t -> Model.model -> string -> Yojson.Safe.t option
+
 (** The render-time concept resolver (concept id -> params -> points), for the
     canvas to evaluate a Generated instance's geometry. *)
 val concept_resolver : Live.concept_resolver

@@ -1005,6 +1005,26 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                       wrote_state := true
                     | None -> ())
                  | None -> ())
+              | "apply_concept_operation" ->
+                (* Apply a named concept operation (CONCEPTS.md section 9). The
+                   operation's effect is RESOLVED here, at production time: the
+                   op-builder looks the operation up in the registry, evaluates its
+                   [set:] expressions over the instance's CURRENT params, and bakes
+                   the resulting [changes] map into the op (value-in-op). Route
+                   through [Op_apply.op_apply] so it JOURNALS; [with_txn] brackets
+                   one undo. Replay merges [changes] and never re-evaluates. *)
+                (match !_current_store,
+                       List.assoc_opt "op_id" params_list with
+                 | Some store, Some (`String op_id) ->
+                   (match Concepts_panel.apply_concept_operation_op store m op_id with
+                    | Some op ->
+                      let ctrl = new Controller.controller ~model:m () in
+                      m#with_txn (fun () ->
+                        m#name_txn "apply_concept_operation";
+                        Op_apply.op_apply m ctrl op);
+                      wrote_state := true
+                    | None -> ())
+                 | _ -> ())
               | "delete_symbol_action" ->
                 (match !_current_store with
                  | Some store ->

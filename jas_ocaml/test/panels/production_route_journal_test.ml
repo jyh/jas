@@ -672,6 +672,91 @@ let concept_tests = [
     (match m#document.J.Document.layers.(0) with
      | J.Element.Layer { children; _ } -> assert (Array.length children = 1)
      | _ -> assert false));
+
+  (* CONCEPTS.md section 9 — [apply_concept_operation] journals + replays
+     byte-identically. Place a hexagon (regular_polygon, sides=6), then apply the
+     [add_side] operation: the production handler RESOLVES its [set:] expression
+     (sides = param.sides + 1 -> 7) over the instance's current params and bakes
+     the resulting [changes] map ({sides: 7}) into the op as the value-in-op
+     operand. [op_id] rides only as journal metadata. Replay merges [changes] and
+     never re-evaluates the expression nor consults the registry — the
+     checkpoint_equivalence gate for the operations verb. Drives the EXACT
+     yaml_panel_view production bracket: build the op via the Concepts_panel
+     op-builder, then with_txn + name_txn + Op_apply.op_apply. *)
+  Alcotest.test_case "apply_concept_operation journals + replays deterministically"
+    `Quick (fun () ->
+    let m = model_with_one_rect () in
+    let store = store_with_selected_concept "regular_polygon" in
+    let pre_doc = m#document in
+
+    (* Place a hexagon (regular_polygon, defaults {sides:6, radius:50}). *)
+    (match J.Concepts_panel.place_concept_op store m with
+     | Some op ->
+       let ctrl = J.Controller.create ~model:m () in
+       m#with_txn (fun () ->
+         m#name_txn "place_concept_instance";
+         J.Op_apply.op_apply m ctrl op)
+     | None -> assert false);
+    let gen_path = [0; 1] in
+    let before = List.length m#journal in
+
+    (* Apply add_side: resolves to { sides: 7 } at production time. *)
+    (match J.Concepts_panel.apply_concept_operation_op store m "add_side" with
+     | Some op ->
+       let ctrl = J.Controller.create ~model:m () in
+       m#with_txn (fun () ->
+         m#name_txn "apply_concept_operation";
+         J.Op_apply.op_apply m ctrl op)
+     | None -> assert false);
+    (* one new named transaction journaling apply_concept_operation. *)
+    assert (List.length m#journal = before + 1);
+    let op_txn = last_txn m in
+    assert (op_txn.J.Op_log.name = Some "apply_concept_operation");
+    let applies = ops_of_verb op_txn "apply_concept_operation" in
+    assert (List.length applies = 1);
+    let apply_op = List.hd applies in
+    (* op_id rides as journal metadata; path + changes are value-in-op. *)
+    assert (str_param apply_op "op_id" = Some "add_side");
+    (match apply_op.J.Op_log.params with
+     | `Assoc kv ->
+       (match List.assoc_opt "path" kv with
+        | Some (`List [ `Int 0; `Int 1 ]) -> ()
+        | _ -> assert false);
+       (* changes is the RESOLVED { sides: 7.0 } map (stored as a float so
+          serialization matches the corpus). *)
+       (match List.assoc_opt "changes" kv with
+        | Some (`Assoc [ ("sides", `Float 7.0) ]) -> ()
+        | _ -> assert false)
+     | _ -> assert false);
+    (* mutation landed: sides is now 7 on the Generated. *)
+    (match J.Document.get_element m#document gen_path with
+     | J.Element.Live (J.Element.Generated gen) ->
+       (match gen.J.Element.gen_params with
+        | `Assoc params ->
+          (match List.assoc_opt "sides" params with
+           | Some (`Float 7.0) -> ()
+           | _ -> assert false)
+        | _ -> assert false)
+     | _ -> assert false);
+
+    (* checkpoint_equivalence: the journal replays to the SAME document, twice
+       (value-in-op operands reproduce the Generated + applied operation
+       byte-for-byte; the operation's expression is never re-evaluated and the
+       registry is never re-consulted on replay). *)
+    assert_checkpoint_equivalence m pre_doc;
+    assert_checkpoint_equivalence m pre_doc;
+
+    (* one undo step round-trips back to sides=6. *)
+    m#undo;
+    (match J.Document.get_element m#document gen_path with
+     | J.Element.Live (J.Element.Generated gen) ->
+       (match gen.J.Element.gen_params with
+        | `Assoc params ->
+          (match List.assoc_opt "sides" params with
+           | Some (`Int 6) | Some (`Float 6.0) -> ()
+           | _ -> assert false)
+        | _ -> assert false)
+     | _ -> assert false));
 ]
 
 let () =

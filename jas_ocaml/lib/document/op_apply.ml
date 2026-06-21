@@ -957,6 +957,18 @@ let op_apply (model : Model.model) (ctrl : Controller.controller)
            | Some path, Some name ->
              ctrl#set_concept_param path name (num_field op "value")
            | _ -> proceed := false)
+        (* Apply a concept operation (CONCEPTS.md section 9). [op_id] rides as
+           journal metadata (the semantic verb) and is NOT consulted for the
+           mutation; [changes] is the production-RESOLVED param map (value-in-op)
+           that is actually applied — replay merges it and never re-evaluates the
+           operation's expressions nor consults the registry. A malformed/missing
+           path or non-object changes SKIPS (the controller also no-ops on an
+           empty / non-object changes, so nothing journals). *)
+        | "apply_concept_operation" ->
+          (match parse_path op "path", member "changes" op with
+           | Some path, (`Assoc _ as changes) ->
+             ctrl#apply_concept_operation path changes
+           | _ -> proceed := false)
         | "detach" ->
           (match parse_path op "path" with
            | Some path -> ctrl#detach path

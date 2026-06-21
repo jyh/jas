@@ -210,10 +210,30 @@ let selected_concept_view (doc : Document.document) : Yojson.Safe.t =
                      Some (`Assoc entry)
                    | _ -> None) ps
                | _ -> [] in
+             (* The concept's named operations (CONCEPTS.md section 9):
+                id + label + description, so the panel can render a button per
+                operation. Empty when the concept declares no [operations:]. *)
+             let operations_out = match Workspace_loader.json_member "operations" spec with
+               | Some (`List ops) ->
+                 List.filter_map (fun o ->
+                   match Workspace_loader.json_member "id" o with
+                   | Some (`String oid) ->
+                     let label = match Workspace_loader.json_member "label" o with
+                       | Some (`String s) -> s | _ -> oid in
+                     let description = match Workspace_loader.json_member "description" o with
+                       | Some (`String s) -> s | _ -> "" in
+                     Some (`Assoc [
+                       ("id", `String oid);
+                       ("label", `String label);
+                       ("description", `String description);
+                     ])
+                   | _ -> None) ops
+               | _ -> [] in
              `Assoc [
                ("concept_id", `String concept_id);
                ("name", `String name);
                ("params", `List params_out);
+               ("operations", `List operations_out);
              ]))
      | _ -> `Null)
   | _ -> `Null

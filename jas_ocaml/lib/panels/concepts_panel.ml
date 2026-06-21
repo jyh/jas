@@ -114,6 +114,71 @@ let set_concept_param_op (_store : State_store.t) (m : Model.model)
      | _ -> None)
   | _ -> None
 
+(** APPLY OPERATION: build the VALUE-IN-OP [apply_concept_operation] op for the
+    named operation [op_id] of the single selected Generated instance (CONCEPTS.md
+    section 9). The operation's effect is RESOLVED here, at production time: look
+    the operation up in the registry by id, evaluate its [set:] expressions with
+    the instance's CURRENT params bound under [param], and bake the resulting
+    [changes] map into the op (value-in-op). [op_id] also rides on the op as
+    journal metadata. [None] unless exactly one Generated element is selected, or
+    when the concept/operation is unknown, or when the resolved [changes] map is
+    empty. The caller brackets one undo and routes through [Op_apply.op_apply];
+    replay merges [changes] and never re-evaluates the expressions. *)
+let apply_concept_operation_op (_store : State_store.t) (m : Model.model)
+    (op_id : string) : Yojson.Safe.t option =
+  let doc = m#document in
+  match Document.PathMap.bindings doc.Document.selection with
+  | [ (path, _) ] ->
+    (match (try Some (Document.get_element doc path) with _ -> None) with
+     | Some (Element.Live (Element.Generated gen)) ->
+       let concept_id = gen.Element.gen_concept_id in
+       let params = gen.Element.gen_params in
+       (* Resolve the operation's [set:] expressions over the instance's current
+          params, bound under the [param] namespace (the generator's namespace),
+          into the concrete [changes] map. Only numeric results are baked, stored
+          as floats so serialization matches the conformance corpus. *)
+       let changes =
+         match Lazy.force workspace with
+         | None -> None
+         | Some ws ->
+           (match Workspace_loader.concept ws concept_id with
+            | None -> None
+            | Some spec ->
+              (match Workspace_loader.json_member "operations" spec with
+               | Some (`List ops) ->
+                 let operation = List.find_opt (fun o ->
+                   match Workspace_loader.json_member "id" o with
+                   | Some (`String oid) -> oid = op_id
+                   | _ -> false) ops in
+                 (match operation with
+                  | None -> None
+                  | Some operation ->
+                    (match Workspace_loader.json_member "set" operation with
+                     | Some (`Assoc set_kvs) ->
+                       let ctx = `Assoc [ ("param", params) ] in
+                       let resolved = List.filter_map (fun (name, expr_v) ->
+                         match expr_v with
+                         | `String src ->
+                           (match Expr_eval.evaluate src ctx with
+                            | Expr_eval.Number n -> Some (name, `Float n)
+                            | _ -> None)
+                         | _ -> None) set_kvs in
+                       Some resolved
+                     | _ -> None))
+               | _ -> None))
+       in
+       (match changes with
+        | Some (_ :: _ as change_kvs) ->
+          Some (`Assoc [
+            ("op", `String "apply_concept_operation");
+            ("path", `List (List.map (fun i -> `Int i) path));
+            ("op_id", `String op_id);
+            ("changes", `Assoc change_kvs);
+          ])
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+
 let num_of = function
   | `Int i -> float_of_int i
   | `Float f -> f

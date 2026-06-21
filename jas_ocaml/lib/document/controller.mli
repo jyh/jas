@@ -18,6 +18,7 @@ class controller : ?model:Model.model -> unit -> object
   method place_instance : string -> string -> unit
   method place_concept_instance : string -> Yojson.Safe.t -> string -> unit
   method set_concept_param : Document.element_path -> string -> float -> unit
+  method apply_concept_operation : Document.element_path -> Yojson.Safe.t -> unit
   method detach : Document.element_path -> unit
   method set_instance_transform :
     Document.element_path -> Element.transform -> unit
