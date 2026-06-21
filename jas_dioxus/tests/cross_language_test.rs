@@ -352,3 +352,66 @@ fn concept_conformance() {
         failures.join("\n"),
     );
 }
+
+// --- Concept-operation conformance (shared corpus) ---
+//
+// Loads test_fixtures/concept_operations/conformance.json (compiled from
+// workspace/concepts/*.yaml + workspace/tests/concept_operations.yaml). For each
+// case, evaluates the operation's `set:` expressions with the case's params bound
+// under `param` and asserts the resolved value of each changed param matches the
+// expected change (1e-9). An operation's effect is just expression evaluation, so
+// this reuses the evaluator — pinning concept-operation RESOLUTION across all
+// apps (CONCEPTS.md §9). The production handler bakes exactly these resolved
+// `changes` into the op (value-in-op), so the gate also pins what gets journaled.
+
+#[test]
+fn operations_conformance() {
+    use jas_dioxus::interpreter::expr;
+    use jas_dioxus::interpreter::expr_types::Value;
+
+    let raw = read_fixture("concept_operations/conformance.json");
+    let cases: serde_json::Value =
+        serde_json::from_str(&raw).expect("conformance.json parses as JSON");
+    let cases = cases.as_array().expect("corpus is a JSON array");
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let concept = case["concept"].as_str().unwrap_or("?");
+        let op = case["op"].as_str().unwrap_or("?");
+        // Bind the current params under the `param` namespace (the generator's
+        // namespace), exactly as the production handler does at resolve time.
+        let mut ctx = serde_json::Map::new();
+        ctx.insert("param".to_string(), case["params"].clone());
+        let ctx = serde_json::Value::Object(ctx);
+
+        let set = case["set"].as_object().expect("set is an object");
+        let expected = case["expected"].as_object().expect("expected is an object");
+        for (name, expr_src) in set {
+            let src = expr_src.as_str().expect("set expr is a string");
+            let result = expr::eval(src, &ctx);
+            let got = match &result {
+                Value::Number(n) => *n,
+                other => {
+                    failures.push(format!(
+                        "{concept}/{op} param {name}: non-numeric result {other:?}"
+                    ));
+                    continue;
+                }
+            };
+            let want = expected
+                .get(name)
+                .and_then(|v| v.as_f64())
+                .unwrap_or_else(|| panic!("{concept}/{op}: expected has no {name}"));
+            if (got - want).abs() >= 1e-9 {
+                failures.push(format!(
+                    "{concept}/{op} param {name}: expected {want}, got {got}"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "concept-operation conformance failures:\n{}",
+        failures.join("\n"),
+    );
+}
