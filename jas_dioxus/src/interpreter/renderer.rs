@@ -699,8 +699,20 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 if let Some(tab) = st.tab_mut() {
                     let existing = existing_ids(&tab.model);
                     let Some(elem_id) = mint(&existing) else { return Vec::new(); };
+                    // Route through op_apply so the placement JOURNALS as a real
+                    // `place_concept_instance` op (value-in-op: concept id +
+                    // resolved default params + minted id), replayable like the
+                    // sibling structural verbs. with_txn brackets one undo; the
+                    // arm both mutates and records.
+                    let op = serde_json::json!({
+                        "op": "place_concept_instance",
+                        "concept_id": concept_id,
+                        "params": params,
+                        "elem_id": elem_id,
+                    });
                     tab.model.with_txn(|m| {
-                        Controller::place_concept_instance(m, &concept_id, params.clone(), &elem_id)
+                        m.name_txn("place_concept_instance");
+                        crate::document::op_apply::op_apply(m, &op);
                     });
                 }
                 return Vec::new();
@@ -732,8 +744,20 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                         }
                     };
                     if let Some(path) = path {
-                        tab.model
-                            .with_txn(|m| Controller::set_concept_param(m, &path, &name, value));
+                        // Route through op_apply so the edit JOURNALS as a real
+                        // `set_concept_param` op (value-in-op: the resolved path,
+                        // param name, and committed value), replayable like the
+                        // sibling property verbs.
+                        let op = serde_json::json!({
+                            "op": "set_concept_param",
+                            "path": path,
+                            "name": name,
+                            "value": value,
+                        });
+                        tab.model.with_txn(|m| {
+                            m.name_txn("set_concept_param");
+                            crate::document::op_apply::op_apply(m, &op);
+                        });
                     }
                 }
                 return Vec::new();
