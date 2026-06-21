@@ -935,6 +935,28 @@ let op_apply (model : Model.model) (ctrl : Controller.controller)
            | Some master_id, Some ref_id ->
              ctrl#place_instance master_id ref_id
            | _ -> proceed := false)
+        (* Concept-pack ops (CONCEPTS.md section 6-7). The two verbs the Concepts
+           panel emits, given journal-replay arms so a placed/edited concept
+           instance survives capture and replay byte-identically (the section 7
+           determinism rule). Both carry every operand VALUE-IN-OP: the concept
+           id, the RESOLVED default params, and the minted elem id (place); the
+           path, param name, and committed value (set). Nothing is re-derived on
+           replay (the registry could have changed), so replay reconstructs the
+           exact Generated instance the live edit produced. A malformed payload
+           SKIPS (never raises, never journals). *)
+        | "place_concept_instance" ->
+          (match str_field op "concept_id", str_field op "elem_id" with
+           | Some concept_id, Some elem_id ->
+             let params = match member "params" op with
+               | `Assoc _ as p -> p
+               | _ -> `Assoc [] in
+             ctrl#place_concept_instance concept_id params elem_id
+           | _ -> proceed := false)
+        | "set_concept_param" ->
+          (match parse_path op "path", str_field op "name" with
+           | Some path, Some name ->
+             ctrl#set_concept_param path name (num_field op "value")
+           | _ -> proceed := false)
         | "detach" ->
           (match parse_path op "path" with
            | Some path -> ctrl#detach path
