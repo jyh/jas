@@ -944,6 +944,48 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+@Test func promoteToConceptReplacesWithGenerated() {
+    // CONCEPTS.md §10: promote replaces a raw element with a Generated instance
+    // carrying the fitted params + the placement transform, while preserving the
+    // original element's identity (id). Mirrors Rust
+    // promote_to_concept_replaces_with_generated.
+    let poly = Element.polygon(Polygon(
+        points: [(10, 0), (0, 10), (-10, 0), (0, -10)],
+        name: "my square", id: "p1"))
+    let doc = Document(layers: [Layer(name: "Layer", children: [poly])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.promoteToConcept(
+        [0, 0], conceptId: "regular_polygon",
+        params: ["sides": 4.0, "radius": 10.0],
+        transform: Transform.translate(5, 7))
+
+    guard case .live(.generated(let g)) = ctrl.document.getElement([0, 0]) else {
+        Issue.record("expected a Generated at [0,0] after promote"); return
+    }
+    #expect(g.conceptId == "regular_polygon")
+    #expect((g.params["sides"] as? Double) == 4)
+    #expect((g.params["radius"] as? Double) == 10)
+    // The placement transform is applied …
+    #expect(g.transform == Transform.translate(5, 7))
+    // … and the original identity preserved.
+    #expect(g.id == "p1")
+}
+
+@Test func promoteToConceptMissingPathIsNoop() {
+    // A missing path is a no-op (the existing element is untouched). Mirrors Rust
+    // promote_to_concept_missing_path_is_noop.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let doc = Document(layers: [Layer(name: "Layer", children: [rect])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.promoteToConcept(
+        [9, 9], conceptId: "regular_polygon", params: [:], transform: .identity)
+    // The rect at [0,0] is untouched; the missing path stays missing.
+    if case .rect = ctrl.document.getElement([0, 0]) {} else {
+        Issue.record("the rect at [0,0] should be untouched")
+    }
+    #expect(ctrl.document.tryGetElement([9, 9]) == nil)
+}
+
 @Test func placeInstanceDanglingMasterOk() {
     // It is fine if the master does not exist; the instance still appears
     // (renders empty until the master exists — dangling is handled).

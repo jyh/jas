@@ -67,6 +67,13 @@ class WorkspaceData {
         (data["concepts"] as? [String: Any])?[id] as? [String: Any]
     }
 
+    /// The whole concept registry (id -> spec), for code that must iterate every
+    /// concept — e.g. `promote` trying each concept's `fitter` detector
+    /// (CONCEPTS.md §10). Mirrors Rust `Workspace::concepts`.
+    func concepts() -> [String: Any]? {
+        data["concepts"] as? [String: Any]
+    }
+
     /// The concept registry as a sorted list of `{id, name, description}` for the
     /// Concepts panel's `data.concepts` foreach (CONCEPTS.md §6).
     func conceptsList() -> [[String: Any]] {

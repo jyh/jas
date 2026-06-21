@@ -59,6 +59,16 @@ private func uintField(_ op: [String: Any], _ key: String) -> Int {
     max(0, (op[key] as? NSNumber)?.intValue ?? 0)
 }
 
+/// Parse a `transform` field — a 6-element matrix `[a,b,c,d,e,f]` — into a
+/// `Transform`, defaulting to identity when absent or malformed (CONCEPTS.md §10
+/// `promote`). Hardened: a wrong-length / non-numeric array is identity, never a
+/// crash. Mirrors Rust `parse_transform`.
+private func parseTransform(_ v: Any?) -> Transform {
+    guard let arr = v as? [Any], arr.count == 6 else { return .identity }
+    let m = arr.map { ($0 as? NSNumber)?.doubleValue ?? 0.0 }
+    return Transform(a: m[0], b: m[1], c: m[2], d: m[3], e: m[4], f: m[5])
+}
+
 // MARK: - id-primary op family (OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md)
 //
 // The id-primary verbs `select_by_ids` / `move_by_ids` / `copy_by_ids` promote
@@ -1133,6 +1143,19 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
         guard let path = parsePath(op["path"]),
               let changes = op["changes"] as? [String: Any] else { return }
         controller.applyConceptOperation(path, changes: changes)
+    // Promote a raw shape to a Generated concept instance (CONCEPTS.md §10 — the
+    // fitter / `promote`). Every operand is value-in-op: the detection ran at
+    // production time, so replay just rebuilds the element. The `transform` is the
+    // 6-element matrix `[a,b,c,d,e,f]` (default identity); `params` defaults to
+    // empty. A malformed / missing path or concept_id SKIPS (never crashes, never
+    // journals). Mirrors the Rust `promote_to_concept` arm.
+    case "promote_to_concept":
+        guard let path = parsePath(op["path"]),
+              let conceptId = strField(op, "concept_id") else { return }
+        let params = (op["params"] as? [String: Any]) ?? [:]
+        let transform = parseTransform(op["transform"])
+        controller.promoteToConcept(
+            path, conceptId: conceptId, params: params, transform: transform)
     case "detach":
         guard let path = parsePath(op["path"]) else { return }
         controller.detach(path)

@@ -775,6 +775,154 @@ private func makeModelWithTwoArtboards() -> Model {
     assertCheckpointEquivalence(model, preDoc: preDoc)
 }
 
+// MARK: - Concepts §10: the fitter / promote
+
+/// Build a model holding a single regular hexagon Polygon (radius 50, centred at
+/// origin, first vertex on +x) — exactly what `regular_polygon{sides:6,
+/// radius:50}` generates — already selected.
+private func makeModelWithSelectedHexagon() -> Model {
+    let pts: [(Double, Double)] = (0..<6).map { i in
+        let a = Double(i) * 60.0 * .pi / 180.0
+        return (50.0 * cos(a), 50.0 * sin(a))
+    }
+    let hex = Element.polygon(Polygon(points: pts))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [hex])],
+        selectedLayer: 0,
+        selection: [ElementSelection.all([0, 0])]
+    ))
+    return model
+}
+
+@Test func productionRoutePromoteToConceptDetectsAndReplaysIsDeterministic() {
+    // CONCEPTS.md §10 — the full promote flow through the REAL production handler
+    // (the inverse of expand). A selected regular hexagon is detected by the
+    // regular_polygon fitter and replaced with a Generated{sides:6, radius:50} at
+    // ~identity placement. Every operand is value-in-op (the fitter ran at
+    // production time): the concept id, the recovered params, and the placement
+    // transform are baked into the op, so replay rebuilds the SAME Generated
+    // WITHOUT re-running the fitter nor consulting the registry — the
+    // checkpoint_equivalence gate for the promote verb. Mirrors Rust's
+    // `promote_action_detects_and_replaces_with_generated` +
+    // `operation_promote_to_concept_replay_is_deterministic`.
+    let model = makeModelWithSelectedHexagon()
+    let preDoc = model.document
+    let before = model.journal.count
+
+    // Drive the REAL native production handler (what dispatchYamlAction routes
+    // `promote_to_concept` to — the path the Object-menu item + panel take).
+    ConceptsPanel.dispatch("promote_to_concept", model: model)
+
+    #expect(model.journal.count == before + 1,
+            "promote_to_concept commits one transaction")
+    guard let promoteTxn = model.journal.last else { Issue.record("promote txn"); return }
+    #expect(promoteTxn.name == "promote_to_concept")
+    #expect(promoteTxn.ops.count == 1, "one promote_to_concept op")
+    guard let op = promoteTxn.ops.first else { Issue.record("promote op"); return }
+    #expect(op.op == "promote_to_concept")
+    #expect((op.params["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } == [0, 0],
+            "the resolved literal path is journaled value-in-op")
+    #expect(op.params["concept_id"] as? String == "regular_polygon")
+    // The recovered params are baked value-in-op.
+    guard let recoveredParams = op.params["params"] as? [String: Any] else {
+        Issue.record("params is a journaled map"); return
+    }
+    #expect((recoveredParams["sides"] as? NSNumber)?.doubleValue == 6.0,
+            "recovered sides = 6 value-in-op")
+    #expect(abs(((recoveredParams["radius"] as? NSNumber)?.doubleValue ?? 0) - 50.0) < 1e-9,
+            "recovered radius = 50 value-in-op")
+    // The placement transform is a journaled 6-element matrix; the canonical
+    // hexagon places at the origin (cx=cy=rotation≈0).
+    guard let t = op.params["transform"] as? [Any], t.count == 6 else {
+        Issue.record("transform is a journaled 6-element matrix"); return
+    }
+    let m = t.map { ($0 as? NSNumber)?.doubleValue ?? Double.nan }
+    #expect(abs(m[4]) < 1e-6 && abs(m[5]) < 1e-6,
+            "canonical hexagon places at the origin: \(m)")
+
+    // The mutation landed: the raw polygon at [0,0] is now a Generated.
+    guard case .live(.generated(let g)) = model.document.tryGetElement([0, 0]) else {
+        Issue.record("expected a Generated at [0,0] after promote"); return
+    }
+    #expect(g.conceptId == "regular_polygon")
+
+    let live = documentToTestJson(model.document)
+    #expect(live.contains("\"concept\":\"regular_polygon\""),
+            "the promoted Generated instance is in the document: \(live)")
+
+    // checkpoint_equivalence: the journal replays to the SAME document the live
+    // edit produced (and deterministically — twice). The fitter NEVER re-runs.
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+
+    // The single undo step round-trips: the Generated reverts to the raw polygon.
+    model.undo()
+    if case .polygon = model.document.getElement([0, 0]) {} else {
+        Issue.record("undo of promote restores the raw polygon")
+    }
+}
+
+@Test func promoteToConceptNoMatchIsNoop() {
+    // A non-regular polygon (a 2:1 rectangle outline — equal-ish radii fail) is
+    // NOT a regular polygon, so no fitter matches and promote is a silent no-op:
+    // nothing journals and the raw polygon is untouched.
+    let rectOutline = Element.polygon(Polygon(
+        points: [(0, 0), (20, 0), (20, 10), (0, 10)]))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [rectOutline])],
+        selectedLayer: 0,
+        selection: [ElementSelection.all([0, 0])]
+    ))
+    let before = model.journal.count
+    ConceptsPanel.dispatch("promote_to_concept", model: model)
+    #expect(model.journal.count == before, "a no-match promote journals nothing")
+    if case .polygon = model.document.getElement([0, 0]) {} else {
+        Issue.record("the raw polygon should be untouched on a no-match")
+    }
+}
+
+// MARK: - Concepts dispatch-gate regression guards (the REAL action dispatch)
+
+/// CONCEPTS.md §6 / §10 — the concept verbs `place_concept_instance` and
+/// `promote_to_concept` are `log`-stub YAML actions whose real work lives in a
+/// native intercept. `dispatchYamlAction` (the entry the path panel buttons + the
+/// Object menu item take) MUST route them to `ConceptsPanel.dispatch`, or they
+/// fall through to the YAML `log` stub and never fire — the Swift analogue of the
+/// Rust dispatch-gate bug. These drive the same native handler `dispatchYamlAction`
+/// delegates to and assert the mutation lands.
+@Test func placeConceptInstanceViaDispatchCreatesGenerated() {
+    // (a) Select a concept, then place an instance via the native dispatch arm —
+    // a Generated is appended.
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [])], selectedLayer: 0, selection: []))
+    model.stateStore.initPanel("concepts_panel_content", defaults: [:])
+    model.stateStore.setPanel("concepts_panel_content", "selected_concept", "regular_polygon")
+    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    if case .live(.generated) = model.document.tryGetElement([0, 0]) {} else {
+        Issue.record("place_concept_instance via dispatch should append a Generated")
+    }
+}
+
+@Test func promoteToConceptViaDispatchRecoversRegularPolygon() {
+    // (b) Add a regular hexagon Polygon, select it, promote via the native
+    // dispatch arm — it becomes a Generated{regular_polygon, sides:6, radius:50}
+    // at ~identity placement.
+    let model = makeModelWithSelectedHexagon()
+    ConceptsPanel.dispatch("promote_to_concept", model: model)
+    guard case .live(.generated(let g)) = model.document.tryGetElement([0, 0]) else {
+        Issue.record("promote_to_concept via dispatch should produce a Generated"); return
+    }
+    #expect(g.conceptId == "regular_polygon")
+    #expect(abs(((g.params["sides"] as? NSNumber)?.doubleValue ?? 0) - 6.0) < 1e-9,
+            "recovered sides = 6")
+    #expect(abs(((g.params["radius"] as? NSNumber)?.doubleValue ?? 0) - 50.0) < 1e-9,
+            "recovered radius = 50")
+    // Canonical placement: ~identity (origin-centred hexagon, first vertex on +x).
+    let t = g.transform ?? .identity
+    #expect(abs(t.e) < 1e-6 && abs(t.f) < 1e-6,
+            "canonical hexagon places at the origin: \(t)")
+}
+
 // MARK: - Native menu Delete / Cut (JasCommands routes the SAME delete_selection op)
 
 @Test func productionRouteNativeMenuDeleteJournalsDeleteSelection() {

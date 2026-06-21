@@ -216,6 +216,45 @@ public class Controller {
         model.editDocument(doc.replaceElement(path, with: .live(.generated(gen))))
     }
 
+    /// Promote the raw element at `path` to a live `GeneratedElem` of
+    /// `conceptId` with the fitted `params` and placement `transform`
+    /// (CONCEPTS.md §10 — the fitter / `promote`). The recovered params + the
+    /// origin-centered generator + the placement transform re-render the same
+    /// geometry the raw element drew. The original element's identity (id,
+    /// opacity, locked, visibility, blend mode, mask) is PRESERVED; only the
+    /// placement transform is (re)set. Every operand is value-in-op — the
+    /// detection already happened at production time — so this just builds the
+    /// element. No-op if `path` is missing. Mirrors Rust
+    /// `Controller::promote_to_concept`.
+    public func promoteToConcept(
+        _ path: ElementPath, conceptId: String,
+        params: [String: Any], transform: Transform
+    ) {
+        let doc = model.document
+        guard let existing = doc.tryGetElement(path) else { return }
+        // Preserve the raw element's identity; (re)set only the placement. The
+        // promotable kinds (Polygon / Polyline) carry an opacity slot the flat
+        // Element accessors do not expose, so read it from the concrete struct.
+        let opacity: Double = {
+            switch existing {
+            case .polygon(let p): return p.opacity
+            case .polyline(let p): return p.opacity
+            default: return 1.0
+            }
+        }()
+        let generated = GeneratedElem(
+            conceptId: conceptId,
+            params: params,
+            id: existing.id,
+            transform: transform,
+            opacity: opacity,
+            locked: existing.isLocked,
+            visibility: existing.visibility,
+            blendMode: existing.blendMode,
+            mask: existing.mask)
+        model.editDocument(doc.replaceElement(path, with: .live(.generated(generated))))
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance
     /// at `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md
     /// §7, Fork S6 — the inverse of Make Symbol). The target id is resolved by
