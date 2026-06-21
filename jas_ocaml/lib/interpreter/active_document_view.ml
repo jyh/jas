@@ -229,11 +229,38 @@ let selected_concept_view (doc : Document.document) : Yojson.Safe.t =
                      ])
                    | _ -> None) ops
                | _ -> [] in
+             (* The concept's VIOLATED constraints (CONCEPTS.md section 11):
+                evaluate each constraint [check] over the instance current params
+                bound under [param]; collect the ones that are NOT truthy
+                ([Expr_eval.to_bool], the same truthiness [if] uses), in declared
+                order. Advisory plus read-only; the panel surfaces these as a
+                warning. Empty when the concept declares no [constraints:] or all
+                hold. *)
+             let violations_ctx = `Assoc [ ("param", gen.Element.gen_params) ] in
+             let violations_out = match Workspace_loader.json_member "constraints" spec with
+               | Some (`List cons) ->
+                 List.filter_map (fun c ->
+                   match Workspace_loader.json_member "id" c,
+                         Workspace_loader.json_member "check" c with
+                   | Some (`String cid), Some (`String check) ->
+                     if Expr_eval.to_bool
+                          (Expr_eval.evaluate check violations_ctx)
+                     then None
+                     else
+                       let message = match Workspace_loader.json_member "message" c with
+                         | Some (`String s) -> s | _ -> "" in
+                       Some (`Assoc [
+                         ("id", `String cid);
+                         ("message", `String message);
+                       ])
+                   | _ -> None) cons
+               | _ -> [] in
              `Assoc [
                ("concept_id", `String concept_id);
                ("name", `String name);
                ("params", `List params_out);
                ("operations", `List operations_out);
+               ("violations", `List violations_out);
              ]))
      | _ -> `Null)
   | _ -> `Null

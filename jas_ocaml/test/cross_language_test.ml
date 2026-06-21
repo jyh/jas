@@ -1341,6 +1341,43 @@ let assert_concept_operations_conformance () =
     assert false
   end
 
+(* Concept-constraint conformance (shared corpus).
+   Loads test_fixtures/concept_constraints/conformance.json (compiled from
+   workspace/concepts/*.yaml + workspace/tests/concept_constraints.yaml). For each
+   case, evaluates each constraint `check` expression with the case params bound
+   under `param` and collects the constraints whose result is NOT truthy
+   (Expr_eval.to_bool, the same truthiness `if` uses) — the violations, in
+   declared order — then asserts they match `expected`. A constraint is just a
+   boolean expression, so this reuses the evaluator — pinning concept CHECKING
+   across all apps (CONCEPTS.md §11). Checking is advisory plus read-only (no
+   op-log verb). *)
+let assert_concept_constraints_conformance () =
+  let open Yojson.Safe.Util in
+  let json_str = read_fixture "concept_constraints/conformance.json" in
+  let cases = Yojson.Safe.from_string json_str |> to_list in
+  let failures = ref [] in
+  let add s = failures := s :: !failures in
+  List.iter (fun tc ->
+    let concept = tc |> member "concept" |> to_string in
+    (* Bind the params under the `param` namespace, exactly as the production
+       checker does at render time. *)
+    let ctx = `Assoc [("param", tc |> member "params")] in
+    let constraints = tc |> member "constraints" |> to_list in
+    let violated = List.filter_map (fun c ->
+      let check = c |> member "check" |> to_string in
+      if Jas.Expr_eval.to_bool (Jas.Expr_eval.evaluate check ctx) then None
+      else Some (c |> member "id" |> to_string)) constraints in
+    let expected = tc |> member "expected" |> to_list |> List.map to_string in
+    if violated <> expected then
+      add (Printf.sprintf "%s: expected violations [%s], got [%s]" concept
+             (String.concat "; " expected) (String.concat "; " violated))
+  ) cases;
+  if !failures <> [] then begin
+    Printf.eprintf "concept-constraint conformance failures:\n%s\n"
+      (String.concat "\n" (List.rev !failures));
+    assert false
+  end
+
 (* Concept registry (increment 3a): the concept packs are bundled into
    workspace.json and loadable via Workspace_loader. See CONCEPTS.md §6/§7. *)
 let assert_concept_registry () =
@@ -1428,6 +1465,12 @@ let () =
         assert_generator_fitter_round_trip;
       Alcotest.test_case "promote_to_concept replay is deterministic" `Quick
         assert_promote_to_concept_replay;
+    ];
+
+    (* Concept-constraint conformance (shared corpus) — CONCEPTS.md §11 *)
+    "Concept constraints conformance", [
+      Alcotest.test_case "concept_constraints_conformance all cases" `Quick
+        assert_concept_constraints_conformance;
     ];
 
     (* Concept registry: concepts load from workspace.json (increment 3a) *)

@@ -111,7 +111,32 @@ let tests = [
     let ops = j_list (Option.get (j_member "operations" sc)) in
     let ids = List.filter_map (fun o ->
       match j_member "id" o with Some (`String s) -> Some s | _ -> None) ops in
-    assert (List.mem "add_side" ids && List.mem "remove_side" ids));
+    assert (List.mem "add_side" ids && List.mem "remove_side" ids);
+    (* violations (CONCEPTS.md §11): valid params (sides 6, radius 50) ⇒ none. *)
+    let vios = j_list (Option.get (j_member "violations" sc)) in
+    assert (vios = []));
+
+  (* CONCEPTS.md §11: a Generated whose params break an invariant surfaces the
+     violated constraint (id + message) in selected_concept.violations. *)
+  Alcotest.test_case "selected_concept_reports_constraint_violations" `Quick (fun () ->
+    let m = make_model ~layer_names:["A"] ~selection_paths:[] in
+    let ctrl = Controller.create ~model:m () in
+    (* sides = 2 violates min_sides (needs >= 3); radius is fine. *)
+    ctrl#place_concept_instance "regular_polygon"
+      (`Assoc [ ("sides", `Int 2); ("radius", `Int 50) ]) "gp1";
+    let view = Active_document_view.build (Some m) in
+    let sc = Option.get (j_member "selected_concept" view) in
+    let vios = j_list (Option.get (j_member "violations" sc)) in
+    let ids = List.filter_map (fun v ->
+      match j_member "id" v with Some (`String s) -> Some s | _ -> None) vios in
+    assert (ids = ["min_sides"]);
+    (* The violation carries its human-readable message. *)
+    let msg = j_string (Option.get (j_member "message" (List.nth vios 0))) in
+    let contains needle hay =
+      let nl = String.length needle and hl = String.length hay in
+      let rec go i = i + nl <= hl && (String.sub hay i nl = needle || go (i + 1)) in
+      nl = 0 || go 0 in
+    assert (contains "at least 3 sides" msg));
 ]
 
 let () = Alcotest.run "active_document_view" [ "view", tests ]
