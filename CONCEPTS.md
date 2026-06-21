@@ -227,10 +227,16 @@ its generator to geometry. The `Generated` element arm (3b) builds on this.
    re-evaluates). Pinned by the operations conformance corpus + a checkpoint_
    equivalence replay test per app; the Concepts panel renders a button per
    operation. **Detailed design + the conformance gate: §9.**
-5. **The fitter (`promote`).** Raw selection → parameters/roles — the deterministic
-   tier first (a regular-polygon detector), the fuzzy/AI tier later (`VISION.md` §7
-   frontier). A fitter is an **expression** (the dual of the generator), needing one
-   new builtin `atan2`. **Detailed design + the conformance gate: §10.**
+5. **The fitter (`promote`) — ✅ done (all 4 native apps).** Raw selection →
+   parameters/roles via a regular-polygon detector. A fitter is an **expression**
+   (the dual of the generator) over a `shape` namespace, needing one new builtin
+   `atan2`; `promote_to_concept` replaces a raw Polygon/Polyline with a `Generated`
+   carrying the recovered params + a `translate·rotate` placement transform.
+   Pinned by the fitter conformance corpus + a generator/fitter round-trip + a
+   checkpoint_equivalence replay per app. The gate also caught three latent bugs
+   (a Rust dispatch gate, a Swift NSNumber/Bool eval bug, an OCaml list-dot-access
+   eval bug). The fuzzy/AI tier stays later (`VISION.md` §7 frontier). **Detailed
+   design + the conformance gate: §10.**
 6. **Constraints.** A representation for a concept's invariants (deterministic, no
    JS — `VISION.md` §6.3 downside), and a checker. Bidirectional constraint
    solving (IK) stays the separate, harder layer (`VISION.md` §6.2).
