@@ -32,17 +32,23 @@ enum Value: Equatable {
     static func fromJson(_ v: Any?) -> Value {
         guard let v = v else { return .null }
 
-        if let b = v as? Bool {
-            return .bool(b)
-        }
+        // NSNumber must be checked BEFORE the bare `as? Bool`: in Swift an
+        // NSNumber(0) / NSNumber(1) (how JSONSerialization boxes the integers 0
+        // and 1) ALSO satisfies `as? Bool` (bridging 0→false, 1→true), so a bare
+        // Bool cast first would misread a JSON integer 0 as `false`. The objCType
+        // encoding (`c` / `B` ⇒ CFBoolean) is the correct bool-vs-number
+        // discriminator — a real JSON boolean still routes here. (Exposed by the
+        // concept-fitter corpus: vertices with a literal `0` coordinate, e.g.
+        // [10, 0], indexed via `p[1]`.)
         if let n = v as? NSNumber {
-            // NSNumber from JSON: distinguish bool vs number.
-            // CFBoolean is bridged as NSNumber; check type encoding.
             let objCType = String(cString: n.objCType)
             if objCType == "c" || objCType == "B" {
                 return .bool(n.boolValue)
             }
             return .number(n.doubleValue)
+        }
+        if let b = v as? Bool {
+            return .bool(b)
         }
         if let n = v as? Int {
             return .number(Double(n))

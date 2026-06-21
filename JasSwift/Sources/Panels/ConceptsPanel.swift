@@ -79,6 +79,10 @@ public enum ConceptsPanel {
                 model.nameTxn("place_concept_instance")
                 opApply(model, Controller(model: model), op)
             }
+        case "promote_to_concept":
+            // CONCEPTS.md §10 — the fitter / promote (the inverse of expand).
+            // Detect + replace the single selected raw shape with a Generated.
+            promote(model: model)
         default:
             break
         }
@@ -152,4 +156,88 @@ public enum ConceptsPanel {
             opApply(model, Controller(model: model), op)
         }
     }
+
+    /// Native intercept for `promote_to_concept` (CONCEPTS.md §10 — the fitter /
+    /// promote, the inverse of expand). Promote the single selected raw shape to
+    /// a `Generated` concept instance: extract the element's WORLD-space vertices
+    /// (bake any element transform into the points so the fitter sees world
+    /// space), try each registered concept's `fitter` expression over them (bound
+    /// under `shape.points`) in sorted-id order, and on the FIRST match split its
+    /// flat result `[params..., cx, cy, rotation]` into the concept params (first
+    /// K, by declared order) and a placement transform (`translate(cx,cy) ·
+    /// rotate(rot)`). Everything is baked into the op value-in-op and routed
+    /// through `opApply` in the one-undo `withTxn`/`nameTxn` bracket; a no-match
+    /// (or a non-Polygon/Polyline selection) is a silent no-op. Mirrors the Rust
+    /// `promote_to_concept` dispatch arm.
+    public static func promote(model: Model) {
+        let doc = model.document
+        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
+        let path = sel.path
+        guard let elem = doc.tryGetElement(path) else { return }
+
+        // Only a Polygon / Polyline carries promotable vertices in v1.
+        let rawPoints: [(Double, Double)]
+        switch elem {
+        case .polygon(let p): rawPoints = p.points
+        case .polyline(let p): rawPoints = p.points
+        default: return
+        }
+        // Bake any element transform into the points so the fitter sees WORLD
+        // space (the promoted instance re-places via its own transform).
+        let pts: [(Double, Double)]
+        if let t = elem.transform {
+            pts = rawPoints.map { t.applyPoint($0.0, $0.1) }
+        } else {
+            pts = rawPoints
+        }
+        let pointsList: [[Double]] = pts.map { [$0.0, $0.1] }
+        let ctx: [String: Any] = ["shape": ["points": pointsList]]
+
+        // Try each registered concept's fitter in sorted-id order (a
+        // deterministic first-match); keep the first that matches.
+        guard let registry = WorkspaceData.load()?.concepts() else { return }
+        var chosen: (conceptId: String, params: [String: Any],
+                     cx: Double, cy: Double, rot: Double)?
+        for id in registry.keys.sorted() {
+            guard let concept = registry[id] as? [String: Any],
+                  let fitter = concept["fitter"] as? String else { continue }
+            // Null / non-list ⇒ no match for this concept.
+            guard case .list(let items) = evaluate(fitter, context: ctx) else { continue }
+            // The concept's declared params, in order — the first K result slots.
+            let paramNames: [String] = (concept["params"] as? [[String: Any]] ?? [])
+                .compactMap { $0["name"] as? String }
+            let k = paramNames.count
+            guard items.count >= k + 3 else { continue }  // need params + cx,cy,rot
+            let nums: [Double] = items.map { fitterNum($0.value) }
+            var params: [String: Any] = [:]
+            for (i, name) in paramNames.enumerated() { params[name] = nums[i] }
+            chosen = (id, params, nums[k], nums[k + 1], nums[k + 2])
+            break
+        }
+        guard let pick = chosen else { return }  // nothing matched: no-op
+
+        // Placement: translate(cx,cy) * rotate(rot) — rotate then translate.
+        let t = Transform.translate(pick.cx, pick.cy)
+            .multiply(Transform.rotate(pick.rot))
+        let op: [String: Any] = [
+            "op": "promote_to_concept",
+            "path": path,
+            "concept_id": pick.conceptId,
+            "params": pick.params,
+            "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
+        ]
+        model.withTxn {
+            model.nameTxn("promote_to_concept")
+            opApply(model, Controller(model: model), op)
+        }
+    }
+}
+
+/// Read a Double out of an expression-list item (NSNumber / Double / Int),
+/// defaulting to 0 (the non-crashing form), for the fitter result splitting.
+private func fitterNum(_ v: Any) -> Double {
+    if let d = v as? Double { return d }
+    if let n = v as? NSNumber { return n.doubleValue }
+    if let i = v as? Int { return Double(i) }
+    return 0
 }

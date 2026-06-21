@@ -1793,6 +1793,123 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         "concept conformance failures:\n\(failures.joined(separator: "\n"))")
 }
 
+// MARK: - Concept-fitter conformance (shared corpus)
+
+/// Loads test_fixtures/concept_fitters/conformance.json (compiled from
+/// workspace/concepts/*.yaml + workspace/tests/concept_fitters.yaml). For each
+/// case, evaluates the concept's `fitter` expression with the case's points
+/// bound under `shape.points` and asserts the result matches `expected` — `null`
+/// for no match, else the flat `[params..., cx, cy, rotation]` list (1e-9). A
+/// fitter is the dual of the generator and just an expression, so this reuses
+/// the evaluator — pinning concept DETECTION across all apps (CONCEPTS.md §10).
+/// The production promote handler runs exactly this and bakes the recovered
+/// values into the op. Mirrors Rust `fitters_conformance`.
+@Test func fittersConformance() throws {
+    func num(_ v: Any?) -> Double? {
+        if let d = v as? Double { return d }
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let i = v as? Int { return Double(i) }
+        return nil
+    }
+
+    let raw = readFixture("concept_fitters/conformance.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = raw.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    var failures: [String] = []
+    for tc in cases {
+        let concept = tc["concept"] as? String ?? "?"
+        let fitter = tc["fitter"] as! String
+        // Bind the input vertices under `shape.points`, exactly as the production
+        // promote handler does at detect time.
+        let ctx: [String: Any] = ["shape": ["points": tc["points"] as! [Any]]]
+        let result = evaluate(fitter, context: ctx)
+
+        // A `null` expected ⇒ no match: the fitter must evaluate to `.null`. JSON
+        // null decodes to NSNull, so distinguish it from the list form.
+        let expected = tc["expected"]
+        if expected == nil || expected is NSNull {
+            if case .null = result {} else {
+                failures.append("\(concept): expected no match (null), got \(result)")
+            }
+            continue
+        }
+        guard case .list(let items) = result else {
+            failures.append("\(concept): expected a list, got non-list \(result)")
+            continue
+        }
+        let exp = expected as! [Any]
+        if items.count != exp.count {
+            failures.append("\(concept): result arity \(items.count) != expected \(exp.count)")
+            continue
+        }
+        for (i, pair) in zip(items, exp).enumerated() {
+            let (item, e) = pair
+            guard let got = num(item.value) else {
+                failures.append("\(concept) output[\(i)]: non-numeric \(item.value)")
+                continue
+            }
+            guard let want = num(e) else {
+                failures.append("\(concept) output[\(i)]: malformed expected \(e)")
+                continue
+            }
+            if abs(got - want) >= 1e-9 {
+                failures.append("\(concept) output[\(i)]: expected \(want), got \(got)")
+            }
+        }
+    }
+    #expect(failures.isEmpty,
+        "concept-fitter conformance failures:\n\(failures.joined(separator: "\n"))")
+}
+
+/// CONCEPTS.md §10 — the generator and fitter are inverses (the round-trip
+/// property). Generate a `regular_polygon`'s vertices, feed them back through the
+/// SAME concept's fitter, and assert it recovers `[sides, radius, 0, 0, 0]`
+/// (canonical placement: origin-centred, first vertex on +x ⇒ rotation 0). Both
+/// expressions are read from the compiled registry, so this pins that a concept's
+/// two halves agree. Mirrors Rust `generator_fitter_round_trip`.
+@Test func generatorFitterRoundTrip() throws {
+    func num(_ v: Any?) -> Double? {
+        if let d = v as? Double { return d }
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let i = v as? Int { return Double(i) }
+        return nil
+    }
+
+    let ws = WorkspaceData.load()
+    let concept = ws?.concept("regular_polygon")
+    let generator = concept?["generator"] as! String
+    let fitter = concept?["fitter"] as! String
+
+    for (sides, radius) in [(6.0, 50.0), (4.0, 10.0), (5.0, 25.0)] {
+        // Generate the canonical points.
+        let gres = evaluate(generator, context: ["param": ["sides": sides, "radius": radius]])
+        guard case .list(let gitems) = gres else {
+            Issue.record("generator returned non-list for sides=\(sides)"); continue
+        }
+        let pts: [[Double]] = gitems.compactMap { item in
+            guard let coords = item.value as? [Any], coords.count == 2,
+                  let x = num(coords[0]), let y = num(coords[1]) else { return nil }
+            return [x, y]
+        }
+        // Fit them back.
+        let fres = evaluate(fitter, context: ["shape": ["points": pts]])
+        guard case .list(let fitems) = fres else {
+            Issue.record("fitter returned non-list for sides=\(sides)"); continue
+        }
+        let nums = fitems.map { num($0.value) ?? Double.nan }
+        let expected = [sides, radius, 0.0, 0.0, 0.0]
+        #expect(nums.count == expected.count, "fitter arity for sides=\(sides)")
+        if nums.count == expected.count {
+            for (i, (g, e)) in zip(nums, expected).enumerated() {
+                #expect(abs(g - e) < 1e-9,
+                        "round-trip sides=\(sides) radius=\(radius) output[\(i)]: expected \(e), got \(g)")
+            }
+        }
+    }
+}
+
 // MARK: - Concept-operation conformance (shared corpus)
 
 /// Loads test_fixtures/concept_operations/conformance.json (compiled from

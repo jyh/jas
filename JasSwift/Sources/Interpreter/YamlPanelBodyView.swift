@@ -971,10 +971,15 @@ struct YamlElementView: View {
             // active panel, so SymbolsPanel reads / writes it directly.
             SymbolsPanel.dispatchSymbolAction(name, model: model)
             return
-        case "place_concept_instance":
+        case "place_concept_instance", "promote_to_concept":
             // Concepts panel: native intercept (the YAML action is a `log`
-            // stub). Build a Generated element from the panel-selected concept
-            // + its default params, id minted value-in-op. Mirrors the Rust arm.
+            // stub). `place_concept_instance` builds a Generated from the
+            // panel-selected concept + its default params (id minted value-in-op);
+            // `promote_to_concept` (CONCEPTS.md §10 — the fitter / promote)
+            // detects + replaces the single selected raw shape with a Generated.
+            // WITHOUT this native arm, `promote_to_concept` falls through to its
+            // YAML `log` stub and never fires — the Swift analogue of the Rust
+            // dispatch-gate bug. Mirrors the Rust dispatch arm.
             ConceptsPanel.dispatch(name, model: model)
             return
         case "set_concept_param":
