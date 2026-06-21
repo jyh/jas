@@ -1343,6 +1343,17 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         default: return .number(tan(rad))
         }
 
+    // atan2(y, x) -> DEGREES (the inverse of sin/cos; concept fitters use it to
+    // recover a placement angle). Args are (y, x), matching libm order.
+    case "atan2":
+        guard args.count == 2 else { return .null }
+        let vy = evalNode(args[0], ctx)
+        let vx = evalNode(args[1], ctx)
+        guard case .number(let y) = vy, case .number(let x) = vx else {
+            return .null
+        }
+        return .number(atan2(y, x) * 180.0 / Double.pi)
+
     // pow(base, exp) -> Number | Null (Null on a non-finite result).
     case "pow":
         guard args.count == 2 else { return .null }

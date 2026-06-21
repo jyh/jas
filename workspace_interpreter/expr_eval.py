@@ -577,6 +577,18 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         fn = {"sin": math.sin, "cos": math.cos, "tan": math.tan}[name]
         return Value.number(fn(rad))
 
+    if name == "atan2":
+        # Inverse tangent of y/x returning DEGREES (the dual of sin/cos; used by
+        # concept fitters to recover a placement angle). Args are (y, x).
+        if len(node.args) != 2:
+            return Value.null()
+        vy = eval_node(node.args[0], ctx)
+        vx = eval_node(node.args[1], ctx)
+        if vy.type != ValueType.NUMBER or vx.type != ValueType.NUMBER:
+            return Value.null()
+        import math
+        return Value.number(math.degrees(math.atan2(vy.value, vx.value)))
+
     if name == "pow":
         if len(node.args) != 2:
             return Value.null()

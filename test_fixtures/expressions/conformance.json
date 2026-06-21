@@ -489,6 +489,36 @@
     "type": "number"
   },
   {
+    "expr": "atan2(0, 1)",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "atan2(1, 0)",
+    "expected": 90,
+    "type": "number"
+  },
+  {
+    "expr": "atan2(1, 1)",
+    "expected": 45,
+    "type": "number"
+  },
+  {
+    "expr": "atan2(0, -1)",
+    "expected": 180,
+    "type": "number"
+  },
+  {
+    "expr": "atan2(-1, 0)",
+    "expected": -90,
+    "type": "number"
+  },
+  {
+    "expr": "atan2(-1, -1)",
+    "expected": -135,
+    "type": "number"
+  },
+  {
     "expr": "fold(range(0, 5), 0, fun (acc, i) -> acc + 1)",
     "expected": 5,
     "type": "number"
