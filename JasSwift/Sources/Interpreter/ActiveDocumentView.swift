@@ -220,11 +220,32 @@ private func selectedConceptView(_ doc: Document) -> Any {
             ])
         }
     }
+    // The concept's VIOLATED constraints (CONCEPTS.md §11): evaluate each
+    // constraint's `check` over the instance's params; collect the ones that are
+    // NOT truthy (`toBool`, the same truthiness `if` uses), in declared order.
+    // Advisory + read-only — the panel surfaces these as a warning. Empty when
+    // the concept declares no `constraints:` or all hold. Mirrors Rust
+    // `build_selected_concept_view`.
+    var violationsOut: [[String: Any]] = []
+    if let cons = concept["constraints"] as? [[String: Any]] {
+        let ctx: [String: Any] = ["param": gen.params]
+        for c in cons {
+            guard let cid = c["id"] as? String,
+                  let check = c["check"] as? String else { continue }
+            if !evaluate(check, context: ctx).toBool() {
+                violationsOut.append([
+                    "id": cid,
+                    "message": (c["message"] as? String) ?? "",
+                ])
+            }
+        }
+    }
     return [
         "concept_id": gen.conceptId,
         "name": name,
         "params": paramsOut,
         "operations": operationsOut,
+        "violations": violationsOut,
     ] as [String: Any]
 }
 

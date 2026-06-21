@@ -86,6 +86,28 @@ import Foundation
     let ids = ops?.compactMap { $0["id"] as? String } ?? []
     #expect(ids.contains("add_side") && ids.contains("remove_side"),
             "selected_concept.operations lists the concept's verbs: \(ids)")
+    // violations (CONCEPTS.md §11): valid params (sides 6, radius 50) => none.
+    let vios = sc?["violations"] as? [[String: Any]]
+    #expect(vios?.isEmpty == true, "a valid instance has no constraint violations")
+}
+
+@Test func activeDocumentSelectedConceptReportsConstraintViolations() {
+    // CONCEPTS.md §11: a Generated whose params break an invariant surfaces the
+    // violated constraint (id + message) in selected_concept.violations.
+    // Mirrors Rust active_document_view_selected_concept_reports_constraint_violations.
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    // sides = 2 violates min_sides (needs >= 3); radius is fine.
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 2, "radius": 50], elemId: "g1")
+    let view = buildActiveDocumentView(model: ctrl.model)
+    let sc = view["selected_concept"] as? [String: Any]
+    let vios = sc?["violations"] as? [[String: Any]]
+    let ids = vios?.compactMap { $0["id"] as? String } ?? []
+    #expect(ids == ["min_sides"], "min_sides is flagged: \(ids)")
+    let message = vios?.first?["message"] as? String ?? ""
+    #expect(message.contains("at least 3 sides"),
+            "the violation carries its human-readable message")
 }
 
 @Test func activeDocumentLayersRollupsPopulatedFromModel() {
