@@ -1123,6 +1123,16 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
         guard let path = parsePath(op["path"]),
               let pname = strField(op, "name") else { return }
         controller.setConceptParam(path, name: pname, value: numField(op, "value"))
+    // Apply a concept operation (CONCEPTS.md §9). `op_id` rides as journal
+    // metadata (the semantic verb); `changes` is the production-RESOLVED param
+    // map (value-in-op) that is actually applied — replay merges it and never
+    // re-evaluates the operation's expressions nor consults the registry. A
+    // malformed / missing payload SKIPS (the controller no-ops on an empty /
+    // non-object `changes`, so nothing journals).
+    case "apply_concept_operation":
+        guard let path = parsePath(op["path"]),
+              let changes = op["changes"] as? [String: Any] else { return }
+        controller.applyConceptOperation(path, changes: changes)
     case "detach":
         guard let path = parsePath(op["path"]) else { return }
         controller.detach(path)

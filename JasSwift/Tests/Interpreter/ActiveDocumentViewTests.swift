@@ -80,6 +80,12 @@ import Foundation
     let sides = plist?.first { $0["name"] as? String == "sides" }
     // The instance's current value (6) is carried on the schema entry.
     #expect((sides?["value"] as? Int) == 6)
+    // operations (CONCEPTS.md §9): the concept's named edit verbs, so the panel
+    // can render a button per operation.
+    let ops = sc?["operations"] as? [[String: Any]]
+    let ids = ops?.compactMap { $0["id"] as? String } ?? []
+    #expect(ids.contains("add_side") && ids.contains("remove_side"),
+            "selected_concept.operations lists the concept's verbs: \(ids)")
 }
 
 @Test func activeDocumentLayersRollupsPopulatedFromModel() {

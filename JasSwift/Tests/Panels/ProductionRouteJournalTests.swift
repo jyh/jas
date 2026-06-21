@@ -712,6 +712,69 @@ private func makeModelWithTwoArtboards() -> Model {
             "undo of place removes the Generated, leaving the seeded rect")
 }
 
+@Test func productionRouteApplyConceptOperationReplayIsDeterministic() {
+    // CONCEPTS.md §9 — `apply_concept_operation` journals + replays byte-
+    // identically. The op carries the production-RESOLVED `changes` map
+    // value-in-op (here `{sides: 7}`, the add_side result over a hexagon), so
+    // replay merges it WITHOUT re-evaluating the operation's expression nor
+    // consulting the registry — the checkpoint_equivalence gate for the
+    // operations verb. Mirrors Rust's
+    // `operation_apply_concept_operation_replay_is_deterministic`.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [rect])],
+        selectedLayer: 0,
+        selection: []
+    ))
+    let preDoc = model.document
+    let before = model.journal.count
+
+    model.stateStore.initPanel("concepts_panel_content", defaults: [:])
+    model.stateStore.setPanel("concepts_panel_content", "selected_concept", "regular_polygon")
+
+    // (1) Place a hexagon (sides=6) via the REAL production handler; it lands at
+    // [0,1] (after the seeded rect) and is auto-selected.
+    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    guard case .live(.generated) = model.document.tryGetElement([0, 1]) else {
+        Issue.record("expected a Generated at [0,1]"); return
+    }
+
+    // (2) Apply `add_side` via the REAL production handler. Its `set:` expr
+    // (`param.sides + 1`) is RESOLVED here over the current params (sides=6) to
+    // `{sides: 7}` and baked into the op (value-in-op).
+    ConceptsPanel.applyOperation(model: model, opId: "add_side")
+
+    #expect(model.journal.count == before + 2,
+            "apply_concept_operation commits a second transaction")
+    guard let opTxn = model.journal.last else { Issue.record("op txn"); return }
+    #expect(opTxn.name == "apply_concept_operation")
+    #expect(opTxn.ops.count == 1, "one apply_concept_operation op")
+    guard let appliedOp = opTxn.ops.first else { Issue.record("applied op"); return }
+    #expect(appliedOp.op == "apply_concept_operation")
+    #expect((appliedOp.params["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } == [0, 1],
+            "the resolved literal path is journaled value-in-op")
+    // `op_id` rides as journal metadata (the semantic verb).
+    #expect(appliedOp.params["op_id"] as? String == "add_side")
+    // `changes` is the production-RESOLVED operand replay merges.
+    guard let recordedChanges = appliedOp.params["changes"] as? [String: Any] else {
+        Issue.record("changes is a journaled map"); return
+    }
+    #expect((recordedChanges["sides"] as? NSNumber)?.doubleValue == 7.0,
+            "add_side resolved to sides=7 value-in-op")
+
+    // The live document carries the regenerated instance. (Swift's recordedFmt
+    // serializes integer-valued numbers as N.0.)
+    let live = documentToTestJson(model.document)
+    #expect(live.contains("\"sides\":7.0"),
+            "the operation merged sides=7: \(live)")
+
+    // checkpoint_equivalence: the journal replays to the SAME document the live
+    // edit produced (and deterministically — twice). Replay merges `changes` and
+    // never re-evaluates the operation expression nor consults the registry.
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+}
+
 // MARK: - Native menu Delete / Cut (JasCommands routes the SAME delete_selection op)
 
 @Test func productionRouteNativeMenuDeleteJournalsDeleteSelection() {

@@ -107,4 +107,49 @@ public enum ConceptsPanel {
             opApply(model, Controller(model: model), op)
         }
     }
+
+    /// Native intercept for `apply_concept_operation` (CONCEPTS.md §9): apply a
+    /// named concept operation to the single selected Generated instance. The
+    /// operation's effect is RESOLVED here, at production time — look the
+    /// operation up in the registry by `opId`, evaluate its `set:` expressions
+    /// with the instance's CURRENT params bound under `param`, and bake the
+    /// resulting `changes` map into the op (value-in-op). Routed through
+    /// `opApply` inside the one-undo `withTxn`/`nameTxn` bracket; replay merges
+    /// `changes` and never re-evaluates. Mirrors the Rust `apply_concept_operation`
+    /// dispatch arm. No-op unless exactly one Generated element is selected and
+    /// the resolved changes are non-empty.
+    public static func applyOperation(model: Model, opId: String) {
+        let doc = model.document
+        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
+        let path = sel.path
+        guard case .live(.generated(let gen)) = doc.tryGetElement(path) else { return }
+
+        // Look up the concept + operation, then resolve its `set:` expressions
+        // over the instance's current params → the concrete `changes` map.
+        guard let concept = WorkspaceData.load()?.concept(gen.conceptId),
+              let ops = concept["operations"] as? [[String: Any]],
+              let operation = ops.first(where: { ($0["id"] as? String) == opId }),
+              let set = operation["set"] as? [String: Any] else { return }
+
+        let ctx: [String: Any] = ["param": gen.params]
+        var changes: [String: Any] = [:]
+        for (name, exprV) in set {
+            guard let src = exprV as? String else { continue }
+            if case .number(let n) = evaluate(src, context: ctx) {
+                changes[name] = n
+            }
+        }
+        guard !changes.isEmpty else { return }
+
+        let op: [String: Any] = [
+            "op": "apply_concept_operation",
+            "path": path,
+            "op_id": opId,
+            "changes": changes,
+        ]
+        model.withTxn {
+            model.nameTxn("apply_concept_operation")
+            opApply(model, Controller(model: model), op)
+        }
+    }
 }
