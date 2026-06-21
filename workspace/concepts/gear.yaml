@@ -23,3 +23,20 @@ generator: |
     let a = t * step + (if p >= 2 then step / 2 else 0) in
     let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in
     [r * cos(a), r * sin(a)])
+operations:
+  - id: add_tooth
+    label: "Add Tooth"
+    description: >
+      Add one tooth to the gear: increases `teeth` by one. The gear outline
+      re-derives from the generator at the new tooth count, so every sector
+      re-spaces to 360/teeth degrees automatically.
+    set:
+      teeth: "param.teeth + 1"
+  - id: remove_tooth
+    label: "Remove Tooth"
+    description: >
+      Remove one tooth, clamped to the three-tooth minimum a cog needs to read
+      as a gear: sets `teeth` to max(teeth - 1, 3). At the floor the operation
+      is a no-op on the value (the document still journals one undoable step).
+    set:
+      teeth: "max(param.teeth - 1, 3)"

@@ -16,3 +16,18 @@ generator: |
   map(range(0, param.sides), fun i ->
     let a = 360 * i / param.sides in
     [param.radius * cos(a), param.radius * sin(a)])
+operations:
+  - id: add_side
+    label: "Add Side"
+    description: >
+      Add one side: increases `sides` by one (a pentagon becomes a hexagon).
+      The vertices re-space to 360/sides degrees automatically.
+    set:
+      sides: "param.sides + 1"
+  - id: remove_side
+    label: "Remove Side"
+    description: >
+      Remove one side, clamped to the three-side minimum a polygon needs:
+      sets `sides` to max(sides - 1, 3).
+    set:
+      sides: "max(param.sides - 1, 3)"

@@ -142,6 +142,40 @@ content:
                     action: set_concept_param
                     params: { name: "p.name", value: "event.value" }
 
+        # ── OPERATIONS (§9) ──
+        # The concept's named edit verbs, one button per operation. Clicking a
+        # button dispatches `apply_concept_operation { op_id }`; the native arm
+        # resolves the operation's `set:` expressions over the instance's current
+        # params and re-generates live. Hidden when the concept declares none.
+        - id: concept_operations
+          type: container
+          layout: column
+          style: { gap: 4, padding: "4 0 0 0" }
+          bind:
+            visible: "active_document.selected_concept.operations.length > 0"
+          children:
+
+            - type: separator
+              orientation: horizontal
+
+            - id: concept_operations_list
+              type: container
+              layout: column
+              style: { gap: 4 }
+              foreach:
+                source: "active_document.selected_concept.operations"
+                as: op
+              do:
+                type: button
+                summary: "{{op.label}}"
+                description: "Apply this concept operation; the instance re-generates."
+                bind:
+                  label: "op.label"
+                behavior:
+                  - event: click
+                    action: apply_concept_operation
+                    params: { op_id: "op.id" }
+
     # ══ LIST MODE (Slice 1) ════════════════════════════════════
     # Nothing (or a non-concept) selected: the registry list + the Place footer.
 

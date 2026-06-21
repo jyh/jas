@@ -1,0 +1,104 @@
+[
+  {
+    "concept": "gear",
+    "op": "add_tooth",
+    "params": {
+      "teeth": 12,
+      "outer": 50,
+      "root": 38
+    },
+    "set": {
+      "teeth": "param.teeth + 1"
+    },
+    "expected": {
+      "teeth": 13
+    }
+  },
+  {
+    "concept": "gear",
+    "op": "remove_tooth",
+    "params": {
+      "teeth": 12,
+      "outer": 50,
+      "root": 38
+    },
+    "set": {
+      "teeth": "max(param.teeth - 1, 3)"
+    },
+    "expected": {
+      "teeth": 11
+    }
+  },
+  {
+    "concept": "gear",
+    "op": "remove_tooth",
+    "params": {
+      "teeth": 3,
+      "outer": 50,
+      "root": 38
+    },
+    "set": {
+      "teeth": "max(param.teeth - 1, 3)"
+    },
+    "expected": {
+      "teeth": 3
+    }
+  },
+  {
+    "concept": "gear",
+    "op": "add_tooth",
+    "params": {
+      "teeth": 12,
+      "outer": 50,
+      "root": 38
+    },
+    "set": {
+      "teeth": "param.teeth + 1"
+    },
+    "expected": {
+      "teeth": 13
+    }
+  },
+  {
+    "concept": "regular_polygon",
+    "op": "add_side",
+    "params": {
+      "sides": 5,
+      "radius": 50
+    },
+    "set": {
+      "sides": "param.sides + 1"
+    },
+    "expected": {
+      "sides": 6
+    }
+  },
+  {
+    "concept": "regular_polygon",
+    "op": "remove_side",
+    "params": {
+      "sides": 6,
+      "radius": 50
+    },
+    "set": {
+      "sides": "max(param.sides - 1, 3)"
+    },
+    "expected": {
+      "sides": 5
+    }
+  },
+  {
+    "concept": "regular_polygon",
+    "op": "remove_side",
+    "params": {
+      "sides": 3,
+      "radius": 50
+    },
+    "set": {
+      "sides": "max(param.sides - 1, 3)"
+    },
+    "expected": {
+      "sides": 3
+    }
+  }
+]

@@ -5830,6 +5830,20 @@
           "log": "set_concept_param"
         }
       ]
+    },
+    "apply_concept_operation": {
+      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). A `log` stub like the other concept mutators \u2014 each app's native arm finds the single selected `Generated`, looks the operation up in the registry, evaluates its `set:` expressions over the instance's current params bound under `param`, and bakes the resulting param changes into one journaled op (value-in-op); the geometry re-derives from the generator at the next render. Single undo op.\n",
+      "category": "concepts",
+      "params": {
+        "op_id": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "log": "apply_concept_operation"
+        }
+      ]
     }
   },
   "version": 1,
@@ -14436,6 +14450,53 @@
                     }
                   ]
                 }
+              },
+              {
+                "id": "concept_operations",
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "gap": 4,
+                  "padding": "4 0 0 0"
+                },
+                "bind": {
+                  "visible": "active_document.selected_concept.operations.length > 0"
+                },
+                "children": [
+                  {
+                    "type": "separator",
+                    "orientation": "horizontal"
+                  },
+                  {
+                    "id": "concept_operations_list",
+                    "type": "container",
+                    "layout": "column",
+                    "style": {
+                      "gap": 4
+                    },
+                    "foreach": {
+                      "source": "active_document.selected_concept.operations",
+                      "as": "op"
+                    },
+                    "do": {
+                      "type": "button",
+                      "summary": "{{op.label}}",
+                      "description": "Apply this concept operation; the instance re-generates.",
+                      "bind": {
+                        "label": "op.label"
+                      },
+                      "behavior": [
+                        {
+                          "event": "click",
+                          "action": "apply_concept_operation",
+                          "params": {
+                            "op_id": "op.id"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -24895,7 +24956,25 @@
         }
       ],
       "closed": true,
-      "generator": "map(range(0, param.teeth * 4), fun k ->\n  let step = 360 / param.teeth in\n  let t = floor(k / 4) in\n  let p = mod(k, 4) in\n  let a = t * step + (if p >= 2 then step / 2 else 0) in\n  let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in\n  [r * cos(a), r * sin(a)])\n"
+      "generator": "map(range(0, param.teeth * 4), fun k ->\n  let step = 360 / param.teeth in\n  let t = floor(k / 4) in\n  let p = mod(k, 4) in\n  let a = t * step + (if p >= 2 then step / 2 else 0) in\n  let r = if p == 1 then param.outer else if p == 2 then param.outer else param.root in\n  [r * cos(a), r * sin(a)])\n",
+      "operations": [
+        {
+          "id": "add_tooth",
+          "label": "Add Tooth",
+          "description": "Add one tooth to the gear: increases `teeth` by one. The gear outline re-derives from the generator at the new tooth count, so every sector re-spaces to 360/teeth degrees automatically.\n",
+          "set": {
+            "teeth": "param.teeth + 1"
+          }
+        },
+        {
+          "id": "remove_tooth",
+          "label": "Remove Tooth",
+          "description": "Remove one tooth, clamped to the three-tooth minimum a cog needs to read as a gear: sets `teeth` to max(teeth - 1, 3). At the floor the operation is a no-op on the value (the document still journals one undoable step).\n",
+          "set": {
+            "teeth": "max(param.teeth - 1, 3)"
+          }
+        }
+      ]
     },
     "regular_polygon": {
       "id": "regular_polygon",
@@ -24914,7 +24993,25 @@
         }
       ],
       "closed": true,
-      "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])\n"
+      "generator": "map(range(0, param.sides), fun i ->\n  let a = 360 * i / param.sides in\n  [param.radius * cos(a), param.radius * sin(a)])\n",
+      "operations": [
+        {
+          "id": "add_side",
+          "label": "Add Side",
+          "description": "Add one side: increases `sides` by one (a pentagon becomes a hexagon). The vertices re-space to 360/sides degrees automatically.\n",
+          "set": {
+            "sides": "param.sides + 1"
+          }
+        },
+        {
+          "id": "remove_side",
+          "label": "Remove Side",
+          "description": "Remove one side, clamped to the three-side minimum a polygon needs: sets `sides` to max(sides - 1, 3).\n",
+          "set": {
+            "sides": "max(param.sides - 1, 3)"
+          }
+        }
+      ]
     },
     "spiral": {
       "id": "spiral",
