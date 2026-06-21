@@ -14428,7 +14428,8 @@
                           "event": "change",
                           "action": "set_concept_param",
                           "params": {
-                            "name": "p.name"
+                            "name": "p.name",
+                            "value": "event.value"
                           }
                         }
                       ]

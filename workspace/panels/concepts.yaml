@@ -140,7 +140,7 @@ content:
                 behavior:
                   - event: change
                     action: set_concept_param
-                    params: { name: "p.name" }
+                    params: { name: "p.name", value: "event.value" }
 
     # ══ LIST MODE (Slice 1) ════════════════════════════════════
     # Nothing (or a non-concept) selected: the registry list + the Place footer.
