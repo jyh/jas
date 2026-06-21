@@ -443,6 +443,35 @@ impl Controller {
         model.edit_document(doc.replace_element(path, new_elem));
     }
 
+    /// Promote the raw element at `path` to a live `Generated` instance of
+    /// `concept_id` with the fitted `params` and placement `transform`
+    /// (CONCEPTS.md §10 — the fitter / `promote`). The recovered params + the
+    /// origin-centered generator + the placement transform re-render the same
+    /// geometry the raw element drew. The original element's identity (id, name,
+    /// opacity, …) is PRESERVED via its `common`; only the placement transform is
+    /// (re)set. Every operand is value-in-op — the detection already happened at
+    /// production time — so this just builds the element. No-op if `path` is
+    /// missing.
+    pub fn promote_to_concept(
+        model: &mut Model,
+        path: &ElementPath,
+        concept_id: &str,
+        params: serde_json::Value,
+        transform: crate::geometry::element::Transform,
+    ) {
+        let doc = model.document().clone();
+        let Some(existing) = doc.get_element(path) else {
+            return;
+        };
+        // Preserve the raw element's identity; (re)set only the placement.
+        let mut common = existing.common().clone();
+        common.transform = Some(transform);
+        let generated = Element::Live(crate::geometry::live::LiveVariant::Generated(
+            crate::geometry::live::GeneratedElem::new(concept_id.to_string(), params, common),
+        ));
+        model.edit_document(doc.replace_element(path, generated));
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance at
     /// `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md §7,
     /// Fork S6 — the inverse of Make Symbol). The target id is resolved by a
@@ -3858,6 +3887,65 @@ mod tests {
             panic!("expected a generated element");
         };
         assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(6.0));
+    }
+
+    #[test]
+    fn promote_to_concept_replaces_with_generated() {
+        // CONCEPTS.md §10: promote replaces a raw element with a Generated
+        // instance carrying the fitted params + the placement transform, while
+        // preserving the original element's identity (id/name).
+        use crate::geometry::element::{CommonProps, Element, PolygonElem, Transform};
+        let mut model = Model::default();
+        let poly = Element::Polygon(PolygonElem {
+            points: vec![(10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0)],
+            fill: None,
+            stroke: None,
+            common: CommonProps {
+                id: Some("p1".into()),
+                name: Some("my square".into()),
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        Controller::add_element(&mut model, poly);
+        let path = vec![0, 0];
+        let params = serde_json::json!({ "sides": 4.0, "radius": 10.0 });
+        let t = Transform::translate(5.0, 7.0);
+        Controller::promote_to_concept(&mut model, &path, "regular_polygon", params, t);
+
+        let el = model.document().get_element(&path).expect("promoted element");
+        let Element::Live(crate::geometry::live::LiveVariant::Generated(g)) = el else {
+            panic!("expected a generated element after promote");
+        };
+        assert_eq!(g.concept_id, "regular_polygon");
+        assert_eq!(g.params.get("sides").and_then(|v| v.as_f64()), Some(4.0));
+        assert_eq!(g.params.get("radius").and_then(|v| v.as_f64()), Some(10.0));
+        // placement transform applied …
+        let gt = g.common.transform.expect("placement transform set");
+        assert_eq!((gt.e, gt.f), (5.0, 7.0));
+        // … and the original identity preserved.
+        assert_eq!(g.common.id.as_deref(), Some("p1"));
+        assert_eq!(g.common.name.as_deref(), Some("my square"));
+    }
+
+    #[test]
+    fn promote_to_concept_missing_path_is_noop() {
+        let mut model = Model::default();
+        Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+        Controller::promote_to_concept(
+            &mut model,
+            &vec![9, 9],
+            "regular_polygon",
+            serde_json::json!({}),
+            crate::geometry::element::Transform::IDENTITY,
+        );
+        // The rect at [0,0] is untouched; the missing path stays missing.
+        assert!(matches!(
+            model.document().get_element(&vec![0, 0]),
+            Some(crate::geometry::element::Element::Rect(_))
+        ));
+        assert!(model.document().get_element(&vec![9, 9]).is_none());
     }
 
     #[test]

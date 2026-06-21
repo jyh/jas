@@ -50,6 +50,13 @@ impl Workspace {
         self.data.get("concepts")?.get(id)
     }
 
+    /// The whole concept registry (id -> spec), for code that must iterate
+    /// every concept — e.g. `promote` trying each concept's `fitter` detector
+    /// (CONCEPTS.md §10).
+    pub fn concepts(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.data.get("concepts")?.as_object()
+    }
+
     /// Get the icons map.
     pub fn icons(&self) -> &serde_json::Value {
         self.data.get("icons").unwrap_or(&serde_json::Value::Null)
