@@ -176,6 +176,33 @@ content:
                     action: apply_concept_operation
                     params: { op_id: "op.id" }
 
+        # ── CONSTRAINT VIOLATIONS (§11) ──
+        # Advisory warnings: the concept invariants this instance currently
+        # breaks (e.g. a gear with fewer than 3 teeth). Read-only — surfaced as a
+        # warning, never blocking the edit (artist-primacy). Hidden when none.
+        - id: concept_violations
+          type: container
+          layout: column
+          style: { gap: 2, padding: "4 0 0 0" }
+          bind:
+            visible: "active_document.selected_concept.violations.length > 0"
+          children:
+
+            - type: separator
+              orientation: horizontal
+
+            - id: concept_violations_list
+              type: container
+              layout: column
+              style: { gap: 2 }
+              foreach:
+                source: "active_document.selected_concept.violations"
+                as: v
+              do:
+                type: text
+                content: "{{v.message}}"
+                style: { font_size: 11, color: "#d98c00" }
+
     # ══ LIST MODE (Slice 1) ════════════════════════════════════
     # Nothing (or a non-concept) selected: the registry list + the Place footer.
 

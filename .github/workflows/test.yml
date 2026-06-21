@@ -62,6 +62,17 @@ jobs:
       - run: pip install PyYAML
       - run: bash scripts/check_concept_fitters_corpus.sh
 
+  concept-constraints-corpus-fresh:
+    name: concept-constraint corpus JSON up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+      - run: bash scripts/check_concept_constraints_corpus.sh
+
   genericity:
     name: Genericity policy
     runs-on: ubuntu-latest

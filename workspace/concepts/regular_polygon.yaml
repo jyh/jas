@@ -56,3 +56,10 @@ operations:
       sets `sides` to max(sides - 1, 3).
     set:
       sides: "max(param.sides - 1, 3)"
+constraints:
+  - id: min_sides
+    message: "A polygon needs at least 3 sides."
+    check: "param.sides >= 3"
+  - id: positive_radius
+    message: "The radius must be positive."
+    check: "param.radius > 0"

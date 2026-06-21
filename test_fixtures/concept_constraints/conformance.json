@@ -1,0 +1,182 @@
+[
+  {
+    "concept": "gear",
+    "constraints": [
+      {
+        "id": "min_teeth",
+        "check": "param.teeth >= 3"
+      },
+      {
+        "id": "outer_exceeds_root",
+        "check": "param.outer > param.root"
+      },
+      {
+        "id": "positive_root",
+        "check": "param.root > 0"
+      }
+    ],
+    "params": {
+      "teeth": 12,
+      "outer": 50,
+      "root": 38
+    },
+    "expected": []
+  },
+  {
+    "concept": "gear",
+    "constraints": [
+      {
+        "id": "min_teeth",
+        "check": "param.teeth >= 3"
+      },
+      {
+        "id": "outer_exceeds_root",
+        "check": "param.outer > param.root"
+      },
+      {
+        "id": "positive_root",
+        "check": "param.root > 0"
+      }
+    ],
+    "params": {
+      "teeth": 2,
+      "outer": 50,
+      "root": 38
+    },
+    "expected": [
+      "min_teeth"
+    ]
+  },
+  {
+    "concept": "gear",
+    "constraints": [
+      {
+        "id": "min_teeth",
+        "check": "param.teeth >= 3"
+      },
+      {
+        "id": "outer_exceeds_root",
+        "check": "param.outer > param.root"
+      },
+      {
+        "id": "positive_root",
+        "check": "param.root > 0"
+      }
+    ],
+    "params": {
+      "teeth": 12,
+      "outer": 30,
+      "root": 38
+    },
+    "expected": [
+      "outer_exceeds_root"
+    ]
+  },
+  {
+    "concept": "gear",
+    "constraints": [
+      {
+        "id": "min_teeth",
+        "check": "param.teeth >= 3"
+      },
+      {
+        "id": "outer_exceeds_root",
+        "check": "param.outer > param.root"
+      },
+      {
+        "id": "positive_root",
+        "check": "param.root > 0"
+      }
+    ],
+    "params": {
+      "teeth": 1,
+      "outer": 10,
+      "root": 20
+    },
+    "expected": [
+      "min_teeth",
+      "outer_exceeds_root"
+    ]
+  },
+  {
+    "concept": "gear",
+    "constraints": [
+      {
+        "id": "min_teeth",
+        "check": "param.teeth >= 3"
+      },
+      {
+        "id": "outer_exceeds_root",
+        "check": "param.outer > param.root"
+      },
+      {
+        "id": "positive_root",
+        "check": "param.root > 0"
+      }
+    ],
+    "params": {
+      "teeth": 12,
+      "outer": 50,
+      "root": 38
+    },
+    "expected": []
+  },
+  {
+    "concept": "regular_polygon",
+    "constraints": [
+      {
+        "id": "min_sides",
+        "check": "param.sides >= 3"
+      },
+      {
+        "id": "positive_radius",
+        "check": "param.radius > 0"
+      }
+    ],
+    "params": {
+      "sides": 6,
+      "radius": 50
+    },
+    "expected": []
+  },
+  {
+    "concept": "regular_polygon",
+    "constraints": [
+      {
+        "id": "min_sides",
+        "check": "param.sides >= 3"
+      },
+      {
+        "id": "positive_radius",
+        "check": "param.radius > 0"
+      }
+    ],
+    "params": {
+      "sides": 2,
+      "radius": 50
+    },
+    "expected": [
+      "min_sides"
+    ]
+  },
+  {
+    "concept": "regular_polygon",
+    "constraints": [
+      {
+        "id": "min_sides",
+        "check": "param.sides >= 3"
+      },
+      {
+        "id": "positive_radius",
+        "check": "param.radius > 0"
+      }
+    ],
+    "params": {
+      "sides": 6,
+      "radius": 0
+    },
+    "expected": [
+      "positive_radius"
+    ]
+  }
+]
