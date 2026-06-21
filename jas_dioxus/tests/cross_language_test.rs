@@ -494,3 +494,58 @@ fn fitters_conformance() {
         failures.join("\n"),
     );
 }
+
+// --- Concept-constraint conformance (shared corpus) ---
+//
+// Loads test_fixtures/concept_constraints/conformance.json (compiled from
+// workspace/concepts/*.yaml + workspace/tests/concept_constraints.yaml). For each
+// case, evaluates each constraint's `check` expression with the case's params
+// bound under `param` and collects the constraints whose result is NOT truthy
+// (`Value::to_bool`, the same truthiness `if` uses) — the violations, in declared
+// order — then asserts they match `expected`. A constraint is just a boolean
+// expression, so this reuses the evaluator — pinning concept CHECKING across all
+// apps (CONCEPTS.md §11). Checking is advisory + read-only (no op-log verb).
+
+#[test]
+fn constraints_conformance() {
+    use jas_dioxus::interpreter::expr;
+
+    let raw = read_fixture("concept_constraints/conformance.json");
+    let cases: serde_json::Value =
+        serde_json::from_str(&raw).expect("conformance.json parses as JSON");
+    let cases = cases.as_array().expect("corpus is a JSON array");
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let concept = case["concept"].as_str().unwrap_or("?");
+        let mut ctx = serde_json::Map::new();
+        ctx.insert("param".to_string(), case["params"].clone());
+        let ctx = serde_json::Value::Object(ctx);
+
+        let constraints = case["constraints"].as_array().expect("constraints array");
+        let violated: Vec<String> = constraints
+            .iter()
+            .filter(|c| {
+                let check = c["check"].as_str().expect("check is a string");
+                !expr::eval(check, &ctx).to_bool()
+            })
+            .map(|c| c["id"].as_str().unwrap_or("?").to_string())
+            .collect();
+        let expected: Vec<String> = case["expected"]
+            .as_array()
+            .expect("expected array")
+            .iter()
+            .map(|v| v.as_str().unwrap_or("?").to_string())
+            .collect();
+        if violated != expected {
+            failures.push(format!(
+                "{concept}: expected violations {expected:?}, got {violated:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "concept-constraint conformance failures:\n{}",
+        failures.join("\n"),
+    );
+}

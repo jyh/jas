@@ -2230,11 +2230,37 @@ fn build_selected_concept_view(
             }));
         }
     }
+    // The concept's VIOLATED constraints (CONCEPTS.md §11): evaluate each
+    // constraint's `check` over the instance's params; collect the ones that are
+    // NOT truthy (`to_bool`, the same truthiness `if` uses), in declared order.
+    // Advisory + read-only — the panel surfaces these as a warning. Empty when
+    // the concept declares no `constraints:` or all hold.
+    let mut violations_out: Vec<serde_json::Value> = Vec::new();
+    if let Some(cons) = concept.get("constraints").and_then(|v| v.as_array()) {
+        let mut ctx = serde_json::Map::new();
+        ctx.insert("param".to_string(), instance_params.clone());
+        let ctx = serde_json::Value::Object(ctx);
+        for c in cons {
+            let Some(cid) = c.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(check) = c.get("check").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !super::expr::eval(check, &ctx).to_bool() {
+                violations_out.push(serde_json::json!({
+                    "id": cid,
+                    "message": c.get("message").and_then(|v| v.as_str()).unwrap_or(""),
+                }));
+            }
+        }
+    }
     serde_json::json!({
         "concept_id": concept_id,
         "name": name,
         "params": params_out,
         "operations": operations_out,
+        "violations": violations_out,
     })
 }
 
@@ -11614,6 +11640,37 @@ mod tests {
         assert!(
             ids.contains(&"add_side") && ids.contains(&"remove_side"),
             "selected_concept.operations lists the concept's verbs: {ids:?}"
+        );
+        // violations (CONCEPTS.md §11): valid params (sides 6, radius 50) ⇒ none.
+        assert_eq!(
+            sc["violations"].as_array().expect("violations array").len(),
+            0,
+            "a valid instance has no constraint violations"
+        );
+    }
+
+    #[test]
+    fn active_document_view_selected_concept_reports_constraint_violations() {
+        // CONCEPTS.md §11: a Generated whose params break an invariant surfaces
+        // the violated constraint (id + message) in selected_concept.violations.
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        // sides = 2 violates min_sides (needs >= 3); radius is fine.
+        let params = serde_json::json!({ "radius": 50.0, "sides": 2.0 });
+        crate::document::controller::Controller::place_concept_instance(
+            &mut st.tabs[st.active_tab].model,
+            "regular_polygon",
+            params,
+            "g1",
+        );
+        let view = build_active_document_view(&st);
+        let vios = view["selected_concept"]["violations"]
+            .as_array()
+            .expect("violations array");
+        let ids: Vec<&str> = vios.iter().filter_map(|v| v["id"].as_str()).collect();
+        assert_eq!(ids, vec!["min_sides"], "min_sides is flagged: {ids:?}");
+        assert!(
+            vios[0]["message"].as_str().unwrap_or("").contains("at least 3 sides"),
+            "the violation carries its human-readable message"
         );
     }
 
