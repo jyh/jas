@@ -1145,6 +1145,29 @@ fn str_field<'a>(op: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     op.get(key).and_then(|v| v.as_str())
 }
 
+/// Parse a `transform` field — a 6-element matrix `[a,b,c,d,e,f]` — into a
+/// `Transform`, defaulting to identity when absent or malformed (CONCEPTS.md §10
+/// `promote`). Hardened: a wrong-length / non-numeric array is identity, never a
+/// panic.
+fn parse_transform(v: Option<&serde_json::Value>) -> crate::geometry::element::Transform {
+    let ident = crate::geometry::element::Transform::IDENTITY;
+    let Some(arr) = v.and_then(|v| v.as_array()) else {
+        return ident;
+    };
+    if arr.len() != 6 {
+        return ident;
+    }
+    let m: Vec<f64> = arr.iter().map(|n| n.as_f64().unwrap_or(0.0)).collect();
+    crate::geometry::element::Transform {
+        a: m[0],
+        b: m[1],
+        c: m[2],
+        d: m[3],
+        e: m[4],
+        f: m[5],
+    }
+}
+
 // ── OP_LOG.md §5 Fork 4 / RECORDED_ELEMENTS.md — the id-primary op family ─────
 //
 // The id-primary verbs `select_by_ids` / `move_by_ids` / `copy_by_ids` promote the
@@ -1455,6 +1478,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
                 return;
             };
             Controller::apply_concept_operation(model, &path, changes);
+        }
+        // Promote a raw shape to a Generated concept instance (CONCEPTS.md §10 —
+        // the fitter / `promote`). Every operand is value-in-op: the detection
+        // ran at production time, so replay just rebuilds the element. The
+        // `transform` is the 6-element matrix `[a,b,c,d,e,f]` (default identity).
+        "promote_to_concept" => {
+            let (Some(path), Some(concept_id)) =
+                (parse_path(op.get("path")), str_field(op, "concept_id"))
+            else {
+                return;
+            };
+            let params = op
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+            let transform = parse_transform(op.get("transform"));
+            Controller::promote_to_concept(model, &path, concept_id, params, transform);
         }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {

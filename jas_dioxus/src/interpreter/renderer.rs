@@ -560,6 +560,19 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         // orphan_count == 0: fall through to the YAML action (delete inline).
     }
 
+    // Native intercept: track the Concepts-panel selection (CONCEPTS.md §6).
+    // `concepts_panel_select` is BOTH a generic `set_panel_state` (which drives
+    // the panel UI binding via the YAML catalog) AND the source of the native
+    // `st.concepts_selected` that `place_concept_instance` reads. So set the
+    // native field here and DO NOT return — fall through so the YAML effect
+    // still runs (the "native in addition to set_panel_state" contract).
+    if action == "concepts_panel_select" {
+        st.concepts_selected = params
+            .get("concept_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+    }
+
     // Native intercept: Symbols panel operations (SYMBOLS.md §7, §8).
     // These mint ids by the value-in-op rule (like the make_instance arm
     // in menu_bar.rs) and call the shared symbol Controller ops, so the
@@ -571,6 +584,15 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         || action == "place_instance"
         || action == "delete_symbol_action"
         || action == "delete_symbol_orphan_confirm_ok"
+        // Concepts panel native verbs (CONCEPTS.md §6-10): each is a pure-native
+        // mutator whose YAML action is a `log` stub, so it runs here and returns
+        // [] (no further YAML effects). `concepts_panel_select` is NOT listed: it
+        // must ALSO run its generic `set_panel_state` YAML effect, so it falls
+        // through to the catalog and is tracked natively by a separate intercept.
+        || action == "place_concept_instance"
+        || action == "set_concept_param"
+        || action == "apply_concept_operation"
+        || action == "promote_to_concept"
     {
         use crate::document::artboard::generate_element_id;
         use crate::document::controller::Controller;
@@ -664,15 +686,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                 return Vec::new();
             }
             // ── Concepts panel (CONCEPTS.md §6) ──
-            // Track the panel-selected concept natively (mirrors symbols), in
-            // addition to the generic set_panel_state that drives the panel UI.
-            "concepts_panel_select" => {
-                st.concepts_selected = params
-                    .get("concept_id")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                return Vec::new();
-            }
+            // (`concepts_panel_select` is handled by an early intercept above so
+            // it can ALSO run its generic `set_panel_state` YAML effect.)
             // Place a generated instance of the panel-selected concept, with the
             // concept's declared default params, minting a fresh id (value-in-op).
             "place_concept_instance" => {
@@ -832,6 +847,121 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                             });
                         }
                     }
+                }
+                return Vec::new();
+            }
+            // Promote the single selected raw shape to a Generated concept
+            // instance (CONCEPTS.md §10 — the fitter / promote). Extract the
+            // element's world-space vertices, try each registered concept's
+            // `fitter` over `shape.points`, and on the first match split its
+            // result `[params..., cx, cy, rotation]` into the concept params
+            // (first K, by declared order) and a placement transform
+            // (translate · rotate). Everything is baked into the op value-in-op
+            // and journaled via op_apply; a no-match is a silent no-op.
+            "promote_to_concept" => {
+                if let Some(tab) = st.tab_mut() {
+                    let path = {
+                        let sel = &tab.model.document().selection;
+                        if sel.len() == 1 {
+                            Some(sel[0].path.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(path) = path else { return Vec::new(); };
+                    let Some(elem) = tab.model.document().get_element(&path).cloned() else {
+                        return Vec::new();
+                    };
+                    // Only a Polygon / Polyline carries promotable vertices in v1.
+                    let raw_points: Vec<(f64, f64)> = match &elem {
+                        crate::geometry::element::Element::Polygon(p) => p.points.clone(),
+                        crate::geometry::element::Element::Polyline(p) => p.points.clone(),
+                        _ => return Vec::new(),
+                    };
+                    // Bake any element transform into the points so the fitter
+                    // sees WORLD space (the promoted instance re-places via its
+                    // own transform).
+                    let pts: Vec<(f64, f64)> = match elem.common().transform.as_ref() {
+                        Some(t) => raw_points
+                            .iter()
+                            .map(|(x, y)| t.apply_point(*x, *y))
+                            .collect(),
+                        None => raw_points,
+                    };
+                    let points_json = serde_json::Value::Array(
+                        pts.iter().map(|(x, y)| serde_json::json!([*x, *y])).collect(),
+                    );
+                    let mut shape = serde_json::Map::new();
+                    shape.insert("points".to_string(), points_json);
+                    let mut ctx = serde_json::Map::new();
+                    ctx.insert("shape".to_string(), serde_json::Value::Object(shape));
+                    let ctx = serde_json::Value::Object(ctx);
+
+                    // Try each registered concept's fitter in sorted-id order (a
+                    // deterministic first-match); keep the first that matches.
+                    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+                        return Vec::new();
+                    };
+                    let Some(registry) = ws.concepts() else { return Vec::new(); };
+                    let mut ids: Vec<&String> = registry.keys().collect();
+                    ids.sort();
+                    let mut chosen: Option<(String, serde_json::Value, f64, f64, f64)> = None;
+                    for id in ids {
+                        let concept = &registry[id];
+                        let Some(fitter) = concept.get("fitter").and_then(|v| v.as_str()) else {
+                            continue;
+                        };
+                        let super::expr_types::Value::List(items) = super::expr::eval(fitter, &ctx)
+                        else {
+                            continue; // Null / non-list ⇒ no match for this concept
+                        };
+                        let param_names: Vec<String> = concept
+                            .get("params")
+                            .and_then(|v| v.as_array())
+                            .map(|ps| {
+                                ps.iter()
+                                    .filter_map(|p| {
+                                        p.get("name").and_then(|n| n.as_str()).map(String::from)
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let k = param_names.len();
+                        if items.len() < k + 3 {
+                            continue; // malformed fitter output (need params + cx,cy,rot)
+                        }
+                        let nums: Vec<f64> =
+                            items.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect();
+                        let mut params = serde_json::Map::new();
+                        for (i, name) in param_names.iter().enumerate() {
+                            params.insert(name.clone(), serde_json::json!(nums[i]));
+                        }
+                        chosen = Some((
+                            id.clone(),
+                            serde_json::Value::Object(params),
+                            nums[k],
+                            nums[k + 1],
+                            nums[k + 2],
+                        ));
+                        break;
+                    }
+                    let Some((concept_id, params, cx, cy, rot)) = chosen else {
+                        return Vec::new(); // nothing matched: no-op
+                    };
+                    // Placement: translate(cx,cy) * rotate(rot) — rotate then translate.
+                    let t = crate::geometry::element::Transform::translate(cx, cy)
+                        .multiply(&crate::geometry::element::Transform::rotate(rot));
+                    let op = serde_json::json!({
+                        "op": "promote_to_concept",
+                        "path": path,
+                        "concept_id": concept_id,
+                        "params": params,
+                        "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
+                    });
+                    tab.model.with_txn(|m| {
+                        m.name_txn("promote_to_concept");
+                        crate::document::op_apply::op_apply(m, &op);
+                    });
                 }
                 return Vec::new();
             }
@@ -11484,6 +11614,97 @@ mod tests {
         assert!(
             ids.contains(&"add_side") && ids.contains(&"remove_side"),
             "selected_concept.operations lists the concept's verbs: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn promote_action_detects_and_replaces_with_generated() {
+        // CONCEPTS.md §10 — the full promote flow through dispatch_action: a
+        // selected regular hexagon is detected by the regular_polygon fitter and
+        // replaced with a Generated{sides:6, radius:50} at ~identity placement.
+        use crate::geometry::element::{CommonProps, Element, PolygonElem};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        // A regular hexagon (radius 50), centred at origin, first vertex on +x —
+        // exactly what regular_polygon{sides:6, radius:50} generates.
+        let pts: Vec<(f64, f64)> = (0..6)
+            .map(|i| {
+                let a = (60.0 * i as f64).to_radians();
+                (50.0 * a.cos(), 50.0 * a.sin())
+            })
+            .collect();
+        let hex = Element::Polygon(PolygonElem {
+            points: pts,
+            fill: None,
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        crate::document::controller::Controller::add_element(
+            &mut st.tabs[st.active_tab].model,
+            hex,
+        );
+        // Select the hexagon, then promote the selection.
+        crate::document::controller::Controller::set_selection(
+            &mut st.tabs[st.active_tab].model,
+            vec![crate::document::document::ElementSelection::all(vec![0, 0])],
+        );
+        let empty = serde_json::Map::new();
+        dispatch_action("promote_to_concept", &empty, &mut st);
+
+        let el = st.tabs[st.active_tab]
+            .model
+            .document()
+            .get_element(&vec![0, 0])
+            .cloned()
+            .expect("element at [0,0]");
+        let Element::Live(crate::geometry::live::LiveVariant::Generated(g)) = el else {
+            panic!("expected promote to produce a Generated, got {el:?}");
+        };
+        assert_eq!(g.concept_id, "regular_polygon");
+        assert!(
+            (g.params.get("sides").and_then(|v| v.as_f64()).unwrap() - 6.0).abs() < 1e-9,
+            "recovered sides = 6"
+        );
+        assert!(
+            (g.params.get("radius").and_then(|v| v.as_f64()).unwrap() - 50.0).abs() < 1e-9,
+            "recovered radius = 50"
+        );
+        // Canonical placement (cx=cy=rotation≈0) ⇒ ~identity transform.
+        let t = g.common.transform.expect("placement transform");
+        assert!(
+            t.e.abs() < 1e-6 && t.f.abs() < 1e-6,
+            "canonical hexagon places at the origin: {t:?}"
+        );
+    }
+
+    #[test]
+    fn place_concept_instance_via_dispatch_creates_generated() {
+        // CONCEPTS.md §6 — the full place flow through dispatch_action (the path
+        // panel buttons take at renderer.rs:4736): select a concept, then
+        // dispatch place_concept_instance, and a Generated is appended. This is a
+        // regression guard for the dispatch-gate bug — the native concept verbs
+        // were inside a `match` gated to symbol actions only, so they never fired.
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut sel_params = serde_json::Map::new();
+        sel_params.insert("concept_id".to_string(), serde_json::json!("regular_polygon"));
+        dispatch_action("concepts_panel_select", &sel_params, &mut st);
+        let empty = serde_json::Map::new();
+        dispatch_action("place_concept_instance", &empty, &mut st);
+
+        let el = st.tabs[st.active_tab]
+            .model
+            .document()
+            .get_element(&vec![0, 0])
+            .cloned();
+        assert!(
+            matches!(
+                el,
+                Some(crate::geometry::element::Element::Live(
+                    crate::geometry::live::LiveVariant::Generated(_)
+                ))
+            ),
+            "place_concept_instance via dispatch_action should append a Generated, got {el:?}"
         );
     }
 

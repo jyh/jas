@@ -415,3 +415,82 @@ fn operations_conformance() {
         failures.join("\n"),
     );
 }
+
+// --- Concept-fitter conformance (shared corpus) ---
+//
+// Loads test_fixtures/concept_fitters/conformance.json (compiled from
+// workspace/concepts/*.yaml + workspace/tests/concept_fitters.yaml). For each
+// case, evaluates the concept's `fitter` expression with the case's points bound
+// under `shape.points` and asserts the result matches `expected` — `null` for no
+// match, else the flat `[params..., cx, cy, rotation]` list (1e-9). A fitter is
+// the dual of the generator and just an expression, so this reuses the evaluator
+// — pinning concept DETECTION across all apps (CONCEPTS.md §10). The production
+// promote handler runs exactly this and bakes the recovered values into the op.
+
+#[test]
+fn fitters_conformance() {
+    use jas_dioxus::interpreter::expr;
+    use jas_dioxus::interpreter::expr_types::Value;
+
+    let raw = read_fixture("concept_fitters/conformance.json");
+    let cases: serde_json::Value =
+        serde_json::from_str(&raw).expect("conformance.json parses as JSON");
+    let cases = cases.as_array().expect("corpus is a JSON array");
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let concept = case["concept"].as_str().unwrap_or("?");
+        let fitter = case["fitter"].as_str().expect("fitter is a string");
+        // Bind the input vertices under `shape.points`, exactly as the production
+        // promote handler does at detect time.
+        let mut shape = serde_json::Map::new();
+        shape.insert("points".to_string(), case["points"].clone());
+        let mut ctx = serde_json::Map::new();
+        ctx.insert("shape".to_string(), serde_json::Value::Object(shape));
+        let ctx = serde_json::Value::Object(ctx);
+
+        let result = expr::eval(fitter, &ctx);
+        let expected = &case["expected"];
+
+        if expected.is_null() {
+            if !matches!(result, Value::Null) {
+                failures.push(format!("{concept}: expected no match (null), got {result:?}"));
+            }
+            continue;
+        }
+        let exp = expected.as_array().expect("expected is an array");
+        let got = match &result {
+            Value::List(items) => items,
+            other => {
+                failures.push(format!("{concept}: expected {exp:?}, got non-list {other:?}"));
+                continue;
+            }
+        };
+        if got.len() != exp.len() {
+            failures.push(format!(
+                "{concept}: result arity {} != expected {}",
+                got.len(),
+                exp.len()
+            ));
+            continue;
+        }
+        for (i, (g, e)) in got.iter().zip(exp.iter()).enumerate() {
+            let gv = match g.as_f64() {
+                Some(n) => n,
+                None => {
+                    failures.push(format!("{concept} output[{i}]: non-numeric {g:?}"));
+                    continue;
+                }
+            };
+            let ev = e.as_f64().unwrap();
+            if (gv - ev).abs() >= 1e-9 {
+                failures.push(format!("{concept} output[{i}]: expected {ev}, got {gv}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "concept-fitter conformance failures:\n{}",
+        failures.join("\n"),
+    );
+}
