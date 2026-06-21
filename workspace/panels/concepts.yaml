@@ -13,12 +13,14 @@ description: >
   shipped, registry-backed *generator* rather than a document-local element, and
   an instance carries editable parameters rather than just a transform.
 
-  This first slice is a TEXT LIST modeled directly on the Symbols panel — a
-  scrolling foreach over the registry-derived concept list, one row per concept,
-  plus a footer with a Place action. Per-instance parameter editing (changing a
-  gear's tooth count and watching it re-generate live — the §6.4 "tune the same
-  parameters without redoing anything" promise), thumbnails, and drag-to-place are
-  deferred to a later slice.
+  The panel is DUAL-MODE. With nothing (or a non-concept) selected it is the
+  registry LIST — a scrolling foreach over the registry-derived concept list, one
+  row per concept, plus a Place footer (Slice 1, modeled on the Symbols panel).
+  When a single generated concept instance is selected on the canvas it switches
+  to PARAMS mode — that instance's editable parameters, where committing a field
+  re-generates the geometry live (the §6.4 "tune the same parameters without
+  redoing anything" promise, Slice 2). Thumbnails and drag-to-place remain
+  deferred.
 
   === Data source ===
 
@@ -86,55 +88,113 @@ content:
   style: { padding: 0, gap: 0 }
   children:
 
-    # ── Row list ──────────────────────────────────────────────
+    # ══ PARAMS MODE (Slice 2) ══════════════════════════════════
+    # A single generated concept instance is selected on the canvas: show its
+    # editable parameters. Each `number_input` dispatches `set_concept_param` on
+    # commit, with the committed numeric value injected as `param.value`
+    # alongside the declared `param.name`, so the instance re-generates live (the
+    # §6.4 "tune the same parameters" promise). `active_document.selected_concept`
+    # is null unless exactly one Generated element is selected; then it is
+    # `{ concept_id, name, params: [{ name, value, min, max }, …] }` — the
+    # concept's param schema merged with the instance's current values.
 
-    - id: concepts_list
+    - id: concepts_params
       type: container
       layout: column
-      style: { flex: 1, overflow_y: auto, padding: 0, gap: 0 }
-      foreach:
-        source: "data.concepts"
-        as: concept
-      do:
-        type: container
-        layout: row
-        style: { height: 24, padding: "0 6", gap: 4, alignment: center }
-        bind:
-          background: "if concept.id == panel.selected_concept then '{{theme.colors.selection}}' else 'transparent'"
-        children:
-
-          # CONCEPT_NAME: click panel-selects this concept
-          - id: concept_name
-            type: text
-            content: "{{concept.name}}"
-            style: { flex: 1, font_size: 11, color: "{{theme.colors.text}}", overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
-            behavior:
-              - event: click
-                action: concepts_panel_select
-                params: { concept_id: "concept.id" }
-
-    # ── Separator ─────────────────────────────────────────────
-
-    - type: separator
-      orientation: horizontal
-
-    # ── Footer ────────────────────────────────────────────────
-
-    - id: concepts_footer
-      type: container
-      layout: row
-      style: { padding: "4 6", gap: 4, alignment: center }
+      style: { padding: "4 6", gap: 4 }
+      bind:
+        visible: "active_document.selected_concept != null"
       children:
 
+        - id: concept_params_title
+          type: text
+          content: "{{active_document.selected_concept.name}}"
+          style: { font_size: 11, color: "{{theme.colors.text}}", padding: "0 0 2 0" }
+
+        - type: separator
+          orientation: horizontal
+
+        - id: concept_params_list
+          type: container
+          layout: column
+          style: { gap: 4 }
+          foreach:
+            source: "active_document.selected_concept.params"
+            as: p
+          do:
+            type: container
+            layout: row
+            style: { gap: 6, alignment: center }
+            children:
+              - type: text
+                content: "{{p.name}}"
+                style: { flex: 1, font_size: 11, color: "{{theme.colors.text}}" }
+              - type: number_input
+                summary: "{{p.name}}"
+                description: "Edit this parameter; the concept instance re-generates on commit."
+                style: { width: 56 }
+                bind:
+                  value: "p.value"
+                  min: "p.min"
+                  max: "p.max"
+                behavior:
+                  - event: change
+                    action: set_concept_param
+                    params: { name: "p.name" }
+
+    # ══ LIST MODE (Slice 1) ════════════════════════════════════
+    # Nothing (or a non-concept) selected: the registry list + the Place footer.
+
+    - id: concepts_list_mode
+      type: container
+      layout: column
+      style: { flex: 1, padding: 0, gap: 0 }
+      bind:
+        visible: "active_document.selected_concept == null"
+      children:
+
+        - id: concepts_list
+          type: container
+          layout: column
+          style: { flex: 1, overflow_y: auto, padding: 0, gap: 0 }
+          foreach:
+            source: "data.concepts"
+            as: concept
+          do:
+            type: container
+            layout: row
+            style: { height: 24, padding: "0 6", gap: 4, alignment: center }
+            bind:
+              background: "if concept.id == panel.selected_concept then '{{theme.colors.selection}}' else 'transparent'"
+            children:
+
+              # CONCEPT_NAME: click panel-selects this concept
+              - id: concept_name
+                type: text
+                content: "{{concept.name}}"
+                style: { flex: 1, font_size: 11, color: "{{theme.colors.text}}", overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
+                behavior:
+                  - event: click
+                    action: concepts_panel_select
+                    params: { concept_id: "concept.id" }
+
+        - type: separator
+          orientation: horizontal
+
         # PLACE_INSTANCE_BUTTON — a concept is panel-selected
-        - id: concept_place
-          type: icon_button
-          icon: symbol_place
-          summary: "Place Instance"
-          description: "Place a new instance of the panel-selected concept on the active layer"
-          style: { size: 16 }
-          bind:
-            disabled: "panel.selected_concept == null"
-          behavior:
-            - event: click
-              action: place_concept_instance
+        - id: concepts_footer
+          type: container
+          layout: row
+          style: { padding: "4 6", gap: 4, alignment: center }
+          children:
+            - id: concept_place
+              type: icon_button
+              icon: symbol_place
+              summary: "Place Instance"
+              description: "Place a new instance of the panel-selected concept on the active layer"
+              style: { size: 16 }
+              bind:
+                disabled: "panel.selected_concept == null"
+              behavior:
+                - event: click
+                  action: place_concept_instance
