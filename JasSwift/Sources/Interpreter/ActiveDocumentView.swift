@@ -206,10 +206,25 @@ private func selectedConceptView(_ doc: Document) -> Any {
             paramsOut.append(entry)
         }
     }
+    // The concept's named operations (CONCEPTS.md §9): id + label + description,
+    // so the panel can render a button per operation. Empty when the concept
+    // declares no `operations:`. Mirrors Rust `build_selected_concept_view`.
+    var operationsOut: [[String: Any]] = []
+    if let ops = concept["operations"] as? [[String: Any]] {
+        for o in ops {
+            guard let oid = o["id"] as? String else { continue }
+            operationsOut.append([
+                "id": oid,
+                "label": (o["label"] as? String) ?? oid,
+                "description": (o["description"] as? String) ?? "",
+            ])
+        }
+    }
     return [
         "concept_id": gen.conceptId,
         "name": name,
         "params": paramsOut,
+        "operations": operationsOut,
     ] as [String: Any]
 }
 

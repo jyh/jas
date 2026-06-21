@@ -911,6 +911,39 @@ private func makeMarqueeCtrl() -> Controller {
     }
 }
 
+@Test func applyConceptOperationMergesChanges() {
+    // CONCEPTS.md §9: an operation's RESOLVED changes map is merged into the
+    // Generated's params (only named params change; others untouched). Mirrors
+    // Rust apply_concept_operation_merges_changes.
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 6, "radius": 50], elemId: "g1")
+    // add_side resolves to { sides: 7 } at production time.
+    ctrl.applyConceptOperation([0, 0], changes: ["sides": 7.0])
+    if case .live(.generated(let g)) = ctrl.document.getElement([0, 0]) {
+        #expect((g.params["sides"] as? Double) == 7)
+        #expect((g.params["radius"] as? Int) == 50)
+    } else {
+        Issue.record("expected a Generated at [0,0]")
+    }
+}
+
+@Test func applyConceptOperationEmptyChangesIsNoop() {
+    // An empty changes map mutates nothing (the no-op guard). Mirrors Rust
+    // apply_concept_operation_empty_changes_is_noop.
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeConceptInstance(
+        conceptId: "regular_polygon", params: ["sides": 6, "radius": 50], elemId: "g1")
+    ctrl.applyConceptOperation([0, 0], changes: [:])
+    if case .live(.generated(let g)) = ctrl.document.getElement([0, 0]) {
+        #expect((g.params["sides"] as? Int) == 6)
+    } else {
+        Issue.record("expected a Generated at [0,0]")
+    }
+}
+
 @Test func placeInstanceDanglingMasterOk() {
     // It is fine if the master does not exist; the instance still appears
     // (renders empty until the master exists — dangling is handled).

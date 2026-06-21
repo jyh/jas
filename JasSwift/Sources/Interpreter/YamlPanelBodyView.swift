@@ -993,6 +993,16 @@ struct YamlElementView: View {
                 ConceptsPanel.setParam(model: model, name: pname, value: value)
             }
             return
+        case "apply_concept_operation":
+            // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML
+            // action is a `log` stub). The operation id arrives as `params.op_id`;
+            // resolve its `set:` expressions over the single selected Generated
+            // instance's current params and bake the result into the op.
+            // Mirrors the Rust `apply_concept_operation` arm.
+            if let opId = params["op_id"] as? String {
+                ConceptsPanel.applyOperation(model: model, opId: opId)
+            }
+            return
         default:
             break
         }

@@ -196,6 +196,26 @@ public class Controller {
         model.editDocument(doc.replaceElement(path, with: .live(.generated(gen))))
     }
 
+    /// Apply a concept operation's RESOLVED `changes` to the generated instance
+    /// at `path` (CONCEPTS.md §9): merge each `name -> value` of `changes` into
+    /// the `GeneratedElem`'s params (a multi-param generalization of
+    /// `setConceptParam`). `changes` is the production-resolved effect of an
+    /// operation (value-in-op), so this performs no expression evaluation — it
+    /// just writes the values; the geometry re-derives from the generator at the
+    /// next render. No-op if `path` is invalid, the element there is not a
+    /// generated instance, or `changes` is empty. Mirrors Rust
+    /// `Controller::apply_concept_operation`.
+    public func applyConceptOperation(_ path: ElementPath, changes: [String: Any]) {
+        guard !changes.isEmpty else { return }
+        let doc = model.document
+        guard let elem = doc.tryGetElement(path) else { return }
+        guard case .live(.generated(var gen)) = elem else { return }
+        for (name, value) in changes {
+            gen.params[name] = value
+        }
+        model.editDocument(doc.replaceElement(path, with: .live(.generated(gen))))
+    }
+
     /// Detach (break the link / expand): replace the `ReferenceElem` instance
     /// at `path` with an INDEPENDENT copy of its resolved target (SYMBOLS.md
     /// §7, Fork S6 — the inverse of Make Symbol). The target id is resolved by

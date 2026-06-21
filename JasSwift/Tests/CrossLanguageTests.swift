@@ -1793,6 +1793,61 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         "concept conformance failures:\n\(failures.joined(separator: "\n"))")
 }
 
+// MARK: - Concept-operation conformance (shared corpus)
+
+/// Loads test_fixtures/concept_operations/conformance.json (compiled from
+/// workspace/concepts/*.yaml + workspace/tests/concept_operations.yaml). For each
+/// case, evaluates the operation's `set:` expressions with the case's params
+/// bound under `param` and asserts the resolved value of each changed param
+/// matches the expected change (1e-9). An operation's effect is just expression
+/// evaluation, so this reuses the evaluator — pinning concept-operation
+/// RESOLUTION across all apps (CONCEPTS.md §9). The production handler bakes
+/// exactly these resolved `changes` into the op (value-in-op), so the gate also
+/// pins what gets journaled. Mirrors Rust `operations_conformance`.
+@Test func operationsConformance() throws {
+    let raw = readFixture("concept_operations/conformance.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = raw.data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    func num(_ v: Any?) -> Double? {
+        if let d = v as? Double { return d }
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let i = v as? Int { return Double(i) }
+        return nil
+    }
+
+    var failures: [String] = []
+    for tc in cases {
+        let concept = tc["concept"] as? String ?? "?"
+        let op = tc["op"] as? String ?? "?"
+        // Bind the current params under the `param` namespace (the generator's
+        // namespace), exactly as the production handler does at resolve time.
+        let params = tc["params"] as! [String: Any]
+        let ctx: [String: Any] = ["param": params]
+
+        let set = tc["set"] as! [String: Any]
+        let expected = tc["expected"] as! [String: Any]
+        for (name, exprAny) in set {
+            let src = exprAny as! String
+            let result = evaluate(src, context: ctx)
+            guard case .number(let got) = result else {
+                failures.append("\(concept)/\(op) param \(name): non-numeric result \(result)")
+                continue
+            }
+            guard let want = num(expected[name]) else {
+                failures.append("\(concept)/\(op): expected has no \(name)")
+                continue
+            }
+            if abs(got - want) >= 1e-9 {
+                failures.append("\(concept)/\(op) param \(name): expected \(want), got \(got)")
+            }
+        }
+    }
+    #expect(failures.isEmpty,
+        "concept-operation conformance failures:\n\(failures.joined(separator: "\n"))")
+}
+
 // MARK: - Concept registry (increment 3a)
 
 /// The concept packs are bundled into workspace.json and loadable via
