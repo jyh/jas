@@ -333,6 +333,33 @@ class Controller:
         new_elem = replace(elem, params=new_params)
         self._model.edit_document(doc.replace_element(path, new_elem))
 
+    def apply_concept_operation(self, path: ElementPath, changes: dict) -> None:
+        """Apply a concept operation's RESOLVED changes to the ``GeneratedElem``
+        at ``path`` (CONCEPTS.md §9): merge each ``name -> value`` of ``changes``
+        into the instance's params (a multi-param generalization of
+        ``set_concept_param``) so it re-generates its geometry live. ``changes``
+        is the production-resolved effect of an operation (value-in-op), so this
+        performs NO expression evaluation — it just writes the values. No-op when
+        ``path`` is invalid, the element there is not a generated instance, or
+        ``changes`` is empty / not a dict. Mirrors the Rust
+        ``Controller::apply_concept_operation``.
+        """
+        from geometry.element import GeneratedElem
+        if not isinstance(changes, dict) or not changes:
+            return
+        doc = self._model.document
+        try:
+            elem = doc.get_element(path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if not isinstance(elem, GeneratedElem):
+            return
+        new_params = dict(elem.params)
+        for name, value in changes.items():
+            new_params[name] = value
+        new_elem = replace(elem, params=new_params)
+        self._model.edit_document(doc.replace_element(path, new_elem))
+
     def detach(self, path: ElementPath) -> None:
         """Detach (break the link / expand): replace the ``ReferenceElem``
         instance at ``path`` with an INDEPENDENT copy of its resolved target

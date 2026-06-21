@@ -470,7 +470,8 @@ class DockPanelWidget(QWidget):
         # Generated instance — each one undo step) lives in concepts_apply,
         # mirroring the Rust dispatch arms. concepts_panel_select stays generic
         # (set_panel_state). Handled before the generic YAML effect path.
-        if action_name in ("place_concept_instance", "set_concept_param"):
+        if action_name in ("place_concept_instance", "set_concept_param",
+                            "apply_concept_operation"):
             if self._dispatch_concepts_action(action_name, params):
                 return
 
@@ -802,6 +803,7 @@ class DockPanelWidget(QWidget):
             return True
         from panels.concepts_apply import (
             apply_place_concept_instance, apply_set_concept_param,
+            apply_concept_operation,
         )
 
         if action_name == "place_concept_instance":
@@ -828,6 +830,13 @@ class DockPanelWidget(QWidget):
                 return True
             if isinstance(name, str):
                 apply_set_concept_param(model, name, value)
+            self.rebuild()
+            return True
+
+        if action_name == "apply_concept_operation":
+            op_id = params.get("op_id") if params else None
+            apply_concept_operation(
+                model, op_id if isinstance(op_id, str) else None)
             self.rebuild()
             return True
 

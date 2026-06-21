@@ -1253,6 +1253,19 @@ def op_apply(model: Model, op: dict) -> None:
         if path is None or cname is None:
             return
         ctrl.set_concept_param(path, cname, num_field(op, "value"))
+    # Apply a concept operation (CONCEPTS.md §9). ``op_id`` rides as journal
+    # metadata only (the semantic verb); ``changes`` is the production-RESOLVED
+    # param map (value-in-op) that is actually applied — replay merges it and
+    # never re-evaluates the operation's expressions nor consults the registry.
+    # Malformed/missing path or changes SKIPS (the controller also no-ops on an
+    # empty/non-dict ``changes``, so nothing journals). Mirrors the Rust
+    # apply_concept_operation arm.
+    elif name == "apply_concept_operation":
+        path = parse_path(op.get("path"))
+        changes = op.get("changes")
+        if path is None or not isinstance(changes, dict):
+            return
+        ctrl.apply_concept_operation(path, changes)
     elif name == "detach":
         path = parse_path(op.get("path"))
         if path is None:

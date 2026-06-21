@@ -88,6 +88,11 @@ class TestBuildActiveDocumentView:
         sides = next(p for p in sc["params"] if p["name"] == "sides")
         # The instance's current value (6) is carried on the schema entry.
         assert sides["value"] == 6
+        # operations (CONCEPTS.md §9): the concept's named edit verbs, so the
+        # panel can render a button per operation. Mirrors Rust
+        # active_document_view_selected_concept_present_for_single_generated.
+        op_ids = [o["id"] for o in sc["operations"]]
+        assert "add_side" in op_ids and "remove_side" in op_ids
 
     def test_next_layer_name_skips_existing(self):
         model = _make_model(["Layer 1", "Layer 2"])
