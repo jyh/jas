@@ -923,6 +923,23 @@ fn eval_func(
             }
         }
 
+        // atan2(y, x) -> DEGREES (the inverse of sin/cos; concept fitters use it
+        // to recover a placement angle). Args are (y, x), matching libm order.
+        "atan2" => {
+            if args.len() != 2 {
+                return Value::Null;
+            }
+            let y = match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            let x = match eval_inner(&args[1], ctx, scope, store_cb) {
+                Value::Number(n) => n,
+                _ => return Value::Null,
+            };
+            Value::Number(y.atan2(x).to_degrees())
+        }
+
         // pow(base, exp) -> Number | Null (Null on a non-finite result,
         // e.g. negative base with a fractional exponent).
         "pow" => {

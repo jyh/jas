@@ -1073,6 +1073,18 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
         | _ -> Null
     end
 
+    (* atan2(y, x) -> DEGREES (the inverse of sin/cos; concept fitters use it to
+       recover a placement angle). Args are (y, x), matching libm order. *)
+    else if name = "atan2" then begin
+      if List.length args <> 2 then Null
+      else
+        let vy = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
+        let vx = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
+        match vy, vx with
+        | Number y, Number x -> Number (Float.atan2 y x *. 180.0 /. Float.pi)
+        | _ -> Null
+    end
+
     else if name = "pow" then begin
       if List.length args <> 2 then Null
       else
