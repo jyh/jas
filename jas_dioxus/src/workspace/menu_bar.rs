@@ -663,12 +663,69 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                // Bundle actions with no bespoke handler above — route through
+                // the generic action pipeline (all are defined in actions.yaml).
+                // These take no params and do not open dialogs today, so the
+                // deferred-effect return is intentionally ignored.
+                "save_as" | "revert" | "quit" | "promote_to_concept"
+                | "zoom_in" | "zoom_out" | "zoom_to_actual_size"
+                | "fit_active_artboard" | "fit_all_artboards" | "fit_in_window" => {
+                    let action = cmd.to_string();
+                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        let _ = crate::interpreter::renderer::dispatch_action(
+                            &action, &serde_json::Map::new(), st);
+                    }));
+                }
+                // Concepts panel toggle: not one of the legacy per-panel arms,
+                // so dispatch the generic toggle_panel action with its param.
+                "toggle_panel_concepts" => {
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        let mut p = serde_json::Map::new();
+                        p.insert("panel".to_string(), serde_json::json!("concepts"));
+                        let _ = crate::interpreter::renderer::dispatch_action(
+                            "toggle_panel", &p, st);
+                    }));
+                }
                 _ => {}
             }
         })
     };
 
-    let menus = super::menu::MENU_BAR;
+    // Menu data projected from the compiled bundle menubar (menubar.yaml) —
+    // the single source of truth. Translate each item to the (label, cmd,
+    // shortcut) shape the renderer + dispatch below consume; the dynamic
+    // Workspace / Appearance submenus map to their sentinel cmds.
+    let menus_owned: Vec<(String, Vec<(String, String, String)>)> =
+        super::menu::menu_bar_model()
+            .iter()
+            .map(|m| {
+                let items = m
+                    .entries
+                    .iter()
+                    .map(|e| match e {
+                        super::menu::MenuEntry::Separator => {
+                            ("---".to_string(), String::new(), String::new())
+                        }
+                        super::menu::MenuEntry::DynamicSubmenu { label, kind } => {
+                            let cmd = match kind {
+                                super::menu::SubmenuKind::Workspace => "workspace_submenu",
+                                super::menu::SubmenuKind::Appearance => "appearance_submenu",
+                            };
+                            (label.clone(), cmd.to_string(), String::new())
+                        }
+                        super::menu::MenuEntry::Action {
+                            label,
+                            action,
+                            params,
+                            shortcut,
+                            ..
+                        } => (label.clone(), cmd_for(action, params), shortcut.clone()),
+                    })
+                    .collect();
+                (m.label.clone(), items)
+            })
+            .collect();
+    let menus = &menus_owned;
 
     // Workspace data for dynamic submenu
     let config_snapshot = app.borrow().app_config.clone();
@@ -685,14 +742,14 @@ pub(crate) fn MenuBarView(
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().flat_map(|&(label, cmd, shortcut)| {
-                if label == "---" {
+            items.iter().flat_map(|(label, cmd, shortcut)| {
+                if label.as_str() == "---" {
                     vec![rsx! {
                         div {
                             style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;",
                         }
                     }]
-                } else if cmd == "workspace_submenu" {
+                } else if cmd.as_str() == "workspace_submenu" {
                     // Dynamic workspace submenu
                     let act_ws = act.clone();
                     let open_menu_ws = open_menu_sig;
@@ -843,7 +900,7 @@ pub(crate) fn MenuBarView(
                         }
                     });
                     items
-                } else if cmd == "appearance_submenu" {
+                } else if cmd.as_str() == "appearance_submenu" {
                     // Dynamic appearance submenu
                     let mut open_menu_ap = open_menu_sig;
 
@@ -1012,6 +1069,30 @@ pub(crate) fn MenuBarView(
                 {node}
             }
         }
+    }
+}
+
+/// Translate a bundle menu `(action, params)` into the legacy command string
+/// the menu dispatch + checkmark logic key on. Actions with a bespoke handler
+/// keep their historical cmd name; `toggle_pane`/`toggle_panel` fold their
+/// param into the per-target cmd; everything else passes through (handled by
+/// the generic `dispatch_action` arm).
+fn cmd_for(action: &str, params: &serde_json::Map<String, serde_json::Value>) -> String {
+    match action {
+        "new_document" => "new".to_string(),
+        "open_file" => "open".to_string(),
+        "open_document_setup" => "document_setup".to_string(),
+        "open_print_dialog" => "print".to_string(),
+        "hide_selection" => "hide".to_string(),
+        "toggle_pane" => format!(
+            "toggle_pane_{}",
+            params.get("pane").and_then(|v| v.as_str()).unwrap_or("")
+        ),
+        "toggle_panel" => format!(
+            "toggle_panel_{}",
+            params.get("panel").and_then(|v| v.as_str()).unwrap_or("")
+        ),
+        other => other.to_string(),
     }
 }
 
