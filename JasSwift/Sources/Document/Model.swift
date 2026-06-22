@@ -372,6 +372,14 @@ public class Model: ObservableObject {
         fitRect(x: minX, y: minY, w: maxX - minX, h: maxY - minY)
     }
 
+    /// Fit the document's element content (not the artboards) into the
+    /// viewport — mirrors doc.zoom.fit_elements in the other apps. Uses the
+    /// shared documentBounds; an empty document is a no-op (fitRect guards w/h).
+    public func fitInWindow() {
+        let b = documentBounds(document)
+        fitRect(x: b.x, y: b.y, w: b.w, h: b.h)
+    }
+
     private func applyZoomCentered(factor: Double) {
         let cx = viewportW / 2.0
         let cy = viewportH / 2.0
