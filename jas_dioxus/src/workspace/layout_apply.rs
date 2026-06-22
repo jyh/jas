@@ -6,7 +6,7 @@
 //! and the test harness share ONE dispatcher and ONE per-verb mutation body —
 //! exactly the unification 3b-B did for document ops. The harness shim
 //! (`cross_language_test.rs::apply_workspace_op`) now delegates here, and the
-//! production layout-mutation sites (menu_bar / toolbar_grid / dock_panel /
+//! production layout-mutation sites (menu_bar / dock_panel /
 //! panel-menu dispatchers) build a resolved op JSON and call `layout_apply`
 //! instead of calling `WorkspaceLayout::<method>` directly. The mutation is
 //! byte-identical to the pre-3d-2 direct call (same args, now
