@@ -1,4 +1,20 @@
-"""Menubar for Jas application."""
+"""Menubar for Jas application.
+
+The top menu bar is rendered from the compiled bundle ``menubar``
+(menubar.yaml, projected by :mod:`menu.menu_model`) so it can never drift
+from the spec. :func:`create_menus` loops the projected model and binds each
+entry to a bespoke native handler via the central :func:`_on_menu_action`
+router — the migration changed the menu's DATA SOURCE + wiring, not the
+handler behavior. Mirrors the Rust ``menu_bar.rs`` dispatch that preserves
+every bespoke native handler and only sources structure from the bundle.
+
+Native handlers are PRESERVED unchanged: file dialogs, clipboard,
+reference-aware orphan-confirm modals, the Document Setup / Print YAML
+dialogs, PDF export, the dynamic Workspace / Appearance submenus, the layout
+pane / panel toggles + their checkmark machinery. ``enabled_when`` from the
+bundle is carried but NOT evaluated — enable/disable stays native (the Revert
+``aboutToShow`` gate and the checkable panel toggles), same as Rust v1.
+"""
 
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
@@ -8,212 +24,451 @@ from document.op_apply import op_apply
 from tools.tool import PASTE_OFFSET
 
 
+def _zoom_step() -> float:
+    """Read ``preferences.viewport.zoom_step`` from the compiled bundle
+    (falls back to 1.2). The View zoom family stays NATIVE because the
+    generic ``doc.zoom.*`` effect path cannot resolve
+    ``preferences.viewport.zoom_step`` in the menu dispatch context (it
+    evaluates to NULL, collapsing the zoom factor to 0)."""
+    try:
+        from panels.yaml_menu import get_workspace_data
+        ws = get_workspace_data() or {}
+        return float(ws.get("preferences", {}).get("viewport", {})
+                     .get("zoom_step", 1.2))
+    except Exception:
+        return 1.2
+
+
+def _fit_padding() -> float:
+    """Read ``preferences.viewport.fit_padding_px`` from the bundle."""
+    try:
+        from panels.yaml_menu import get_workspace_data
+        ws = get_workspace_data() or {}
+        return float(ws.get("preferences", {}).get("viewport", {})
+                     .get("fit_padding_px", 20.0))
+    except Exception:
+        return 20.0
+
+
+def _canvas_update(window: QMainWindow) -> None:
+    canvas = (window.tab_widget.currentWidget()
+              if hasattr(window, "tab_widget") else None)
+    if canvas is not None and hasattr(canvas, "update"):
+        canvas.update()
+
+
+def _bump_zoom(window: QMainWindow, factor: float) -> None:
+    """Zoom about the viewport center by ``factor`` (native View handler)."""
+    m = window.active_model()
+    if m is None:
+        return
+    cx = m.viewport_w / 2.0
+    cy = m.viewport_h / 2.0
+    z = m.zoom_level
+    doc_cx = (cx - m.view_offset_x) / z if z else 0
+    doc_cy = (cy - m.view_offset_y) / z if z else 0
+    z2 = max(0.1, min(64.0, z * factor))
+    m.zoom_level = z2
+    m.view_offset_x = cx - doc_cx * z2
+    m.view_offset_y = cy - doc_cy * z2
+    _canvas_update(window)
+
+
+def _zoom_actual_size(window: QMainWindow) -> None:
+    """View > Actual Size: set zoom to 1.0 (clamped), keep center."""
+    m = window.active_model()
+    if m is None:
+        return
+    cx = m.viewport_w / 2.0
+    cy = m.viewport_h / 2.0
+    z = m.zoom_level
+    doc_cx = (cx - m.view_offset_x) / z if z else 0
+    doc_cy = (cy - m.view_offset_y) / z if z else 0
+    z2 = max(0.1, min(64.0, 1.0))
+    m.zoom_level = z2
+    m.view_offset_x = cx - doc_cx * z2
+    m.view_offset_y = cy - doc_cy * z2
+    _canvas_update(window)
+
+
+def _fit_rect_into_viewport(m, x: float, y: float, w: float, h: float,
+                            padding: float) -> bool:
+    """Write the zoom + pan that fits rect (x,y,w,h) into the viewport with
+    ``padding`` px on each side. Returns False (no change) for an empty rect
+    or viewport."""
+    if w <= 0 or h <= 0 or m.viewport_w <= 0 or m.viewport_h <= 0:
+        return False
+    avail_w = m.viewport_w - 2.0 * padding
+    avail_h = m.viewport_h - 2.0 * padding
+    if avail_w <= 0 or avail_h <= 0:
+        return False
+    z = max(0.1, min(64.0, min(avail_w / w, avail_h / h)))
+    rect_cx = x + w / 2.0
+    rect_cy = y + h / 2.0
+    m.zoom_level = z
+    m.view_offset_x = m.viewport_w / 2.0 - rect_cx * z
+    m.view_offset_y = m.viewport_h / 2.0 - rect_cy * z
+    return True
+
+
+def _fit_active_artboard(window: QMainWindow) -> None:
+    """View > Fit Artboard in Window: fit the current artboard rect."""
+    m = window.active_model()
+    if m is None:
+        return
+    artboards = list(m.document.artboards)
+    if not artboards:
+        return
+    ab = artboards[0]
+    _fit_rect_into_viewport(m, float(ab.x), float(ab.y),
+                            float(ab.width), float(ab.height), _fit_padding())
+    _canvas_update(window)
+
+
+def _fit_all_artboards(window: QMainWindow) -> None:
+    """View > Fit All in Window: fit the union of all artboard rects."""
+    m = window.active_model()
+    if m is None:
+        return
+    artboards = list(m.document.artboards)
+    if not artboards:
+        return
+    min_x = min(float(ab.x) for ab in artboards)
+    min_y = min(float(ab.y) for ab in artboards)
+    max_x = max(float(ab.x + ab.width) for ab in artboards)
+    max_y = max(float(ab.y + ab.height) for ab in artboards)
+    _fit_rect_into_viewport(m, min_x, min_y, max_x - min_x, max_y - min_y,
+                            _fit_padding())
+    _canvas_update(window)
+
+
+def _fit_in_window(window: QMainWindow) -> None:
+    """View > Fit in Window: center on the current artboard (matches the
+    pre-migration native behavior of the Ctrl+0 entry)."""
+    m = window.active_model()
+    if m is None:
+        return
+    m.center_view_on_current_artboard()
+    _canvas_update(window)
+
+
+def _new_doc(window: QMainWindow) -> None:
+    # Document() defaults artboards=(); seed the at-least-one-artboard
+    # invariant so a fresh canvas opens with a visible white artboard
+    # rather than a featureless gray pasteboard.
+    from document.document import Document
+    from document.artboard import ensure_artboards_invariant
+    abs_, _ = ensure_artboards_invariant(())
+    doc = Document(artboards=abs_)
+    window.add_canvas(Model(document=doc))
+
+
+# Bundle action -> bespoke native handler. Each handler takes
+# (window, model_or_none, params) and routes to the SAME private
+# function the hand-built menu used; behavior is unchanged. Actions that
+# need an active model resolve it inside the handler (no-op when absent),
+# preserving the old `_with_model` guard.
+def _on_menu_action(window: QMainWindow, action: str, params: dict) -> None:
+    """Central menu-action router. Every menubar action is backed by a
+    bespoke native handler (the actions.yaml entries are ``log`` / ``if``
+    stubs whose real behavior lives natively, so routing them through the
+    generic dispatcher would no-op them). ``params`` carries the bundle's
+    ``params`` (e.g. ``{"panel": "color"}``)."""
+    m = window.active_model()
+
+    # --- File ---
+    if action == "new_document":
+        _new_doc(window)
+    elif action == "open_file":
+        _open_file(window)
+    elif action == "save":
+        _save(window, m)
+    elif action == "save_as":
+        _save_as(window, m)
+    elif action == "revert":
+        _revert(window, m)
+    elif action == "open_document_setup":
+        _open_yaml_dialog(window, "document_setup")
+    elif action == "open_print_dialog":
+        _open_yaml_dialog(window, "print")
+    elif action == "export_to_pdf":
+        # The only menubar action with no actions.yaml entry — bespoke.
+        _export_to_pdf(window, m)
+    elif action == "quit":
+        window.close()
+
+    # --- Edit ---
+    elif action == "undo":
+        if m:
+            m.undo()
+    elif action == "redo":
+        if m:
+            m.redo()
+    elif action == "cut":
+        if m:
+            _cut_selection(m, window)
+    elif action == "copy":
+        if m:
+            _copy_selection(m)
+    elif action == "paste":
+        if m:
+            _paste_clipboard(m, PASTE_OFFSET)
+    elif action == "paste_in_place":
+        if m:
+            _paste_clipboard(m, 0.0)
+    elif action == "select_all":
+        if m:
+            _select_all(m)
+
+    # --- Object ---
+    elif action == "group":
+        if m:
+            _group_selection(m)
+    elif action == "ungroup":
+        if m:
+            _ungroup_selection(m)
+    elif action == "ungroup_all":
+        if m:
+            _ungroup_all(m)
+    elif action == "lock":
+        if m:
+            _lock_selection(m)
+    elif action == "unlock_all":
+        if m:
+            _unlock_all(m)
+    elif action == "hide_selection":
+        if m:
+            _hide_selection(m)
+    elif action == "show_all":
+        if m:
+            _show_all(m)
+    elif action == "make_instance":
+        if m:
+            _link_to_selection(m)
+    elif action == "promote_to_concept":
+        if m:
+            _promote_to_concept(m)
+
+    # --- View (native; generic doc.zoom.* path cannot resolve prefs here) ---
+    elif action == "zoom_in":
+        _bump_zoom(window, _zoom_step())
+    elif action == "zoom_out":
+        _bump_zoom(window, 1.0 / _zoom_step())
+    elif action == "zoom_to_actual_size":
+        _zoom_actual_size(window)
+    elif action == "fit_active_artboard":
+        _fit_active_artboard(window)
+    elif action == "fit_all_artboards":
+        _fit_all_artboards(window)
+    elif action == "fit_in_window":
+        _fit_in_window(window)
+
+    # --- Window: layout (native pane/panel/tile machinery) ---
+    elif action == "tile_panes":
+        _tile_panes(window)
+    elif action == "toggle_pane":
+        _toggle_pane_by_name(window, params.get("pane", ""))
+    elif action == "toggle_panel":
+        _toggle_panel_by_name(window, params.get("panel", ""))
+
+
 def create_menus(window: QMainWindow) -> None:
-    """Create File, Edit, and View menus for the main window.
+    """Build the top menu bar from the compiled bundle ``menubar``.
+
+    Loops the projected :func:`menu.menu_model.build_menu_model` model: each
+    top-level menu becomes ``menuBar().addMenu(label)``; each action becomes
+    ``addAction(label)`` (the ``&`` mnemonic markers are kept VERBATIM — Qt
+    consumes ``&`` as its native accelerator marker); shortcuts pass straight
+    to ``QKeySequence`` (Qt parses ``"Ctrl+Shift+S"`` / ``"Ctrl+="`` /
+    ``"Ctrl+Alt+0"`` directly); ``triggered`` routes through
+    :func:`_on_menu_action`. The dynamic Workspace / Appearance submenus and
+    the checkable panel toggles are rebuilt by the bespoke code below.
 
     Args:
         window: The QMainWindow to add menus to (must have active_model()).
     """
-    def _model() -> Model | None:
-        return window.active_model()
+    from menu.menu_model import (
+        build_menu_model, MenuAction, MenuSeparator, MenuSubmenu, SubmenuKind,
+    )
 
     menubar = window.menuBar()
+    model = build_menu_model()
 
-    # File menu
-    file_menu = menubar.addMenu("&File")
+    # Map a bundle panel-toggle param -> PanelKind so the checkable panel
+    # toggles can be tracked + re-synced (the bespoke checkmark machinery).
+    from workspace.workspace_layout import PanelKind
+    panel_param_to_kind = {
+        "artboards": PanelKind.ARTBOARDS,
+        "layers": PanelKind.LAYERS,
+        "color": PanelKind.COLOR,
+        "swatches": PanelKind.SWATCHES,
+        "stroke": PanelKind.STROKE,
+        "properties": PanelKind.PROPERTIES,
+        "character": PanelKind.CHARACTER,
+        "paragraph": PanelKind.PARAGRAPH,
+        "align": PanelKind.ALIGN,
+        "boolean": PanelKind.BOOLEAN,
+        "magic_wand": PanelKind.MAGIC_WAND,
+        "opacity": PanelKind.OPACITY,
+        "symbols": PanelKind.SYMBOLS,
+    }
+    # PanelKind has no CONCEPTS member in some builds; resolve defensively
+    # so the Concepts toggle still tracks its checkmark when present.
+    concepts_kind = getattr(PanelKind, "CONCEPTS", None)
+    if concepts_kind is not None:
+        panel_param_to_kind["concepts"] = concepts_kind
 
-    def _new_doc() -> None:
-        # Document() defaults artboards=(); seed the at-least-one-
-        # artboard invariant so a fresh canvas opens with a visible
-        # white artboard rather than a featureless gray pasteboard.
-        from document.document import Document
-        from document.artboard import ensure_artboards_invariant
-        abs_, _ = ensure_artboards_invariant(())
-        doc = Document(artboards=abs_)
-        window.add_canvas(Model(document=doc))
+    panel_menu_actions: dict = {}
 
-    new_action = file_menu.addAction("&New")
-    new_action.setShortcut(QKeySequence.New)
-    new_action.triggered.connect(_new_doc)
+    # Hold Python references to the created QMenu objects on the window so
+    # PySide does not garbage-collect (and delete the underlying C++ object
+    # of) the top-level dropdowns. Without this, the menus still render but
+    # the QMenu wrappers can become stale "already deleted" handles.
+    menu_objects: list = []
+    window._menu_objects = menu_objects
 
-    open_action = file_menu.addAction("&Open...")
-    open_action.setShortcut(QKeySequence.Open)
-    open_action.triggered.connect(lambda: _open_file(window))
+    for top in model:
+        qmenu = menubar.addMenu(top.label)
+        menu_objects.append(qmenu)
+        for entry in top.entries:
+            if isinstance(entry, MenuSeparator):
+                qmenu.addSeparator()
+            elif isinstance(entry, MenuSubmenu):
+                if entry.kind == SubmenuKind.WORKSPACE:
+                    menu_objects.append(
+                        _build_workspace_submenu(window, qmenu, entry.label))
+                else:
+                    menu_objects.append(
+                        _build_appearance_submenu(window, qmenu, entry.label))
+            elif isinstance(entry, MenuAction):
+                act = qmenu.addAction(entry.label)
+                if entry.shortcut:
+                    act.setShortcut(QKeySequence(entry.shortcut))
+                a_name = entry.action
+                a_params = dict(entry.params)
+                act.triggered.connect(
+                    lambda checked=False, n=a_name, p=a_params:
+                    _on_menu_action(window, n, p))
+                # Revert stays natively enable-gated (enabled_when carried in
+                # the bundle but not evaluated — same as Rust v1).
+                if a_name == "revert":
+                    qmenu.aboutToShow.connect(
+                        lambda mb=qmenu, ac=act: ac.setEnabled(
+                            window.active_model() is not None
+                            and window.active_model().is_modified
+                            and not window.active_model().filename.startswith(
+                                "Untitled-")))
+                # Checkable panel toggles: track each by PanelKind so the
+                # checkmark can be re-synced from layout state after any
+                # change (close from header X, drag-out, layout restore).
+                if a_name == "toggle_panel":
+                    kind = panel_param_to_kind.get(a_params.get("panel"))
+                    if kind is not None:
+                        act.setCheckable(True)
+                        panel_menu_actions[kind] = act
 
-    save_action = file_menu.addAction("&Save")
-    save_action.setShortcut(QKeySequence.Save)
-    save_action.triggered.connect(lambda: _save(window, _model()))
-
-    save_as_action = file_menu.addAction("Save &As...")
-    save_as_action.setShortcut(QKeySequence.SaveAs)
-    save_as_action.triggered.connect(lambda: _save_as(window, _model()))
-
-    revert_action = file_menu.addAction("&Revert")
-    revert_action.triggered.connect(lambda: _revert(window, _model()))
-    # Dynamically enable/disable: only when model is modified and has a saved file
-    file_menu.aboutToShow.connect(lambda: revert_action.setEnabled(
-        _model() is not None
-        and _model().is_modified
-        and not _model().filename.startswith("Untitled-")
-    ))
-
-    file_menu.addSeparator()
-
-    # PRINT.md §1: Document Setup, Print, Export to PDF.
-    document_setup_action = file_menu.addAction("Document Set&up...")
-    document_setup_action.triggered.connect(lambda: _open_yaml_dialog(window, "document_setup"))
-
-    print_action = file_menu.addAction("&Print...")
-    print_action.setShortcut(QKeySequence("Ctrl+P"))
-    print_action.triggered.connect(lambda: _open_yaml_dialog(window, "print"))
-
-    export_pdf_action = file_menu.addAction("Export to PDF...")
-    export_pdf_action.triggered.connect(lambda: _export_to_pdf(window, _model()))
-
-    file_menu.addSeparator()
-
-    quit_action = file_menu.addAction("&Quit")
-    quit_action.setShortcut(QKeySequence.Quit)
-    quit_action.triggered.connect(window.close)
-
-    # Edit menu
-    edit_menu = menubar.addMenu("&Edit")
-
-    def _with_model(fn):
-        """Call fn(model) if a model is active, avoiding double _model() calls."""
-        m = _model()
-        if m:
-            fn(m)
-
-    undo_action = edit_menu.addAction("&Undo")
-    undo_action.setShortcut(QKeySequence.Undo)
-    undo_action.triggered.connect(lambda: _with_model(lambda m: m.undo()))
-
-    redo_action = edit_menu.addAction("&Redo")
-    redo_action.setShortcut(QKeySequence.Redo)
-    redo_action.triggered.connect(lambda: _with_model(lambda m: m.redo()))
-
-    edit_menu.addSeparator()
-
-    cut_action = edit_menu.addAction("Cu&t")
-    cut_action.setShortcut(QKeySequence.Cut)
-    cut_action.triggered.connect(lambda: _with_model(lambda m: _cut_selection(m, window)))
-
-    copy_action = edit_menu.addAction("&Copy")
-    copy_action.setShortcut(QKeySequence.Copy)
-    copy_action.triggered.connect(lambda: _with_model(lambda m: _copy_selection(m)))
-
-    paste_action = edit_menu.addAction("&Paste")
-    paste_action.setShortcut(QKeySequence.Paste)
-    paste_action.triggered.connect(lambda: _with_model(lambda m: _paste_clipboard(m, PASTE_OFFSET)))
-
-    paste_in_place_action = edit_menu.addAction("Paste in &Place")
-    paste_in_place_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
-    paste_in_place_action.triggered.connect(
-        lambda: _with_model(lambda m: _paste_clipboard(m, 0.0)))
-
-    edit_menu.addSeparator()
-
-    delete_action = edit_menu.addAction("&Delete")
-    delete_action.setShortcut(QKeySequence.Delete)
-    delete_action.triggered.connect(lambda: _with_model(lambda m: _delete_selection(m, window)))
-
-    select_all_action = edit_menu.addAction("Select &All")
-    select_all_action.setShortcut(QKeySequence.SelectAll)
-    select_all_action.triggered.connect(lambda: _with_model(lambda m: _select_all(m)))
-
-    # Object menu
-    object_menu = menubar.addMenu("&Object")
-
-    group_action = object_menu.addAction("&Group")
-    group_action.setShortcut(QKeySequence("Ctrl+G"))
-    group_action.triggered.connect(lambda: _with_model(lambda m: _group_selection(m)))
-
-    ungroup_action = object_menu.addAction("&Ungroup")
-    ungroup_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
-    ungroup_action.triggered.connect(lambda: _with_model(lambda m: _ungroup_selection(m)))
-
-    ungroup_all_action = object_menu.addAction("Ungroup A&ll")
-    ungroup_all_action.triggered.connect(lambda: _with_model(lambda m: _ungroup_all(m)))
-
-    object_menu.addSeparator()
-
-    lock_action = object_menu.addAction("&Lock")
-    lock_action.setShortcut(QKeySequence("Ctrl+2"))
-    lock_action.triggered.connect(lambda: _with_model(lambda m: _lock_selection(m)))
-
-    unlock_all_action = object_menu.addAction("Unlock &All")
-    unlock_all_action.setShortcut(QKeySequence("Ctrl+Alt+2"))
-    unlock_all_action.triggered.connect(lambda: _with_model(lambda m: _unlock_all(m)))
-
-    object_menu.addSeparator()
-
-    hide_action = object_menu.addAction("&Hide")
-    hide_action.setShortcut(QKeySequence("Ctrl+3"))
-    hide_action.triggered.connect(lambda: _with_model(lambda m: _hide_selection(m)))
-
-    show_all_action = object_menu.addAction("&Show All")
-    show_all_action.setShortcut(QKeySequence("Ctrl+Alt+3"))
-    show_all_action.triggered.connect(lambda: _with_model(lambda m: _show_all(m)))
-
-    object_menu.addSeparator()
-
-    make_instance_action = object_menu.addAction("&Make Instance")
-    # No keyboard shortcut (matches the Rust Make Instance command).
-    make_instance_action.triggered.connect(
-        lambda: _with_model(lambda m: _link_to_selection(m)))
-
-    promote_concept_action = object_menu.addAction("&Promote to Concept")
-    # No keyboard shortcut (matches the YAML menubar / Rust command).
-    promote_concept_action.triggered.connect(
-        lambda: _with_model(lambda m: _promote_to_concept(m)))
-
-    # View menu
-    view_menu = menubar.addMenu("&View")
-
-    def _bump_zoom(factor: float) -> None:
-        m = _model()
-        if m is None:
+    def _sync_panel_menu_checks() -> None:
+        if not hasattr(window, 'workspace_layout'):
             return
-        cx = m.viewport_w / 2.0
-        cy = m.viewport_h / 2.0
-        z = m.zoom_level
-        doc_cx = (cx - m.view_offset_x) / z if z else 0
-        doc_cy = (cy - m.view_offset_y) / z if z else 0
-        z2 = max(0.1, min(64.0, z * factor))
-        m.zoom_level = z2
-        m.view_offset_x = cx - doc_cx * z2
-        m.view_offset_y = cy - doc_cy * z2
-        canvas = window.tab_widget.currentWidget() if hasattr(window, "tab_widget") else None
-        if canvas is not None and hasattr(canvas, "update"):
-            canvas.update()
+        layout = window.workspace_layout
+        for k, a in panel_menu_actions.items():
+            try:
+                a.setChecked(layout.is_panel_visible(k))
+            except Exception:
+                pass
 
-    def _fit_artboard() -> None:
-        m = _model()
-        if m is None:
-            return
-        m.center_view_on_current_artboard()
-        canvas = window.tab_widget.currentWidget() if hasattr(window, "tab_widget") else None
-        if canvas is not None and hasattr(canvas, "update"):
-            canvas.update()
+    # Stash the syncer on the window so dock_panel.rebuild can fire it after
+    # a rebuild and external paths (drag-out, layout restore) flip the checks.
+    window.sync_panel_menu_checks = _sync_panel_menu_checks
+    _sync_panel_menu_checks()
 
-    zoom_in_action = view_menu.addAction("Zoom &In")
-    zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
-    zoom_in_action.triggered.connect(lambda: _bump_zoom(1.2))
 
-    zoom_out_action = view_menu.addAction("Zoom &Out")
-    zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
-    zoom_out_action.triggered.connect(lambda: _bump_zoom(1.0 / 1.2))
+def _tile_panes(window: QMainWindow) -> None:
+    if not hasattr(window, 'workspace_layout'):
+        return
+    # 3d-2: route through the runtime layout dispatcher. panes_mut still owns
+    # the dirty signal (the pane mutators do not bump themselves); layout_apply
+    # mutates the same pane_layout the lambda would have.
+    from workspace.layout_apply import layout_apply, op_tile_panes
+    layout = window.workspace_layout
+    layout.panes_mut(lambda pl: layout_apply(layout, op_tile_panes()))
+    if hasattr(window, 'refresh_panes'):
+        window.refresh_panes()
 
-    fit_action = view_menu.addAction("&Fit in Window")
-    fit_action.setShortcut(QKeySequence("Ctrl+0"))
-    fit_action.triggered.connect(_fit_artboard)
 
-    # --- Window menu ---
-    window_menu = menubar.addMenu("&Window")
+def _toggle_pane_by_name(window: QMainWindow, pane: str) -> None:
+    from workspace.pane import PaneKind as PK
+    kind = {"toolbar": PK.TOOLBAR, "dock": PK.DOCK}.get(pane)
+    if kind is None:
+        return
+    _toggle_pane(window, kind)
 
-    # Workspace submenu
-    ws_menu = window_menu.addMenu("Workspace")
+
+def _toggle_pane(window: QMainWindow, kind) -> None:
+    if not hasattr(window, 'workspace_layout'):
+        return
+    # 3d-2: route the resolved hide/show verb through the runtime dispatcher;
+    # panes_mut owns the dirty signal (one bump).
+    from workspace.layout_apply import layout_apply, op_hide_pane, op_show_pane
+    layout = window.workspace_layout
+    layout.panes_mut(lambda pl: layout_apply(
+        layout,
+        op_hide_pane(kind) if pl.is_pane_visible(kind) else op_show_pane(kind)))
+    if hasattr(window, 'refresh_panes'):
+        window.refresh_panes()
+
+
+def _toggle_panel_by_name(window: QMainWindow, panel: str) -> None:
+    from workspace.workspace_layout import PanelKind
+    kind_map = {
+        "artboards": PanelKind.ARTBOARDS, "layers": PanelKind.LAYERS,
+        "color": PanelKind.COLOR, "swatches": PanelKind.SWATCHES,
+        "stroke": PanelKind.STROKE, "properties": PanelKind.PROPERTIES,
+        "character": PanelKind.CHARACTER, "paragraph": PanelKind.PARAGRAPH,
+        "align": PanelKind.ALIGN, "boolean": PanelKind.BOOLEAN,
+        "magic_wand": PanelKind.MAGIC_WAND, "opacity": PanelKind.OPACITY,
+        "symbols": PanelKind.SYMBOLS,
+    }
+    concepts_kind = getattr(PanelKind, "CONCEPTS", None)
+    if concepts_kind is not None:
+        kind_map["concepts"] = concepts_kind
+    kind = kind_map.get(panel)
+    if kind is None:
+        return
+    _toggle_panel(window, kind)
+
+
+def _toggle_panel(window: QMainWindow, kind) -> None:
+    if not hasattr(window, 'workspace_layout'):
+        return
+    from workspace.workspace_layout import GroupAddr, PanelAddr
+    # 3d-2: route the resolved panel verbs through the runtime dispatcher
+    # (close_panel / show_panel bump internally — dirty signal preserved).
+    from workspace.layout_apply import layout_apply, op_close_panel, op_show_panel
+    layout = window.workspace_layout
+    if layout.is_panel_visible(kind):
+        # Find and close
+        for _, dock in layout.anchored:
+            for gi, group in enumerate(dock.groups):
+                for pi, k in enumerate(group.panels):
+                    if k == kind:
+                        layout_apply(layout, op_close_panel(
+                            PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi)))
+                        if hasattr(window, 'dock_panel'):
+                            window.dock_panel.rebuild()
+                        if hasattr(window, 'sync_panel_menu_checks'):
+                            window.sync_panel_menu_checks()
+                        return
+    else:
+        layout_apply(layout, op_show_panel(kind))
+        if hasattr(window, 'dock_panel'):
+            window.dock_panel.rebuild()
+    if hasattr(window, 'sync_panel_menu_checks'):
+        window.sync_panel_menu_checks()
+
+
+def _build_workspace_submenu(window: QMainWindow, parent_menu, label: str):
+    ws_menu = parent_menu.addMenu(label)
 
     def _rebuild_workspace_menu():
         from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
@@ -240,9 +495,20 @@ def create_menus(window: QMainWindow) -> None:
         revert_action.setEnabled(has_saved)
 
     ws_menu.aboutToShow.connect(_rebuild_workspace_menu)
+    return ws_menu
 
-    # Appearance submenu
-    appearance_menu = window_menu.addMenu("Appearance")
+
+def _switch_appearance(window, name):
+    if not hasattr(window, 'app_config'):
+        return
+    window.app_config.active_appearance = name
+    window.app_config.save()
+    if hasattr(window, 'refresh_theme'):
+        window.refresh_theme()
+
+
+def _build_appearance_submenu(window, parent_menu, label):
+    appearance_menu = parent_menu.addMenu(label)
 
     def _rebuild_appearance_menu():
         from workspace.theme import PREDEFINED_APPEARANCES, resolve_appearance
@@ -256,128 +522,8 @@ def create_menus(window: QMainWindow) -> None:
             action.triggered.connect(
                 lambda checked=False, n=entry.name: _switch_appearance(window, n))
 
-    def _switch_appearance(window, name):
-        if not hasattr(window, 'app_config'):
-            return
-        window.app_config.active_appearance = name
-        window.app_config.save()
-        if hasattr(window, 'refresh_theme'):
-            window.refresh_theme()
-
     appearance_menu.aboutToShow.connect(_rebuild_appearance_menu)
-
-    window_menu.addSeparator()
-
-    # Tile
-    def _tile_panes():
-        if not hasattr(window, 'workspace_layout'):
-            return
-        # 3d-2: route through the runtime layout dispatcher. panes_mut still
-        # owns the dirty signal (the pane mutators do not bump themselves);
-        # layout_apply mutates the same pane_layout the lambda would have.
-        from workspace.layout_apply import layout_apply, op_tile_panes
-        layout = window.workspace_layout
-        layout.panes_mut(lambda pl: layout_apply(layout, op_tile_panes()))
-        if hasattr(window, 'refresh_panes'):
-            window.refresh_panes()
-
-    tile_action = window_menu.addAction("Tile")
-    tile_action.triggered.connect(_tile_panes)
-
-    window_menu.addSeparator()
-
-    # Pane toggles
-    def _toggle_pane(kind):
-        if not hasattr(window, 'workspace_layout'):
-            return
-        # 3d-2: route the resolved hide/show verb through the runtime
-        # dispatcher; panes_mut owns the dirty signal (one bump).
-        from workspace.layout_apply import layout_apply, op_hide_pane, op_show_pane
-        layout = window.workspace_layout
-        layout.panes_mut(lambda pl: layout_apply(
-            layout,
-            op_hide_pane(kind) if pl.is_pane_visible(kind) else op_show_pane(kind)))
-        if hasattr(window, 'refresh_panes'):
-            window.refresh_panes()
-
-    from workspace.pane import PaneKind as PK
-    toolbar_action = window_menu.addAction("Toolbar")
-    toolbar_action.triggered.connect(lambda: _toggle_pane(PK.TOOLBAR))
-    panels_action = window_menu.addAction("Panels")
-    panels_action.triggered.connect(lambda: _toggle_pane(PK.DOCK))
-
-    window_menu.addSeparator()
-
-    # Panel toggles
-    def _toggle_panel(kind):
-        if not hasattr(window, 'workspace_layout'):
-            return
-        from workspace.workspace_layout import WorkspaceLayout, GroupAddr, PanelAddr
-        # 3d-2: route the resolved panel verbs through the runtime dispatcher
-        # (close_panel / show_panel bump internally — dirty signal preserved).
-        from workspace.layout_apply import layout_apply, op_close_panel, op_show_panel
-        layout = window.workspace_layout
-        if layout.is_panel_visible(kind):
-            # Find and close
-            for _, dock in layout.anchored:
-                for gi, group in enumerate(dock.groups):
-                    for pi, k in enumerate(group.panels):
-                        if k == kind:
-                            layout_apply(layout, op_close_panel(
-                                PanelAddr(group=GroupAddr(dock_id=dock.id, group_idx=gi), panel_idx=pi)))
-                            if hasattr(window, 'dock_panel'):
-                                window.dock_panel.rebuild()
-                            if hasattr(window, 'sync_panel_menu_checks'):
-                                window.sync_panel_menu_checks()
-                            return
-        else:
-            layout_apply(layout, op_show_panel(kind))
-            if hasattr(window, 'dock_panel'):
-                window.dock_panel.rebuild()
-        if hasattr(window, 'sync_panel_menu_checks'):
-            window.sync_panel_menu_checks()
-
-    # Panel toggle entries: track each QAction by PanelKind so the
-    # checkmark can be re-synced from layout state after any change
-    # — close from header X, drag-out to floating, layout restore,
-    # programmatic show/close. Without sync_panel_menu_checks, the
-    # menu's checkmark only updated when the menu action itself
-    # toggled the panel (the user-clicked path), so external
-    # visibility changes left stale checks. Mirrors the OCaml
-    # sync_panel_checks pattern (CLR-001 OCaml notes).
-    from workspace.workspace_layout import PanelKind
-    panel_menu_actions: dict = {}
-    for kind, label in [(PanelKind.LAYERS, "&Layers"), (PanelKind.COLOR, "&Color"),
-                        (PanelKind.SWATCHES, "&Swatches"), (PanelKind.STROKE, "&Stroke"),
-                        (PanelKind.PROPERTIES, "&Properties"),
-                        (PanelKind.CHARACTER, "C&haracter"),
-                        (PanelKind.PARAGRAPH, "Pa&ragraph"),
-                        (PanelKind.ARTBOARDS, "&Artboards"),
-                        (PanelKind.ALIGN, "Ali&gn"),
-                        (PanelKind.BOOLEAN, "&Boolean"),
-                        (PanelKind.OPACITY, "&Opacity"),
-                        (PanelKind.MAGIC_WAND, "&Magic Wand"),
-                        (PanelKind.SYMBOLS, "S&ymbols")]:
-        action = window_menu.addAction(label)
-        action.setCheckable(True)
-        action.triggered.connect(lambda checked=False, k=kind: _toggle_panel(k))
-        panel_menu_actions[kind] = action
-
-    def _sync_panel_menu_checks() -> None:
-        if not hasattr(window, 'workspace_layout'):
-            return
-        layout = window.workspace_layout
-        for k, act in panel_menu_actions.items():
-            try:
-                act.setChecked(layout.is_panel_visible(k))
-            except Exception:
-                pass
-
-    # Stash the syncer on the window so dock_panel.rebuild can fire
-    # it after a rebuild and external paths (drag-out, layout
-    # restore) can also flip the checks.
-    window.sync_panel_menu_checks = _sync_panel_menu_checks
-    _sync_panel_menu_checks()
+    return appearance_menu
 
 
 def _refresh(window):
