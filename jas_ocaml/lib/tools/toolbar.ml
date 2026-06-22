@@ -56,6 +56,15 @@ let tool_button_size = 32
 let _title_bar_height = 24
 let long_press_ms = Canvas_tool.long_press_ms
 
+(* Fired at the end of [select_tool] with the newly-active tool. The
+   bundle-rendered toolbar (Yaml_panel_view) wires this to mirror the
+   tool into a string the YAML [bind.checked] expressions read, then
+   rebuild itself so the highlight tracks the active tool — regardless
+   of whether the change came from a toolbar click, a keyboard shortcut,
+   or the spacebar Hand pass-through. Toolbar STEP A of the bundle
+   migration. *)
+let tool_changed_hook : (tool -> unit) ref = ref (fun _ -> ())
+
 (* Theme-aware colors for Cairo rendering *)
 let icon_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_text)
 let active_bg_rgb () = Theme.hex_to_rgb !(Dock_panel.theme_bg_tab)
@@ -195,7 +204,9 @@ class toolbar ~title:(_title : string) ~x ~y
        | Scale | Shear ->
          transform_slot_tool <- t
        | _ -> ());
-      self#redraw_all
+      self#redraw_all;
+      (* Notify the bundle toolbar so its highlight tracks (STEP A). *)
+      !tool_changed_hook t
 
     method private redraw_all =
       selection_btn#misc#queue_draw ();

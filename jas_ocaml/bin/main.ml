@@ -156,6 +156,78 @@ let () =
     match tool with
     | Some t -> toolbar#select_tool t
     | None -> ());
+
+  (* ── Bundle-rendered toolbar (STEP A of the toolbar migration) ──
+     Render the toolbar pane's [tool_grid] + fill/stroke widget from
+     workspace.json via the generic [Yaml_panel_view] renderer, mirroring
+     what Rust and Swift already do, instead of the hand-built native
+     [Toolbar] GTK class. The native [toolbar] object is kept (the canvas
+     and keyboard shortcuts still drive tool selection through it), but
+     its widget is hidden and no longer mounted — STEP B will delete the
+     class. Two-step keeps the change reversible. *)
+  (* Map a native tool variant back to its workspace state string, so a
+     tool change from ANY source (keyboard shortcut, spacebar Hand,
+     toolbar click routed via set_active_tool_hook) updates the string
+     the YAML [bind.checked] expressions read. *)
+  let tool_to_name (t : Jas.Toolbar.tool) : string =
+    match t with
+    | Jas.Toolbar.Selection -> "selection"
+    | Jas.Toolbar.Partial_selection -> "partial_selection"
+    | Jas.Toolbar.Interior_selection -> "interior_selection"
+    | Jas.Toolbar.Magic_wand -> "magic_wand"
+    | Jas.Toolbar.Pen -> "pen"
+    | Jas.Toolbar.Add_anchor_point -> "add_anchor"
+    | Jas.Toolbar.Delete_anchor_point -> "delete_anchor"
+    | Jas.Toolbar.Anchor_point -> "anchor_point"
+    | Jas.Toolbar.Pencil -> "pencil"
+    | Jas.Toolbar.Paintbrush -> "paintbrush"
+    | Jas.Toolbar.Blob_brush -> "blob_brush"
+    | Jas.Toolbar.Path_eraser -> "path_eraser"
+    | Jas.Toolbar.Smooth -> "smooth"
+    | Jas.Toolbar.Type_tool -> "type"
+    | Jas.Toolbar.Type_on_path -> "type_on_path"
+    | Jas.Toolbar.Line -> "line"
+    | Jas.Toolbar.Rect -> "rect"
+    | Jas.Toolbar.Rounded_rect -> "rounded_rect"
+    | Jas.Toolbar.Ellipse -> "ellipse"
+    | Jas.Toolbar.Polygon -> "polygon"
+    | Jas.Toolbar.Star -> "star"
+    | Jas.Toolbar.Lasso -> "lasso"
+    | Jas.Toolbar.Scale -> "scale"
+    | Jas.Toolbar.Rotate -> "rotate"
+    | Jas.Toolbar.Shear -> "shear"
+    | Jas.Toolbar.Hand -> "hand"
+    | Jas.Toolbar.Zoom -> "zoom"
+    | Jas.Toolbar.Artboard -> "artboard"
+    | Jas.Toolbar.Eyedropper -> "eyedropper"
+  in
+  (* Hide the native toolbar widget — stop mounting it. *)
+  toolbar#widget#misc#hide ();
+  (* Holder packed into the toolbar pane's GtkFixed at (0,0). Rebuilt in
+     place by [rebuild_bundle_toolbar] so the highlight tracks the tool. *)
+  let bundle_toolbar_holder = GPack.vbox () in
+  toolbar_fixed#put bundle_toolbar_holder#coerce ~x:0 ~y:0;
+  let rebuild_bundle_toolbar () =
+    List.iter (fun w -> bundle_toolbar_holder#remove w)
+      bundle_toolbar_holder#children;
+    Jas.Yaml_panel_view.mount_toolbar
+      ~packing:(bundle_toolbar_holder#pack ~expand:false ~fill:false)
+      ~get_model:(fun () -> Some (get_model ())) ();
+    bundle_toolbar_holder#misc#show_all ()
+  in
+  (* Every native tool change mirrors its string + rebuilds the toolbar
+     so the bind.checked highlight re-evaluates. *)
+  Jas.Toolbar.tool_changed_hook := (fun t ->
+    let name = tool_to_name t in
+    if !Jas.Yaml_panel_view.active_tool_name <> name then begin
+      Jas.Yaml_panel_view.active_tool_name := name;
+      rebuild_bundle_toolbar ()
+    end);
+  Jas.Yaml_panel_view.toolbar_rerender_hook := rebuild_bundle_toolbar;
+  (* Seed the string from the toolbar's current tool, then render once. *)
+  Jas.Yaml_panel_view.active_tool_name := tool_to_name toolbar#current_tool;
+  rebuild_bundle_toolbar ();
+
   (* Tool to restore when spacebar pass-through to Hand releases.
      None when no Space-held pass-through is active. Per
      HAND_TOOL.md Spacebar pass-through. *)

@@ -11,6 +11,14 @@ val tool_yaml_id : tool -> string option
     the toolbar-slot double-click handlers. *)
 val tool_options_dialog_id : tool -> string option
 
+(** Fired at the end of [select_tool] with the newly-active tool. The
+    bundle-rendered toolbar (Yaml_panel_view, STEP A) wires this in
+    main.ml to mirror the tool into the string the YAML [bind.checked]
+    expressions read and rebuild itself so the highlight tracks —
+    regardless of whether the change came from a toolbar click, a
+    keyboard shortcut, or the spacebar Hand pass-through. *)
+val tool_changed_hook : (tool -> unit) ref
+
 class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> object
   method current_tool : tool
   method widget : GObj.widget
