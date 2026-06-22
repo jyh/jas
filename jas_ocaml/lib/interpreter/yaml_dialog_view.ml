@@ -182,3 +182,116 @@ let show_dialog ?(parent : GWindow.window option)
       Dialog_global.current_close := (fun () -> ());
       Dialog_global.current_build_ctx := (fun () -> `Assoc [])
     | _ -> ()
+
+(** Show a [modal: false] YAML dialog as a non-blocking GTK flyout.
+
+    Unlike [show_dialog] (which is modal and runs a blocking
+    [dialog#run] loop), this opens an undecorated top-level window
+    that does NOT grab the main loop — so the canvas / toolbar stay
+    live and the popup dismisses itself on a click outside or when an
+    item's [close_dialog] effect fires. Used by the toolbar's
+    long-press tool-alternates flyout.
+
+    The window is positioned at the current pointer location so it
+    appears next to the slot button the user is holding. The same
+    [Dialog_global] wiring [show_dialog] installs is reused, so an
+    item button's [set: { active_tool: ... }] + [close_dialog]
+    behavior dispatches through the identical render-button path. *)
+let show_nonmodal_dialog (ds : dialog_state) : unit =
+  match Workspace_loader.load () with
+  | None -> ()
+  | Some ws ->
+    match Workspace_loader.dialog ws ds.id with
+    | Some (`Assoc dlg_def) ->
+      (* If a prior flyout is still open, dismiss it first so two
+         long-presses don't stack windows. *)
+      Dialog_global.close ();
+      let win = GWindow.window
+        ~type_hint:`POPUP_MENU
+        ~decorated:false
+        ~resizable:false
+        ~show:false
+        () in
+      win#set_skip_taskbar_hint true;
+      win#set_skip_pager_hint true;
+      (* Accept + grab focus on map so the focus-out dismissal below is
+         reliable: the popup holds focus, and the user's next click
+         elsewhere moves focus away and closes it (menu semantics). *)
+      win#set_accept_focus true;
+      win#set_focus_on_map true;
+      (* Anchor the flyout at the pointer (the slot button the user is
+         long-pressing). [window_at_pointer] gives the window under the
+         cursor plus pointer-relative coords; that window's root origin
+         converts them to absolute screen coords. Offset a touch so the
+         popup sits below-right of the cursor rather than under it.
+         Best-effort: a centered popup if the pointer can't be read. *)
+      (try
+        match Gdk.Display.window_at_pointer () with
+        | Some (gwin, rx, ry) ->
+          let (ox, oy) = Gdk.Window.get_origin gwin in
+          win#move ~x:(ox + rx + 4) ~y:(oy + ry + 4)
+        | None -> ()
+      with _ -> ());
+      let frame = GBin.frame ~shadow_type:`OUT ~packing:win#add () in
+      let vbox = GPack.vbox ~packing:frame#add () in
+      let state_defaults = Workspace_loader.state_defaults ws in
+      let icons = Workspace_loader.icons ws in
+      let live_state = ref ds.state in
+      let props = match List.assoc_opt "state" dlg_def with
+        | Some (`Assoc state_defs) ->
+          List.filter_map (fun (key, def) ->
+            match def with
+            | `Assoc fields ->
+              let get = match List.assoc_opt "get" fields with
+                | Some (`String s) -> Some s | _ -> None in
+              let set = match List.assoc_opt "set" fields with
+                | Some (`String s) -> Some s | _ -> None in
+              if get = None && set = None then None
+              else Some (key, { Dialog_global.prop_get = get; prop_set = set })
+            | _ -> None
+          ) state_defs
+        | _ -> []
+      in
+      Dialog_global.current_state := Some live_state;
+      Dialog_global.current_id := Some ds.id;
+      Dialog_global.current_outer_scope := [];
+      Dialog_global.current_props := props;
+      Dialog_global.clear_state_change_listeners ();
+      (* close_dialog / dismiss_dialog and the outside-click handler
+         all route through this. Tear down the Dialog_global wiring on
+         destroy so a closed flyout leaves no stale state behind. *)
+      let teardown () =
+        Dialog_global.current_state := None;
+        Dialog_global.current_id := None;
+        Dialog_global.current_outer_scope := [];
+        Dialog_global.current_props := [];
+        Dialog_global.clear_state_change_listeners ();
+        Dialog_global.current_close := (fun () -> ());
+        Dialog_global.current_build_ctx := (fun () -> `Assoc [])
+      in
+      Dialog_global.current_close := (fun () ->
+        teardown ();
+        (try win#destroy () with _ -> ()));
+      Dialog_global.current_build_ctx := (fun () ->
+        `Assoc (
+          ("state", `Assoc state_defaults) ::
+          ("dialog", `Assoc (Dialog_global.read_state ())) ::
+          ("param", `Assoc ds.params) ::
+          ("icons", icons) :: []
+        ));
+      let ctx = !Dialog_global.current_build_ctx () in
+      (match List.assoc_opt "content" dlg_def with
+       | Some content ->
+         Yaml_panel_view.render_element
+           ~packing:(vbox#pack ~expand:false)
+           ~ctx content
+       | None -> ());
+      (* Dismiss on focus-out (a click anywhere outside the popup moves
+         focus away, so the flyout closes — matching menu semantics:
+         the next click either lands on an item (running its
+         close_dialog) or dismisses the popup). *)
+      ignore (win#event#connect#focus_out ~callback:(fun _ ->
+        Dialog_global.close (); false));
+      win#show ();
+      win#present ()
+    | _ -> ()

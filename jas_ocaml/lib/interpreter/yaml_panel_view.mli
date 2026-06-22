@@ -55,6 +55,13 @@ val confirm_delete_orphans_hook : (int -> bool) ref
 val open_yaml_dialog_hook :
   (string -> (string * Yojson.Safe.t) list -> unit) ref
 
+(** Open a ``modal: false`` YAML dialog as a non-blocking flyout (the
+    toolbar long-press tool-alternates popup). Distinct from
+    [open_yaml_dialog_hook], which runs the blocking modal dialog. Wired
+    in main.ml against [Yaml_dialog_view.show_nonmodal_dialog]. *)
+val open_nonmodal_dialog_hook :
+  (string -> (string * Yojson.Safe.t) list -> unit) ref
+
 (** Switch the active canvas's tool from a YAML ``set: { active_tool:
     ... }`` effect or a toolbar ``select_tool`` action. Wired in main.ml
     against the active toolbar. *)

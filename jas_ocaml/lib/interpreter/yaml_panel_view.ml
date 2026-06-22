@@ -444,6 +444,17 @@ let open_yaml_dialog_hook :
   (string -> (string * Yojson.Safe.t) list -> unit) ref =
   ref (fun _ _ -> ())
 
+(** Hook for opening a NON-MODAL YAML-defined dialog as a flyout
+    (``modal: false`` dialogs only). Set in main.ml using
+    [Yaml_dialog_view.open_dialog] + [show_nonmodal_dialog]. Distinct
+    from [open_yaml_dialog_hook] (which runs the blocking modal
+    [show_dialog]) so the toolbar long-press tool-alternates flyout
+    can pop a non-blocking popup that leaves the canvas/toolbar live.
+    Same cycle-avoidance rationale as [open_yaml_dialog_hook]. *)
+let open_nonmodal_dialog_hook :
+  (string -> (string * Yojson.Safe.t) list -> unit) ref =
+  ref (fun _ _ -> ())
+
 (** Hook for switching the active canvas's toolbar tool from a YAML
     effect (``set: { active_tool: "<name>" }``). The color picker's
     eyedropper icon and other in-dialog tool-switch shortcuts need
@@ -1849,6 +1860,86 @@ and render_button ~packing ~ctx el =
          state; action-only dispatches let the model+canvas refresh
          pipeline do the work without a flickery dock rebuild. *)
       if wrote_state then schedule_panel_rerender ()))
+  end;
+  (* Long-press tool-alternates flyout (toolbar). A slot button declares
+     [mouse_down] -> start_timer(250ms) -> open_dialog, and
+     [mouse_up] -> cancel_timer. The [click] behavior (select_tool)
+     still fires on a quick press+release because the press/release
+     callbacks return [false] (don't consume the event), so the
+     GtkButton's own [clicked] signal proceeds.
+       - mouse_down arms the timer; if held 250ms the timer's nested
+         [open_dialog: { id: <slot>_alternates }] fires.
+       - The [open_dialog] platform handler below routes that to the
+         non-modal flyout opener (the built-in Effects.open_dialog only
+         seeds State_store). Scoped to the timer's effects run, so
+         panels/dialogs that use the built-in open_dialog are
+         unaffected.
+       - mouse_up cancels a not-yet-fired timer, so a fast click never
+         leaves a stray timer and never pops the flyout.
+     Only wired when the element actually declares mouse_down/mouse_up
+     behaviors, so ordinary panel buttons keep their plain click path. *)
+  let behavior_for_event ev_name =
+    match el |> member "behavior" with
+    | `List bs ->
+      List.filter_map (fun b ->
+        if (b |> member "event" |> to_string_option) = Some ev_name then
+          match b |> member "effects" with
+          | `List effs -> Some effs
+          | _ -> None
+        else None) bs
+      |> List.concat
+    | _ -> []
+  in
+  let mouse_down_effects = behavior_for_event "mouse_down" in
+  let mouse_up_effects = behavior_for_event "mouse_up" in
+  if mouse_down_effects <> [] || mouse_up_effects <> [] then begin
+    (* [open_dialog] platform handler: pop the flyout window for a
+       NON-MODAL ([modal: false]) dialog via the hook (set in main.ml
+       against Yaml_dialog_view.show_nonmodal_dialog). This handler is
+       scoped to this slot button's mouse_down/up effects run only, so
+       the built-in Effects.open_dialog used by panels/dialogs (modal
+       color_picker / tool-options flows) is untouched. A toolbar
+       long-press only ever targets a ``modal: false`` alternates
+       dialog; were it ever to fire a modal one, this would no-op
+       (rather than open it) — acceptable since that path is unused
+       here. *)
+    let open_dialog_h : Effects.platform_effect = fun value _ctx _store ->
+      let dlg_id = match value with
+        | `Assoc d ->
+          (match List.assoc_opt "id" d with Some (`String s) -> s | _ -> "")
+        | `String s -> s
+        | _ -> "" in
+      let is_non_modal =
+        match Workspace_loader.load () with
+        | Some ws ->
+          (match Workspace_loader.dialog ws dlg_id with
+           | Some (`Assoc dlg_def) ->
+             (match List.assoc_opt "modal" dlg_def with
+              | Some (`Bool b) -> not b
+              | _ -> false)  (* dialogs default to modal *)
+           | _ -> false)
+        | None -> false in
+      if dlg_id <> "" && is_non_modal then
+        !open_nonmodal_dialog_hook dlg_id [];
+      `Null
+    in
+    let live_store = match !_current_store with
+      | Some s -> s | None -> State_store.create () in
+    let ctx_pairs = match ctx with `Assoc p -> p | _ -> [] in
+    let run effs =
+      if effs <> [] then
+        Effects.run_effects
+          ~platform_effects:[("open_dialog", open_dialog_h)]
+          effs ctx_pairs live_store
+    in
+    ignore (btn#event#connect#button_press ~callback:(fun ev ->
+      if GdkEvent.Button.button ev = 1 then run mouse_down_effects;
+      (* Return false: do NOT consume — the GtkButton still emits
+         [clicked] for a quick press+release (select_tool). *)
+      false));
+    ignore (btn#event#connect#button_release ~callback:(fun ev ->
+      if GdkEvent.Button.button ev = 1 then run mouse_up_effects;
+      false))
   end;
   (* Inline behavior dispatch for buttons in dialogs (Color Picker
      OK button writes [if param.target == fill then set fill_color
@@ -5133,11 +5224,14 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
     [dispatch_click_behaviors] — that's where a tool button's
     ``action: select_tool`` lands.
 
-    The long-press alternates flyout is NOT functional yet: it relies on
-    ``start_timer → open_dialog``, and the generic [Effects.open_dialog]
-    only seeds State_store — it does not pop the GTK dialog window (that
-    path runs solely through [open_yaml_dialog_hook]). Closing that gap
-    is a separate, generic effects-layer increment. *)
+    The long-press alternates flyout is wired in [render_button]: a slot
+    button's ``mouse_down`` arms a 250ms timer whose ``open_dialog``
+    effect routes (via an [open_dialog] platform handler scoped to that
+    run) through [open_nonmodal_dialog_hook] to pop the ``modal: false``
+    alternates dialog as a non-blocking flyout; ``mouse_up`` cancels the
+    timer so a quick click selects the tool without popping the flyout.
+    The flyout items' ``set: { active_tool } + close_dialog`` behaviors
+    dispatch through the same Dialog_global path the modal dialogs use. *)
 let mount_toolbar ~packing ?(get_model = fun () -> None) () =
   match Workspace_loader.load () with
   | None -> ()
