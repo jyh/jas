@@ -14,6 +14,11 @@ val load : unit -> workspace option
 (** Return a member of a JSON object, or [None] if missing or not an object. *)
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
+(** [menubar ws] returns the top-level menu bar definition (menubar.yaml)
+    as a list of menu JSON objects in declaration order. Empty when the
+    bundle ships no [menubar] key. *)
+val menubar : workspace -> Yojson.Safe.t list
+
 val panel : workspace -> string -> Yojson.Safe.t option
 
 (** [concept ws id] returns the concept pack [id] from the registry, or [None]. *)

@@ -601,6 +601,77 @@ let revert (get_model : unit -> Model.model) (parent : GWindow.window) () =
     | _ -> ()
   end
 
+(* Parse a bundle shortcut string ("Ctrl+N", "Ctrl+Shift+S", "Ctrl+=",
+   "Ctrl+Alt+2", ...) into a (keysym, modifiers) pair. Returns [None]
+   for the empty string or any token we cannot map. This FIXES the
+   former Save / Save-As collision where both bound plain Ctrl+S: Save
+   As now carries [`SHIFT] from "Ctrl+Shift+S". The accelerator is
+   attached directly to the menu item via [#add_accelerator] so each
+   item gets its exact modifier set, rather than relying on the
+   factory-wide [`CONTROL] default. *)
+let parse_shortcut (s : string) : (Gdk.keysym * Gdk.Tags.modifier list) option =
+  let s = String.trim s in
+  if s = "" then None
+  else
+    let tokens = String.split_on_char '+' s |> List.map String.trim in
+    match List.rev tokens with
+    | [] -> None
+    | key_tok :: mod_toks_rev ->
+      let mods =
+        List.filter_map (fun t ->
+          match String.lowercase_ascii t with
+          | "ctrl" | "control" | "cmd" -> Some `CONTROL
+          | "shift" -> Some `SHIFT
+          | "alt" | "option" | "opt" -> Some `MOD1
+          | _ -> None)
+          (List.rev mod_toks_rev)
+      in
+      let key =
+        match key_tok with
+        | "N" | "n" -> Some GdkKeysyms._n
+        | "O" | "o" -> Some GdkKeysyms._o
+        | "S" | "s" -> Some GdkKeysyms._s
+        | "P" | "p" -> Some GdkKeysyms._p
+        | "Q" | "q" -> Some GdkKeysyms._q
+        | "Z" | "z" -> Some GdkKeysyms._z
+        | "X" | "x" -> Some GdkKeysyms._x
+        | "C" | "c" -> Some GdkKeysyms._c
+        | "V" | "v" -> Some GdkKeysyms._v
+        | "A" | "a" -> Some GdkKeysyms._a
+        | "G" | "g" -> Some GdkKeysyms._g
+        | "0" -> Some GdkKeysyms._0
+        | "1" -> Some GdkKeysyms._1
+        | "2" -> Some GdkKeysyms._2
+        | "3" -> Some GdkKeysyms._3
+        | "=" | "+" -> Some GdkKeysyms._equal
+        | "-" -> Some GdkKeysyms._minus
+        | _ -> None
+      in
+      (match key with Some k -> Some (k, mods) | None -> None)
+
+(* Map a bundle [toggle_panel] panel string to the layout's
+   [panel_kind]. The Concepts panel exists as a widget in this app but
+   is not (yet) a dockable [panel_kind] in the layout, so "concepts"
+   returns [None] and its Window-menu entry becomes an inert item — see
+   the note in [create]. Adding a Concepts panel_kind is a separate
+   feature. *)
+let panel_kind_of_string (s : string) : Workspace_layout.panel_kind option =
+  match s with
+  | "layers" -> Some Workspace_layout.Layers
+  | "color" -> Some Workspace_layout.Color
+  | "swatches" -> Some Workspace_layout.Swatches
+  | "stroke" -> Some Workspace_layout.Stroke
+  | "properties" -> Some Workspace_layout.Properties
+  | "character" -> Some Workspace_layout.Character
+  | "paragraph" -> Some Workspace_layout.Paragraph
+  | "artboards" -> Some Workspace_layout.Artboards
+  | "align" -> Some Workspace_layout.Align
+  | "boolean" -> Some Workspace_layout.Boolean
+  | "opacity" -> Some Workspace_layout.Opacity
+  | "magic_wand" -> Some Workspace_layout.Magic_wand
+  | "symbols" -> Some Workspace_layout.Symbols
+  | _ -> None
+
 let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
   let m () = get_model () in
   (* Menubar *)
@@ -614,28 +685,24 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   apply_menubar_css ();
   menubar#misc#style_context#add_provider menubar_css 600;
   let factory = new GMenu.factory menubar in
+  let accel_group = factory#accel_group in
   (* Attach the factory's accel_group to the parent window so menu
      accelerators (Ctrl-N, Ctrl-S, Ctrl-P, etc.) actually fire as
      keyboard shortcuts. Without this the keysym shows in the menu
      label but the keypress is never routed to the menu callback. *)
-  parent#add_accel_group factory#accel_group;
+  parent#add_accel_group accel_group;
 
-  (* File menu *)
-  let _file_menu = factory#add_submenu "File" in
-  let file_factory = new GMenu.factory ~accel_group:factory#accel_group _file_menu in
-  (* Document.default_document () builds with empty artboards which
-     gives a featureless gray pasteboard. Seed the at-least-one
-     invariant so a fresh canvas opens with a visible white artboard. *)
-  ignore (file_factory#add_item "New" ~key:GdkKeysyms._n ~callback:(fun () ->
+  (* New document: Document.default_document () builds with empty
+     artboards which gives a featureless gray pasteboard. Seed the
+     at-least-one invariant so a fresh canvas opens with a visible
+     white artboard. *)
+  let new_document () =
     let layers = [| Element.make_layer [||] |] in
     let (abs, _) = Artboard.ensure_invariant [] in
     let doc = Document.make_document ~artboards:abs layers in
-    on_open (Model.create ~document:doc ())));
-  ignore (file_factory#add_item "Open..." ~key:GdkKeysyms._o ~callback:(open_file on_open parent));
-  ignore (file_factory#add_item "Save" ~key:GdkKeysyms._s ~callback:(fun () -> save (m ()) parent ()));
-  ignore (file_factory#add_item "Save As..." ~key:GdkKeysyms._s ~callback:(fun () -> save_as (m ()) parent ()));
-  ignore (file_factory#add_item "Revert" ~callback:(revert m parent));
-  ignore (file_factory#add_separator ());
+    on_open (Model.create ~document:doc ())
+  in
+
   (* PRINT.md §1: Document Setup, Print, Export to PDF.
      Dialog flows route through [Yaml_dialog_view] which renders the
      workspace YAML, wires widget write-backs, and dispatches the
@@ -652,84 +719,83 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     | Some ds -> Yaml_dialog_view.show_dialog ~parent ~outer_scope ds
     | None -> ()
   in
-  ignore (file_factory#add_item "Document Setup..."
-    ~callback:(open_print_phase_dialog "document_setup"));
-  ignore (file_factory#add_item "Print..." ~key:GdkKeysyms._p
-    ~callback:(open_print_phase_dialog "print"));
-  ignore (file_factory#add_item "Export to PDF..." ~callback:(fun () ->
-    export_to_pdf (m ()) parent ()));
-  ignore (file_factory#add_separator ());
-  ignore (file_factory#add_item "Quit" ~key:GdkKeysyms._q ~callback:(fun () -> GMain.quit ()));
 
-  (* Edit menu *)
-  let _edit_menu = factory#add_submenu "Edit" in
-  let edit_factory = new GMenu.factory ~accel_group:factory#accel_group _edit_menu in
-  ignore (edit_factory#add_item "Undo" ~key:GdkKeysyms._z ~callback:(fun () -> (m ())#undo));
-  ignore (edit_factory#add_item "Redo" ~callback:(fun () -> (m ())#redo));
-  ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Cut" ~key:GdkKeysyms._x ~callback:(fun () -> cut_selection (m ()) parent ()));
-  ignore (edit_factory#add_item "Copy" ~key:GdkKeysyms._c ~callback:(fun () -> copy_selection (m ()) ()));
-  ignore (edit_factory#add_item "Paste" ~key:GdkKeysyms._v ~callback:(fun () -> paste_clipboard (m ()) Canvas_tool.paste_offset ()));
-  ignore (edit_factory#add_item "Paste in Place" ~callback:(fun () -> paste_clipboard (m ()) 0.0 ()));
-  ignore (edit_factory#add_separator ());
-  ignore (edit_factory#add_item "Select All" ~key:GdkKeysyms._a ~callback:(fun () ->
+  (* Generic dispatch for bundle actions with NO bespoke handler — today
+     only the View-menu zoom/fit actions and the [promote_to_concept]
+     stub. Routes through the shared [Dialog_global.dispatch_action] with
+     a fresh Controller, exactly like the dialog OK / Print path: its
+     [_platform_effects_for] already registers the [doc.zoom.*] effects
+     (apply / set / fit_rect / fit_all_artboards / fit_elements) that
+     actions.yaml's zoom_in/zoom_out/zoom_to_actual_size/
+     fit_active_artboard/fit_all_artboards/fit_in_window reference, so
+     they run cleanly with no extra wiring. [promote_to_concept]'s bundle
+     effect is a [{log}] stub (the real promote lives panel-side in
+     Concepts_panel / yaml_panel_view), so routing it here is log-only —
+     parity with the Rust menu, where it also routes through the generic
+     dispatcher. A redraw is queued so view-state changes paint. *)
+  let dispatch_generic action params () =
     let model = m () in
-    (new Controller.controller ~model ())#select_all));
-
-  (* Object menu *)
-  let _object_menu = factory#add_submenu "Object" in
-  let object_factory = new GMenu.factory ~accel_group:factory#accel_group _object_menu in
-  ignore (object_factory#add_item "Group" ~key:GdkKeysyms._g ~callback:(fun () -> group_selection (m ()) ()));
-  ignore (object_factory#add_item "Ungroup" ~callback:(fun () -> ungroup_selection (m ()) ()));
-  ignore (object_factory#add_item "Ungroup All" ~callback:(fun () -> ungroup_all (m ()) ()));
-  ignore (object_factory#add_separator ());
-  (* The Controller mutators self-bracket via edit_document (one undo step);
-     no separate snapshot needed (OP_LOG.md Increment 1). *)
-  ignore (object_factory#add_item "Lock" ~key:GdkKeysyms._2 ~callback:(fun () ->
-    let model = m () in (new Controller.controller ~model ())#lock_selection));
-  ignore (object_factory#add_item "Unlock All" ~callback:(fun () ->
-    let model = m () in (new Controller.controller ~model ())#unlock_all));
-  ignore (object_factory#add_separator ());
-  ignore (object_factory#add_item "Hide" ~key:GdkKeysyms._3 ~callback:(fun () ->
-    let model = m () in (new Controller.controller ~model ())#hide_selection));
-  ignore (object_factory#add_item "Show All" ~callback:(fun () ->
-    let model = m () in (new Controller.controller ~model ())#show_all));
-  ignore (object_factory#add_separator ());
-  ignore (object_factory#add_item "Make Instance" ~callback:(fun () ->
-    make_instance (m ()) ()));
-
-  (* View menu *)
-  let _view_menu = factory#add_submenu "View" in
-  let view_factory = new GMenu.factory ~accel_group:factory#accel_group _view_menu in
-  let bump_zoom factor () =
-    let model = m () in
-    let cx = model#viewport_w /. 2.0 in
-    let cy = model#viewport_h /. 2.0 in
-    let z = model#zoom_level in
-    let doc_cx = (cx -. model#view_offset_x) /. z in
-    let doc_cy = (cy -. model#view_offset_y) /. z in
-    let z' = max 0.1 (min 64.0 (z *. factor)) in
-    model#set_zoom_level z';
-    model#set_view_offset_x (cx -. doc_cx *. z');
-    model#set_view_offset_y (cy -. doc_cy *. z');
+    let ctrl = new Controller.controller ~model () in
+    Dialog_global.dispatch_action action params (Some ctrl) (fun () -> ());
     parent#misc#queue_draw ()
   in
-  ignore (view_factory#add_item "Zoom In" ~key:GdkKeysyms._plus
-    ~callback:(bump_zoom 1.2));
-  ignore (view_factory#add_item "Zoom Out" ~key:GdkKeysyms._minus
-    ~callback:(bump_zoom (1.0 /. 1.2)));
-  ignore (view_factory#add_item "Fit in Window" ~key:GdkKeysyms._0
-    ~callback:(fun () ->
-      (m ())#center_view_on_current_artboard;
-      parent#misc#queue_draw ()));
 
-  (* Window menu *)
-  let _window_menu = factory#add_submenu "Window" in
-  let window_factory = new GMenu.factory ~accel_group:factory#accel_group _window_menu in
+  (* Per-action router. BESPOKE-PRESERVED arms call the existing native
+     functions (file dialogs, clipboard, orphan-confirm modals,
+     print/document-setup dialogs, undo/redo, group/lock/hide, etc.)
+     unchanged; only the menu's DATA SOURCE moved to the bundle. GENERIC
+     arms route the zoom/fit/promote actions through [dispatch_generic].
+     [tile_panes] / [toggle_pane] / [toggle_panel] are handled separately
+     by the dynamic-entry builders below (their bundle effects are
+     placeholders, so they MUST stay on the native Layout_apply path). *)
+  let on_menu_action (action : string) (params : (string * Yojson.Safe.t) list) : unit =
+    match action with
+    (* --- File (bespoke) --- *)
+    | "new_document" -> new_document ()
+    | "open_file" -> open_file on_open parent ()
+    | "save" -> save (m ()) parent ()
+    | "save_as" -> save_as (m ()) parent ()
+    | "revert" -> revert m parent ()
+    | "open_document_setup" -> open_print_phase_dialog "document_setup" ()
+    | "open_print_dialog" -> open_print_phase_dialog "print" ()
+    | "export_to_pdf" -> export_to_pdf (m ()) parent ()
+    | "quit" -> GMain.quit ()
+    (* --- Edit (bespoke) --- *)
+    | "undo" -> (m ())#undo
+    | "redo" -> (m ())#redo
+    | "cut" -> cut_selection (m ()) parent ()
+    | "copy" -> copy_selection (m ()) ()
+    | "paste" -> paste_clipboard (m ()) Canvas_tool.paste_offset ()
+    | "paste_in_place" -> paste_clipboard (m ()) 0.0 ()
+    | "select_all" ->
+      let model = m () in (new Controller.controller ~model ())#select_all
+    (* --- Object (bespoke) --- *)
+    | "group" -> group_selection (m ()) ()
+    | "ungroup" -> ungroup_selection (m ()) ()
+    | "ungroup_all" -> ungroup_all (m ()) ()
+    | "lock" ->
+      let model = m () in (new Controller.controller ~model ())#lock_selection
+    | "unlock_all" ->
+      let model = m () in (new Controller.controller ~model ())#unlock_all
+    | "hide_selection" ->
+      let model = m () in (new Controller.controller ~model ())#hide_selection
+    | "show_all" ->
+      let model = m () in (new Controller.controller ~model ())#show_all
+    | "make_instance" -> make_instance (m ()) ()
+    (* --- View + promote (generic, effect-backed) --- *)
+    | "zoom_in" | "zoom_out" | "zoom_to_actual_size"
+    | "fit_active_artboard" | "fit_all_artboards" | "fit_in_window"
+    | "promote_to_concept" -> dispatch_generic action params ()
+    | _ -> ()
+  in
 
-  (* Workspace submenu *)
-  (match workspace_layout, app_config, refresh_dock with
-   | Some layout, Some config, Some refresh ->
+  (* Workspace submenu builder — behavior identical to the former
+     hardcoded block; extracted so the model loop can invoke it on the
+     Workspace dynamic submenu entry. Adds the submenu under
+     [window_factory]. *)
+  let build_workspace_submenu (window_factory : GMenu.menu GMenu.factory) =
+    match workspace_layout, app_config, refresh_dock with
+    | Some layout, Some config, Some refresh ->
      let _ws_menu = window_factory#add_submenu "Workspace" in
      let ws_factory = new GMenu.factory _ws_menu in
      (* List saved layouts, filtering out "Workspace" *)
@@ -826,11 +892,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
        end
      ));
      ignore (ws_factory#add_separator ())
-   | _ -> ());
+   | _ -> ()
+  in
 
-  (* Appearance submenu — rebuilt on each show to update checkmarks *)
-  (match app_config, refresh_dock with
-   | Some config, Some refresh ->
+  (* Appearance submenu builder — rebuilt on each show to update
+     checkmarks; behavior identical to the former hardcoded block. *)
+  let build_appearance_submenu (window_factory : GMenu.menu GMenu.factory) =
+    match app_config, refresh_dock with
+    | Some config, Some refresh ->
      let app_menu = window_factory#add_submenu "Appearance" in
      let rec rebuild_appearance_menu () =
        List.iter (fun c -> c#destroy ()) app_menu#children;
@@ -848,55 +917,61 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
        ) Theme.predefined_appearances
      in
      rebuild_appearance_menu ()
-   | _ -> ());
+    | _ -> ()
+  in
 
-  (* Pane toggles *)
-  (match workspace_layout, refresh_dock with
-   | Some layout, Some refresh ->
-     ignore (window_factory#add_separator ());
-     ignore (window_factory#add_item "Tile" ~callback:(fun () ->
-       (* OP_LOG 3d-2: route the menu Tile through the shared runtime
-          dispatcher. [panes_mut] preserves the dirty signal (bumps after the
-          op), and the dispatcher re-guards [pane_layout] internally. The
-          corpus path is the no-override case. *)
-       Workspace_layout.panes_mut layout (fun _pl ->
-         Layout_apply.layout_apply layout (Layout_apply.op_tile_panes ()));
-       refresh ()
-     ));
-     ignore (window_factory#add_separator ());
-     let toggle_pane kind label =
-       let active = match Workspace_layout.panes layout with
-         | Some pl -> Pane.is_pane_visible pl kind
-         | None -> false in
-       ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
-         if !_suppress_check_callback then () else begin
-           (* OP_LOG 3d-2: route the pane visibility toggle through the shared
-              runtime dispatcher; [panes_mut] preserves the dirty signal. *)
-           Workspace_layout.panes_mut layout (fun pl ->
-             let op =
-               if Pane.is_pane_visible pl kind
-               then Layout_apply.op_hide_pane kind
-               else Layout_apply.op_show_pane kind
-             in
-             Layout_apply.layout_apply layout op);
-           refresh ()
-         end
-       ))
-     in
-     toggle_pane Pane.Toolbar "Toolbar";
-     toggle_pane Pane.Dock "Panels"
-   | _ -> ());
+  (* Tile (native): route the menu Tile through the shared runtime
+     dispatcher. The bundle [tile_panes] effect is a placeholder, so
+     this stays on the native Layout_apply path. *)
+  let build_tile (window_factory : GMenu.menu GMenu.factory) =
+    match workspace_layout, refresh_dock with
+    | Some layout, Some refresh ->
+      ignore (window_factory#add_item "Tile" ~callback:(fun () ->
+        (* OP_LOG 3d-2: [panes_mut] preserves the dirty signal (bumps
+           after the op), and the dispatcher re-guards [pane_layout]
+           internally. The corpus path is the no-override case. *)
+        Workspace_layout.panes_mut layout (fun _pl ->
+          Layout_apply.layout_apply layout (Layout_apply.op_tile_panes ()));
+        refresh ()))
+    | _ -> ()
+  in
 
-  ignore (window_factory#add_separator ());
+  (* Pane toggle (native) — check-menu item. The bundle [toggle_pane]
+     effect is a placeholder, so this stays on the native Layout_apply
+     path and keeps the [_suppress_check_callback] re-entrancy guard. *)
+  let build_toggle_pane (window_factory : GMenu.menu GMenu.factory) kind label =
+    match workspace_layout, refresh_dock with
+    | Some layout, Some refresh ->
+      let active = match Workspace_layout.panes layout with
+        | Some pl -> Pane.is_pane_visible pl kind
+        | None -> false in
+      ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
+        if !_suppress_check_callback then () else begin
+          (* OP_LOG 3d-2: route the pane visibility toggle through the shared
+             runtime dispatcher; [panes_mut] preserves the dirty signal. *)
+          Workspace_layout.panes_mut layout (fun pl ->
+            let op =
+              if Pane.is_pane_visible pl kind
+              then Layout_apply.op_hide_pane kind
+              else Layout_apply.op_show_pane kind
+            in
+            Layout_apply.layout_apply layout op);
+          refresh ()
+        end))
+    | _ -> ()
+  in
 
   (* Panel toggles — check-menu items so the Window menu shows a
      checkmark next to each visible panel. The menu is built once at
      startup; check states are kept truthful by [sync_panel_checks]
      (assigned below), which canvas.ml's dock_refresh fires after any
-     panel/dock state change. *)
+     panel/dock state change. The bundle [toggle_panel] effect is a
+     placeholder, so this stays on the native Layout_apply path and
+     keeps the [panel_checks] Hashtbl + [_suppress_check_callback]
+     re-entrancy machinery. *)
   let panel_checks : (Workspace_layout.panel_kind, GMenu.check_menu_item) Hashtbl.t =
     Hashtbl.create 16 in
-  let toggle_panel kind label =
+  let build_toggle_panel (window_factory : GMenu.menu GMenu.factory) kind label =
     let active = match workspace_layout with
       | Some layout -> Workspace_layout.is_panel_visible layout kind
       | None -> false in
@@ -941,19 +1016,58 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     ) in
     Hashtbl.replace panel_checks kind item
   in
-  toggle_panel Workspace_layout.Align "Align";
-  toggle_panel Workspace_layout.Artboards "Artboards";
-  toggle_panel Workspace_layout.Boolean "Boolean";
-  toggle_panel Workspace_layout.Character "Character";
-  toggle_panel Workspace_layout.Color "Color";
-  toggle_panel Workspace_layout.Layers "Layers";
-  toggle_panel Workspace_layout.Magic_wand "Magic Wand";
-  toggle_panel Workspace_layout.Opacity "Opacity";
-  toggle_panel Workspace_layout.Paragraph "Paragraph";
-  toggle_panel Workspace_layout.Properties "Properties";
-  toggle_panel Workspace_layout.Stroke "Stroke";
-  toggle_panel Workspace_layout.Swatches "Swatches";
-  toggle_panel Workspace_layout.Symbols "Symbols";
+
+  (* --- Build the menu bar by projecting the compiled bundle [menubar]
+     (menubar.yaml) — the single source of truth. Each top-level menu
+     becomes a [factory#add_submenu]; each entry is dispatched by kind.
+     A [Window]-scoped factory is captured per Window menu so the native
+     dynamic submenus / pane / panel toggles attach to it. This replaced
+     five hand-maintained native menus that had drifted from the spec. *)
+  let add_action_item (mf : GMenu.menu GMenu.factory) ~label ~action ~params ~shortcut =
+    let item = mf#add_item (Menu_model.strip_mnemonic label)
+      ~callback:(fun () -> on_menu_action action params) in
+    (match parse_shortcut shortcut with
+     | Some (key, modi) -> item#add_accelerator ~group:accel_group ~modi key
+     | None -> ())
+  in
+  List.iter (fun (menu : Menu_model.menu) ->
+    let menu_widget = factory#add_submenu (Menu_model.strip_mnemonic menu.label) in
+    let mf = new GMenu.factory ~accel_group menu_widget in
+    List.iter (fun (entry : Menu_model.entry) ->
+      match entry with
+      | Menu_model.Separator -> ignore (mf#add_separator ())
+      | Menu_model.Dynamic_submenu { kind = Menu_model.Workspace; _ } ->
+        build_workspace_submenu mf
+      | Menu_model.Dynamic_submenu { kind = Menu_model.Appearance; _ } ->
+        build_appearance_submenu mf
+      | Menu_model.Action { label; action; params; shortcut; _ } ->
+        (match action with
+         | "tile_panes" -> build_tile mf
+         | "toggle_pane" ->
+           let pane = match List.assoc_opt "pane" params with
+             | Some (`String s) -> s | _ -> "" in
+           (match pane with
+            | "toolbar" ->
+              build_toggle_pane mf Pane.Toolbar (Menu_model.strip_mnemonic label)
+            | "dock" ->
+              build_toggle_pane mf Pane.Dock (Menu_model.strip_mnemonic label)
+            | _ -> ())
+         | "toggle_panel" ->
+           let panel = match List.assoc_opt "panel" params with
+             | Some (`String s) -> s | _ -> "" in
+           (match panel_kind_of_string panel with
+            | Some kind ->
+              build_toggle_panel mf kind (Menu_model.strip_mnemonic label)
+            | None ->
+              (* No matching dockable [panel_kind] (e.g. "concepts" — the
+                 Concepts panel is a widget, not yet a layout panel_kind
+                 in this app). Add an inert item so the menu still shows
+                 the entry; wiring a real toggle needs a new panel_kind,
+                 a separate feature. *)
+              ignore (mf#add_item (Menu_model.strip_mnemonic label)))
+         | _ -> add_action_item mf ~label ~action ~params ~shortcut)
+    ) menu.entries
+  ) (Menu_model.menu_bar_model ());
 
   (* Wire the sync closure: canvas.ml's dock_refresh calls this after
      any panel state change to keep the Window menu checkmarks
