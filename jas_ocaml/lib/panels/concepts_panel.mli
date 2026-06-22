@@ -47,7 +47,7 @@ val apply_concept_operation_op :
     undo and routes through [Op_apply.op_apply]; replay never re-runs the
     fitter. *)
 val promote_to_concept_op :
-  State_store.t -> Model.model -> Yojson.Safe.t option
+  Model.model -> Yojson.Safe.t option
 
 (** The render-time concept resolver (concept id -> params -> points), for the
     canvas to evaluate a Generated instance's geometry. *)

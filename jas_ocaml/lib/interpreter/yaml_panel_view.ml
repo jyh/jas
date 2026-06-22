@@ -1035,8 +1035,8 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                    [Op_apply.op_apply] so it JOURNALS; [with_txn] brackets one
                    undo. A no-match yields no op and is a silent no-op. *)
                 (match !_current_store with
-                 | Some store ->
-                   (match Concepts_panel.promote_to_concept_op store m with
+                 | Some _ ->
+                   (match Concepts_panel.promote_to_concept_op m with
                     | Some op ->
                       let ctrl = new Controller.controller ~model:m () in
                       m#with_txn (fun () ->
