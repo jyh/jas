@@ -13,6 +13,10 @@ menubar:
       - separator
       - { id: menu_document_setup, label: "Document Set&up...", action: open_document_setup,
           enabled_when: "state.tab_count > 0" }
+      - { id: menu_print,    label: "&Print...",   action: open_print_dialog, shortcut: "Ctrl+P",
+          enabled_when: "state.tab_count > 0" }
+      - { id: menu_export_pdf, label: "Export to PDF...", action: export_to_pdf,
+          enabled_when: "state.tab_count > 0" }
       - separator
       - { id: menu_quit,     label: "&Quit",        action: quit,          shortcut: "Ctrl+Q" }
 
