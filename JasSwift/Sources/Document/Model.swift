@@ -190,6 +190,15 @@ public class Model: ObservableObject {
     /// A panel-state mutation bumps `panelStateVersion` so SwiftUI
     /// re-renders the bound views.
     public let stateStore: StateStore = StateStore()
+    /// Mirror hook for ``state.active_tool`` writes that originate in
+    /// YAML effects (the tool-alternates flyout's ``set: { active_tool }``).
+    /// ContentView installs this so a flyout pick switches the live
+    /// canvas tool (its ``currentTool`` @State), unifying the bundle's
+    /// string-keyed active-tool state with the native ``Tool`` binding.
+    /// Fired by the ``apply_active_tool`` platform effect after the
+    /// store write lands. Not @Published — it is an imperative callback,
+    /// not view state.
+    public var onActiveToolChange: ((String) -> Void)?
     @Published public var panelStateVersion: Int = 0
     /// Stack of isolated container paths for the Layers panel. Each entry
     /// is a top-level path [Int]. Written by enter/exit_isolation_mode
