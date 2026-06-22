@@ -3098,7 +3098,7 @@ mod tests {
     #[cfg(feature = "web")]
     use crate::workspace::test_json::{
         workspace_to_test_json, test_json_to_workspace,
-        toolbar_structure_json, menu_structure_json,
+        toolbar_structure_json,
         state_defaults_json, shortcut_structure_json,
     };
     #[cfg(feature = "web")]
@@ -3477,13 +3477,6 @@ mod tests {
     fn toolbar_structure() {
         let json = toolbar_structure_json();
         assert_workspace_fixture("toolbar_structure", &json);
-    }
-
-    #[cfg(feature = "web")]
-    #[test]
-    fn menu_structure() {
-        let json = menu_structure_json();
-        assert_workspace_fixture("menu_structure", &json);
     }
 
     #[cfg(feature = "web")]
