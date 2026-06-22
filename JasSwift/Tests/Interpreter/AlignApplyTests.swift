@@ -105,6 +105,10 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // set_active_color) so the change reaches the canvas selection,
         // matching the direct ColorPanel.setActiveColor path.
         "apply_active_color",
+        // Active-tool mirror hook: fires when a YAML set: writes
+        // active_tool (the toolbar's tool-alternates flyout) so the
+        // live canvas tool switches. See ContentView's BundleToolbarPane.
+        "apply_active_tool",
         "align_left", "align_horizontal_center", "align_right",
         "align_top", "align_vertical_center", "align_bottom",
         "distribute_left", "distribute_horizontal_center", "distribute_right",

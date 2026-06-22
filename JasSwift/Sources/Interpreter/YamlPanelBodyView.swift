@@ -675,6 +675,15 @@ struct YamlElementView: View {
         // text button using the summary so the click target stays
         // accessible. Mirrors jas_dioxus's render_icon_button which
         // embeds the SVG inline.
+        // Long-press alternates: the toolbar's multi-tool slots carry
+        // mouse_down / mouse_up behaviors (start_timer → open_dialog /
+        // cancel_timer). Layer a press-and-hold gesture over the Button
+        // so those fire; a plain Button is click-only. No-op for the
+        // common case (panel buttons have only `click`).
+        let behaviors = element["behavior"] as? [[String: Any]] ?? []
+        let hasMouseDown = behaviors.contains { ($0["event"] as? String) == "mouse_down" }
+        let hasMouseUp = behaviors.contains { ($0["event"] as? String) == "mouse_up" }
+        let hasPress = hasMouseDown || hasMouseUp
         if let theme = theme, !iconName.isEmpty,
            WorkspaceIconCache.shared.lookup(iconName) != nil {
             Button(action: { handleWidgetClick() }) {
@@ -688,6 +697,10 @@ struct YamlElementView: View {
             .buttonStyle(.plain)
             .help(summary)
             .disabled(isDisabled)
+            .modifier(PressDispatchModifier(
+                onPress: { if hasPress { handleBehaviorClick(eventName: "mouse_down") } },
+                onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
+            ))
         } else {
             Button(summary) { handleWidgetClick() }
                 .buttonStyle(.plain)
@@ -697,6 +710,10 @@ struct YamlElementView: View {
                         .fill(isChecked ? checkedBg : .clear)
                 )
                 .disabled(isDisabled)
+                .modifier(PressDispatchModifier(
+                    onPress: { if hasPress { handleBehaviorClick(eventName: "mouse_down") } },
+                    onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
+                ))
         }
     }
 
@@ -834,6 +851,7 @@ struct YamlElementView: View {
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
         let actions = ws?.data["actions"] as? [String: Any]
+        let dialogs = ws?.data["dialogs"] as? [String: Any]
         let platformEffects = alignPlatformEffects(model: model)
         var ctxWithEvent = context
         ctxWithEvent["event"] = currentEventModifiers()
@@ -873,7 +891,7 @@ struct YamlElementView: View {
             let effects = (entry["effects"] as? [Any]) ?? []
             if !effects.isEmpty {
                 runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
-                           actions: actions, platformEffects: platformEffects)
+                           actions: actions, dialogs: dialogs, platformEffects: platformEffects)
                 // Effects like `select` write via store.setPanel,
                 // which bypasses the commitPanelWrite version bump.
                 // Without this, the swatch's `selected_in` binding
@@ -1732,17 +1750,48 @@ struct YamlElementView: View {
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
         let actions = ws?.data["actions"] as? [String: Any]
+        let dialogs = ws?.data["dialogs"] as? [String: Any]
         let platformEffects = alignPlatformEffects(model: model)
         var ctxWithEvent = context
         ctxWithEvent["event"] = currentEventModifiers()
         if let pid = panelId {
             model.stateStore.setActivePanel(pid)
         }
+        // Capture the bridge + pre-effect dialog id so a long-press
+        // mouse_down → start_timer → open_dialog (the toolbar's tool-
+        // alternates flyout) surfaces in the SwiftUI overlay. The
+        // open happens asynchronously inside TimerManager, so we
+        // schedule a main-queue bridge after the timer's delay rather
+        // than checking synchronously (the store id hasn't changed yet
+        // when runEffects returns).
+        let bridge = onStoreDialogOpened
+        let beforeDlg = model.stateStore.getDialogId()
         for entry in behavior where (entry["event"] as? String) == eventName {
             let effects = (entry["effects"] as? [Any]) ?? []
             if !effects.isEmpty {
                 runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
-                           actions: actions, platformEffects: platformEffects)
+                           actions: actions, dialogs: dialogs, platformEffects: platformEffects)
+                // Synchronous open (no timer): bridge immediately.
+                if let bridge = bridge,
+                   model.stateStore.getDialogId() != beforeDlg,
+                   model.stateStore.getDialogId() != nil {
+                    bridge()
+                }
+                // Deferred open via start_timer: schedule a bridge
+                // check after the timer fires. Find the longest delay
+                // among any start_timer effects in this entry.
+                if let bridge = bridge,
+                   let delayMs = maxStartTimerDelay(in: effects) {
+                    let capturedStore = model.stateStore
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now() + Double(delayMs) / 1000.0 + 0.03
+                    ) {
+                        if capturedStore.getDialogId() != beforeDlg,
+                           capturedStore.getDialogId() != nil {
+                            bridge()
+                        }
+                    }
+                }
             }
             if let actionName = entry["action"] as? String {
                 let rawParams = (entry["params"] as? [String: Any]) ?? [:]
@@ -1766,6 +1815,21 @@ struct YamlElementView: View {
                 )
             }
         }
+    }
+
+    /// Scan an effect list for `start_timer` entries and return the
+    /// longest `delay_ms` found (nil if none). Used by
+    /// ``handleBehaviorClick`` to schedule the dialog-open bridge after
+    /// a long-press timer fires its deferred `open_dialog`.
+    private func maxStartTimerDelay(in effects: [Any]) -> Int? {
+        var maxDelay: Int? = nil
+        for e in effects {
+            guard let dict = e as? [String: Any],
+                  let st = dict["start_timer"] as? [String: Any] else { continue }
+            let delay = (st["delay_ms"] as? NSNumber)?.intValue ?? 250
+            maxDelay = max(maxDelay ?? 0, delay)
+        }
+        return maxDelay
     }
 
     /// Dispatch a widget's `behavior: [{event: change, action: …, params: …}]`
@@ -2650,6 +2714,38 @@ struct YamlElementView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+/// Dispatch `mouse_down` / `mouse_up` behavior events for a press-and-
+/// hold gesture (the toolbar's tool-alternates long-press: mouse_down
+/// starts a 250ms timer whose effect opens the alternates flyout;
+/// mouse_up cancels it). A plain SwiftUI Button only fires on click, so
+/// icon_buttons that carry mouse_down/mouse_up behaviors layer this
+/// simultaneous gesture on top. Owns a `pressed` @State so mouse_down
+/// fires once per press (not on every drag-change tick). The recursive
+/// YamlElementView can't hold @State itself, so this lives in a
+/// dedicated modifier. Mirrors the Rust toolbar's onmousedown /
+/// onmouseup handlers that drive start_timer / cancel_timer.
+private struct PressDispatchModifier: ViewModifier {
+    let onPress: () -> Void
+    let onRelease: () -> Void
+    @State private var pressed = false
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !pressed {
+                        pressed = true
+                        onPress()
+                    }
+                }
+                .onEnded { _ in
+                    pressed = false
+                    onRelease()
+                }
+        )
     }
 }
 

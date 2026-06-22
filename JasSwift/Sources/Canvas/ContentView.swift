@@ -74,6 +74,88 @@ func toolYamlId(_ tool: Tool) -> String? {
     }
 }
 
+/// Map a bundle ``state.active_tool`` string to the native ``Tool``
+/// enum. These are the tool identifiers used by the compiled
+/// workspace.json toolbar — the ``select_tool`` action params, the
+/// ``bind.checked`` ``mem(...)`` lists, and the tool-alternates
+/// flyout's ``set: { active_tool }`` writes. They differ from
+/// ``toolYamlId`` for a few cases (``add_anchor`` vs
+/// ``add_anchor_point``, ``type`` vs ``type``-on-path, ``blob_brush``,
+/// etc.) so the mapping is spelled out explicitly. Returns nil for an
+/// unknown string. Inverse of ``yamlToolString``.
+func toolFromYamlString(_ s: String) -> Tool? {
+    switch s {
+    case "selection": return .selection
+    case "partial_selection": return .partialSelection
+    case "interior_selection": return .interiorSelection
+    case "magic_wand": return .magicWand
+    case "pen": return .pen
+    case "add_anchor": return .addAnchorPoint
+    case "delete_anchor": return .deleteAnchorPoint
+    case "anchor_point": return .anchorPoint
+    case "pencil": return .pencil
+    case "paintbrush": return .paintbrush
+    case "blob_brush": return .blobBrush
+    case "path_eraser": return .pathEraser
+    case "smooth": return .smooth
+    case "type": return .typeTool
+    case "type_on_path": return .typeOnPath
+    case "line": return .line
+    case "rect": return .rect
+    case "rounded_rect": return .roundedRect
+    case "ellipse": return .ellipse
+    case "polygon": return .polygon
+    case "star": return .star
+    case "lasso": return .lasso
+    case "scale": return .scale
+    case "rotate": return .rotate
+    case "shear": return .shear
+    case "hand": return .hand
+    case "zoom": return .zoom
+    case "artboard": return .artboard
+    case "eyedropper": return .eyedropper
+    default: return nil
+    }
+}
+
+/// Map a native ``Tool`` to the bundle ``state.active_tool`` string.
+/// Used to seed the toolbar's eval context so ``bind.checked`` (which
+/// reads ``state.active_tool``) highlights the slot matching the live
+/// canvas tool. Inverse of ``toolFromYamlString``.
+func yamlToolString(_ tool: Tool) -> String {
+    switch tool {
+    case .selection: return "selection"
+    case .partialSelection: return "partial_selection"
+    case .interiorSelection: return "interior_selection"
+    case .magicWand: return "magic_wand"
+    case .pen: return "pen"
+    case .addAnchorPoint: return "add_anchor"
+    case .deleteAnchorPoint: return "delete_anchor"
+    case .anchorPoint: return "anchor_point"
+    case .pencil: return "pencil"
+    case .paintbrush: return "paintbrush"
+    case .blobBrush: return "blob_brush"
+    case .pathEraser: return "path_eraser"
+    case .smooth: return "smooth"
+    case .typeTool: return "type"
+    case .typeOnPath: return "type_on_path"
+    case .line: return "line"
+    case .rect: return "rect"
+    case .roundedRect: return "rounded_rect"
+    case .ellipse: return "ellipse"
+    case .polygon: return "polygon"
+    case .star: return "star"
+    case .lasso: return "lasso"
+    case .scale: return "scale"
+    case .rotate: return "rotate"
+    case .shear: return "shear"
+    case .hand: return "hand"
+    case .zoom: return "zoom"
+    case .artboard: return "artboard"
+    case .eyedropper: return "eyedropper"
+    }
+}
+
 // MARK: - Canvas entry for multi-canvas workspace
 
 public struct CanvasEntry: Identifiable {
@@ -312,50 +394,35 @@ public struct ContentView: View {
     private func paneView(geo: PaneGeometry, rs: RenderingState) -> some View {
         switch geo.kind {
         case .toolbar:
+            // STEP A (toolbar YAML migration): the tool grid renders
+            // from the compiled bundle (workspace.json layout →
+            // toolbar_pane → tool_grid) via the generic YamlElementView,
+            // mirroring Rust's YamlToolbarContent. The native
+            // ToolbarPanel below is intentionally left in the file but
+            // no longer mounted — Step B deletes it after GUI
+            // verification, keeping this reversible.
+            //
+            // The fill/stroke widget under the grid stays native
+            // (FillStrokeWidget): the bundle's toolbar_pane content does
+            // carry a fill/stroke node, but it relies on color_swatch
+            // actions (open_color_picker / swap_fill_stroke /
+            // reset_fill_stroke / set_fill_type_* / set_fill_none) that
+            // are not yet wired in Swift — a separate increment.
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
-                          content: { ToolbarPanel(currentTool: $currentTool, model: workspace.activeModel, theme: workspace.theme, onOpenColorPicker: { forFill in
-                              // Build live state for dialog initialization
-                              var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
-                              if let model = workspace.activeModel {
-                                  if let fill = model.defaultFill {
-                                      liveState["fill_color"] = "#" + fill.color.toHex()
-                                  }
-                                  if let stroke = model.defaultStroke {
-                                      liveState["stroke_color"] = "#" + stroke.color.toHex()
-                                  }
-                              }
-                              yamlDialogState = openYamlDialog(
-                                  dialogId: "color_picker",
-                                  rawParams: ["target": forFill ? "fill" : "stroke"],
-                                  liveState: liveState
+                          content: {
+                              BundleToolbarPane(
+                                  currentTool: $currentTool,
+                                  model: workspace.activeModel,
+                                  theme: workspace.theme,
+                                  yamlDialogState: $yamlDialogState,
+                                  onOpenColorPicker: { forFill in openToolbarColorPicker(forFill: forFill) }
                               )
-                          }, onOpenToolOptions: { tool in
-                              // Look up the tool's workspace entry. Prefer
-                              // tool_options_panel (Magic Wand) over
-                              // tool_options_dialog (Paintbrush, Blob Brush);
-                              // a tool yaml uses one or the other, not both.
-                              // See MAGIC_WAND_TOOL.md §Panel and
-                              // PAINTBRUSH_TOOL.md §Tool options.
-                              guard let yamlId = toolYamlId(tool) else { return }
-                              guard let ws = WorkspaceData.load() else { return }
-                              let tools = ws.data["tools"] as? [String: Any] ?? [:]
-                              let toolSpec = tools[yamlId] as? [String: Any] ?? [:]
-                              if let panelId = toolSpec["tool_options_panel"] as? String,
-                                 let kind = panelIdToKind(panelId) {
-                                  // OP_LOG 3d-2: dispatch through the shared
-                                  // layout-op runtime (byte-identical to the
-                                  // prior direct `showPanel(kind)`).
-                                  layoutApply(&workspace.workspaceLayout, opShowPanel(kind))
-                                  return
-                              }
-                              guard let dialogId = toolSpec["tool_options_dialog"] as? String else { return }
-                              let liveState: [String: Any] = ws.stateDefaults()
-                              yamlDialogState = openYamlDialog(
-                                  dialogId: dialogId,
-                                  rawParams: [:],
-                                  liveState: liveState
-                              )
-                          }) },
+                              // TODO(toolbar-dblclick): deferred cross-app
+                              // increment — double-clicking a tool icon
+                              // should open its tool_options_dialog /
+                              // tool_options_panel (the prior native
+                              // onOpenToolOptions path). Not part of Step A.
+                          },
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.doubleClickAction == .maximize && rs.canvasMaximized),
@@ -366,6 +433,28 @@ public struct ContentView: View {
                           content: { dockContent },
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         }
+    }
+
+    /// Open the color picker for the toolbar's fill/stroke widget,
+    /// seeding the dialog with the active model's default fill / stroke.
+    /// Extracted from the prior ToolbarPanel.onOpenColorPicker closure so
+    /// the bundle-driven toolbar's native FillStrokeWidget keeps the same
+    /// behavior.
+    private func openToolbarColorPicker(forFill: Bool) {
+        var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
+        if let model = workspace.activeModel {
+            if let fill = model.defaultFill {
+                liveState["fill_color"] = "#" + fill.color.toHex()
+            }
+            if let stroke = model.defaultStroke {
+                liveState["stroke_color"] = "#" + stroke.color.toHex()
+            }
+        }
+        yamlDialogState = openYamlDialog(
+            dialogId: "color_picker",
+            rawParams: ["target": forFill ? "fill" : "stroke"],
+            liveState: liveState
+        )
     }
 
     private var canvasContent: some View {
@@ -615,6 +704,223 @@ struct CanvasTab: View {
             currentTool: $currentTool,
             onFocus: onFocus
         )
+    }
+}
+
+// MARK: - Bundle-driven Toolbar Pane (Step A)
+
+/// Toolbar pane that renders the tool grid from the compiled bundle
+/// (workspace.json layout → toolbar_pane → tool_grid) via the generic
+/// ``YamlElementView``, then the native fill/stroke widget below it.
+/// Mirrors Rust's ``YamlToolbarContent``.
+///
+/// Active-tool unification: the canvas tool (``currentTool`` @State in
+/// ContentView) is the single source of truth. The grid's eval context
+/// seeds ``state.active_tool`` from it so ``bind.checked`` highlights
+/// the live slot. A ``select_tool`` click routes through
+/// ``onWidgetAction`` and sets ``currentTool`` (and mirrors it into the
+/// store). The tool-alternates flyout's ``set: { active_tool }`` write
+/// fires the ``apply_active_tool`` platform effect, which calls
+/// ``model.onActiveToolChange`` — installed here — to set
+/// ``currentTool`` from the bundle tool string.
+struct BundleToolbarPane: View {
+    @Binding var currentTool: Tool
+    var model: Model?
+    var theme: Theme
+    @Binding var yamlDialogState: YamlDialogState?
+    var onOpenColorPicker: ((Bool) -> Void)?
+
+    var body: some View {
+        if let model = model {
+            BundleToolbarPaneBody(
+                currentTool: $currentTool,
+                model: model,
+                theme: theme,
+                yamlDialogState: $yamlDialogState,
+                onOpenColorPicker: onOpenColorPicker
+            )
+        } else {
+            // No open document: render the grid against fresh defaults
+            // with a throwaway model so the toolbar is still visible.
+            BundleToolbarPaneBody(
+                currentTool: $currentTool,
+                model: Model(),
+                theme: theme,
+                yamlDialogState: $yamlDialogState,
+                onOpenColorPicker: onOpenColorPicker
+            )
+        }
+    }
+}
+
+/// Inner observer: holds the non-optional ``model`` as @ObservedObject so
+/// store-driven writes (panelStateVersion) re-render the grid.
+private struct BundleToolbarPaneBody: View {
+    @Binding var currentTool: Tool
+    @ObservedObject var model: Model
+    var theme: Theme
+    @Binding var yamlDialogState: YamlDialogState?
+    var onOpenColorPicker: ((Bool) -> Void)?
+
+    private let toolbarWidth: CGFloat = 80
+
+    var body: some View {
+        // Re-render when a widget commits a store write (e.g. the
+        // alternates flyout). currentTool is @State upstream, so a
+        // select_tool click already re-renders; this also catches the
+        // flyout path that mutates the store.
+        _ = model.panelStateVersion
+        let capturedModel = model
+        return VStack(spacing: 0) {
+            toolGridView
+                .padding(4)
+                .frame(width: toolbarWidth)
+                .background(SwiftUI.Color(nsColor: theme.paneBg))
+
+            // Native fill/stroke widget (kept until the bundle's
+            // color_swatch fill/stroke actions are wired — separate
+            // increment). Matches the prior ToolbarPanel layout.
+            FillStrokeWidget(model: capturedModel, onDoubleClick: { forFill in
+                onOpenColorPicker?(forFill)
+            })
+            .padding(.top, 8)
+            .frame(width: toolbarWidth)
+
+            HStack(spacing: 2) {
+                toolbarModeButton(label: "C", tooltip: "Color", iconName: "fill_solid") {
+                    if capturedModel.fillOnTop {
+                        if capturedModel.defaultFill == nil {
+                            capturedModel.defaultFill = Fill(color: .white)
+                        }
+                    } else {
+                        if capturedModel.defaultStroke == nil {
+                            capturedModel.defaultStroke = Stroke(color: .black)
+                        }
+                    }
+                }
+                toolbarModeButton(label: "G", tooltip: "Gradient", iconName: "fill_gradient") {
+                    // Gradient mode -- not yet implemented
+                }
+                .disabled(true)
+                .opacity(0.4)
+                toolbarModeButton(label: "/", tooltip: "None", iconName: "color_none") {
+                    if capturedModel.fillOnTop {
+                        capturedModel.defaultFill = nil
+                    } else {
+                        capturedModel.defaultStroke = nil
+                    }
+                }
+            }
+            .padding(.top, 4)
+
+            Spacer()
+        }
+        .frame(width: toolbarWidth)
+        .background(SwiftUI.Color(nsColor: theme.paneBgDark))
+        .onAppear {
+            // Install the active-tool mirror so the alternates flyout's
+            // set:{active_tool} write switches the live canvas tool.
+            installActiveToolMirror(on: capturedModel)
+            // Seed the store so bind.checked resolves consistently.
+            capturedModel.stateStore.set("active_tool", yamlToolString(currentTool))
+        }
+        .onChange(of: currentTool) { newTool in
+            capturedModel.stateStore.set("active_tool", yamlToolString(newTool))
+        }
+    }
+
+    /// Render the bundle's tool_grid element via the generic renderer.
+    @ViewBuilder
+    private var toolGridView: some View {
+        if let grid = WorkspaceData.load()?.toolGrid() {
+            let ctx = buildToolbarContext()
+            let capturedModel = model
+            let dialogBinding = $yamlDialogState
+            // select_tool arrives as a widget-level `action:` on each
+            // icon_button → handleWidgetClick → onWidgetAction. Map the
+            // bundle tool string onto the native Tool and set
+            // currentTool (the canvas source of truth), mirroring it
+            // into the store so bind.checked re-evaluates.
+            YamlElementView(
+                element: grid,
+                context: ctx,
+                model: capturedModel,
+                onWidgetAction: { actionName, params in
+                    guard actionName == "select_tool" else { return }
+                    guard let toolStr = params["tool"] as? String,
+                          let tool = toolFromYamlString(toolStr) else { return }
+                    currentTool = tool
+                    capturedModel.stateStore.set("active_tool", toolStr)
+                },
+                theme: theme,
+                onStoreDialogOpened: {
+                    if let newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+                        dialogBinding.wrappedValue = newState
+                    }
+                }
+            )
+        } else {
+            SwiftUI.Text("Toolbar not found")
+                .foregroundColor(SwiftUI.Color(nsColor: theme.textDim))
+        }
+    }
+
+    /// Build the eval context for the tool grid: live state with
+    /// active_tool overridden to the current canvas tool, plus icons +
+    /// theme colors so SVG glyphs and checked-bg resolve.
+    private func buildToolbarContext() -> [String: Any] {
+        let ws = WorkspaceData.load()
+        var stateMap = ws?.stateDefaults() ?? [:]
+        stateMap["active_tool"] = yamlToolString(currentTool)
+        let icons = ws?.icons() ?? [:]
+        let themeColors: [String: Any] = {
+            guard let t = ws?.theme(),
+                  let base = t["base"] as? [String: Any],
+                  let colors = base["colors"] as? [String: Any] else { return [:] }
+            return colors
+        }()
+        let themeSizes: [String: Any] = {
+            guard let t = ws?.theme(),
+                  let base = t["base"] as? [String: Any],
+                  let sizes = base["sizes"] as? [String: Any] else { return [:] }
+            return sizes
+        }()
+        return [
+            "state": stateMap,
+            "icons": icons,
+            "theme": ["colors": themeColors, "sizes": themeSizes] as [String: Any],
+        ]
+    }
+
+    private func installActiveToolMirror(on model: Model) {
+        model.onActiveToolChange = { toolStr in
+            if let tool = toolFromYamlString(toolStr) {
+                currentTool = tool
+            }
+        }
+    }
+
+    /// Fill/stroke mode button (Color / Gradient / None), preserving the
+    /// prior ToolbarPanel.fillModeButton appearance.
+    private func toolbarModeButton(
+        label: String, tooltip: String, iconName: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack {
+                SwiftUI.Color(nsColor: theme.buttonChecked)
+                if WorkspaceIconCache.shared.lookup(iconName) != nil {
+                    WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
+                } else {
+                    SwiftUI.Text(label)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
+                }
+            }
+            .frame(width: 20, height: 16)
+            .cornerRadius(2)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
     }
 }
 

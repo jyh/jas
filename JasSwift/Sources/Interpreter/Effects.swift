@@ -348,6 +348,16 @@ private func runOne(
            let hook = platformEffects["apply_active_color"] {
             _ = hook("", ctx, store)
         }
+        // Active-tool writes (the tool-alternates flyout's
+        // `set: { active_tool }`) must switch the live canvas tool.
+        // The store now holds the new tool string; the host registers
+        // "apply_active_tool" to mirror it into the native Tool binding
+        // (ContentView's currentTool @State). Silent no-op when unset.
+        let wroteActiveTool = pairs.keys.contains { $0 == "active_tool" }
+        if wroteActiveTool,
+           let hook = platformEffects["apply_active_tool"] {
+            _ = hook("", ctx, store)
+        }
         // Stroke render-key writes also trigger the stroke apply
         // pipeline. The notify hook uses stroke_panel_content as the
         // panel id; notifyPanelStateChanged dispatches to
@@ -2468,6 +2478,16 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         // direct ColorPanel.setActiveColor path.
         "apply_active_color": { _, _, store in
             applyActiveColorFromStore(store: store, model: model)
+            return nil
+        },
+        // Mirror a YAML `set: { active_tool }` write (tool-alternates
+        // flyout pick) into the live canvas tool. ContentView installs
+        // model.onActiveToolChange to map the bundle tool string onto
+        // its currentTool @State. See ContentView.toolFromYamlString.
+        "apply_active_tool": { _, _, store in
+            if let s = store.get("active_tool") as? String {
+                model.onActiveToolChange?(s)
+            }
             return nil
         },
     ]

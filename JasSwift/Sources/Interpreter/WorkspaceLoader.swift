@@ -124,6 +124,36 @@ class WorkspaceData {
         panel(contentId)?["content"] as? [String: Any]
     }
 
+    /// Find a node with the given ``id`` anywhere in the layout tree
+    /// (depth-first over ``children``). Used to pull the toolbar's
+    /// ``tool_grid`` element out of the compiled layout so the toolbar
+    /// pane renders from the bundle, mirroring Rust's
+    /// ``YamlToolbarContent`` lookup.
+    private func findLayoutNode(_ id: String, in node: [String: Any]) -> [String: Any]? {
+        if node["id"] as? String == id { return node }
+        if let kids = node["children"] as? [[String: Any]] {
+            for kid in kids {
+                if let found = findLayoutNode(id, in: kid) { return found }
+            }
+        }
+        // The toolbar pane's content is nested under `content`, not
+        // `children`; descend into it too.
+        if let content = node["content"] as? [String: Any] {
+            if let found = findLayoutNode(id, in: content) { return found }
+        }
+        return nil
+    }
+
+    /// The toolbar's ``tool_grid`` element from the compiled layout
+    /// (``layout`` → ``toolbar_pane`` → ``content`` → ``tool_grid``).
+    /// Nil if the layout or grid is absent. Step A renders only the
+    /// tool grid generically; the fill/stroke widget below it stays
+    /// native (see ContentView's toolbar pane).
+    func toolGrid() -> [String: Any]? {
+        guard let layout = data["layout"] as? [String: Any] else { return nil }
+        return findLayoutNode("tool_grid", in: layout)
+    }
+
     /// Extract default values from state definitions.
     func stateDefaults() -> [String: Any] {
         guard let state = data["state"] as? [String: Any] else { return [:] }
