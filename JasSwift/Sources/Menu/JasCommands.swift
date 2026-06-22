@@ -379,11 +379,7 @@ public struct JasCommands: Commands {
         case "fit_all_artboards":
             model?.fitAllArtboards()
         case "fit_in_window":
-            // Genuinely-new View action. No fit-in-window primitive exists
-            // yet; alias to fit-all-artboards (the closest existing fit) so
-            // the menu item is functional rather than dead. The dedicated
-            // content-bounds fit is follow-on work shared across all apps.
-            model?.fitAllArtboards()
+            model?.fitInWindow()
         // Window
         case "tile_panes":
             guard let ws = workspace else { return }
