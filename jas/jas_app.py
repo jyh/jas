@@ -40,6 +40,53 @@ from workspace.pane import PaneKind, EdgeSide
 TITLE_BAR_HEIGHT = 20
 
 
+# Inverse of MainWindow._TOOL_YAML_IDS: the bundle's active_tool string
+# -> native Tool enum. The bundle toolbar (workspace tool_grid) drives
+# tool selection through state.active_tool (the select_tool action and
+# the alternates flyout's set:{active_tool} effect both write this key);
+# the state -> canvas bridge maps the string back to a Tool to drive
+# canvas.set_tool. Two ids that the enum map doesn't carry are aliased
+# here so the bundle's shorter names resolve: the state enum uses
+# ``add_anchor`` / ``delete_anchor`` while the Tool enum maps spell them
+# ``add_anchor_point`` / ``delete_anchor_point``. A test asserts this is
+# the exact inverse of _TOOL_YAML_IDS (plus the two aliases).
+_TOOL_YAML_ID_TO_ENUM = {
+    "selection": Tool.SELECTION,
+    "partial_selection": Tool.PARTIAL_SELECTION,
+    "interior_selection": Tool.INTERIOR_SELECTION,
+    "magic_wand": Tool.MAGIC_WAND,
+    "pen": Tool.PEN,
+    "add_anchor_point": Tool.ADD_ANCHOR_POINT,
+    "delete_anchor_point": Tool.DELETE_ANCHOR_POINT,
+    "anchor_point": Tool.ANCHOR_POINT,
+    "pencil": Tool.PENCIL,
+    "paintbrush": Tool.PAINTBRUSH,
+    "blob_brush": Tool.BLOB_BRUSH,
+    "path_eraser": Tool.PATH_ERASER,
+    "smooth": Tool.SMOOTH,
+    "line": Tool.LINE,
+    "rect": Tool.RECT,
+    "rounded_rect": Tool.ROUNDED_RECT,
+    "ellipse": Tool.ELLIPSE,
+    "polygon": Tool.POLYGON,
+    "star": Tool.STAR,
+    "lasso": Tool.LASSO,
+    "scale": Tool.SCALE,
+    "rotate": Tool.ROTATE,
+    "shear": Tool.SHEAR,
+    "hand": Tool.HAND,
+    "zoom": Tool.ZOOM,
+    "eyedropper": Tool.EYEDROPPER,
+    "artboard": Tool.ARTBOARD,
+    "type": Tool.TYPE,
+    "type_on_path": Tool.TYPE_ON_PATH,
+    # State-enum spellings (state.yaml active_tool values) that differ
+    # from the Tool-enum yaml_id, so both resolve from the bundle.
+    "add_anchor": Tool.ADD_ANCHOR_POINT,
+    "delete_anchor": Tool.DELETE_ANCHOR_POINT,
+}
+
+
 class PaneTitleBar(QWidget):
     """Title bar for a pane: label + close button."""
 
@@ -211,15 +258,37 @@ class MainWindow(QMainWindow):
         cid = pl.pane_by_kind(PaneKind.CANVAS).id if pl else 1
         did = pl.pane_by_kind(PaneKind.DOCK).id if pl else 2
 
-        # Toolbar pane
+        # Toolbar pane.
+        #
+        # STEP A of the bundle-toolbar migration (mirrors Rust
+        # YamlToolbarContent / the Swift port): the visible pane renders
+        # the workspace ``toolbar_pane -> content -> tool_grid`` through
+        # the generic yaml_renderer rather than the native QPainter
+        # ``Toolbar`` widget. The native ``Toolbar`` is still constructed
+        # but NOT mounted — it lives on as a headless tool-state
+        # controller so the existing keyboard shortcuts, spacebar
+        # pass-through (canvas.on_request_tool_change) and the
+        # fill/stroke widget keep working unchanged. Its tool_changed
+        # signal still drives the canvas, and a state<->toolbar bridge
+        # (wired in _build_yaml_toolbar) keeps state.active_tool and the
+        # native current_tool in lockstep so the YAML grid highlight and
+        # the canvas tool agree regardless of which path initiated the
+        # switch. STEP B will delete tools/toolbar.py once the fill/stroke
+        # + keyboard paths move onto the bundle too.
         self.toolbar = Toolbar()
         self.toolbar.tool_options_requested.connect(self._open_tool_options_dialog)
+        # Pane body container — populated by _build_yaml_toolbar once the
+        # YAML state store exists (the store is created further below).
+        self._toolbar_body = QWidget()
+        _tb_lay = QVBoxLayout(self._toolbar_body)
+        _tb_lay.setContentsMargins(2, 4, 2, 4)
+        _tb_lay.setSpacing(0)
         self._toolbar_title = PaneTitleBar(
             "", pane_id=tid,
             on_close=lambda: self._hide_pane(PaneKind.TOOLBAR),
             on_drag_start=self._start_pane_drag,
             theme=self.theme)
-        self._toolbar_frame = PaneFrame(self._toolbar_title, self.toolbar,
+        self._toolbar_frame = PaneFrame(self._toolbar_title, self._toolbar_body,
                                         pane_id=tid, on_edge_drag_start=self._start_edge_drag,
                                         theme=self.theme, parent=self._pane_container)
 
@@ -345,6 +414,13 @@ class MainWindow(QMainWindow):
                                       pane_id=did, on_edge_drag_start=self._start_edge_drag,
                                       theme=self.theme,
                                       parent=self._pane_container)
+
+        # Bundle toolbar (STEP A): render the workspace tool_grid into
+        # the toolbar pane body and wire the state<->canvas bridge. Done
+        # here because it needs both _yaml_state (above) and dock_panel
+        # (for _dispatch_yaml_action, which routes the select_tool
+        # action).
+        self._build_yaml_toolbar()
 
         # Border handle widgets
         self._border_widgets: list[QWidget] = []
@@ -770,6 +846,120 @@ class MainWindow(QMainWindow):
             tw = self.tab_widget.width()
             lw = self._canvas_logo_lbl.width()
             self._canvas_logo_lbl.move(tw - lw - 10, 10)
+
+    def _build_yaml_toolbar(self) -> None:
+        """Render the bundle toolbar grid into the toolbar pane (STEP A).
+
+        Finds the compiled ``layout -> toolbar_pane -> content ->
+        tool_grid`` and renders it through the generic yaml_renderer
+        (mirrors Rust YamlToolbarContent). Tool clicks dispatch the
+        ``select_tool`` action through the dock panel's YAML dispatcher,
+        which writes ``state.active_tool``; a state subscription then
+        drives the canvas tool (via the headless native toolbar). The
+        native fill/stroke widget is kept below the grid — its actions
+        aren't part of the tool_grid node and its app-specific sync
+        (_resync_toolbar_fs) is preserved.
+
+        DEFERRED (cross-app increment): double-click a tool icon to open
+        its tool-options dialog/panel. The native ToolButton bubbled this
+        via tool_options_requested; the bundle path would dispatch the
+        tool's tool_options_dialog / tool_options_panel on dblclick.
+        Not wired in any app's bundle toolbar yet — left for a later step.
+        """
+        from panels.yaml_renderer import render_element
+        from workspace_interpreter.loader import load_workspace
+
+        body_layout = self._toolbar_body.layout()
+
+        grid_el = None
+        try:
+            ws = load_workspace(os.path.join(_REPO_ROOT, "workspace"))
+            layout = ws.get("layout") if ws else None
+            pane = self._find_layout_node(layout, "toolbar_pane")
+            content = pane.get("content") if isinstance(pane, dict) else None
+            for child in (content or {}).get("children", []):
+                if isinstance(child, dict) and child.get("id") == "tool_grid":
+                    grid_el = child
+                    break
+        except (OSError, ValueError, AttributeError):
+            grid_el = None
+
+        if grid_el is not None:
+            ctx = {"_panel_id": "toolbar_pane", "_get_model": self.active_model}
+            dispatch = (self.dock_panel._dispatch_yaml_action
+                        if hasattr(self, "dock_panel") else None)
+            grid_widget = render_element(grid_el, self._yaml_state, ctx,
+                                         dispatch_fn=dispatch)
+            if grid_widget is not None:
+                body_layout.addWidget(grid_widget,
+                                      alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        # Keep the native fill/stroke widget below the grid (its actions
+        # live outside the tool_grid node and its sync is app-native).
+        body_layout.addSpacing(8)
+        body_layout.addWidget(self.toolbar.fill_stroke_widget,
+                              alignment=Qt.AlignmentFlag.AlignHCenter)
+        body_layout.addStretch()
+
+        # State -> canvas bridge. Both write paths into the tool grid
+        # land in state.active_tool: the select_tool ACTION (single
+        # click) and the alternates flyout's set:{active_tool} EFFECT
+        # (long-press menu). Subscribing here maps the string back to the
+        # native Tool enum and drives the headless toolbar's select_tool,
+        # which emits tool_changed -> canvas.set_tool AND keeps the
+        # native current_tool / slot state coherent for the spacebar
+        # pass-through + keyboard shortcuts. The _bridging guard prevents
+        # the reverse bridge (below) from echoing back into a loop.
+        self._tool_bridging = False
+
+        def _state_to_canvas(_key, value):
+            if self._tool_bridging:
+                return
+            tool = _TOOL_YAML_ID_TO_ENUM.get(value) if isinstance(value, str) else None
+            if tool is None:
+                return
+            if self.toolbar.current_tool == tool:
+                return
+            self._tool_bridging = True
+            try:
+                self.toolbar.select_tool(tool)
+            finally:
+                self._tool_bridging = False
+
+        self._yaml_state.subscribe(["active_tool"], _state_to_canvas)
+
+        # Reverse bridge: native tool changes (keyboard shortcuts,
+        # spacebar pass-through, the headless toolbar's own select_tool)
+        # mirror the string back into state.active_tool so the YAML grid
+        # highlight tracks. Guarded so the state->canvas bridge above
+        # doesn't re-enter.
+        def _canvas_to_state(tool):
+            if self._tool_bridging:
+                return
+            yaml_id = self._TOOL_YAML_IDS.get(tool)
+            if yaml_id is None:
+                return
+            self._tool_bridging = True
+            try:
+                self._yaml_state.set("active_tool", yaml_id)
+            finally:
+                self._tool_bridging = False
+
+        self.toolbar.tool_changed.connect(_canvas_to_state)
+
+    @staticmethod
+    def _find_layout_node(node, node_id):
+        """Depth-first search for a layout node with the given id."""
+        stack = [node]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, dict):
+                if cur.get("id") == node_id:
+                    return cur
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+        return None
 
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""

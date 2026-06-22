@@ -378,7 +378,20 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
             icon_name = static_icon
     style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
     raw_size = style.get("size")
-    icon_size = int(raw_size) if isinstance(raw_size, (int, float)) else 20
+    # The bundle's toolbar tool buttons carry size:
+    # "{{theme.sizes.tool_button}}" (=32), which the panel renderer's
+    # eval context doesn't resolve (no theme thread), so the templated
+    # string falls through to the default. Toolbar buttons are
+    # recognised by their checked binding below; size their button +
+    # glyph to match the native toolbar (BUTTON_SIZE 32 / ICON 28).
+    checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
+    is_tool_button = isinstance(checked_expr, str) and bool(checked_expr)
+    if isinstance(raw_size, (int, float)):
+        icon_size = int(raw_size)
+    elif is_tool_button:
+        icon_size = 28
+    else:
+        icon_size = 20
     pixmap = _workspace_icon_pixmap(icon_name, icon_size) if icon_name else None
     if pixmap is not None:
         from PySide6.QtGui import QIcon
@@ -388,6 +401,61 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
         btn.setToolTip(summary)
     else:
         btn.setText(summary)
+
+    # bind.checked turns an icon_button into a checkable toggle — used
+    # by the bundle toolbar's tool grid so the active tool's button
+    # shows a highlighted background (mirrors the native toolbar's
+    # _checked_bg fill and the Rust/Swift bundle-toolbar ports). The
+    # actual checked state + reactive re-evaluation flow through
+    # _apply_bindings (the global store subscription), so here we only
+    # make the button checkable and give it a checked-state stylesheet.
+    # The initial checked value is set eagerly so the highlight is
+    # correct on first paint, before any state change fires.
+    if is_tool_button:
+        btn.setCheckable(True)
+        btn.setFixedSize(32, 32)
+        try:
+            from workspace.dock_panel import THEME_BG_TAB, THEME_BORDER
+            checked_bg = THEME_BG_TAB
+            border = THEME_BORDER
+        except Exception:
+            checked_bg = "#4a4a4a"
+            border = "#555"
+        btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; "
+            "border-radius: 3px; }"
+            f"QPushButton:hover {{ background: {checked_bg}; }}"
+            f"QPushButton:checked {{ background: {checked_bg}; "
+            f"border: 1px solid {border}; }}"
+        )
+        try:
+            init = evaluate(checked_expr, store.eval_context(ctx))
+            btn.setChecked(init.to_bool())
+        except Exception:
+            pass
+
+        # A bare checkable QPushButton toggles its own checked state on
+        # every click, so clicking the already-active tool would toggle
+        # it OFF — and the select_tool dispatch is a no-op (same value),
+        # so the _apply_bindings subscriber never fires to re-check it.
+        # Reconcile the checked state from the binding AFTER the click's
+        # dispatch has run (deferred to the next event-loop tick), so the
+        # active tool's button always reflects state.active_tool.
+        from PySide6.QtCore import QTimer
+
+        def _reconcile_checked():
+            try:
+                from shiboken6 import isValid
+                if not isValid(btn):
+                    return
+            except Exception:
+                pass
+            r = evaluate(checked_expr, store.eval_context(ctx))
+            btn.setChecked(r.to_bool())
+
+        btn.clicked.connect(
+            lambda _=None: QTimer.singleShot(0, _reconcile_checked))
+
     _wire_opacity_link_indicator_click(btn, el, ctx)
     return btn
 
@@ -3167,6 +3235,28 @@ def _render_repeat(el, store, ctx, dispatch_fn):
 # ── Style ────────────────────────────────────────────────────
 
 
+def _style_px(val) -> int | None:
+    """Coerce a style size value to an int pixel count, or None.
+
+    Returns None for values that can't be a fixed pixel size — most
+    importantly unresolved ``{{theme.sizes.X}}`` template strings, which
+    appear on the bundle toolbar's icon_buttons because the panel
+    renderer doesn't thread the theme into the eval context. Returning
+    None lets _apply_style skip the setFixed* call (the widget keeps its
+    natural / renderer-set size) instead of raising on int("{{...}}").
+    """
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(float(val))
+        except ValueError:
+            return None
+    return None
+
+
 def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
     """Apply style properties to a widget via setStyleSheet."""
     if not style:
@@ -3178,6 +3268,19 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
     for key, val in style.items():
         if key in ("gap", "padding", "alignment", "justify"):
             continue  # handled by layout
+        if isinstance(val, dict):
+            # Nested style sub-maps (e.g. an icon_button's
+            # ``hover: { background: ... }``) describe pseudo-state
+            # styling that the flat setStyleSheet pass below can't
+            # express. The tool-grid icon_buttons consume their own
+            # hover / checked_bg in _render_icon_button; skip the dict
+            # here so it doesn't stringify into invalid CSS.
+            continue
+        if key == "checked_bg":
+            # Button-checked highlight color. Consumed by
+            # _render_icon_button (toolbar tool buttons); not a Qt CSS
+            # property, so skip it here to avoid "Unknown property".
+            continue
         if key == "flex":
             # flex: N means "stretch in the parent layout". Map to a
             # horizontally-expanding size policy so spacers / footer
@@ -3190,8 +3293,9 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
                                  widget.sizePolicy().verticalPolicy())
             continue
         if key == "size":
-            sz = int(val)
-            widget.setFixedSize(sz, sz)
+            sz = _style_px(val)
+            if sz is not None:
+                widget.setFixedSize(sz, sz)
             continue
         if key == "width":
             if isinstance(val, str) and val.endswith("%"):
@@ -3199,7 +3303,9 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
                 widget.setSizePolicy(QSizePolicy.Expanding,
                                      widget.sizePolicy().verticalPolicy())
             else:
-                widget.setFixedWidth(int(val))
+                px = _style_px(val)
+                if px is not None:
+                    widget.setFixedWidth(px)
             continue
         if key == "height":
             if isinstance(val, str) and val.endswith("%"):
@@ -3207,7 +3313,9 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
                 widget.setSizePolicy(widget.sizePolicy().horizontalPolicy(),
                                      QSizePolicy.Expanding)
             else:
-                widget.setFixedHeight(int(val))
+                px = _style_px(val)
+                if px is not None:
+                    widget.setFixedHeight(px)
             continue
         if key == "min_width":
             widget.setMinimumWidth(int(val))
@@ -3379,6 +3487,15 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
                 widget.setEnabled(not r.to_bool())
             elif prop == "value":
                 _set_widget_value(widget, r.value)
+            elif prop == "checked":
+                # Reactive checked highlight — the bundle toolbar's tool
+                # buttons re-evaluate ``state.active_tool == "..."`` /
+                # ``mem(state.active_tool, [...])`` here when active_tool
+                # changes, so the active tool's button stays lit. Without
+                # this the initial-only setChecked in the renderer never
+                # tracks later tool switches.
+                if hasattr(widget, "setChecked"):
+                    widget.setChecked(r.to_bool())
             elif prop == "color":
                 selected = _is_selected_in(new_ctx)
                 widget.setStyleSheet(_color_stylesheet(r.value, selected))
@@ -3477,6 +3594,26 @@ def _apply_behaviors(widget: QWidget, behaviors: list, store: StateStore,
             _wire_change(widget, action, params, condition, effects, store, ctx, dispatch_fn)
 
 
+def _resolve_param_value(v, eval_ctx):
+    """Resolve a behavior ``params`` value against the eval context.
+
+    String values are expressions. A bare identifier that evaluates to
+    null (no state binding) is treated as a literal string, so YAML
+    ``params: { tool: selection }`` passes the string ``"selection"``
+    rather than null — this is how the tool-grid select_tool buttons
+    encode their target. Mirrors the Rust renderer's bare-identifier
+    fallback (jas_dioxus build_mouse_event_handler). Non-string values
+    pass through unchanged.
+    """
+    if not isinstance(v, str):
+        return v
+    result = evaluate(v, eval_ctx)
+    value = getattr(result, "value", result)
+    if value is None and v and all(c.isalnum() or c == "_" for c in v):
+        return v
+    return value
+
+
 def _wire_click(widget, action, params, condition, effects, store, ctx, dispatch_fn):
     if not hasattr(widget, "clicked"):
         return
@@ -3514,8 +3651,7 @@ def _wire_click(widget, action, params, condition, effects, store, ctx, dispatch
             resolved_params = {}
             eval_ctx = _build_eval_ctx()
             for k, v in params.items():
-                r = evaluate(str(v), eval_ctx)
-                resolved_params[k] = r.value
+                resolved_params[k] = _resolve_param_value(v, eval_ctx)
             if dispatch_fn:
                 dispatch_fn(action, resolved_params)
         if effects:
