@@ -198,7 +198,7 @@ let num_of = function
     fitter. [None] unless exactly one Polygon / Polyline is selected and some
     concept matches (a no-match is a silent no-op). The caller brackets one undo
     and routes through [Op_apply.op_apply]. *)
-let promote_to_concept_op (_store : State_store.t) (m : Model.model)
+let promote_to_concept_op (m : Model.model)
   : Yojson.Safe.t option =
   let doc = m#document in
   match Document.PathMap.bindings doc.Document.selection with

@@ -720,19 +720,15 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     | None -> ()
   in
 
-  (* Generic dispatch for bundle actions with NO bespoke handler — today
-     only the View-menu zoom/fit actions and the [promote_to_concept]
-     stub. Routes through the shared [Dialog_global.dispatch_action] with
-     a fresh Controller, exactly like the dialog OK / Print path: its
-     [_platform_effects_for] already registers the [doc.zoom.*] effects
-     (apply / set / fit_rect / fit_all_artboards / fit_elements) that
-     actions.yaml's zoom_in/zoom_out/zoom_to_actual_size/
-     fit_active_artboard/fit_all_artboards/fit_in_window reference, so
-     they run cleanly with no extra wiring. [promote_to_concept]'s bundle
-     effect is a [{log}] stub (the real promote lives panel-side in
-     Concepts_panel / yaml_panel_view), so routing it here is log-only —
-     parity with the Rust menu, where it also routes through the generic
-     dispatcher. A redraw is queued so view-state changes paint. *)
+  (* Generic dispatch for the View-menu zoom/fit actions — routed through
+     the shared [Dialog_global.dispatch_action] with a fresh Controller,
+     exactly like the dialog OK / Print path: its [_platform_effects_for]
+     already registers the [doc.zoom.*] effects (apply / set / fit_rect /
+     fit_all_artboards / fit_elements) that actions.yaml's
+     zoom_in/zoom_out/zoom_to_actual_size/fit_active_artboard/
+     fit_all_artboards/fit_in_window reference, so they run cleanly with no
+     extra wiring. A redraw is queued so view-state changes paint.
+     [promote_to_concept] has its own arm (the real fitter op, below). *)
   let dispatch_generic action params () =
     let model = m () in
     let ctrl = new Controller.controller ~model () in
@@ -782,10 +778,22 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
     | "show_all" ->
       let model = m () in (new Controller.controller ~model ())#show_all
     | "make_instance" -> make_instance (m ()) ()
-    (* --- View + promote (generic, effect-backed) --- *)
+    (* --- Promote to Concept: the real fitter op (mirrors the Concepts
+       panel's promote intercept), not the {log} bundle stub. --- *)
+    | "promote_to_concept" ->
+      let model = m () in
+      (match Concepts_panel.promote_to_concept_op model with
+       | Some op ->
+         let ctrl = new Controller.controller ~model () in
+         model#with_txn (fun () ->
+           model#name_txn "promote_to_concept";
+           Op_apply.op_apply model ctrl op);
+         parent#misc#queue_draw ()
+       | None -> ())
+    (* --- View (generic, effect-backed) --- *)
     | "zoom_in" | "zoom_out" | "zoom_to_actual_size"
     | "fit_active_artboard" | "fit_all_artboards" | "fit_in_window"
-    | "promote_to_concept" -> dispatch_generic action params ()
+      -> dispatch_generic action params ()
     | _ -> ()
   in
 
