@@ -5,10 +5,16 @@
 /// substituting `currentColor` strokes/fills with the supplied tint.
 ///
 /// Supported SVG primitives: rect, line, circle, ellipse, polyline,
-/// polygon, path. Path d-string supports M/L/H/V/C/Q/Z (case-sensitive
-/// absolute + lowercase relative). Unsupported features (text element,
-/// path commands S/T/A) cause WorkspaceIcon to render an EmptyView so
-/// the caller can fall back to a text label.
+/// polygon, path. Path d-string supports M/L/H/V/C/S/Q/T/A/Z
+/// (case-sensitive absolute + lowercase relative), including the
+/// smooth-curve reflected-control-point rule (S/s, T/t) and the
+/// elliptical-arc endpoint parameterization (A/a, approximated with
+/// <=90-degree cubic-bezier segments). Elements may carry a
+/// `transform` attribute of `rotate(a[,cx,cy])` / `translate(tx[,ty])`
+/// (composed left-to-right; degrees). The `<text>` element is rendered
+/// via Canvas text. Anything else (tspan/use/image, scale/matrix
+/// transforms) causes WorkspaceIcon to render an EmptyView so the
+/// caller can fall back to a text label.
 
 import SwiftUI
 import AppKit
@@ -251,7 +257,13 @@ private enum SvgPrimitiveBuilder {
             path = SvgDParser.parse(d)
         default: return nil
         }
-        guard let p = path else { return nil }
+        guard var p = path else { return nil }
+        // Apply an element-level transform (rotate / translate). SVG
+        // transforms are right-to-left function composition; we build
+        // the equivalent CGAffineTransform and run the path through it.
+        if let tf = attrs["transform"], let xform = parseTransform(tf) {
+            p = p.applying(xform)
+        }
         return SvgPrimitive(
             path: p,
             fill: parsePaint(attrs["fill"]) ?? .none,
@@ -377,6 +389,60 @@ private enum SvgPrimitiveBuilder {
         }
     }
 
+    /// Parse the subset of the SVG `transform` attribute used by the
+    /// bundle icons: `rotate(a)`, `rotate(a, cx, cy)`, `translate(tx)`,
+    /// `translate(tx, ty)`. Multiple space-separated functions compose
+    /// left-to-right (the leftmost is outermost), matching SVG. Angles
+    /// are in DEGREES. Returns nil if the string contains an
+    /// unsupported function so the caller can decide how to handle it
+    /// (here: nil means "no transform", but every transform in the
+    /// bundle is one of the supported forms).
+    private static func parseTransform(_ raw: String) -> CGAffineTransform? {
+        var result = CGAffineTransform.identity
+        var sawAny = false
+        // Match `name( args )` repeatedly.
+        let pattern = #"([a-zA-Z]+)\s*\(([^)]*)\)"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = raw as NSString
+        let matches = re.matches(in: raw, range: NSRange(location: 0, length: ns.length))
+        for m in matches {
+            let fn = ns.substring(with: m.range(at: 1)).lowercased()
+            let argStr = ns.substring(with: m.range(at: 2))
+            let args = argStr
+                .split(whereSeparator: { $0.isWhitespace || $0 == "," })
+                .compactMap { Double($0) }
+            let step: CGAffineTransform
+            switch fn {
+            case "rotate":
+                if args.count >= 3 {
+                    // rotate(a, cx, cy) = T(cx,cy) . R(a) . T(-cx,-cy)
+                    let a = args[0] * .pi / 180.0
+                    let cx = args[1], cy = args[2]
+                    step = CGAffineTransform(translationX: cx, y: cy)
+                        .rotated(by: a)
+                        .translatedBy(x: -cx, y: -cy)
+                } else if args.count >= 1 {
+                    step = CGAffineTransform(rotationAngle: args[0] * .pi / 180.0)
+                } else {
+                    return nil
+                }
+            case "translate":
+                let tx = args.first ?? 0
+                let ty = args.count >= 2 ? args[1] : 0
+                step = CGAffineTransform(translationX: tx, y: ty)
+            default:
+                // scale / matrix / skew: not used by any bundle icon.
+                return nil
+            }
+            // Compose left-to-right: a point is mapped by the leftmost
+            // function last. CGAffineTransform applies `result` after
+            // `step` when we do step.concatenating(result), so prepend.
+            result = step.concatenating(result)
+            sawAny = true
+        }
+        return sawAny ? result : nil
+    }
+
     private static func parseLineCap(_ s: String?) -> CGLineCap {
         switch s {
         case "round": return .round
@@ -409,6 +475,15 @@ private enum SvgDParser {
         var subpathStart = CGPoint.zero
         var scanner = SvgDScanner(d)
         var lastCmd: Character = " "
+        // Reflected-control-point tracking for the smooth commands.
+        // `lastCubicCtrl` holds the second control point of the most
+        // recent C/c/S/s command; `lastQuadCtrl` the control point of
+        // the most recent Q/q/T/t. Both are nil when the preceding
+        // command was of a different family, in which case the
+        // reflected control point collapses onto the current point
+        // (per the SVG path spec).
+        var lastCubicCtrl: CGPoint? = nil
+        var lastQuadCtrl: CGPoint? = nil
 
         while !scanner.atEnd {
             let cmd: Character
@@ -429,46 +504,59 @@ private enum SvgDParser {
                 }
             }
 
+            // Most commands break the smooth-curve chain. The cubic /
+            // quad cases below re-arm their own tracker after running.
+            // Compute the reflected control point for S/s/T/t up front
+            // using the PREVIOUS command's stored control point.
             switch cmd {
             case "M":
                 guard let p = scanner.readPoint() else { return nil }
                 current = p; subpathStart = p
                 path.move(to: p)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "m":
                 guard let p = scanner.readPoint() else { return nil }
                 current = CGPoint(x: current.x + p.x, y: current.y + p.y)
                 subpathStart = current
                 path.move(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "L":
                 guard let p = scanner.readPoint() else { return nil }
                 current = p
                 path.addLine(to: p)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "l":
                 guard let p = scanner.readPoint() else { return nil }
                 current = CGPoint(x: current.x + p.x, y: current.y + p.y)
                 path.addLine(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "H":
                 guard let x = scanner.readNumber() else { return nil }
                 current.x = x
                 path.addLine(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "h":
                 guard let dx = scanner.readNumber() else { return nil }
                 current.x += dx
                 path.addLine(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "V":
                 guard let y = scanner.readNumber() else { return nil }
                 current.y = y
                 path.addLine(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "v":
                 guard let dy = scanner.readNumber() else { return nil }
                 current.y += dy
                 path.addLine(to: current)
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "C":
                 guard let c1 = scanner.readPoint(),
                       let c2 = scanner.readPoint(),
                       let p = scanner.readPoint() else { return nil }
                 path.addCurve(to: p, control1: c1, control2: c2)
                 current = p
+                lastCubicCtrl = c2; lastQuadCtrl = nil
             case "c":
                 guard let c1 = scanner.readPoint(),
                       let c2 = scanner.readPoint(),
@@ -478,26 +566,193 @@ private enum SvgDParser {
                 let absP = CGPoint(x: current.x + p.x, y: current.y + p.y)
                 path.addCurve(to: absP, control1: abs1, control2: abs2)
                 current = absP
+                lastCubicCtrl = abs2; lastQuadCtrl = nil
+            case "S":
+                guard let c2 = scanner.readPoint(),
+                      let p = scanner.readPoint() else { return nil }
+                let c1 = Self.reflected(lastCubicCtrl, about: current)
+                path.addCurve(to: p, control1: c1, control2: c2)
+                current = p
+                lastCubicCtrl = c2; lastQuadCtrl = nil
+            case "s":
+                guard let c2r = scanner.readPoint(),
+                      let pr = scanner.readPoint() else { return nil }
+                let c1 = Self.reflected(lastCubicCtrl, about: current)
+                let abs2 = CGPoint(x: current.x + c2r.x, y: current.y + c2r.y)
+                let absP = CGPoint(x: current.x + pr.x, y: current.y + pr.y)
+                path.addCurve(to: absP, control1: c1, control2: abs2)
+                current = absP
+                lastCubicCtrl = abs2; lastQuadCtrl = nil
             case "Q":
                 guard let c = scanner.readPoint(), let p = scanner.readPoint() else { return nil }
                 path.addQuadCurve(to: p, control: c)
                 current = p
+                lastQuadCtrl = c; lastCubicCtrl = nil
             case "q":
                 guard let c = scanner.readPoint(), let p = scanner.readPoint() else { return nil }
                 let absC = CGPoint(x: current.x + c.x, y: current.y + c.y)
                 let absP = CGPoint(x: current.x + p.x, y: current.y + p.y)
                 path.addQuadCurve(to: absP, control: absC)
                 current = absP
+                lastQuadCtrl = absC; lastCubicCtrl = nil
+            case "T":
+                guard let p = scanner.readPoint() else { return nil }
+                let c = Self.reflected(lastQuadCtrl, about: current)
+                path.addQuadCurve(to: p, control: c)
+                current = p
+                lastQuadCtrl = c; lastCubicCtrl = nil
+            case "t":
+                guard let pr = scanner.readPoint() else { return nil }
+                let c = Self.reflected(lastQuadCtrl, about: current)
+                let absP = CGPoint(x: current.x + pr.x, y: current.y + pr.y)
+                path.addQuadCurve(to: absP, control: c)
+                current = absP
+                lastQuadCtrl = c; lastCubicCtrl = nil
+            case "A", "a":
+                let relative = (cmd == "a")
+                guard let rx = scanner.readNumber(),
+                      let ry = scanner.readNumber(),
+                      let xRot = scanner.readNumber(),
+                      let largeArc = scanner.readFlag(),
+                      let sweep = scanner.readFlag(),
+                      let end = scanner.readPoint() else { return nil }
+                let absEnd = relative
+                    ? CGPoint(x: current.x + end.x, y: current.y + end.y)
+                    : end
+                Self.appendArc(to: &path, from: current, to: absEnd,
+                               rx: rx, ry: ry, xAxisRotationDeg: xRot,
+                               largeArc: largeArc, sweep: sweep)
+                current = absEnd
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             case "Z", "z":
                 path.closeSubpath()
                 current = subpathStart
+                lastCubicCtrl = nil; lastQuadCtrl = nil
             default:
-                // S, s, T, t, A, a — not yet supported.
                 return nil
             }
         }
 
         return path
+    }
+
+    /// Reflect the stored control point `ctrl` about `current`. When
+    /// `ctrl` is nil (the previous command was not of the matching
+    /// curve family) the reflected point is `current` itself, per the
+    /// SVG smooth-curve rule.
+    private static func reflected(_ ctrl: CGPoint?, about current: CGPoint) -> CGPoint {
+        guard let c = ctrl else { return current }
+        return CGPoint(x: 2 * current.x - c.x, y: 2 * current.y - c.y)
+    }
+
+    /// Append an SVG elliptical arc to `path`, converting the
+    /// endpoint parameterization (rx ry x-rotation large-arc sweep
+    /// endpoint) into one or more cubic-bezier segments (each <= 90
+    /// degrees). Implements the conversion + radius correction from
+    /// the SVG implementation notes (appendix on arcs).
+    private static func appendArc(to path: inout SwiftUI.Path,
+                                  from p0: CGPoint, to p1: CGPoint,
+                                  rx rxIn: Double, ry ryIn: Double,
+                                  xAxisRotationDeg phiDeg: Double,
+                                  largeArc: Bool, sweep: Bool) {
+        // Degenerate: identical endpoints -> nothing to draw.
+        if p0.x == p1.x && p0.y == p1.y { return }
+        // rx==0 or ry==0 -> straight line (per spec).
+        var rx = abs(rxIn)
+        var ry = abs(ryIn)
+        if rx == 0 || ry == 0 {
+            path.addLine(to: p1)
+            return
+        }
+
+        let phi = phiDeg * Double.pi / 180.0
+        let cosPhi = cos(phi)
+        let sinPhi = sin(phi)
+
+        // Step 1: compute (x1', y1') — the endpoints in the rotated,
+        // midpoint-centred coordinate system.
+        let dx2 = (Double(p0.x) - Double(p1.x)) / 2.0
+        let dy2 = (Double(p0.y) - Double(p1.y)) / 2.0
+        let x1p = cosPhi * dx2 + sinPhi * dy2
+        let y1p = -sinPhi * dx2 + cosPhi * dy2
+
+        // Step 2: radius correction — scale up rx, ry if too small.
+        var rxSq = rx * rx
+        var rySq = ry * ry
+        let x1pSq = x1p * x1p
+        let y1pSq = y1p * y1p
+        let lambda = x1pSq / rxSq + y1pSq / rySq
+        if lambda > 1 {
+            let s = lambda.squareRoot()
+            rx *= s
+            ry *= s
+            rxSq = rx * rx
+            rySq = ry * ry
+        }
+
+        // Step 3: compute the centre (cx', cy') in the rotated frame.
+        var num = rxSq * rySq - rxSq * y1pSq - rySq * x1pSq
+        if num < 0 { num = 0 }  // guard against tiny negative from FP error
+        let den = rxSq * y1pSq + rySq * x1pSq
+        var coef = den == 0 ? 0 : (num / den).squareRoot()
+        if largeArc == sweep { coef = -coef }
+        let cxp = coef * (rx * y1p / ry)
+        let cyp = coef * -(ry * x1p / rx)
+
+        // Step 4: centre in the original coordinate system.
+        let cx = cosPhi * cxp - sinPhi * cyp + (Double(p0.x) + Double(p1.x)) / 2.0
+        let cy = sinPhi * cxp + cosPhi * cyp + (Double(p0.y) + Double(p1.y)) / 2.0
+
+        // Step 5: start angle theta1 and sweep delta-theta.
+        func angle(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
+            let dot = ux * vx + uy * vy
+            let len = (ux * ux + uy * uy).squareRoot() * (vx * vx + vy * vy).squareRoot()
+            var c = len == 0 ? 0 : dot / len
+            c = min(1, max(-1, c))
+            var a = acos(c)
+            if ux * vy - uy * vx < 0 { a = -a }
+            return a
+        }
+        let ux = (x1p - cxp) / rx
+        let uy = (y1p - cyp) / ry
+        let vx = (-x1p - cxp) / rx
+        let vy = (-y1p - cyp) / ry
+        let theta1 = angle(1, 0, ux, uy)
+        var deltaTheta = angle(ux, uy, vx, vy)
+        let twoPi = 2 * Double.pi
+        if !sweep && deltaTheta > 0 { deltaTheta -= twoPi }
+        if sweep && deltaTheta < 0 { deltaTheta += twoPi }
+
+        // Step 6: split into <= 90-degree segments and emit cubics.
+        let segments = max(1, Int(ceil(abs(deltaTheta) / (Double.pi / 2.0) - 1e-9)))
+        let delta = deltaTheta / Double(segments)
+        // Bezier control-point magnitude for a unit-circle arc of
+        // angle `delta`.
+        let t = (4.0 / 3.0) * tan(delta / 4.0)
+
+        var theta = theta1
+        for _ in 0..<segments {
+            let cosT1 = cos(theta)
+            let sinT1 = sin(theta)
+            let theta2 = theta + delta
+            let cosT2 = cos(theta2)
+            let sinT2 = sin(theta2)
+
+            // Unit-circle points / tangents, then scale by rx,ry and
+            // rotate by phi back into icon coordinates.
+            func map(_ ex: Double, _ ey: Double) -> CGPoint {
+                let sx = rx * ex
+                let sy = ry * ey
+                let x = cosPhi * sx - sinPhi * sy + cx
+                let y = sinPhi * sx + cosPhi * sy + cy
+                return CGPoint(x: x, y: y)
+            }
+            let c1 = map(cosT1 - t * sinT1, sinT1 + t * cosT1)
+            let c2 = map(cosT2 + t * sinT2, sinT2 - t * cosT2)
+            let endPt = map(cosT2, sinT2)
+            path.addCurve(to: endPt, control1: c1, control2: c2)
+            theta = theta2
+        }
     }
 }
 
@@ -551,5 +806,19 @@ private struct SvgDScanner {
     mutating func readPoint() -> CGPoint? {
         guard let x = readNumber(), let y = readNumber() else { return nil }
         return CGPoint(x: x, y: y)
+    }
+
+    /// Read a single arc flag: exactly one `0` or `1` digit. The SVG
+    /// grammar allows arc flags to be packed against the following
+    /// number with no separator (e.g. `...1 1 0 5 5` may appear as
+    /// `...110 5 5`), so a flag must consume just one character and
+    /// NOT greedily read a full number. Returns true for `1`.
+    mutating func readFlag() -> Bool? {
+        skipSep()
+        guard idx < chars.count else { return nil }
+        let c = chars[idx]
+        if c == "0" { idx += 1; return false }
+        if c == "1" { idx += 1; return true }
+        return nil
     }
 }
