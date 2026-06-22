@@ -467,5 +467,168 @@ class LinkToSelectionTest(absltest.TestCase):
         self.assertEqual(len(model.document.layers[0].children), 1)
 
 
+class BuildMenuModelTest(absltest.TestCase):
+    """The menu bar is projected from the compiled bundle ``menubar``
+    (menubar.yaml) so it can never drift from the spec. These tests pin
+    the projected render model. Mirrors the Rust ``menu.rs`` model tests.
+    """
+
+    def _model(self):
+        from menu.menu_model import build_menu_model
+        return build_menu_model()
+
+    def _actions(self, menu):
+        from menu.menu_model import MenuAction
+        return [e.action for e in menu.entries if isinstance(e, MenuAction)]
+
+    def _find(self, model, label):
+        return next(m for m in model if m.label == label)
+
+    def test_model_has_five_menus_with_ampersand_titles(self):
+        # Titles keep the & mnemonic markers verbatim (Qt consumes &).
+        model = self._model()
+        labels = [m.label for m in model]
+        self.assertEqual(
+            labels, ["&File", "&Edit", "&Object", "&View", "&Window"])
+
+    def test_file_menu_has_print_and_export(self):
+        model = self._model()
+        actions = self._actions(self._find(model, "&File"))
+        self.assertIn("open_print_dialog", actions)
+        self.assertIn("export_to_pdf", actions)
+
+    def test_file_menu_separators_present(self):
+        from menu.menu_model import MenuSeparator
+        model = self._model()
+        file_menu = self._find(model, "&File")
+        seps = [e for e in file_menu.entries if isinstance(e, MenuSeparator)]
+        self.assertGreaterEqual(len(seps), 1)
+
+    def test_view_menu_has_zoom_and_fit(self):
+        model = self._model()
+        actions = self._actions(self._find(model, "&View"))
+        self.assertIn("zoom_in", actions)
+        self.assertIn("zoom_out", actions)
+        self.assertIn("zoom_to_actual_size", actions)
+        self.assertIn("fit_active_artboard", actions)
+        self.assertIn("fit_all_artboards", actions)
+        self.assertIn("fit_in_window", actions)
+
+    def test_window_menu_has_dynamic_submenus(self):
+        from menu.menu_model import MenuSubmenu, SubmenuKind
+        model = self._model()
+        window = self._find(model, "&Window")
+        kinds = [e.kind for e in window.entries if isinstance(e, MenuSubmenu)]
+        self.assertIn(SubmenuKind.WORKSPACE, kinds)
+        self.assertIn(SubmenuKind.APPEARANCE, kinds)
+
+    def test_window_toggle_panel_carries_panel_param(self):
+        from menu.menu_model import MenuAction
+        model = self._model()
+        window = self._find(model, "&Window")
+        color = [e for e in window.entries
+                 if isinstance(e, MenuAction)
+                 and e.action == "toggle_panel"
+                 and e.params.get("panel") == "color"]
+        self.assertEqual(len(color), 1)
+
+    def test_window_has_all_fourteen_panel_toggles(self):
+        from menu.menu_model import MenuAction
+        model = self._model()
+        window = self._find(model, "&Window")
+        panels = {e.params.get("panel") for e in window.entries
+                  if isinstance(e, MenuAction) and e.action == "toggle_panel"}
+        expected = {"artboards", "layers", "color", "swatches", "stroke",
+                    "properties", "character", "paragraph", "align",
+                    "boolean", "magic_wand", "opacity", "symbols", "concepts"}
+        self.assertEqual(panels, expected)
+
+    def test_shortcuts_passed_through_verbatim(self):
+        from menu.menu_model import MenuAction
+        model = self._model()
+        edit = self._find(model, "&Edit")
+        save_as = self._find(model, "&File")
+        shortcuts = {e.action: e.shortcut for m in model for e in m.entries
+                     if isinstance(e, MenuAction)}
+        self.assertEqual(shortcuts["save_as"], "Ctrl+Shift+S")
+        self.assertEqual(shortcuts["zoom_in"], "Ctrl+=")
+        self.assertEqual(shortcuts["fit_all_artboards"], "Ctrl+Alt+0")
+
+
+class MenuStructureFromBundleTest(absltest.TestCase):
+    """The rendered Qt menus reflect the bundle structure. Runs under the
+    shared offscreen QApplication established by :class:`MenubarTest`."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+        cls.window = MainWindow()
+
+    def _labels(self, idx):
+        # Read via the stable references create_menus stashes on the window.
+        # ``menuBar().actions()[i].menu()`` returns a transient QMenu wrapper
+        # that PySide can report as an already-deleted C++ object once many
+        # MainWindows have been constructed in-process (a PySide ownership
+        # quirk, pre-existing and unrelated to the bundle projection); the
+        # retained ``_menu_objects`` list is the durable handle.
+        menu = self.window._menu_objects[idx]
+        return [a.text() for a in menu.actions() if not a.isSeparator()]
+
+    def test_view_menu_has_six_actions(self):
+        # View menu now renders all six bundle items (previously only 3).
+        self.assertEqual(self._labels(3), [
+            "Zoom &In", "Zoom &Out", "Actual &Size",
+            "Fit &Artboard in Window", "Fit A&ll in Window", "&Fit in Window",
+        ])
+
+    def test_window_menu_has_concepts_toggle(self):
+        self.assertIn("Co&ncepts", self._labels(4))
+
+    def test_top_level_menu_titles_keep_ampersands(self):
+        titles = [self.window._menu_objects[i].title() for i in range(5)]
+        self.assertEqual(
+            titles, ["&File", "&Edit", "&Object", "&View", "&Window"])
+
+
+class ZoomRoutingTest(absltest.TestCase):
+    """The View zoom/fit family mutates the active model's view state.
+    Pins that the bundle-driven View entries reach working zoom handlers
+    (kept native because the generic doc.zoom.* path cannot resolve
+    ``preferences.viewport.zoom_step`` in the menu dispatch context)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.window = MainWindow()
+        # MainWindow may open with no canvas; ensure an active model.
+        if self.window.active_model() is None:
+            self.window.add_canvas(_make_model_with_rects(1))
+
+    def test_zoom_in_increases_zoom_level(self):
+        model = self.window.active_model()
+        self.assertIsNotNone(model)
+        model.viewport_w = 800
+        model.viewport_h = 600
+        before = model.zoom_level
+        menu_module._on_menu_action(self.window, "zoom_in", {})
+        self.assertGreater(model.zoom_level, before)
+
+    def test_actual_size_sets_zoom_to_one(self):
+        model = self.window.active_model()
+        model.viewport_w = 800
+        model.viewport_h = 600
+        model.zoom_level = 3.0
+        menu_module._on_menu_action(self.window, "zoom_to_actual_size", {})
+        self.assertEqual(model.zoom_level, 1.0)
+
+
 if __name__ == "__main__":
     absltest.main()
