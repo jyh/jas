@@ -8350,6 +8350,38 @@
           }
         },
         {
+          "id": "menu_boolean",
+          "label": "&Boolean",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "boolean"
+          }
+        },
+        {
+          "id": "menu_magic_wand",
+          "label": "&Magic Wand",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "magic_wand"
+          }
+        },
+        {
+          "id": "menu_opacity",
+          "label": "&Opacity",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "opacity"
+          }
+        },
+        {
+          "id": "menu_symbols",
+          "label": "S&ymbols",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "symbols"
+          }
+        },
+        {
           "id": "menu_concepts",
           "label": "Co&ncepts",
           "action": "toggle_panel",
