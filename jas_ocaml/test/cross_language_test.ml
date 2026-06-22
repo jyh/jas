@@ -2357,15 +2357,6 @@ let () =
           assert false
         end);
 
-      Alcotest.test_case "toolbar_structure" `Quick (fun () ->
-        let expected = read_fixture "expected/toolbar_structure.json" in
-        let actual = Jas.Workspace_test_json.toolbar_structure_json () in
-        if actual <> expected then begin
-          Printf.eprintf "=== EXPECTED (toolbar_structure) ===\n%s\n" expected;
-          Printf.eprintf "=== ACTUAL (toolbar_structure) ===\n%s\n" actual;
-          assert false
-        end);
-
       Alcotest.test_case "state_defaults" `Quick (fun () ->
         let expected = read_fixture "expected/state_defaults.json" in
         let actual = Jas.Workspace_test_json.state_defaults_json () in

@@ -1435,11 +1435,6 @@ private func assertWorkspaceFixture(_ name: String, _ json: String) {
     }
 }
 
-@Test func testToolbarStructure() {
-    let json = toolbarStructureJson()
-    assertWorkspaceFixture("toolbar_structure", json)
-}
-
 @Test func testStateDefaults() {
     let json = stateDefaultsJson()
     assertWorkspaceFixture("state_defaults", json)

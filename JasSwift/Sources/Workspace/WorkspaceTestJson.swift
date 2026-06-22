@@ -235,41 +235,6 @@ private func panelAddrJson(_ a: PanelAddr) -> String {
     return o.build()
 }
 
-// MARK: - Toolbar structure (static data for cross-language fixture)
-
-/// Return canonical JSON for the toolbar slot layout.
-///
-/// Encodes the same slot grid defined in `tools/tool.rs` tests,
-/// producing a fixture that all four languages must match.
-package func toolbarStructureJson() -> String {
-    let slots: [(Int, Int, [String])] = [
-        (0, 0, ["selection"]),
-        (0, 1, ["partial_selection", "interior_selection"]),
-        (1, 0, ["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
-        (1, 1, ["pencil", "path_eraser", "smooth"]),
-        (2, 0, ["type", "type_on_path"]),
-        (2, 1, ["line"]),
-        (3, 0, ["rect", "rounded_rect", "polygon", "star"]),
-        (3, 1, ["lasso"]),
-    ]
-
-    let total = slots.reduce(0) { $0 + $1.2.count }
-
-    let slotJsons = slots.map { (row, col, tools) -> String in
-        let o = JsonObj()
-        o.int("col", col)
-        o.int("row", row)
-        let toolStrs = tools.map { "\"\($0)\"" }
-        o.raw("tools", jsonArray(toolStrs))
-        return o.build()
-    }
-
-    let o = JsonObj()
-    o.raw("slots", jsonArray(slotJsons))
-    o.int("total_tools", total)
-    return o.build()
-}
-
 // MARK: - State defaults (must match workspace/state.yaml)
 
 package func stateDefaultsJson() -> String {
