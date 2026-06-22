@@ -29,7 +29,6 @@ from workspace.pane import (
 )
 from workspace.workspace_test_json import (
     workspace_to_test_json, test_json_to_workspace,
-    toolbar_structure_json,
     state_defaults_json, shortcut_structure_json,
 )
 from workspace.layout_apply import layout_apply
@@ -1368,10 +1367,6 @@ class CrossLanguageTest(absltest.TestCase):
             reserialized = workspace_to_test_json(parsed)
             self.assertEqual(fixture, reserialized,
                 f"Workspace JSON roundtrip failed for '{name}'")
-
-    def test_toolbar_structure(self):
-        actual = toolbar_structure_json()
-        self._assert_workspace_fixture("toolbar_structure", actual)
 
     def test_state_defaults(self):
         actual = state_defaults_json()

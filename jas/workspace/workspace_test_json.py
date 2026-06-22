@@ -245,40 +245,6 @@ def _panel_addr_json(a: PanelAddr) -> str:
 
 
 # ------------------------------------------------------------------ #
-# Toolbar structure (static data for cross-language fixture)          #
-# ------------------------------------------------------------------ #
-
-def toolbar_structure_json() -> str:
-    """Return canonical JSON for the toolbar slot layout."""
-    slots = [
-        (0, 0, ["selection"]),
-        (0, 1, ["partial_selection", "interior_selection"]),
-        (1, 0, ["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
-        (1, 1, ["pencil", "path_eraser", "smooth"]),
-        (2, 0, ["type", "type_on_path"]),
-        (2, 1, ["line"]),
-        (3, 0, ["rect", "rounded_rect", "polygon", "star"]),
-        (3, 1, ["lasso"]),
-    ]
-
-    total = sum(len(tools) for _, _, tools in slots)
-
-    slot_jsons = []
-    for row, col, tools in slots:
-        o = _JsonObj()
-        o.int_("col", col)
-        o.int_("row", row)
-        tool_strs = [f'"{t}"' for t in tools]
-        o.raw("tools", _json_array(tool_strs))
-        slot_jsons.append(o.build())
-
-    o = _JsonObj()
-    o.raw("slots", _json_array(slot_jsons))
-    o.int_("total_tools", total)
-    return o.build()
-
-
-# ------------------------------------------------------------------ #
 # State defaults (from workspace YAML state.yaml)                     #
 # ------------------------------------------------------------------ #
 

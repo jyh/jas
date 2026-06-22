@@ -260,49 +260,6 @@ fn panel_addr_json(a: &PanelAddr) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar structure (static data for cross-language fixture)
-// ---------------------------------------------------------------------------
-
-/// Return canonical JSON for the toolbar slot layout.
-///
-/// This encodes the same slot grid defined in `tools/tool.rs` tests,
-/// producing a fixture that all four languages must match.
-pub fn toolbar_structure_json() -> String {
-    let slots: &[(usize, usize, &[&str])] = &[
-        (0, 0, &["selection"]),
-        (0, 1, &["partial_selection", "interior_selection"]),
-        (1, 0, &["pen", "add_anchor_point", "delete_anchor_point", "anchor_point"]),
-        (1, 1, &["pencil", "path_eraser", "smooth"]),
-        (2, 0, &["type", "type_on_path"]),
-        (2, 1, &["line"]),
-        (3, 0, &["rect", "rounded_rect", "polygon", "star"]),
-        (3, 1, &["lasso"]),
-    ];
-
-    let total: usize = slots.iter().map(|(_, _, tools)| tools.len()).sum();
-
-    let slot_jsons: Vec<String> = slots.iter().map(|(row, col, tools)| {
-        let mut o = JsonObj::new();
-        o.int("col", *col);
-        o.int("row", *row);
-        let tool_strs: Vec<String> = tools.iter()
-            .map(|t| format!("\"{}\"", t))
-            .collect();
-        o.raw("tools", json_array(&tool_strs));
-        o.build()
-    }).collect();
-
-    let mut o = JsonObj::new();
-    o.raw("slots", json_array(&slot_jsons));
-    o.int("total_tools", total);
-    o.build()
-}
-
-// ---------------------------------------------------------------------------
-// Menu structure (static data for cross-language fixture)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // State defaults (must match workspace/state.yaml)
 // ---------------------------------------------------------------------------
 
@@ -776,12 +733,6 @@ mod tests {
         std::fs::write(format!("{}/workspace_default_with_panes.json", fixtures), &json)
             .expect("Failed to write workspace_default_with_panes.json");
         eprintln!("Wrote workspace_default_with_panes.json ({} bytes)", json.len());
-
-        let json = toolbar_structure_json();
-        std::fs::write(format!("{}/toolbar_structure.json", fixtures), &json)
-            .expect("Failed to write toolbar_structure.json");
-        eprintln!("Wrote toolbar_structure.json ({} bytes)", json.len());
-
     }
 
     #[test]

@@ -219,35 +219,6 @@ let panel_addr_json (a : panel_addr) =
   json_build o
 
 (* ------------------------------------------------------------------ *)
-(* Toolbar structure (static data for cross-language fixture)           *)
-(* ------------------------------------------------------------------ *)
-
-let toolbar_structure_json () =
-  let slots = [
-    (0, 0, ["selection"]);
-    (0, 1, ["partial_selection"; "interior_selection"]);
-    (1, 0, ["pen"; "add_anchor_point"; "delete_anchor_point"; "anchor_point"]);
-    (1, 1, ["pencil"; "path_eraser"; "smooth"]);
-    (2, 0, ["type"; "type_on_path"]);
-    (2, 1, ["line"]);
-    (3, 0, ["rect"; "rounded_rect"; "polygon"; "star"]);
-    (3, 1, ["lasso"]);
-  ] in
-  let total = List.fold_left (fun acc (_, _, tools) -> acc + List.length tools) 0 slots in
-  let slot_jsons = List.map (fun (row, col, tools) ->
-    let o = json_obj () in
-    json_int o "col" col;
-    json_int o "row" row;
-    let tool_strs = List.map (fun t -> Printf.sprintf "\"%s\"" t) tools in
-    json_raw o "tools" (json_array tool_strs);
-    json_build o
-  ) slots in
-  let o = json_obj () in
-  json_raw o "slots" (json_array slot_jsons);
-  json_int o "total_tools" total;
-  json_build o
-
-(* ------------------------------------------------------------------ *)
 (* State defaults (must match workspace/state.yaml)                    *)
 (* ------------------------------------------------------------------ *)
 
