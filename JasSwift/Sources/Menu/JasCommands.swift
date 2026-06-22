@@ -87,190 +87,390 @@ public struct JasCommands: Commands {
 
     public init() {}
 
+    /// Top menu-bar entries projected from the compiled bundle `menubar`
+    /// (menubar.yaml) — the single source of truth. The five top-level
+    /// menus map onto macOS's fixed Commands DSL slots (File → newItem +
+    /// saveItem, Edit → undoRedo + pasteboard, Object → CommandMenu, View →
+    /// toolbar, Window → windowList): macOS pins these system slots, so the
+    /// shells are static while their CONTENTS `ForEach` the projected
+    /// entries. Mirrors the Rust reference `menu_bar.rs` (which projects the
+    /// same model, then renders it).
+    private var model_menus: [MenuModel] { menuBarModel() }
+
+    /// Entries for one top-level menu by its bundle label, or `[]` if absent.
+    private func entries(for label: String) -> [MenuEntry] {
+        model_menus.first { $0.label == label }?.entries ?? []
+    }
+
     public var body: some Commands {
+        // File menu. macOS splits the File menu across two fixed slots:
+        // `.newItem` (where New / Open live) and `.saveItem` (Save … Quit).
+        // The bundle has one flat File list; we render its leading New/Open
+        // pair into `.newItem` and the remainder into `.saveItem`. Splitting
+        // by action keeps the projection authoritative without inventing a
+        // second bundle menu.
         CommandGroup(replacing: .newItem) {
-            Button("New") {
-                // Document() defaults artboards: []; newEmptyDocument()
-                // seeds the at-least-one-artboard invariant so the new
-                // canvas isn't a featureless white plane.
-                addCanvas?(Model(document: Document.newEmptyDocument()))
-            }
-            .keyboardShortcut("n", modifiers: .command)
-
-            Button("Open...") {
-                openFile()
-            }
-            .keyboardShortcut("o", modifiers: .command)
+            renderEntries(entries(for: "&File").filter { isFileNewItem($0) })
         }
-
         CommandGroup(replacing: .saveItem) {
-            Button("Save") {
-                save()
-            }
-            .keyboardShortcut("s", modifiers: .command)
-
-            Button("Save As...") {
-                saveAs()
-            }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
-
-            Button("Revert") {
-                revert()
-            }
-            .disabled(model == nil
-                      || !(model?.isModified ?? false)
-                      || (model?.filename.hasPrefix("Untitled-") ?? true))
-
-            Divider()
-
-            Button("Document Setup...") {
-                openYamlDialog?("document_setup")
-            }
-            .disabled(model == nil)
-
-            Button("Print...") {
-                openYamlDialog?("print")
-            }
-            .keyboardShortcut("p", modifiers: .command)
-            .disabled(model == nil)
-
-            Button("Export to PDF...") {
-                exportToPdf()
-            }
-            .disabled(model == nil)
+            renderEntries(entries(for: "&File").filter { !isFileNewItem($0) })
         }
 
+        // Edit menu → undoRedo (Undo/Redo) + pasteboard (Cut … Select All).
         CommandGroup(replacing: .undoRedo) {
-            Button("Undo") {
-                model?.undo()
-            }
-            .keyboardShortcut("z", modifiers: .command)
-            .disabled(!(canUndo ?? false))
-
-            Button("Redo") {
-                model?.redo()
-            }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-            .disabled(!(canRedo ?? false))
+            renderEntries(entries(for: "&Edit").filter { isEditUndoRedo($0) })
         }
-
         CommandGroup(replacing: .pasteboard) {
-            Button("Cut") {
-                cutSelection()
-            }
-            .keyboardShortcut("x", modifiers: .command)
-            .disabled(!(hasSelection ?? false))
-
-            Button("Copy") {
-                copySelection()
-            }
-            .keyboardShortcut("c", modifiers: .command)
-            .disabled(!(hasSelection ?? false))
-
-            Button("Paste") {
-                pasteClipboard(offset: pasteOffset)
-            }
-            .keyboardShortcut("v", modifiers: .command)
-
-            Button("Paste in Place") {
-                pasteClipboard(offset: 0.0)
-            }
-            .keyboardShortcut("v", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Delete") {
-                deleteSelection()
-            }
-            .keyboardShortcut(.delete, modifiers: [])
-            .disabled(!(hasSelection ?? false))
-
-            Button("Select All") {
-                selectAll()
-            }
-            .keyboardShortcut("a", modifiers: .command)
+            renderEntries(entries(for: "&Edit").filter { !isEditUndoRedo($0) })
         }
 
+        // Object menu → its own CommandMenu (no fixed system slot).
         CommandMenu("Object") {
-            Button("Group") {
-                groupSelection()
-            }
-            .keyboardShortcut("g", modifiers: .command)
-            .disabled(!(hasSelection ?? false))
-
-            Button("Ungroup") {
-                ungroupSelection()
-            }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-            .disabled(!(hasSelection ?? false))
-
-            Button("Ungroup All") {
-                ungroupAll()
-            }
-
-            Divider()
-
-            Button("Lock") {
-                lockSelection()
-            }
-            .keyboardShortcut("2", modifiers: .command)
-            .disabled(!(hasSelection ?? false))
-
-            Button("Unlock All") {
-                unlockAll()
-            }
-            .keyboardShortcut("2", modifiers: [.command, .option])
-
-            Divider()
-
-            Button("Hide") {
-                hideSelection()
-            }
-            .keyboardShortcut("3", modifiers: .command)
-            .disabled(!(hasSelection ?? false))
-
-            Button("Show All") {
-                showAll()
-            }
-            .keyboardShortcut("3", modifiers: [.command, .option])
-
-            Divider()
-
-            Button("Make Instance") {
-                makeInstance()
-            }
-            .disabled((model?.document.selection.count ?? 0) != 1)
+            renderEntries(entries(for: "&Object"))
         }
 
-        // Replace default toolbar section in View menu with our zoom items.
-        // Uses the same @FocusedValue(\.jasModel) path that Save / Print
-        // use — workspace from @FocusedValue doesn't propagate to
-        // JasCommands for reasons that aren't obvious here, but model
-        // does, and we don't need workspace for these actions anyway.
+        // View menu → the `.toolbar` slot (zoom + fit items).
         CommandGroup(replacing: .toolbar) {
-            Button("Zoom In") { model?.zoomIn() }
-            .keyboardShortcut("=", modifiers: .command)
-            .disabled(model == nil)
-
-            Button("Zoom Out") { model?.zoomOut() }
-            .keyboardShortcut("-", modifiers: .command)
-            .disabled(model == nil)
-
-            Button("Actual Size") { model?.zoomToActualSize() }
-            .keyboardShortcut("1", modifiers: .command)
-            .disabled(model == nil)
-
-            Button("Fit Artboard") { model?.fitActiveArtboard() }
-            .keyboardShortcut("0", modifiers: .command)
-            .disabled(model == nil)
-
-            Button("Fit All Artboards") { model?.fitAllArtboards() }
-            .keyboardShortcut("0", modifiers: [.command, .option])
-            .disabled(model == nil)
+            renderEntries(entries(for: "&View"))
         }
 
-        // Replace default window list with our workspace/pane items
+        // Window menu → `.windowList`. The dynamic Workspace / Appearance
+        // submenus stay bespoke (runtime-populated); the projected entries
+        // (Tile, pane toggles, panel toggles) flow through renderEntries.
         CommandGroup(replacing: .windowList) {
+            renderWindowEntries(entries(for: "&Window"))
+        }
+    }
+
+    /// The File entries that belong in the `.newItem` slot (New, Open): the
+    /// leading run of actions before the first separator. Everything after
+    /// (Save, Save As, Revert, Document Setup, Print, Export, Quit) goes in
+    /// `.saveItem`.
+    private func isFileNewItem(_ entry: MenuEntry) -> Bool {
+        if case .action(_, let action, _, _, _) = entry {
+            return action == "new_document" || action == "open_file"
+        }
+        return false
+    }
+
+    /// The Edit entries that belong in the `.undoRedo` slot (Undo, Redo).
+    private func isEditUndoRedo(_ entry: MenuEntry) -> Bool {
+        if case .action(_, let action, _, _, _) = entry {
+            return action == "undo" || action == "redo"
+        }
+        return false
+    }
+
+    /// Render a flat list of projected entries (separators + actions) into
+    /// the SwiftUI Commands DSL. Mixing `Divider` and `Button` from one list
+    /// is the main DSL friction; emitting one view per entry (separator →
+    /// `Divider`, action → `Button`) keeps it inside a single `ForEach`.
+    @ViewBuilder
+    private func renderEntries(_ entries: [MenuEntry]) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            entryView(entry)
+        }
+    }
+
+    /// Window menu renderer: like ``renderEntries`` but routes
+    /// `.dynamicSubmenu` entries to the bespoke Workspace / Appearance
+    /// builders (runtime-populated, with check-mark machinery) and gates the
+    /// whole dynamic block + pane toggles behind a live `workspace`.
+    @ViewBuilder
+    private func renderWindowEntries(_ entries: [MenuEntry]) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            windowEntryView(entry)
+        }
+    }
+
+    /// A single non-Window entry → its SwiftUI view. Mnemonic markers are
+    /// stripped for display (macOS has no `&` mnemonics); the shortcut is
+    /// parsed from the bundle string; the enabled predicate stays NATIVE,
+    /// keyed by the action name (the bundle `enabled_when` expression is NOT
+    /// evaluated — same as the Rust v1 migration).
+    @ViewBuilder
+    private func entryView(_ entry: MenuEntry) -> some View {
+        switch entry {
+        case .separator:
+            Divider()
+        case .dynamicSubmenu:
+            // No dynamic submenus outside Window today; render nothing.
+            EmptyView()
+        case .action(let label, let action, let params, let shortcut, _):
+            actionButton(label: label, action: action, params: params,
+                         shortcut: shortcut)
+        }
+    }
+
+    /// A single Window-menu entry → its SwiftUI view, including the bespoke
+    /// dynamic submenus.
+    @ViewBuilder
+    private func windowEntryView(_ entry: MenuEntry) -> some View {
+        switch entry {
+        case .separator:
+            Divider()
+        case .dynamicSubmenu(_, let kind):
+            switch kind {
+            case .workspace: workspaceSubmenu()
+            case .appearance: appearanceSubmenu()
+            }
+        case .action(let label, let action, let params, let shortcut, _):
+            actionButton(label: label, action: action, params: params,
+                         shortcut: shortcut)
+        }
+    }
+
+    /// Build one action Button: stripped label (+ check-mark prefix for pane /
+    /// panel toggles), parsed keyboard shortcut, native disabled predicate,
+    /// and the dispatch to the bespoke handler / generic route.
+    @ViewBuilder
+    private func actionButton(label: String, action: String,
+                              params: [String: Any], shortcut: String) -> some View {
+        let display = stripMnemonic(label)
+        let prefixed = toggleCheckPrefix(action: action, params: params)
+            .map { $0 + display } ?? display
+        let btn = Button(prefixed) {
+            dispatchMenuAction(action, params: params)
+        }
+        .disabled(!actionEnabled(action))
+        if let parsed = parseShortcut(shortcut) {
+            btn.keyboardShortcut(KeyEquivalent(parsed.key), modifiers: parsed.modifiers)
+        } else {
+            btn
+        }
+    }
+
+    /// Native enable/disable predicate keyed by the bundle action name. This
+    /// preserves the prior hand-written `.disabled(...)` rules verbatim; the
+    /// bundle `enabled_when` expression string is intentionally NOT evaluated
+    /// (matching the Rust v1 migration — `enabled_when` stays native).
+    private func actionEnabled(_ action: String) -> Bool {
+        switch action {
+        case "save", "save_as":
+            return true
+        case "revert":
+            return !(model == nil
+                     || !(model?.isModified ?? false)
+                     || (model?.filename.hasPrefix("Untitled-") ?? true))
+        case "open_document_setup", "open_print_dialog", "export_to_pdf":
+            return model != nil
+        case "undo":
+            return canUndo ?? false
+        case "redo":
+            return canRedo ?? false
+        case "cut", "copy":
+            return hasSelection ?? false
+        case "group", "ungroup":
+            return hasSelection ?? false
+        case "lock", "hide_selection":
+            return hasSelection ?? false
+        case "make_instance", "promote_to_concept":
+            return (model?.document.selection.count ?? 0) == 1
+        case "zoom_in", "zoom_out", "zoom_to_actual_size",
+             "fit_active_artboard", "fit_all_artboards", "fit_in_window":
+            return model != nil
+        default:
+            return true
+        }
+    }
+
+    /// Check-mark prefix for the pane / panel toggle entries, mirroring the
+    /// prior `paneToggle` / `panelToggle` helpers. Returns nil for non-toggle
+    /// actions (no prefix). The leading-space form keeps non-checked rows
+    /// aligned with checked ones, matching the prior native menus.
+    private func toggleCheckPrefix(action: String, params: [String: Any]) -> String? {
+        switch action {
+        case "toggle_pane":
+            guard let ws = workspace,
+                  let paneId = params["pane"] as? String,
+                  let kind = paneKindForId(paneId) else { return "    " }
+            let visible = ws.workspaceLayout.panes()?.isPaneVisible(kind) ?? true
+            return visible ? "\u{2713} " : "    "
+        case "toggle_panel":
+            guard let ws = workspace,
+                  let panelId = params["panel"] as? String,
+                  let kind = panelKindForMenuId(panelId) else { return "    " }
+            let visible = ws.workspaceLayout.isPanelVisible(kind)
+            return visible ? "\u{2713} " : "    "
+        default:
+            return nil
+        }
+    }
+
+    /// Dispatch a bundle action to the EXISTING bespoke handler or generic
+    /// route. Every historical handler (file dialogs, clipboard, orphan
+    /// NSAlert, withTxn bracketing, dynamic-submenu helpers) is preserved
+    /// verbatim — only the DATA SOURCE + wiring changed. Mirrors the Rust
+    /// reference `menu_bar.rs` dispatch.
+    private func dispatchMenuAction(_ action: String, params: [String: Any]) {
+        switch action {
+        // File
+        case "new_document":
+            // Document() defaults artboards: []; newEmptyDocument() seeds the
+            // at-least-one-artboard invariant so the new canvas isn't a
+            // featureless white plane.
+            addCanvas?(Model(document: Document.newEmptyDocument()))
+        case "open_file":
+            openFile()
+        case "save":
+            save()
+        case "save_as":
+            saveAs()
+        case "revert":
+            revert()
+        case "open_document_setup":
+            openYamlDialog?("document_setup")
+        case "open_print_dialog":
+            openYamlDialog?("print")
+        case "export_to_pdf":
+            exportToPdf()
+        case "quit":
+            // Genuinely-new File action: terminate the app (no bespoke
+            // handler existed before — the menu had no Quit item).
+            NSApplication.shared.terminate(nil)
+        // Edit
+        case "undo":
+            model?.undo()
+        case "redo":
+            model?.redo()
+        case "cut":
+            cutSelection()
+        case "copy":
+            copySelection()
+        case "paste":
+            pasteClipboard(offset: pasteOffset)
+        case "paste_in_place":
+            pasteClipboard(offset: 0.0)
+        case "select_all":
+            selectAll()
+        // Object
+        case "group":
+            groupSelection()
+        case "ungroup":
+            ungroupSelection()
+        case "ungroup_all":
+            ungroupAll()
+        case "lock":
+            lockSelection()
+        case "unlock_all":
+            unlockAll()
+        case "hide_selection":
+            hideSelection()
+        case "show_all":
+            showAll()
+        case "make_instance":
+            makeInstance()
+        case "promote_to_concept":
+            // CONCEPTS.md §10 — the fitter / promote. New menu route to the
+            // existing ConceptsPanel intercept (was only reachable from the
+            // panel before). No-op unless exactly one element is selected
+            // (the native enabled predicate already gates the menu item).
+            guard let model = model else { return }
+            ConceptsPanel.dispatch("promote_to_concept", model: model)
+        // View
+        case "zoom_in":
+            model?.zoomIn()
+        case "zoom_out":
+            model?.zoomOut()
+        case "zoom_to_actual_size":
+            model?.zoomToActualSize()
+        case "fit_active_artboard":
+            model?.fitActiveArtboard()
+        case "fit_all_artboards":
+            model?.fitAllArtboards()
+        case "fit_in_window":
+            // Genuinely-new View action. No fit-in-window primitive exists
+            // yet; alias to fit-all-artboards (the closest existing fit) so
+            // the menu item is functional rather than dead. The dedicated
+            // content-bounds fit is follow-on work shared across all apps.
+            model?.fitAllArtboards()
+        // Window
+        case "tile_panes":
+            guard let ws = workspace else { return }
+            // OP_LOG 3d-2: dispatch through the shared layout-op runtime.
+            // Swift's menu Tile neither clears canvas maximization nor
+            // applies a collapsed-dock override, so both params are omitted —
+            // byte-identical to the prior `pl.tilePanes(collapsedOverride:
+            // nil)` call and matching the bare corpus `tile_panes` path.
+            layoutApply(&ws.workspaceLayout,
+                        opTilePanes(setCanvasMaximized: nil, overridePane: nil))
+            ws.workspaceLayout.saveIfNeeded()
+        case "toggle_pane":
+            guard let ws = workspace,
+                  let paneId = params["pane"] as? String,
+                  let kind = paneKindForId(paneId) else { return }
+            // OP_LOG 3d-2: resolve live visibility against the pane layout,
+            // then dispatch hide/show through the shared layout-op runtime
+            // (only when a pane layout exists, matching the prior `panesMut`
+            // guard). Byte-identical to the prior `paneToggle` body.
+            if let visibleNow = ws.workspaceLayout.panes()?.isPaneVisible(kind) {
+                let op = visibleNow ? opHidePane(kind) : opShowPane(kind)
+                layoutApply(&ws.workspaceLayout, op)
+            }
+            ws.workspaceLayout.saveIfNeeded()
+        case "toggle_panel":
+            guard let ws = workspace,
+                  let panelId = params["panel"] as? String else { return }
+            guard let kind = panelKindForMenuId(panelId) else {
+                // `concepts` has NO PanelKind case (the Concepts panel is not
+                // wired into the dock/PanelKind layout in this app), so the
+                // toggle is a graceful no-op here — special-cased like Rust's
+                // `toggle_panel_concepts`, but Swift has no panel to show yet.
+                return
+            }
+            // OP_LOG 3d-2: dispatch close/show through the shared layout-op
+            // runtime. Byte-identical to the prior `panelToggle` body.
+            if ws.workspaceLayout.isPanelVisible(kind) {
+                if let addr = findPanel(ws.workspaceLayout, kind) {
+                    layoutApply(&ws.workspaceLayout, opClosePanel(addr))
+                }
+            } else {
+                layoutApply(&ws.workspaceLayout, opShowPanel(kind))
+            }
+            ws.workspaceLayout.saveIfNeeded()
+        default:
+            break
+        }
+    }
+
+    /// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``.
+    private func paneKindForId(_ id: String) -> PaneKind? {
+        switch id {
+        case "toolbar": return .toolbar
+        case "dock": return .dock
+        case "canvas": return .canvas
+        default: return nil
+        }
+    }
+
+    /// Map a bundle Window-menu panel id to ``PanelKind``. Returns nil for
+    /// `concepts` (no PanelKind case — see the `toggle_panel` dispatch arm).
+    private func panelKindForMenuId(_ id: String) -> PanelKind? {
+        switch id {
+        case "layers": return .layers
+        case "color": return .color
+        case "swatches": return .swatches
+        case "stroke": return .stroke
+        case "properties": return .properties
+        case "character": return .character
+        case "paragraph": return .paragraph
+        case "artboards": return .artboards
+        case "align": return .align
+        case "boolean": return .boolean
+        case "opacity": return .opacity
+        case "magic_wand": return .magicWand
+        case "symbols": return .symbols
+        default: return nil
+        }
+    }
+
+    /// The bespoke dynamic Workspace submenu (runtime-populated, with the
+    /// active-layout check mark + Save As / Reset / Revert). Unchanged from
+    /// the prior native version; only its trigger moved to a `.dynamicSubmenu`
+    /// projected entry.
+    @ViewBuilder
+    private func workspaceSubmenu() -> some View {
+        SwiftUI.Group {
             if let ws = workspace {
                 Menu("Workspace \u{25B6}") {
                     let visibleLayouts = ws.appConfig.savedLayouts.filter { $0 != workspaceLayoutName }
@@ -333,91 +533,25 @@ public struct JasCommands: Commands {
                     }
                     .disabled(ws.appConfig.activeLayout == workspaceLayoutName)
                 }
+            }
+        }
+    }
 
-                Menu("Appearance \u{25B6}") {
-                    ForEach(predefinedAppearances, id: \.name) { entry in
-                        let isActive = entry.name == (activeAppearanceName ?? "dark_gray")
-                        let prefix = isActive ? "\u{2713} " : "    "
-                        Button(prefix + entry.label) {
-                            ws.switchAppearance(entry.name)
-                        }
+    /// The bespoke dynamic Appearance submenu (runtime-populated, with the
+    /// active-appearance check mark). Unchanged from the prior native version;
+    /// only its trigger moved to a `.dynamicSubmenu` projected entry.
+    @ViewBuilder
+    private func appearanceSubmenu() -> some View {
+        if let ws = workspace {
+            Menu("Appearance \u{25B6}") {
+                ForEach(predefinedAppearances, id: \.name) { entry in
+                    let isActive = entry.name == (activeAppearanceName ?? "dark_gray")
+                    let prefix = isActive ? "\u{2713} " : "    "
+                    Button(prefix + entry.label) {
+                        ws.switchAppearance(entry.name)
                     }
                 }
-
-                Divider()
             }
-
-            if let ws = workspace {
-                Button("Tile") {
-                    // OP_LOG 3d-2: dispatch through the shared layout-op runtime.
-                    // Swift's menu Tile neither clears canvas maximization nor
-                    // applies a collapsed-dock override, so both params are
-                    // omitted — byte-identical to the prior
-                    // `pl.tilePanes(collapsedOverride: nil)` call and matching
-                    // the bare corpus `tile_panes` path.
-                    layoutApply(&ws.workspaceLayout,
-                                opTilePanes(setCanvasMaximized: nil, overridePane: nil))
-                    ws.workspaceLayout.saveIfNeeded()
-                }
-
-                Divider()
-
-                paneToggle(ws, .toolbar, "Toolbar")
-                paneToggle(ws, .dock, "Panels")
-
-                Divider()
-            }
-
-            panelToggle(.align, "Align")
-            panelToggle(.artboards, "Artboards")
-            panelToggle(.boolean, "Boolean")
-            panelToggle(.character, "Character")
-            panelToggle(.color, "Color")
-            panelToggle(.layers, "Layers")
-            panelToggle(.magicWand, "Magic Wand")
-            panelToggle(.opacity, "Opacity")
-            panelToggle(.paragraph, "Paragraph")
-            panelToggle(.properties, "Properties")
-            panelToggle(.stroke, "Stroke")
-            panelToggle(.swatches, "Swatches")
-            panelToggle(.symbols, "Symbols")
-        }
-    }
-
-    @ViewBuilder
-    private func paneToggle(_ ws: WorkspaceState, _ kind: PaneKind, _ label: String) -> some View {
-        let visible = ws.workspaceLayout.panes()?.isPaneVisible(kind) ?? true
-        let prefix = visible ? "\u{2713} " : "    "
-        Button(prefix + label) {
-            // OP_LOG 3d-2: resolve the live visibility against the pane layout,
-            // then dispatch hide/show through the shared layout-op runtime
-            // (only when a pane layout exists, matching the prior `panesMut`
-            // guard). Byte-identical to the prior in-`panesMut` branch.
-            if let visibleNow = ws.workspaceLayout.panes()?.isPaneVisible(kind) {
-                let op = visibleNow ? opHidePane(kind) : opShowPane(kind)
-                layoutApply(&ws.workspaceLayout, op)
-            }
-            ws.workspaceLayout.saveIfNeeded()
-        }
-    }
-
-    @ViewBuilder
-    private func panelToggle(_ kind: PanelKind, _ label: String) -> some View {
-        let visible = workspace?.workspaceLayout.isPanelVisible(kind) ?? true
-        let prefix = visible ? "\u{2713} " : "    "
-        Button(prefix + label) {
-            guard let ws = workspace else { return }
-            // OP_LOG 3d-2: dispatch close/show through the shared layout-op
-            // runtime. Byte-identical to the prior direct
-            // `closePanel(addr)` / `showPanel(kind)` calls.
-            if ws.workspaceLayout.isPanelVisible(kind) {
-                if let addr = findPanel(ws.workspaceLayout, kind) {
-                    layoutApply(&ws.workspaceLayout, opClosePanel(addr))
-                }
-            } else {
-                layoutApply(&ws.workspaceLayout, opShowPanel(kind))
-            }
-            ws.workspaceLayout.saveIfNeeded()
         }
     }
 

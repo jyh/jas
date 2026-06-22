@@ -110,6 +110,15 @@ class WorkspaceData {
         return menu
     }
 
+    /// Get the top menu-bar spec: the raw heterogeneous array of top-level
+    /// menus (each a `{ id, label, items }` object) from the compiled bundle.
+    /// The menu bar projector (``menuBarModel()``) consumes this. Mirrors the
+    /// ``panelMenuRaw`` accessor — it returns `[Any]` so nested `"separator"`
+    /// string entries survive (an `[[String: Any]]` cast would drop them).
+    func menubar() -> [Any] {
+        data["menubar"] as? [Any] ?? []
+    }
+
     /// Get the panel content element tree for a content id.
     func panelContent(_ contentId: String) -> [String: Any]? {
         panel(contentId)?["content"] as? [String: Any]
