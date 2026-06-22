@@ -3598,7 +3598,7 @@ def _apply_behaviors(widget: QWidget, behaviors: list, store: StateStore,
             _wire_mouse_up(widget, effects, store, ctx)
 
 
-def _run_behavior_effects(effects, eval_ctx, store, ctx):
+def _run_behavior_effects(effects, eval_ctx, store, ctx, anchor=None):
     """Run a behavior's effect list.
 
     Prefers a host-supplied runner under ``ctx["_run_behavior_effects"]``
@@ -3612,10 +3612,23 @@ def _run_behavior_effects(effects, eval_ctx, store, ctx):
     dialog_signal wiring). When no runner is supplied (ordinary panel
     buttons), this falls back to plain ``run_effects`` so their behavior
     is byte-unchanged.
+
+    ``anchor`` is the global-screen ``(x, y)`` captured at the slot
+    button's mouse_down (see ``_wire_mouse_down``). It is threaded into
+    the host runner so a non-modal flyout (tool-alternates) can be placed
+    NEXT TO the cursor instead of centered — mirrors Rust threading the
+    mouse_down page coords through the long-press timer into
+    ``DialogState.anchor`` (renderer.rs build_mousedown_handler ->
+    start_timer -> open_dialog_at). The runner accepts ``anchor`` as a
+    keyword arg; we pass it only when set so the call stays compatible
+    with runners that don't take it.
     """
     runner = ctx.get("_run_behavior_effects") if isinstance(ctx, dict) else None
     if callable(runner):
-        runner(effects, eval_ctx)
+        if anchor is not None:
+            runner(effects, eval_ctx, anchor=anchor)
+        else:
+            runner(effects, eval_ctx)
         return
     from workspace_interpreter.effects import run_effects
     run_effects(effects, eval_ctx, store)
@@ -3654,7 +3667,20 @@ def _wire_mouse_down(widget, effects, store, ctx):
         return
 
     def _on_pressed():
-        _run_behavior_effects(effects, _behavior_eval_ctx(store, ctx), store, ctx)
+        # Capture the cursor's GLOBAL screen position at press time, the
+        # Qt analogue of the Rust mouse-event page coordinates read in
+        # build_mousedown_handler (renderer.rs evt.data().page_coordinates()).
+        # QPushButton.pressed carries no QMouseEvent, so QCursor.pos() is
+        # the natural source; it is the position to place a non-modal
+        # long-press flyout NEXT TO the cursor. Threaded through the
+        # behavior runner -> long-press timer -> dialog show, mirroring
+        # Rust's anchor plumbing. The anchor is harmless for ordinary
+        # (modal / non-flyout) effects, which ignore it.
+        from PySide6.QtGui import QCursor
+        pt = QCursor.pos()
+        anchor = (pt.x(), pt.y())
+        _run_behavior_effects(effects, _behavior_eval_ctx(store, ctx), store,
+                              ctx, anchor=anchor)
 
     widget.pressed.connect(_on_pressed)
 
