@@ -711,7 +711,7 @@ pub(crate) fn MenuBarView(
                                 super::menu::SubmenuKind::Workspace => "workspace_submenu",
                                 super::menu::SubmenuKind::Appearance => "appearance_submenu",
                             };
-                            (label.clone(), cmd.to_string(), String::new())
+                            (strip_mnemonic(label), cmd.to_string(), String::new())
                         }
                         super::menu::MenuEntry::Action {
                             label,
@@ -719,10 +719,10 @@ pub(crate) fn MenuBarView(
                             params,
                             shortcut,
                             ..
-                        } => (label.clone(), cmd_for(action, params), shortcut.clone()),
+                        } => (strip_mnemonic(label), cmd_for(action, params), shortcut.clone()),
                     })
                     .collect();
-                (m.label.clone(), items)
+                (strip_mnemonic(&m.label), items)
             })
             .collect();
     let menus = &menus_owned;
@@ -1072,6 +1072,27 @@ pub(crate) fn MenuBarView(
     }
 }
 
+/// Strip Windows/GTK-style `&` mnemonic markers from a label for display.
+/// The bundle labels (e.g. `&File`, `Zoom &In`) mark the accelerator key for
+/// frameworks that support mnemonics; the Dioxus menu bar does not, so the
+/// marker is removed for display. `&&` is an escaped literal ampersand → `&`.
+fn strip_mnemonic(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+            // otherwise drop the mnemonic marker
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Translate a bundle menu `(action, params)` into the legacy command string
 /// the menu dispatch + checkmark logic key on. Actions with a bespoke handler
 /// keep their historical cmd name; `toggle_pane`/`toggle_panel` fold their
@@ -1133,5 +1154,15 @@ mod tests {
     fn filename_stem_empty_yields_untitled() {
         assert_eq!(filename_stem(""), "Untitled");
         assert_eq!(filename_stem("   "), "Untitled");
+    }
+
+    #[test]
+    fn strip_mnemonic_removes_markers() {
+        assert_eq!(strip_mnemonic("&File"), "File");
+        assert_eq!(strip_mnemonic("Zoom &In"), "Zoom In");
+        assert_eq!(strip_mnemonic("Save &As..."), "Save As...");
+        assert_eq!(strip_mnemonic("Fit A&ll in Window"), "Fit All in Window");
+        assert_eq!(strip_mnemonic("Tile"), "Tile");
+        assert_eq!(strip_mnemonic("A && B"), "A & B");
     }
 }
