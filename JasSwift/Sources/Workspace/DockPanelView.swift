@@ -640,9 +640,13 @@ private struct PanelBodyObserver: View {
         let ctx = contextProvider()
         let capturedModel = model
         let capturedDialog = yamlDialogState
-        let onStoreDialogOpened: () -> Void = {
+        let onStoreDialogOpened: (CGPoint?) -> Void = { anchor in
             if let binding = capturedDialog,
-               let newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+               var newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+                // Panel-opened dialogs are modal (anchor is nil here);
+                // the field is carried through for type parity with the
+                // toolbar long-press path.
+                newState.anchor = anchor
                 binding.wrappedValue = newState
             }
         }
