@@ -9,7 +9,6 @@ pub mod color_panel_view;
 // color_picker.rs and color_picker_dialog.rs removed — uses YAML dialog system
 pub(crate) mod dock_panel;
 pub mod fill_stroke_widget;
-pub mod icons;
 pub(crate) mod keyboard;
 // The single runtime LAYOUT-op dispatcher (OP_LOG.md §12, Fork 5, Increment
 // 3d-2): production layout mutations and the cross-language harness share this
@@ -24,7 +23,6 @@ pub mod menu_bar;
 pub mod pane;
 // save_dialog.rs removed — workspace save-as uses YAML dialog system
 pub(crate) mod session;
-pub mod toolbar_grid;
 // Cross-language fixture serialization; consumed only by tests and
 // the workspace_roundtrip binary, not the main lib.
 #[allow(dead_code)]

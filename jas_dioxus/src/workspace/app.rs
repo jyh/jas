@@ -5,7 +5,6 @@
 //! and keyboard handlers in `keyboard`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -25,7 +24,6 @@ use super::fill_stroke_widget::FillStrokeWidgetView;
 use super::menu_bar::MenuBarView;
 // SaveAsDialogView removed — workspace save-as now uses YAML dialog system
 use super::dock_panel::{DragState, DockGroupsView, FloatingDocksView};
-use super::toolbar_grid::{ToolbarGrid, TOOLBAR_SLOTS};
 use crate::panels::panel_menu_state::{PanelMenuState, MenuBarState};
 use crate::panels::panel_menu_view::PanelMenuOverlay;
 
@@ -655,21 +653,6 @@ pub fn App() -> Element {
         make_keydown_handler(act.clone(), app.clone(), revision, yaml_dialog);
     let on_keyup = make_keyup_handler(act.clone());
 
-    // --- Tool buttons with shared slots ---
-    // Track which alternate is visible in each shared slot.
-    // Key: index into TOOLBAR_SLOTS for slots with alternates.
-    let slot_alternates = use_signal(|| {
-        let mut map = HashMap::<usize, usize>::new();
-        for (i, (_r, _c, tools)) in TOOLBAR_SLOTS.iter().enumerate() {
-            if tools.len() > 1 {
-                map.insert(i, 0); // default to first alternate
-            }
-        }
-        map
-    });
-    // Signal for which slot is showing a long-press popup (-1 = none)
-    let mut popup_slot = use_signal(|| Option::<usize>::None);
-
     // Dock drag-and-drop state.
     let mut drag_source = use_signal(|| Option::<super::workspace::DragPayload>::None);
     let mut drop_target_sig = use_signal(|| Option::<super::workspace::DropTarget>::None);
@@ -1001,9 +984,6 @@ pub fn App() -> Element {
             tabindex: "0",
             onkeydown: on_keydown,
             onkeyup: on_keyup,
-            onmousedown: move |_| {
-                popup_slot.set(None);
-            },
             onmousemove: {
                 let layout_act = layout_act.clone();
                 let app = app.clone();
@@ -1291,7 +1271,6 @@ pub fn App() -> Element {
                     move |_: Event<MouseData>| {
                         open_menu.set(None);
                         panel_menu_sig.set(None);
-                        popup_slot.set(None);
                         if !canvas_maximized {
                             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                                 crate::workspace::layout_apply::layout_apply(

@@ -145,8 +145,8 @@ impl ToolKind {
 
     /// String name used to expose the active tool kind into YAML
     /// expression context (e.g. `$state.active_tool`). Distinct from
-    /// the YAML file id used by the toolbar (see
-    /// `workspace::toolbar_grid::tool_yaml_id`): the file ids are
+    /// the YAML file id used to load a tool's spec (see the tool
+    /// registration in `workspace::app_state`): the file ids are
     /// `add_anchor_point` / `delete_anchor_point` to match the
     /// filenames in `workspace/tools/`, while panel-state names use
     /// the shorter `add_anchor` / `delete_anchor` for the predicates
