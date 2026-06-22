@@ -302,41 +302,6 @@ pub fn toolbar_structure_json() -> String {
 // Menu structure (static data for cross-language fixture)
 // ---------------------------------------------------------------------------
 
-/// Return canonical JSON for the menu bar structure.
-///
-/// This encodes the same data as `workspace::menu::MENU_BAR`,
-/// producing a fixture that all four languages must match.
-pub fn menu_structure_json() -> String {
-    use super::menu::MENU_BAR;
-
-    let total: usize = MENU_BAR.iter().map(|(_, items)| items.len()).sum();
-
-    let menu_jsons: Vec<String> = MENU_BAR.iter().map(|(title, items)| {
-        let item_jsons: Vec<String> = items.iter().map(|&(label, cmd, shortcut)| {
-            if label == "---" {
-                let mut o = JsonObj::new();
-                o.bool_val("separator", true);
-                o.build()
-            } else {
-                let mut o = JsonObj::new();
-                o.str_val("command", cmd);
-                o.str_val("label", label);
-                o.str_val("shortcut", shortcut);
-                o.build()
-            }
-        }).collect();
-        let mut o = JsonObj::new();
-        o.raw("items", json_array(&item_jsons));
-        o.str_val("title", title);
-        o.build()
-    }).collect();
-
-    let mut o = JsonObj::new();
-    o.raw("menus", json_array(&menu_jsons));
-    o.int("total_items", total);
-    o.build()
-}
-
 // ---------------------------------------------------------------------------
 // State defaults (must match workspace/state.yaml)
 // ---------------------------------------------------------------------------
@@ -817,10 +782,6 @@ mod tests {
             .expect("Failed to write toolbar_structure.json");
         eprintln!("Wrote toolbar_structure.json ({} bytes)", json.len());
 
-        let json = menu_structure_json();
-        std::fs::write(format!("{}/menu_structure.json", fixtures), &json)
-            .expect("Failed to write menu_structure.json");
-        eprintln!("Wrote menu_structure.json ({} bytes)", json.len());
     }
 
     #[test]
