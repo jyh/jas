@@ -166,6 +166,64 @@ icons:
         fill="none" stroke="currentColor" stroke-width="2"
         stroke-linejoin="miter"/>
 
+  # Paintbrush: angled handle + rounded bristled tip, distinct from
+  # Pencil's sharp point. Ported from the native toolbar icon (256x256
+  # source). currentColor for the handle/ferrule body, #fff for the
+  # bristle accent lines so it inherits the toolbar foreground.
+  paintbrush:
+    viewbox: "0 0 256 256"
+    svg: >
+      <path fill="currentColor" d="M30,230 L60,255 L200,115 L165,80 Z"/>
+      <rect fill="#5f5f5b" x="165" y="60" width="45" height="30"
+        transform="rotate(-45, 187, 75)"/>
+      <path fill="currentColor" d="M195,45 Q225,20 250,40 Q255,70 225,90 Q200,90 185,65 Z"/>
+      <path fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"
+        d="M205,55 L225,82 M220,45 L238,70 M235,45 L242,75"/>
+
+  # Blob Brush: angled handle + filled blob output below, distinct
+  # from Paintbrush's stroke-oriented bristles. Ported from the native
+  # toolbar icon (256x256 source).
+  blob_brush:
+    viewbox: "0 0 256 256"
+    svg: >
+      <path fill="currentColor" d="M30,230 L60,255 L200,115 L165,80 Z"/>
+      <rect fill="#5f5f5b" x="165" y="60" width="45" height="30"
+        transform="rotate(-45, 187, 75)"/>
+      <ellipse fill="currentColor" cx="220" cy="60" rx="40" ry="28"/>
+      <path fill="currentColor" d="M50,250 Q80,230 115,240 Q145,255 175,245
+        Q205,230 225,245 Q245,265 230,250 Q210,235 185,245 Q155,260 125,250
+        Q90,240 55,260 Z"/>
+
+  # Scale: a small square being extruded into a larger one, suggesting
+  # resize. Stroke-only design matching the other transform tool icons.
+  # Per SCALE_TOOL.md §Tool icon.
+  scale:
+    viewbox: "0 0 28 28"
+    svg: >
+      <rect x="3" y="13" width="10" height="11" fill="none"
+        stroke="currentColor" stroke-width="1.5"/>
+      <rect x="13" y="3" width="12" height="13" fill="none"
+        stroke="currentColor" stroke-width="1.5"/>
+
+  # Rotate: a curved arrow indicating circular motion. Per
+  # ROTATE_TOOL.md §Tool icon.
+  rotate:
+    viewbox: "0 0 28 28"
+    svg: >
+      <path d="M14,5 A9,9 0 1,1 5,14" fill="none"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <polyline points="11,2 14,5 11,8" fill="none"
+        stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  # Shear: a square slanted into a parallelogram. Per SHEAR_TOOL.md
+  # §Tool icon.
+  shear:
+    viewbox: "0 0 28 28"
+    svg: >
+      <polygon points="9,4 26,4 19,24 2,24" fill="none"
+        stroke="currentColor" stroke-width="1.5"/>
+
   # Magic Wand: a wand at ~45° with a sparkle / star at the tip.
   # Diagonal handle (lower-left → upper-right) + 4-point sparkle
   # at the tip + two small accent stars near the tip. Matches the
