@@ -104,7 +104,7 @@ layout:
             type: grid
             summary: "Tool buttons"
             description: >
-              4-row, 2-column grid of 32x32px tool buttons. Single click
+              7-row, 2-column grid of 32x32px tool buttons. Single click
               selects the tool. Buttons with a small triangle indicator have
               alternate tools accessible via long-press (250ms hold).
             cols: 2
@@ -238,8 +238,8 @@ layout:
                 description: >
                   Freehand drawing tool that creates paths by tracking mouse
                   movement. The path is smoothed after drawing. Long-press
-                  (250ms) opens a menu to switch between Pencil, Path Eraser,
-                  and Smooth tools.
+                  (250ms) opens a menu to switch between Pencil, Paintbrush,
+                  Blob Brush, Path Eraser, and Smooth tools.
                 icon: "pencil"
                 grid: { row: 1, col: 1 }
                 style:
@@ -261,12 +261,16 @@ layout:
                     action: select_tool
                     params: { tool: pencil }
                 bind:
-                  checked: 'mem(state.active_tool, ["pencil", "path_eraser", "smooth"])'
+                  checked: 'mem(state.active_tool, ["pencil", "paintbrush", "blob_brush", "path_eraser", "smooth"])'
                 alternates:
                   menu_id: pencil_alternates
                   items:
                     - { id: pencil,      label: "Pencil",      icon: "pencil",
                         description: "Draw freehand paths" }
+                    - { id: paintbrush,  label: "Paintbrush",  icon: "paintbrush",
+                        description: "Paint calligraphic and art-brush strokes along a freehand path" }
+                    - { id: blob_brush,  label: "Blob Brush",  icon: "blob_brush",
+                        description: "Paint filled blob shapes that merge with overlapping fills" }
                     - { id: path_eraser, label: "Path Eraser",  icon: "path_eraser",
                         description: "Erase portions of paths" }
                     - { id: smooth,      label: "Smooth",       icon: "smooth",
@@ -401,7 +405,81 @@ layout:
                 bind:
                   checked: 'state.active_tool == "lasso"'
 
-              # Row 4, Col 0: Hand slot (Hand / Zoom)
+              # Row 4, Col 0: Transform slot (Scale / Shear)
+              - id: btn_transform_slot
+                type: icon_button
+                summary: "Scale (S)"
+                description: >
+                  Resize selected objects relative to a reference point.
+                  Drag a handle to scale interactively; hold Shift to scale
+                  uniformly. Long-press (250ms) opens a menu to switch
+                  between Scale and Shear tools (the transform tool pair).
+                  Both tools share the transform-family conventions
+                  (state.transform_reference_point, and the
+                  dblclick-icon / Alt-click-canvas dialog gestures). The
+                  Rotate tool lives in its own adjacent slot. The button
+                  shows checked state when either tool in this slot is
+                  active. See SCALE_TOOL.md and SHEAR_TOOL.md.
+                icon: "scale"
+                grid: { row: 4, col: 0 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: mouse_down
+                    effects:
+                      - start_timer:
+                          id: "long_press_btn_transform_slot"
+                          delay_ms: 250
+                          effects:
+                            - open_dialog: { id: scale_alternates }
+                  - event: mouse_up
+                    effects:
+                      - cancel_timer: "long_press_btn_transform_slot"
+                  - event: click
+                    action: select_tool
+                    params: { tool: scale }
+                bind:
+                  checked: 'mem(state.active_tool, ["scale", "shear"])'
+                alternates:
+                  menu_id: scale_alternates
+                  items:
+                    - id: scale
+                      label: "Scale (S)"
+                      icon: "scale"
+                      description: "Resize objects relative to a reference point"
+                    - id: shear
+                      label: "Shear"
+                      icon: "shear"
+                      description: "Slant objects along a configurable axis"
+
+              # Row 4, Col 1: Rotate
+              - id: btn_rotate
+                type: icon_button
+                summary: "Rotate (R)"
+                description: >
+                  Rotate selected objects around a reference point. Drag
+                  to rotate interactively; hold Shift to constrain to
+                  45-degree increments. Double-click the icon or Alt-click
+                  on the canvas to open the Rotate dialog and rotate by a
+                  precise angle. Shares the transform-family reference
+                  point with Scale and Shear. No long-press alternates.
+                  See ROTATE_TOOL.md.
+                icon: "rotate"
+                grid: { row: 4, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: rotate }
+                bind:
+                  checked: 'state.active_tool == "rotate"'
+
+              # Row 5, Col 0: Hand slot (Hand / Zoom)
               - id: btn_hand_slot
                 type: icon_button
                 summary: "Hand (H)"
@@ -414,7 +492,7 @@ layout:
                   checked state when either tool in this slot is active.
                   See HAND_TOOL.md and ZOOM_TOOL.md.
                 icon: "hand"
-                grid: { row: 4, col: 0 }
+                grid: { row: 5, col: 0 }
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"
@@ -454,7 +532,37 @@ layout:
                         drag for scrubby or marquee zoom; Ctrl+wheel
                         for stepped zoom
 
-              # Row 4, Col 1: Artboard
+              # Row 5, Col 1: Eyedropper
+              - id: btn_eyedropper
+                type: icon_button
+                summary: "Eyedropper (I)"
+                description: >
+                  Sample appearance attributes (fill, stroke, and other
+                  paint properties) from an object under the cursor and
+                  apply them to the current selection. Click an object to
+                  pick up its attributes; Alt-click to apply the sampled
+                  attributes. Double-click the icon to open the Eyedropper
+                  Tool Options dialog and choose which attributes are
+                  sampled and applied. No long-press alternates.
+                  See EYEDROPPER_TOOL.md.
+                icon: "eyedropper"
+                grid: { row: 5, col: 1 }
+                style:
+                  size: "{{theme.sizes.tool_button}}"
+                  checked_bg: "{{theme.colors.button_checked}}"
+                  hover: { background: "{{theme.colors.button_checked}}" }
+                behavior:
+                  - event: click
+                    action: select_tool
+                    params: { tool: eyedropper }
+                  # Double-click is dispatched by each app's toolbar
+                  # dispatcher reading the active tool's
+                  # tool_options_action field — see
+                  # workspace/tools/eyedropper.yaml.
+                bind:
+                  checked: 'state.active_tool == "eyedropper"'
+
+              # Row 6, Col 0: Artboard
               - id: btn_artboard_slot
                 type: icon_button
                 summary: "Artboard (Shift+O)"
@@ -470,7 +578,7 @@ layout:
                   fit_all_artboards. No long-press alternates.
                   See ARTBOARD_TOOL.md.
                 icon: "artboard"
-                grid: { row: 4, col: 1 }
+                grid: { row: 6, col: 0 }
                 style:
                   size: "{{theme.sizes.tool_button}}"
                   checked_bg: "{{theme.colors.button_checked}}"

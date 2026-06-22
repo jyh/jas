@@ -18,6 +18,7 @@ jobs:
       - run: pip install PyYAML
       - run: bash scripts/check_workspace_json.sh
       - run: python scripts/check_menu_structure.py
+      - run: python scripts/check_toolbar_structure.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date

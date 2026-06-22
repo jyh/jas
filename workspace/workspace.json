@@ -6239,6 +6239,26 @@
       "viewbox": "0 0 28 28",
       "svg": "<path d=\"M5,6 L18,6 L23,11 L23,23 L5,23 Z\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linejoin=\"miter\"/>\n<polyline points=\"18,6 18,11 23,11\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"\n  stroke-linejoin=\"miter\"/>\n"
     },
+    "paintbrush": {
+      "viewbox": "0 0 256 256",
+      "svg": "<path fill=\"currentColor\" d=\"M30,230 L60,255 L200,115 L165,80 Z\"/> <rect fill=\"#5f5f5b\" x=\"165\" y=\"60\" width=\"45\" height=\"30\"\n  transform=\"rotate(-45, 187, 75)\"/>\n<path fill=\"currentColor\" d=\"M195,45 Q225,20 250,40 Q255,70 225,90 Q200,90 185,65 Z\"/> <path fill=\"none\" stroke=\"#fff\" stroke-width=\"4\" stroke-linecap=\"round\"\n  d=\"M205,55 L225,82 M220,45 L238,70 M235,45 L242,75\"/>\n"
+    },
+    "blob_brush": {
+      "viewbox": "0 0 256 256",
+      "svg": "<path fill=\"currentColor\" d=\"M30,230 L60,255 L200,115 L165,80 Z\"/> <rect fill=\"#5f5f5b\" x=\"165\" y=\"60\" width=\"45\" height=\"30\"\n  transform=\"rotate(-45, 187, 75)\"/>\n<ellipse fill=\"currentColor\" cx=\"220\" cy=\"60\" rx=\"40\" ry=\"28\"/> <path fill=\"currentColor\" d=\"M50,250 Q80,230 115,240 Q145,255 175,245\n  Q205,230 225,245 Q245,265 230,250 Q210,235 185,245 Q155,260 125,250\n  Q90,240 55,260 Z\"/>\n"
+    },
+    "scale": {
+      "viewbox": "0 0 28 28",
+      "svg": "<rect x=\"3\" y=\"13\" width=\"10\" height=\"11\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"1.5\"/>\n<rect x=\"13\" y=\"3\" width=\"12\" height=\"13\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"1.5\"/>\n"
+    },
+    "rotate": {
+      "viewbox": "0 0 28 28",
+      "svg": "<path d=\"M14,5 A9,9 0 1,1 5,14\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n<polyline points=\"11,2 14,5 11,8\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"1.5\"\n  stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"
+    },
+    "shear": {
+      "viewbox": "0 0 28 28",
+      "svg": "<polygon points=\"9,4 26,4 19,24 2,24\" fill=\"none\"\n  stroke=\"currentColor\" stroke-width=\"1.5\"/>\n"
+    },
     "magic_wand": {
       "viewbox": "0 0 28 28",
       "svg": "<line x1=\"4\" y1=\"22\" x2=\"18\" y2=\"8\" stroke=\"currentColor\"\n  stroke-width=\"2\" stroke-linecap=\"round\"/>\n<polygon fill=\"currentColor\"\n  points=\"20,3 21,7 25,8 21,9 20,13 19,9 15,8 19,7\"/>\n<polygon fill=\"currentColor\"\n  points=\"24,12 24.7,13.5 26.5,14 24.7,14.5 24,16 23.3,14.5 21.5,14 23.3,13.5\"/>\n"
@@ -6915,7 +6935,7 @@
               "id": "tool_grid",
               "type": "grid",
               "summary": "Tool buttons",
-              "description": "4-row, 2-column grid of 32x32px tool buttons. Single click selects the tool. Buttons with a small triangle indicator have alternate tools accessible via long-press (250ms hold).\n",
+              "description": "7-row, 2-column grid of 32x32px tool buttons. Single click selects the tool. Buttons with a small triangle indicator have alternate tools accessible via long-press (250ms hold).\n",
               "cols": 2,
               "gap": 2,
               "children": [
@@ -7117,7 +7137,7 @@
                   "id": "btn_pencil_slot",
                   "type": "icon_button",
                   "summary": "Pencil (N)",
-                  "description": "Freehand drawing tool that creates paths by tracking mouse movement. The path is smoothed after drawing. Long-press (250ms) opens a menu to switch between Pencil, Path Eraser, and Smooth tools.\n",
+                  "description": "Freehand drawing tool that creates paths by tracking mouse movement. The path is smoothed after drawing. Long-press (250ms) opens a menu to switch between Pencil, Paintbrush, Blob Brush, Path Eraser, and Smooth tools.\n",
                   "icon": "pencil",
                   "grid": {
                     "row": 1,
@@ -7166,7 +7186,7 @@
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"pencil\", \"path_eraser\", \"smooth\"])"
+                    "checked": "mem(state.active_tool, [\"pencil\", \"paintbrush\", \"blob_brush\", \"path_eraser\", \"smooth\"])"
                   },
                   "alternates": {
                     "menu_id": "pencil_alternates",
@@ -7176,6 +7196,18 @@
                         "label": "Pencil",
                         "icon": "pencil",
                         "description": "Draw freehand paths"
+                      },
+                      {
+                        "id": "paintbrush",
+                        "label": "Paintbrush",
+                        "icon": "paintbrush",
+                        "description": "Paint calligraphic and art-brush strokes along a freehand path"
+                      },
+                      {
+                        "id": "blob_brush",
+                        "label": "Blob Brush",
+                        "icon": "blob_brush",
+                        "description": "Paint filled blob shapes that merge with overlapping fills"
                       },
                       {
                         "id": "path_eraser",
@@ -7417,13 +7449,116 @@
                   }
                 },
                 {
+                  "id": "btn_transform_slot",
+                  "type": "icon_button",
+                  "summary": "Scale (S)",
+                  "description": "Resize selected objects relative to a reference point. Drag a handle to scale interactively; hold Shift to scale uniformly. Long-press (250ms) opens a menu to switch between Scale and Shear tools (the transform tool pair). Both tools share the transform-family conventions (state.transform_reference_point, and the dblclick-icon / Alt-click-canvas dialog gestures). The Rotate tool lives in its own adjacent slot. The button shows checked state when either tool in this slot is active. See SCALE_TOOL.md and SHEAR_TOOL.md.\n",
+                  "icon": "scale",
+                  "grid": {
+                    "row": 4,
+                    "col": 0
+                  },
+                  "style": {
+                    "size": "{{theme.sizes.tool_button}}",
+                    "checked_bg": "{{theme.colors.button_checked}}",
+                    "hover": {
+                      "background": "{{theme.colors.button_checked}}"
+                    }
+                  },
+                  "behavior": [
+                    {
+                      "event": "mouse_down",
+                      "effects": [
+                        {
+                          "start_timer": {
+                            "id": "long_press_btn_transform_slot",
+                            "delay_ms": 250,
+                            "effects": [
+                              {
+                                "open_dialog": {
+                                  "id": "scale_alternates"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "event": "mouse_up",
+                      "effects": [
+                        {
+                          "cancel_timer": "long_press_btn_transform_slot"
+                        }
+                      ]
+                    },
+                    {
+                      "event": "click",
+                      "action": "select_tool",
+                      "params": {
+                        "tool": "scale"
+                      }
+                    }
+                  ],
+                  "bind": {
+                    "checked": "mem(state.active_tool, [\"scale\", \"shear\"])"
+                  },
+                  "alternates": {
+                    "menu_id": "scale_alternates",
+                    "items": [
+                      {
+                        "id": "scale",
+                        "label": "Scale (S)",
+                        "icon": "scale",
+                        "description": "Resize objects relative to a reference point"
+                      },
+                      {
+                        "id": "shear",
+                        "label": "Shear",
+                        "icon": "shear",
+                        "description": "Slant objects along a configurable axis"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "btn_rotate",
+                  "type": "icon_button",
+                  "summary": "Rotate (R)",
+                  "description": "Rotate selected objects around a reference point. Drag to rotate interactively; hold Shift to constrain to 45-degree increments. Double-click the icon or Alt-click on the canvas to open the Rotate dialog and rotate by a precise angle. Shares the transform-family reference point with Scale and Shear. No long-press alternates. See ROTATE_TOOL.md.\n",
+                  "icon": "rotate",
+                  "grid": {
+                    "row": 4,
+                    "col": 1
+                  },
+                  "style": {
+                    "size": "{{theme.sizes.tool_button}}",
+                    "checked_bg": "{{theme.colors.button_checked}}",
+                    "hover": {
+                      "background": "{{theme.colors.button_checked}}"
+                    }
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "select_tool",
+                      "params": {
+                        "tool": "rotate"
+                      }
+                    }
+                  ],
+                  "bind": {
+                    "checked": "state.active_tool == \"rotate\""
+                  }
+                },
+                {
                   "id": "btn_hand_slot",
                   "type": "icon_button",
                   "summary": "Hand (H)",
                   "description": "Pan the canvas by click-and-drag. Spacebar held while another tool is active temporarily switches to Hand. Long-press (250ms) opens a menu to switch between Hand and Zoom tools (the navigation tool pair). Double-click the icon to invoke fit_active_artboard. The button shows checked state when either tool in this slot is active. See HAND_TOOL.md and ZOOM_TOOL.md.\n",
                   "icon": "hand",
                   "grid": {
-                    "row": 4,
+                    "row": 5,
                     "col": 0
                   },
                   "style": {
@@ -7490,14 +7625,44 @@
                   }
                 },
                 {
+                  "id": "btn_eyedropper",
+                  "type": "icon_button",
+                  "summary": "Eyedropper (I)",
+                  "description": "Sample appearance attributes (fill, stroke, and other paint properties) from an object under the cursor and apply them to the current selection. Click an object to pick up its attributes; Alt-click to apply the sampled attributes. Double-click the icon to open the Eyedropper Tool Options dialog and choose which attributes are sampled and applied. No long-press alternates. See EYEDROPPER_TOOL.md.\n",
+                  "icon": "eyedropper",
+                  "grid": {
+                    "row": 5,
+                    "col": 1
+                  },
+                  "style": {
+                    "size": "{{theme.sizes.tool_button}}",
+                    "checked_bg": "{{theme.colors.button_checked}}",
+                    "hover": {
+                      "background": "{{theme.colors.button_checked}}"
+                    }
+                  },
+                  "behavior": [
+                    {
+                      "event": "click",
+                      "action": "select_tool",
+                      "params": {
+                        "tool": "eyedropper"
+                      }
+                    }
+                  ],
+                  "bind": {
+                    "checked": "state.active_tool == \"eyedropper\""
+                  }
+                },
+                {
                   "id": "btn_artboard_slot",
                   "type": "icon_button",
                   "summary": "Artboard (Shift+O)",
                   "description": "Create, activate, move, resize, and duplicate artboards on the canvas. Drag from empty canvas to create a new artboard. Click an artboard to activate it (writes panel-selection per the panel rules). Drag an artboard interior to move it; drag a resize handle to resize it; Alt-drag to duplicate. Double- click an artboard to open the Artboard Options Dialogue. Double-click the icon to invoke fit_all_artboards. No long-press alternates. See ARTBOARD_TOOL.md.\n",
                   "icon": "artboard",
                   "grid": {
-                    "row": 4,
-                    "col": 1
+                    "row": 6,
+                    "col": 0
                   },
                   "style": {
                     "size": "{{theme.sizes.tool_button}}",
@@ -36049,7 +36214,7 @@
     },
     "pencil_alternates": {
       "summary": "Pencil Tools",
-      "description": "Tool-alternate flyout menu for the pencil tool slot. Lists: Pencil (draw freehand paths), Path Eraser (erase portions of paths), and Smooth (smooth out rough path segments). Clicking selects the tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu for the pencil tool slot. Lists: Pencil (draw freehand paths), Paintbrush (paint calligraphic and art-brush strokes along a freehand path), Blob Brush (paint filled blob shapes that merge with overlapping fills), Path Eraser (erase portions of paths), and Smooth (smooth out rough path segments). Clicking selects the tool and closes the dialog.\n",
       "modal": false,
       "content": {
         "type": "container",
@@ -36077,6 +36242,60 @@
                   {
                     "set": {
                       "active_tool": "\"pencil\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "icon_button",
+            "icon": "paintbrush",
+            "label": "Paintbrush",
+            "summary": "Paint calligraphic and art-brush strokes along a freehand path",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"paintbrush\""
+                    }
+                  },
+                  {
+                    "close_dialog": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "icon_button",
+            "icon": "blob_brush",
+            "label": "Blob Brush",
+            "summary": "Paint filled blob shapes that merge with overlapping fills",
+            "style": {
+              "width": "100%",
+              "justify": "start",
+              "gap": 8,
+              "padding": "4 8"
+            },
+            "behavior": [
+              {
+                "event": "click",
+                "effects": [
+                  {
+                    "set": {
+                      "active_tool": "\"blob_brush\""
                     }
                   },
                   {
