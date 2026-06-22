@@ -13,6 +13,14 @@ struct YamlDialogState {
     var state: [String: Any]
     /// Parameters passed when the dialog was opened.
     var params: [String: Any]
+    /// Popover anchor in the window's `.global` coordinate space —
+    /// the page coordinates of the press that opened the dialog.
+    /// Mirrors Rust's ``DialogState.anchor`` (page coords captured at
+    /// the slot button's mouse_down, threaded through the long-press
+    /// timer). Only consulted for non-modal dialogs; modal dialogs
+    /// stay centered regardless. Default nil → centered fallback,
+    /// matching Rust's ``anchor: None`` branch.
+    var anchor: CGPoint? = nil
 }
 
 /// Open a dialog by ID, initializing its state from the workspace
@@ -232,41 +240,130 @@ struct YamlDialogOverlay: View {
 
     var body: some View {
         if let ds = dialogState {
-            ZStack {
-                // Backdrop
-                SwiftUI.Color.black.opacity(0.15)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        dialogState = nil
-                        onDismiss?()
-                    }
-
-                // Dialog container
-                VStack(spacing: 0) {
-                    // Title bar
-                    titleBar(ds)
-
-                    // Body
-                    dialogBody(ds)
-                }
-                .background(SwiftUI.Color(nsColor: theme.paneBg))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(SwiftUI.Color(nsColor: theme.border), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
-                .frame(maxWidth: dialogWidth(ds))
-                // Without this the outer VStack expands vertically to
-                // fill the ZStack — Spacer()s in the tabs renderer
-                // (used for the left rail and the content column)
-                // push the dialog to full window height. Forcing
-                // intrinsic vertical sizing fits the dialog to its
-                // content; the inner Spacers still let tab content
-                // top-align within the available rail height.
-                .fixedSize(horizontal: false, vertical: true)
+            if !isModal(ds), let anchor = ds.anchor {
+                // Popover branch (non-modal + anchored): transparent
+                // full-screen backdrop (click-outside dismiss) + a
+                // container pinned next to the press location. Mirrors
+                // Rust's `!is_modal && anchor==Some` branch
+                // (dialog_view.rs:452-457): position:absolute; left/top
+                // at the cursor's page coords, no flex centering, no
+                // title bar. The slot button is ~28pt wide; offset the
+                // popover a touch to the right of the press so it sits
+                // beside the button rather than under the cursor.
+                anchoredPopover(ds, anchor: anchor)
+            } else {
+                // Modal (and non-modal-without-anchor) branch: dimmed,
+                // flex-centered overlay exactly as before. Color
+                // picker / tool-options / print / artboard options all
+                // land here and are visually unchanged.
+                centeredModal(ds)
             }
         }
+    }
+
+    /// Read the dialog spec's `modal` flag, defaulting to true (matches
+    /// Rust's ``dlg_def.get("modal")...unwrap_or(true)``). Only
+    /// ``modal: false`` dialogs (the toolbar tool-alternates flyouts)
+    /// are eligible for at-cursor placement.
+    private func isModal(_ ds: YamlDialogState) -> Bool {
+        guard let ws = WorkspaceData.load(),
+              let dlgDef = ws.dialog(ds.id),
+              let m = dlgDef["modal"] as? Bool else { return true }
+        return m
+    }
+
+    /// Centered modal/backdrop overlay (the pre-existing presentation).
+    @ViewBuilder
+    private func centeredModal(_ ds: YamlDialogState) -> some View {
+        ZStack {
+            // Backdrop
+            SwiftUI.Color.black.opacity(0.15)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dialogState = nil
+                    onDismiss?()
+                }
+
+            // Dialog container
+            VStack(spacing: 0) {
+                // Title bar
+                titleBar(ds)
+
+                // Body
+                dialogBody(ds)
+            }
+            .background(SwiftUI.Color(nsColor: theme.paneBg))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(SwiftUI.Color(nsColor: theme.border), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
+            .frame(maxWidth: dialogWidth(ds))
+            // Without this the outer VStack expands vertically to
+            // fill the ZStack — Spacer()s in the tabs renderer
+            // (used for the left rail and the content column)
+            // push the dialog to full window height. Forcing
+            // intrinsic vertical sizing fits the dialog to its
+            // content; the inner Spacers still let tab content
+            // top-align within the available rail height.
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Non-modal popover pinned at `anchor` (window `.global` coords).
+    /// The transparent backdrop fills the window and dismisses on tap
+    /// (mirrors Rust's transparent `inset:0` backdrop whose onmousedown
+    /// clears the dialog). The container is placed with `.position` in
+    /// the SAME `.global` coordinate space the anchor was captured in,
+    /// so left/top math matches Rust's `position:absolute; left/top`.
+    @ViewBuilder
+    private func anchoredPopover(_ ds: YamlDialogState, anchor: CGPoint) -> some View {
+        // Offset the popover so its top-left sits just beside the
+        // long-pressed slot button instead of under the cursor. Rust
+        // pins the top-left to the raw page coords; the slot button is
+        // ~28pt wide, so nudging right keeps the flyout clear of the
+        // pressing finger/cursor while staying adjacent to the slot.
+        let dx: CGFloat = 30
+        let dy: CGFloat = 0
+        ZStack(alignment: .topLeading) {
+            // Transparent full-screen click-outside dismiss target.
+            SwiftUI.Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dialogState = nil
+                    onDismiss?()
+                }
+
+            // Compact bare container (no title bar) positioned at the
+            // anchor. `.position` centers a view on the given point, so
+            // we offset by half the measured size to pin the TOP-LEFT
+            // corner to (anchor + delta), matching Rust's left/top.
+            popoverContainer(ds)
+                .modifier(TopLeadingPositionModifier(
+                    point: CGPoint(x: anchor.x + dx, y: anchor.y + dy)
+                ))
+        }
+    }
+
+    /// The popover's content container: bare (no title bar), shadowed,
+    /// width-constrained. Reuses ``dialogBody`` so flyout items render
+    /// through the same YamlElementView path as every other dialog.
+    @ViewBuilder
+    private func popoverContainer(_ ds: YamlDialogState) -> some View {
+        VStack(spacing: 0) {
+            dialogBody(ds)
+        }
+        .background(SwiftUI.Color(nsColor: theme.paneBg))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(SwiftUI.Color(nsColor: theme.border), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
+        .frame(maxWidth: dialogWidth(ds))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func titleBar(_ ds: YamlDialogState) -> some View {
@@ -406,5 +503,38 @@ struct YamlDialogOverlay: View {
               let dlgDef = ws.dialog(ds.id),
               let w = dlgDef["width"] as? NSNumber else { return 500 }
         return CGFloat(w.doubleValue)
+    }
+}
+
+/// Pin a view's TOP-LEFT corner to `point` in the parent's coordinate
+/// space. SwiftUI's `.position(_:)` centers the view on the point, so
+/// this measures the view via a GeometryReader-backed preference and
+/// shifts by half its size — yielding the same top-left semantics as
+/// Rust's `position:absolute; left:{x}px; top:{y}px`. Used by the
+/// non-modal tool-alternates popover so the flyout's top-left lands at
+/// the press location rather than its center.
+private struct TopLeadingPositionModifier: ViewModifier {
+    let point: CGPoint
+    @State private var size: CGSize = .zero
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    SwiftUI.Color.clear
+                        .preference(key: PopoverSizeKey.self, value: geo.size)
+                }
+            )
+            .onPreferenceChange(PopoverSizeKey.self) { size = $0 }
+            .position(x: point.x + size.width / 2,
+                      y: point.y + size.height / 2)
+    }
+}
+
+private struct PopoverSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }

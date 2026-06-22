@@ -853,8 +853,14 @@ private struct BundleToolbarPaneBody: View {
                     capturedModel.stateStore.set("active_tool", toolStr)
                 },
                 theme: theme,
-                onStoreDialogOpened: {
-                    if let newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+                onStoreDialogOpened: { anchor in
+                    if var newState = yamlDialogStateFromStore(capturedModel.stateStore) {
+                        // Stamp the long-press location (window .global
+                        // coords) so a non-modal tool-alternates flyout
+                        // opens beside the slot button instead of
+                        // centered. Mirrors Rust's open_dialog_at, which
+                        // patches ds.anchor after the plain open_dialog.
+                        newState.anchor = anchor
                         dialogBinding.wrappedValue = newState
                     }
                 }

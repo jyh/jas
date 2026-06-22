@@ -50,7 +50,13 @@ struct YamlElementView: View {
     /// surfacing the dialog as a SwiftUI modal (DockPanelView
     /// supplies a closure that bridges to its yamlDialogState
     /// binding). Mirrors the menu-dispatch dialog bridge.
-    var onStoreDialogOpened: (() -> Void)? = nil
+    ///
+    /// The optional ``CGPoint`` is the popover anchor in window
+    /// `.global` coords, supplied only by the toolbar long-press path
+    /// (the press location captured at mouse_down). All other open
+    /// paths pass nil → the bridge stamps no anchor → the overlay
+    /// centers the dialog (matching Rust's anchor:None branch).
+    var onStoreDialogOpened: ((CGPoint?) -> Void)? = nil
     /// Called after the click chain closes the dialog in the store
     /// (e.g. the color picker's OK / Cancel buttons). The closure
     /// owner clears its SwiftUI dialogState binding so the modal
@@ -698,7 +704,7 @@ struct YamlElementView: View {
             .help(summary)
             .disabled(isDisabled)
             .modifier(PressDispatchModifier(
-                onPress: { if hasPress { handleBehaviorClick(eventName: "mouse_down") } },
+                onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
                 onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
             ))
         } else {
@@ -711,7 +717,7 @@ struct YamlElementView: View {
                 )
                 .disabled(isDisabled)
                 .modifier(PressDispatchModifier(
-                    onPress: { if hasPress { handleBehaviorClick(eventName: "mouse_down") } },
+                    onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
                     onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
                 ))
         }
@@ -1054,7 +1060,9 @@ struct YamlElementView: View {
         // surfaced. Mirrors `dispatchWithDialogBridge` in
         // DockPanelView (used for hamburger-menu dispatches).
         if store.getDialogId() != beforeDlg {
-            onStoreDialogOpened?()
+            // No anchor: widget-action opens (e.g. swatch options) are
+            // modal and stay centered.
+            onStoreDialogOpened?(nil)
         }
     }
 
@@ -1745,7 +1753,7 @@ struct YamlElementView: View {
     /// version of handleClickBehavior for non-click events such as
     /// `double_click`. Routes `effects:` through runEffects and
     /// `action:` through dispatchYamlAction.
-    private func handleBehaviorClick(eventName: String) {
+    private func handleBehaviorClick(eventName: String, pressLocation: CGPoint? = nil) {
         guard let model = model else { return }
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
@@ -1764,7 +1772,15 @@ struct YamlElementView: View {
         // schedule a main-queue bridge after the timer's delay rather
         // than checking synchronously (the store id hasn't changed yet
         // when runEffects returns).
+        //
+        // The press location (window `.global` coords, captured by the
+        // PressDispatchModifier at mouse_down) is the popover anchor —
+        // the Swift analogue of Rust threading the mouse event's page
+        // coords through start_timer into open_dialog_at. It is forwarded
+        // to the bridge so the overlay can place a non-modal flyout at
+        // the press instead of centering it.
         let bridge = onStoreDialogOpened
+        let anchor = pressLocation
         let beforeDlg = model.stateStore.getDialogId()
         for entry in behavior where (entry["event"] as? String) == eventName {
             let effects = (entry["effects"] as? [Any]) ?? []
@@ -1775,7 +1791,7 @@ struct YamlElementView: View {
                 if let bridge = bridge,
                    model.stateStore.getDialogId() != beforeDlg,
                    model.stateStore.getDialogId() != nil {
-                    bridge()
+                    bridge(anchor)
                 }
                 // Deferred open via start_timer: schedule a bridge
                 // check after the timer fires. Find the longest delay
@@ -1788,7 +1804,7 @@ struct YamlElementView: View {
                     ) {
                         if capturedStore.getDialogId() != beforeDlg,
                            capturedStore.getDialogId() != nil {
-                            bridge()
+                            bridge(anchor)
                         }
                     }
                 }
@@ -2728,17 +2744,25 @@ struct YamlElementView: View {
 /// dedicated modifier. Mirrors the Rust toolbar's onmousedown /
 /// onmouseup handlers that drive start_timer / cancel_timer.
 private struct PressDispatchModifier: ViewModifier {
-    let onPress: () -> Void
+    /// Receives the press location in the window's `.global` coordinate
+    /// space — captured here at mouse_down so it can seed the
+    /// tool-alternates popover anchor, mirroring Rust's
+    /// `evt.data().page_coordinates()` capture in build_mousedown_handler.
+    let onPress: (CGPoint) -> Void
     let onRelease: () -> Void
     @State private var pressed = false
 
     func body(content: Content) -> some View {
         content.simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
+            // `.global` coordinate space → the gesture's `location` is
+            // in window coords, the same space the dialog overlay
+            // positions in. This is the Swift analogue of the mouse
+            // event's page coordinates.
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
                     if !pressed {
                         pressed = true
-                        onPress()
+                        onPress(value.location)
                     }
                 }
                 .onEnded { _ in
@@ -3833,8 +3857,9 @@ struct YamlPanelBodyView: View {
     /// after a widget effect transitions the store's dialog id, so
     /// DockPanelView can copy the new dialog state into its SwiftUI
     /// overlay binding (mirrors `dispatchWithDialogBridge` for the
-    /// menu path).
-    var onStoreDialogOpened: (() -> Void)? = nil
+    /// menu path). The optional ``CGPoint`` carries a popover anchor
+    /// (only the toolbar long-press path supplies one; panels pass nil).
+    var onStoreDialogOpened: ((CGPoint?) -> Void)? = nil
     /// Forwarded close-side bridge — fires when a widget click chain
     /// closes the store's dialog (e.g. color picker OK / Cancel).
     var onStoreDialogClosed: (() -> Void)? = nil
