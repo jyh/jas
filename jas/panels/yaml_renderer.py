@@ -3592,6 +3592,88 @@ def _apply_behaviors(widget: QWidget, behaviors: list, store: StateStore,
             _wire_click(widget, action, params, condition, effects, store, ctx, dispatch_fn)
         elif event == "change":
             _wire_change(widget, action, params, condition, effects, store, ctx, dispatch_fn)
+        elif event == "mouse_down":
+            _wire_mouse_down(widget, effects, store, ctx)
+        elif event == "mouse_up":
+            _wire_mouse_up(widget, effects, store, ctx)
+
+
+def _run_behavior_effects(effects, eval_ctx, store, ctx):
+    """Run a behavior's effect list.
+
+    Prefers a host-supplied runner under ``ctx["_run_behavior_effects"]``
+    when present — the dock supplies one that registers the
+    ``start_timer`` / ``cancel_timer`` platform effects and, after the
+    batch (and after each timer fires), calls ``_check_dialog_opened`` so
+    a long-press ``open_dialog`` actually SHOWS the Qt flyout. The plain
+    ``run_effects`` path can only SET ``store._dialog_id`` — it pops no
+    window — so without the host runner the toolbar's long-press
+    alternates never appear (mirrors the Rust renderer's timer_ctx +
+    dialog_signal wiring). When no runner is supplied (ordinary panel
+    buttons), this falls back to plain ``run_effects`` so their behavior
+    is byte-unchanged.
+    """
+    runner = ctx.get("_run_behavior_effects") if isinstance(ctx, dict) else None
+    if callable(runner):
+        runner(effects, eval_ctx)
+        return
+    from workspace_interpreter.effects import run_effects
+    run_effects(effects, eval_ctx, store)
+
+
+def _behavior_eval_ctx(store, ctx):
+    """Build the effect eval-context for a behavior, stripping the
+    scope namespaces from the wire-time ctx (mirrors _wire_click's
+    _build_eval_ctx) so a stale dialog / panel snapshot can't shadow
+    the live store. Re-exposes the widget's own panel scope under
+    ``panel`` when ``_panel_id`` is known."""
+    widget_pid = ctx.get("_panel_id") if isinstance(ctx, dict) else None
+    extra = {k: v for k, v in ctx.items()
+             if k not in ("state", "panel", "dialog", "param", "tool",
+                          "active_document",
+                          "_run_behavior_effects")} if isinstance(ctx, dict) else {}
+    ec = store.eval_context(extra)
+    if widget_pid:
+        ec["panel"] = store.get_panel_state(widget_pid)
+    return ec
+
+
+def _wire_mouse_down(widget, effects, store, ctx):
+    """Wire a ``mouse_down`` behavior to the button's press.
+
+    Used by the bundle toolbar's multi-tool slots: mouse_down carries
+    ``start_timer`` (with a nested ``open_dialog <slot>_alternates``)
+    so a long press opens the tool-alternates flyout. ``QPushButton``
+    fires ``pressed`` on mouse-down; a quick click then fires
+    ``released`` (cancel_timer) well within the delay, so no stray
+    timer is left and the flyout does not appear. Only attaches when
+    the element declares a ``mouse_down`` behavior, so ordinary panel
+    buttons (which declare none) are unaffected. Mirrors the Rust
+    build_mousedown_handler."""
+    if not effects or not hasattr(widget, "pressed"):
+        return
+
+    def _on_pressed():
+        _run_behavior_effects(effects, _behavior_eval_ctx(store, ctx), store, ctx)
+
+    widget.pressed.connect(_on_pressed)
+
+
+def _wire_mouse_up(widget, effects, store, ctx):
+    """Wire a ``mouse_up`` behavior to the button's release.
+
+    Carries ``cancel_timer`` for the slot long-press; ``QPushButton``
+    fires ``released`` on mouse-up (whether or not the cursor is still
+    over the button), so a quick click cancels the pending long-press
+    timer before it can open the flyout. Mirrors the Rust
+    build_mouseup_handler."""
+    if not effects or not hasattr(widget, "released"):
+        return
+
+    def _on_released():
+        _run_behavior_effects(effects, _behavior_eval_ctx(store, ctx), store, ctx)
+
+    widget.released.connect(_on_released)
 
 
 def _resolve_param_value(v, eval_ctx):

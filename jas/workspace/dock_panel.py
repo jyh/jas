@@ -698,6 +698,58 @@ class DockPanelWidget(QWidget):
                     self._dispatch_yaml_cmd(kind, action_name, params, addr)
                     return
 
+    def run_behavior_effects(self, effects: list, eval_ctx: dict) -> None:
+        """Run a YAML *behavior* effect list with the platform timer
+        effects registered and a dialog-show pass afterward.
+
+        Behavior effects (from a widget's ``behavior:`` block) are run by
+        the renderer's effect path, which by itself can only mutate store
+        state — it has no ``start_timer`` / ``cancel_timer`` handlers and
+        no way to SHOW a Qt dialog. The bundle toolbar's multi-tool slots
+        need both: mouse_down arms a long-press ``start_timer`` whose
+        nested ``open_dialog <slot>_alternates`` must pop the flyout
+        window once the timer fires, and mouse_up cancels it. The
+        renderer reaches this method through
+        ``ctx["_run_behavior_effects"]`` (supplied only for the toolbar
+        ctx), so this dialog-show plumbing is scoped to the toolbar and
+        leaves every other dialog (tool-options, color picker, print,
+        which open via the action path's ``_check_dialog_opened``)
+        untouched. Mirrors the Rust renderer's timer_ctx + dialog_signal
+        wiring.
+        """
+        from workspace_interpreter.effects import run_effects
+        from panels.timer_manager import TimerManager
+        ws = get_workspace_data()
+        actions = ws.get("actions") if ws else None
+        dialogs = ws.get("dialogs") if ws else None
+
+        # Mirror _dispatch_yaml_action's timer handlers, but route the
+        # post-fire dialog-show through _check_dialog_opened so a
+        # long-press open_dialog actually pops the YamlDialogView.
+        def handle_start_timer(data, c, s):
+            timer_id = data.get("id", "") if isinstance(data, dict) else ""
+            delay_ms = data.get("delay_ms", 250) if isinstance(data, dict) else 250
+            nested = data.get("effects", []) if isinstance(data, dict) else []
+            dialog_before = s.get_dialog_id() if s else None
+            TimerManager.shared().start_timer(timer_id, delay_ms, lambda: (
+                run_effects(nested, c, s, actions=actions, dialogs=dialogs),
+                self._check_dialog_opened(s, dialog_before),
+            ))
+
+        def handle_cancel_timer(data, _c, _s):
+            timer_id = data if isinstance(data, str) else ""
+            TimerManager.shared().cancel_timer(timer_id)
+
+        dialog_before = self._state_store.get_dialog_id() if self._state_store else None
+        run_effects(effects, eval_ctx, self._state_store,
+                    actions=actions, dialogs=dialogs,
+                    platform_effects={
+                        "start_timer": handle_start_timer,
+                        "cancel_timer": handle_cancel_timer,
+                    })
+        # An immediate (non-timer) open_dialog in the batch still shows.
+        self._check_dialog_opened(self._state_store, dialog_before)
+
     def _dispatch_symbols_action(self, action_name: str, params: dict) -> bool:
         """Native arms for the Symbols panel (SYMBOLS.md §7, §8), modeled
         on menu._link_to_selection (Make Instance) + the layers-panel

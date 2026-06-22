@@ -194,6 +194,153 @@ class SelectToolDispatchTest(absltest.TestCase):
         self.assertEqual(captured.get("params", {}).get("tool"), "pen")
 
 
+class LongPressAlternatesTest(absltest.TestCase):
+    """Long-press on a multi-tool slot opens its alternates flyout.
+
+    The bundle slot buttons carry mouse_down -> start_timer (nested
+    open_dialog <slot>_alternates) and mouse_up -> cancel_timer
+    behaviors. These tests cover the renderer gap closed in
+    yaml_renderer: mouse_down/mouse_up are now dispatched (previously
+    only click/change were), so the long-press timer starts on press,
+    cancels on a quick release, and its open_dialog reaches the right
+    <slot>_alternates dialog id. The actual Qt flyout appearing is
+    GUI-only (verified manually); here we unit-test the timer +
+    dialog-state plumbing without a live display."""
+
+    def setUp(self):
+        # Each test starts from a clean TimerManager so a leftover
+        # timer from a prior test cannot leak into the assertions.
+        from panels.timer_manager import TimerManager
+        tm = TimerManager.shared()
+        for tid in list(tm._timers.keys()):
+            tm.cancel_timer(tid)
+
+    def _slot(self, slot_id):
+        bundle = _load_bundle()
+        grid = _tool_grid(bundle)
+        return dict(_icon_buttons(grid))[slot_id]
+
+    def _dock_ctx(self, store):
+        """A ctx carrying a behavior-effects runner like the one the
+        dock supplies: it registers start_timer / cancel_timer platform
+        effects so the slot's mouse_down/up effects plumb through, and
+        records every dialog id that open_dialog wrote (standing in for
+        _check_dialog_opened, which is GUI-only)."""
+        from panels.timer_manager import TimerManager
+        from workspace_interpreter.effects import run_effects
+
+        _WORKSPACE_JSON_ws = json.load(open(_WORKSPACE_JSON))
+        ws_actions = _WORKSPACE_JSON_ws.get("actions", {})
+        ws_dialogs = _WORKSPACE_JSON_ws.get("dialogs", {})
+        opened = []
+
+        def _runner(effects, eval_ctx):
+            def handle_start_timer(data, c, s):
+                timer_id = data.get("id", "") if isinstance(data, dict) else ""
+                delay_ms = data.get("delay_ms", 250) if isinstance(data, dict) else 250
+                nested = data.get("effects", []) if isinstance(data, dict) else []
+                TimerManager.shared().start_timer(timer_id, delay_ms, lambda: (
+                    run_effects(nested, c, s, actions=ws_actions,
+                                dialogs=ws_dialogs),
+                    opened.append(s.get_dialog_id()),
+                ))
+
+            def handle_cancel_timer(data, c, s):
+                timer_id = data if isinstance(data, str) else ""
+                TimerManager.shared().cancel_timer(timer_id)
+
+            run_effects(effects, eval_ctx, store, actions=ws_actions,
+                        dialogs=ws_dialogs, platform_effects={
+                            "start_timer": handle_start_timer,
+                            "cancel_timer": handle_cancel_timer,
+                        })
+
+        return {"_panel_id": "toolbar_pane",
+                "_run_behavior_effects": _runner}, opened
+
+    def test_mouse_down_starts_long_press_timer(self):
+        from panels.timer_manager import TimerManager
+        store, _bundle = _make_store(active_tool="selection")
+        ctx, _opened = self._dock_ctx(store)
+        btn = render_element(self._slot("btn_arrow_slot"), store, ctx,
+                             dispatch_fn=lambda *_: None)
+        # Press -> the named long-press timer must be pending.
+        btn.pressed.emit()
+        self.assertIn("long_press_btn_arrow_slot",
+                      TimerManager.shared()._timers)
+
+    def test_mouse_up_cancels_long_press_timer(self):
+        from panels.timer_manager import TimerManager
+        store, _bundle = _make_store(active_tool="selection")
+        ctx, _opened = self._dock_ctx(store)
+        btn = render_element(self._slot("btn_arrow_slot"), store, ctx,
+                             dispatch_fn=lambda *_: None)
+        btn.pressed.emit()
+        self.assertIn("long_press_btn_arrow_slot",
+                      TimerManager.shared()._timers)
+        # A quick release cancels the pending timer — no stray timer,
+        # no flyout.
+        btn.released.emit()
+        self.assertNotIn("long_press_btn_arrow_slot",
+                         TimerManager.shared()._timers)
+
+    def test_long_press_opens_arrow_alternates(self):
+        from panels.timer_manager import TimerManager
+        store, _bundle = _make_store(active_tool="selection")
+        ctx, opened = self._dock_ctx(store)
+        btn = render_element(self._slot("btn_arrow_slot"), store, ctx,
+                             dispatch_fn=lambda *_: None)
+        btn.pressed.emit()
+        # Fire the pending timer directly (no real 250 ms wait) and
+        # assert the nested open_dialog reached arrow_alternates.
+        timer = TimerManager.shared()._timers.get("long_press_btn_arrow_slot")
+        self.assertIsNotNone(timer)
+        TimerManager.shared()._on_fire("long_press_btn_arrow_slot",
+                                       timer.timeout.emit)
+        self.assertEqual(store.get_dialog_id(), "arrow_alternates")
+        self.assertEqual(opened[-1], "arrow_alternates")
+        store.close_dialog()
+
+    def test_each_multitool_slot_opens_its_alternates(self):
+        # Every slot whose mouse_down nests open_dialog must reach the
+        # matching <slot>_alternates dialog id.
+        from panels.timer_manager import TimerManager
+        for slot_id, dlg_id in (
+                ("btn_arrow_slot", "arrow_alternates"),
+                ("btn_pen_slot", "pen_alternates"),
+                ("btn_pencil_slot", "pencil_alternates"),
+                ("btn_text_slot", "text_alternates"),
+                ("btn_shape_slot", "shape_alternates"),
+                ("btn_transform_slot", "scale_alternates"),
+                ("btn_hand_slot", "hand_alternates")):
+            store, _bundle = _make_store(active_tool="selection")
+            ctx, opened = self._dock_ctx(store)
+            el = self._slot(slot_id)
+            btn = render_element(el, store, ctx, dispatch_fn=lambda *_: None)
+            btn.pressed.emit()
+            timer = TimerManager.shared()._timers.get(
+                f"long_press_{slot_id}")
+            self.assertIsNotNone(timer, f"{slot_id} started no timer")
+            TimerManager.shared()._on_fire(
+                f"long_press_{slot_id}", timer.timeout.emit)
+            self.assertEqual(store.get_dialog_id(), dlg_id,
+                             f"{slot_id} should open {dlg_id}")
+            store.close_dialog()
+
+    def test_single_tool_button_has_no_mouse_handlers(self):
+        # A plain single-tool slot (Selection) declares no mouse_down,
+        # so pressing it must not start any timer.
+        from panels.timer_manager import TimerManager
+        store, _bundle = _make_store(active_tool="pen")
+        ctx, _opened = self._dock_ctx(store)
+        sel = self._slot("btn_selection")
+        btn = render_element(sel, store, ctx, dispatch_fn=lambda *_: None)
+        btn.pressed.emit()
+        self.assertEqual(
+            [t for t in TimerManager.shared()._timers
+             if t.startswith("long_press_btn_selection")], [])
+
+
 class ToolIdEnumBridgeTest(absltest.TestCase):
     """The active_tool string round-trips with the native Tool enum so the
     state bridge can drive canvas.set_tool from store writes (both the
