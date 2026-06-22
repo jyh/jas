@@ -16142,7 +16142,7 @@
                   },
                   {
                     "id": "mwp_fill_tolerance",
-                    "type": "number",
+                    "type": "number_input",
                     "min": 0,
                     "max": 255,
                     "step": 1,
@@ -16231,7 +16231,7 @@
                   },
                   {
                     "id": "mwp_stroke_tolerance",
-                    "type": "number",
+                    "type": "number_input",
                     "min": 0,
                     "max": 255,
                     "step": 1,
@@ -16320,7 +16320,7 @@
                   },
                   {
                     "id": "mwp_stroke_weight_tolerance",
-                    "type": "number",
+                    "type": "number_input",
                     "min": 0,
                     "max": 100,
                     "step": 0.1,
@@ -16416,7 +16416,7 @@
                   },
                   {
                     "id": "mwp_opacity_tolerance",
-                    "type": "number",
+                    "type": "number_input",
                     "min": 0,
                     "max": 100,
                     "step": 1,
