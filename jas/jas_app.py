@@ -886,6 +886,15 @@ class MainWindow(QMainWindow):
 
         if grid_el is not None:
             ctx = {"_panel_id": "toolbar_pane", "_get_model": self.active_model}
+            # Route the slot buttons' mouse_down/mouse_up behavior effects
+            # through the dock's runner so the long-press start_timer /
+            # cancel_timer fire AND the nested open_dialog actually shows
+            # the <slot>_alternates flyout (the plain renderer effect path
+            # can only set dialog state, it pops no window). Scoped to the
+            # toolbar ctx so other dialogs are unaffected.
+            if hasattr(self, "dock_panel") and hasattr(
+                    self.dock_panel, "run_behavior_effects"):
+                ctx["_run_behavior_effects"] = self.dock_panel.run_behavior_effects
             dispatch = (self.dock_panel._dispatch_yaml_action
                         if hasattr(self, "dock_panel") else None)
             grid_widget = render_element(grid_el, self._yaml_state, ctx,
