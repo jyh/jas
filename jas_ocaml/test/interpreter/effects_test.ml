@@ -249,6 +249,46 @@ let platform_effects_tests = [
     run_effects ~platform_effects:[("doc.set", handler)]
       [`Assoc [("doc.set", spec)]] [] s;
     assert (!captured = spec));
+
+  (* Long-press tool-alternates flyout: the toolbar wires an
+     [open_dialog] platform handler so the timer's nested
+     [open_dialog: { id: <slot>_alternates }] pops the GTK flyout
+     window (the built-in handler only seeds State_store). Verify a
+     registered platform handler INTERCEPTS the built-in open_dialog
+     and receives the dialog spec. *)
+  Alcotest.test_case "open_dialog_platform_handler_intercepts" `Quick (fun () ->
+    let captured = ref `Null in
+    let handler value _ _ = captured := value; `Null in
+    let s = create () in
+    run_effects ~platform_effects:[("open_dialog", handler)]
+      [`Assoc [("open_dialog", `Assoc [("id", `String "arrow_alternates")])]]
+      [] s;
+    assert (!captured = `Assoc [("id", `String "arrow_alternates")]);
+    (* The built-in seeding must NOT have run when intercepted. *)
+    assert (get_dialog_id s = None));
+
+  (* The platform handler must also be reachable from inside a
+     [start_timer]'s nested effects (effects.ml threads
+     [~platform_effects] through the timer callback). The timer here
+     fires after the GTK main loop pumps; we assert it has not fired
+     synchronously (delay > 0), proving start_timer defers rather than
+     runs inline. The flyout itself is exercised in the GUI smoke
+     test. *)
+  Alcotest.test_case "open_dialog_in_timer_not_synchronous" `Quick (fun () ->
+    let called = ref 0 in
+    let handler _ _ _ = incr called; `Null in
+    let s = create () in
+    run_effects ~platform_effects:[("open_dialog", handler)]
+      [`Assoc [("start_timer", `Assoc [
+        ("id", `String "long_press_test");
+        ("delay_ms", `Int 250);
+        ("effects", `List [
+          `Assoc [("open_dialog", `Assoc [("id", `String "arrow_alternates")])]])])]]
+      [] s;
+    (* Deferred to the main loop; not fired inline. *)
+    assert (!called = 0);
+    (* Cancel so the pending timer cannot fire into a later test. *)
+    run_effects [`Assoc [("cancel_timer", `String "long_press_test")]] [] s);
 ]
 
 let foreach_tests = [

@@ -30,6 +30,14 @@ val show_dialog :
   ?outer_scope:(string * Yojson.Safe.t) list ->
   dialog_state -> unit
 
+(** Render a ``modal: false`` dialog as a non-blocking GTK flyout
+    (undecorated popup positioned at the pointer). Unlike [show_dialog]
+    this does NOT run a blocking [dialog#run] loop, so the canvas /
+    toolbar stay interactive; the popup dismisses on an outside click
+    or when an item's ``close_dialog`` effect fires. Backs the toolbar
+    long-press tool-alternates flyout. *)
+val show_nonmodal_dialog : dialog_state -> unit
+
 (** Read the live dialog state list, or [[]] when no dialog is open.
     Used by widget renderers to rebuild contexts at click time so the
     OK action sees typed-in values rather than the stale render-time

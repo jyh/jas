@@ -35,6 +35,17 @@ let () =
     | Some ds -> Jas.Yaml_dialog_view.show_dialog ds
     | None -> ());
 
+  (* Toolbar long-press tool-alternates flyout: a slot button's
+     mouse_down -> start_timer -> open_dialog routes through this hook
+     to pop the [modal: false] alternates dialog as a non-blocking
+     flyout (distinct from the modal show_dialog above). Same
+     cycle-avoidance rationale: Yaml_panel_view can't reach
+     Yaml_dialog_view directly. *)
+  Jas.Yaml_panel_view.open_nonmodal_dialog_hook := (fun dlg_id raw_params ->
+    match Jas.Yaml_dialog_view.open_dialog dlg_id raw_params [] with
+    | Some ds -> Jas.Yaml_dialog_view.show_nonmodal_dialog ds
+    | None -> ());
+
   let dummy_model = Jas.Model.create () in
   (* On any document change, refresh the color panel's fill/stroke
      swatches + hex entry in-place (no body rebuild). The full
