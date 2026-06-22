@@ -453,6 +453,21 @@ let open_yaml_dialog_hook :
     canvas's toolbar. *)
 let set_active_tool_hook : (string -> unit) ref = ref (fun _ -> ())
 
+(** Current active-tool name, as the YAML toolbar's [bind.checked]
+    expressions read it (``state.active_tool == "selection"`` etc.).
+    The native toolbar / canvas own the real tool; this string mirrors
+    it so the bundle-rendered toolbar can re-evaluate its highlight.
+    Updated by [select_tool] click dispatch, the alternates flyout's
+    ``set: { active_tool: ... }`` effect, and — via the toolbar's
+    [tool_changed_hook] wired in main.ml — every native tool change
+    (keyboard shortcuts, spacebar Hand). Toolbar STEP A. *)
+let active_tool_name : string ref = ref "selection"
+
+(** Rebuild the bundle-rendered toolbar pane in place. Wired in main.ml
+    to re-run [mount_toolbar] so the tool-button highlight re-evaluates
+    after [active_tool_name] changes. No-op until wired. *)
+let toolbar_rerender_hook : (unit -> unit) ref = ref (fun () -> ())
+
 (** Hook returning the active appearance's text color. Used by
     [render_text]'s default when [style.color] is unset, so labels
     re-skin when the user switches between Dark / Medium / Light
@@ -460,6 +475,51 @@ let set_active_tool_hook : (string -> unit) ref = ref (fun _ -> ())
     — referencing that ref directly would create a Yaml_panel_view ↔
     Dock_panel cycle. *)
 let theme_text_hook : (unit -> string) ref = ref (fun () -> "#cccccc")
+
+(** Resolve an integer size from a [style.size] JSON value that may be
+    a plain number or a ``{{theme.base.sizes.tool_button}}`` token
+    string. Walks the workspace [theme] tree by the dotted path inside
+    the braces. Returns [None] when the value is neither a number nor a
+    resolvable theme token. The toolbar's tool buttons declare
+    ``size: "{{theme.sizes.tool_button}}"`` (32px); without this they
+    fell back to the 20px default. Toolbar STEP A. *)
+let resolve_size_token (v : Yojson.Safe.t) : int option =
+  match v with
+  | `Int n -> Some n
+  | `Float f -> Some (int_of_float f)
+  | `String s ->
+    let s = String.trim s in
+    let len = String.length s in
+    if len > 4 && String.sub s 0 2 = "{{"
+       && String.sub s (len - 2) 2 = "}}" then begin
+      let path = String.trim (String.sub s 2 (len - 4)) in
+      let segs = String.split_on_char '.' path in
+      (* Drop a leading "theme." since we index from ws.data.theme. *)
+      let segs = match segs with "theme" :: rest -> rest | rest -> rest in
+      match Workspace_loader.load () with
+      | None -> None
+      | Some ws ->
+        let theme = match Workspace_loader.json_member "theme" ws.Workspace_loader.data with
+          | Some t -> t | None -> `Null in
+        (* The compiled theme nests sizes under [base]; accept both the
+           short ``sizes.tool_button`` and the explicit
+           ``base.sizes.tool_button`` forms. *)
+        let rec descend node = function
+          | [] -> Some node
+          | seg :: rest ->
+            (match Workspace_loader.json_member seg node with
+             | Some child -> descend child rest
+             | None -> None) in
+        let found = match descend theme segs with
+          | Some r -> Some r
+          | None -> descend theme ("base" :: segs) in
+        (match found with
+         | Some (`Int n) -> Some n
+         | Some (`Float f) -> Some (int_of_float f)
+         | _ -> None)
+    end else
+      (try Some (int_of_string s) with _ -> None)
+  | _ -> None
 
 (** Trigger a re-sync of the open Paragraph panel from the active
     model's current selection. No-op when no Paragraph panel is
@@ -470,13 +530,6 @@ let paragraph_panel_resync_from_active_model () : unit =
   | Some f -> f ()
   | None -> ()
 
-
-(** Look up a previously registered panel store by content id, or None
-    if no panel with that id has mounted yet. Thin wrapper over the
-    Panel_menu registry so callers in this module read symmetrically
-    with everywhere else. *)
-let panel_store_of_id (id : string) : State_store.t option =
-  Panel_menu.lookup_panel_store id
 
 (** Iterate every registered panel store. Cross-panel bridges use
     this in [Panel_menu.add_recent_colors_listener] callbacks so a
@@ -817,6 +870,18 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                  would otherwise no-op. Mirrors the click-handler
                  shortcuts the Rust / Swift ports take. *)
               match action_name with
+              | "select_tool" ->
+                (* Toolbar STEP A: a tool button was clicked. Mirror the
+                   tool string into [active_tool_name] (so bind.checked
+                   re-evaluates) and route through [set_active_tool_hook]
+                   to switch the native toolbar + canvas. The hook calls
+                   [toolbar#select_tool], whose [tool_changed_hook]
+                   (wired in main.ml) does the string update + toolbar
+                   rebuild — so this arm only needs to fire the hook. *)
+                (match List.assoc_opt "tool" params_list with
+                 | Some (`String tool) when tool <> "" ->
+                   !set_active_tool_hook tool
+                 | _ -> ())
               | "set_active_color" ->
                 let color_opt =
                   match List.assoc_opt "color" params_list with
@@ -1409,10 +1474,37 @@ and render_container ~packing ~ctx el etype =
 
 and render_grid ~packing ~ctx el =
   let open Yojson.Safe.Util in
+  (* True 2-D grid: each child declares its cell via ``grid: { row, col }``
+     and we attach it with [grid#attach ~left:col ~top:row]. The toolbar's
+     [tool_grid] is the only ``type: grid`` node in the whole workspace, so
+     this path is toolbar-isolated. ``cols`` defaults to 2; ``gap`` controls
+     row/col spacing. Mirrors the Rust grid handling
+     (jas_dioxus/src/interpreter/renderer.rs). *)
   let _cols = el |> member "cols" |> to_int_option |> Option.value ~default:2 in
-  (* GTK grid approximated with an HBox *)
-  let hbox = GPack.hbox ~spacing:2 ~packing () in
-  render_children ~packing:(hbox#pack ~expand:false ~fill:false) ~ctx el
+  let gap = el |> member "gap" |> to_int_option |> Option.value ~default:2 in
+  let grid = GPack.grid ~row_spacings:gap ~col_spacings:gap ~packing () in
+  let children = match el |> member "children" with
+    | `List xs -> xs | _ -> [] in
+  let fallback = ref 0 in
+  List.iter (fun child ->
+    if is_visible child ctx then begin
+      let cell = child |> member "grid" in
+      let row = cell |> member "row" |> to_int_option in
+      let col = cell |> member "col" |> to_int_option in
+      let row, col = match row, col with
+        | Some r, Some c -> r, c
+        | _ ->
+          (* No explicit cell — flow into the next slot left-to-right,
+             top-to-bottom using the declared column count. *)
+          let n = !fallback in
+          incr fallback;
+          (n / _cols), (n mod _cols)
+      in
+      let holder = GPack.hbox () in
+      render_element ~packing:(holder#pack ~expand:false ~fill:false) ~ctx child;
+      grid#attach ~left:col ~top:row holder#coerce
+    end
+  ) children
 
 and render_text ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -1624,8 +1716,9 @@ and render_button ~packing ~ctx el =
       in
       if icon_name = "" then None
       else begin
-        let size = match el |> member "style" |> safe_member "size" |> to_number_option with
-          | Some n -> int_of_float n
+        let size =
+          match resolve_size_token (el |> member "style" |> safe_member "size") with
+          | Some n -> n
           | None -> 20
         in
         (* Hardcoded tint matches the Dark Gray theme's text color
@@ -1656,14 +1749,33 @@ and render_button ~packing ~ctx el =
      padding via CSS so the icon image fills the requested size
      instead of leaving a ~6px frame around it. *)
   if etype = "icon_button" then begin
-    let size = match el |> member "style" |> safe_member "size" |> to_number_option with
-      | Some n -> int_of_float n
+    let size =
+      match resolve_size_token (el |> member "style" |> safe_member "size") with
+      | Some n -> n
       | None -> 20
     in
     btn#misc#set_size_request ~width:size ~height:size ();
+    (* bind.checked highlight: an icon_button with a truthy
+       ``bind.checked`` expression renders with a filled background so
+       the active state is visible. The toolbar's tool buttons use this
+       to show which tool is selected (``state.active_tool == "..."``).
+       The checked color comes from ``style.checked_bg`` when it resolves
+       to a literal hex, else a sensible default. Toolbar STEP A. *)
+    let checked = match el |> member "bind" |> safe_member "checked"
+                        |> to_string_option with
+      | Some expr -> Expr_eval.to_bool (Expr_eval.evaluate expr ctx)
+      | None -> false in
+    let checked_bg =
+      match el |> member "style" |> safe_member "checked_bg"
+            |> to_string_option with
+      | Some s when String.length s > 0 && s.[0] = '#' -> s
+      | _ -> "#4a4a4a" in
     let provider = GObj.css_provider () in
+    let bg = if checked then checked_bg else "transparent" in
     provider#load_from_data
-      "button { padding: 0; margin: 0; min-width: 0; min-height: 0; border: 0; background: transparent; }";
+      (Printf.sprintf
+         "button { padding: 0; margin: 0; min-width: 0; min-height: 0; \
+          border: 0; background: %s; }" bg);
     btn#misc#style_context#add_provider provider 800
   end;
   (* style.opacity < 1.0 — render the button dimmed AND insensitive.
@@ -4768,12 +4880,9 @@ and render_repeat ~packing ~ctx el =
      ) items
    | _ -> ())
 
-(** Helper to convert number from JSON safely. *)
-and to_number_option (j : Yojson.Safe.t) : float option =
-  match j with
-  | `Int n -> Some (float_of_int n)
-  | `Float f -> Some f
-  | _ -> None
+(* [to_number_option] is provided by [Yojson.Safe.Util] (opened inside
+   each render function) and also parses numeric strings — the former
+   local definition here was shadowed everywhere and is gone. *)
 
 (** Create a YAML-interpreted panel body in a GTK container.
     Returns unit. The panel content is rendered from the compiled
@@ -5002,4 +5111,103 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          sync ();
          _paragraph_panel_sync := Some sync
        end);
+      render_element ~packing ~ctx content
+
+(** Toolbar STEP A: render the bundle's [layout → toolbar_pane → content]
+    (the tool_grid + fill/stroke widget) through the generic element
+    renderer, instead of the hand-built [Toolbar] GTK class. Wired in
+    main.ml against the toolbar pane container; re-invoked by
+    [toolbar_rerender_hook] after the active tool changes so the
+    [bind.checked] highlight tracks.
+
+    The render ctx exposes:
+      - [state.active_tool] sourced from [active_tool_name] so each tool
+        button's ``bind.checked`` re-evaluates against the live tool;
+      - [icons] for the SVG glyphs;
+      - [data] / [active_document] / [document] namespaces so the
+        embedded fill/stroke widget resolves the same way it does in the
+        Color panel.
+
+    [_current_panel_id] is set to a sentinel ("toolbar_pane") so the
+    icon_button click path in [render_button] fires
+    [dispatch_click_behaviors] — that's where a tool button's
+    ``action: select_tool`` lands.
+
+    The long-press alternates flyout is NOT functional yet: it relies on
+    ``start_timer → open_dialog``, and the generic [Effects.open_dialog]
+    only seeds State_store — it does not pop the GTK dialog window (that
+    path runs solely through [open_yaml_dialog_hook]). Closing that gap
+    is a separate, generic effects-layer increment. *)
+let mount_toolbar ~packing ?(get_model = fun () -> None) () =
+  match Workspace_loader.load () with
+  | None -> ()
+  | Some ws ->
+    (* layout → children → (id = toolbar_pane) → content *)
+    let content =
+      match Workspace_loader.json_member "layout" ws.Workspace_loader.data with
+      | Some layout ->
+        (match Workspace_loader.json_member "children" layout with
+         | Some (`List children) ->
+           let pane = List.find_opt (fun c ->
+             match Workspace_loader.json_member "id" c with
+             | Some (`String "toolbar_pane") -> true
+             | _ -> false) children in
+           (match pane with
+            | Some p -> Workspace_loader.json_member "content" p
+            | None -> None)
+         | _ -> None)
+      | None -> None
+    in
+    match content with
+    | None -> ()
+    | Some content ->
+      (* Reuse a stable store across rebuilds so fill_on_top + any
+         state.* writes survive a toolbar re-render. *)
+      let content_id = "toolbar_pane" in
+      let store = match Panel_menu.lookup_panel_store content_id with
+        | Some s -> s
+        | None ->
+          let s = State_store.create () in
+          Panel_menu.register_panel_store content_id s;
+          s in
+      let state_defaults = Workspace_loader.state_defaults ws in
+      let merge_overrides defaults overrides =
+        List.fold_left (fun acc (k, v) ->
+          (k, v) :: List.filter (fun (k', _) -> k' <> k) acc
+        ) defaults overrides in
+      let live_state = State_store.get_all store in
+      (* The active tool string drives every bind.checked. It lives in
+         [active_tool_name], updated on every tool change. *)
+      let state_pairs =
+        merge_overrides
+          (merge_overrides state_defaults live_state)
+          [("active_tool", `String !active_tool_name)] in
+      let icons_obj = Workspace_loader.icons ws in
+      let swatch_libs = Workspace_loader.swatch_libraries ws in
+      let brush_libs = Workspace_loader.brush_libraries ws in
+      let concepts = Workspace_loader.concepts_list ws in
+      let data_obj = `Assoc [
+        ("swatch_libraries", swatch_libs);
+        ("brush_libraries", brush_libs);
+        ("concepts", concepts);
+      ] in
+      let active_document_view = Active_document_view.build (get_model ()) in
+      let document_view =
+        match get_model () with
+        | Some m ->
+          `Assoc [("recent_colors",
+                   `List (List.map (fun s -> `String s) m#recent_colors))]
+        | None -> `Assoc [("recent_colors", `List [])] in
+      let selection_preds =
+        Active_document_view.build_selection_predicates (get_model ()) in
+      let ctx = `Assoc ([
+        ("state", `Assoc state_pairs);
+        ("icons", icons_obj);
+        ("data", data_obj);
+        ("active_document", active_document_view);
+        ("document", document_view);
+      ] @ selection_preds) in
+      _current_store := Some store;
+      _current_panel_id := Some content_id;
+      _get_model_ref := get_model;
       render_element ~packing ~ctx content
