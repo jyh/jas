@@ -43,6 +43,15 @@ let json_member (key : string) (j : Yojson.Safe.t) : Yojson.Safe.t option =
   | `Assoc pairs -> List.assoc_opt key pairs
   | _ -> None
 
+(** The top-level menu bar definition (menubar.yaml) as a list of menu
+    JSON objects, in declaration order. Empty when the bundle ships no
+    [menubar] key. The menu bar render model (Menu_model) projects this
+    into native menus so the menu can never drift from the spec. *)
+let menubar (ws : workspace) : Yojson.Safe.t list =
+  match json_member "menubar" ws.data with
+  | Some (`List l) -> l
+  | _ -> []
+
 (** Get a panel definition by content id (e.g. "color_panel_content"). *)
 let panel (ws : workspace) (content_id : string) : Yojson.Safe.t option =
   match json_member "panels" ws.data with
