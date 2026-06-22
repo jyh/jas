@@ -698,7 +698,8 @@ class DockPanelWidget(QWidget):
                     self._dispatch_yaml_cmd(kind, action_name, params, addr)
                     return
 
-    def run_behavior_effects(self, effects: list, eval_ctx: dict) -> None:
+    def run_behavior_effects(self, effects: list, eval_ctx: dict,
+                             anchor=None) -> None:
         """Run a YAML *behavior* effect list with the platform timer
         effects registered and a dialog-show pass afterward.
 
@@ -716,6 +717,15 @@ class DockPanelWidget(QWidget):
         which open via the action path's ``_check_dialog_opened``)
         untouched. Mirrors the Rust renderer's timer_ctx + dialog_signal
         wiring.
+
+        ``anchor`` is the global-screen ``(x, y)`` captured at the slot
+        button's mouse_down (the cursor position). It is carried across
+        the long-press timer hop into ``_check_dialog_opened`` so the
+        non-modal ``<slot>_alternates`` flyout is placed NEXT TO the
+        cursor instead of centered — mirroring Rust threading the
+        mouse_down page coords through start_timer into the deferred
+        open_dialog_at (timer.rs anchor param). It is None for any
+        non-toolbar behavior, leaving those dialogs centered.
         """
         from workspace_interpreter.effects import run_effects
         from panels.timer_manager import TimerManager
@@ -725,7 +735,10 @@ class DockPanelWidget(QWidget):
 
         # Mirror _dispatch_yaml_action's timer handlers, but route the
         # post-fire dialog-show through _check_dialog_opened so a
-        # long-press open_dialog actually pops the YamlDialogView.
+        # long-press open_dialog actually pops the YamlDialogView. The
+        # anchor captured at press time is carried into the deferred
+        # callback (the live mouse event is long gone by the time the
+        # 250ms timer fires) so the flyout lands at the cursor.
         def handle_start_timer(data, c, s):
             timer_id = data.get("id", "") if isinstance(data, dict) else ""
             delay_ms = data.get("delay_ms", 250) if isinstance(data, dict) else 250
@@ -733,7 +746,7 @@ class DockPanelWidget(QWidget):
             dialog_before = s.get_dialog_id() if s else None
             TimerManager.shared().start_timer(timer_id, delay_ms, lambda: (
                 run_effects(nested, c, s, actions=actions, dialogs=dialogs),
-                self._check_dialog_opened(s, dialog_before),
+                self._check_dialog_opened(s, dialog_before, anchor=anchor),
             ))
 
         def handle_cancel_timer(data, _c, _s):
@@ -748,7 +761,7 @@ class DockPanelWidget(QWidget):
                         "cancel_timer": handle_cancel_timer,
                     })
         # An immediate (non-timer) open_dialog in the batch still shows.
-        self._check_dialog_opened(self._state_store, dialog_before)
+        self._check_dialog_opened(self._state_store, dialog_before, anchor=anchor)
 
     def _dispatch_symbols_action(self, action_name: str, params: dict) -> bool:
         """Native arms for the Symbols panel (SYMBOLS.md §7, §8), modeled
@@ -912,14 +925,20 @@ class DockPanelWidget(QWidget):
             QMessageBox.Cancel | QMessageBox.Ok, QMessageBox.Cancel)
         return reply == QMessageBox.Ok
 
-    def _check_dialog_opened(self, store, dialog_before=None):
-        """Show a YAML dialog if one was opened by effects."""
+    def _check_dialog_opened(self, store, dialog_before=None, anchor=None):
+        """Show a YAML dialog if one was opened by effects.
+
+        ``anchor`` (global-screen ``(x, y)``) is forwarded to
+        ``_show_yaml_dialog`` so a non-modal flyout opened by a toolbar
+        long-press is placed at the cursor. None for every other dialog
+        path (color picker / tool-options / print / artboard), which stay
+        centered."""
         dialog_after = store.get_dialog_id() if store else None
         if dialog_after and dialog_after != dialog_before:
-            self._show_yaml_dialog(dialog_after)
+            self._show_yaml_dialog(dialog_after, anchor=anchor)
             self.rebuild()
 
-    def _show_yaml_dialog(self, dialog_id: str):
+    def _show_yaml_dialog(self, dialog_id: str, anchor=None):
         """Show a YAML-interpreted dialog."""
         from panels.yaml_dialog_view import YamlDialogView
         # Build active_document ctx from jas model + current artboards
@@ -942,7 +961,8 @@ class DockPanelWidget(QWidget):
         dlg = YamlDialogView(dialog_id, self._state_store,
                              dispatch_fn=self._dispatch_yaml_action,
                              ctx=dialog_ctx,
-                             parent=self)
+                             parent=self,
+                             anchor=anchor)
         dlg.exec()
         # Clean up dialog state if still open
         if self._state_store and self._state_store.get_dialog_id():

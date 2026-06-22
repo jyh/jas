@@ -39,12 +39,24 @@ class YamlDialogView(QDialog):
 
     def __init__(self, dialog_id: str, store: StateStore,
                  dispatch_fn=None, ctx: dict | None = None,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None,
+                 anchor: tuple | None = None):
         super().__init__(parent)
         self._dialog_id = dialog_id
         self._store = store
         self._dispatch_fn = dispatch_fn
         self._ctx = ctx or {}
+        # ``anchor`` is the global-screen (x, y) at which a NON-MODAL
+        # flyout (e.g. the toolbar long-press tool-alternates) should be
+        # placed — the cursor position captured at the slot button's
+        # mouse_down. None means "no anchor": the dialog keeps Qt's
+        # default centered-on-parent placement (color picker, tool-
+        # options, print, artboard — all modal). Positioning is applied
+        # in showEvent once the dialog has been sized. Mirrors the Rust
+        # dialog_view branch on (is_modal, anchor): only !is_modal AND a
+        # present anchor places at the cursor.
+        self._anchor = anchor
+        self._anchor_applied = False
 
         # Load dialog definition
         import os as _os
@@ -59,8 +71,19 @@ class YamlDialogView(QDialog):
         # Set dialog properties
         summary = self._dialog_def.get("summary", dialog_id)
         self.setWindowTitle(summary)
-        if self._dialog_def.get("modal", True):
+        self._is_modal = bool(self._dialog_def.get("modal", True))
+        if self._is_modal:
             self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        else:
+            # Non-modal flyout (modal: false — tool-alternates). Render as
+            # a frameless popup so it reads as a compact bare container
+            # placed at the cursor, NOT a centered titled dialog. Mirrors
+            # the Rust dialog_view suppressing the title bar when
+            # !is_modal (show_title_bar = is_modal) and the at-cursor
+            # absolute placement. The popup window flag also makes a
+            # click outside dismiss it (Qt closes a Popup on outside
+            # press), matching Rust's transparent click-outside backdrop.
+            self.setWindowFlags(Qt.WindowType.Popup)
         width = self._dialog_def.get("width")
         if isinstance(width, (int, float)):
             self.setFixedWidth(int(width))
@@ -98,6 +121,58 @@ class YamlDialogView(QDialog):
                 except RuntimeError:
                     pass
         store.subscribe(None, _on_state)
+
+    def showEvent(self, event):
+        """Place a NON-MODAL anchored flyout at the cursor before it
+        first appears, instead of Qt's default centered-on-parent.
+
+        Mirrors the Rust dialog_view branch: the at-cursor placement
+        fires only when BOTH ``modal: false`` AND an anchor is present
+        (dialog_view.rs (a) branch). The popover's top-left corner is
+        pinned to the anchor coords — the same as Rust's
+        ``position:absolute; left:{ax}px; top:{ay}px`` with no flip /
+        clamp / offset math. The dialog is sized by its layout by the
+        time showEvent fires, so a light clamp keeps the bottom / right
+        edges on-screen (Qt's frameless Popup would otherwise let a
+        bottom-of-screen press run the flyout off the desktop — this is
+        the small, harmless deviation Rust doesn't need because the web
+        viewport scrolls; it never moves the top-left ABOVE / LEFT of the
+        anchor so the popover still grows down-and-right from the cursor).
+        Modal dialogs (anchor None) are untouched and stay centered.
+        """
+        if (not self._anchor_applied and self._anchor is not None
+                and not getattr(self, "_is_modal", True)):
+            self._anchor_applied = True
+            self._place_at_anchor()
+        super().showEvent(event)
+
+    def _place_at_anchor(self) -> None:
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QGuiApplication
+        ax, ay = int(self._anchor[0]), int(self._anchor[1])
+        # Ensure the geometry is computed so width()/height() reflect the
+        # laid-out content before we clamp against the screen edges.
+        self.adjustSize()
+        w = self.width()
+        h = self.height()
+        screen = self.screen() or QGuiApplication.screenAt(QPoint(ax, ay)) \
+            or QGuiApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            # Clamp so the popover stays on-screen but never above/left
+            # of the cursor (it grows down-and-right like the Rust one).
+            max_x = geo.right() - w
+            max_y = geo.bottom() - h
+            if max_x >= ax:
+                pass
+            elif max_x >= geo.left():
+                ax = max_x
+            # else: too wide for the screen; leave at cursor.
+            if max_y >= ay:
+                pass
+            elif max_y >= geo.top():
+                ay = max_y
+        self.move(ax, ay)
 
     def _dispatch_dialog_action(self, action_name: str, params: dict):
         """Dispatch actions from dialog buttons."""

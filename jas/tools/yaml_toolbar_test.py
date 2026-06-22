@@ -233,8 +233,17 @@ class LongPressAlternatesTest(absltest.TestCase):
         ws_actions = _WORKSPACE_JSON_ws.get("actions", {})
         ws_dialogs = _WORKSPACE_JSON_ws.get("dialogs", {})
         opened = []
+        anchors = []
+        self._last_anchors = anchors
 
-        def _runner(effects, eval_ctx):
+        # ``anchor`` mirrors dock_panel.run_behavior_effects' signature:
+        # the cursor coords captured at the slot button's mouse_down are
+        # threaded in so the non-modal flyout lands next to the cursor.
+        # The renderer passes it as a keyword arg, so the stub must accept
+        # it; we record it alongside the opened dialog id.
+        def _runner(effects, eval_ctx, anchor=None):
+            anchors.append(anchor)
+
             def handle_start_timer(data, c, s):
                 timer_id = data.get("id", "") if isinstance(data, dict) else ""
                 delay_ms = data.get("delay_ms", 250) if isinstance(data, dict) else 250
@@ -268,6 +277,13 @@ class LongPressAlternatesTest(absltest.TestCase):
         btn.pressed.emit()
         self.assertIn("long_press_btn_arrow_slot",
                       TimerManager.shared()._timers)
+        # mouse_down captured the cursor's screen coords and threaded a
+        # (x, y) anchor into the runner so the flyout can be placed next
+        # to the cursor (mirrors Rust page_coordinates -> DialogState.anchor).
+        self.assertTrue(self._last_anchors, "runner received no call")
+        anchor = self._last_anchors[-1]
+        self.assertIsInstance(anchor, tuple)
+        self.assertEqual(len(anchor), 2)
 
     def test_mouse_up_cancels_long_press_timer(self):
         from panels.timer_manager import TimerManager
