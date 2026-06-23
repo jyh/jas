@@ -214,8 +214,6 @@ public class WorkspaceState: ObservableObject {
     public func switchAppearance(_ name: String) {
         objectWillChange.send()
         theme = resolveAppearance(name)
-        toolbarCheckedBg = theme.buttonChecked
-        toolbarIconColor = theme.text
         appConfig.activeAppearance = name
         appConfig.save()
     }
@@ -401,13 +399,12 @@ public struct ContentView: View {
     private func paneView(geo: PaneGeometry, rs: RenderingState) -> some View {
         switch geo.kind {
         case .toolbar:
-            // STEP A (toolbar YAML migration): the tool grid renders
-            // from the compiled bundle (workspace.json layout →
-            // toolbar_pane → tool_grid) via the generic YamlElementView,
-            // mirroring Rust's YamlToolbarContent. The native
-            // ToolbarPanel below is intentionally left in the file but
-            // no longer mounted — Step B deletes it after GUI
-            // verification, keeping this reversible.
+            // The tool grid renders from the compiled bundle
+            // (workspace.json layout → toolbar_pane → tool_grid) via the
+            // generic YamlElementView, mirroring Rust's
+            // YamlToolbarContent. The old native ToolbarPanel /
+            // ToolbarView hand-drawn tool grid + long-press alternates
+            // were deleted once this bundle path was verified.
             //
             // The fill/stroke widget under the grid stays native
             // (FillStrokeWidget): the bundle's toolbar_pane content does
@@ -996,187 +993,6 @@ private struct BundleToolbarPaneBody: View {
             ZStack {
                 SwiftUI.Color(nsColor: theme.buttonChecked)
                 if WorkspaceIconCache.shared.lookup(iconName) != nil {
-                    WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
-                } else {
-                    SwiftUI.Text(label)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(SwiftUI.Color(nsColor: theme.text))
-                }
-            }
-            .frame(width: 20, height: 16)
-            .cornerRadius(2)
-        }
-        .buttonStyle(.plain)
-        .help(tooltip)
-    }
-}
-
-// MARK: - Toolbar Panel
-
-struct ToolbarPanel: View {
-    @Binding var currentTool: Tool
-    var model: Model?
-    var theme: Theme
-    var onOpenColorPicker: ((Bool) -> Void)?
-    var onOpenToolOptions: ((Tool) -> Void)?
-    @State private var arrowSlotTool: Tool = .partialSelection
-    @State private var penSlotTool: Tool = .pen
-    @State private var pencilSlotTool: Tool = .pencil
-    @State private var textSlotTool: Tool = .typeTool
-    @State private var shapeSlotTool: Tool = .rect
-    @State private var transformSlotTool: Tool = .scale
-    @State private var navSlotTool: Tool = .hand
-
-    private let toolbarWidth: CGFloat = 80
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Tool buttons
-            VStack(spacing: 2) {
-                HStack(spacing: 2) {
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .selection,
-                                           onRequestOptions: onOpenToolOptions)
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $arrowSlotTool,
-                        alternates: [.partialSelection, .interiorSelection, .magicWand],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                }
-                HStack(spacing: 2) {
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $penSlotTool,
-                        alternates: [.pen, .addAnchorPoint, .deleteAnchorPoint, .anchorPoint],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $pencilSlotTool,
-                        alternates: [.pencil, .paintbrush, .blobBrush, .pathEraser, .smooth],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                }
-                HStack(spacing: 2) {
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $textSlotTool,
-                        alternates: [.typeTool, .typeOnPath],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .line,
-                                           onRequestOptions: onOpenToolOptions)
-                }
-                HStack(spacing: 2) {
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $shapeSlotTool,
-                        alternates: [.rect, .roundedRect, .ellipse, .polygon, .star],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .lasso,
-                                           onRequestOptions: onOpenToolOptions)
-                }
-                // Transform-tool family: Scale (with Shear as long-press
-                // alternate) + Rotate. All three share the dialog
-                // gesture and state.transform_reference_point. See
-                // SCALE_TOOL.md / ROTATE_TOOL.md / SHEAR_TOOL.md.
-                HStack(spacing: 2) {
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $transformSlotTool,
-                        alternates: [.scale, .shear],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                    ToolbarView.toolButton(currentTool: $currentTool, tool: .rotate,
-                                           onRequestOptions: onOpenToolOptions)
-                }
-                // Navigation-tool family: Hand (primary, with Zoom as
-                // long-press alternate). Hand-icon dblclick →
-                // fit_active_artboard; Zoom-icon dblclick →
-                // zoom_to_actual_size, both via tool_options_action
-                // on the tool YAMLs. See HAND_TOOL.md / ZOOM_TOOL.md.
-                HStack(spacing: 2) {
-                    ToolbarView.toolButtonWithAlternates(
-                        currentTool: $currentTool,
-                        visibleTool: $navSlotTool,
-                        alternates: [.hand, .zoom],
-                        onRequestOptions: onOpenToolOptions
-                    )
-                    // Eyedropper — top-level slot, no alternates
-                    // (Phase 1). Dblclick opens the Eyedropper Tool
-                    // Options dialog via tool_options_dialog. See
-                    // EYEDROPPER_TOOL.md.
-                    ToolbarView.toolButton(
-                        currentTool: $currentTool,
-                        tool: .eyedropper,
-                        onRequestOptions: onOpenToolOptions
-                    )
-                }
-            }
-            .padding(4)
-            .frame(width: toolbarWidth)
-            .background(SwiftUI.Color(nsColor: theme.paneBg))
-
-            // Fill/Stroke indicator
-            if let model = model {
-                FillStrokeWidget(model: model, onDoubleClick: { forFill in
-                    onOpenColorPicker?(forFill)
-                })
-                .padding(.top, 8)
-                .frame(width: toolbarWidth)
-
-                // Mode buttons: Color, Gradient (disabled), None
-                HStack(spacing: 2) {
-                    fillModeButton(label: "C", tooltip: "Color") {
-                        // Set to color mode (ensure non-nil)
-                        if model.fillOnTop {
-                            if model.defaultFill == nil {
-                                model.defaultFill = Fill(color: .white)
-                            }
-                        } else {
-                            if model.defaultStroke == nil {
-                                model.defaultStroke = Stroke(color: .black)
-                            }
-                        }
-                    }
-                    fillModeButton(label: "G", tooltip: "Gradient") {
-                        // Gradient mode -- not yet implemented
-                    }
-                    .disabled(true)
-                    .opacity(0.4)
-                    fillModeButton(label: "/", tooltip: "None") {
-                        // Set to none
-                        if model.fillOnTop {
-                            model.defaultFill = nil
-                        } else {
-                            model.defaultStroke = nil
-                        }
-                    }
-                }
-                .padding(.top, 4)
-            }
-
-            Spacer()
-        }
-        .frame(width: toolbarWidth)
-        .background(SwiftUI.Color(nsColor: theme.paneBgDark))
-    }
-
-    private func fillModeButton(label: String, tooltip: String, action: @escaping () -> Void) -> some View {
-        // Map the mode label to its icon name (icons.yaml).
-        let iconName: String? = {
-            switch label {
-            case "C": return "fill_solid"
-            case "G": return "fill_gradient"
-            case "/": return "color_none"
-            default: return nil
-            }
-        }()
-        return Button(action: action) {
-            ZStack {
-                SwiftUI.Color(nsColor: theme.buttonChecked)
-                if let iconName, WorkspaceIconCache.shared.lookup(iconName) != nil {
                     WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
                 } else {
                     SwiftUI.Text(label)

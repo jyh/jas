@@ -1,4 +1,10 @@
-(** A floating toolbar subwindow embedded inside the workspace. *)
+(** Tool-state controller for the workspace.
+
+    The visible toolbar renders from the compiled bundle [tool_grid] via
+    [Yaml_panel_view] (STEP A). This module is the live tool-state
+    controller the canvas, keyboard shortcuts, and the bundle toolbar
+    highlight read and drive. The hand-drawn GTK toolbar widget was
+    removed in STEP B. *)
 
 type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pen | Add_anchor_point | Delete_anchor_point | Anchor_point | Pencil | Paintbrush | Blob_brush | Path_eraser | Smooth | Type_tool | Type_on_path | Line | Rect | Rounded_rect | Ellipse | Polygon | Star | Lasso | Scale | Rotate | Shear | Hand | Zoom | Artboard | Eyedropper
 
@@ -7,8 +13,7 @@ type tool = Selection | Partial_selection | Interior_selection | Magic_wand | Pe
 val tool_yaml_id : tool -> string option
 
 (** Look up a tool's [tool_options_dialog] field in workspace.json.
-    Returns the dialog id when set, [None] otherwise. Consumed by
-    the toolbar-slot double-click handlers. *)
+    Returns the dialog id when set, [None] otherwise. *)
 val tool_options_dialog_id : tool -> string option
 
 (** Fired at the end of [select_tool] with the newly-active tool. The
@@ -19,18 +24,14 @@ val tool_options_dialog_id : tool -> string option
     keyboard shortcut, or the spacebar Hand pass-through. *)
 val tool_changed_hook : (tool -> unit) ref
 
-class toolbar : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> object
+class toolbar : ?get_model:(unit -> Model.model) -> unit -> object
   method current_tool : tool
-  method widget : GObj.widget
-  method x : int
-  method y : int
   method select_tool : tool -> unit
   method fill_on_top : bool
   method set_fill_on_top : bool -> unit
   method toggle_fill_on_top : unit
   method reset_defaults : unit
   method swap_fill_stroke : unit
-  method redraw_fill_stroke : unit
 end
 
-val create : title:string -> x:int -> y:int -> ?get_model:(unit -> Model.model) -> GPack.fixed -> toolbar
+val create : ?get_model:(unit -> Model.model) -> unit -> toolbar

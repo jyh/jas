@@ -119,7 +119,7 @@ let () =
   let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas () in
   main_window_ref := Some main_window;
   notebook_ref := Some notebook;
-  let toolbar = Jas.Toolbar.create ~title:"Tools" ~x:0 ~y:0 ~get_model toolbar_fixed in
+  let toolbar = Jas.Toolbar.create ~get_model () in
   toolbar_ref := Some toolbar;
   (* Read the active appearance's text color so YAML text labels
      (slider H/S/B/%/# captions etc.) re-skin when the user switches
@@ -218,21 +218,8 @@ let () =
     | Jas.Toolbar.Artboard -> "artboard"
     | Jas.Toolbar.Eyedropper -> "eyedropper"
   in
-  (* Hide the native toolbar widget — stop mounting it.
-
-     [set_no_show_all true] is load-bearing: the native toolbar frame is
-     packed into the SAME [toolbar_fixed] as the bundle toolbar holder
-     (both at 0,0), and the pane relayout in [Canvas.create_main_window]
-     calls [toolbar_frame#misc#show_all ()] on every layout pass. A plain
-     [hide] is undone by that recursive [show_all], which would re-map the
-     native drawing-area tool buttons on top of the bundle toolbar. A
-     long-press then hits the native button's handler, popping the OLD
-     native [GMenu.check_menu_item] tool-alternates menu (literal
-     checkboxes) instead of the YAML [modal:false] icon-button flyout.
-     [no_show_all] makes [show_all] skip the native toolbar subtree so it
-     stays hidden, leaving only the bundle flyout live. *)
-  toolbar#widget#misc#hide ();
-  toolbar#widget#set_no_show_all true;
+  (* The native toolbar has no widget anymore — it is a plain tool-state
+     controller (STEP B). Only the bundle toolbar is mounted below. *)
   (* Holder packed into the toolbar pane's GtkFixed at (0,0). Rebuilt in
      place by [rebuild_bundle_toolbar] so the highlight tracks the tool. *)
   let bundle_toolbar_holder = GPack.vbox () in
