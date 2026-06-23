@@ -482,33 +482,41 @@ class MainWindow(QMainWindow):
                 fn()
             return _wrapper
 
-        QShortcut(QKeySequence("V"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.SELECTION)))
-        QShortcut(QKeySequence("A"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.PARTIAL_SELECTION)))
-        QShortcut(QKeySequence("P"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.PEN)))
-        QShortcut(QKeySequence("="), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT)))
-        QShortcut(QKeySequence("+"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.ADD_ANCHOR_POINT)))
-        QShortcut(QKeySequence("-"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.DELETE_ANCHOR_POINT)))
-        QShortcut(QKeySequence("T"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.TYPE)))
-        QShortcut(QKeySequence("\\"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.LINE)))
-        QShortcut(QKeySequence("M"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.RECT)))
-        QShortcut(QKeySequence("Shift+E"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.PATH_ERASER)))
-        QShortcut(QKeySequence("Q"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.LASSO)))
-        # Navigation tools (HAND_TOOL.md / ZOOM_TOOL.md).
-        QShortcut(QKeySequence("H"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.HAND)))
-        QShortcut(QKeySequence("Z"), self,
-                  _guarded(lambda: self.toolbar.select_tool(Tool.ZOOM)))
+        # Tool-selection shortcuts are driven by the shared bundle
+        # ``shortcuts`` table (TESTING_STRATEGY.md §5 rec 3, Phase 2b) — the
+        # SAME table the cross-language key corpus pins and the SAME
+        # ``select_tool`` action the bundle toolbar fires. The hardcoded
+        # per-tool QShortcut block was replaced by this loop so a single
+        # authoritative source (workspace/shortcuts.yaml) now drives both
+        # the toolbar and the keyboard. For every entry whose action is
+        # ``select_tool`` we register one QShortcut on the entry's key
+        # string (Qt's QKeySequence parses "Shift+E", "\\", "=" natively,
+        # so the chord match is Qt's; resolve_key need not run live — the
+        # SOURCE is the bundle, not hardcoded constants). The bound lambda
+        # dispatches ``select_tool`` through the dock panel's YAML action
+        # runner (-> run_effects -> set:{active_tool}), which the
+        # state->canvas bridge maps back to the native Tool enum; this is
+        # byte-for-byte the toolbar click path. The _guarded wrapper still
+        # defers to an active keyboard-capturing tool (Type session).
+        #
+        # Non-select_tool bundle entries (menu/edit/view verbs, the
+        # fill/stroke D / X / Shift+X) are NOT registered here — they keep
+        # their dedicated native handlers below. Tool keys' framework
+        # binding (BINDING step) stays on the manual floor; only the key
+        # SOURCE moved to the bundle.
+        def _make_tool_shortcut(tool_id):
+            def _select():
+                self.dock_panel._dispatch_yaml_action(
+                    "select_tool", {"tool": tool_id})
+            return _guarded(_select)
+
+        for _entry in self._tool_select_shortcuts():
+            _key = _entry.get("key")
+            _tool_id = (_entry.get("params") or {}).get("tool")
+            if not isinstance(_key, str) or not isinstance(_tool_id, str):
+                continue
+            QShortcut(QKeySequence(_key), self, _make_tool_shortcut(_tool_id))
+
         # View shortcuts (per ZOOM_TOOL.md §Keyboard shortcuts).
         QShortcut(QKeySequence("Ctrl+0"), self,
                   self._fit_active_artboard)
@@ -885,6 +893,27 @@ class MainWindow(QMainWindow):
             tw = self.tab_widget.width()
             lw = self._canvas_logo_lbl.width()
             self._canvas_logo_lbl.move(tw - lw - 10, 10)
+
+    @staticmethod
+    def _tool_select_shortcuts() -> list:
+        """Return the bundle ``shortcuts`` entries whose action is
+        ``select_tool`` (TESTING_STRATEGY.md §5 rec 3, Phase 2b).
+
+        Loaded through the SAME accessor the menu / key_resolver use
+        (``key_resolver._load_shortcuts`` -> ``get_workspace_data``), so the
+        live keyboard's tool keys and the cross-language key corpus read one
+        authoritative table. Entries without a ``select_tool`` action (menu /
+        edit / view verbs, the fill/stroke D / X / Shift+X) are filtered out
+        — those keep their dedicated native handlers. Returns an empty list
+        if the bundle is missing/corrupt (no tool keys, fail-soft).
+        """
+        from workspace.key_resolver import _load_shortcuts
+
+        out = []
+        for entry in _load_shortcuts():
+            if isinstance(entry, dict) and entry.get("action") == "select_tool":
+                out.append(entry)
+        return out
 
     def _build_yaml_toolbar(self) -> None:
         """Render the bundle toolbar grid into the toolbar pane (STEP A).

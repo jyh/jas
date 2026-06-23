@@ -133,44 +133,55 @@ let () =
      Same hook pattern as theme_text_hook to avoid a renderer ↔ dock
      cycle. *)
   Jas.Yaml_panel_view.dialog_bg_hook := (fun () -> !Jas.Dock_panel.theme_bg_dark);
+  (* Map an active_tool string to its native [Toolbar.tool]. Accepts BOTH the
+     short ROUTING ids the bundle dispatches (the strings written by
+     [set: { active_tool: ... }] in shortcuts.yaml / tool_alternates.yaml,
+     e.g. [add_anchor]/[delete_anchor]/[type]) AND the longer tool-definition
+     id aliases ([add_anchor_point]/[delete_anchor_point]/[type_tool]) the
+     earlier code used. Carrying both fixes a PRE-EXISTING bug where the
+     add/delete-anchor and type flyout buttons -- which dispatch the SHORT
+     routing ids -- silently failed to switch tools, and lets the bundle-driven
+     keyboard path (below) route through this same single mapping. *)
+  let tool_of_name (name : string) : Jas.Toolbar.tool option =
+    match name with
+    | "selection" -> Some Jas.Toolbar.Selection
+    | "partial_selection" -> Some Jas.Toolbar.Partial_selection
+    | "interior_selection" -> Some Jas.Toolbar.Interior_selection
+    | "magic_wand" -> Some Jas.Toolbar.Magic_wand
+    | "pen" -> Some Jas.Toolbar.Pen
+    | "add_anchor" | "add_anchor_point" -> Some Jas.Toolbar.Add_anchor_point
+    | "delete_anchor" | "delete_anchor_point" -> Some Jas.Toolbar.Delete_anchor_point
+    | "anchor_point" -> Some Jas.Toolbar.Anchor_point
+    | "pencil" -> Some Jas.Toolbar.Pencil
+    | "paintbrush" -> Some Jas.Toolbar.Paintbrush
+    | "blob_brush" -> Some Jas.Toolbar.Blob_brush
+    | "path_eraser" -> Some Jas.Toolbar.Path_eraser
+    | "smooth" -> Some Jas.Toolbar.Smooth
+    | "type" | "type_tool" -> Some Jas.Toolbar.Type_tool
+    | "type_on_path" -> Some Jas.Toolbar.Type_on_path
+    | "line" -> Some Jas.Toolbar.Line
+    | "rect" -> Some Jas.Toolbar.Rect
+    | "rounded_rect" -> Some Jas.Toolbar.Rounded_rect
+    | "ellipse" -> Some Jas.Toolbar.Ellipse
+    | "polygon" -> Some Jas.Toolbar.Polygon
+    | "star" -> Some Jas.Toolbar.Star
+    | "lasso" -> Some Jas.Toolbar.Lasso
+    | "scale" -> Some Jas.Toolbar.Scale
+    | "rotate" -> Some Jas.Toolbar.Rotate
+    | "shear" -> Some Jas.Toolbar.Shear
+    | "hand" -> Some Jas.Toolbar.Hand
+    | "zoom" -> Some Jas.Toolbar.Zoom
+    | "artboard" -> Some Jas.Toolbar.Artboard
+    | "eyedropper" -> Some Jas.Toolbar.Eyedropper
+    | _ -> None
+  in
   (* Route YAML ``set: { active_tool: "<name>" }`` effects from
      dialog buttons through the toolbar. The color picker's
      eyedropper button sets active_tool="eyedropper" and dismisses
      the dialog; without this hook the set effect would write to a
      scratch store and the canvas tool wouldn't change. *)
   Jas.Yaml_panel_view.set_active_tool_hook := (fun name ->
-    let tool = match name with
-      | "selection" -> Some Jas.Toolbar.Selection
-      | "partial_selection" -> Some Jas.Toolbar.Partial_selection
-      | "interior_selection" -> Some Jas.Toolbar.Interior_selection
-      | "magic_wand" -> Some Jas.Toolbar.Magic_wand
-      | "pen" -> Some Jas.Toolbar.Pen
-      | "add_anchor_point" -> Some Jas.Toolbar.Add_anchor_point
-      | "delete_anchor_point" -> Some Jas.Toolbar.Delete_anchor_point
-      | "anchor_point" -> Some Jas.Toolbar.Anchor_point
-      | "pencil" -> Some Jas.Toolbar.Pencil
-      | "paintbrush" -> Some Jas.Toolbar.Paintbrush
-      | "blob_brush" -> Some Jas.Toolbar.Blob_brush
-      | "path_eraser" -> Some Jas.Toolbar.Path_eraser
-      | "smooth" -> Some Jas.Toolbar.Smooth
-      | "type_tool" -> Some Jas.Toolbar.Type_tool
-      | "type_on_path" -> Some Jas.Toolbar.Type_on_path
-      | "line" -> Some Jas.Toolbar.Line
-      | "rect" -> Some Jas.Toolbar.Rect
-      | "rounded_rect" -> Some Jas.Toolbar.Rounded_rect
-      | "ellipse" -> Some Jas.Toolbar.Ellipse
-      | "polygon" -> Some Jas.Toolbar.Polygon
-      | "star" -> Some Jas.Toolbar.Star
-      | "lasso" -> Some Jas.Toolbar.Lasso
-      | "scale" -> Some Jas.Toolbar.Scale
-      | "rotate" -> Some Jas.Toolbar.Rotate
-      | "shear" -> Some Jas.Toolbar.Shear
-      | "hand" -> Some Jas.Toolbar.Hand
-      | "zoom" -> Some Jas.Toolbar.Zoom
-      | "artboard" -> Some Jas.Toolbar.Artboard
-      | "eyedropper" -> Some Jas.Toolbar.Eyedropper
-      | _ -> None in
-    match tool with
+    match tool_of_name name with
     | Some t -> toolbar#select_tool t
     | None -> ());
 
@@ -363,39 +374,7 @@ let () =
         tname = "GtkEntry" || tname = "GtkSpinButton" || tname = "GtkTextView"
       with _ -> false
     ) then false
-    else if key = GdkKeysyms._v || key = GdkKeysyms._V then begin
-      toolbar#select_tool Jas.Toolbar.Selection; true
-    end else if key = GdkKeysyms._a || key = GdkKeysyms._A then begin
-      toolbar#select_tool Jas.Toolbar.Partial_selection; true
-    end else if key = GdkKeysyms._p || key = GdkKeysyms._P then begin
-      toolbar#select_tool Jas.Toolbar.Pen; true
-    end else if key = GdkKeysyms._plus || key = GdkKeysyms._equal then begin
-      toolbar#select_tool Jas.Toolbar.Add_anchor_point; true
-    end else if key = GdkKeysyms._minus || key = GdkKeysyms._underscore then begin
-      toolbar#select_tool Jas.Toolbar.Delete_anchor_point; true
-    end else if key = GdkKeysyms._t || key = GdkKeysyms._T then begin
-      toolbar#select_tool Jas.Toolbar.Type_tool; true
-    end else if key = GdkKeysyms._backslash then begin
-      toolbar#select_tool Jas.Toolbar.Line; true
-    end else if key = GdkKeysyms._m || key = GdkKeysyms._M then begin
-      toolbar#select_tool Jas.Toolbar.Rect; true
-    end else if key = GdkKeysyms._q || key = GdkKeysyms._Q then begin
-      toolbar#select_tool Jas.Toolbar.Lasso; true
-    end else if key = GdkKeysyms._n then begin
-      toolbar#select_tool Jas.Toolbar.Pencil; true
-    end else if key = GdkKeysyms._E then begin
-      toolbar#select_tool Jas.Toolbar.Path_eraser; true
-    end else if key = GdkKeysyms._h || key = GdkKeysyms._H then begin
-      toolbar#select_tool Jas.Toolbar.Hand; true
-    end else if key = GdkKeysyms._z && not (List.mem `CONTROL (GdkEvent.Key.state ev))
-             && not (List.mem `META (GdkEvent.Key.state ev)) then begin
-      (* Bare Z (without Ctrl/Cmd, which is undo) selects Zoom. *)
-      toolbar#select_tool Jas.Toolbar.Zoom; true
-    end else if key = GdkKeysyms._Z && not (List.mem `CONTROL (GdkEvent.Key.state ev))
-             && not (List.mem `META (GdkEvent.Key.state ev))
-             && not (List.mem `SHIFT (GdkEvent.Key.state ev)) then begin
-      toolbar#select_tool Jas.Toolbar.Zoom; true
-    end else if key = GdkKeysyms._space
+    else if key = GdkKeysyms._space
              && not (List.mem `CONTROL (GdkEvent.Key.state ev))
              && not (List.mem `META (GdkEvent.Key.state ev)) then begin
       (* Spacebar pass-through to Hand. Save the current tool and
@@ -567,7 +546,48 @@ let () =
         (* Swap fill and stroke colors *)
         toolbar#swap_fill_stroke;
         true
-      end else false
+      end else begin
+        (* ── Tool shortcuts (bundle-driven, TESTING_STRATEGY.md
+           section 5 rec 3, Phase 2b) ──
+           The hardcoded per-tool [GdkKeysyms] match arms were replaced by
+           this single fallback: normalize the GTK key event into a
+           framework-neutral [Key_resolver.chord] and resolve it against the
+           shared bundle [shortcuts] table via [Key_resolver.resolve_key],
+           the SAME pure resolver pinned cross-language by the key corpus.
+           A [select_tool] result is dispatched through [tool_of_name] +
+           [toolbar#select_tool] -- the SAME path the toolbar uses -- so one
+           table now drives both the toolbar and the keyboard.
+
+           This fallback is reached only AFTER every stateful / modal arm
+           above (Space hand pass-through, Escape/Return, Delete/Backspace,
+           and fill/stroke D/X/Shift+X) has had its chance, so those keep
+           precedence. Ctrl/Meta chords never reach here -- the menu-modifier
+           guard near the top of this handler returns [false] for them, so
+           GTK menu accelerators (Ctrl+N etc.) stay authoritative.
+
+           Token: a printable ASCII keyval equals its ASCII code, so it maps
+           directly to its single-character token (GTK delivers the SHIFTED
+           keyval, e.g. [_B] for Shift+b, which [canon_key] folds to the same
+           uppercase letter while [shift] is carried separately). Anything
+           outside printable ASCII (named keys etc.) has no tool binding and
+           falls through unmatched. *)
+        let alt = List.mem `MOD1 state in
+        if key >= 0x20 && key <= 0x7e then begin
+          let token = String.make 1 (Char.chr key) in
+          let chord =
+            Jas.Key_resolver.make_chord ~key:token
+              ~ctrl:has_ctrl ~shift:has_shift ~alt ~meta:false () in
+          match Jas.Key_resolver.resolve_key chord with
+          | Some { Jas.Key_resolver.action = "select_tool"; params } ->
+            (match List.assoc_opt "tool" params with
+             | Some (`String tool_id) ->
+               (match tool_of_name tool_id with
+                | Some t -> toolbar#select_tool t; true
+                | None -> false)
+             | _ -> false)
+          | _ -> false
+        end else false
+      end
     end
   ) |> ignore;
 
