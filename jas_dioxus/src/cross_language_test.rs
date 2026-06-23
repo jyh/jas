@@ -756,6 +756,17 @@ mod tests {
         // the second rect (which starts at doc-x 72). No geometry changes; only
         // the selection becomes [{kind:"all", path:[0,0]}].
         "select_click.json",
+        // Marquee-select (TESTING_STRATEGY.md §5 rec 4): the other half of
+        // the selection tool. When on_mousedown hit-tests to NULL (press on
+        // empty space, here doc(-10,-10), outside both rects) the tool enters
+        // MARQUEE mode, recording doc_marquee_start/end; on_mousemove updates
+        // the end; on_mouseup commits via doc.select_in_rect with the
+        // min/max-normalized marquee bounds. The marquee here drags to
+        // doc(200,100), fully enclosing BOTH rects (doc-bounds 0..144 x
+        // 0..72) — so the contain-vs-intersect semantics of select_in_rect
+        // don't matter, and the result is unambiguously both elements:
+        // [{kind:"all", path:[0,0]}, {kind:"all", path:[0,1]}].
+        "select_marquee.json",
     ];
 
     /// Build the YamlTool for `tool_id` from the embedded workspace

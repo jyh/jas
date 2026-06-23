@@ -2420,6 +2420,11 @@ let () =
          cross-app hit-test parity gate. Click center of rect0 -> path [0,0]. *)
       Alcotest.test_case "select_click gesture" `Quick (fun () ->
         run_gesture_fixture "select_click.json");
+      (* Marquee-select (§5 rec 4): press on EMPTY space (hit_test==null)
+         enters marquee mode; mouseup commits doc.select_in_rect over the
+         normalized marquee bounds. Drag encloses both rects -> [0,0]+[0,1]. *)
+      Alcotest.test_case "select_marquee gesture" `Quick (fun () ->
+        run_gesture_fixture "select_marquee.json");
     ];
 
     (* Action equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b):
