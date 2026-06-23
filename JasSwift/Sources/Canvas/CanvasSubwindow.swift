@@ -2998,20 +2998,25 @@ class CanvasNSView: NSView {
         model.viewOffsetY = ay - docAy * zNew
     }
 
-    /// Switch the active tool by its bundle active_tool ROUTING id — the
-    /// SAME store-driven path the toolbar click / alternates flyout use,
-    /// so the toolbar slot glyph + highlight follow the selection. Writes
-    /// active_tool and bumps panelStateVersion; the toolbar's
-    /// `.onChange(of: the store's active_tool)` then syncs ContentView's
-    /// currentTool @State (→ canvas tool + grid). Falls back to the
-    /// canvas @Binding onToolChange only when no document model is present
-    /// (no store to observe).
+    /// Switch the active tool from a keyboard-initiated change (shortcut,
+    /// Space→Hand pass-through) so BOTH the live canvas tool and the
+    /// bundle toolbar follow. Two proven mechanisms, because an AppKit
+    /// @Binding write alone does not reliably re-render the sibling
+    /// toolbar pane, and a store write alone does not reliably re-activate
+    /// the canvas tool for every path:
+    ///   1. `onToolChange` drives ContentView's currentTool @Binding —
+    ///      this reliably switches the live canvas tool (behavior +
+    ///      cursor), the path keyboard tool selection always used.
+    ///   2. write active_tool + bump panelStateVersion — the toolbar grid
+    ///      reads currentTool via buildToolbarContext (which #1 just set);
+    ///      the bump forces it to re-render so the slot glyph + highlight
+    ///      follow. (The store mirror also keeps active_tool-derived
+    ///      consumers consistent.)
     private func selectToolByYamlId(_ toolStr: String, fallback: Tool) {
+        onToolChange?(fallback)
         if let model = controller?.model {
             model.stateStore.set("active_tool", toolStr)
             model.panelStateVersion &+= 1
-        } else {
-            onToolChange?(fallback)
         }
     }
 
