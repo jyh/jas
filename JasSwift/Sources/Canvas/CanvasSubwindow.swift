@@ -2900,27 +2900,23 @@ class CanvasNSView: NSView {
                        resolved.action == "select_tool",
                        let toolStr = resolved.params["tool"],
                        let tool = toolFromYamlString(toolStr) {
-                        // Route through the model's active-tool mirror — the
-                        // SAME path the tool-alternates flyout uses (installed
-                        // on the toolbar view in .onAppear). It sets
-                        // ContentView's `currentTool` @State in the toolbar's
-                        // own reactive scope, so the bundle-driven grid
-                        // re-highlights the slot (and re-evaluates the
-                        // active-alternate slot icon); the @State change also
-                        // activates the tool on the canvas via updateNSView.
-                        // The canvas's own `onToolChange` (a @Binding written
-                        // from this AppKit handler) reliably switches the
-                        // canvas tool but does NOT re-render the sibling
-                        // toolbar pane, so it is only the fallback when no
-                        // document mirror is installed. The explicit store
-                        // write mirrors the toolbar-click path (onWidgetAction)
-                        // and bumps the grid's observed state so bind.checked
-                        // re-evaluates even if the @State→onChange mirror is
-                        // coalesced.
-                        if let model = controller?.model,
-                           let mirror = model.onActiveToolChange {
-                            mirror(toolStr)
+                        // Drive tool selection through the shared store, the
+                        // SAME path the tool-alternates flyout uses: write
+                        // active_tool and bump panelStateVersion so the
+                        // toolbar body re-renders. Its `.onChange(of: the
+                        // store's active_tool)` then syncs ContentView's
+                        // `currentTool` @State (in the toolbar's live reactive
+                        // scope), which both re-highlights the grid / active-
+                        // alternate icon AND activates the tool on the canvas
+                        // via updateNSView. We deliberately do NOT use the
+                        // canvas's own `onToolChange` @Binding here: written
+                        // from this AppKit handler it switches the canvas tool
+                        // but does not reliably re-render the sibling toolbar.
+                        // Fall back to onToolChange only when no document model
+                        // is present (no store to observe).
+                        if let model = controller?.model {
                             model.stateStore.set("active_tool", toolStr)
+                            model.panelStateVersion &+= 1
                         } else {
                             onToolChange?(tool)
                         }
