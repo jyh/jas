@@ -362,8 +362,12 @@ struct YamlDialogOverlay: View {
                 .stroke(SwiftUI.Color(nsColor: theme.border), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
-        .frame(maxWidth: dialogWidth(ds))
-        .fixedSize(horizontal: false, vertical: true)
+        // Size the flyout to its intrinsic content (a compact tool list)
+        // rather than the 500pt default dialog width. The alternates
+        // items are width:"100%", so a wide frame made the popover a
+        // 500px box whose bulk read as ~300px to the right of the cursor
+        // even though its top-left was pinned at the press point.
+        .fixedSize()
     }
 
     private func titleBar(_ ds: YamlDialogState) -> some View {
