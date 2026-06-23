@@ -8,8 +8,7 @@ let all_tools : Jas.Toolbar.tool list = [
   Line; Rect; Rounded_rect; Polygon; Star;
 ]
 
-let fixed = GPack.fixed ()
-let tb = Jas.Toolbar.create ~title:"Tools" ~x:10 ~y:10 fixed
+let tb = Jas.Toolbar.create ()
 
 let () =
   Alcotest.run "Toolbar" [
