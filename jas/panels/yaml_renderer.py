@@ -19,6 +19,27 @@ from workspace_interpreter.state_store import StateStore
 from panels import widget_registry
 
 
+# Scoped default icon size for size-less ``icon_button`` glyphs rendered
+# inside the NON-MODAL tool-alternate flyout (modal: false). The flyout
+# items declare no ``style.size``, so without this they would fall back to
+# the 20px panel default. YamlDialogView sets this to 28 around its render
+# and restores it to None afterward (mirrors OCaml's
+# ``Yaml_panel_view.nonmodal_icon_size``), so panels — which are also
+# size-less ``icon_button``s — keep their own 20px default unchanged.
+NONMODAL_ICON_SIZE: int | None = None
+
+
+def set_nonmodal_icon_size(size: int | None) -> None:
+    """Set (or clear) the flyout-scoped default icon size used by
+    ``_render_icon_button`` for size-less, non-toolbar glyphs.
+
+    The non-modal flyout view brackets its content render with
+    ``set_nonmodal_icon_size(28)`` ... ``set_nonmodal_icon_size(None)`` so
+    only the flyout's icons grow to 28px while panel icons stay at 20px."""
+    global NONMODAL_ICON_SIZE
+    NONMODAL_ICON_SIZE = size
+
+
 def _confirm_panel_delete_if_orphans(model, panel_selection_paths, parent=None) -> bool:
     """Decide whether a Layers-panel delete should proceed (REFERENCE_GRAPH.md
     warn-then-orphan), mirroring ``menu._confirm_delete_if_orphans`` but on the
@@ -383,13 +404,23 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
     # eval context doesn't resolve (no theme thread), so the templated
     # string falls through to the default. Toolbar buttons are
     # recognised by their checked binding below; size their button +
-    # glyph to match the native toolbar (BUTTON_SIZE 32 / ICON 28).
+    # glyph to match the native toolbar (BUTTON_SIZE 32 / ICON 32), so
+    # the glyph fills the slot exactly as OCaml renders the toolbar
+    # pixbuf at the literal style.size (32px).
     checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
     is_tool_button = isinstance(checked_expr, str) and bool(checked_expr)
     if isinstance(raw_size, (int, float)):
         icon_size = int(raw_size)
     elif is_tool_button:
-        icon_size = 28
+        # Toolbar tool slot: render the glyph at the full 32px button
+        # size (the unresolved "{{theme.sizes.tool_button}}" == 32).
+        icon_size = 32
+    elif NONMODAL_ICON_SIZE is not None:
+        # Inside the non-modal tool-alternate flyout: the size-less
+        # flyout items pick up the flyout-scoped 28px default (mirrors
+        # OCaml's nonmodal_icon_size). Panels never set this, so their
+        # size-less icons stay at the 20px default below.
+        icon_size = NONMODAL_ICON_SIZE
     else:
         icon_size = 20
     pixmap = _workspace_icon_pixmap(icon_name, icon_size) if icon_name else None

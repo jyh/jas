@@ -12,6 +12,43 @@ private struct PickerEntry: Identifiable {
     let displayLabel: String
 }
 
+/// Resolve an icon_button glyph size (points) from its ``style`` map,
+/// the eval ``context``, and an optional flyout-scoped default.
+///
+/// Three scopes, matching the OCaml app:
+///   * TOOLBAR slots set ``style.size: "{{theme.sizes.tool_button}}"``;
+///     the ``{{...}}`` template resolves through ``context`` to the
+///     literal theme size (32). A bare numeric / "px"-suffixed string
+///     also resolves here (panel dialogs that hard-code a size).
+///   * FLYOUT (tool-alternates) items declare NO size; with
+///     ``flyoutDefault == 28`` (set only by the non-modal dialog body)
+///     they render at 28 — OCaml's ``nonmodal_icon_size := Some 28``.
+///   * PANEL icon_buttons declare no size and get no flyout default, so
+///     they fall through to the 20pt panel default — UNCHANGED.
+///
+/// An explicit ``style.size`` always wins over ``flyoutDefault``, so
+/// hard-coded sizes (and any future ``size:`` added to shared YAML)
+/// stay authoritative.
+func resolveIconButtonSize(
+    style: [String: Any], context: [String: Any], flyoutDefault: CGFloat?
+) -> CGFloat {
+    if let raw = style["size"] {
+        if let n = raw as? Double { return CGFloat(n) }
+        if let n = raw as? Int { return CGFloat(n) }
+        if let s = raw as? String {
+            // ``{{theme.sizes.tool_button}}`` and friends: resolve the
+            // template against the eval context (the toolbar context
+            // carries ``theme.sizes``), then parse the numeric result.
+            let resolved = s.contains("{{") ? evaluateText(s, context: context) : s
+            if let n = Double(
+                resolved.trimmingCharacters(in: CharacterSet(charactersIn: "px "))) {
+                return CGFloat(n)
+            }
+        }
+    }
+    return flyoutDefault ?? 20
+}
+
 /// Renders a YAML element tree as a SwiftUI view.
 struct YamlElementView: View {
     let element: [String: Any]
@@ -37,6 +74,14 @@ struct YamlElementView: View {
     /// Nil call sites (e.g. early init) fall back to the text-stub
     /// rendering of ``icon_button``.
     var theme: Theme? = nil
+    /// Flyout-scoped default icon size, in points. Set to 28 only by the
+    /// non-modal tool-alternates flyout (``YamlDialogView.dialogBody``
+    /// when ``!isModal``); nil everywhere else, so panel icon_buttons
+    /// keep their 20pt default. Mirrors OCaml's
+    /// ``Yaml_panel_view.nonmodal_icon_size := Some 28`` scoped around
+    /// the non-modal dialog render. Propagated to child
+    /// ``YamlElementView``s so nested flyout items inherit it.
+    var flyoutIconDefault: CGFloat? = nil
     /// Set by YAML dialogs to receive widget write-backs whose
     /// ``bind.value`` / ``bind.checked`` expression starts with
     /// ``dialog.``. Without it, dialog widgets are read-only — typing
@@ -402,21 +447,21 @@ struct YamlElementView: View {
             ) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         } else if layout == "row" {
             HStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         } else {
             VStack(spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
-                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                    YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
             }
         }
@@ -529,7 +574,8 @@ struct YamlElementView: View {
                 YamlElementView(
                     element: children[i], context: context, model: model,
                     panelId: panelId, onWidgetAction: onWidgetAction,
-                    theme: theme, onDialogWrite: onDialogWrite,
+                    theme: theme, flyoutIconDefault: flyoutIconDefault,
+                    onDialogWrite: onDialogWrite,
                     onStoreDialogOpened: onStoreDialogOpened,
                     onStoreDialogClosed: onStoreDialogClosed
                 )
@@ -550,7 +596,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
             }
         }
     }
@@ -732,20 +778,14 @@ struct YamlElementView: View {
         return evaluate(expr, context: context).toBool()
     }
 
-    /// Read ``style.size`` from the icon_button element (default 20pt).
-    /// Mirrors Rust's ``icon_size_px`` — used so dialogs / panels with
-    /// a small style.size declaration get a small icon rather than a
-    /// stretched one.
+    /// Resolve the icon_button glyph size for this element, honoring the
+    /// flyout-scoped default. Delegates to the free
+    /// ``resolveIconButtonSize`` so the three scopes (toolbar / flyout /
+    /// panel) share one resolution path and the logic is unit-testable.
     private func resolvedIconSize() -> CGFloat {
-        if let style = element["style"] as? [String: Any], let raw = style["size"] {
-            if let n = raw as? Double { return CGFloat(n) }
-            if let n = raw as? Int { return CGFloat(n) }
-            if let s = raw as? String,
-               let n = Double(s.trimmingCharacters(in: CharacterSet(charactersIn: "px "))) {
-                return CGFloat(n)
-            }
-        }
-        return 20
+        let style = element["style"] as? [String: Any] ?? [:]
+        return resolveIconButtonSize(
+            style: style, context: context, flyoutDefault: flyoutIconDefault)
     }
 
     /// Resolve the icon name from ``bind.icon`` (if present, as a
@@ -2254,7 +2294,7 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderPanel() -> some View {
         if let content = element["content"] as? [String: Any] {
-            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+            YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
         } else {
             renderPlaceholder()
         }
@@ -2663,7 +2703,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
         }
     }
 
@@ -2723,7 +2763,7 @@ struct YamlElementView: View {
             // Content
             VStack {
                 if let content = activeContent {
-                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                    YamlElementView(element: content, context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
                 }
                 Spacer()
             }
@@ -3853,6 +3893,11 @@ struct YamlPanelBodyView: View {
     /// Active theme — passed down to ``icon_button`` so it can tint
     /// `currentColor` SVG fills/strokes via ``WorkspaceIcon``.
     var theme: Theme? = nil
+    /// Flyout-scoped icon default (28) forwarded to the body's
+    /// ``YamlElementView``. Nil for panels (they keep the 20pt default);
+    /// the non-modal tool-alternates flyout sets it. See
+    /// ``YamlElementView/flyoutIconDefault``.
+    var flyoutIconDefault: CGFloat? = nil
     /// Dialog overlays supply this so dialog-bound widgets can write
     /// back to the SwiftUI dialog state. Panels leave it nil.
     var onDialogWrite: ((String, Any?) -> Void)? = nil
@@ -3871,6 +3916,7 @@ struct YamlPanelBodyView: View {
         YamlElementView(
             element: contentSpec, context: context, model: model,
             panelId: panelId, theme: theme,
+            flyoutIconDefault: flyoutIconDefault,
             onDialogWrite: onDialogWrite,
             onStoreDialogOpened: onStoreDialogOpened,
             onStoreDialogClosed: onStoreDialogClosed

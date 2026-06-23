@@ -17,7 +17,7 @@ arrow_alternates:
         icon: "partial_selection_arrow"
         label: "Partial Selection"
         summary: "Select individual anchor points and path segments"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -27,7 +27,7 @@ arrow_alternates:
         icon: "interior_selection_arrow"
         label: "Interior Selection"
         summary: "Select objects within groups without ungrouping"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -37,7 +37,7 @@ arrow_alternates:
         icon: "magic_wand"
         label: "Magic Wand"
         summary: "Select objects with similar appearance attributes"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -62,7 +62,7 @@ pen_alternates:
         icon: "pen"
         label: "Pen"
         summary: "Draw paths by clicking to place anchor points"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -72,7 +72,7 @@ pen_alternates:
         icon: "add_anchor"
         label: "Add Anchor Point"
         summary: "Add anchor points to an existing path"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -82,7 +82,7 @@ pen_alternates:
         icon: "delete_anchor"
         label: "Delete Anchor Point"
         summary: "Remove anchor points from a path"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -92,7 +92,7 @@ pen_alternates:
         icon: "anchor_point"
         label: "Anchor Point"
         summary: "Convert anchor points between smooth and corner"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -118,7 +118,7 @@ pencil_alternates:
         icon: "pencil"
         label: "Pencil"
         summary: "Draw freehand paths"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -128,7 +128,7 @@ pencil_alternates:
         icon: "paintbrush"
         label: "Paintbrush"
         summary: "Paint calligraphic and art-brush strokes along a freehand path"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -138,7 +138,7 @@ pencil_alternates:
         icon: "blob_brush"
         label: "Blob Brush"
         summary: "Paint filled blob shapes that merge with overlapping fills"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -148,7 +148,7 @@ pencil_alternates:
         icon: "path_eraser"
         label: "Path Eraser"
         summary: "Erase portions of paths"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -158,7 +158,7 @@ pencil_alternates:
         icon: "smooth"
         label: "Smooth"
         summary: "Smooth out rough path segments"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -181,7 +181,7 @@ text_alternates:
         icon: "type"
         label: "Type"
         summary: "Create and edit text"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -191,7 +191,7 @@ text_alternates:
         icon: "type_on_path"
         label: "Type on a Path"
         summary: "Place text along a path curve"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -215,7 +215,7 @@ shape_alternates:
         icon: "rect"
         label: "Rectangle"
         summary: "Draw rectangles and squares"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -225,7 +225,7 @@ shape_alternates:
         icon: "rounded_rect"
         label: "Rounded Rectangle"
         summary: "Draw rectangles with rounded corners"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -235,7 +235,7 @@ shape_alternates:
         icon: "ellipse"
         label: "Ellipse"
         summary: "Draw ellipses and circles"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -245,7 +245,7 @@ shape_alternates:
         icon: "polygon"
         label: "Polygon"
         summary: "Draw regular polygons"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -255,7 +255,7 @@ shape_alternates:
         icon: "star"
         label: "Star"
         summary: "Draw star shapes"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -282,7 +282,7 @@ hand_alternates:
         icon: "hand"
         label: "Hand"
         summary: "Pan the canvas by click-and-drag"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -292,7 +292,7 @@ hand_alternates:
         icon: "zoom"
         label: "Zoom"
         summary: "Zoom in by click, drag, or marquee"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -319,7 +319,7 @@ scale_alternates:
         icon: "scale"
         label: "Scale"
         summary: "Resize objects relative to a reference point"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
@@ -329,7 +329,7 @@ scale_alternates:
         icon: "shear"
         label: "Shear"
         summary: "Slant objects along a configurable axis"
-        style: { width: "100%", justify: start, gap: 8, padding: "4 8" }
+        style: { width: "100%", justify: start, gap: 8, padding: "4 8", size: 28 }
         behavior:
           - event: click
             effects:
