@@ -4,6 +4,7 @@ shortcuts:
   - { key: "Ctrl+O",       action: open_file }
   - { key: "Ctrl+S",       action: save }
   - { key: "Ctrl+Shift+S", action: save_as }
+  - { key: "Ctrl+P",       action: open_print_dialog }
   - { key: "Ctrl+Q",       action: quit }
   # Edit
   - { key: "Ctrl+Z",       action: undo }
@@ -28,18 +29,29 @@ shortcuts:
   - { key: "Ctrl+0",       action: fit_active_artboard }
   - { key: "Ctrl+Alt+0",   action: fit_all_artboards }
   - { key: "Ctrl+1",       action: zoom_to_actual_size }
-  # Tools
+  # Tools — `tool` is the bundle tool id (see workspace/tools/*.yaml); `type`
+  # is the native Type tool (NATIVE_BOUNDARY.md §6), not a YAML tool. These
+  # are the single authoritative source for tool keys; workspace/tools/*.yaml
+  # `shortcut:` fields are display hints that must agree with this table.
   - { key: "V",            action: select_tool,      params: { tool: selection } }
   - { key: "A",            action: select_tool,      params: { tool: partial_selection } }
   - { key: "P",            action: select_tool,      params: { tool: pen } }
-  - { key: "=",            action: select_tool,      params: { tool: add_anchor } }
-  - { key: "-",            action: select_tool,      params: { tool: delete_anchor } }
+  - { key: "C",            action: select_tool,      params: { tool: anchor_point } }
+  - { key: "=",            action: select_tool,      params: { tool: add_anchor_point } }
+  - { key: "-",            action: select_tool,      params: { tool: delete_anchor_point } }
   - { key: "T",            action: select_tool,      params: { tool: type } }
   - { key: "\\",           action: select_tool,      params: { tool: line } }
   - { key: "M",            action: select_tool,      params: { tool: rect } }
+  - { key: "L",            action: select_tool,      params: { tool: ellipse } }
   - { key: "N",            action: select_tool,      params: { tool: pencil } }
+  - { key: "B",            action: select_tool,      params: { tool: paintbrush } }
+  - { key: "Shift+B",      action: select_tool,      params: { tool: blob_brush } }
   - { key: "Shift+E",      action: select_tool,      params: { tool: path_eraser } }
   - { key: "Q",            action: select_tool,      params: { tool: lasso } }
+  - { key: "Y",            action: select_tool,      params: { tool: magic_wand } }
+  - { key: "S",            action: select_tool,      params: { tool: scale } }
+  - { key: "R",            action: select_tool,      params: { tool: rotate } }
+  - { key: "I",            action: select_tool,      params: { tool: eyedropper } }
   - { key: "Z",            action: select_tool,      params: { tool: zoom } }
   - { key: "H",            action: select_tool,      params: { tool: hand } }
   - { key: "Shift+O",      action: select_tool,      params: { tool: artboard } }

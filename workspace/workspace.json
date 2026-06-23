@@ -8876,6 +8876,10 @@
       "action": "save_as"
     },
     {
+      "key": "Ctrl+P",
+      "action": "open_print_dialog"
+    },
+    {
       "key": "Ctrl+Q",
       "action": "quit"
     },
@@ -8981,17 +8985,24 @@
       }
     },
     {
+      "key": "C",
+      "action": "select_tool",
+      "params": {
+        "tool": "anchor_point"
+      }
+    },
+    {
       "key": "=",
       "action": "select_tool",
       "params": {
-        "tool": "add_anchor"
+        "tool": "add_anchor_point"
       }
     },
     {
       "key": "-",
       "action": "select_tool",
       "params": {
-        "tool": "delete_anchor"
+        "tool": "delete_anchor_point"
       }
     },
     {
@@ -9016,10 +9027,31 @@
       }
     },
     {
+      "key": "L",
+      "action": "select_tool",
+      "params": {
+        "tool": "ellipse"
+      }
+    },
+    {
       "key": "N",
       "action": "select_tool",
       "params": {
         "tool": "pencil"
+      }
+    },
+    {
+      "key": "B",
+      "action": "select_tool",
+      "params": {
+        "tool": "paintbrush"
+      }
+    },
+    {
+      "key": "Shift+B",
+      "action": "select_tool",
+      "params": {
+        "tool": "blob_brush"
       }
     },
     {
@@ -9034,6 +9066,34 @@
       "action": "select_tool",
       "params": {
         "tool": "lasso"
+      }
+    },
+    {
+      "key": "Y",
+      "action": "select_tool",
+      "params": {
+        "tool": "magic_wand"
+      }
+    },
+    {
+      "key": "S",
+      "action": "select_tool",
+      "params": {
+        "tool": "scale"
+      }
+    },
+    {
+      "key": "R",
+      "action": "select_tool",
+      "params": {
+        "tool": "rotate"
+      }
+    },
+    {
+      "key": "I",
+      "action": "select_tool",
+      "params": {
+        "tool": "eyedropper"
       }
     },
     {
@@ -22569,7 +22629,7 @@
       "id": "path_eraser",
       "cursor": "crosshair",
       "menu_label": "Path Eraser Tool",
-      "shortcut": "E",
+      "shortcut": "Shift+E",
       "state": {
         "erasing": {
           "default": false
@@ -23555,7 +23615,6 @@
       "id": "rounded_rect",
       "cursor": "crosshair",
       "menu_label": "Rounded Rectangle Tool",
-      "shortcut": "E",
       "state": {
         "mode": {
           "default": "idle",

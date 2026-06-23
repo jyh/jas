@@ -14,7 +14,9 @@
 id: rounded_rect
 cursor: crosshair
 menu_label: "Rounded Rectangle Tool"
-shortcut: "E"
+# No dedicated keyboard shortcut: rounded_rect is a variant of the rectangle
+# tool group (M), not a top-level keyed tool. (The former bare-"E" hint was
+# erroneous and collided with path_eraser; path_eraser owns Shift+E.)
 
 state:
   mode:
