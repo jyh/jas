@@ -83,6 +83,20 @@ val toolbar_rerender_hook : (unit -> unit) ref
     to avoid a renderer ↔ dock cycle. *)
 val theme_text_hook : (unit -> string) ref
 
+(** Background color for the toolbar long-press tool-alternates flyout,
+    so its #cccccc-tinted icons pop bright on a dark popup rather than
+    reading gray on GTK's default light popup background. Wired in
+    main.ml against [Dock_panel.theme_bg_dark] to avoid a renderer ↔
+    dock cycle. *)
+val dialog_bg_hook : (unit -> string) ref
+
+(** Override for [render_button]'s ``icon_button`` size default (normally
+    20px). Set to [Some n] by [Yaml_dialog_view.show_nonmodal_dialog]
+    only while it renders the tool-alternates flyout, so the flyout's
+    size-less items render larger (close to the toolbar), and reset to
+    [None] right after so panels / modal dialogs keep the 20px default. *)
+val nonmodal_icon_size : int option ref
+
 (* ── Panel-body registry & targeted updates ──────────────────────── *)
 
 (** Register a fast in-place re-render function for a panel kind, used
