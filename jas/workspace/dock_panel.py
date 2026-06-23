@@ -963,10 +963,30 @@ class DockPanelWidget(QWidget):
                              ctx=dialog_ctx,
                              parent=self,
                              anchor=anchor)
-        dlg.exec()
-        # Clean up dialog state if still open
-        if self._state_store and self._state_store.get_dialog_id():
-            self._state_store.close_dialog()
+        if getattr(dlg, "_is_modal", True):
+            dlg.exec()
+            # Clean up dialog state if still open
+            if self._state_store and self._state_store.get_dialog_id():
+                self._state_store.close_dialog()
+        else:
+            # Non-modal flyout (Qt.Popup — the tool-alternates popup):
+            # show() it NON-blocking so Qt's popup grab dismisses it on an
+            # outside click. exec() runs it MODALLY and captures the
+            # outside click, so the popup never closed (the reported bug).
+            # Keep a Python reference so it isn't GC'd while shown, and
+            # clear the store's dialog id when it closes (outside click OR
+            # item pick) so re-opening the same flyout works.
+            self._flyout_dlg = dlg
+
+            def _on_flyout_closed(_result, _dlg=dlg):
+                if self._state_store and self._state_store.get_dialog_id():
+                    self._state_store.close_dialog()
+                if getattr(self, "_flyout_dlg", None) is _dlg:
+                    self._flyout_dlg = None
+
+            dlg.finished.connect(_on_flyout_closed)
+            dlg.show()
+            dlg.raise_()
 
     def _toggle_dock(self, dock_id):
         self._layout_data.toggle_dock_collapsed(dock_id)
