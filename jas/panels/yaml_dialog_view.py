@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt
 from workspace_interpreter.state_store import StateStore
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.loader import load_workspace
-from panels.yaml_renderer import render_element
+from panels.yaml_renderer import render_element, set_nonmodal_icon_size
 
 
 class YamlDialogView(QDialog):
@@ -107,11 +107,25 @@ class YamlDialogView(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Render content
+        # Render content. For the NON-MODAL tool-alternate flyout
+        # (modal: false), bracket the render with the flyout-scoped icon
+        # size (28px): its size-less ``icon_button`` items then render
+        # their glyphs at 28px instead of the 20px panel default,
+        # matching OCaml's ``nonmodal_icon_size := Some 28`` around
+        # show_nonmodal_dialog. The size is restored to None in a finally
+        # so panels (also size-less icon_buttons) keep their 20px default
+        # even if render raises. Modal dialogs are untouched.
         content = self._dialog_def.get("content")
         content_widget = None
         if isinstance(content, dict):
-            widget = render_element(content, store, eval_ctx, self._dispatch_dialog_action)
+            if not self._is_modal:
+                set_nonmodal_icon_size(28)
+            try:
+                widget = render_element(
+                    content, store, eval_ctx, self._dispatch_dialog_action)
+            finally:
+                if not self._is_modal:
+                    set_nonmodal_icon_size(None)
             if widget:
                 content_widget = widget
                 layout.addWidget(widget)

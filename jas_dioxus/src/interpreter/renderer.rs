@@ -4884,7 +4884,57 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
             } else { 32.0 }
         })
         .unwrap_or(32.0);
-    let svg_px = (icon_size_px * 0.75).round() as i64;
+    // Tool buttons (toolbar slots + long-press flyout items) render the
+    // glyph at the FULL literal style.size — toolbar 32, flyout 28 —
+    // matching OCaml (toolbar honors the literal tool_button size; the
+    // flyout uses its scoped 28 default). Every other icon_button (panel
+    // op_* buttons, dialog toggles) keeps the 0.75 reduction so panel
+    // icons stay at their smaller default. Detection is by behavior, not
+    // panel_kind:
+    //   • Toolbar slot — `action: select_tool` (every layout.yaml slot).
+    //   • Flyout item  — a `set: { active_tool: ... }` effect AND a
+    //     `close_dialog` effect (every tool_alternates.yaml item). The
+    //     close_dialog clause excludes the color picker's `cp_eyedropper`
+    //     button, which also sets active_tool but is a dialog control
+    //     (it uses `action: dismiss_dialog`, no close_dialog effect) and
+    //     must keep its 0.75-reduced size.
+    let is_tool_button = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|behaviors| {
+            behaviors.iter().any(|b| {
+                // Toolbar slot: `action: select_tool`.
+                let is_select_tool_action = b
+                    .get("action")
+                    .and_then(|a| a.as_str())
+                    .map(|a| a == "select_tool")
+                    .unwrap_or(false);
+                // Flyout item: effects that BOTH set active_tool and
+                // close the dialog.
+                let (sets_active_tool, closes_dialog) = b
+                    .get("effects")
+                    .and_then(|e| e.as_array())
+                    .map(|effects| {
+                        let sets = effects.iter().any(|eff| {
+                            eff.get("set")
+                                .and_then(|s| s.get("active_tool"))
+                                .is_some()
+                        });
+                        let closes = effects
+                            .iter()
+                            .any(|eff| eff.get("close_dialog").is_some());
+                        (sets, closes)
+                    })
+                    .unwrap_or((false, false));
+                is_select_tool_action || (sets_active_tool && closes_dialog)
+            })
+        })
+        .unwrap_or(false);
+    let svg_px = if is_tool_button {
+        icon_size_px.round() as i64
+    } else {
+        (icon_size_px * 0.75).round() as i64
+    };
     // Look up icon from ctx first, then fall back to cached workspace
     let ws_for_icons = super::workspace::Workspace::load();
     let icon_svg = if !icon_name.is_empty() {

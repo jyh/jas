@@ -414,6 +414,14 @@ struct YamlDialogOverlay: View {
                 model: model,
                 onWidgetAction: handleDialogWidgetAction,
                 theme: theme,
+                // Non-modal dialogs are the toolbar tool-alternates
+                // flyouts: their icon_button items declare no size, so
+                // give them a 28pt flyout-scoped default (panel icons
+                // keep 20, toolbar slots resolve their own 32). Mirrors
+                // OCaml's nonmodal_icon_size := Some 28. Modal dialogs
+                // (color picker, tool options, print, ...) pass nil and
+                // keep the existing per-widget sizing.
+                flyoutIconDefault: isModal(ds) ? nil : 28,
                 onDialogWrite: handleDialogStateWrite,
                 onStoreDialogClosed: { dialogState = nil }
             )
