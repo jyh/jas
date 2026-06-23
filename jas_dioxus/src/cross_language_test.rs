@@ -735,8 +735,17 @@ mod tests {
     // ===============================================================
 
     /// The list of gesture fixture files under `test_fixtures/gestures/`.
-    /// Inc-1 is just the rectangle-draw gesture.
-    const GESTURE_FIXTURES: &[&str] = &["draw_rect.json"];
+    /// Inc-1 seeded the rectangle-draw gesture; inc-2 adds the remaining
+    /// press-drag-release draw tools (line / ellipse / rounded_rect /
+    /// polygon / star).
+    const GESTURE_FIXTURES: &[&str] = &[
+        "draw_rect.json",
+        "draw_line.json",
+        "draw_ellipse.json",
+        "draw_rounded_rect.json",
+        "draw_polygon.json",
+        "draw_star.json",
+    ];
 
     /// Build the YamlTool for `tool_id` from the embedded workspace
     /// bundle (`Workspace::load()`), the same path the running app
