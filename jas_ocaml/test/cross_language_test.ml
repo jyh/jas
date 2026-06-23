@@ -342,6 +342,107 @@ let run_gesture_fixture (fixture_name : string) =
     end
   ) tests
 
+(* ------------------------------------------------------------------ *)
+(* ACTION equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b /
+   TESTING_STRATEGY.md section 5 rec 2). Sibling to the GESTURE and
+   OPERATION corpora. Where the gesture corpus drives the CanvasTool seam
+   (press / move / release) and the operation corpus drives Op_apply.op_apply,
+   this corpus drives the ACTION seam: the panel/menu/dialog `action` verbs
+   the UI dispatches, which RESOLVE to ops/effects.
+
+   Production seam: [Panel_menu.dispatch_yaml_action action_name model] — the
+   generic action dispatcher the live UI calls for every layers-panel menu
+   item and panel button (panel_dispatch routes
+   "toggle_all_layers_visibility" et al. through it). It looks up the action
+   spec's [effects] in the embedded workspace bundle and runs them through the
+   shared [Effects.run_effects] pipeline, naming the owning transaction with
+   the action verb. We drive THAT path, not a test-only shortcut, so passing
+   here proves the real production route. Mirrors the Rust [run_action_model]
+   over [dispatch_action].
+
+   Fixture format (test_fixtures/actions/<name>.json) — a JSON array of cases:
+     {
+       "name":        "<case id>",
+       "setup_svg":   "<file under test_fixtures/svg/>",
+       "actions":     [ {"action": "<action_id>",
+                         "params": { <resolved literals> }}, ... ],
+       "expected_json": "<file under test_fixtures/actions/>"
+     }
+   Each entry in [actions] is dispatched in order through the production
+   [dispatch_yaml_action]; the FINAL document is serialized with
+   [document_to_test_json] and compared to the pinned golden — identical to the
+   gesture corpus's assertion shape.
+
+   SELECTION SETUP: an action that operates on the selection expresses it as a
+   LEADING select_* action in the same [actions] list — a verb the UI itself
+   dispatches — so setup stays on the production dispatch path and inside the
+   journaled-state model (selection is serialized Document state, OP_LOG.md
+   section 7). The seeded case (toggle_all_layers_visibility) needs NO selection
+   (it folds over all top-level layers), so its actions list is one verb with
+   empty params.
+
+   TRANSACTION BRACKETING: actions self-bracket. A document-mutating action
+   opens its undo transaction via the [snapshot] effect and [Effects.run_effects]
+   commits it once at the end (naming it with the action verb). So — exactly
+   like the gesture runner, and UNLIKE the operation runner which OWNS the
+   bracket — the action runner does NOT wrap dispatch in begin_txn/commit_txn. *)
+(* ------------------------------------------------------------------ *)
+
+(* The list of action fixture files under [test_fixtures/actions/]. Inc-2
+   (foundation) seeds the simplest faithful document-affecting action: the
+   layers-panel "toggle all layers visibility" verb (no params, no selection),
+   which the running app drives through this same [dispatch_yaml_action] path.
+   Mirrors the Rust [ACTION_FIXTURES]. *)
+let action_fixtures = [
+  "toggle_all_layers_visibility.json";
+]
+
+(* Run one action case and return the resulting Model. Loads [setup_svg] into a
+   Model under the default identity view (selected_layer 0, empty selection),
+   then dispatches each [actions[i]] through the REAL [dispatch_yaml_action]
+   with the case's resolved params. Mirrors the Rust [run_action_model] (which
+   returns the whole AppState so future state-dependent cases can reach it; the
+   OCaml Model carries the document + selection the document-equivalence golden
+   pins). *)
+let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
+  let open Yojson.Safe.Util in
+  let setup_svg_file = tc |> member "setup_svg" |> to_string in
+  let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+  let doc = Jas.Svg.svg_to_document svg in
+  let model = Jas.Model.create ~document:doc () in
+  List.iter (fun step ->
+    let action = step |> member "action" |> to_string in
+    (* Params are an object of resolved literals; default to empty. The
+       dispatcher takes them as a [(string * Yojson.Safe.t) list]. *)
+    let params = match step |> member "params" with
+      | `Assoc pairs -> pairs
+      | _ -> []
+    in
+    Jas.Panel_menu.dispatch_yaml_action ~params action model
+  ) (tc |> member "actions" |> to_list);
+  model
+
+(* Load an action fixture, replay each case through the ACTION seam, and
+   byte-compare the canonical document JSON to the pinned golden, dumping
+   EXPECTED/ACTUAL on mismatch. Mirrors the Rust [assert_action_test] /
+   [action_corpus]. *)
+let run_action_fixture (fixture_name : string) =
+  let json_str = read_fixture (Printf.sprintf "actions/%s" fixture_name) in
+  let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+  List.iter (fun tc ->
+    let open Yojson.Safe.Util in
+    let name = tc |> member "name" |> to_string in
+    let expected_file = tc |> member "expected_json" |> to_string in
+    let expected = read_fixture (Printf.sprintf "actions/%s" expected_file) in
+    let model = run_action_model tc in
+    let actual = Jas.Test_json.document_to_test_json model#document in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+      Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+      assert false
+    end
+  ) tests
+
 (* Canonical JSON of the Transaction journal (OP_LOG.md section 10 item 4):
    pins the reserved causal/merge metadata + each op's verb and targets across
    apps. Fixed key order + deterministic txn-N ids make it byte-shareable.
@@ -2315,6 +2416,18 @@ let () =
       Alcotest.test_case "draw_star gesture" `Quick (fun () ->
         run_gesture_fixture "draw_star.json");
     ];
+
+    (* Action equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b):
+       drives the ACTION seam (panel/menu `action` verbs through
+       Panel_menu.dispatch_yaml_action -> Effects.run_effects) and byte-matches
+       the Rust-authored golden. Inc-2 is the layers-panel
+       toggle_all_layers_visibility verb (no params, no selection). Mirrors the
+       Rust [action_corpus]. *)
+    "Action",
+    List.map (fun fixture ->
+      Alcotest.test_case (Printf.sprintf "%s action" fixture) `Quick (fun () ->
+        run_action_fixture fixture))
+      action_fixtures;
 
     "Operation", [
       Alcotest.test_case "select_and_move operations" `Quick (fun () ->

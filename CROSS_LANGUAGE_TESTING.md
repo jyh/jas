@@ -454,6 +454,63 @@ Gesture format:
 }
 ```
 
+### 3b. Action equivalence
+
+Dispatching the same panel/menu/dialog **action** verbs in each
+language produces the same result. Where operation equivalence drives
+the `op_apply` seam and gesture equivalence drives the `CanvasTool`
+seam, action equivalence drives the **action dispatcher** — the
+generic seam the UI calls for every menu item, panel button, and
+dialog confirm (Rust `dispatch_action(action, params, &mut AppState)`
+→ the action's `effects`). Actions RESOLVE to ops/effects, so this is
+the highest-level seam: it covers the route a user click actually
+travels.
+
+```
+            action(s)        to_test_json
+   Doc ──────────────> Doc_A' ──────────────> JSON_A'
+    |                                            ||
+    |  action(s)        to_test_json             ||
+    +──────────────> Doc_B' ──────────────> JSON_B'
+
+   Assert: JSON_A' = JSON_B'
+```
+
+Each implementation loads the setup document into app state, then
+dispatches each `actions[i]` (with its resolved `params`) through the
+production action dispatcher, and emits canonical JSON of the
+resulting document.
+
+Conventions:
+- **Resolved params.** Each action's `params` are an object of already
+  -resolved literals (the values the UI would have resolved from the
+  dialog/widget state), mirroring the production-route transform
+  tests.
+- **Selection setup via a leading action.** An action that operates on
+  the selection (e.g. a transform confirm) expresses its selection as a
+  leading `select_*` action in the same `actions` list — a verb the UI
+  itself dispatches — so the whole setup stays on the production
+  dispatch path and inside the journaled-state model (selection is
+  serialized Document state). An action that folds over all elements
+  (e.g. `toggle_all_layers_visibility`) needs no selection setup.
+- **Self-bracketing.** A document-mutating action opens its undo
+  transaction via the `snapshot` effect and the action runner commits
+  it once at the end (naming it with the action verb), so — like the
+  gesture runner, unlike the operation runner — the action runner does
+  NOT wrap dispatch in an outer transaction.
+
+Action format:
+```json
+{
+  "name": "toggle_all_layers_visibility",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+    {"action": "toggle_all_layers_visibility", "params": {}}
+  ],
+  "expected_json": "toggle_all_layers_visibility_expected.json"
+}
+```
+
 ### 4. Algorithm test vectors
 
 Pure functions tested with shared input/output pairs.
@@ -514,6 +571,10 @@ test_fixtures/
   gestures/
     draw_rect.json          (pointer-event sequence + setup + tool)
     draw_rect_expected.json (canonical JSON after replaying the gesture)
+    ...
+  actions/
+    toggle_all_layers_visibility.json          (action verb(s) + params + setup)
+    toggle_all_layers_visibility_expected.json (canonical JSON after dispatch)
     ...
   algorithms/
     hit_test.json
