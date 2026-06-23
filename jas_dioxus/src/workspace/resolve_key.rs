@@ -19,11 +19,6 @@
 //! chords). Resolution is therefore a first-match lookup — the list order is
 //! a deterministic tie-break that the present table never exercises.
 
-// The whole module is the pure resolver; it is exercised today by the
-// key-resolution corpus and gets wired into each app's live keyboard path in
-// Phase 2 of §5 rec 3. Allow dead_code module-wide until that wiring lands.
-#![allow(dead_code)]
-
 use serde_json::{Map, Value};
 
 /// A normalized, framework-neutral key chord. `key` is the canonical token:

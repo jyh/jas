@@ -439,96 +439,14 @@ pub(crate) fn make_keydown_handler(
                     );
                 }));
             }
-            // --- Tool shortcuts (bare keys, no modifier) ---
-            Key::Character(ref c) if c == "v" || c == "V" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Selection);
-                }));
-            }
-            Key::Character(ref c) if c == "a" || c == "A" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::PartialSelection);
-                }));
-            }
-            Key::Character(ref c) if c == "p" || c == "P" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Pen);
-                }));
-            }
-            Key::Character(ref c) if c == "=" || c == "+" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::AddAnchorPoint);
-                }));
-            }
-            Key::Character(ref c) if c == "-" || c == "_" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::DeleteAnchorPoint);
-                }));
-            }
-            Key::Character(ref c) if c == "C" => {
-                // Shift+C for Anchor Point tool
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::AnchorPoint);
-                }));
-            }
-            Key::Character(ref c) if c == "n" || c == "N" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Pencil);
-                }));
-            }
-            Key::Character(ref c) if c == "E" => {
-                // Shift+E for Path Eraser tool
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::PathEraser);
-                }));
-            }
-            Key::Character(ref c) if c == "t" || c == "T" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Type);
-                }));
-            }
-            // Per line.yaml shortcut "\\" and ellipse.yaml shortcut "L".
-            // Backslash → Line; bare "l"/"L" → Ellipse.
-            Key::Character(ref c) if c == "\\" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Line);
-                }));
-            }
-            Key::Character(ref c) if c == "l" || c == "L" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Ellipse);
-                }));
-            }
-            Key::Character(ref c) if c == "m" || c == "M" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Rect);
-                }));
-            }
-            Key::Character(ref c) if c == "h" || c == "H" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Hand);
-                }));
-            }
-            Key::Character(ref c) if c == "z" || c == "Z" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Zoom);
-                }));
-            }
-            // Lasso — Q per workspace/tools/lasso.yaml.
-            Key::Character(ref c) if c == "q" || c == "Q" => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Lasso);
-                }));
-            }
-            // Artboard tool — Shift+O per workspace/tools/artboard.yaml.
-            // The "O" comes through capital with Shift held on most
-            // layouts (US / UK), so guard on Shift to avoid stealing
-            // a future plain "o" shortcut.
-            Key::Character(ref c) if (c == "o" || c == "O") && mods.shift() && !cmd => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    st.set_tool(ToolKind::Artboard);
-                }));
-            }
+            // --- Tool shortcuts ---
+            // The hardcoded per-tool arms were replaced by a single
+            // bundle-driven fallback at the end of this match (§5 rec 3):
+            // it normalizes the character + modifiers into a KeyChord and
+            // resolves it against the shared `shortcuts` table via
+            // `resolve_key`. Placing it at the END keeps the special-character
+            // arms above (Space, d/x/X) ahead of it. See the `Key::Character
+            // (ref c) if !cmd` arm below.
             // --- Spacebar pass-through to Hand (HAND_TOOL.md
             // §Spacebar pass-through) ---
             // On Space-down, if Hand isn't already active, save the
@@ -630,6 +548,36 @@ pub(crate) fn make_keydown_handler(
                         &params,
                         &live_state,
                     );
+                }
+            }
+            // --- Tool shortcuts (bundle-driven, §5 rec 3) ---
+            // Any bare/Shift character key not consumed by a special arm
+            // above is normalized into a KeyChord and resolved against the
+            // shared bundle `shortcuts` table. The `!cmd` guard leaves
+            // Ctrl/Meta menu chords to their own arms; only `select_tool`
+            // results are acted on (menu/fill verbs are handled above), and
+            // the resolved tool id is dispatched through the same
+            // `select_tool` action the toolbar uses — so a single table now
+            // drives both the toolbar and the keyboard.
+            Key::Character(ref c) if !cmd => {
+                let chord = crate::workspace::resolve_key::KeyChord::new(
+                    c,
+                    false,
+                    mods.shift(),
+                    mods.alt(),
+                    false,
+                );
+                if let Some(resolved) = crate::workspace::resolve_key::resolve_key(&chord) {
+                    if resolved.action == "select_tool" {
+                        let params = resolved.params.clone();
+                        (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            crate::interpreter::renderer::dispatch_action(
+                                "select_tool",
+                                &params,
+                                st,
+                            );
+                        }));
+                    }
                 }
             }
             _ => {}
