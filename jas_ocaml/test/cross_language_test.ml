@@ -2415,6 +2415,11 @@ let () =
         run_gesture_fixture "draw_polygon.json");
       Alcotest.test_case "draw_star gesture" `Quick (fun () ->
         run_gesture_fixture "draw_star.json");
+      (* Selection-family (§5 rec 4): click-select drives the selection
+         tool's doc-space hit_test (which element is under the point) — the
+         cross-app hit-test parity gate. Click center of rect0 -> path [0,0]. *)
+      Alcotest.test_case "select_click gesture" `Quick (fun () ->
+        run_gesture_fixture "select_click.json");
     ];
 
     (* Action equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b):

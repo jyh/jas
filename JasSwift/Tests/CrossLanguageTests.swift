@@ -2120,6 +2120,10 @@ private let gestureFixtures = [
     "draw_rounded_rect.json",
     "draw_polygon.json",
     "draw_star.json",
+    // Selection-family (§5 rec 4): click-select drives the selection tool's
+    // doc-space hit_test (which element is under the point) — the cross-app
+    // hit-test parity gate. Click center of rect0 -> path [0,0].
+    "select_click.json",
 ]
 
 /// Build a minimal ToolContext for replaying gestures: a YamlTool reads only
