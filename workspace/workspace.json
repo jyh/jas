@@ -8995,14 +8995,14 @@
       "key": "=",
       "action": "select_tool",
       "params": {
-        "tool": "add_anchor_point"
+        "tool": "add_anchor"
       }
     },
     {
       "key": "-",
       "action": "select_tool",
       "params": {
-        "tool": "delete_anchor_point"
+        "tool": "delete_anchor"
       }
     },
     {
