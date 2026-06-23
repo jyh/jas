@@ -200,6 +200,27 @@ public class Model: ObservableObject {
     /// not view state.
     public var onActiveToolChange: ((String) -> Void)?
     @Published public var panelStateVersion: Int = 0
+    /// A keyboard-initiated tool-selection request (a shortcut, or the
+    /// Space→Hand pass-through). Unlike a YAML store write (whose toolbar
+    /// re-render goes through stateStore.get + panelStateVersion) or an
+    /// AppKit @Binding write from the canvas responder, this is a RELIABLE
+    /// @Published channel the toolbar view observes via `.onChange` to set
+    /// its `currentTool` @State — a @Published mutation always re-renders
+    /// the @ObservedObject view and re-checks `.onChange`. `currentTool`
+    /// then drives both the canvas (updateNSView) and the grid
+    /// (buildToolbarContext). `seq` increments per request so re-requesting
+    /// the SAME tool id still fires `.onChange`.
+    public struct ToolRequest: Equatable {
+        public let id: String
+        public let seq: Int
+    }
+    @Published public var toolRequest: ToolRequest? = nil
+    private var toolRequestSeq: Int = 0
+    /// Request a tool by its active_tool routing id from a keyboard path.
+    public func requestTool(_ id: String) {
+        toolRequestSeq += 1
+        toolRequest = ToolRequest(id: id, seq: toolRequestSeq)
+    }
     /// Stack of isolated container paths for the Layers panel. Each entry
     /// is a top-level path [Int]. Written by enter/exit_isolation_mode
     /// actions via YAML dispatch (see LayersPanel.dispatchYamlAction).

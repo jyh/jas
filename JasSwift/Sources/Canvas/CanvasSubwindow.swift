@@ -2999,24 +2999,23 @@ class CanvasNSView: NSView {
     }
 
     /// Switch the active tool from a keyboard-initiated change (shortcut,
-    /// Space→Hand pass-through) so BOTH the live canvas tool and the
-    /// bundle toolbar follow. Two proven mechanisms, because an AppKit
-    /// @Binding write alone does not reliably re-render the sibling
-    /// toolbar pane, and a store write alone does not reliably re-activate
-    /// the canvas tool for every path:
-    ///   1. `onToolChange` drives ContentView's currentTool @Binding —
-    ///      this reliably switches the live canvas tool (behavior +
-    ///      cursor), the path keyboard tool selection always used.
-    ///   2. write active_tool + bump panelStateVersion — the toolbar grid
-    ///      reads currentTool via buildToolbarContext (which #1 just set);
-    ///      the bump forces it to re-render so the slot glyph + highlight
-    ///      follow. (The store mirror also keeps active_tool-derived
-    ///      consumers consistent.)
+    /// Space→Hand pass-through) so BOTH the live canvas tool and the bundle
+    /// toolbar follow. Routes through the model's RELIABLE @Published
+    /// `requestTool` channel: the toolbar view's `.onChange(of:
+    /// model.toolRequest)` sets ContentView's currentTool @State (which
+    /// drives the canvas via updateNSView AND the grid glyph/highlight via
+    /// buildToolbarContext). A @Published mutation always re-renders the
+    /// @ObservedObject toolbar and re-checks the .onChange — unlike an
+    /// AppKit @Binding write from this canvas responder (which does not
+    /// reliably re-render the sibling toolbar) or a bare store write (whose
+    /// get/panelStateVersion re-check proved flaky for the Space path).
+    /// Falls back to the canvas @Binding onToolChange only when no document
+    /// model is present.
     private func selectToolByYamlId(_ toolStr: String, fallback: Tool) {
-        onToolChange?(fallback)
         if let model = controller?.model {
-            model.stateStore.set("active_tool", toolStr)
-            model.panelStateVersion &+= 1
+            model.requestTool(toolStr)
+        } else {
+            onToolChange?(fallback)
         }
     }
 
