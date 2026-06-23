@@ -2900,7 +2900,30 @@ class CanvasNSView: NSView {
                        resolved.action == "select_tool",
                        let toolStr = resolved.params["tool"],
                        let tool = toolFromYamlString(toolStr) {
-                        onToolChange?(tool)
+                        // Route through the model's active-tool mirror — the
+                        // SAME path the tool-alternates flyout uses (installed
+                        // on the toolbar view in .onAppear). It sets
+                        // ContentView's `currentTool` @State in the toolbar's
+                        // own reactive scope, so the bundle-driven grid
+                        // re-highlights the slot (and re-evaluates the
+                        // active-alternate slot icon); the @State change also
+                        // activates the tool on the canvas via updateNSView.
+                        // The canvas's own `onToolChange` (a @Binding written
+                        // from this AppKit handler) reliably switches the
+                        // canvas tool but does NOT re-render the sibling
+                        // toolbar pane, so it is only the fallback when no
+                        // document mirror is installed. The explicit store
+                        // write mirrors the toolbar-click path (onWidgetAction)
+                        // and bumps the grid's observed state so bind.checked
+                        // re-evaluates even if the @State→onChange mirror is
+                        // coalesced.
+                        if let model = controller?.model,
+                           let mirror = model.onActiveToolChange {
+                            mirror(toolStr)
+                            model.stateStore.set("active_tool", toolStr)
+                        } else {
+                            onToolChange?(tool)
+                        }
                         return
                     }
                 }
