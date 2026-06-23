@@ -2783,7 +2783,6 @@ class CanvasNSView: NSView {
             }
         default:
             switch chars {
-            case "E": onToolChange?(.pathEraser)
             case "d", "D":
                 // Reset fill/stroke defaults
                 if let model = controller?.model {
@@ -2857,31 +2856,55 @@ class CanvasNSView: NSView {
                         break
                     }
                 }
-                switch chars.lowercased() {
-                case "v": onToolChange?(.selection)
-                case "a": onToolChange?(.partialSelection)
-                case "p": onToolChange?(.pen)
-                case "t": onToolChange?(.typeTool)
-                case "\\": onToolChange?(.line)
-                case "l": onToolChange?(.ellipse)
-                case "m": onToolChange?(.rect)
-                case "q": onToolChange?(.lasso)
-                case "h": onToolChange?(.hand)
-                case "z": onToolChange?(.zoom)
-                case "=", "+": onToolChange?(.addAnchorPoint)
-                case "-", "_": onToolChange?(.deleteAnchorPoint)
-                case " ":
-                    // Spacebar pass-through to Hand. Save the
-                    // current tool to priorToolForSpacebar and
-                    // switch to Hand. Per HAND_TOOL.md §Spacebar
-                    // pass-through. The matching keyup is in
-                    // keyUp(with:).
+                // Spacebar pass-through to Hand. Save the current tool
+                // to priorToolForSpacebar and switch to Hand. Per
+                // HAND_TOOL.md §Spacebar pass-through. The matching
+                // keyup is in keyUp(with:). Handled here (ahead of the
+                // bundle resolver) so Space keeps its modal precedence;
+                // " " has no shortcuts.yaml entry anyway.
+                if chars == " " {
                     if currentTool != .hand && priorToolForSpacebar == nil {
                         priorToolForSpacebar = currentTool
                         onToolChange?(.hand)
                     }
-                default: super.keyDown(with: event)
+                    return
                 }
+                // Tool selection is driven by the shared bundle
+                // `shortcuts` table (TESTING_STRATEGY.md §5 rec 3,
+                // Phase 2b): the per-key tool switch was deleted and
+                // replaced by this single fallback. Normalize the
+                // event into a KeyChord (single ASCII letter uppercased
+                // by KeyChord.init; shift carried separately; Cmd/Ctrl
+                // EXCLUDED because those are framework-native menu
+                // accelerators handled by NSMenuItem.keyboardShortcut)
+                // and resolve it via the same `resolveKeyChord` the
+                // cross-language corpus uses. Only `select_tool`
+                // results are acted on — menu / fill verbs are handled
+                // by the dedicated arms above — and the resolved tool
+                // id is dispatched through `onToolChange`, the SAME
+                // sink the toolbar's select_tool drives (it sets
+                // `currentTool`, whose .onChange mirrors `active_tool`
+                // into the store). `charactersIgnoringModifiers`
+                // yields the shift-folded glyph (e.g. "B" for Shift+B,
+                // "O" for Shift+O), which KeyChord.init uppercases so
+                // the shift flag, not case, distinguishes the chord.
+                if !hasCmd && !event.modifierFlags.contains(.control) {
+                    let chord = KeyChord(
+                        key: chars,
+                        ctrl: false,
+                        shift: hasShift,
+                        alt: event.modifierFlags.contains(.option),
+                        meta: false
+                    )
+                    if let resolved = resolveKeyChord(chord),
+                       resolved.action == "select_tool",
+                       let toolStr = resolved.params["tool"],
+                       let tool = toolFromYamlString(toolStr) {
+                        onToolChange?(tool)
+                        return
+                    }
+                }
+                super.keyDown(with: event)
             }
         }
     }
