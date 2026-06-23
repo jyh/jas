@@ -848,6 +848,15 @@ private struct BundleToolbarPaneBody: View {
         // flyout path that mutates the store.
         _ = model.panelStateVersion
         let capturedModel = model
+        // The store's active_tool is written by EVERY tool-selection path
+        // (toolbar click, alternates flyout, keyboard shortcut). Mirror it
+        // into `currentTool` via the reliable `.onChange` below so the grid
+        // highlight + active-alternate icon follow ALL paths — not just a
+        // direct primary-slot click. (The former model.onActiveToolChange
+        // mirror was installed once in .onAppear and captured a stale
+        // currentTool binding, so flyout / keyboard selections updated the
+        // store but never re-rendered the live toolbar.)
+        let storeActiveTool = (capturedModel.stateStore.get("active_tool") as? String) ?? ""
         return VStack(spacing: 0) {
             toolGridView
                 .padding(4)
@@ -903,6 +912,17 @@ private struct BundleToolbarPaneBody: View {
         }
         .onChange(of: currentTool) { newTool in
             capturedModel.stateStore.set("active_tool", yamlToolString(newTool))
+        }
+        .onChange(of: storeActiveTool) { newVal in
+            // Sync the canvas tool from a store write (alternates flyout /
+            // keyboard shortcut). Guarded by inequality so the
+            // currentTool → store mirror above does not loop. Setting
+            // currentTool here — in the toolbar's live reactive scope —
+            // re-highlights the grid (buildToolbarContext reads currentTool)
+            // and activates the tool on the canvas (via updateNSView).
+            if let t = toolFromYamlString(newVal), t != currentTool {
+                currentTool = t
+            }
         }
     }
 
