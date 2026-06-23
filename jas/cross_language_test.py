@@ -457,8 +457,18 @@ class CrossLanguageTest(absltest.TestCase):
     # ---------------------------------------------------------------
 
     # The gesture fixture files under test_fixtures/gestures/.
-    # Inc-1 is just the rectangle-draw gesture.
-    _GESTURE_FIXTURES = ["draw_rect.json"]
+    # Inc-1 was just the rectangle-draw gesture; inc-2 adds the five
+    # remaining draw tools (line, ellipse, rounded_rect, polygon, star).
+    # Order mirrors the Rust GESTURE_FIXTURES list so the corpus stays
+    # comparable.
+    _GESTURE_FIXTURES = [
+        "draw_rect.json",
+        "draw_line.json",
+        "draw_ellipse.json",
+        "draw_rounded_rect.json",
+        "draw_polygon.json",
+        "draw_star.json",
+    ]
 
     @staticmethod
     def _build_gesture_tool(tool_id: str):

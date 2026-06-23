@@ -2110,8 +2110,17 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 // the transaction bracket. Mirrors Rust's run_gesture_model / assert_gesture_test.
 
 /// The list of gesture fixture files under `test_fixtures/gestures/`.
-/// Inc-1 is just the rectangle-draw gesture.
-private let gestureFixtures = ["draw_rect.json"]
+/// Inc-1 was just the rectangle-draw gesture; inc-2 adds the five additional
+/// draw tools (line, ellipse, rounded_rect, polygon, star), each replaying the
+/// same press(10,20)->drag(110,70)->release(110,70) gesture as draw_rect.
+private let gestureFixtures = [
+    "draw_rect.json",
+    "draw_line.json",
+    "draw_ellipse.json",
+    "draw_rounded_rect.json",
+    "draw_polygon.json",
+    "draw_star.json",
+]
 
 /// Build a minimal ToolContext for replaying gestures: a YamlTool reads only
 /// `ctx.model` and `ctx.requestUpdate` on the pointer path, so the hit-test

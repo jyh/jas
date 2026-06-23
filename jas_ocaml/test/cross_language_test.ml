@@ -2304,6 +2304,16 @@ let () =
     "Gesture", [
       Alcotest.test_case "draw_rect gesture" `Quick (fun () ->
         run_gesture_fixture "draw_rect.json");
+      Alcotest.test_case "draw_line gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_line.json");
+      Alcotest.test_case "draw_ellipse gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_ellipse.json");
+      Alcotest.test_case "draw_rounded_rect gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_rounded_rect.json");
+      Alcotest.test_case "draw_polygon gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_polygon.json");
+      Alcotest.test_case "draw_star gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_star.json");
     ];
 
     "Operation", [

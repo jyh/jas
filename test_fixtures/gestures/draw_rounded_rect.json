@@ -1,0 +1,13 @@
+[
+  {
+    "name": "draw_rounded_rect",
+    "setup_svg": "circle_basic.svg",
+    "tool": "rounded_rect",
+    "events": [
+      {"kind": "press", "x": 10, "y": 20},
+      {"kind": "move", "x": 110, "y": 70, "dragging": true},
+      {"kind": "release", "x": 110, "y": 70}
+    ],
+    "expected_json": "draw_rounded_rect_expected.json"
+  }
+]
