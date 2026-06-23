@@ -2754,11 +2754,14 @@ private struct PressDispatchModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.simultaneousGesture(
-            // `.global` coordinate space → the gesture's `location` is
-            // in window coords, the same space the dialog overlay
-            // positions in. This is the Swift analogue of the mouse
-            // event's page coordinates.
-            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            // Capture in the shared "jasRoot" coordinate space (defined
+            // on ContentView's root, wrapping both the panes and the
+            // dialog overlay) so the press location and the overlay's
+            // popover positioning resolve in ONE explicit space. macOS
+            // gesture `.global` and the overlay's layout space don't
+            // reliably align, which put the flyout down-and-right of the
+            // press; a shared named space is exact.
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("jasRoot"))
                 .onChanged { value in
                     if !pressed {
                         pressed = true
