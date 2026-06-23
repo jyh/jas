@@ -29,16 +29,19 @@ shortcuts:
   - { key: "Ctrl+0",       action: fit_active_artboard }
   - { key: "Ctrl+Alt+0",   action: fit_all_artboards }
   - { key: "Ctrl+1",       action: zoom_to_actual_size }
-  # Tools — `tool` is the bundle tool id (see workspace/tools/*.yaml); `type`
-  # is the native Type tool (NATIVE_BOUNDARY.md §6), not a YAML tool. These
-  # are the single authoritative source for tool keys; workspace/tools/*.yaml
-  # `shortcut:` fields are display hints that must agree with this table.
+  # Tools — `tool` is the active_tool ROUTING id (the string dispatched by
+  # `set: { active_tool: ... }`, as in dialogs/tool_alternates.yaml), which for
+  # the anchor tools is the short `add_anchor`/`delete_anchor` rather than the
+  # tool-definition id `add_anchor_point`/`delete_anchor_point`; `type` is the
+  # native Type tool (NATIVE_BOUNDARY.md §6). These are the single authoritative
+  # source for tool KEYS; workspace/tools/*.yaml `shortcut:` fields are display
+  # hints that must agree with this table on the key.
   - { key: "V",            action: select_tool,      params: { tool: selection } }
   - { key: "A",            action: select_tool,      params: { tool: partial_selection } }
   - { key: "P",            action: select_tool,      params: { tool: pen } }
   - { key: "C",            action: select_tool,      params: { tool: anchor_point } }
-  - { key: "=",            action: select_tool,      params: { tool: add_anchor_point } }
-  - { key: "-",            action: select_tool,      params: { tool: delete_anchor_point } }
+  - { key: "=",            action: select_tool,      params: { tool: add_anchor } }
+  - { key: "-",            action: select_tool,      params: { tool: delete_anchor } }
   - { key: "T",            action: select_tool,      params: { tool: type } }
   - { key: "\\",           action: select_tool,      params: { tool: line } }
   - { key: "M",            action: select_tool,      params: { tool: rect } }
