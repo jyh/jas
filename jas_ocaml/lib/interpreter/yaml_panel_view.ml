@@ -1859,20 +1859,55 @@ and render_button ~packing ~ctx el =
        | _ -> static_label)
     | None -> static_label in
   (* For ``icon_button`` widgets, try to render the SVG glyph from
-     workspace icons.yaml. ``bind.icon`` is an expression returning
-     the icon name (e.g. ``chain_linked`` / ``chain_broken``);
-     ``icon`` is a static name. Falls back to the text-label button
-     when the icon can't be resolved or the renderer doesn't support
-     the icon's primitives. *)
+     workspace icons.yaml. Resolution order mirrors jas_dioxus
+     [render_icon_button]:
+       1. ``bind.icon`` — an expression returning the icon name
+          (e.g. ``chain_linked`` / ``chain_broken`` on the Opacity
+          panel link indicator).
+       2. ``alternates.items`` lookup by ``state.active_tool`` — a
+          multi-tool toolbar slot (pen / pencil / shape / arrow /
+          text / hand) shows the glyph of the ACTIVE alternate, so
+          the slot icon follows the live tool. Without this the slot
+          stays stuck on its default glyph after picking a different
+          alternate from the long-press flyout or via a keyboard
+          shortcut. ``state.active_tool`` is read from the same eval
+          [ctx] the slot bind.checked highlight uses, so glyph and
+          highlight agree.
+       3. The static ``icon`` field (fallback).
+     Falls back to the text-label button when the icon can't be
+     resolved or the renderer doesn't support the icon's primitives. *)
   let icon_pixbuf : GdkPixbuf.pixbuf option =
     if etype <> "icon_button" then None
     else begin
+      let static_icon = el |> member "icon" |> to_string_option |> Option.value ~default:"" in
+      (* Look up the icon of the alternate whose [id] matches the
+         active tool. Returns the static icon when no alternate matches
+         (or there is no [alternates.items] list). *)
+      let alternate_icon () =
+        match el |> member "alternates" |> safe_member "items" with
+        | `List items ->
+          let active = match Expr_eval.evaluate "state.active_tool" ctx with
+            | Expr_eval.Str s -> s
+            | _ -> ""
+          in
+          let matched =
+            List.find_map
+              (fun item ->
+                 match item |> member "id" |> to_string_option,
+                       item |> member "icon" |> to_string_option with
+                 | Some id, Some icon when id = active -> Some icon
+                 | _ -> None)
+              items
+          in
+          (match matched with Some icon -> icon | None -> static_icon)
+        | _ -> static_icon
+      in
       let icon_name = match el |> member "bind" |> safe_member "icon" |> to_string_option with
         | Some expr ->
           (match Expr_eval.evaluate expr ctx with
            | Expr_eval.Str s -> s
-           | _ -> el |> member "icon" |> to_string_option |> Option.value ~default:"")
-        | None -> el |> member "icon" |> to_string_option |> Option.value ~default:""
+           | _ -> static_icon)
+        | None -> alternate_icon ()
       in
       if icon_name = "" then None
       else begin
