@@ -969,12 +969,28 @@ class DockPanelWidget(QWidget):
             if self._state_store and self._state_store.get_dialog_id():
                 self._state_store.close_dialog()
         else:
-            # Non-modal flyout (Qt.Popup — the tool-alternates popup):
-            # show() it NON-blocking so Qt's popup grab dismisses it on an
-            # outside click. exec() runs it MODALLY and captures the
-            # outside click, so the popup never closed (the reported bug).
+            # Non-modal flyout (the tool-alternates popover): show() it
+            # NON-blocking so the event loop keeps running and the
+            # dialog's own outside-press event filter can dismiss it on a
+            # genuine click (exec() ran it MODALLY and captured the outside
+            # click, the reported original bug).
+            #
+            # CRITICAL: the open path is _check_dialog_opened ->
+            # _show_yaml_dialog -> self.rebuild(). With the old blocking
+            # exec(), rebuild() ran only AFTER the dialog closed. With a
+            # non-blocking show() the rebuild runs immediately, and its
+            # toolbar re-render (yaml_renderer _apply_bindings/setVisible
+            # churn) makes the freshly-shown popover emit ``finished``,
+            # which tore it straight back down — the regression where the
+            # flyout no longer appeared at all. Defer the show() to the
+            # next event-loop turn via QTimer.singleShot(0, ...) so the
+            # caller's rebuild() completes FIRST, then the flyout is shown
+            # against a settled widget tree and stays up. (Measured: with
+            # rebuild-after-show the flyout is destroyed; deferring the
+            # show keeps isVisible() True.)
+            #
             # Keep a Python reference so it isn't GC'd while shown, and
-            # clear the store's dialog id when it closes (outside click OR
+            # clear the store's dialog id when it closes (outside press OR
             # item pick) so re-opening the same flyout works.
             self._flyout_dlg = dlg
 
@@ -985,8 +1001,18 @@ class DockPanelWidget(QWidget):
                     self._flyout_dlg = None
 
             dlg.finished.connect(_on_flyout_closed)
-            dlg.show()
-            dlg.raise_()
+
+            from PySide6.QtCore import QTimer
+
+            def _deferred_show(_dlg=dlg):
+                # The flyout may have been superseded (store dialog id
+                # changed) before this turn ran; only show the current one.
+                if getattr(self, "_flyout_dlg", None) is not _dlg:
+                    return
+                _dlg.show()
+                _dlg.raise_()
+
+            QTimer.singleShot(0, _deferred_show)
 
     def _toggle_dock(self, dock_id):
         self._layout_data.toggle_dock_collapsed(dock_id)

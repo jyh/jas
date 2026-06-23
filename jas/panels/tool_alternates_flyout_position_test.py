@@ -63,13 +63,23 @@ class ToolAlternatesFlyoutPositionTest(absltest.TestCase):
         dlg = YamlDialogView("arrow_alternates", store, anchor=(640, 480))
         self.assertFalse(dlg._is_modal)
 
-    def test_flyout_renders_as_popup(self):
-        """Non-modal flyout is a frameless Popup (compact bare container,
-        no title bar) — mirrors Rust show_title_bar = is_modal."""
+    def test_flyout_renders_as_frameless_popover(self):
+        """Non-modal flyout is a frameless borderless popover (compact bare
+        container, no title bar) — mirrors Rust show_title_bar = is_modal.
+
+        It is deliberately NOT a Qt.WindowType.Popup: a Popup's implicit
+        mouse grab closes the window on the OPENING long-press release and
+        hides it without clearing the store (blocking reopen). The flyout
+        is a frameless Tool window dismissed by an explicit application
+        event filter instead (see the dismiss-and-reopen test)."""
         store = self._open("arrow_alternates")
         dlg = YamlDialogView("arrow_alternates", store, anchor=(640, 480))
-        wtype = dlg.windowFlags() & Qt.WindowType.WindowType_Mask
-        self.assertEqual(wtype, Qt.WindowType.Popup)
+        flags = dlg.windowFlags()
+        wtype = flags & Qt.WindowType.WindowType_Mask
+        self.assertEqual(wtype, Qt.WindowType.Tool)
+        self.assertTrue(bool(flags & Qt.WindowType.FramelessWindowHint))
+        # Not a Popup (no implicit grab that would eat the opening release).
+        self.assertNotEqual(wtype, Qt.WindowType.Popup)
 
     def test_flyout_positioned_at_anchor_not_centered(self):
         """The flyout's top-left corner is pinned to the anchor (cursor)
@@ -251,6 +261,143 @@ class FlyoutAnchorThreadingTest(absltest.TestCase):
         TimerManager.shared().cancel_timer("long_press_test_slot")
         self.assertEqual(captured.get("id"), "arrow_alternates")
         self.assertEqual(captured.get("anchor"), (111, 222))
+
+
+class FlyoutOpenDismissReopenTest(absltest.TestCase):
+    """End-to-end through the REAL open path (run_behavior_effects ->
+    long-press timer -> _check_dialog_opened -> _show_yaml_dialog ->
+    rebuild()): the non-modal flyout must (a) APPEAR (non-blocking),
+    (b) dismiss on a GENUINE outside mouse-press but NOT on the opening
+    long-press release, and (c) be re-openable afterward.
+
+    Regression guard: a prior change shifted the non-modal branch from
+    exec() to show() but left self.rebuild() running AFTER the show().
+    The rebuild's toolbar re-render fired the freshly-shown popover's
+    ``finished`` signal, tearing it down before it painted, so the flyout
+    no longer appeared at all. The fix defers the show() to the next
+    event-loop turn (so rebuild() finishes first) and dismisses via an
+    application event filter rather than a Qt.Popup grab.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+
+    def _make_widget(self):
+        from workspace.dock_panel import DockPanelWidget
+        from workspace.workspace_layout import DockEdge, WorkspaceLayout
+        layout = WorkspaceLayout.default_layout()
+        store = StateStore()
+        w = DockPanelWidget(layout, DockEdge.RIGHT,
+                            get_model=lambda: None, state_store=store)
+        return w, store
+
+    def _long_press_open(self, w, store, anchor):
+        """Drive the real long-press path and pump until the flyout shows.
+
+        Returns the live flyout dialog (w._flyout_dlg) once visible."""
+        from PySide6.QtCore import QEventLoop, QTimer
+        effects = [{
+            "start_timer": {
+                "id": "long_press_btn_arrow_slot",
+                "delay_ms": 10,
+                "effects": [{"open_dialog": {"id": "arrow_alternates"}}],
+            }
+        }]
+        w.run_behavior_effects(effects, {}, anchor=anchor)
+        # Pump until the 10ms long-press timer fires AND the deferred
+        # (singleShot(0)) show() has run.
+        loop = QEventLoop()
+        QTimer.singleShot(60, loop.quit)
+        loop.exec()
+        self.app.processEvents()
+        return getattr(w, "_flyout_dlg", None)
+
+    def test_flyout_appears_via_real_path(self):
+        """After a long-press the flyout is visible and non-modal, and the
+        store still holds the dialog id (rebuild did not tear it down)."""
+        w, store = self._make_widget()
+        dlg = self._long_press_open(w, store, anchor=(200, 200))
+        self.assertIsNotNone(dlg, "flyout was never created/shown")
+        self.assertTrue(dlg.isVisible(), "flyout did not appear")
+        self.assertFalse(dlg.isModal(), "flyout must be non-modal")
+        self.assertEqual(store.get_dialog_id(), "arrow_alternates")
+        dlg.close()
+        self.app.processEvents()
+
+    def test_outside_press_dismisses_but_opening_release_does_not(self):
+        """The opening long-press RELEASE must not close the flyout; a
+        later GENUINE outside mouse-press must. After dismissal the store's
+        dialog id is cleared so the flyout can reopen."""
+        from PySide6.QtCore import QEvent, QPoint, QPointF
+        from PySide6.QtGui import QMouseEvent
+        w, store = self._make_widget()
+        dlg = self._long_press_open(w, store, anchor=(200, 200))
+        self.assertTrue(dlg.isVisible())
+
+        app = self.app
+
+        def send(etype, global_pt):
+            gp = QPointF(global_pt)
+            ev = QMouseEvent(etype, QPointF(0, 0), gp,
+                             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+            app.sendEvent(app, ev)
+            app.processEvents()
+
+        # 1) The opening long-press release (the button was held through
+        #    the long-press). It must NOT dismiss the flyout — it only arms.
+        send(QEvent.Type.MouseButtonRelease, QPoint(200, 200))
+        self.assertTrue(
+            dlg.isVisible(),
+            "opening long-press release wrongly dismissed the flyout")
+        self.assertEqual(store.get_dialog_id(), "arrow_alternates")
+
+        # 2) A genuine mouse PRESS well outside the flyout geometry must
+        #    dismiss it and clear the store dialog id.
+        geo = dlg.frameGeometry()
+        outside = QPoint(geo.right() + 200, geo.bottom() + 200)
+        self.assertFalse(geo.contains(outside))
+        send(QEvent.Type.MouseButtonPress, outside)
+        self.assertFalse(dlg.isVisible(), "outside press did not dismiss")
+        self.assertIsNone(
+            store.get_dialog_id(),
+            "store dialog id not cleared on dismiss — reopen would be blocked")
+
+        # 3) Reopen: a fresh long-press opens the same flyout again.
+        dlg2 = self._long_press_open(w, store, anchor=(300, 300))
+        self.assertIsNotNone(dlg2, "flyout did not reopen")
+        self.assertTrue(dlg2.isVisible(), "reopened flyout not visible")
+        self.assertFalse(dlg2.isModal())
+        self.assertEqual(store.get_dialog_id(), "arrow_alternates")
+        dlg2.close()
+        self.app.processEvents()
+
+    def test_inside_press_does_not_dismiss(self):
+        """A mouse press INSIDE the flyout (an item pick) must not be
+        treated as an outside dismissal."""
+        from PySide6.QtCore import QEvent, QPoint, QPointF
+        from PySide6.QtGui import QMouseEvent
+        w, store = self._make_widget()
+        dlg = self._long_press_open(w, store, anchor=(200, 200))
+        self.assertTrue(dlg.isVisible())
+        app = self.app
+        # Arm via the opening release, then press inside the flyout.
+        for etype, pt in (
+            (QEvent.Type.MouseButtonRelease, QPoint(200, 200)),
+            (QEvent.Type.MouseButtonPress, dlg.frameGeometry().center()),
+        ):
+            ev = QMouseEvent(etype, QPointF(0, 0), QPointF(pt),
+                             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+            app.sendEvent(app, ev)
+            app.processEvents()
+        self.assertTrue(dlg.isVisible(),
+                        "press inside the flyout wrongly dismissed it")
+        self.assertEqual(store.get_dialog_id(), "arrow_alternates")
+        dlg.close()
+        self.app.processEvents()
 
 
 if __name__ == "__main__":

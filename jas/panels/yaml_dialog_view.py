@@ -76,14 +76,24 @@ class YamlDialogView(QDialog):
             self.setWindowModality(Qt.WindowModality.ApplicationModal)
         else:
             # Non-modal flyout (modal: false — tool-alternates). Render as
-            # a frameless popup so it reads as a compact bare container
-            # placed at the cursor, NOT a centered titled dialog. Mirrors
-            # the Rust dialog_view suppressing the title bar when
+            # a frameless borderless popover so it reads as a compact bare
+            # container placed at the cursor, NOT a centered titled dialog.
+            # Mirrors the Rust dialog_view suppressing the title bar when
             # !is_modal (show_title_bar = is_modal) and the at-cursor
-            # absolute placement. The popup window flag also makes a
-            # click outside dismiss it (Qt closes a Popup on outside
-            # press), matching Rust's transparent click-outside backdrop.
-            self.setWindowFlags(Qt.WindowType.Popup)
+            # absolute placement.
+            #
+            # We deliberately do NOT use Qt.WindowType.Popup here. A Popup
+            # installs an implicit mouse grab that (a) closes the window on
+            # the very next mouse RELEASE — which, for a long-press flyout,
+            # is the release that OPENED it — and (b) hides the widget
+            # without clearing our store's dialog id, so the flyout could
+            # not be re-opened. Instead this is a plain frameless Tool
+            # window dismissed by an explicit application event filter
+            # (see _install_dismiss_filter): the filter closes the flyout
+            # on a genuine mouse PRESS outside its geometry while ignoring
+            # the opening release, and clears the store so it can reopen.
+            self.setWindowFlags(
+                Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         width = self._dialog_def.get("width")
         self._has_declared_width = isinstance(width, (int, float))
         if self._has_declared_width:
@@ -145,6 +155,17 @@ class YamlDialogView(QDialog):
                     pass
         store.subscribe(None, _on_state)
 
+        # Outside-press dismissal state for the non-modal flyout. The
+        # application event filter (installed in showEvent, removed on
+        # close/hide) closes the flyout on a genuine mouse PRESS outside
+        # its geometry. ``_dismiss_armed`` guards the OPENING release: the
+        # long-press fires while the slot button is still held, so the
+        # very first mouse RELEASE the app sees after the flyout shows is
+        # the one that opened it — never a dismissal. We arm only once a
+        # press lands inside the flyout, or once that opening release has
+        # passed, so the opening release can never close the flyout.
+        self._dismiss_filter_installed = False
+
     def showEvent(self, event):
         """Place a NON-MODAL anchored flyout at the cursor before it
         first appears, instead of Qt's default centered-on-parent.
@@ -167,7 +188,96 @@ class YamlDialogView(QDialog):
                 and not getattr(self, "_is_modal", True)):
             self._anchor_applied = True
             self._place_at_anchor()
+        # Arm the outside-press dismissal for the non-modal flyout once it
+        # is actually on screen (after placement, so geometry() is final).
+        if not getattr(self, "_is_modal", True):
+            self._install_dismiss_filter()
         super().showEvent(event)
+
+    def hideEvent(self, event):
+        # Stop intercepting global mouse events the moment the flyout is
+        # no longer visible (outside-press dismiss, item pick, or accept).
+        self._remove_dismiss_filter()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self._remove_dismiss_filter()
+        super().closeEvent(event)
+
+    def _install_dismiss_filter(self) -> None:
+        """Install an application-wide event filter that closes this
+        non-modal flyout on a genuine mouse PRESS outside its geometry.
+
+        This replaces Qt.WindowType.Popup's implicit grab, which closed
+        the flyout on the OPENING long-press release and hid it without
+        clearing the store (blocking reopen). The filter ignores the
+        opening release (``_dismiss_armed`` starts False) and only acts on
+        a real outside press once armed.
+        """
+        if self._dismiss_filter_installed:
+            return
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is None:
+            return
+        # The opening long-press release has not been seen yet. Stay
+        # unarmed until the first release passes (or a press lands inside),
+        # so that release can never be treated as an outside dismissal.
+        self._dismiss_armed = False
+        app.installEventFilter(self)
+        self._dismiss_filter_installed = True
+
+    def _remove_dismiss_filter(self) -> None:
+        if not getattr(self, "_dismiss_filter_installed", False):
+            return
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._dismiss_filter_installed = False
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        et = event.type()
+        if et == QEvent.Type.MouseButtonRelease:
+            # The first release after the flyout opens is the long-press
+            # release that opened it — consume nothing, just arm so the
+            # NEXT press can dismiss.
+            self._dismiss_armed = True
+            return super().eventFilter(obj, event)
+        if et == QEvent.Type.MouseButtonPress:
+            # A press inside the flyout (item pick) is handled by the
+            # item's own handler; arm so a later outside press dismisses,
+            # and let the event through.
+            inside = self._press_is_inside(event)
+            if inside:
+                self._dismiss_armed = True
+                return super().eventFilter(obj, event)
+            # Outside press: dismiss only once armed (never the opening
+            # interaction). Clearing the store lets the same flyout reopen.
+            if getattr(self, "_dismiss_armed", False):
+                self._dismiss_armed = False
+                self._remove_dismiss_filter()
+                if self._store is not None and self._store.get_dialog_id():
+                    self._store.close_dialog()
+                if not self._closing:
+                    try:
+                        self.reject()
+                    except RuntimeError:
+                        pass
+                # Swallow this press so it does not also act on whatever is
+                # behind the flyout (mirrors a popup's modal-ish dismiss).
+                return True
+        return super().eventFilter(obj, event)
+
+    def _press_is_inside(self, event) -> bool:
+        """True if a mouse-press event falls within the flyout's window
+        rectangle (in global/screen coords)."""
+        try:
+            gp = event.globalPosition().toPoint()
+        except AttributeError:
+            gp = event.globalPos()
+        return self.frameGeometry().contains(gp)
 
     def _place_at_anchor(self) -> None:
         from PySide6.QtCore import QPoint
