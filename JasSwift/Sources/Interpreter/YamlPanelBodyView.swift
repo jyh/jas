@@ -813,17 +813,42 @@ struct YamlElementView: View {
             style: style, context: context, flyoutDefault: flyoutIconDefault)
     }
 
-    /// Resolve the icon name from ``bind.icon`` (if present, as a
-    /// yaml expression returning a string) or the static ``icon``
-    /// field, falling back to ``""``.
+    /// Resolve the icon name. Resolution order mirrors jas_dioxus
+    /// ``render_icon_button``:
+    ///   1. ``bind.icon`` (yaml expression returning a string).
+    ///   2. ``alternates.items`` lookup by ``state.active_tool`` — a
+    ///      multi-tool toolbar slot (pen / pencil / shape / arrow / text
+    ///      / hand) shows the glyph of the ACTIVE alternate, so the slot
+    ///      icon follows the live tool. Without this the slot stays stuck
+    ///      on its default glyph after picking a different alternate from
+    ///      the long-press menu or via a keyboard shortcut.
+    ///   3. The static ``icon`` field (fallback).
     private func resolvedIconName() -> String {
+        let staticIcon = element["icon"] as? String ?? ""
         if let bind = element["bind"] as? [String: Any],
            let expr = bind["icon"] as? String {
             if case .string(let s) = evaluate(expr, context: context) {
                 return s
             }
+            return staticIcon
         }
-        return element["icon"] as? String ?? ""
+        if let alternates = element["alternates"] as? [String: Any],
+           let items = alternates["items"] as? [Any] {
+            var active = ""
+            if case .string(let s) = evaluate("state.active_tool", context: context) {
+                active = s
+            }
+            for itemAny in items {
+                guard let item = itemAny as? [String: Any],
+                      let id = item["id"] as? String,
+                      let icon = item["icon"] as? String else { continue }
+                if id == active {
+                    return icon
+                }
+            }
+            return staticIcon
+        }
+        return staticIcon
     }
 
     /// Evaluate `bind.disabled` if present; returns `false` when
