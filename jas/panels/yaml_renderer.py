@@ -487,6 +487,25 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
         btn.clicked.connect(
             lambda _=None: QTimer.singleShot(0, _reconcile_checked))
 
+        # Double-click a TOOLBAR tool button -> open the ACTIVE tool's
+        # options. This is scoped to is_tool_button slots only (they alone
+        # carry bind.checked over state.active_tool); panels and other
+        # icon_buttons never reach here, so they get no dblclick. The host
+        # supplies ctx["_open_tool_options"]; we read the *active* tool
+        # from the store (NOT this button's own tool) so dblclicking any
+        # tool slot opens whatever tool is currently selected — exactly as
+        # the old native ToolButton dblclick did. The bundle-driven lookup
+        # + 3-way dispatch (panel / action / dialog) lives in the host
+        # callback. With no host callback (e.g. unit tests of the grid in
+        # isolation) the dblclick is a silent no-op.
+        open_tool_options = ctx.get("_open_tool_options") if isinstance(ctx, dict) else None
+        if callable(open_tool_options):
+            def _on_tool_dblclick(event, _store=store, _cb=open_tool_options):
+                active = _store.get("active_tool")
+                if isinstance(active, str) and active:
+                    _cb(active)
+            btn.mouseDoubleClickEvent = _on_tool_dblclick
+
     _wire_opacity_link_indicator_click(btn, el, ctx)
     return btn
 

@@ -31,6 +31,46 @@ val _current_store : State_store.t option ref
     panel-bound state, so the caller can schedule a re-render. *)
 val dispatch_click_behaviors : Yojson.Safe.t -> Yojson.Safe.t -> bool
 
+(* ── Toolbar tool-options double-click ───────────────────────────── *)
+
+(** [is_tool_button el] — true iff [el] is a TOOLBAR tool button: an
+    ``icon_button`` whose ``behavior`` declares an ``event: click,
+    action: select_tool`` entry. Scopes the double-click-opens-tool-options
+    behavior to tool buttons only (fill/stroke and panel icon_buttons,
+    which use other actions or none, are excluded). *)
+val is_tool_button : Yojson.Safe.t -> bool
+
+(** How a tool's options are summoned, in priority order; the result of
+    [tool_options_dispatch_for]. *)
+type tool_options_dispatch =
+  | Show_panel of Workspace_layout.panel_kind
+      (** ``tool_options_panel`` — show/dock the named panel. *)
+  | Run_action of string
+      (** ``tool_options_action`` — dispatch the named bundle action. *)
+  | Open_dialog of string
+      (** ``tool_options_dialog`` — open the named dialog. *)
+  | No_options
+      (** the tool declares none — double-click is a no-op. *)
+
+(** Map a ``tool_options_panel`` id string (the short panel id, e.g.
+    ``magic_wand``) to its [panel_kind], or [None] when unknown. *)
+val panel_id_to_kind : string -> Workspace_layout.panel_kind option
+
+(** [tool_options_dispatch_for name] — look up the tool [name] in the
+    compiled bundle ``tools`` map and decide how its options should be
+    summoned, in priority order panel > action > dialog. A tool that
+    declares none (or an unknown tool, or an unresolvable panel id) yields
+    [No_options]. Pure / GUI-free, built entirely from the bundle (no
+    hardcoded tool list) — the lookup + priority order are unit-testable. *)
+val tool_options_dispatch_for : string -> tool_options_dispatch
+
+(** Open the ACTIVE tool's options: reads [active_tool_name], resolves via
+    [tool_options_dispatch_for], and runs the side effect — [show_panel_hook]
+    / [Dialog_global.dispatch_action] (fresh Controller) /
+    [open_yaml_dialog_hook] / no-op. Invoked from the toolbar tool button's
+    double-click handler. *)
+val dispatch_active_tool_options : unit -> unit
+
 (** Delete the current panel-state selection (reference-aware; consults
     [confirm_delete_orphans_hook] when the deletion would orphan live
     references). Backs the panel's Delete Selection command. *)
@@ -66,6 +106,12 @@ val open_nonmodal_dialog_hook :
     ... }`` effect or a toolbar ``select_tool`` action. Wired in main.ml
     against the active toolbar. *)
 val set_active_tool_hook : (string -> unit) ref
+
+(** Show (summon / dock) a panel by its [panel_kind]. Wired in canvas.ml
+    against the live [workspace_layout] (``Layout_apply.op_show_panel`` +
+    dock refresh). Used by the toolbar double-click handler to surface a
+    tool's ``tool_options_panel`` (e.g. Magic Wand). No-op until wired. *)
+val show_panel_hook : (Workspace_layout.panel_kind -> unit) ref
 
 (** Current active-tool name as the YAML toolbar's ``bind.checked``
     expressions read it. Mirrors the native toolbar / canvas tool;

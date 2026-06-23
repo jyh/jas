@@ -389,5 +389,240 @@ class ToolIdEnumBridgeTest(absltest.TestCase):
             self.assertIn(slot_tool, _TOOL_YAML_ID_TO_ENUM)
 
 
+class ToolOptionsDispatchLookupTest(absltest.TestCase):
+    """The bundle-driven active-tool -> options lookup (tool_options_dispatch)
+    resolves each tool's tool_options_panel / _action / _dialog in priority
+    order, entirely from bundle["tools"] (nothing hardcoded). This is the
+    pure logic behind the toolbar dblclick; the actual panel/dialog opening
+    is GUI (user-verified)."""
+
+    def test_dialog_tools_resolve_to_dialog(self):
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        cases = {
+            "paintbrush": "paintbrush_tool_options",
+            "blob_brush": "blob_brush_tool_options",
+            "scale": "scale_options",
+            "rotate": "rotate_options",
+            "shear": "shear_options",
+            "eyedropper": "eyedropper_tool_options",
+        }
+        for tool, dialog_id in cases.items():
+            kind, target = tool_options_dispatch(bundle, tool)
+            self.assertEqual(kind, "dialog", f"{tool} should dispatch a dialog")
+            self.assertEqual(target, dialog_id)
+
+    def test_action_tools_resolve_to_action(self):
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        cases = {
+            "hand": "fit_active_artboard",
+            "zoom": "zoom_to_actual_size",
+            "artboard": "fit_all_artboards",
+        }
+        for tool, action in cases.items():
+            kind, target = tool_options_dispatch(bundle, tool)
+            self.assertEqual(kind, "action", f"{tool} should dispatch an action")
+            self.assertEqual(target, action)
+
+    def test_panel_tool_resolves_to_panel(self):
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        kind, target = tool_options_dispatch(bundle, "magic_wand")
+        self.assertEqual(kind, "panel")
+        self.assertEqual(target, "magic_wand")
+
+    def test_tool_without_options_is_noop(self):
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        # Selection / Pen / Rect declare no tool_options_* field.
+        for tool in ("selection", "pen", "rect"):
+            self.assertEqual(tool_options_dispatch(bundle, tool), (None, None))
+
+    def test_unknown_or_empty_tool_is_noop(self):
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        self.assertEqual(tool_options_dispatch(bundle, "not_a_tool"), (None, None))
+        self.assertEqual(tool_options_dispatch(bundle, ""), (None, None))
+        self.assertEqual(tool_options_dispatch(bundle, None), (None, None))
+
+    def test_panel_action_dialog_priority(self):
+        # If a (synthetic) tool ever declares more than one field, panel
+        # wins over action wins over dialog — the documented priority.
+        from jas_app import tool_options_dispatch
+        bundle = {
+            "tools": {
+                "multi": {
+                    "tool_options_panel": "p",
+                    "tool_options_action": "a",
+                    "tool_options_dialog": "d",
+                }
+            }
+        }
+        self.assertEqual(tool_options_dispatch(bundle, "multi"), ("panel", "p"))
+        del bundle["tools"]["multi"]["tool_options_panel"]
+        self.assertEqual(tool_options_dispatch(bundle, "multi"), ("action", "a"))
+        del bundle["tools"]["multi"]["tool_options_action"]
+        self.assertEqual(tool_options_dispatch(bundle, "multi"), ("dialog", "d"))
+
+    def test_every_tool_options_field_resolves(self):
+        # Read the options-bearing tools straight from the bundle (no
+        # hardcoded list) and confirm each resolves to a non-empty target.
+        from jas_app import tool_options_dispatch
+        bundle = _load_bundle()
+        seen = 0
+        for tool_id, spec in (bundle.get("tools") or {}).items():
+            if not isinstance(spec, dict):
+                continue
+            if any(k in spec for k in ("tool_options_panel",
+                                       "tool_options_action",
+                                       "tool_options_dialog")):
+                kind, target = tool_options_dispatch(bundle, tool_id)
+                self.assertIn(kind, ("panel", "action", "dialog"))
+                self.assertTrue(target)
+                seen += 1
+        # The bundle ships several options-bearing tools; guard against a
+        # regression that silently drops them all.
+        self.assertGreaterEqual(seen, 6)
+
+
+class ToolButtonDblClickTest(absltest.TestCase):
+    """The dblclick is wired ONLY on toolbar tool buttons (is_tool_button:
+    those carrying bind.checked over state.active_tool), reads the ACTIVE
+    tool from the store, and calls ctx["_open_tool_options"] with it. Panels
+    and other icon_buttons get no dblclick. The host callback's panel/dialog
+    opening is GUI (user-verified); here we verify the wiring + active-tool
+    read."""
+
+    def _grid_widget(self, store, opened):
+        grid = _tool_grid(_load_bundle())
+        ctx = {"_panel_id": "toolbar_pane",
+               "_open_tool_options": lambda t: opened.append(t)}
+        return render_element(grid, store, ctx, dispatch_fn=lambda *_: None)
+
+    def _dbl(self, btn):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+        ev = QMouseEvent(QEvent.Type.MouseButtonDblClick,
+                         QPointF(1, 1), QPointF(1, 1),
+                         Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.NoModifier)
+        btn.mouseDoubleClickEvent(ev)
+
+    def test_dblclick_any_tool_button_opens_active_tool_options(self):
+        # Active tool = magic_wand; dblclicking ANY tool slot (here the
+        # Selection button) must open the ACTIVE tool's options, not the
+        # button's own tool.
+        store, _ = _make_store(active_tool="magic_wand")
+        opened = []
+        widget = self._grid_widget(store, opened)
+        sel = next(b for b in widget.findChildren(QPushButton)
+                   if b.isCheckable())
+        self._dbl(sel)
+        self.assertEqual(opened, ["magic_wand"])
+
+    def test_dblclick_reads_live_active_tool(self):
+        store, _ = _make_store(active_tool="selection")
+        opened = []
+        widget = self._grid_widget(store, opened)
+        btn = next(b for b in widget.findChildren(QPushButton)
+                   if b.isCheckable())
+        # Change the active tool after render; the dblclick must read the
+        # live store value, not a value baked in at render time.
+        store.set("active_tool", "paintbrush")
+        self._dbl(btn)
+        self.assertEqual(opened, ["paintbrush"])
+
+    def test_tool_buttons_have_dblclick_override(self):
+        store, _ = _make_store(active_tool="selection")
+        opened = []
+        widget = self._grid_widget(store, opened)
+        # Every checkable (is_tool_button) slot must carry the per-instance
+        # dblclick override (an attribute on the instance, not the class).
+        checkable = [b for b in widget.findChildren(QPushButton)
+                     if b.isCheckable()]
+        self.assertTrue(checkable)
+        for b in checkable:
+            self.assertIn("mouseDoubleClickEvent", b.__dict__,
+                          "tool button missing dblclick override")
+
+    def test_no_callback_means_no_dblclick_override(self):
+        # Without ctx["_open_tool_options"], even tool buttons get no
+        # per-instance dblclick override (silent no-op).
+        store, _ = _make_store(active_tool="selection")
+        grid = _tool_grid(_load_bundle())
+        widget = render_element(grid, store, {"_panel_id": "toolbar_pane"},
+                                dispatch_fn=lambda *_: None)
+        for b in widget.findChildren(QPushButton):
+            self.assertNotIn("mouseDoubleClickEvent", b.__dict__)
+
+
+class OpenToolOptionsHostDispatchTest(absltest.TestCase):
+    """MainWindow._open_tool_options routes the bundle-resolved kind to the
+    matching host path (panel show / action dispatch / dialog open). We stub
+    the host so the routing is testable without a live window; the concrete
+    panel/dialog/window opening is GUI (user-verified)."""
+
+    class _Host:
+        # Minimal stand-in carrying just the attributes _open_tool_options
+        # touches, so we can drive the real method unbound.
+        def __init__(self):
+            self.dispatched = []
+            self.shown_panels = []
+
+            class _Dock:
+                def __init__(self, outer):
+                    self._outer = outer
+
+                def _dispatch_yaml_action(self, name, params):
+                    self._outer.dispatched.append((name, params))
+
+                def rebuild_all(self):
+                    pass
+
+            self.dock_panel = _Dock(self)
+            self.workspace_layout = object()
+            self._yaml_state = None
+
+        def _panel_id_to_kind(self, panel_id):
+            from jas_app import MainWindow
+            return MainWindow._panel_id_to_kind(panel_id)
+
+    def test_action_tool_dispatches_through_dock(self):
+        from jas_app import MainWindow
+        host = self._Host()
+        MainWindow._open_tool_options(host, "zoom")
+        self.assertIn(("zoom_to_actual_size", {}), host.dispatched)
+
+    def test_hand_tool_dispatches_fit_active_artboard(self):
+        from jas_app import MainWindow
+        host = self._Host()
+        MainWindow._open_tool_options(host, "hand")
+        self.assertIn(("fit_active_artboard", {}), host.dispatched)
+
+    def test_noop_tool_dispatches_nothing(self):
+        from jas_app import MainWindow
+        host = self._Host()
+        MainWindow._open_tool_options(host, "selection")
+        self.assertEqual(host.dispatched, [])
+
+    def test_panel_tool_does_not_hit_action_path(self):
+        # Magic Wand resolves to a panel, so the action dispatcher must
+        # not fire (the panel show path is GUI; here we just confirm the
+        # action branch is skipped). We patch layout_apply via the panel
+        # show being a no-op on the stub's object workspace_layout — the
+        # call is harmless and dispatched stays empty.
+        from jas_app import MainWindow
+        host = self._Host()
+        try:
+            MainWindow._open_tool_options(host, "magic_wand")
+        except Exception:
+            # The real op_show_panel needs a live layout; the object stub
+            # may raise. What matters for this test is that the ACTION
+            # dispatcher was never reached.
+            pass
+        self.assertEqual(host.dispatched, [])
+
+
 if __name__ == "__main__":
     absltest.main()

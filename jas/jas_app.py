@@ -87,6 +87,45 @@ _TOOL_YAML_ID_TO_ENUM = {
 }
 
 
+# Priority order for resolving a tool's double-click options from the
+# compiled bundle. This mirrors the old native toolbar
+# (ToolButton.mouseDoubleClickEvent -> tool_options_dialog/panel/action
+# lookup + 3-way dispatch). A tool yaml carries at most one of these; the
+# priority only fixes the resolution order when more than one is present.
+#   1. tool_options_panel  -> show that panel (Magic Wand)
+#   2. tool_options_action -> dispatch that generic action (Hand/Zoom/Artboard)
+#   3. tool_options_dialog -> open that dialog (Paintbrush/Blob Brush/Scale/...)
+_TOOL_OPTIONS_FIELDS = (
+    ("panel", "tool_options_panel"),
+    ("action", "tool_options_action"),
+    ("dialog", "tool_options_dialog"),
+)
+
+
+def tool_options_dispatch(bundle, active_tool):
+    """Resolve the double-click options for ``active_tool`` from the
+    compiled bundle, returning ``(kind, target)`` where ``kind`` is one
+    of ``"panel"`` / ``"action"`` / ``"dialog"`` and ``target`` is the
+    panel id / action name / dialog id; ``(None, None)`` when the active
+    tool declares no options (the dblclick is then a no-op).
+
+    The tool list is read entirely from ``bundle["tools"]`` — nothing is
+    hardcoded — so adding a ``tool_options_*`` field to any tool yaml is
+    enough to wire its dblclick.
+    """
+    if not isinstance(active_tool, str) or not active_tool:
+        return (None, None)
+    tools = bundle.get("tools") if isinstance(bundle, dict) else None
+    spec = (tools or {}).get(active_tool) if isinstance(tools, dict) else None
+    if not isinstance(spec, dict):
+        return (None, None)
+    for kind, field in _TOOL_OPTIONS_FIELDS:
+        target = spec.get(field)
+        if isinstance(target, str) and target:
+            return (kind, target)
+    return (None, None)
+
+
 class PaneTitleBar(QWidget):
     """Title bar for a pane: label + close button."""
 
@@ -860,11 +899,13 @@ class MainWindow(QMainWindow):
         aren't part of the tool_grid node and its app-specific sync
         (_resync_toolbar_fs) is preserved.
 
-        DEFERRED (cross-app increment): double-click a tool icon to open
-        its tool-options dialog/panel. The native ToolButton bubbled this
-        via tool_options_requested; the bundle path would dispatch the
-        tool's tool_options_dialog / tool_options_panel on dblclick.
-        Not wired in any app's bundle toolbar yet — left for a later step.
+        Double-click a tool icon opens its tool-options. The renderer
+        installs a dblclick on each is_tool_button slot that reads
+        state.active_tool and calls ctx["_open_tool_options"]
+        (= self._open_tool_options), which resolves the tool's
+        tool_options_panel / _action / _dialog from the bundle and
+        dispatches it. This mirrors the old native ToolButton dblclick
+        (tool_options_requested -> _open_tool_options_dialog).
         """
         from panels.yaml_renderer import render_element
         from workspace_interpreter.loader import load_workspace
@@ -895,6 +936,12 @@ class MainWindow(QMainWindow):
             if hasattr(self, "dock_panel") and hasattr(
                     self.dock_panel, "run_behavior_effects"):
                 ctx["_run_behavior_effects"] = self.dock_panel.run_behavior_effects
+            # Double-click a TOOLBAR tool button -> open the ACTIVE tool's
+            # options. The renderer (only for is_tool_button slots) reads
+            # state.active_tool and calls this callback, which resolves the
+            # tool's tool_options_panel / _action / _dialog from the bundle
+            # and dispatches it (mirrors the old native ToolButton dblclick).
+            ctx["_open_tool_options"] = self._open_tool_options
             dispatch = (self.dock_panel._dispatch_yaml_action
                         if hasattr(self, "dock_panel") else None)
             grid_widget = render_element(grid_el, self._yaml_state, ctx,
@@ -1443,54 +1490,87 @@ class MainWindow(QMainWindow):
         Tool.ARTBOARD: "artboard",
     }
 
-    # Map a tool yaml's tool_options_panel id to a PanelKind.
+    # Map a tool yaml's tool_options_panel id to a PanelKind. The panel
+    # id is the bundle's panel content id (e.g. "magic_wand"); the lookup
+    # tolerates a trailing "_panel" suffix so either spelling resolves.
     @staticmethod
     def _panel_id_to_kind(panel_id: str):
         from workspace.workspace_layout import PanelKind
-        return {
+        table = {
             "magic_wand": PanelKind.MAGIC_WAND,
-        }.get(panel_id)
+        }
+        if panel_id in table:
+            return table[panel_id]
+        if isinstance(panel_id, str) and panel_id.endswith("_panel"):
+            return table.get(panel_id[: -len("_panel")])
+        return None
 
     def _open_tool_options_dialog(self, tool):
-        """Handler for Toolbar.tool_options_requested.
+        """Handler for the old native Toolbar.tool_options_requested
+        signal (Tool enum). Maps the enum to its bundle yaml-id and
+        delegates to the bundle-driven dispatcher so the native and
+        bundle toolbars share one code path."""
+        yaml_id = self._TOOL_YAML_IDS.get(tool)
+        if yaml_id:
+            self._open_tool_options(yaml_id)
 
-        Prefers ``tool_options_panel`` (Magic Wand) over
-        ``tool_options_dialog`` (Paintbrush, Blob Brush). A tool yaml
-        uses one or the other, not both. See MAGIC_WAND_TOOL.md §Panel
-        and PAINTBRUSH_TOOL.md §Tool options."""
+    def _open_tool_options(self, active_tool):
+        """Open the double-click options for the bundle tool id
+        ``active_tool`` (the ``state.active_tool`` string written by the
+        bundle toolbar's select_tool action / alternates flyout).
+
+        Resolves the tool's ``tool_options_panel`` / ``_action`` /
+        ``_dialog`` from the compiled bundle in priority order (see
+        ``tool_options_dispatch``) and dispatches the matching path:
+
+          panel  -> map the panel id to a PanelKind and show/dock it
+          action -> dispatch the generic action through the dock runner
+          dialog -> open_dialog + show the YamlDialogView
+
+        A tool that declares none is a no-op. This mirrors the old native
+        toolbar's tool_options dispatch (Magic Wand panel, Hand/Zoom view
+        actions, Paintbrush/Blob Brush/Scale/Rotate/Shear/Eyedropper
+        dialogs). See MAGIC_WAND_TOOL.md §Panel, ZOOM_TOOL.md /
+        HAND_TOOL.md §Tool options, PAINTBRUSH_TOOL.md §Tool options."""
         from workspace_interpreter.effects import run_effects
         from workspace_interpreter.loader import load_workspace
 
-        yaml_id = self._TOOL_YAML_IDS.get(tool)
-        if not yaml_id:
-            return
-        ws = load_workspace("workspace")
+        ws = load_workspace(os.path.join(_REPO_ROOT, "workspace"))
         if not ws:
             return
-        tool_spec = (ws.get("tools") or {}).get(yaml_id) or {}
-        panel_id = tool_spec.get("tool_options_panel")
-        if panel_id:
-            kind = self._panel_id_to_kind(panel_id)
+        kind_str, target = tool_options_dispatch(ws, active_tool)
+        if kind_str is None:
+            return
+
+        if kind_str == "panel":
+            kind = self._panel_id_to_kind(target)
             if kind is not None:
-                # 3d-2: route through the runtime dispatcher (show_panel bumps
-                # internally — dirty signal preserved).
+                # 3d-2: route through the runtime dispatcher (show_panel
+                # bumps internally — dirty signal preserved).
                 from workspace.layout_apply import layout_apply, op_show_panel
                 layout_apply(self.workspace_layout, op_show_panel(kind))
                 if hasattr(self, "dock_panel"):
                     self.dock_panel.rebuild_all()
-                return
-        dialog_id = tool_spec.get("tool_options_dialog")
-        if not dialog_id:
             return
+
+        if kind_str == "action":
+            # Generic action/effect dispatcher — the same path single
+            # clicks and menu items use (e.g. fit_active_artboard,
+            # zoom_to_actual_size, fit_all_artboards).
+            if hasattr(self, "dock_panel"):
+                self.dock_panel._dispatch_yaml_action(target, {})
+            return
+
+        # kind_str == "dialog"
         if not hasattr(self, "_yaml_state") or not self._yaml_state:
             return
         run_effects(
-            [{"open_dialog": {"id": dialog_id}}],
+            [{"open_dialog": {"id": target}}],
             {}, self._yaml_state,
             dialogs=ws.get("dialogs"),
         )
         dlg = YamlDialogView(
-            dialog_id, self._yaml_state,
+            target, self._yaml_state,
             dispatch_fn=self.dock_panel._dispatch_yaml_action
                 if hasattr(self, "dock_panel") else None,
             parent=self,

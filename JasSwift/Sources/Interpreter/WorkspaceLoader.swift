@@ -251,6 +251,72 @@ public func panelIdToKind(_ id: String) -> PanelKind? {
     }
 }
 
+/// The three ways a tool can surface its options when its toolbar icon
+/// is double-clicked, in the priority order the dispatcher resolves them
+/// (panel beats action beats dialog). ``.none`` means the active tool
+/// declares no options field — the double-click is a no-op.
+///
+/// Mirrors the prior native ``onOpenToolOptions`` lookup (which handled
+/// only ``tool_options_panel`` / ``tool_options_dialog``) plus the
+/// previously-aspirational ``tool_options_action`` path documented on the
+/// Hand / Zoom toolbar slots (HAND_TOOL.md / ZOOM_TOOL.md).
+public enum ToolOptionsDispatch: Equatable {
+    /// ``tool_options_panel`` → show this panel id (mapped to a
+    /// ``PanelKind`` by ``panelIdToKind``). e.g. magic_wand → magic_wand.
+    case panel(String)
+    /// ``tool_options_action`` → dispatch this named view action.
+    /// e.g. hand → fit_active_artboard, zoom → zoom_to_actual_size.
+    case action(String)
+    /// ``tool_options_dialog`` → open this dialog id via the dialog path.
+    /// e.g. paintbrush → paintbrush_tool_options.
+    case dialog(String)
+    /// The tool declares none of the three options fields.
+    case none
+}
+
+/// Resolve the active tool's options dispatch from the compiled bundle's
+/// ``tools`` map. The tool list is NOT hardcoded — the entry is looked up
+/// by its yaml string id and its three optional fields are read in
+/// priority order (panel → action → dialog). A tool typically declares at
+/// most one; if it somehow declared several, panel wins, then action.
+///
+/// Returns ``.none`` when the tool is unknown or declares no options
+/// field, so callers treat the double-click as a no-op.
+public func resolveToolOptions(
+    tools: [String: Any], activeTool: String
+) -> ToolOptionsDispatch {
+    guard let spec = tools[activeTool] as? [String: Any] else { return .none }
+    if let panelId = spec["tool_options_panel"] as? String, !panelId.isEmpty {
+        return .panel(panelId)
+    }
+    if let actionName = spec["tool_options_action"] as? String, !actionName.isEmpty {
+        return .action(actionName)
+    }
+    if let dialogId = spec["tool_options_dialog"] as? String, !dialogId.isEmpty {
+        return .dialog(dialogId)
+    }
+    return .none
+}
+
+/// Discriminate a TOOLBAR tool button from every other ``icon_button``
+/// (panel radios, dialog glyphs, fill/stroke mode buttons, …). A toolbar
+/// tool slot is exactly an ``icon_button`` whose ``behavior`` carries a
+/// ``click`` event dispatching the ``select_tool`` action (the same
+/// discriminator the icon-sizing path keys on). This is true for both the
+/// plain top-level slots (btn_selection, btn_line, …) and the
+/// long-press-alternate slots (btn_arrow_slot, …): both commit a tool on
+/// click, so both should open the active tool's options on double-click.
+/// Panels and other icon_buttons never carry a ``select_tool`` click, so
+/// they never match — the double-click stays scoped to tool slots.
+public func isToolButtonElement(_ element: [String: Any]) -> Bool {
+    guard (element["type"] as? String) == "icon_button" else { return false }
+    let behaviors = element["behavior"] as? [[String: Any]] ?? []
+    return behaviors.contains { beh in
+        (beh["event"] as? String) == "click"
+            && (beh["action"] as? String) == "select_tool"
+    }
+}
+
 /// Map PanelKind to YAML content id.
 func panelKindToContentId(_ kind: PanelKind) -> String {
     switch kind {

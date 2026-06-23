@@ -246,6 +246,17 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
     ~workspace_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ())
     (menubar_row :> GPack.box);
 
+  (* Wire the toolbar double-click -> show-panel path: a tool whose bundle
+     entry declares a [tool_options_panel] (e.g. Magic Wand) summons that
+     panel on double-click. Route through the live [workspace_layout] +
+     dock refresh, the same op the Window menu's toggle uses. Yaml_panel_view
+     can't reach the layout directly (it would tie the renderer to the
+     canvas wiring), so it dispatches through this hook. *)
+  Yaml_panel_view.show_panel_hook := (fun kind ->
+    if not (Workspace_layout.is_panel_visible workspace_layout kind) then
+      Layout_apply.layout_apply workspace_layout (Layout_apply.op_show_panel kind);
+    !dock_refresh ());
+
   (* Pane container: GtkLayout for absolute positioning.
      Unlike GtkFixed, GtkLayout doesn't expand the window when
      children extend beyond its allocation. *)

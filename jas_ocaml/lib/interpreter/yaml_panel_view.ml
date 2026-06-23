@@ -464,6 +464,17 @@ let open_nonmodal_dialog_hook :
     canvas's toolbar. *)
 let set_active_tool_hook : (string -> unit) ref = ref (fun _ -> ())
 
+(** Hook for showing (summoning/docking) a panel by its [panel_kind].
+    Wired in main.ml / canvas.ml against the live [workspace_layout] +
+    dock refresh: ``Layout_apply.op_show_panel kind`` followed by a dock
+    rebuild. Used by the toolbar double-click handler to surface a tool's
+    [tool_options_panel] (e.g. Magic Wand). Referencing the layout
+    directly here would tie Yaml_panel_view to the canvas/layout wiring,
+    so it routes through this ref like the dialog/tool hooks. No-op until
+    wired. *)
+let show_panel_hook : (Workspace_layout.panel_kind -> unit) ref =
+  ref (fun _ -> ())
+
 (** Current active-tool name, as the YAML toolbar's [bind.checked]
     expressions read it (``state.active_tool == "selection"`` etc.).
     The native toolbar / canvas own the real tool; this string mirrors
@@ -1213,6 +1224,125 @@ let dispatch_double_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) :
     end
   ) behaviors
 
+(** [is_tool_button el] — true iff the YAML element is a TOOLBAR tool
+    button: an ``icon_button`` whose [behavior] declares an
+    ``event: click, action: select_tool`` entry. This is the canonical
+    marker the bundle's tool grid stamps on every tool slot
+    (btn_selection, btn_pen_slot, …) and is exactly what scopes the
+    double-click-opens-tool-options behavior to tool buttons only — the
+    fill/stroke icon_buttons (swap / reset / solid / gradient / none) use
+    other actions, and panel icon_buttons declare none, so neither is
+    misidentified. Mirrors the click->select_tool discriminator the
+    native toolbars used before the bundle migration. *)
+let is_tool_button (el : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  (el |> member "type" |> to_string_option) = Some "icon_button"
+  &&
+  (match el |> member "behavior" with
+   | `List bs ->
+     List.exists (fun b ->
+       (b |> member "event" |> to_string_option) = Some "click"
+       && (b |> member "action" |> to_string_option) = Some "select_tool"
+     ) bs
+   | _ -> false)
+
+(** The three declarative ways a tool exposes its options, in priority
+    order, plus the no-op when a tool declares none. Read off the
+    compiled [tools.<name>] entry by [tool_options_dispatch_for]. *)
+type tool_options_dispatch =
+  | Show_panel of Workspace_layout.panel_kind
+      (** ``tool_options_panel`` — summon/dock the named panel. *)
+  | Run_action of string
+      (** ``tool_options_action`` — dispatch the named bundle action. *)
+  | Open_dialog of string
+      (** ``tool_options_dialog`` — open the named dialog. *)
+  | No_options
+      (** the tool declares none of the three — double-click is a no-op. *)
+
+(** Map a [tool_options_panel] id string (the short panel id the bundle
+    stores, e.g. ``magic_wand``) to its {!Workspace_layout.panel_kind}.
+    Generalizes the old native toolbar's [panel_id_to_kind] (which only
+    knew magic_wand) to the full panel set, so any tool that grows a
+    [tool_options_panel] resolves without further wiring. Returns [None]
+    for an unknown id. *)
+let panel_id_to_kind (panel_id : string) : Workspace_layout.panel_kind option =
+  match panel_id with
+  | "layers" -> Some Workspace_layout.Layers
+  | "color" -> Some Workspace_layout.Color
+  | "swatches" -> Some Workspace_layout.Swatches
+  | "stroke" -> Some Workspace_layout.Stroke
+  | "properties" -> Some Workspace_layout.Properties
+  | "character" -> Some Workspace_layout.Character
+  | "paragraph" -> Some Workspace_layout.Paragraph
+  | "artboards" -> Some Workspace_layout.Artboards
+  | "align" -> Some Workspace_layout.Align
+  | "boolean" -> Some Workspace_layout.Boolean
+  | "opacity" -> Some Workspace_layout.Opacity
+  | "magic_wand" -> Some Workspace_layout.Magic_wand
+  | "symbols" -> Some Workspace_layout.Symbols
+  | _ -> None
+
+(** [tool_options_dispatch_for tool_name] — look the tool up in the
+    compiled bundle [tools] map and decide how its options should be
+    summoned, in PRIORITY ORDER:
+      1. ``tool_options_panel`` -> {!Show_panel} (resolved to a panel_kind);
+      2. ``tool_options_action`` -> {!Run_action};
+      3. ``tool_options_dialog`` -> {!Open_dialog}.
+    A tool that declares none (or an unknown tool, or a [tool_options_panel]
+    whose id doesn't resolve) yields {!No_options} so the double-click is a
+    no-op. Built entirely from the bundle — no hardcoded tool list — so new
+    tools and their options come along for free. Pure / GUI-free, so the
+    lookup + priority order are unit-testable; only the resulting
+    side-effect (open panel/dialog or run action) is GUI. *)
+let tool_options_dispatch_for (tool_name : string) : tool_options_dispatch =
+  let open Yojson.Safe.Util in
+  match Workspace_loader.load () with
+  | None -> No_options
+  | Some ws ->
+    (match Workspace_loader.tool ws tool_name with
+     | None -> No_options
+     | Some entry ->
+       let str_field k = entry |> member k |> to_string_option in
+       (match str_field "tool_options_panel" with
+        | Some pid when pid <> "" ->
+          (match panel_id_to_kind pid with
+           | Some kind -> Show_panel kind
+           | None -> No_options)
+        | _ ->
+          (match str_field "tool_options_action" with
+           | Some act when act <> "" -> Run_action act
+           | _ ->
+             (match str_field "tool_options_dialog" with
+              | Some dlg when dlg <> "" -> Open_dialog dlg
+              | _ -> No_options))))
+
+(** Perform the active tool's options dispatch. Reads {!active_tool_name}
+    (the string the bundle toolbar's [bind.checked] tracks — kept in sync
+    by every tool change), resolves its options via
+    {!tool_options_dispatch_for}, and runs the matching side effect:
+      - {!Show_panel} -> {!show_panel_hook} (Layout_apply.op_show_panel + dock
+        refresh, wired in canvas.ml);
+      - {!Run_action} -> [Dialog_global.dispatch_action] against a fresh
+        Controller, exactly the menubar's generic zoom/fit dispatch path so
+        the action's ``doc.*`` effects run (hand -> fit_active_artboard,
+        zoom -> zoom_to_actual_size, artboard -> fit_all_artboards);
+      - {!Open_dialog} -> {!open_yaml_dialog_hook} (the modal show_dialog
+        path, same as the old pencil-slot double-click opened the Paintbrush
+        tool-options dialog);
+      - {!No_options} -> nothing.
+    Invoked from [render_button]'s double-click handler on tool buttons. *)
+let dispatch_active_tool_options () : unit =
+  match tool_options_dispatch_for !active_tool_name with
+  | Show_panel kind -> !show_panel_hook kind
+  | Run_action action ->
+    (match !_get_model_ref () with
+     | None -> ()
+     | Some m ->
+       let ctrl = new Controller.controller ~model:m () in
+       Dialog_global.dispatch_action action [] (Some ctrl) (fun () -> ()))
+  | Open_dialog dlg_id -> !open_yaml_dialog_hook dlg_id []
+  | No_options -> ()
+
 (** Dispatch a value-change commit on a YAML element by walking its [behavior]
     array for [event: change] entries. The committed [value] is injected as
     [event.value] (so params like [value: "event.value"] resolve) and action
@@ -1952,13 +2082,45 @@ and render_button ~packing ~ctx el =
           effs ctx_pairs live_store
     in
     ignore (btn#event#connect#button_press ~callback:(fun ev ->
-      if GdkEvent.Button.button ev = 1 then run mouse_down_effects;
-      (* Return false: do NOT consume — the GtkButton still emits
-         [clicked] for a quick press+release (select_tool). *)
-      false));
+      if GdkEvent.Button.button ev = 1
+         && GdkEvent.get_type ev = `TWO_BUTTON_PRESS
+         && is_tool_button el then begin
+        (* Double-click on a SLOT tool button: open the ACTIVE tool's
+           options (panel / action / dialog, per the bundle). Cancel the
+           pending long-press timer first so the alternates flyout never
+           pops on the way through — the first press of the pair armed it,
+           and though the intervening release usually cancels it, doing it
+           here too matches the old native toolbar's explicit cancel and
+           guards against a fast double-tap that skips the release. Consume
+           the event ([true]) so the GtkButton's [clicked] doesn't also
+           re-select the tool on the second half of the double. *)
+        let timer_id =
+          "long_press_" ^ (el |> member "id" |> to_string_option
+                            |> Option.value ~default:"") in
+        Timer_manager.cancel_timer timer_id;
+        dispatch_active_tool_options ();
+        true
+      end else begin
+        if GdkEvent.Button.button ev = 1 then run mouse_down_effects;
+        (* Return false: do NOT consume — the GtkButton still emits
+           [clicked] for a quick press+release (select_tool). *)
+        false
+      end));
     ignore (btn#event#connect#button_release ~callback:(fun ev ->
       if GdkEvent.Button.button ev = 1 then run mouse_up_effects;
       false))
+  end
+  (* Double-click on a NON-SLOT tool button (no long-press flyout, so no
+     mouse_down/up handler above) — e.g. Selection, Line, Rotate,
+     Eyedropper. Same active-tool-options dispatch; scoped to tool buttons
+     so panel / fill-stroke icon_buttons never get it. *)
+  else if is_tool_button el then begin
+    ignore (btn#event#connect#button_press ~callback:(fun ev ->
+      if GdkEvent.Button.button ev = 1
+         && GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+        dispatch_active_tool_options ();
+        true
+      end else false))
   end;
   (* Inline behavior dispatch for buttons in dialogs (Color Picker
      OK button writes [if param.target == fill then set fill_color

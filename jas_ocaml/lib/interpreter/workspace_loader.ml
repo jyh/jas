@@ -58,6 +58,16 @@ let panel (ws : workspace) (content_id : string) : Yojson.Safe.t option =
   | Some panels -> json_member content_id panels
   | None -> None
 
+(** [tool ws name] returns the compiled tool entry [tools.<name>] from the
+    bundle, or [None] when the tool is unknown. The entry carries the tool's
+    declarative ``tool_options_panel`` / ``tool_options_action`` /
+    ``tool_options_dialog`` fields, read by the toolbar double-click handler
+    to summon the active tool's options. *)
+let tool (ws : workspace) (name : string) : Yojson.Safe.t option =
+  match json_member "tools" ws.data with
+  | Some tools -> json_member name tools
+  | None -> None
+
 (** Get a concept pack by id from the concept registry (CONCEPTS.md): the spec
     carries params, closed, and the generator expression. *)
 let concept (ws : workspace) (id : string) : Yojson.Safe.t option =

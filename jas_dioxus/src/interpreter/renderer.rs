@@ -4787,6 +4787,77 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     }
 }
 
+/// Where a tool's options live, resolved from the compiled bundle in
+/// priority order. Double-clicking a toolbar tool button opens the
+/// ACTIVE tool's options via one of these three mutually-exclusive
+/// destinations:
+///   1. `tool_options_panel`  → show the named panel (Magic Wand).
+///   2. `tool_options_action` → invoke a one-shot action (Hand →
+///      fit_active_artboard, Zoom → zoom_to_actual_size, Artboard →
+///      fit_all_artboards).
+///   3. `tool_options_dialog` → open a modal options dialog
+///      (Paintbrush / Blob Brush / Scale / Rotate / Shear / Eyedropper).
+/// A tool declaring none of these has no dblclick options (no-op).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolOptionsDest {
+    Panel(String),
+    Action(String),
+    Dialog(String),
+}
+
+/// Resolve the active tool's options destination from the compiled
+/// bundle `tools` map, keyed by the tool's YAML id (the value of
+/// `ToolKind::panel_state_name`). The lookup mirrors the pre-bundle
+/// native toolbar: panel beats action beats dialog when more than one
+/// is present, though the spec keeps them mutually exclusive. Returns
+/// `None` when the tool isn't in the bundle or declares no options —
+/// the toolbar dblclick is then a silent no-op. Builds the list from
+/// the bundle, never a hardcoded tool table.
+fn tool_options_dest_for_yaml_id(yaml_id: &str) -> Option<ToolOptionsDest> {
+    let ws = super::workspace::Workspace::load()?;
+    let tool = ws.data().get("tools")?.get(yaml_id)?;
+    if let Some(p) = tool.get("tool_options_panel").and_then(|v| v.as_str()) {
+        return Some(ToolOptionsDest::Panel(p.to_string()));
+    }
+    if let Some(a) = tool.get("tool_options_action").and_then(|v| v.as_str()) {
+        return Some(ToolOptionsDest::Action(a.to_string()));
+    }
+    if let Some(d) = tool.get("tool_options_dialog").and_then(|v| v.as_str()) {
+        return Some(ToolOptionsDest::Dialog(d.to_string()));
+    }
+    None
+}
+
+/// Map a YAML panel id (the value of `tool_options_panel`) to its
+/// `PanelKind`. Returns `None` when the id matches no known panel — the
+/// toolbar dblclick is then a silent no-op. Mirrors the pre-bundle
+/// native toolbar's `panel_id_to_kind`.
+fn panel_id_to_kind(id: &str) -> Option<PanelKind> {
+    Some(match id {
+        "magic_wand" => PanelKind::MagicWand,
+        // Add other tool panels here as they gain tool_options_panel.
+        _ => return None,
+    })
+}
+
+/// True when this icon_button is a TOOLBAR TOOL SLOT — a button whose
+/// `behavior` declares an `action: select_tool` (every layout toolbar
+/// slot). This is the discriminator the dblclick-opens-tool-options
+/// gesture is scoped to: panels' op_* buttons, dialog toggles, and the
+/// long-press flyout items (which `set` active_tool + `close_dialog`
+/// but carry no `select_tool` action) all return false and never get
+/// the dblclick.
+fn is_toolbar_tool_slot(el: &serde_json::Value) -> bool {
+    el.get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|behaviors| {
+            behaviors.iter().any(|b| {
+                b.get("action").and_then(|a| a.as_str()) == Some("select_tool")
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
@@ -4980,6 +5051,78 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
+
+    // Double-clicking a TOOLBAR TOOL SLOT opens the ACTIVE tool's
+    // options. The destination is active-tool-dynamic (it depends on
+    // state.active_tool at click time, not on this button), so this is
+    // a native handler reading AppState rather than a declarative
+    // behavior. Scoped to toolbar tool slots only — panels' op_*
+    // buttons, dialog toggles, and long-press flyout items return false
+    // from is_toolbar_tool_slot and get no dblclick. This restores the
+    // pre-bundle native toolbar's 3-path dispatch (panel/action/dialog).
+    let tool_options_dblclick: Option<EventHandler<Event<MouseData>>> =
+        if is_toolbar_tool_slot(el) {
+            let app = rctx.app.clone();
+            let mut revision = rctx.revision;
+            let mut dialog_signal = rctx.dialog_ctx.0;
+            Some(EventHandler::new(move |evt: Event<MouseData>| {
+                evt.stop_propagation();
+                let app = app.clone();
+                spawn(async move {
+                    // Resolve the active tool's options destination from
+                    // the bundle. Read active_tool under a short borrow.
+                    let dest = {
+                        let st = app.borrow();
+                        let yaml_id = st.active_tool.panel_state_name();
+                        tool_options_dest_for_yaml_id(yaml_id)
+                    };
+                    let Some(dest) = dest else { return }; // no-op
+                    match dest {
+                        ToolOptionsDest::Panel(panel_id) => {
+                            let Some(kind) = panel_id_to_kind(&panel_id) else { return };
+                            {
+                                let mut st = app.borrow_mut();
+                                crate::workspace::layout_apply::layout_apply(
+                                    &mut st.workspace_layout,
+                                    &crate::workspace::layout_apply::op_show_panel(kind),
+                                );
+                                if kind == PanelKind::Color {
+                                    // COLOR.md §Panel initialization:
+                                    // mode resets to HSB on each reopen.
+                                    st.color_panel_mode =
+                                        crate::workspace::color_panel_view::ColorMode::Hsb;
+                                }
+                            }
+                            revision += 1;
+                        }
+                        ToolOptionsDest::Action(action_id) => {
+                            {
+                                let mut st = app.borrow_mut();
+                                let empty = serde_json::Map::new();
+                                dispatch_action(&action_id, &empty, &mut st);
+                            }
+                            revision += 1;
+                        }
+                        ToolOptionsDest::Dialog(dlg_id) => {
+                            let (live_state, outer_scope) = {
+                                let st = app.borrow();
+                                (
+                                    crate::workspace::dock_panel::build_live_state_map(&st),
+                                    build_dialog_outer_scope(&st),
+                                )
+                            };
+                            let empty = serde_json::Map::new();
+                            super::dialog_view::open_dialog_with_outer(
+                                &mut dialog_signal, &dlg_id, &empty, &live_state, &outer_scope,
+                            );
+                            revision += 1;
+                        }
+                    }
+                });
+            }))
+        } else {
+            None
+        };
     // Disabled styling: grey out + block pointer events so the
     // button doesn't respond to clicks. Opacity panel's
     // LINK_INDICATOR disables itself when the selection has no mask.
@@ -5038,6 +5181,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
             onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
+            ondoubleclick: move |evt| { if let Some(ref h) = tool_options_dblclick { h.call(evt); } },
             onkeydown: move |evt: Event<KeyboardData>| {
                 if disabled { return; }
                 let key = evt.data().key();
@@ -12258,6 +12402,132 @@ mod tests {
         assert_eq!(op.opacity, 100.0);
         assert!(!op.thumbnails_hidden);
         assert!(op.new_masks_clipping);
+    }
+
+    // ---- Toolbar dblclick → active tool's options (3-path lookup) ----
+
+    #[test]
+    fn tool_options_dest_panel_for_magic_wand() {
+        // magic_wand declares tool_options_panel: magic_wand.
+        assert_eq!(
+            super::tool_options_dest_for_yaml_id("magic_wand"),
+            Some(super::ToolOptionsDest::Panel("magic_wand".to_string()))
+        );
+    }
+
+    #[test]
+    fn tool_options_dest_action_for_hand_and_zoom() {
+        assert_eq!(
+            super::tool_options_dest_for_yaml_id("hand"),
+            Some(super::ToolOptionsDest::Action("fit_active_artboard".to_string()))
+        );
+        assert_eq!(
+            super::tool_options_dest_for_yaml_id("zoom"),
+            Some(super::ToolOptionsDest::Action("zoom_to_actual_size".to_string()))
+        );
+    }
+
+    #[test]
+    fn tool_options_dest_dialog_for_dialog_tools() {
+        // Every tool the prompt lists as a tool_options_dialog tool.
+        for (yaml_id, dlg) in [
+            ("paintbrush", "paintbrush_tool_options"),
+            ("blob_brush", "blob_brush_tool_options"),
+            ("scale", "scale_options"),
+            ("rotate", "rotate_options"),
+            ("shear", "shear_options"),
+            ("eyedropper", "eyedropper_tool_options"),
+        ] {
+            assert_eq!(
+                super::tool_options_dest_for_yaml_id(yaml_id),
+                Some(super::ToolOptionsDest::Dialog(dlg.to_string())),
+                "tool {yaml_id} should resolve to dialog {dlg}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_options_dest_none_for_tool_without_options() {
+        // Selection declares no tool_options_* → dblclick is a no-op.
+        assert_eq!(super::tool_options_dest_for_yaml_id("selection"), None);
+        // Unknown id → None as well.
+        assert_eq!(super::tool_options_dest_for_yaml_id("not_a_tool"), None);
+    }
+
+    #[test]
+    fn tool_options_dest_lookup_is_bundle_driven() {
+        // The lookup is built from the bundle, not a hardcoded table:
+        // iterate every tool the bundle declares and confirm the
+        // resolved destination matches that entry's fields in the
+        // documented priority order (panel > action > dialog).
+        let ws = super::super::workspace::Workspace::load().unwrap();
+        let tools = ws
+            .data()
+            .get("tools")
+            .and_then(|t| t.as_object())
+            .expect("bundle has a tools map");
+        // The bundle must actually declare some options-bearing tools,
+        // otherwise this test would vacuously pass.
+        let mut saw_some = false;
+        for (yaml_id, tool) in tools {
+            let dest = super::tool_options_dest_for_yaml_id(yaml_id);
+            let panel = tool.get("tool_options_panel").and_then(|v| v.as_str());
+            let action = tool.get("tool_options_action").and_then(|v| v.as_str());
+            let dialog = tool.get("tool_options_dialog").and_then(|v| v.as_str());
+            let expected = if let Some(p) = panel {
+                Some(super::ToolOptionsDest::Panel(p.to_string()))
+            } else if let Some(a) = action {
+                Some(super::ToolOptionsDest::Action(a.to_string()))
+            } else if let Some(d) = dialog {
+                Some(super::ToolOptionsDest::Dialog(d.to_string()))
+            } else {
+                None
+            };
+            if expected.is_some() {
+                saw_some = true;
+            }
+            assert_eq!(dest, expected, "tool {yaml_id}: lookup must match bundle");
+        }
+        assert!(saw_some, "bundle should declare at least one options-bearing tool");
+    }
+
+    #[test]
+    fn panel_id_to_kind_maps_magic_wand() {
+        assert_eq!(super::panel_id_to_kind("magic_wand"), Some(PanelKind::MagicWand));
+        assert_eq!(super::panel_id_to_kind("unknown_panel"), None);
+    }
+
+    #[test]
+    fn is_toolbar_tool_slot_true_only_for_select_tool_buttons() {
+        // Toolbar slot: behavior has action: select_tool.
+        let slot = serde_json::json!({
+            "type": "icon_button",
+            "behavior": [{ "event": "click", "action": "select_tool",
+                           "params": { "tool": "selection" } }]
+        });
+        assert!(super::is_toolbar_tool_slot(&slot));
+
+        // Long-press flyout item: sets active_tool + close_dialog, but
+        // NO select_tool action → must NOT get the dblclick.
+        let flyout = serde_json::json!({
+            "type": "icon_button",
+            "behavior": [{ "event": "click", "effects": [
+                { "set": { "active_tool": "paintbrush" } },
+                { "close_dialog": null }
+            ] }]
+        });
+        assert!(!super::is_toolbar_tool_slot(&flyout));
+
+        // Panel op_* button: a plain action, not select_tool.
+        let op_btn = serde_json::json!({
+            "type": "icon_button",
+            "behavior": [{ "event": "click", "action": "op_make_mask" }]
+        });
+        assert!(!super::is_toolbar_tool_slot(&op_btn));
+
+        // No behavior at all.
+        let bare = serde_json::json!({ "type": "icon_button" });
+        assert!(!super::is_toolbar_tool_slot(&bare));
     }
 }
 
