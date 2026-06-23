@@ -435,6 +435,111 @@ class CrossLanguageTest(absltest.TestCase):
         self._run_operation_fixture("boolean_ops.json")
 
     # ---------------------------------------------------------------
+    # Gesture equivalence corpus (CROSS_LANGUAGE_TESTING.md §3a; mirrors
+    # the Operation equivalence corpus above, but drives the CanvasTool
+    # seam — raw pointer events through a YamlTool — instead of op_apply).
+    # A gesture fixture replays a sequence of pointer events against a
+    # tool built from the workspace spec and serializes the resulting
+    # document via document_to_test_json, byte-comparing against the
+    # Rust-authored golden under test_fixtures/gestures/.
+    #
+    # Identity-view convention: the Model loads with the default
+    # (identity) view, so the event x/y ARE document coordinates
+    # (_pointer_payload computes doc_x == x when zoom == 0 and
+    # view_offset == 0). shift/alt default to false; `dragging` defaults
+    # to false on move events.
+    #
+    # Self-bracketing: each tool that mutates the document does its own
+    # `doc.snapshot` (rect.yaml's on_mouseup), so the gesture runner does
+    # NOT wrap events in begin_txn/commit_txn — unlike the operation
+    # runner, which owns the transaction bracket. Mirrors the Rust
+    # run_gesture_model / assert_gesture_test / gesture_corpus.
+    # ---------------------------------------------------------------
+
+    # The gesture fixture files under test_fixtures/gestures/.
+    # Inc-1 is just the rectangle-draw gesture.
+    _GESTURE_FIXTURES = ["draw_rect.json"]
+
+    @staticmethod
+    def _build_gesture_tool(tool_id: str):
+        # Build the YamlTool for tool_id from the compiled workspace
+        # bundle (the same bundle the running app loads), so the corpus
+        # tracks the bundle in CI. Mirrors the Rust build_gesture_tool.
+        from tools.yaml_tool import YamlTool
+        repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), ".."))
+        with open(os.path.join(repo_root, "workspace", "workspace.json")) as f:
+            data = json.load(f)
+        spec = data.get("tools", {}).get(tool_id)
+        assert spec is not None, f"workspace declares no tool '{tool_id}'"
+        tool = YamlTool.from_workspace_tool(spec)
+        assert tool is not None, f"tool spec '{tool_id}' failed to parse"
+        return tool
+
+    def _run_gesture_model(self, tc):
+        # Load the setup SVG into a Model under the default identity view,
+        # build the tool from the workspace spec, activate it, then
+        # dispatch each event through the CanvasTool seam. Mirrors the
+        # Rust run_gesture_model.
+        from tools.tool import ToolContext
+        setup_svg = _read_fixture(f"svg/{tc['setup_svg']}")
+        model = Model(document=svg_to_document(setup_svg))
+        ctrl = Controller(model=model)
+        # The rect gesture uses no hit-testing; pass inert callbacks so
+        # ToolContext stays a faithful (live-document) headless seam.
+        ctx = ToolContext(
+            model=model,
+            controller=ctrl,
+            hit_test_selection=lambda x, y: False,
+            hit_test_handle=lambda x, y: None,
+            hit_test_text=lambda x, y: None,
+            hit_test_path_curve=lambda x, y: None,
+            request_update=lambda: None,
+        )
+        tool = self._build_gesture_tool(tc["tool"])
+        tool.activate(ctx)
+        for ev in tc["events"]:
+            x = float(ev["x"])
+            y = float(ev["y"])
+            # shift/alt default false; dragging defaults false.
+            shift = bool(ev.get("shift", False))
+            alt = bool(ev.get("alt", False))
+            kind = ev["kind"]
+            if kind == "press":
+                tool.on_press(ctx, x, y, shift, alt)
+            elif kind == "move":
+                dragging = bool(ev.get("dragging", False))
+                tool.on_move(ctx, x, y, shift, dragging)
+            elif kind == "release":
+                tool.on_release(ctx, x, y, shift, alt)
+            else:
+                self.fail(f"unknown gesture event kind: {kind!r}")
+        return model
+
+    def _assert_gesture_test(self, tc):
+        # Replay the gesture and byte-compare the canonical document JSON
+        # against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
+        # Mirrors the Rust assert_gesture_test.
+        name = tc["name"]
+        expected = _read_fixture(f"gestures/{tc['expected_json']}")
+        actual = document_to_test_json(self._run_gesture_model(tc).document)
+        if actual != expected:
+            print(f"=== EXPECTED ({name}) ===")
+            print(expected)
+            print(f"=== ACTUAL ({name}) ===")
+            print(actual)
+        self.assertEqual(actual, expected,
+            f"Gesture test '{name}' failed: canonical JSON mismatch")
+
+    def test_gesture_corpus(self):
+        # Inc-1 = draw_rect: a press/move/release drives the rect YamlTool
+        # to add a rect (10,20)-(110,70) over circle_basic.svg; the result
+        # must byte-match the Rust golden.
+        for fixture in self._GESTURE_FIXTURES:
+            for tc in json.loads(_read_fixture(f"gestures/{fixture}")):
+                self._assert_gesture_test(tc)
+
+    # ---------------------------------------------------------------
     # The 33-verb actions.yaml<->op_apply unification (OP_LOG.md §9
     # Phases P1-P7). Each shared fixture replays through the production
     # op_apply dispatcher and byte-matches the Rust golden via

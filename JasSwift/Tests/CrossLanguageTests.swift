@@ -2090,3 +2090,116 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(ps.count == 1)
     #expect(ps.first?.count == 4)
 }
+
+// MARK: - Gesture equivalence corpus (CROSS_LANGUAGE_TESTING.md §3a)
+//
+// Mirrors the OPERATION corpus above, but drives the CanvasTool seam — raw
+// pointer events through a YamlTool — instead of opApply. A gesture fixture
+// replays a sequence of pointer events against a tool built from the workspace
+// spec and serializes the resulting document, asserting BYTE-EQUAL to the
+// Rust-authored golden.
+//
+// Identity-view convention: the Model is loaded with the default (identity)
+// view (zoomLevel == 1.0, viewOffsetX/Y == 0.0), so the event x/y ARE document
+// coordinates (pointerPayload computes doc_x == x in that case). shift/alt
+// default to false; `dragging` defaults to false on move events.
+//
+// Self-bracketing: each tool that mutates the document does its own
+// doc.snapshot (e.g. rect.yaml's on_mouseup), so the gesture runner does NOT
+// wrap events in beginTxn/commitTxn — unlike the operation runner, which owns
+// the transaction bracket. Mirrors Rust's run_gesture_model / assert_gesture_test.
+
+/// The list of gesture fixture files under `test_fixtures/gestures/`.
+/// Inc-1 is just the rectangle-draw gesture.
+private let gestureFixtures = ["draw_rect.json"]
+
+/// Build a minimal ToolContext for replaying gestures: a YamlTool reads only
+/// `ctx.model` and `ctx.requestUpdate` on the pointer path, so the hit-test
+/// closures and overlay hook are inert stubs. Mirrors the makeCtx helper used
+/// across the tool tests.
+private func gestureToolContext(_ model: Model) -> ToolContext {
+    ToolContext(
+        model: model,
+        controller: Controller(model: model),
+        hitTestSelection: { _ in false },
+        hitTestHandle: { _ in nil },
+        hitTestText: { _ in nil },
+        hitTestPathCurve: { _, _ in nil },
+        requestUpdate: {},
+        drawElementOverlay: { _, _, _ in }
+    )
+}
+
+/// Run a gesture fixture and return the resulting Model. Loads the setup SVG
+/// into a Model under the default identity view, builds the tool from the
+/// workspace spec (the same `loadYamlTool` path the running app uses), activates
+/// it, then dispatches each event through the CanvasTool seam (onPress / onMove /
+/// onRelease). Mirrors Rust `run_gesture_model`.
+private func runGestureModel(_ tc: [String: Any]) -> Model {
+    let setupSvg = readFixture("svg/\(tc["setup_svg"] as! String)")
+    let model = Model(document: svgToDocument(setupSvg))
+
+    let toolId = tc["tool"] as! String
+    guard let ws = WorkspaceData.load() else {
+        fatalError("workspace.json failed to load")
+    }
+    guard let tool = loadYamlTool(toolId, in: ws) else {
+        fatalError("workspace declares no tool '\(toolId)' (or it failed to parse)")
+    }
+
+    let ctx = gestureToolContext(model)
+    tool.activate(ctx)
+
+    for ev in tc["events"] as! [[String: Any]] {
+        let x = (ev["x"] as! NSNumber).doubleValue
+        let y = (ev["y"] as! NSNumber).doubleValue
+        // shift/alt default false; dragging defaults false on move.
+        let shift = (ev["shift"] as? Bool) ?? false
+        let alt = (ev["alt"] as? Bool) ?? false
+        switch ev["kind"] as! String {
+        case "press":
+            tool.onPress(ctx, x: x, y: y, shift: shift, alt: alt)
+        case "move":
+            let dragging = (ev["dragging"] as? Bool) ?? false
+            tool.onMove(ctx, x: x, y: y, shift: shift, dragging: dragging)
+        case "release":
+            tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
+        default:
+            Issue.record("unknown gesture event kind: \(ev["kind"] ?? "nil")")
+        }
+    }
+    return model
+}
+
+/// Mirror of `assertOperationTest`: replay the gesture and compare the canonical
+/// document JSON against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
+/// Mirrors Rust `assert_gesture_test`.
+private func assertGestureTest(_ tc: [String: Any]) {
+    let name = tc["name"] as! String
+    let expectedFile = tc["expected_json"] as! String
+    let expected = readFixture("gestures/\(expectedFile)")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let actual = documentToTestJson(runGestureModel(tc).document)
+
+    if actual != expected {
+        print("=== EXPECTED (\(name)) ===")
+        print(expected)
+        print("=== ACTUAL (\(name)) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "Gesture test '\(name)' failed: canonical JSON mismatch")
+}
+
+/// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer
+/// events through this app's CanvasTool seam and assert the resulting document
+/// serializes byte-identically to the Rust-authored golden.
+@Test func gestureCorpus() throws {
+    for fixture in gestureFixtures {
+        let json = readFixture("gestures/\(fixture)")
+        let data = json.data(using: .utf8)!
+        let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+        for tc in tests {
+            assertGestureTest(tc)
+        }
+    }
+}
