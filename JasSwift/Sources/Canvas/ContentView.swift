@@ -924,6 +924,18 @@ private struct BundleToolbarPaneBody: View {
                 currentTool = t
             }
         }
+        .onChange(of: model.toolRequest) { req in
+            // Reliable keyboard tool-selection channel (shortcut / Space→
+            // Hand pass-through + its release restore). A @Published request
+            // always re-renders this @ObservedObject view and re-checks this
+            // .onChange, so it sets currentTool in the toolbar's reactive
+            // scope where an AppKit @Binding write from the canvas responder
+            // is unreliable. currentTool drives both the canvas tool
+            // (updateNSView) and the grid glyph/highlight (buildToolbarContext).
+            if let req = req, let t = toolFromYamlString(req.id) {
+                currentTool = t
+            }
+        }
     }
 
     /// Render the bundle's tool_grid element via the generic renderer.
