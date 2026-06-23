@@ -1035,6 +1035,158 @@ mod tests {
         }
     }
 
+    // ===============================================================
+    // KEY-RESOLUTION corpus (TESTING_STRATEGY.md §5 rec 3)
+    // ---------------------------------------------------------------
+    // Sibling to the GESTURE and ACTION corpora. Where those drive the
+    // canvas-tool seam and the dispatch_action seam, this corpus pins
+    // the PURE key→action RESOLUTION step: `resolve_key(chord)` maps a
+    // normalized, framework-neutral key chord {key, ctrl, shift, alt,
+    // meta} to the bundle `shortcuts` table's {action, params} (or
+    // null). The framework event → chord BINDING stays on the manual
+    // floor (§5); only resolution is byte-gated here.
+    //
+    // Unlike the gesture/action corpora the output is NOT a document —
+    // it is the resolved command itself, so there is no setup_svg and
+    // no dispatch. Each fixture group lists `cases` (a name + chord);
+    // the runner resolves every chord against the once-loaded bundle
+    // `shortcuts` array and emits a CANONICAL JSON array of
+    // {name, result} (sorted object keys, compact) compared to the
+    // Rust-generated golden. The canonical serializer (`canon_value`)
+    // sorts object keys so the byte comparison is order-independent and
+    // identical across the four apps.
+    // ===============================================================
+
+    /// Key-resolution fixture files under `test_fixtures/keys/`.
+    const KEY_FIXTURES: &[&str] = &["key_resolution.json"];
+
+    /// Canonical JSON serializer for the key corpus: object keys are
+    /// emitted in sorted order, arrays in document order, scalars via
+    /// serde_json (correct string escaping / number formatting). This is
+    /// the shared cross-language canonicalization — every app must
+    /// produce byte-identical output for the same resolved commands.
+    fn canon_value(v: &serde_json::Value) -> String {
+        use serde_json::Value;
+        match v {
+            Value::Object(m) => {
+                let mut ks: Vec<&String> = m.keys().collect();
+                ks.sort();
+                let body: Vec<String> = ks
+                    .iter()
+                    .map(|k| {
+                        format!("{}:{}", serde_json::to_string(k).unwrap(), canon_value(&m[*k]))
+                    })
+                    .collect();
+                format!("{{{}}}", body.join(","))
+            }
+            Value::Array(a) => {
+                let body: Vec<String> = a.iter().map(canon_value).collect();
+                format!("[{}]", body.join(","))
+            }
+            other => serde_json::to_string(other).unwrap(),
+        }
+    }
+
+    /// Wrap a resolved command (or its absence) as the canonical result
+    /// value: `null` when unmapped, else `{action, params}`.
+    fn key_result_value(
+        cmd: &Option<crate::workspace::resolve_key::ResolvedCommand>,
+    ) -> serde_json::Value {
+        use serde_json::Value;
+        match cmd {
+            None => Value::Null,
+            Some(c) => {
+                let mut o = serde_json::Map::new();
+                o.insert("action".into(), Value::String(c.action.clone()));
+                o.insert("params".into(), Value::Object(c.params.clone()));
+                Value::Object(o)
+            }
+        }
+    }
+
+    /// Resolve every chord in a fixture group against the once-loaded
+    /// bundle `shortcuts` table and return the canonical result array.
+    fn run_key_test(group: &serde_json::Value) -> String {
+        use crate::workspace::resolve_key::{resolve_key_in, KeyChord};
+        use serde_json::Value;
+        let ws = crate::interpreter::workspace::Workspace::load()
+            .expect("embedded workspace must parse");
+        let shortcuts = ws
+            .data()
+            .get("shortcuts")
+            .and_then(|s| s.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut arr: Vec<Value> = Vec::new();
+        for case in group["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let ch = &case["chord"];
+            let b = |k: &str| ch.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let chord = KeyChord::new(
+                ch["key"].as_str().unwrap(),
+                b("ctrl"),
+                b("shift"),
+                b("alt"),
+                b("meta"),
+            );
+            let cmd = resolve_key_in(&chord, &shortcuts);
+            let mut o = serde_json::Map::new();
+            o.insert("name".into(), Value::String(name.to_string()));
+            o.insert("result".into(), key_result_value(&cmd));
+            arr.push(Value::Object(o));
+        }
+        canon_value(&Value::Array(arr))
+    }
+
+    /// Replay a key fixture group and compare the canonical result array
+    /// against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
+    fn assert_key_test(group: &serde_json::Value) {
+        let name = group["name"].as_str().unwrap();
+        let expected_file = group["expected_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("keys/{}", expected_file));
+        let expected = expected.trim();
+        let actual = run_key_test(group);
+        if actual != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", actual);
+            panic!("Key test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    #[test]
+    fn key_corpus() {
+        for fixture in KEY_FIXTURES {
+            let json_str = read_fixture(&format!("keys/{}", fixture));
+            let groups: serde_json::Value = serde_json::from_str(&json_str)
+                .unwrap_or_else(|e| panic!("key fixture {} is not valid JSON: {}", fixture, e));
+            for group in groups.as_array().unwrap() {
+                assert_key_test(group);
+            }
+        }
+    }
+
+    /// Bootstrap helper: generate expected JSON for key tests.
+    /// Run with: cargo test generate_key_expected -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn generate_key_expected() {
+        for fixture in KEY_FIXTURES {
+            let json_str = read_fixture(&format!("keys/{}", fixture));
+            let groups: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for group in groups.as_array().unwrap() {
+                let name = group["name"].as_str().unwrap();
+                let expected_file = group["expected_json"].as_str().unwrap();
+                let actual = run_key_test(group);
+                let path = format!("{}/keys/{}", FIXTURES, expected_file);
+                std::fs::write(&path, &actual)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+                eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
     /// Bootstrap: generate the live-element round-trip fixtures
     /// (live_compound_roundtrip / live_reference_roundtrip). Run with:
     ///   cargo test generate_live_fixtures -- --ignored --nocapture

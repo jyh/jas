@@ -2335,3 +2335,125 @@ private func assertActionTest(_ tc: [String: Any]) {
         }
     }
 }
+
+// MARK: - Key-resolution corpus (TESTING_STRATEGY.md §5 rec 3)
+//
+// Sibling to the GESTURE and ACTION corpora above. Where those drive the
+// canvas-tool seam and the dispatch_action seam, this corpus pins the PURE
+// key→action RESOLUTION step: ``resolveKeyIn(chord, shortcuts:)`` maps a
+// normalized, framework-neutral key chord {key, ctrl, shift, alt, meta} to the
+// bundle `shortcuts` table's {action, params} (or null). The framework
+// event → chord BINDING stays on the manual floor (§5); only resolution is
+// byte-gated here.
+//
+// Unlike the gesture/action corpora the output is NOT a document — it is the
+// resolved command itself, so there is no setup_svg and no dispatch. Each
+// fixture group lists `cases` (a name + chord); the runner resolves every chord
+// against the once-loaded bundle `shortcuts` array and emits a CANONICAL JSON
+// array of {name, result} (sorted object keys, compact) compared to the
+// Rust-generated golden. The canonical serializer (``keyCanonValue``) sorts
+// object keys so the byte comparison is order-independent and identical across
+// the four apps. We resolve through the SAME production ``resolveKeyIn`` the
+// live keyboard path is wired to in Phase 2, not a test-only shortcut. Mirrors
+// Rust's run_key_test / assert_key_test.
+
+/// Key-resolution fixture files under `test_fixtures/keys/`.
+private let keyFixtures = ["key_resolution.json"]
+
+/// Canonical JSON serializer for the key corpus: object keys are emitted in
+/// sorted order, arrays in document order, strings escaped via JSON, null as
+/// `null`, compact (no spaces anywhere). This is the shared cross-language
+/// canonicalization — every app must produce byte-identical output for the same
+/// resolved commands. Mirrors Rust `canon_value`.
+private func keyCanonValue(_ v: Any) -> String {
+    if v is NSNull { return "null" }
+    if let dict = v as? [String: Any] {
+        let body = dict.keys.sorted().map { k in
+            "\(keyCanonString(k)):\(keyCanonValue(dict[k]!))"
+        }
+        return "{\(body.joined(separator: ","))}"
+    }
+    if let arr = v as? [Any] {
+        let body = arr.map { keyCanonValue($0) }
+        return "[\(body.joined(separator: ","))]"
+    }
+    if let s = v as? String { return keyCanonString(s) }
+    if let b = v as? Bool { return b ? "true" : "false" }
+    // No non-string scalars occur in the key corpus (results are null or
+    // {action:String, params:{String:String}}), but stay total.
+    return "\(v)"
+}
+
+/// Encode a Swift String as a canonical JSON string literal (quotes + standard
+/// escaping), byte-matching serde_json's string encoder for the tokens that
+/// occur in the corpus (e.g. the tool id `"\\"` would escape to `"\\\\"`).
+private func keyCanonString(_ s: String) -> String {
+    let data = try! JSONSerialization.data(
+        withJSONObject: [s], options: [.withoutEscapingSlashes])
+    let json = String(data: data, encoding: .utf8)!
+    // JSONSerialization wraps in an array: ["..."]. Strip the brackets.
+    return String(json.dropFirst().dropLast())
+}
+
+/// Resolve every chord in a fixture group against the once-loaded bundle
+/// `shortcuts` table and return the canonical result array string. Mirrors Rust
+/// `run_key_test`.
+private func runKeyTest(_ group: [String: Any]) -> String {
+    guard let ws = WorkspaceData.load() else {
+        fatalError("workspace.json failed to load")
+    }
+    let shortcuts = (ws.data["shortcuts"] as? [Any]) ?? []
+    var arr: [Any] = []
+    for case let c as [String: Any] in group["cases"] as! [Any] {
+        let name = c["name"] as! String
+        let ch = c["chord"] as! [String: Any]
+        let bool = { (k: String) in (ch[k] as? Bool) ?? false }
+        let chord = KeyChord(
+            key: ch["key"] as! String,
+            ctrl: bool("ctrl"),
+            shift: bool("shift"),
+            alt: bool("alt"),
+            meta: bool("meta"))
+        let cmd = resolveKeyIn(chord, shortcuts: shortcuts)
+        let result: Any
+        if let cmd = cmd {
+            result = ["action": cmd.action, "params": cmd.params] as [String: Any]
+        } else {
+            result = NSNull()
+        }
+        arr.append(["name": name, "result": result] as [String: Any])
+    }
+    return keyCanonValue(arr)
+}
+
+/// Replay a key fixture group and compare the canonical result array against the
+/// pinned golden, dumping EXPECTED/ACTUAL on mismatch. Mirrors Rust
+/// `assert_key_test`.
+private func assertKeyTest(_ group: [String: Any]) {
+    let name = group["name"] as! String
+    let expectedFile = group["expected_json"] as! String
+    let expected = readFixture("keys/\(expectedFile)")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let actual = runKeyTest(group)
+    if actual != expected {
+        print("=== EXPECTED (\(name)) ===")
+        print(expected)
+        print("=== ACTUAL (\(name)) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "Key test '\(name)' failed: canonical JSON mismatch")
+}
+
+/// The shared key-resolution corpus: resolve every fixture chord against this
+/// app's production ``resolveKeyIn`` and assert the canonical result array
+/// serializes byte-identically to the Rust-authored golden.
+@Test func keyCorpus() throws {
+    for fixture in keyFixtures {
+        let json = readFixture("keys/\(fixture)")
+        let data = json.data(using: .utf8)!
+        let groups = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+        for group in groups {
+            assertKeyTest(group)
+        }
+    }
+}

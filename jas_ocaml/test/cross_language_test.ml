@@ -443,6 +443,76 @@ let run_action_fixture (fixture_name : string) =
     end
   ) tests
 
+(* ------------------------------------------------------------------ *)
+(* KEY-RESOLUTION corpus (TESTING_STRATEGY.md section 5 rec 3). Sibling
+   to the GESTURE and ACTION corpora. Where those drive the canvas-tool
+   seam and the dispatch_action seam, this corpus pins the PURE
+   key->action RESOLUTION step: [Key_resolver.resolve_key chord] maps a
+   normalized, framework-neutral key chord {key, ctrl, shift, alt, meta}
+   to the bundle [shortcuts] table {action, params} (or null). The
+   framework event -> chord BINDING stays on the manual floor (section
+   5); only resolution is byte-gated here.
+
+   Unlike the gesture/action corpora the output is NOT a document -- it
+   is the resolved command itself, so there is no setup_svg and no
+   dispatch. The fixture is the ONE group object {name, expected_json,
+   cases} (each case a name + chord); the runner resolves every chord
+   against the once-loaded bundle [shortcuts] array and emits a CANONICAL
+   JSON array of {name, result} (sorted object keys, compact) compared to
+   the Rust-generated golden. The canonical serializer
+   ([Key_resolver.canon_value]) sorts object keys so the byte comparison
+   is order-independent and identical across the four apps. Rust OWNS
+   golden generation; this harness only ASSERTS. *)
+(* ------------------------------------------------------------------ *)
+
+(* Key-resolution fixture files under [test_fixtures/keys/]. Mirrors the
+   Rust [KEY_FIXTURES]. *)
+let key_fixtures = [ "key_resolution.json" ]
+
+(* Resolve every chord in a fixture group against the once-loaded bundle
+   [shortcuts] table and return the canonical result array string.
+   Mirrors the Rust [run_key_test]. *)
+let run_key_test (group : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
+  let shortcuts = Jas.Key_resolver.bundle_shortcuts () in
+  let arr =
+    List.map (fun case ->
+      let name = case |> member "name" |> to_string in
+      let ch = case |> member "chord" in
+      let b k = match ch |> member k with `Bool v -> v | _ -> false in
+      let key = ch |> member "key" |> to_string in
+      let chord =
+        Jas.Key_resolver.make_chord ~key ~ctrl:(b "ctrl") ~shift:(b "shift")
+          ~alt:(b "alt") ~meta:(b "meta") ()
+      in
+      let cmd = Jas.Key_resolver.resolve_key_in chord shortcuts in
+      `Assoc [
+        ("name", `String name);
+        ("result", Jas.Key_resolver.result_value cmd);
+      ])
+      (group |> member "cases" |> to_list)
+  in
+  Jas.Key_resolver.canon_value (`List arr)
+
+(* Load a key fixture, replay every group, and byte-compare the canonical
+   result array to the pinned Rust golden, dumping EXPECTED/ACTUAL on
+   mismatch. Mirrors the Rust [assert_key_test] / [key_corpus]. *)
+let run_key_fixture (fixture_name : string) =
+  let json_str = read_fixture (Printf.sprintf "keys/%s" fixture_name) in
+  let groups = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+  List.iter (fun group ->
+    let open Yojson.Safe.Util in
+    let name = group |> member "name" |> to_string in
+    let expected_file = group |> member "expected_json" |> to_string in
+    let expected = read_fixture (Printf.sprintf "keys/%s" expected_file) in
+    let actual = run_key_test group in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+      Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+      assert false
+    end
+  ) groups
+
 (* Canonical JSON of the Transaction journal (OP_LOG.md section 10 item 4):
    pins the reserved causal/merge metadata + each op's verb and targets across
    apps. Fixed key order + deterministic txn-N ids make it byte-shareable.
@@ -2438,6 +2508,16 @@ let () =
       Alcotest.test_case (Printf.sprintf "%s action" fixture) `Quick (fun () ->
         run_action_fixture fixture))
       action_fixtures;
+
+    (* Key-resolution corpus (TESTING_STRATEGY.md section 5 rec 3): drives the
+       PURE key->action RESOLUTION seam (Key_resolver.resolve_key_in over the
+       bundle [shortcuts] table) and byte-matches the Rust-authored golden.
+       Mirrors the Rust [key_corpus]. *)
+    "Key",
+    List.map (fun fixture ->
+      Alcotest.test_case (Printf.sprintf "%s key" fixture) `Quick (fun () ->
+        run_key_fixture fixture))
+      key_fixtures;
 
     "Operation", [
       Alcotest.test_case "select_and_move operations" `Quick (fun () ->

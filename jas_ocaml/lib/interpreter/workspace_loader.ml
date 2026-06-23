@@ -52,6 +52,15 @@ let menubar (ws : workspace) : Yojson.Safe.t list =
   | Some (`List l) -> l
   | _ -> []
 
+(** The top-level [shortcuts] table (shortcuts.yaml) as a list of entry JSON
+    objects, in declaration order. Each entry is {key, action, params?}. Empty
+    when the bundle ships no [shortcuts] key. Read the same way as [menubar];
+    consumed by the pure key resolver (Key_resolver). *)
+let shortcuts (ws : workspace) : Yojson.Safe.t list =
+  match json_member "shortcuts" ws.data with
+  | Some (`List l) -> l
+  | _ -> []
+
 (** Get a panel definition by content id (e.g. "color_panel_content"). *)
 let panel (ws : workspace) (content_id : string) : Yojson.Safe.t option =
   match json_member "panels" ws.data with

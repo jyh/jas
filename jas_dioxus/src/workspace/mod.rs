@@ -21,6 +21,9 @@ pub mod menu_bar;
 // (project_pane_propagation memory).
 #[allow(dead_code)]
 pub mod pane;
+// Pure key-chord → action resolution (TESTING_STRATEGY.md §5 rec 3),
+// pinned cross-language by the key corpus.
+pub mod resolve_key;
 // save_dialog.rs removed — workspace save-as uses YAML dialog system
 pub(crate) mod session;
 // Cross-language fixture serialization; consumed only by tests and

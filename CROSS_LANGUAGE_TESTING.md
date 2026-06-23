@@ -511,6 +511,72 @@ Action format:
 }
 ```
 
+### 3c. Key-resolution equivalence
+
+Resolving the same keyboard **chord** in each language yields the same
+`{action, params}` (or none). A keyboard shortcut becomes a command in
+two steps:
+
+1. **Binding** — the framework key event (Dioxus `KeyboardData`, AppKit
+   `NSEvent`, GTK `GdkEvent.Key`, Qt `QKeyEvent`) is normalized into a
+   framework-neutral chord `{key, ctrl, shift, alt, meta}`. This is
+   platform-specific (e.g. on macOS ⌘ arrives as `meta`, mapped to the
+   bundle's `Ctrl` vocabulary) and stays on the **manual floor**.
+2. **Resolution** — the chord is looked up against the compiled bundle
+   `shortcuts` table (`workspace/shortcuts.yaml`) to yield an action verb
+   and params. This step is **pure**, framework-free, and is what this
+   corpus pins (TESTING_STRATEGY.md §5 rec 3).
+
+```
+            resolve_key        canon_value
+   chord ──────────────> cmd_A ──────────────> JSON_A
+    |                                            ||
+    |  resolve_key        canon_value            ||
+    +──────────────> cmd_B ──────────────> JSON_B
+
+   Assert: JSON_A = JSON_B   (against the Rust-generated golden)
+```
+
+`shortcuts` is the single authoritative key→action table; it carries
+both menu actions (`Ctrl+N` → `new_document`) and tool selections
+(`V` → `select_tool {tool: selection}`), already disambiguated (no
+duplicate chords), so resolution is a first-match lookup. Unlike the
+gesture/action corpora the output is **not a document** — it is the
+resolved command itself, so there is no `setup_svg` and no dispatch.
+
+Conventions:
+- **Canonical chord.** `key` is a canonical token: a single ASCII letter
+  is UPPERCASED (`v` → `V`); digits, symbols (`=`, `-`, `\`), and named
+  keys (`Delete`, `Backspace`) are verbatim. `shift` is a separate flag,
+  never folded into the character — so `Shift+E` is `{key:"E",
+  shift:true}`, distinct from bare `{key:"E"}`.
+- **`shortcuts`, not `menubar`.** Resolution reads the purpose-built
+  `shortcuts` table, not the menubar's display accelerators. The two
+  overlap but differ (e.g. `Ctrl+P` is menubar-only, `Delete` is
+  shortcuts-only); the corpus pins that an unmapped chord resolves to
+  `null` even when the menubar binds it via a framework accelerator.
+- **Canonical serialization.** The result array is serialized with
+  sorted object keys, document-order arrays, and compact separators —
+  byte-identical across languages. A tool result is exactly
+  `{"action":"select_tool","params":{"tool":"selection"}}`; a menu
+  result is `{"action":"new_document","params":{}}`; an unmapped chord
+  is `null`.
+
+Key format (`test_fixtures/keys/key_resolution.json` — an array of fixture
+groups, each producing one golden):
+```json
+{
+  "name": "key_resolution",
+  "expected_json": "key_resolution_expected.json",
+  "cases": [
+    { "name": "menu_new",       "chord": { "key": "N", "ctrl": true } },
+    { "name": "tool_selection", "chord": { "key": "V" } },
+    { "name": "tool_path_eraser","chord": { "key": "E", "shift": true } },
+    { "name": "null_bare_e",    "chord": { "key": "E" } }
+  ]
+}
+```
+
 ### 4. Algorithm test vectors
 
 Pure functions tested with shared input/output pairs.
@@ -576,6 +642,9 @@ test_fixtures/
     toggle_all_layers_visibility.json          (action verb(s) + params + setup)
     toggle_all_layers_visibility_expected.json (canonical JSON after dispatch)
     ...
+  keys/
+    key_resolution.json          (key chords -> bundle `shortcuts` lookup)
+    key_resolution_expected.json (canonical {name, result} array)
   algorithms/
     hit_test.json
     measure.json
