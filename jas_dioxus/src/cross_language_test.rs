@@ -715,6 +715,135 @@ mod tests {
         }
     }
 
+    // ===============================================================
+    // GESTURE equivalence corpus (mirrors the OPERATION corpus above,
+    // but drives the CanvasTool seam — raw pointer events through a
+    // YamlTool — instead of op_apply). A gesture fixture replays a
+    // sequence of pointer events against a tool built from the
+    // workspace spec and serializes the resulting document.
+    //
+    // Identity-view convention: the model is loaded with the default
+    // (identity) view, so the event x/y ARE document coordinates
+    // (pointer_event_payload computes doc_x == x when zoom == 1 and
+    // view_offset == 0). shift/alt default to false; `dragging`
+    // defaults to false on move events.
+    //
+    // Self-bracketing: each tool that mutates the document does its
+    // own `doc.snapshot` (see e.g. rect.yaml's on_mouseup), so the
+    // gesture runner does NOT wrap events in begin_txn/commit_txn —
+    // unlike the operation runner, which owns the transaction bracket.
+    // ===============================================================
+
+    /// The list of gesture fixture files under `test_fixtures/gestures/`.
+    /// Inc-1 is just the rectangle-draw gesture.
+    const GESTURE_FIXTURES: &[&str] = &["draw_rect.json"];
+
+    /// Build the YamlTool for `tool_id` from the embedded workspace
+    /// bundle (`Workspace::load()`), the same path the running app
+    /// uses. Mirrors `rect_yaml_tool` in `yaml_tool.rs`, but reads the
+    /// already-loaded workspace so the corpus tracks the bundle in CI.
+    fn build_gesture_tool(tool_id: &str) -> crate::tools::yaml_tool::YamlTool {
+        let ws = crate::interpreter::workspace::Workspace::load()
+            .expect("embedded workspace must parse");
+        let spec_json = ws
+            .data()
+            .get("tools")
+            .and_then(|t| t.get(tool_id))
+            .unwrap_or_else(|| panic!("workspace declares no tool '{}'", tool_id));
+        crate::tools::yaml_tool::YamlTool::from_workspace_tool(spec_json)
+            .unwrap_or_else(|| panic!("tool spec '{}' failed to parse", tool_id))
+    }
+
+    /// Run a gesture fixture and return the resulting Model. Loads the
+    /// setup SVG into a Model under the default identity view, builds
+    /// the tool from the workspace spec, activates it, then dispatches
+    /// each event through the CanvasTool seam.
+    fn run_gesture_model(tc: &serde_json::Value) -> Model {
+        use crate::tools::tool::CanvasTool;
+
+        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
+        let doc = svg_to_document(&setup_svg);
+        let mut model = Model::new(doc, None);
+
+        let tool_id = tc["tool"].as_str().unwrap();
+        let mut tool = build_gesture_tool(tool_id);
+        tool.activate(&mut model);
+
+        for ev in tc["events"].as_array().unwrap() {
+            let x = ev["x"].as_f64().unwrap();
+            let y = ev["y"].as_f64().unwrap();
+            // shift/alt default false; dragging defaults false.
+            let shift = ev.get("shift").and_then(|v| v.as_bool()).unwrap_or(false);
+            let alt = ev.get("alt").and_then(|v| v.as_bool()).unwrap_or(false);
+            match ev["kind"].as_str().unwrap() {
+                "press" => tool.on_press(&mut model, x, y, shift, alt),
+                "move" => {
+                    let dragging =
+                        ev.get("dragging").and_then(|v| v.as_bool()).unwrap_or(false);
+                    tool.on_move(&mut model, x, y, shift, alt, dragging)
+                }
+                "release" => tool.on_release(&mut model, x, y, shift, alt),
+                other => panic!("unknown gesture event kind: {other:?}"),
+            }
+        }
+        model
+    }
+
+    fn run_gesture_test(tc: &serde_json::Value) -> String {
+        document_to_test_json(run_gesture_model(tc).document())
+    }
+
+    /// Mirror of `assert_operation_test`: replay the gesture and compare
+    /// the canonical document JSON against the pinned golden, dumping
+    /// EXPECTED/ACTUAL on mismatch.
+    fn assert_gesture_test(tc: &serde_json::Value) {
+        let name = tc["name"].as_str().unwrap();
+        let expected_file = tc["expected_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("gestures/{}", expected_file));
+        let expected = expected.trim();
+        let actual = run_gesture_test(tc);
+
+        if actual != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", actual);
+            panic!("Gesture test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    #[test]
+    fn gesture_corpus() {
+        for fixture in GESTURE_FIXTURES {
+            let json_str = read_fixture(&format!("gestures/{}", fixture));
+            let tests: serde_json::Value = serde_json::from_str(&json_str)
+                .unwrap_or_else(|e| panic!("gesture fixture {} is not valid JSON: {}", fixture, e));
+            for tc in tests.as_array().unwrap() {
+                assert_gesture_test(tc);
+            }
+        }
+    }
+
+    /// Bootstrap helper: generate expected JSON for gesture tests.
+    /// Run with: cargo test generate_gesture_expected -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn generate_gesture_expected() {
+        for fixture in GESTURE_FIXTURES {
+            let json_str = read_fixture(&format!("gestures/{}", fixture));
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let name = tc["name"].as_str().unwrap();
+                let expected_file = tc["expected_json"].as_str().unwrap();
+                let actual = run_gesture_test(tc);
+                let path = format!("{}/gestures/{}", FIXTURES, expected_file);
+                std::fs::write(&path, &actual)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+                eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
     /// Bootstrap: generate the live-element round-trip fixtures
     /// (live_compound_roundtrip / live_reference_roundtrip). Run with:
     ///   cargo test generate_live_fixtures -- --ignored --nocapture

@@ -238,6 +238,110 @@ let run_operation_fixture fixture_name =
     end
   ) tests
 
+(* ------------------------------------------------------------------ *)
+(* GESTURE equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3a).
+   Mirrors the OPERATION corpus above, but drives the CanvasTool seam — raw
+   pointer events through a Yaml_tool — instead of [Op_apply.op_apply]. A
+   gesture fixture replays a sequence of pointer events against a tool built
+   from the workspace bundle and serializes the resulting document, then byte-
+   compares to the Rust-authored golden under [gestures/]. Mirrors the Rust
+   [run_gesture_model] / [assert_gesture_test] / [gesture_corpus].
+
+   Identity-view convention: a fresh Model has zoom_level = 1.0 and
+   view_offset = 0.0, so [pointer_payload] computes doc_x == x / doc_y == y —
+   the event x/y ARE document coordinates. shift/alt default to false; the
+   [dragging] flag on a move event defaults to false.
+
+   Self-bracketing: the rect tool does its OWN [doc.snapshot] on on_mouseup
+   (rect.yaml), so the gesture runner does NOT wrap events in
+   begin_txn/commit_txn — unlike [run_operation_fixture], which owns the
+   transaction bracket. *)
+(* ------------------------------------------------------------------ *)
+
+(* Build a headless [tool_context] over [model] / [ctrl]: all hit-tests miss,
+   request_update + draw_element_overlay are no-ops. The gesture seam only
+   reads ctx.model / ctx.controller / ctx.request_update, so the GUI-bound
+   fields are inert. Mirrors the make_ctx helper in tool_interaction_test. *)
+let make_gesture_ctx (model : Jas.Model.model)
+    (ctrl : Jas.Controller.controller) : Jas.Canvas_tool.tool_context =
+  {
+    model;
+    controller = ctrl;
+    hit_test_selection = (fun _x _y -> false);
+    hit_test_handle = (fun _x _y -> None);
+    hit_test_text = (fun _x _y -> None);
+    hit_test_path_curve = (fun _x _y -> None);
+    request_update = (fun () -> ());
+    draw_element_overlay = (fun _cr _elem ~is_partial:_ _cps -> ());
+  }
+
+(* Build the Yaml_tool for [tool_id] from the embedded workspace bundle, the
+   same path the running app uses (Tool_factory.load_yaml_tool reads the
+   identical bundle by string id). Mirrors the Rust [build_gesture_tool]. *)
+let build_gesture_tool (tool_id : string) : Jas.Canvas_tool.canvas_tool =
+  let ws = match Jas.Workspace_loader.load () with
+    | Some ws -> ws
+    | None -> failwith "embedded workspace must load" in
+  match Jas.Workspace_loader.tool ws tool_id with
+  | None -> failwith (Printf.sprintf "workspace declares no tool '%s'" tool_id)
+  | Some spec ->
+    (match Jas.Yaml_tool.from_workspace_tool spec with
+     | Some t -> (t :> Jas.Canvas_tool.canvas_tool)
+     | None -> failwith (Printf.sprintf "tool spec '%s' failed to parse" tool_id))
+
+(* Replay one gesture case and return the resulting Model. Loads [setup_svg]
+   into a Model under the default identity view, builds the tool from the
+   bundle, activates it, then dispatches each event through on_press / on_move
+   / on_release with the OCaml labeled-arg shapes. Mirrors the Rust
+   [run_gesture_model]. *)
+let run_gesture_model (tc : Yojson.Safe.t) : Jas.Model.model =
+  let open Yojson.Safe.Util in
+  let setup_svg_file = tc |> member "setup_svg" |> to_string in
+  let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
+  let doc = Jas.Svg.svg_to_document svg in
+  let model = Jas.Model.create ~document:doc () in
+  let ctrl = Jas.Controller.create ~model () in
+  let ctx = make_gesture_ctx model ctrl in
+  let tool = build_gesture_tool (tc |> member "tool" |> to_string) in
+  tool#activate ctx;
+  let bool_field ev key =
+    match ev |> member key with `Bool b -> b | _ -> false in
+  List.iter (fun ev ->
+    let x = ev |> member "x" |> to_number in
+    let y = ev |> member "y" |> to_number in
+    let shift = bool_field ev "shift" in
+    let alt = bool_field ev "alt" in
+    match ev |> member "kind" |> to_string with
+    | "press" -> tool#on_press ctx x y ~shift ~alt
+    | "move" ->
+      let dragging = bool_field ev "dragging" in
+      tool#on_move ctx x y ~shift ~dragging
+    | "release" -> tool#on_release ctx x y ~shift ~alt
+    | other -> failwith (Printf.sprintf "unknown gesture event kind: %s" other)
+  ) (tc |> member "events" |> to_list);
+  model
+
+(* Load a gesture fixture, replay each case through the CanvasTool seam, and
+   byte-compare the canonical document JSON to the pinned golden, dumping
+   EXPECTED/ACTUAL on mismatch. Mirrors the Rust [assert_gesture_test] /
+   [gesture_corpus]. *)
+let run_gesture_fixture (fixture_name : string) =
+  let json_str = read_fixture (Printf.sprintf "gestures/%s" fixture_name) in
+  let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+  List.iter (fun tc ->
+    let open Yojson.Safe.Util in
+    let name = tc |> member "name" |> to_string in
+    let expected_file = tc |> member "expected_json" |> to_string in
+    let expected = read_fixture (Printf.sprintf "gestures/%s" expected_file) in
+    let model = run_gesture_model tc in
+    let actual = Jas.Test_json.document_to_test_json model#document in
+    if actual <> expected then begin
+      Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name expected;
+      Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name actual;
+      assert false
+    end
+  ) tests
+
 (* Canonical JSON of the Transaction journal (OP_LOG.md section 10 item 4):
    pins the reserved causal/merge metadata + each op's verb and targets across
    apps. Fixed key order + deterministic txn-N ids make it byte-shareable.
@@ -2192,6 +2296,16 @@ let () =
     ];
 
     (* Operation equivalence tests *)
+    (* Gesture equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3a):
+       drives the CanvasTool seam (raw pointer events through a Yaml_tool)
+       and byte-matches the Rust-authored golden. Inc-1 is the rectangle-draw
+       gesture (press -> drag-move -> release). Mirrors the Rust
+       [gesture_corpus]. *)
+    "Gesture", [
+      Alcotest.test_case "draw_rect gesture" `Quick (fun () ->
+        run_gesture_fixture "draw_rect.json");
+    ];
+
     "Operation", [
       Alcotest.test_case "select_and_move operations" `Quick (fun () ->
         run_operation_fixture "select_and_move.json");

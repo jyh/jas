@@ -408,6 +408,52 @@ Operation format:
 }
 ```
 
+### 3a. Gesture equivalence
+
+Replaying the same sequence of raw pointer events through a tool in
+each language produces the same result. Where operation equivalence
+drives the `op_apply` seam, gesture equivalence drives the
+`CanvasTool` seam (`on_press` / `on_move` / `on_release`), so it
+covers the interactive path a tool actually exercises.
+
+```
+            gesture          to_test_json
+   Doc ──────────────> Doc_A' ──────────────> JSON_A'
+    |                                            ||
+    |  gesture          to_test_json             ||
+    +──────────────> Doc_B' ──────────────> JSON_B'
+
+   Assert: JSON_A' = JSON_B'
+```
+
+Each implementation loads the setup document, builds the named tool
+from the workspace spec, then dispatches the events and emits
+canonical JSON.
+
+Conventions:
+- **Identity view.** The document is loaded under the default
+  (identity) view, so each event's `x`/`y` ARE document coordinates.
+- `shift` / `alt` default to `false`; a move event's `dragging`
+  defaults to `false`.
+- **Self-bracketing.** Tools that mutate the document take their own
+  snapshot (e.g. the rectangle tool snapshots on mouseup), so the
+  runner does NOT wrap the events in an outer transaction.
+
+Gesture format:
+```json
+{
+  "name": "draw_rect",
+  "setup_svg": "circle_basic.svg",
+  "tool": "rect",
+  "events": [
+    {"kind": "press", "x": 10, "y": 20},
+    {"kind": "move", "x": 110, "y": 70, "dragging": true},
+    {"kind": "release", "x": 110, "y": 70}
+  ],
+  "expected_json": "draw_rect_expected.json"
+}
+```
+
 ### 4. Algorithm test vectors
 
 Pure functions tested with shared input/output pairs.
@@ -464,6 +510,10 @@ test_fixtures/
     select_and_move.json
     copy_selection.json
     undo_redo.json
+    ...
+  gestures/
+    draw_rect.json          (pointer-event sequence + setup + tool)
+    draw_rect_expected.json (canonical JSON after replaying the gesture)
     ...
   algorithms/
     hit_test.json
