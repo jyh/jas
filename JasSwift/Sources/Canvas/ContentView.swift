@@ -422,13 +422,16 @@ public struct ContentView: View {
                                   model: workspace.activeModel,
                                   theme: workspace.theme,
                                   yamlDialogState: $yamlDialogState,
-                                  onOpenColorPicker: { forFill in openToolbarColorPicker(forFill: forFill) }
+                                  onOpenColorPicker: { forFill in openToolbarColorPicker(forFill: forFill) },
+                                  // Double-clicking a TOOLBAR tool slot
+                                  // opens the ACTIVE tool's options —
+                                  // tool_options_panel / _action / _dialog,
+                                  // in that priority. Restores the prior
+                                  // native onOpenToolOptions path (which
+                                  // handled panel + dialog) and adds the
+                                  // action arm (Hand → fit, Zoom → zoom).
+                                  onOpenToolOptions: { dispatchToolOptions() }
                               )
-                              // TODO(toolbar-dblclick): deferred cross-app
-                              // increment — double-clicking a tool icon
-                              // should open its tool_options_dialog /
-                              // tool_options_panel (the prior native
-                              // onOpenToolOptions path). Not part of Step A.
                           },
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .canvas:
@@ -462,6 +465,67 @@ public struct ContentView: View {
             rawParams: ["target": forFill ? "fill" : "stroke"],
             liveState: liveState
         )
+    }
+
+    /// Double-clicking a TOOLBAR tool slot opens the ACTIVE tool's
+    /// options. Reads the live tool (``currentTool``), looks its entry up
+    /// in the compiled bundle ``tools`` map, and dispatches the declared
+    /// options in priority order: ``tool_options_panel`` → show that
+    /// panel; ``tool_options_action`` → dispatch the named view action;
+    /// ``tool_options_dialog`` → open that dialog. A tool that declares
+    /// none is a no-op. The tool list is NOT hardcoded — it comes from
+    /// the bundle via ``resolveToolOptions``. Restores the prior native
+    /// ``onOpenToolOptions`` lookup (panel + dialog) and adds the action
+    /// arm the Hand / Zoom slots documented but the native path never
+    /// dispatched (HAND_TOOL.md / ZOOM_TOOL.md).
+    private func dispatchToolOptions() {
+        guard let ws = WorkspaceData.load() else { return }
+        let tools = ws.data["tools"] as? [String: Any] ?? [:]
+        let activeTool = yamlToolString(currentTool)
+        switch resolveToolOptions(tools: tools, activeTool: activeTool) {
+        case .panel(let panelId):
+            guard let kind = panelIdToKind(panelId) else { return }
+            // Dispatch through the shared layout-op runtime (byte-identical
+            // to the prior direct showPanel(kind)), matching the prior
+            // native onOpenToolOptions panel arm.
+            layoutApply(&workspace.workspaceLayout, opShowPanel(kind))
+            workspace.workspaceLayout.saveIfNeeded()
+        case .action(let actionName):
+            // Tool-options view action (Hand → fit_active_artboard,
+            // Zoom → zoom_to_actual_size, Artboard → fit_all_artboards).
+            // These are the canvas view actions exposed on Model, the
+            // same targets the menu's View commands dispatch.
+            dispatchToolOptionsAction(actionName)
+        case .dialog(let dialogId):
+            // Open the tool's options dialog via the same path the prior
+            // native toolbar used: plain state defaults, no params.
+            yamlDialogState = openYamlDialog(
+                dialogId: dialogId,
+                rawParams: [:],
+                liveState: ws.stateDefaults()
+            )
+        case .none:
+            // Active tool declares no options field — no-op, matching the
+            // prior native early-return.
+            break
+        }
+    }
+
+    /// Dispatch a ``tool_options_action`` view action against the active
+    /// model. Mirrors JasCommands' View-action switch (the same method
+    /// targets the menu's Fit / Zoom commands invoke), so the toolbar
+    /// double-click and the menu stay byte-identical.
+    private func dispatchToolOptionsAction(_ name: String) {
+        guard let model = workspace.activeModel else { return }
+        switch name {
+        case "zoom_to_actual_size": model.zoomToActualSize()
+        case "fit_active_artboard": model.fitActiveArtboard()
+        case "fit_all_artboards": model.fitAllArtboards()
+        case "fit_in_window": model.fitInWindow()
+        case "zoom_in": model.zoomIn()
+        case "zoom_out": model.zoomOut()
+        default: break
+        }
     }
 
     private var canvasContent: some View {
@@ -736,6 +800,10 @@ struct BundleToolbarPane: View {
     var theme: Theme
     @Binding var yamlDialogState: YamlDialogState?
     var onOpenColorPicker: ((Bool) -> Void)?
+    /// Double-click on a TOOLBAR tool slot → open the ACTIVE tool's
+    /// options. Owned by ContentView (which holds the workspace layout
+    /// for the panel-show path); the toolbar grid only triggers it.
+    var onOpenToolOptions: (() -> Void)?
 
     var body: some View {
         if let model = model {
@@ -744,7 +812,8 @@ struct BundleToolbarPane: View {
                 model: model,
                 theme: theme,
                 yamlDialogState: $yamlDialogState,
-                onOpenColorPicker: onOpenColorPicker
+                onOpenColorPicker: onOpenColorPicker,
+                onOpenToolOptions: onOpenToolOptions
             )
         } else {
             // No open document: render the grid against fresh defaults
@@ -754,7 +823,8 @@ struct BundleToolbarPane: View {
                 model: Model(),
                 theme: theme,
                 yamlDialogState: $yamlDialogState,
-                onOpenColorPicker: onOpenColorPicker
+                onOpenColorPicker: onOpenColorPicker,
+                onOpenToolOptions: onOpenToolOptions
             )
         }
     }
@@ -768,6 +838,9 @@ private struct BundleToolbarPaneBody: View {
     var theme: Theme
     @Binding var yamlDialogState: YamlDialogState?
     var onOpenColorPicker: ((Bool) -> Void)?
+    /// Threaded into the tool grid's ``onToolOptionsRequest`` so a
+    /// double-click on a tool slot opens the active tool's options.
+    var onOpenToolOptions: (() -> Void)?
 
     private let toolbarWidth: CGFloat = 80
 
@@ -870,7 +943,8 @@ private struct BundleToolbarPaneBody: View {
                         newState.anchor = anchor
                         dialogBinding.wrappedValue = newState
                     }
-                }
+                },
+                onToolOptionsRequest: { onOpenToolOptions?() }
             )
         } else {
             SwiftUI.Text("Toolbar not found")

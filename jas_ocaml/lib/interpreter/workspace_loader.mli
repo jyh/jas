@@ -21,6 +21,12 @@ val menubar : workspace -> Yojson.Safe.t list
 
 val panel : workspace -> string -> Yojson.Safe.t option
 
+(** [tool ws name] returns the compiled tool entry [tools.<name>] from the
+    bundle, or [None] when the tool is unknown. The entry carries the tool's
+    declarative ``tool_options_panel`` / ``tool_options_action`` /
+    ``tool_options_dialog`` fields, read by the toolbar double-click handler. *)
+val tool : workspace -> string -> Yojson.Safe.t option
+
 (** [concept ws id] returns the concept pack [id] from the registry, or [None]. *)
 val concept : workspace -> string -> Yojson.Safe.t option
 

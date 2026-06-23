@@ -107,6 +107,16 @@ struct YamlElementView: View {
     /// owner clears its SwiftUI dialogState binding so the modal
     /// overlay dismisses too.
     var onStoreDialogClosed: (() -> Void)? = nil
+    /// Double-clicking a TOOLBAR tool button opens the ACTIVE tool's
+    /// options. Set only by the bundle toolbar pane; the closure reads
+    /// ``state.active_tool``, looks the entry up in the bundle ``tools``
+    /// map, and dispatches its options (panel / action / dialog). Nil
+    /// everywhere else, so panel / dialog icon_buttons get no dblclick.
+    /// The gesture is attached only on elements for which
+    /// ``isToolButtonElement`` is true, so even inside the toolbar grid
+    /// only the tool slots respond. Propagated through grid / container /
+    /// repeat so the grid's icon_button children inherit it.
+    var onToolOptionsRequest: (() -> Void)? = nil
 
     var body: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
@@ -577,7 +587,8 @@ struct YamlElementView: View {
                     theme: theme, flyoutIconDefault: flyoutIconDefault,
                     onDialogWrite: onDialogWrite,
                     onStoreDialogOpened: onStoreDialogOpened,
-                    onStoreDialogClosed: onStoreDialogClosed
+                    onStoreDialogClosed: onStoreDialogClosed,
+                    onToolOptionsRequest: onToolOptionsRequest
                 )
             }
         }
@@ -596,7 +607,7 @@ struct YamlElementView: View {
             spacing: gap
         ) {
             ForEach(0..<children.count, id: \.self) { i in
-                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed, onToolOptionsRequest: onToolOptionsRequest)
             }
         }
     }
@@ -736,6 +747,16 @@ struct YamlElementView: View {
         let hasMouseDown = behaviors.contains { ($0["event"] as? String) == "mouse_down" }
         let hasMouseUp = behaviors.contains { ($0["event"] as? String) == "mouse_up" }
         let hasPress = hasMouseDown || hasMouseUp
+        // Double-click a TOOLBAR tool slot → open the active tool's
+        // options. Scoped to tool slots only: ``isToolButtonElement``
+        // keys on a ``click`` event dispatching ``select_tool`` (the same
+        // discriminator the toolbar icon-size path uses), and the
+        // dispatch closure is only non-nil inside the bundle toolbar. The
+        // dblclick rides a ``simultaneousGesture`` so the single-click
+        // select_tool still fires, mirroring the prior native toolbar's
+        // ``TapGesture(count: 2)`` over the same buttons.
+        let wantsToolOptionsDblClick = isToolButtonElement(element) && onToolOptionsRequest != nil
+        let toolOptionsAction = onToolOptionsRequest
         if let theme = theme, !iconName.isEmpty,
            WorkspaceIconCache.shared.lookup(iconName) != nil {
             Button(action: { handleWidgetClick() }) {
@@ -753,6 +774,8 @@ struct YamlElementView: View {
                 onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
                 onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
             ))
+            .modifier(ToolOptionsDblClickModifier(
+                enabled: wantsToolOptionsDblClick, onDoubleClick: toolOptionsAction))
         } else {
             Button(summary) { handleWidgetClick() }
                 .buttonStyle(.plain)
@@ -766,6 +789,8 @@ struct YamlElementView: View {
                     onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
                     onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
                 ))
+                .modifier(ToolOptionsDblClickModifier(
+                    enabled: wantsToolOptionsDblClick, onDoubleClick: toolOptionsAction))
         }
     }
 
@@ -2703,7 +2728,7 @@ struct YamlElementView: View {
     private func renderChildElements() -> some View {
         let children = element["children"] as? [[String: Any]] ?? []
         ForEach(0..<children.count, id: \.self) { i in
-            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+            YamlElementView(element: children[i], context: context, model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed, onToolOptionsRequest: onToolOptionsRequest)
         }
     }
 
@@ -2813,6 +2838,30 @@ private struct PressDispatchModifier: ViewModifier {
                     onRelease()
                 }
         )
+    }
+}
+
+/// Conditionally attach the toolbar tool-options double-click gesture.
+/// Only the bundle toolbar's tool slots want it (``enabled``); every
+/// other icon_button passes ``enabled: false`` and the view is returned
+/// unchanged, so panel / dialog buttons keep their single-click-only
+/// behavior. The gesture is `simultaneous`, so the slot's single-click
+/// ``select_tool`` action still fires — the double-click only adds the
+/// options dispatch on top. Mirrors the prior native toolbar's
+/// ``TapGesture(count: 2)`` / ``.onTapGesture(count: 2)`` over the same
+/// tool buttons.
+private struct ToolOptionsDblClickModifier: ViewModifier {
+    let enabled: Bool
+    let onDoubleClick: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if enabled, let action = onDoubleClick {
+            content.simultaneousGesture(
+                TapGesture(count: 2).onEnded { action() }
+            )
+        } else {
+            content
+        }
     }
 }
 

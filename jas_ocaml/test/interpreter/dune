@@ -42,3 +42,8 @@
  (name doc_primitives_test)
  (modules doc_primitives_test)
  (libraries jas alcotest))
+
+(test
+ (name tool_options_dispatch_test)
+ (modules tool_options_dispatch_test)
+ (libraries jas alcotest))
