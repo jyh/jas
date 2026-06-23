@@ -127,6 +127,12 @@ let () =
      because Yaml_panel_view can't depend on Dock_panel without
      creating a cycle. *)
   Jas.Yaml_panel_view.theme_text_hook := (fun () -> !Jas.Dock_panel.theme_text);
+  (* Dark background for the toolbar long-press tool-alternates flyout, so
+     its #cccccc-tinted icons pop bright the way they do on the dark
+     toolbar instead of reading gray on GTK's default light popup bg.
+     Same hook pattern as theme_text_hook to avoid a renderer ↔ dock
+     cycle. *)
+  Jas.Yaml_panel_view.dialog_bg_hook := (fun () -> !Jas.Dock_panel.theme_bg_dark);
   (* Route YAML ``set: { active_tool: "<name>" }`` effects from
      dialog buttons through the toolbar. The color picker's
      eyedropper button sets active_tool="eyedropper" and dismisses

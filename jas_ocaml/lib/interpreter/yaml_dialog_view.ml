@@ -232,8 +232,26 @@ let show_nonmodal_dialog (ds : dialog_state) : unit =
           win#move ~x:(ox + rx + 4) ~y:(oy + ry + 4)
         | None -> ()
       with _ -> ());
-      let frame = GBin.frame ~shadow_type:`OUT ~packing:win#add () in
+      (* Dark popup chrome so the flyout matches the dark toolbar/menu:
+         GTK's default popup background is light, which makes the
+         #cccccc-tinted tool icons read as gray. A dark bg makes the
+         same icons pop bright/white like they do on the toolbar. Use
+         [`NONE] shadow on the frame so GTK's light 3D bevel doesn't
+         fight the dark fill, and paint a subtle border + radius via a
+         CSS provider (mirrors how menubar.ml builds + adds a provider).
+         The bg color comes from [dialog_bg_hook] (wired in main.ml to
+         the active appearance's dark pane background). *)
+      let frame = GBin.frame ~shadow_type:`NONE ~packing:win#add () in
       let vbox = GPack.vbox ~packing:frame#add () in
+      let flyout_bg = !(Yaml_panel_view.dialog_bg_hook) () in
+      let flyout_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+      flyout_css#load_from_data (Printf.sprintf
+        "window, frame, frame > border, box { background-color: %s; } \
+         frame, frame > border { border: 1px solid #5a5a5a; border-radius: 4px; padding: 2px; }"
+        flyout_bg);
+      win#misc#style_context#add_provider flyout_css 600;
+      frame#misc#style_context#add_provider flyout_css 600;
+      vbox#misc#style_context#add_provider flyout_css 600;
       let state_defaults = Workspace_loader.state_defaults ws in
       let icons = Workspace_loader.icons ws in
       let live_state = ref ds.state in
@@ -280,12 +298,24 @@ let show_nonmodal_dialog (ds : dialog_state) : unit =
           ("icons", icons) :: []
         ));
       let ctx = !Dialog_global.current_build_ctx () in
+      (* Render the flyout's tool icons larger than the 20px panel
+         default — close to the 32px toolbar so the alternates read as
+         prominent tool buttons, not shrunken glyphs. The items in
+         tool_alternates.yaml declare no [style.size], so they pick up
+         this scoped override. Restored to [None] in a finally so panels
+         and modal dialogs keep their 20px default even if render raises. *)
+      Yaml_panel_view.nonmodal_icon_size := Some 28;
       (match List.assoc_opt "content" dlg_def with
        | Some content ->
-         Yaml_panel_view.render_element
-           ~packing:(vbox#pack ~expand:false)
-           ~ctx content
-       | None -> ());
+         (match Yaml_panel_view.render_element
+            ~packing:(vbox#pack ~expand:false)
+            ~ctx content
+          with
+          | () -> Yaml_panel_view.nonmodal_icon_size := None
+          | exception e ->
+            Yaml_panel_view.nonmodal_icon_size := None;
+            raise e)
+       | None -> Yaml_panel_view.nonmodal_icon_size := None);
       (* Dismiss on focus-out (a click anywhere outside the popup moves
          focus away, so the flyout closes — matching menu semantics:
          the next click either lands on an item (running its

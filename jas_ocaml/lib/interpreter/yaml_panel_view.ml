@@ -487,6 +487,25 @@ let toolbar_rerender_hook : (unit -> unit) ref = ref (fun () -> ())
     Dock_panel cycle. *)
 let theme_text_hook : (unit -> string) ref = ref (fun () -> "#cccccc")
 
+(** Background color for the toolbar long-press tool-alternates flyout
+    (the non-modal popup built by [Yaml_dialog_view.show_nonmodal_dialog]).
+    Returned dark so the #cccccc-tinted tool icons pop bright the same
+    way they do on the dark toolbar, instead of reading gray against
+    GTK's default light popup background. Wired in main.ml against
+    [Dock_panel.theme_bg_dark] — referencing that ref directly would
+    create a Yaml_panel_view ↔ Dock_panel cycle, same pattern as
+    [theme_text_hook]. *)
+let dialog_bg_hook : (unit -> string) ref = ref (fun () -> "#2b2b2b")
+
+(** Override for the icon size used by [render_button]'s ``icon_button``
+    default (normally 20px). Set to [Some n] by
+    [Yaml_dialog_view.show_nonmodal_dialog] only while it renders the
+    tool-alternates flyout, so the flyout's size-less items render at a
+    prominent flyout size (close to the 32px toolbar) instead of the
+    20px panel default. Reset to [None] immediately after, so dock
+    panels and modal dialogs keep the 20px default. *)
+let nonmodal_icon_size : int option ref = ref None
+
 (** Resolve an integer size from a [style.size] JSON value that may be
     a plain number or a ``{{theme.base.sizes.tool_button}}`` token
     string. Walks the workspace [theme] tree by the dotted path inside
@@ -1730,7 +1749,7 @@ and render_button ~packing ~ctx el =
         let size =
           match resolve_size_token (el |> member "style" |> safe_member "size") with
           | Some n -> n
-          | None -> 20
+          | None -> (match !nonmodal_icon_size with Some n -> n | None -> 20)
         in
         (* Hardcoded tint matches the Dark Gray theme's text color
            (#cccccc). Threading the active theme into yaml_panel_view
@@ -1763,7 +1782,7 @@ and render_button ~packing ~ctx el =
     let size =
       match resolve_size_token (el |> member "style" |> safe_member "size") with
       | Some n -> n
-      | None -> 20
+      | None -> (match !nonmodal_icon_size with Some n -> n | None -> 20)
     in
     btn#misc#set_size_request ~width:size ~height:size ();
     (* bind.checked highlight: an icon_button with a truthy
