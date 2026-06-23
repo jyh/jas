@@ -372,6 +372,63 @@ def _render_button(el, store, ctx, dispatch_fn):
     return btn
 
 
+def _resolve_icon_name(el, eval_ctx):
+    """Resolve an icon_button's glyph NAME. Resolution order mirrors
+    Rust ``render_icon_button`` (renderer.rs) and Swift
+    ``resolvedIconName`` exactly:
+
+      1. ``bind.icon`` — a yaml expression returning a string (e.g.
+         the Opacity panel link indicator flipping chain glyphs).
+      2. ``alternates.items`` lookup by ``state.active_tool`` — for the
+         multi-tool toolbar slots (pen / pencil / shape / arrow / text /
+         hand groups). When the element carries
+         ``alternates: { items: [{id, icon, ...}, ...] }``, evaluate
+         ``state.active_tool`` and return the icon of the item whose
+         ``id`` matches the active tool; fall back to the static icon
+         when none matches. Without this the slot stays stuck on the
+         default glyph after picking a different alternate from the
+         long-press flyout (or pressing its keyboard shortcut).
+      3. The static ``icon`` field on the element.
+
+    Returns the glyph name string, or ``None`` when no icon resolves.
+    ``eval_ctx`` is the same eval context the slot's ``bind.checked``
+    expression uses, so the glyph and highlight always agree.
+    """
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    static_icon = el.get("icon") if isinstance(el.get("icon"), str) else None
+    static_icon = static_icon or None
+
+    icon_expr = bind.get("icon") if isinstance(bind.get("icon"), str) else None
+    if icon_expr:
+        # ``evaluate`` returns a Value wrapper; extract .value before
+        # checking the type. Without this the chain-link expression
+        # always resolves to a non-str instance and falls through.
+        result = evaluate(icon_expr, eval_ctx)
+        result_value = getattr(result, "value", result)
+        if isinstance(result_value, str):
+            return result_value
+        return static_icon
+
+    alternates = el.get("alternates")
+    if isinstance(alternates, dict):
+        items = alternates.get("items")
+        if isinstance(items, list):
+            active_result = evaluate("state.active_tool", eval_ctx)
+            active = getattr(active_result, "value", active_result)
+            if isinstance(active, str):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item_id = item.get("id")
+                    item_icon = item.get("icon")
+                    if (isinstance(item_id, str) and isinstance(item_icon, str)
+                            and item_id == active):
+                        return item_icon
+            return static_icon
+
+    return static_icon
+
+
 def _render_icon_button(el, store, ctx, dispatch_fn):
     summary = el.get("summary", "")
     btn = QPushButton()
@@ -382,21 +439,11 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
     # SVG glyph from workspace icons.yaml; fall back to summary text
     # when rendering fails or the icon can't be resolved.
     bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
-    icon_expr = bind.get("icon") if isinstance(bind.get("icon"), str) else None
-    icon_name = None
-    if icon_expr:
-        # ``evaluate`` returns a Value wrapper; extract .value before
-        # checking the type. Without this the chain-link expression
-        # always resolves to a non-str instance and falls through to
-        # the summary-text fallback.
-        result = evaluate(icon_expr, store.eval_context(ctx))
-        result_value = getattr(result, "value", result)
-        if isinstance(result_value, str):
-            icon_name = result_value
-    if icon_name is None:
-        static_icon = el.get("icon")
-        if isinstance(static_icon, str) and static_icon:
-            icon_name = static_icon
+    # Resolve the glyph name through the shared resolver: bind.icon ->
+    # alternates-by-active_tool -> static icon (mirrors Rust/Swift). The
+    # alternates step makes a multi-tool toolbar slot display the GLYPH
+    # of the currently-active alternate.
+    icon_name = _resolve_icon_name(el, store.eval_context(ctx))
     style = el.get("style", {}) if isinstance(el.get("style"), dict) else {}
     raw_size = style.get("size")
     # The bundle's toolbar tool buttons carry size:
@@ -432,6 +479,26 @@ def _render_icon_button(el, store, ctx, dispatch_fn):
         btn.setToolTip(summary)
     else:
         btn.setText(summary)
+
+    # Stash a re-resolution closure so the glyph follows the live tool.
+    # When ``state.active_tool`` changes, _apply_bindings' subscription
+    # fires (it already re-evaluates this slot's bind.checked highlight);
+    # there it calls this closure to re-resolve the glyph through
+    # _resolve_icon_name (bind.icon -> alternates-by-active_tool ->
+    # static) and re-apply the QIcon, so a multi-tool slot shows the
+    # GLYPH of the currently-active alternate. Only meaningful for slots
+    # whose icon can change at runtime (alternates / bind.icon); for a
+    # purely static icon it harmlessly re-applies the same glyph.
+    def _refresh_icon(eval_ctx, _btn=btn, _size=icon_size, _summary=summary):
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        name = _resolve_icon_name(el, eval_ctx)
+        pm = _workspace_icon_pixmap(name, _size) if name else None
+        if pm is not None:
+            _btn.setIcon(QIcon(pm))
+            _btn.setIconSize(QSize(_size, _size))
+
+    btn._jas_refresh_icon = _refresh_icon
 
     # bind.checked turns an icon_button into a checkable toggle — used
     # by the bundle toolbar's tool grid so the active tool's button
@@ -3549,6 +3616,17 @@ def _apply_bindings(widget: QWidget, el: dict, store: StateStore, ctx: dict):
             elif prop == "color":
                 selected = _is_selected_in(new_ctx)
                 widget.setStyleSheet(_color_stylesheet(r.value, selected))
+
+        # Re-resolve the icon glyph when state changes. The multi-tool
+        # toolbar slots resolve their glyph through alternates-by-
+        # active_tool (not through `bind`), so the loop above never
+        # touches the icon; this closure (stashed by _render_icon_button)
+        # re-runs the bind.icon -> alternates -> static resolution so the
+        # slot's GLYPH follows the live tool, matching the checked
+        # highlight that the loop already keeps in sync.
+        refresh_icon = getattr(widget, "_jas_refresh_icon", None)
+        if callable(refresh_icon):
+            refresh_icon(new_ctx)
 
     store.subscribe(None, _update_bindings)
 
