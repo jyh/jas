@@ -1,0 +1,13 @@
+[
+  {
+    "name": "select_marquee",
+    "setup_svg": "two_rects.svg",
+    "tool": "selection",
+    "events": [
+      { "kind": "press", "x": -10, "y": -10 },
+      { "kind": "move", "x": 200, "y": 100, "dragging": true },
+      { "kind": "release", "x": 200, "y": 100 }
+    ],
+    "expected_json": "select_marquee_expected.json"
+  }
+]

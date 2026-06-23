@@ -472,6 +472,10 @@ class CrossLanguageTest(absltest.TestCase):
         # tool's doc-space hit_test (which element is under the point) — the
         # cross-app hit-test parity gate. Click center of rect0 -> path [0,0].
         "select_click.json",
+        # Marquee-select (§5 rec 4): press on EMPTY space (hit_test==null)
+        # enters marquee mode; mouseup commits doc.select_in_rect over the
+        # normalized marquee bounds. Drag encloses both rects -> [0,0]+[0,1].
+        "select_marquee.json",
     ]
 
     @staticmethod
