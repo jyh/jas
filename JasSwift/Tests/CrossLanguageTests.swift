@@ -2212,3 +2212,118 @@ private func assertGestureTest(_ tc: [String: Any]) {
         }
     }
 }
+
+// MARK: - Action equivalence corpus (CROSS_LANGUAGE_TESTING.md §3b)
+//
+// Sibling to the GESTURE corpus above and the OPERATION corpus. Where the
+// gesture corpus drives the CanvasTool seam (press / move / release) and the
+// operation corpus drives opApply, this corpus drives the ACTION seam: the
+// panel/menu/dialog `action` verbs the UI dispatches, which RESOLVE to
+// ops/effects.
+//
+// Production seam: `LayersPanel.dispatchYamlAction(action, model:, params:)`
+// (Sources/Panels/LayersPanel.swift) — the generic action dispatcher the live
+// UI menu invokes for the layers-panel verbs (it is what
+// `LayersPanel.dispatch("toggle_all_layers_visibility", …)` routes to). It
+// loads the action's `effects` from the bundle, builds the `active_document`
+// eval context (the `top_level_layers` / `top_level_layer_paths` rollups the
+// effects read), and runs the effects through the SHARED `runEffects` pipeline,
+// threading the action verb as the transaction name (OP_LOG.md §9). We drive
+// THAT path, not a test-only shortcut, so passing here proves the real
+// production route — the Swift analogue of Rust's generic `dispatch_action`.
+//
+// Fixture format (test_fixtures/actions/<name>.json) — a JSON array of cases,
+// each:
+//   {
+//     "name":        "<case id>",
+//     "setup_svg":   "<file under test_fixtures/svg/>",
+//     "actions":     [ {"action": "<action_id>", "params": { <literals> }}, … ],
+//     "expected_json": "<file under test_fixtures/actions/>"
+//   }
+// Each entry in `actions` is dispatched in order through the production
+// dispatcher with its resolved params. The final document is serialized with
+// `documentToTestJson` and compared to the pinned golden — identical to the
+// gesture corpus's assertion shape.
+//
+// SELECTION SETUP: an action that operates on the selection expresses it as a
+// LEADING `select_*` action in the same `actions` list — a verb the UI itself
+// dispatches — so setup stays on the production dispatch path and inside the
+// journaled-state model (selection is serialized Document state, OP_LOG.md §7).
+// The first seeded case (`toggle_all_layers_visibility`) needs NO selection: it
+// folds over ALL top-level layers, so its `actions` list is one verb with empty
+// params.
+//
+// TRANSACTION BRACKETING: actions self-bracket. A document-mutating action
+// opens its undo transaction via the `snapshot` effect and the `runEffects`
+// owner commits it once at the end (naming it with the action verb). So —
+// exactly like the gesture runner, and UNLIKE the operation runner which owns
+// the bracket — the action runner does NOT wrap dispatch in beginTxn/commitTxn.
+// Mirrors Rust's run_action_model / assert_action_test.
+
+/// The list of action fixture files under `test_fixtures/actions/`.
+/// Inc-2 mirrors the Rust ACTION_FIXTURES foundation: the layers-panel
+/// "toggle all layers visibility" verb (the simplest faithful document-
+/// affecting action), driven through this app's production action dispatcher.
+private let actionFixtures = [
+    "toggle_all_layers_visibility.json",
+]
+
+/// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust
+/// `action_state_from_svg` (loads the tree from a shared SVG fixture instead of
+/// constructing layers inline) and the gesture runner's identity-view setup.
+private func actionModelFromSvg(_ setupSvg: String) -> Model {
+    let svg = readFixture("svg/\(setupSvg)")
+    return Model(document: svgToDocument(svg))
+}
+
+/// Run an action fixture and return the resulting Model. Loads the setup SVG,
+/// then dispatches each `actions[i]` through the REAL
+/// `LayersPanel.dispatchYamlAction` (the same generic dispatcher the UI menu
+/// invokes), passing the case's resolved params. Mirrors Rust `run_action_model`
+/// — state is reachable on the returned Model for cases that need it.
+private func runActionModel(_ tc: [String: Any]) -> Model {
+    let setupSvg = tc["setup_svg"] as! String
+    let model = actionModelFromSvg(setupSvg)
+
+    for step in tc["actions"] as! [[String: Any]] {
+        let action = step["action"] as! String
+        // Params are an object of resolved literals (mirrors the production-route
+        // transform tests). Default to empty.
+        let params = (step["params"] as? [String: Any]) ?? [:]
+        LayersPanel.dispatchYamlAction(action, model: model, params: params)
+    }
+    return model
+}
+
+/// Mirror of `assertGestureTest`: replay the action sequence and compare the
+/// canonical document JSON against the pinned golden, dumping EXPECTED/ACTUAL on
+/// mismatch. Mirrors Rust `assert_action_test`.
+private func assertActionTest(_ tc: [String: Any]) {
+    let name = tc["name"] as! String
+    let expectedFile = tc["expected_json"] as! String
+    let expected = readFixture("actions/\(expectedFile)")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let actual = documentToTestJson(runActionModel(tc).document)
+
+    if actual != expected {
+        print("=== EXPECTED (\(name)) ===")
+        print(expected)
+        print("=== ACTUAL (\(name)) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
+}
+
+/// Inc-2 of the shared action-fixture corpus: replay each fixture's action
+/// sequence through this app's production action-dispatch seam and assert the
+/// resulting document serializes byte-identically to the Rust-authored golden.
+@Test func actionCorpus() throws {
+    for fixture in actionFixtures {
+        let json = readFixture("actions/\(fixture)")
+        let data = json.data(using: .utf8)!
+        let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+        for tc in tests {
+            assertActionTest(tc)
+        }
+    }
+}

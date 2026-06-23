@@ -550,6 +550,120 @@ class CrossLanguageTest(absltest.TestCase):
                 self._assert_gesture_test(tc)
 
     # ---------------------------------------------------------------
+    # ACTION equivalence corpus (CROSS_LANGUAGE_TESTING.md §3b; sibling
+    # to the GESTURE corpus above and the OPERATIONS corpus below).
+    # Where the gesture corpus drives the CanvasTool seam (press / move /
+    # release) and the operation corpus drives op_apply directly, this
+    # corpus drives the ACTION seam: the panel/menu/dialog `action` verbs
+    # the live UI dispatches, which RESOLVE to ops/effects.
+    #
+    # Production seam (this app): the live layers panel routes the
+    # `toggle_all_layers_visibility` verb through
+    # ``panels.panel_menu._dispatch_yaml_layers_action`` (panel_menu.py
+    # cmd-routing branch, ~line 702 — the SAME headless-safe dispatcher
+    # production_route_journal_test drives). That dispatcher is the
+    # Python analog of Rust's generic ``dispatch_action``: it looks the
+    # action up in the compiled workspace bundle, builds the
+    # ``active_document`` eval context, registers the snapshot + doc.set
+    # platform handlers, and runs the action's ``effects`` through
+    # ``run_effects`` (passing ``model`` + ``action_name`` so the runner
+    # OWNS and NAMES the undo transaction). We drive THAT path, not a
+    # test-only shortcut, so passing here proves the real production
+    # route. Mirrors the Rust ``run_action_model`` / ``assert_action_test``
+    # / ``action_corpus``.
+    #
+    # Fixture format (test_fixtures/actions/<name>.json) — a JSON array
+    # of cases, each:
+    #   {
+    #     "name":        "<case id>",
+    #     "setup_svg":   "<file under test_fixtures/svg/>",
+    #     "actions":     [ {"action": "<action_id>",
+    #                       "params": { <resolved literals> }}, ... ],
+    #     "expected_json": "<file under test_fixtures/actions/>"
+    #   }
+    # Each entry in `actions` is dispatched in order through the
+    # production dispatcher; the FINAL document is serialized with
+    # document_to_test_json and byte-compared to the pinned golden —
+    # identical to the gesture corpus's assertion shape.
+    #
+    # SELECTION SETUP: an action that operates on the selection expresses
+    # it as a LEADING select_* action in the same `actions` list — a verb
+    # the UI itself dispatches — so setup stays on the production dispatch
+    # path and inside the journaled-state model (selection is serialized
+    # Document state, OP_LOG.md §7). The first seeded case
+    # (`toggle_all_layers_visibility`) needs NO selection: it folds over
+    # ALL top-level layers, so its `actions` list is a single verb with
+    # empty params.
+    #
+    # TRANSACTION BRACKETING: actions self-bracket. A document-mutating
+    # action opens its undo transaction via the `snapshot` effect (which
+    # `_dispatch_yaml_layers_action` maps to `model.begin_txn`) and
+    # `run_effects` commits it once at the end (naming it with the action
+    # verb). So — exactly like the gesture runner, and UNLIKE the
+    # operation runner which owns the bracket — the action runner does
+    # NOT wrap dispatch in begin_txn/commit_txn.
+    # ---------------------------------------------------------------
+
+    # The action fixture files under test_fixtures/actions/. Inc-2
+    # (foundation) seeds the simplest faithful document-affecting action:
+    # the layers-panel "toggle all layers visibility" verb. Order mirrors
+    # the Rust ACTION_FIXTURES list so the corpus stays comparable.
+    _ACTION_FIXTURES = [
+        "toggle_all_layers_visibility.json",
+    ]
+
+    @staticmethod
+    def _dispatch_action(action_name: str, params: dict, model):
+        # Drive ONE action through THIS app's production dispatcher (the
+        # Python analog of Rust's generic dispatch_action). The live
+        # layers panel routes its menu verbs through
+        # _dispatch_yaml_layers_action, which owns + names + commits the
+        # undo transaction the action's `snapshot` effect opens. Mirrors
+        # the per-step body of the Rust run_action_model loop.
+        from panels.panel_menu import _dispatch_yaml_layers_action
+        _dispatch_yaml_layers_action(action_name, model, params=params)
+
+    def _run_action_model(self, tc):
+        # Load the setup SVG into a Model, then dispatch each `actions[i]`
+        # through the production dispatcher in order, passing the case's
+        # resolved params (defaulting to empty). Returns the Model so
+        # future cases that need more than the document (panel selection,
+        # journal/txn-name assertions) can reach it. Mirrors the Rust
+        # run_action_model, which returns the whole AppState.
+        setup_svg = _read_fixture(f"svg/{tc['setup_svg']}")
+        model = Model(document=svg_to_document(setup_svg))
+        for step in tc["actions"]:
+            action = step["action"]
+            params = step.get("params", {}) or {}
+            self._dispatch_action(action, params, model)
+        return model
+
+    def _assert_action_test(self, tc):
+        # Replay the action sequence and byte-compare the canonical
+        # document JSON against the pinned golden, dumping EXPECTED/ACTUAL
+        # on mismatch. Mirrors the Rust assert_action_test.
+        name = tc["name"]
+        expected = _read_fixture(f"actions/{tc['expected_json']}")
+        actual = document_to_test_json(self._run_action_model(tc).document)
+        if actual != expected:
+            print(f"=== EXPECTED ({name}) ===")
+            print(expected)
+            print(f"=== ACTUAL ({name}) ===")
+            print(actual)
+        self.assertEqual(actual, expected,
+            f"Action test '{name}' failed: canonical JSON mismatch")
+
+    def test_action_corpus(self):
+        # Inc-2 = toggle_all_layers_visibility: a single no-param verb
+        # over multi_layer.svg flips both top-level layers from the
+        # implicit "preview" default to "invisible" via the action's
+        # foreach + doc.set effects; the result must byte-match the
+        # Rust-authored golden.
+        for fixture in self._ACTION_FIXTURES:
+            for tc in json.loads(_read_fixture(f"actions/{fixture}")):
+                self._assert_action_test(tc)
+
+    # ---------------------------------------------------------------
     # The 33-verb actions.yaml<->op_apply unification (OP_LOG.md §9
     # Phases P1-P7). Each shared fixture replays through the production
     # op_apply dispatcher and byte-matches the Rust golden via

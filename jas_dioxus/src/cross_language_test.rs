@@ -853,6 +853,166 @@ mod tests {
         }
     }
 
+    // ===============================================================
+    // ACTION corpus (TESTING_STRATEGY.md §5 rec 2)
+    // ---------------------------------------------------------------
+    // Sibling to the GESTURE corpus above and the OPERATIONS corpus.
+    // Where the gesture corpus drives the canvas-tool seam (press /
+    // move / release) and the operation corpus drives op_apply, this
+    // corpus drives the ACTION seam: the panel/menu/dialog `action`
+    // verbs the UI dispatches, which RESOLVE to ops/effects.
+    //
+    // Production seam: `dispatch_action(action, params, &mut AppState)`
+    // (interpreter/renderer.rs) — the GENERIC action dispatcher the
+    // live UI calls for every menu item, panel button, and dialog
+    // confirm. It merges the action spec's param defaults, builds the
+    // AppState eval context, and runs the action's `effects` through
+    // `run_yaml_effects_named` (which threads the action verb as the
+    // transaction name). We drive THAT path, not a test-only shortcut,
+    // so passing here proves the real production route.
+    //
+    // Fixture format (test_fixtures/actions/<name>.json) — a JSON
+    // array of cases, each:
+    //   {
+    //     "name":        "<case id>",
+    //     "setup_svg":   "<file under test_fixtures/svg/>",
+    //     "actions":     [ {"action": "<action_id>",
+    //                       "params": { <resolved params> }}, ... ],
+    //     "expected_json": "<file under test_fixtures/actions/>"
+    //   }
+    // Each entry in `actions` is dispatched in order through the
+    // production `dispatch_action`. The final document is serialized
+    // with `document_to_test_json` and compared to the pinned golden
+    // — identical to the gesture corpus's assertion shape.
+    //
+    // SELECTION SETUP: an action that operates on the selection (e.g.
+    // a transform confirm) needs the element selected first. Express
+    // that as a LEADING action in the `actions` list — a `select_*`
+    // verb the UI itself dispatches — so the whole setup stays on the
+    // production dispatch path and inside the journaled-state model
+    // (selection is serialized Document state, OP_LOG.md §7). The
+    // first seeded case (`toggle_all_layers_visibility`) needs no
+    // selection: it folds over ALL top-level layers, so its `actions`
+    // list is a single verb with empty params.
+    //
+    // TRANSACTION BRACKETING: actions self-bracket. A document-
+    // mutating action opens its undo transaction via the `snapshot`
+    // effect and `run_yaml_effects_named` commits it once at the end
+    // (naming it with the action verb). So — exactly like the gesture
+    // runner, and UNLIKE the operation runner which owns the bracket —
+    // the action runner does NOT wrap dispatch in begin_txn/commit_txn.
+    // ===============================================================
+
+    /// The list of action fixture files under `test_fixtures/actions/`.
+    /// Inc-1 (foundation) seeds the simplest faithful document-affecting
+    /// action: the layers-panel "toggle all layers visibility" verb,
+    /// which the existing `toggle_all_layers_visibility_*` unit tests in
+    /// renderer.rs already exercise through this same `dispatch_action`
+    /// path (the "eye-demo" template §5 calls out).
+    const ACTION_FIXTURES: &[&str] = &[
+        "toggle_all_layers_visibility.json",
+    ];
+
+    /// Build an `AppState` whose active tab holds the document parsed
+    /// from `setup_svg`. Mirrors `make_state_with_layers` in renderer.rs
+    /// (the eye-demo template) but loads the tree from a shared SVG
+    /// fixture instead of constructing layers inline, so the action
+    /// corpus shares the gesture/operation corpus's setup vocabulary.
+    fn action_state_from_svg(setup_svg: &str) -> crate::workspace::app_state::AppState {
+        use crate::workspace::app_state::{AppState, TabState};
+        let svg = read_fixture(&format!("svg/{}", setup_svg));
+        let doc = svg_to_document(&svg);
+        let mut st = AppState::new();
+        // AppState::new may return empty tabs; guarantee one active tab.
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    /// Run an action fixture and return the resulting `AppState`. Loads
+    /// the setup SVG, then dispatches each `actions[i]` through the REAL
+    /// `dispatch_action` (the same generic dispatcher the UI calls),
+    /// passing the case's resolved params. State (not just the document)
+    /// is reachable on the returned AppState for cases that need it.
+    fn run_action_model(tc: &serde_json::Value) -> crate::workspace::app_state::AppState {
+        let setup_svg = tc["setup_svg"].as_str().unwrap();
+        let mut st = action_state_from_svg(setup_svg);
+
+        for step in tc["actions"].as_array().unwrap() {
+            let action = step["action"].as_str().unwrap();
+            // Params are an object of resolved literals (mirrors the
+            // production-route transform tests). Default to empty.
+            let params: serde_json::Map<String, serde_json::Value> = step
+                .get("params")
+                .and_then(|p| p.as_object())
+                .cloned()
+                .unwrap_or_default();
+            crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
+        }
+        st
+    }
+
+    /// Serialize the document the action sequence produced (mirrors
+    /// `run_gesture_test`).
+    fn run_action_test(tc: &serde_json::Value) -> String {
+        let st = run_action_model(tc);
+        document_to_test_json(st.tabs[st.active_tab].model.document())
+    }
+
+    /// Mirror of `assert_gesture_test`: replay the action sequence and
+    /// compare the canonical document JSON against the pinned golden,
+    /// dumping EXPECTED/ACTUAL on mismatch.
+    fn assert_action_test(tc: &serde_json::Value) {
+        let name = tc["name"].as_str().unwrap();
+        let expected_file = tc["expected_json"].as_str().unwrap();
+        let expected = read_fixture(&format!("actions/{}", expected_file));
+        let expected = expected.trim();
+        let actual = run_action_test(tc);
+
+        if actual != expected {
+            eprintln!("=== EXPECTED ({}) ===", name);
+            eprintln!("{}", expected);
+            eprintln!("=== ACTUAL ({}) ===", name);
+            eprintln!("{}", actual);
+            panic!("Action test '{}' failed: canonical JSON mismatch", name);
+        }
+    }
+
+    #[test]
+    fn action_corpus() {
+        for fixture in ACTION_FIXTURES {
+            let json_str = read_fixture(&format!("actions/{}", fixture));
+            let tests: serde_json::Value = serde_json::from_str(&json_str)
+                .unwrap_or_else(|e| panic!("action fixture {} is not valid JSON: {}", fixture, e));
+            for tc in tests.as_array().unwrap() {
+                assert_action_test(tc);
+            }
+        }
+    }
+
+    /// Bootstrap helper: generate expected JSON for action tests.
+    /// Run with: cargo test generate_action_expected -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn generate_action_expected() {
+        for fixture in ACTION_FIXTURES {
+            let json_str = read_fixture(&format!("actions/{}", fixture));
+            let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let name = tc["name"].as_str().unwrap();
+                let expected_file = tc["expected_json"].as_str().unwrap();
+                let actual = run_action_test(tc);
+                let path = format!("{}/actions/{}", FIXTURES, expected_file);
+                std::fs::write(&path, &actual)
+                    .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
+                eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
     /// Bootstrap: generate the live-element round-trip fixtures
     /// (live_compound_roundtrip / live_reference_roundtrip). Run with:
     ///   cargo test generate_live_fixtures -- --ignored --nocapture
