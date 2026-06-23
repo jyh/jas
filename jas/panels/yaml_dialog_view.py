@@ -85,7 +85,8 @@ class YamlDialogView(QDialog):
             # press), matching Rust's transparent click-outside backdrop.
             self.setWindowFlags(Qt.WindowType.Popup)
         width = self._dialog_def.get("width")
-        if isinstance(width, (int, float)):
+        self._has_declared_width = isinstance(width, (int, float))
+        if self._has_declared_width:
             self.setFixedWidth(int(width))
 
         # Build context with dialog namespace
@@ -98,10 +99,32 @@ class YamlDialogView(QDialog):
 
         # Render content
         content = self._dialog_def.get("content")
+        content_widget = None
         if isinstance(content, dict):
             widget = render_element(content, store, eval_ctx, self._dispatch_dialog_action)
             if widget:
+                content_widget = widget
                 layout.addWidget(widget)
+
+        # Compact-width clamp for the NON-MODAL flyout (modal: false,
+        # e.g. the toolbar long-press tool-alternates). Its items carry
+        # ``width: "100%"`` which _apply_style maps to a horizontally
+        # Expanding size policy — correct for filling a fixed-width
+        # column, but a top-level QDialog has no width to fill, so Qt
+        # opens the window at the platform's default minimum (~380px on
+        # macOS, 200px offscreen) and the Expanding items stretch to it,
+        # leaving the small icons floating in a wide empty box. Pin the
+        # flyout to its content's own sizeHint width so it reads as the
+        # compact narrow icon column the Swift/OCaml flyouts already show.
+        # Scoped to !is_modal AND no declared width: modal dialogs use
+        # the centered path (and may declare their own width) and the
+        # 32x32 checked toolbar tool buttons live in the panes, not here,
+        # so both are untouched.
+        if (not self._is_modal and not self._has_declared_width
+                and content_widget is not None):
+            hint = content_widget.sizeHint().width()
+            if hint > 0:
+                self.setFixedWidth(hint)
 
         # Subscribe to dialog state so inline effects that call
         # close_dialog (e.g. the picker's OK button) actually close

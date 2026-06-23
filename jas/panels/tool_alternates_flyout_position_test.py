@@ -90,6 +90,55 @@ class ToolAlternatesFlyoutPositionTest(absltest.TestCase):
         self.assertNotEqual(dlg.pos().x(), centre_x)
         dlg.close()
 
+    def test_flyout_is_compact_sized_to_content(self):
+        """The non-modal flyout is a compact narrow icon column, NOT a
+        wide ~380px box with the icons floating in empty space. Its
+        items carry ``width: "100%"`` (Expanding) which, on a top-level
+        QDialog with no width to fill, would otherwise stretch them to
+        the platform's default minimum window width. The flyout must be
+        pinned to its content's own sizeHint width instead. Mirrors the
+        compact Swift/OCaml tool-alternate flyouts.
+        """
+        for did in ("arrow_alternates", "pen_alternates",
+                    "pencil_alternates", "text_alternates",
+                    "shape_alternates", "hand_alternates",
+                    "scale_alternates"):
+            store = self._open(did)
+            dlg = YamlDialogView(did, store, anchor=(640, 480))
+            content = dlg.layout().itemAt(0).widget()
+            hint = content.sizeHint().width()
+            dlg.show()
+            self.app.processEvents()
+            # Compact: comfortably under 200px (an icon-only column), and
+            # exactly the content sizeHint — not a wide box.
+            self.assertLess(
+                dlg.width(), 200,
+                f"{did} flyout is too wide ({dlg.width()}px) — should be a "
+                f"compact icon column, not a wide empty box",
+            )
+            self.assertEqual(
+                dlg.width(), hint,
+                f"{did} flyout width {dlg.width()} != content sizeHint {hint}",
+            )
+            # Pinned to a fixed width (min == max) so it cannot re-expand.
+            self.assertEqual(dlg.minimumWidth(), dlg.maximumWidth())
+            dlg.close()
+
+    def test_modal_dialog_keeps_declared_width(self):
+        """The compact-width clamp is scoped to non-modal flyouts. A modal
+        dialog that declares its own ``width`` keeps it — the flyout
+        sizeHint clamp must not touch it."""
+        store = self._open("boolean_options")
+        dlg = YamlDialogView("boolean_options", store)  # modal, declares width
+        self.assertTrue(dlg._is_modal)
+        self.assertTrue(dlg._has_declared_width)
+        dlg.show()
+        self.app.processEvents()
+        # boolean_options declares width: 360; it is not shrunk to a
+        # narrow icon-column sizeHint.
+        self.assertGreaterEqual(dlg.width(), 300)
+        dlg.close()
+
     def test_flyout_clamped_on_screen_near_edge(self):
         """A long-press near the bottom-right edge keeps the flyout fully
         on-screen (grows up/left only enough to fit) — Qt's frameless
