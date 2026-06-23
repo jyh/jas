@@ -745,6 +745,17 @@ mod tests {
         "draw_rounded_rect.json",
         "draw_polygon.json",
         "draw_star.json",
+        // First SELECTION-family gesture (TESTING_STRATEGY.md §5 rec 4):
+        // a click-select. Unlike the draw tools, the selection tool's
+        // on_mousedown HIT-TESTS — it resolves the top-most element whose
+        // bounds contain the press point (doc-space, headless, deterministic
+        // via doc_primitives::hit_test) and sets the selection from it. The
+        // press point (36,36) is dead-center of the first rect in
+        // two_rects.svg (doc-bounds 0..72 in both axes after the 0.75 px->pt
+        // import scale), unambiguously inside its bounds and 36 units clear of
+        // the second rect (which starts at doc-x 72). No geometry changes; only
+        // the selection becomes [{kind:"all", path:[0,0]}].
+        "select_click.json",
     ];
 
     /// Build the YamlTool for `tool_id` from the embedded workspace

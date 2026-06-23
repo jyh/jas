@@ -1,0 +1,12 @@
+[
+  {
+    "name": "select_click",
+    "setup_svg": "two_rects.svg",
+    "tool": "selection",
+    "events": [
+      {"kind": "press", "x": 36, "y": 36},
+      {"kind": "release", "x": 36, "y": 36}
+    ],
+    "expected_json": "select_click_expected.json"
+  }
+]
