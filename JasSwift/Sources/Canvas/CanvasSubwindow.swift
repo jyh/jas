@@ -2865,7 +2865,10 @@ class CanvasNSView: NSView {
                 if chars == " " {
                     if currentTool != .hand && priorToolForSpacebar == nil {
                         priorToolForSpacebar = currentTool
-                        onToolChange?(.hand)
+                        // Route through the store path so the Hand slot
+                        // highlights / its glyph shows while Space is held,
+                        // matching a keyboard / flyout selection.
+                        selectToolByYamlId("hand", fallback: .hand)
                     }
                     return
                 }
@@ -2914,12 +2917,7 @@ class CanvasNSView: NSView {
                         // but does not reliably re-render the sibling toolbar.
                         // Fall back to onToolChange only when no document model
                         // is present (no store to observe).
-                        if let model = controller?.model {
-                            model.stateStore.set("active_tool", toolStr)
-                            model.panelStateVersion &+= 1
-                        } else {
-                            onToolChange?(tool)
-                        }
+                        selectToolByYamlId(toolStr, fallback: tool)
                         return
                     }
                 }
@@ -3000,6 +2998,23 @@ class CanvasNSView: NSView {
         model.viewOffsetY = ay - docAy * zNew
     }
 
+    /// Switch the active tool by its bundle active_tool ROUTING id — the
+    /// SAME store-driven path the toolbar click / alternates flyout use,
+    /// so the toolbar slot glyph + highlight follow the selection. Writes
+    /// active_tool and bumps panelStateVersion; the toolbar's
+    /// `.onChange(of: the store's active_tool)` then syncs ContentView's
+    /// currentTool @State (→ canvas tool + grid). Falls back to the
+    /// canvas @Binding onToolChange only when no document model is present
+    /// (no store to observe).
+    private func selectToolByYamlId(_ toolStr: String, fallback: Tool) {
+        if let model = controller?.model {
+            model.stateStore.set("active_tool", toolStr)
+            model.panelStateVersion &+= 1
+        } else {
+            onToolChange?(fallback)
+        }
+    }
+
     override func keyUp(with event: NSEvent) {
         // Spacebar pass-through restore: if we're holding a prior
         // tool from a Space-down, restore it on Space-up. Per
@@ -3007,7 +3022,9 @@ class CanvasNSView: NSView {
         if event.charactersIgnoringModifiers == " ",
            let prior = priorToolForSpacebar {
             priorToolForSpacebar = nil
-            onToolChange?(prior)
+            // Restore via the store path so the toolbar slot returns to the
+            // prior tool (glyph + highlight), not just the canvas.
+            selectToolByYamlId(yamlToolString(prior), fallback: prior)
             return
         }
         if let ctx = toolContext, activeTool.onKeyUp(ctx, keyCode: event.keyCode) {
