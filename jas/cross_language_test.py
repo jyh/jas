@@ -672,6 +672,97 @@ class CrossLanguageTest(absltest.TestCase):
                 self._assert_action_test(tc)
 
     # ---------------------------------------------------------------
+    # KEY-RESOLUTION corpus (TESTING_STRATEGY.md §5 rec 3)
+    # ---------------------------------------------------------------
+    # Sibling to the GESTURE and ACTION corpora above. Where those drive
+    # the canvas-tool seam (press/move/release) and the dispatch_action
+    # seam, this corpus pins the PURE key->action RESOLUTION step:
+    # resolve_key(chord) maps a normalized, framework-neutral key chord
+    # {key, ctrl, shift, alt, meta} to the bundle `shortcuts` table's
+    # {action, params} (or null). The framework event -> chord BINDING
+    # stays on the manual floor (§5); only resolution is byte-gated here.
+    #
+    # Unlike the gesture/action corpora the output is NOT a document — it
+    # is the resolved command itself, so there is no setup_svg and no
+    # dispatch. Each fixture group lists `cases` (a name + chord); the
+    # runner resolves every chord against the once-loaded bundle
+    # `shortcuts` array and emits a CANONICAL JSON array of {name, result}
+    # (sorted object keys, compact separators) compared to the
+    # Rust-generated golden. The canonicalization (json.dumps with
+    # sort_keys + compact separators) sorts object keys so the byte
+    # comparison is order-independent and identical across the four apps.
+    # Mirrors the Rust run_key_test / assert_key_test / key_corpus.
+    # ---------------------------------------------------------------
+
+    # Key-resolution fixture files under test_fixtures/keys/. Order
+    # mirrors the Rust KEY_FIXTURES list so the corpus stays comparable.
+    _KEY_FIXTURES = [
+        "key_resolution.json",
+    ]
+
+    @staticmethod
+    def _canon_key_json(obj) -> str:
+        # Canonical serializer for the key corpus: object keys in sorted
+        # order, arrays in document order, COMPACT (no spaces), standard
+        # JSON string escaping. json.dumps with sort_keys + the (',', ':')
+        # separators reproduces the Rust canon_value byte-for-byte
+        # (nested params sort too because sort_keys recurses). ensure_ascii
+        # is left at its default (True), matching serde_json's ASCII
+        # escaping for the resolved-command strings in this table.
+        return json.dumps(obj, separators=(",", ":"), sort_keys=True)
+
+    @staticmethod
+    def _run_key_test(group: dict) -> str:
+        # Resolve every chord in a fixture group against the once-loaded
+        # bundle `shortcuts` table and return the canonical result array.
+        # Mirrors the Rust run_key_test: load the bundle shortcuts once,
+        # resolve each case's chord, wrap as {action, params} | null.
+        from workspace.key_resolver import make_chord, resolve_key_in
+        from panels.yaml_menu import get_workspace_data
+        ws = get_workspace_data() or {}
+        shortcuts = ws.get("shortcuts")
+        if not isinstance(shortcuts, list):
+            shortcuts = []
+        arr = []
+        for case in group["cases"]:
+            ch = case["chord"]
+            chord = make_chord(
+                ch["key"],
+                bool(ch.get("ctrl", False)),
+                bool(ch.get("shift", False)),
+                bool(ch.get("alt", False)),
+                bool(ch.get("meta", False)),
+            )
+            cmd = resolve_key_in(chord, shortcuts)
+            # null when unmapped, else {action, params}.
+            arr.append({"name": case["name"], "result": cmd})
+        return CrossLanguageTest._canon_key_json(arr)
+
+    def _assert_key_test(self, group: dict):
+        # Replay a key fixture group and byte-compare the canonical result
+        # array against the pinned golden, dumping EXPECTED/ACTUAL on
+        # mismatch. Mirrors the Rust assert_key_test.
+        name = group["name"]
+        expected = _read_fixture(f"keys/{group['expected_json']}")
+        actual = self._run_key_test(group)
+        if actual != expected:
+            print(f"=== EXPECTED ({name}) ===")
+            print(expected)
+            print(f"=== ACTUAL ({name}) ===")
+            print(actual)
+        self.assertEqual(actual, expected,
+            f"Key test '{name}' failed: canonical JSON mismatch")
+
+    def test_key_corpus(self):
+        # The pure key->action resolver pinned cross-language: each chord
+        # in key_resolution.json resolves against the bundle `shortcuts`
+        # table to {action, params} | null; the canonical result array
+        # must byte-match the Rust-authored golden.
+        for fixture in self._KEY_FIXTURES:
+            for group in json.loads(_read_fixture(f"keys/{fixture}")):
+                self._assert_key_test(group)
+
+    # ---------------------------------------------------------------
     # The 33-verb actions.yaml<->op_apply unification (OP_LOG.md §9
     # Phases P1-P7). Each shared fixture replays through the production
     # op_apply dispatcher and byte-matches the Rust golden via

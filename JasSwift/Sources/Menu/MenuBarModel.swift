@@ -108,6 +108,135 @@ public func stripMnemonic(_ label: String) -> String {
     return out
 }
 
+// MARK: - Pure key → action resolution (TESTING_STRATEGY.md §5 rec 3)
+//
+// A keyboard shortcut becomes an application command in two steps:
+//   1. BINDING — the framework key event (here an AppKit `NSEvent`) is
+//      normalized into a framework-neutral ``KeyChord``. This is
+//      platform-specific (on macOS the ⌘ key arrives as `meta`, mapped to the
+//      bundle's `Ctrl` vocabulary) and stays on the MANUAL floor.
+//   2. RESOLUTION — the chord is looked up against the compiled bundle
+//      `shortcuts` table to yield an action verb and its params. This step is
+//      PURE and framework-free, and is the refactor target of §5 rec 3: it is
+//      pinned cross-language by the key corpus so all four apps resolve a chord
+//      to byte-identical {action, params}.
+//
+// ``parseShortcut`` above produces a SwiftUI ``EventModifiers`` set with
+// macOS-specific folding (`Ctrl` → `.command`, letters lowercased) for the menu
+// renderer. The resolver below instead works in the framework-NEUTRAL canonical
+// vocabulary (separate ctrl/shift/alt/meta booleans, letters UPPERCASE) so its
+// chord comparison is byte-identical to the Rust reference `resolve_key`. The
+// two intentionally differ; ``resolveKeyChord`` is the cross-language pinned one.
+//
+// The live keyboard path is wired to ``resolveKeyChord`` in Phase 2 of §5 rec 3;
+// until then it is exercised only by the key-resolution corpus.
+
+/// A normalized, framework-neutral key chord. `key` is the canonical token:
+/// an UPPERCASE ASCII letter (`"V"`), a digit (`"0"`), a symbol (`"="`, `"-"`,
+/// `"\\"`), or a named key (`"Delete"`, `"Backspace"`). `shift` is carried as a
+/// SEPARATE flag and is never folded into the character. Mirrors the Rust
+/// reference `KeyChord`.
+public struct KeyChord: Equatable {
+    public let key: String
+    public let ctrl: Bool
+    public let shift: Bool
+    public let alt: Bool
+    public let meta: Bool
+
+    /// Build a chord, canonicalizing the key token (single ASCII letters are
+    /// uppercased; everything else kept verbatim) so live callers need not
+    /// pre-normalize case. Mirrors Rust `KeyChord::new`.
+    public init(key: String, ctrl: Bool = false, shift: Bool = false,
+                alt: Bool = false, meta: Bool = false) {
+        self.key = canonKey(key)
+        self.ctrl = ctrl
+        self.shift = shift
+        self.alt = alt
+        self.meta = meta
+    }
+}
+
+/// The resolved command: an action verb plus its resolved params. Mirrors the
+/// Rust reference `ResolvedCommand`. `params` is `[:]` when the shortcut entry
+/// carries none.
+public struct ResolvedCommand: Equatable {
+    public let action: String
+    public let params: [String: String]
+}
+
+/// Canonicalize a key token: a single ASCII letter is uppercased; every other
+/// token (digit, symbol, named key) is returned verbatim. This makes the chord
+/// comparison case-insensitive for letters while leaving `"Delete"`, `"="`,
+/// `"\\"` untouched. Mirrors Rust `canon_key`.
+private func canonKey(_ key: String) -> String {
+    if key.count == 1, let c = key.first, c.isASCII, c.isLetter {
+        return key.uppercased()
+    }
+    return key
+}
+
+/// Parse a bundle shortcut string (`"Ctrl+Shift+S"`, `"V"`, `"Shift+E"`,
+/// `"Delete"`, `"\\"`) into a normalized chord. Tokens are split on `+`; all
+/// but the last are modifiers (matched case-insensitively: `Ctrl`/`Control`,
+/// `Shift`, `Alt`/`Option`, `Meta`/`Cmd`/`Command`/`Super`), and the last token
+/// is the key. Returns nil for an empty string. (No shortcut in the table uses
+/// `+` as its key, so splitting on `+` is unambiguous.) Mirrors Rust
+/// `parse_shortcut` — note it does NOT do the macOS `Ctrl`→Command folding that
+/// the menu-renderer ``parseShortcut`` above performs; the resolver stays in the
+/// framework-neutral vocabulary for cross-language byte parity.
+public func parseShortcutChord(_ s: String) -> KeyChord? {
+    if s.isEmpty { return nil }
+    // Split on "+" keeping empty subsequences so a trailing-key like "\\" or a
+    // literal "+" key would survive; the bundle has no "+"-as-key entry.
+    let tokens = s.components(separatedBy: "+")
+    guard let keyTok = tokens.last else { return nil }
+    let modToks = tokens.dropLast()
+    var ctrl = false, shift = false, alt = false, meta = false
+    for m in modToks {
+        switch m.lowercased() {
+        case "ctrl", "control": ctrl = true
+        case "shift": shift = true
+        case "alt", "option": alt = true
+        case "meta", "cmd", "command", "super": meta = true
+        // Unknown modifier token: ignore (keeps parsing total).
+        default: break
+        }
+    }
+    return KeyChord(key: keyTok, ctrl: ctrl, shift: shift, alt: alt, meta: meta)
+}
+
+/// Resolve a chord against the compiled bundle `shortcuts` table. Returns the
+/// first entry whose parsed chord equals `chord`, or nil if unmapped / the
+/// bundle is missing. Mirrors Rust `resolve_key`.
+public func resolveKeyChord(_ chord: KeyChord) -> ResolvedCommand? {
+    guard let ws = WorkspaceData.load(),
+          let shortcuts = ws.data["shortcuts"] as? [Any] else { return nil }
+    return resolveKeyIn(chord, shortcuts: shortcuts)
+}
+
+/// Resolve against an explicit `shortcuts` array (the testable core, so the
+/// corpus can resolve every case against one loaded bundle). Returns the first
+/// entry whose parsed chord equals `chord`, or nil if unmapped. Mirrors Rust
+/// `resolve_key_in`.
+public func resolveKeyIn(_ chord: KeyChord, shortcuts: [Any]) -> ResolvedCommand? {
+    for entry in shortcuts {
+        guard let obj = entry as? [String: Any],
+              let keyStr = obj["key"] as? String,
+              let parsed = parseShortcutChord(keyStr) else { continue }
+        if parsed == chord {
+            let action = (obj["action"] as? String) ?? ""
+            var params: [String: String] = [:]
+            if let p = obj["params"] as? [String: Any] {
+                for (k, v) in p {
+                    if let s = v as? String { params[k] = s }
+                }
+            }
+            return ResolvedCommand(action: action, params: params)
+        }
+    }
+    return nil
+}
+
 /// A parsed keyboard shortcut: the key character plus SwiftUI modifiers.
 public struct ParsedShortcut: Equatable {
     public let key: Character

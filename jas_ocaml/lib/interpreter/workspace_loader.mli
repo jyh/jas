@@ -19,6 +19,12 @@ val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t option
     bundle ships no [menubar] key. *)
 val menubar : workspace -> Yojson.Safe.t list
 
+(** [shortcuts ws] returns the top-level key-to-action table (shortcuts.yaml)
+    as a list of entry JSON objects ({key, action, params?}) in declaration
+    order. Empty when the bundle ships no [shortcuts] key. Read the same way as
+    [menubar]; consumed by the pure key resolver (Key_resolver). *)
+val shortcuts : workspace -> Yojson.Safe.t list
+
 val panel : workspace -> string -> Yojson.Safe.t option
 
 (** [tool ws name] returns the compiled tool entry [tools.<name>] from the
