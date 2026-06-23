@@ -55,8 +55,9 @@ struct WorkspaceIcon: View {
                 // baseline; SwiftUI.Text draws from a top-left
                 // origin, so estimate the ascent (≈0.8 * fontSize)
                 // and shift the draw point up by it.
-                let color = prim.fill.toColor(tint: tint)
+                var color = prim.fill.toColor(tint: tint)
                     ?? SwiftUI.Color(nsColor: tint)
+                if prim.fillAlpha < 1.0 { color = color.opacity(prim.fillAlpha) }
                 let font = NSFont.systemFont(ofSize: t.fontSize, weight: t.fontWeight)
                 var resolved = ctx.resolve(SwiftUI.Text(t.content)
                     .font(SwiftUI.Font(font as CTFont))
@@ -67,7 +68,10 @@ struct WorkspaceIcon: View {
                 continue
             }
             if let fillColor = prim.fill.toColor(tint: tint) {
-                ctx.fill(prim.path, with: .color(fillColor))
+                let shaded = prim.fillAlpha < 1.0
+                    ? fillColor.opacity(prim.fillAlpha) : fillColor
+                ctx.fill(prim.path, with: .color(shaded),
+                         style: FillStyle(eoFill: prim.fillEvenOdd))
             }
             if let strokeColor = prim.stroke.toColor(tint: tint), prim.strokeWidth > 0 {
                 let style = StrokeStyle(
@@ -76,7 +80,9 @@ struct WorkspaceIcon: View {
                     lineJoin: prim.strokeLineJoin,
                     dash: prim.strokeDashArray.map { CGFloat($0) }
                 )
-                ctx.stroke(prim.path, with: .color(strokeColor), style: style)
+                let shaded = prim.strokeAlpha < 1.0
+                    ? strokeColor.opacity(prim.strokeAlpha) : strokeColor
+                ctx.stroke(prim.path, with: .color(shaded), style: style)
             }
         }
     }
@@ -104,6 +110,21 @@ struct SvgPrimitive {
     let strokeLineCap: CGLineCap
     let strokeLineJoin: CGLineJoin
     let strokeDashArray: [Double]
+    /// SVG `fill-rule`. The spec default is nonzero; even-odd is the
+    /// only other value the bundle uses (star + boolean_* holes). When
+    /// true the fill is drawn with `FillStyle(eoFill: true)` so
+    /// self-intersecting / nested subpaths leave holes instead of
+    /// filling solid, matching the real SVG engines.
+    let fillEvenOdd: Bool
+    /// Effective fill alpha multiplier = `opacity` * `fill-opacity`.
+    /// 1.0 when neither attribute is present. Folded into the fill
+    /// color's alpha at draw time. (Element `opacity` strictly
+    /// composites the whole element, but every opacity-bearing bundle
+    /// icon paints a single channel — fill XOR stroke — so multiplying
+    /// the paint alpha is exact here.)
+    let fillAlpha: Double
+    /// Effective stroke alpha multiplier = `opacity` * `stroke-opacity`.
+    let strokeAlpha: Double
     /// Set when the primitive came from an SVG `<text>` element. The
     /// `path` is empty in that case; the renderer draws the string at
     /// `(textX, textY)` (where y is the SVG baseline) using the
@@ -264,14 +285,25 @@ private enum SvgPrimitiveBuilder {
         if let tf = attrs["transform"], let xform = parseTransform(tf) {
             p = p.applying(xform)
         }
+        // SVG paint defaults: an absent `fill` is BLACK (not none, not
+        // currentColor) — the real engines fill an attribute-less path
+        // black, so a no-fill icon like `pen` must NOT vanish. An
+        // absent `stroke` IS none (spec default), so keep that.
+        let opacity = parseOpacity(attrs["opacity"]) ?? 1.0
+        let fillOpacity = parseOpacity(attrs["fill-opacity"]) ?? 1.0
+        let strokeOpacity = parseOpacity(attrs["stroke-opacity"]) ?? 1.0
         return SvgPrimitive(
             path: p,
-            fill: parsePaint(attrs["fill"]) ?? .none,
+            fill: parsePaint(attrs["fill"]) ?? .literal(.black),
             stroke: parsePaint(attrs["stroke"]) ?? .none,
             strokeWidth: Double(attrs["stroke-width"] ?? "") ?? 1.0,
             strokeLineCap: parseLineCap(attrs["stroke-linecap"]),
             strokeLineJoin: parseLineJoin(attrs["stroke-linejoin"]),
             strokeDashArray: parseNumberList(attrs["stroke-dasharray"]),
+            fillEvenOdd: (attrs["fill-rule"]?.trimmingCharacters(in: .whitespaces)
+                .lowercased() == "evenodd"),
+            fillAlpha: opacity * fillOpacity,
+            strokeAlpha: opacity * strokeOpacity,
             text: nil
         )
     }
@@ -302,14 +334,22 @@ private enum SvgPrimitiveBuilder {
             default: return .regular
             }
         }()
+        let opacity = parseOpacity(attrs["opacity"]) ?? 1.0
+        let fillOpacity = parseOpacity(attrs["fill-opacity"]) ?? 1.0
         return SvgPrimitive(
             path: SwiftUI.Path(),
+            // Text-as-icon glyphs default to the tint (currentColor)
+            // rather than black so they pick up the toolbar color, as
+            // before; an explicit `fill` still wins.
             fill: parsePaint(attrs["fill"]) ?? .current,
             stroke: .none,
             strokeWidth: 0,
             strokeLineCap: .butt,
             strokeLineJoin: .miter,
             strokeDashArray: [],
+            fillEvenOdd: false,
+            fillAlpha: opacity * fillOpacity,
+            strokeAlpha: 1.0,
             text: SvgText(
                 content: trimmed, x: x, y: y,
                 fontFamily: family, fontSize: size,
@@ -377,7 +417,7 @@ private enum SvgPrimitiveBuilder {
               !s.isEmpty else { return nil }
         if s == "none" { return SvgPaint.none }
         if s == "currentcolor" { return .current }
-        if s.hasPrefix("#") { return .literal(NSColor(hex: s)) }
+        if s.hasPrefix("#"), let c = parseHexColor(s) { return .literal(c) }
         switch s {
         case "black": return .literal(.black)
         case "white": return .literal(.white)
@@ -387,6 +427,43 @@ private enum SvgPrimitiveBuilder {
         case "blue": return .literal(.blue)
         default: return nil
         }
+    }
+
+    /// Parse an SVG hex color, supporting all four CSS forms the bundle
+    /// uses: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`. The shorthand
+    /// forms expand each nibble (`#fff` -> `#ffffff`), which the shared
+    /// `NSColor(hex:)` does NOT do (it would read `#fff` as 0x000fff =
+    /// blue). The real SVG engines expand shorthand, so we must too,
+    /// or every `#fff` facet (pen / anchor_point / paintbrush / arrows)
+    /// renders the wrong color. Returns nil for malformed input.
+    private static func parseHexColor(_ raw: String) -> NSColor? {
+        let h = raw.hasPrefix("#") ? String(raw.dropFirst()) : raw
+        let hex = Array(h)
+        guard hex.allSatisfy({ $0.isHexDigit }) else { return nil }
+        func val(_ a: Character, _ b: Character) -> Double? {
+            guard let n = UInt8(String([a, b]), radix: 16) else { return nil }
+            return Double(n) / 255.0
+        }
+        let r, g, b: Double
+        var a: Double = 1.0
+        switch hex.count {
+        case 3, 4:
+            // Shorthand: duplicate each nibble.
+            guard let rr = val(hex[0], hex[0]),
+                  let gg = val(hex[1], hex[1]),
+                  let bb = val(hex[2], hex[2]) else { return nil }
+            r = rr; g = gg; b = bb
+            if hex.count == 4, let aa = val(hex[3], hex[3]) { a = aa }
+        case 6, 8:
+            guard let rr = val(hex[0], hex[1]),
+                  let gg = val(hex[2], hex[3]),
+                  let bb = val(hex[4], hex[5]) else { return nil }
+            r = rr; g = gg; b = bb
+            if hex.count == 8, let aa = val(hex[6], hex[7]) { a = aa }
+        default:
+            return nil
+        }
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
     }
 
     /// Parse the subset of the SVG `transform` attribute used by the
@@ -463,6 +540,19 @@ private enum SvgPrimitiveBuilder {
         guard let s = raw else { return [] }
         return s.split(whereSeparator: { $0.isWhitespace || $0 == "," })
             .compactMap { Double($0) }
+    }
+
+    /// Parse an SVG opacity value (`opacity` / `fill-opacity` /
+    /// `stroke-opacity`). Accepts a plain `<number>` or a `<percentage>`
+    /// and clamps to [0, 1] per the spec. Returns nil if absent /
+    /// unparseable so the caller can default to 1.0.
+    private static func parseOpacity(_ raw: String?) -> Double? {
+        guard var s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty
+        else { return nil }
+        var scale = 1.0
+        if s.hasSuffix("%") { s = String(s.dropLast()); scale = 0.01 }
+        guard let v = Double(s) else { return nil }
+        return min(1.0, max(0.0, v * scale))
     }
 }
 
