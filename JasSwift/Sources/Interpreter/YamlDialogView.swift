@@ -319,31 +319,29 @@ struct YamlDialogOverlay: View {
     /// so left/top math matches Rust's `position:absolute; left/top`.
     @ViewBuilder
     private func anchoredPopover(_ ds: YamlDialogState, anchor: CGPoint) -> some View {
-        // Offset the popover so its top-left sits just beside the
-        // long-pressed slot button instead of under the cursor. Rust
-        // pins the top-left to the raw page coords; the slot button is
-        // ~28pt wide, so nudging right keeps the flyout clear of the
-        // pressing finger/cursor while staying adjacent to the slot.
-        let dx: CGFloat = 30
-        let dy: CGFloat = 0
-        ZStack(alignment: .topLeading) {
-            // Transparent full-screen click-outside dismiss target.
-            SwiftUI.Color.clear
-                .contentShape(Rectangle())
-                .ignoresSafeArea()
-                .onTapGesture {
-                    dialogState = nil
-                    onDismiss?()
-                }
-
-            // Compact bare container (no title bar) positioned at the
-            // anchor. `.position` centers a view on the given point, so
-            // we offset by half the measured size to pin the TOP-LEFT
-            // corner to (anchor + delta), matching Rust's left/top.
-            popoverContainer(ds)
-                .modifier(TopLeadingPositionModifier(
-                    point: CGPoint(x: anchor.x + dx, y: anchor.y + dy)
-                ))
+        // `anchor` is the press point in the shared "jasRoot" coordinate
+        // space. Convert it into THIS overlay container's local space
+        // (via the container's own frame in "jasRoot") and pin the
+        // popover's TOP-LEFT there with `.offset` from a topLeading
+        // ZStack — so the flyout lands exactly at the press point no
+        // matter where the overlay sits in the window. A small nudge
+        // keeps the first item clear of the release point. Matches
+        // Rust's at-cursor `position:absolute; left/top` flyout.
+        let dx: CGFloat = 8
+        let dy: CGFloat = 8
+        GeometryReader { geo in
+            let o = geo.frame(in: .named("jasRoot")).origin
+            ZStack(alignment: .topLeading) {
+                // Transparent full-area click-outside dismiss target.
+                SwiftUI.Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dialogState = nil
+                        onDismiss?()
+                    }
+                popoverContainer(ds)
+                    .offset(x: anchor.x - o.x + dx, y: anchor.y - o.y + dy)
+            }
         }
     }
 
@@ -510,35 +508,3 @@ struct YamlDialogOverlay: View {
     }
 }
 
-/// Pin a view's TOP-LEFT corner to `point` in the parent's coordinate
-/// space. SwiftUI's `.position(_:)` centers the view on the point, so
-/// this measures the view via a GeometryReader-backed preference and
-/// shifts by half its size — yielding the same top-left semantics as
-/// Rust's `position:absolute; left:{x}px; top:{y}px`. Used by the
-/// non-modal tool-alternates popover so the flyout's top-left lands at
-/// the press location rather than its center.
-private struct TopLeadingPositionModifier: ViewModifier {
-    let point: CGPoint
-    @State private var size: CGSize = .zero
-
-    func body(content: Content) -> some View {
-        content
-            .background(
-                GeometryReader { geo in
-                    SwiftUI.Color.clear
-                        .preference(key: PopoverSizeKey.self, value: geo.size)
-                }
-            )
-            .onPreferenceChange(PopoverSizeKey.self) { size = $0 }
-            .position(x: point.x + size.width / 2,
-                      y: point.y + size.height / 2)
-    }
-}
-
-private struct PopoverSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        let next = nextValue()
-        if next != .zero { value = next }
-    }
-}

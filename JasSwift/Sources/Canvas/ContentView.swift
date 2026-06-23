@@ -387,6 +387,13 @@ public struct ContentView: View {
                     }
                 )
             }
+            // One explicit window-root coordinate space shared by the
+            // toolbar long-press capture (PressDispatchModifier) and the
+            // dialog overlay's at-cursor popover positioning. Using a
+            // single named space avoids the macOS gesture-`.global` vs
+            // overlay-layout-space mismatch that put the flyout offset
+            // down-and-right of the press point.
+            .coordinateSpace(name: "jasRoot")
         }
     }
 
