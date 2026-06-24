@@ -293,6 +293,62 @@ private func selectionTool() -> CanvasTool {
     }
 }
 
+// MARK: - Scale tool: doc-space reference reconcile at a non-identity view
+//
+// Regression guard for the transform-tool doc-space reconcile (branch
+// testing-strategy). At a NON-identity view (zoom != 1, view_offset != 0) a
+// custom clicked reference point must pivot the committed scale about the
+// DOCUMENT point under the cursor, not the raw screen point. The cross-
+// language corpora run only at the identity view (where doc == screen), so
+// this case is otherwise unguarded. Mirrors COORD_RECONCILE_TESTS.md CR-012.
+
+private func scaleTool() -> CanvasTool {
+    createTools()[.scale]!
+}
+
+@Test func scaleCustomRefPivotsAboutDocPointAtNonIdentityView() {
+    // Rect at document (0,0), 100x100, selected.
+    let rect: Element = .rect(Rect(x: 0, y: 0, width: 100, height: 100,
+                                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+    let layer = Layer(name: "L", children: [rect])
+    let sel: Selection = [ElementSelection.all([0, 0])]
+    let doc = Document(layers: [layer], selection: sel)
+    let model = Model(document: doc)
+
+    // Non-identity view: screen = doc * 2 + (10, 20)  =>  doc = (screen - off) / 2.
+    model.zoomLevel = 2.0
+    model.viewOffsetX = 10.0
+    model.viewOffsetY = 20.0
+    let (ctx, _, _) = makeCtx(model: model)
+    let tool = scaleTool()
+
+    // 1. Plain click at SCREEN (10, 20) -> doc (0, 0): set the custom
+    //    reference point to the rect's top-left corner.
+    tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
+    tool.onRelease(ctx, x: 10, y: 20, shift: false, alt: false)
+
+    // 2. Drag-scale: press SCREEN (210, 220) -> doc (100, 100); release
+    //    SCREEN (410, 420) -> doc (200, 200). With pivot (0,0) that is
+    //    sx = sy = 200 / 100 = 2.0.
+    tool.onPress(ctx, x: 210, y: 220, shift: false, alt: false)
+    tool.onMove(ctx, x: 410, y: 420, shift: false, dragging: true)
+    tool.onRelease(ctx, x: 410, y: 420, shift: false, alt: false)
+
+    // The committed scale is carried in the element transform (rect x/y/w/h
+    // stay local). Verify the PIVOT is document (0,0): the reference point is
+    // the fixed point of the scale, and the opposite corner (100,100) doubles
+    // to (200,200). Pre-fix the click stored the SCREEN point (10,20) into the
+    // doc-space reference field, so the pivot landed at doc (10,20) and
+    // applyPoint(0,0) would be (-10,-20) — which these assertions reject.
+    let t = layerChildren(model)[0].transform ?? .identity
+    let pivot = t.applyPoint(0, 0)
+    let corner = t.applyPoint(100, 100)
+    #expect(abs(pivot.0 - 0.0) < 1e-6 && abs(pivot.1 - 0.0) < 1e-6,
+            "reference point should be the fixed point at doc (0,0); got \(pivot)")
+    #expect(abs(corner.0 - 200.0) < 1e-6 && abs(corner.1 - 200.0) < 1e-6,
+            "opposite corner should double to (200,200); got \(corner)")
+}
+
 // MARK: - Add Anchor Point tool tests (YAML-driven per Phase 7.11-13)
 //
 // Drag-adjusts-handles, cusp-drag, and Space+drag reposition from the
