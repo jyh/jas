@@ -22,7 +22,9 @@ import pytest
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import Ellipse, Layer, Rect as RectElem
+from geometry.element import (
+    Color, Ellipse, Layer, Rect as RectElem, Stroke, Transform,
+)
 from tools.tool import KeyMods
 from tools.yaml_tool import (
     OverlayStyle, YamlTool, parse_color, parse_style,
@@ -478,3 +480,80 @@ class TestOverlayColorParse:
 
     def test_invalid(self):
         assert parse_color("garbage") is None
+
+
+# ── CR-012: Scale custom reference unprojects screen → doc ───
+#
+# At a non-identity view a custom clicked reference point must pivot
+# the committed Scale about the DOCUMENT point under the cursor, not
+# the raw screen point. The cross-language corpora run only at the
+# identity view (where doc == screen), so this case is otherwise
+# unguarded. Mirrors COORD_RECONCILE_TESTS.md CR-012 and the Swift
+# scaleCustomRefPivotsAboutDocPointAtNonIdentityView test.
+
+
+class TestScaleCustomReferenceUnproject:
+    def test_scale_custom_ref_pivots_about_doc_point_at_non_identity_view(self):
+        tool = _load_ws_tool("scale")
+        if tool is None:
+            pytest.skip("workspace.json not available")
+
+        # Rect at document (0,0), 100x100, selected (path [0,0]).
+        rect = RectElem(
+            x=0.0, y=0.0, width=100.0, height=100.0,
+            stroke=Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=1.0),
+        )
+        layer = Layer(name="L", children=(rect,))
+        sel = frozenset({ElementSelection.all((0, 0))})
+        doc = Document(layers=(layer,), selection=sel)
+        model = Model(document=doc)
+
+        # Non-identity view: screen = doc * 2 + (10, 20)
+        #   =>  doc = (screen - off) / 2.
+        # The tool's event-payload builder computes
+        #   event.doc_x = (x - view_offset_x) / zoom internally,
+        # so feed it SCREEN coords.
+        model.zoom_level = 2.0
+        model.view_offset_x = 10.0
+        model.view_offset_y = 20.0
+        ctx, _ = _ctx(model)
+
+        # 1. Plain click at SCREEN (10, 20) -> doc (0, 0): set the
+        #    custom reference point to the rect's top-left corner.
+        tool.on_press(ctx, 10, 20)
+        tool.on_release(ctx, 10, 20)
+
+        # 2. Drag-scale: press SCREEN (210, 220) -> doc (100, 100);
+        #    move/release SCREEN (410, 420) -> doc (200, 200). With
+        #    pivot (0,0) this is sx = sy = 200 / 100 = 2.0.
+        tool.on_press(ctx, 210, 220)
+        tool.on_move(ctx, 410, 420, dragging=True)
+        # The move-threshold guard in scale.yaml that sets
+        # tool.scale.moved is "abs(...) > 2 || abs(...) > 2". Now that the
+        # lexer recognizes the C-style || operator (synonym for the `or`
+        # keyword), this guard evaluates correctly: abs(200-100) > 2 is
+        # true, so moved is set and the drag commits. No workaround needed.
+        tool.on_release(ctx, 410, 420)
+
+        # The committed scale is carried in the element TRANSFORM
+        # (the rect's local x/y/w/h stay unchanged). Verify the PIVOT
+        # is document (0,0): the reference point is the fixed point of
+        # the scale, and the opposite corner (100,100) doubles to
+        # (200,200). Pre-fix the click stored the SCREEN point (10,20)
+        # into the doc-space reference field, so the pivot landed at
+        # doc (10,20) and apply_point(0,0) would be (-10,-20) — which
+        # these assertions reject.
+        committed = model.document.layers[0].children[0]
+        assert isinstance(committed, RectElem)
+        # Local geometry is unchanged; the scale lives in the matrix.
+        assert committed.x == 0.0 and committed.y == 0.0
+        assert committed.width == 100.0 and committed.height == 100.0
+        t = committed.transform or Transform()
+        px, py = t.apply_point(0.0, 0.0)
+        cx, cy = t.apply_point(100.0, 100.0)
+        assert abs(px - 0.0) < 1e-6 and abs(py - 0.0) < 1e-6, (
+            f"reference point should be the fixed point at doc (0,0); "
+            f"got ({px}, {py})")
+        assert abs(cx - 200.0) < 1e-6 and abs(cy - 200.0) < 1e-6, (
+            f"opposite corner should double to (200,200); "
+            f"got ({cx}, {cy})")
