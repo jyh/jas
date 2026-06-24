@@ -200,6 +200,18 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         controller.model.begin_txn()
         return None
 
+    def doc_snapshot_restore(_spec, _ctx, _store):
+        # Escape-cancel for the transform tools (Scale / Rotate / Shear):
+        # roll back the in-progress gesture's undo transaction opened by
+        # doc.snapshot. The live drag preview is the bbox_ghost OVERLAY
+        # (the document is only mutated on the journaled mouseup apply),
+        # so for those tools this just discards the still-open begin_txn;
+        # for any tool that edited the document mid-gesture it restores
+        # the pre-edit document and closes the transaction. Mirrors the
+        # Rust run_doc_effect "doc.snapshot.restore" => model.abort_txn().
+        controller.model.abort_txn()
+        return None
+
     def doc_clear_selection(_spec, _ctx, _store):
         controller.set_selection(frozenset())
         return None
@@ -1437,6 +1449,37 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         new_layers = list(doc.layers)
         new_layers[layer_idx] = new_layer
         return dataclasses.replace(doc, layers=tuple(new_layers))
+
+    def doc_blob_brush_sweep_sample(spec, ctx, store):
+        # Blob Brush on_mousemove dab accumulation (BLOB_BRUSH_TOOL.md
+        # §Gestures): push the current point into the named buffer only
+        # when the cumulative arc-length since the last buffered point
+        # exceeds the tip's spacing — so a curved drag deposits dabs
+        # ALONG the path instead of leaving the buffer with only the
+        # press + release points (which would sweep a single straight
+        # segment). Spacing matches _blob_brush_sweep_region: half the
+        # tip's min dimension, floored at 0.5. First point always lands.
+        # Mirrors the Rust run_doc_effect "doc.blob_brush.sweep_sample".
+        import math
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("buffer")
+        if not isinstance(name, str) or not name:
+            return None
+        x = eval_number(spec.get("x"), store, ctx)
+        y = eval_number(spec.get("y"), store, ctx)
+        size, _angle, roundness = _blob_brush_effective_tip(store, ctx)
+        min_dim = min(size, size * roundness / 100.0)
+        spacing = max(min_dim * 0.5, 0.5)
+        pts = point_buffers.points(name)
+        if not pts:
+            push = True
+        else:
+            lx, ly = pts[-1]
+            push = math.sqrt((x - lx) ** 2 + (y - ly) ** 2) >= spacing
+        if push:
+            point_buffers.push(name, x, y)
+        return None
 
     def doc_blob_brush_commit_painting(spec, ctx, store):
         """BLOB_BRUSH_TOOL.md Commit pipeline + Multi-element merge.
@@ -3160,6 +3203,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.artboard.duplicate_commit"] = doc_artboard_duplicate_commit
 
     effects["doc.snapshot"] = doc_snapshot
+    effects["doc.snapshot.restore"] = doc_snapshot_restore
     effects["doc.clear_selection"] = doc_clear_selection
     effects["doc.set_selection"] = doc_set_selection
     effects["doc.add_to_selection"] = doc_add_to_selection
@@ -3204,6 +3248,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
     effects["doc.preview.clear"] = doc_preview_clear
     effects["doc.paintbrush.edit_start"] = doc_paintbrush_edit_start
     effects["doc.paintbrush.edit_commit"] = doc_paintbrush_edit_commit
+    effects["doc.blob_brush.sweep_sample"] = doc_blob_brush_sweep_sample
     effects["doc.blob_brush.commit_painting"] = doc_blob_brush_commit_painting
     effects["doc.blob_brush.commit_erasing"] = doc_blob_brush_commit_erasing
     effects["doc.path.probe_anchor_hit"] = doc_path_probe_anchor_hit

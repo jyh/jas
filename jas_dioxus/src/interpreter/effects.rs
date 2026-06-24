@@ -641,6 +641,16 @@ fn run_doc_effect(
         "doc.snapshot" => {
             model.begin_txn();
         }
+        "doc.snapshot.restore" => {
+            // Escape-cancel for the transform tools (Scale / Rotate / Shear):
+            // roll back the in-progress gesture's undo transaction opened by
+            // `doc.snapshot`. The live drag preview is the bbox_ghost OVERLAY
+            // (the document is only mutated on the journaled mouseup apply),
+            // so for those tools this just discards the still-open begin_txn;
+            // for any tool that edited the document mid-gesture it restores
+            // the pre-edit document and closes the transaction.
+            model.abort_txn();
+        }
         "doc.preview.capture" => {
             // Out-of-band document snapshot for dialog Preview flows
             // (Scale / Rotate / Shear). Captures the document state at
@@ -1495,6 +1505,33 @@ fn run_doc_effect(
                 };
                 let within = eval_number(args.get("within"), store, ctx);
                 path_paintbrush_edit_commit(model, store, &buffer, fit_error, within);
+            }
+        }
+        "doc.blob_brush.sweep_sample" => {
+            // Blob Brush on_mousemove dab accumulation (BLOB_BRUSH_TOOL.md
+            // §Gestures): push the current point into the named buffer only
+            // when the cumulative arc-length since the last buffered point
+            // exceeds the tip's spacing — so a curved drag deposits dabs
+            // ALONG the path instead of leaving the buffer with only the
+            // press + release points (which would sweep a single straight
+            // segment). Spacing matches blob_brush_sweep_region: half the
+            // tip's min dimension, floored at 0.5. First point always lands.
+            if let serde_json::Value::Object(args) = spec {
+                let name = args.get("buffer").and_then(|v| v.as_str()).unwrap_or("");
+                if !name.is_empty() {
+                    let x = eval_number(args.get("x"), store, ctx);
+                    let y = eval_number(args.get("y"), store, ctx);
+                    let (size, _angle, roundness) = blob_brush_effective_tip(store, ctx);
+                    let min_dim = size.min(size * roundness / 100.0);
+                    let spacing = (min_dim * 0.5).max(0.5);
+                    let push = super::point_buffers::with_points(name, |pts| match pts.last() {
+                        None => true,
+                        Some(&(lx, ly)) => ((x - lx).powi(2) + (y - ly).powi(2)).sqrt() >= spacing,
+                    });
+                    if push {
+                        super::point_buffers::push(name, x, y);
+                    }
+                }
             }
         }
         "doc.blob_brush.commit_painting" => {
