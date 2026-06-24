@@ -118,6 +118,18 @@ let () =
   let get_fill_on_top () = match !toolbar_ref with Some t -> t#fill_on_top | None -> true in
   let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas () in
   main_window_ref := Some main_window;
+  (* Optional window-title override from [--title <name>] on the command line.
+     The window is otherwise titled Jas; a unique title lets a screen-capture
+     or UI-test harness find this window deterministically. *)
+  (let n = Array.length Sys.argv in
+   let rec find i =
+     if i + 1 >= n then None
+     else if Sys.argv.(i) = "--title" then Some Sys.argv.(i + 1)
+     else find (i + 1)
+   in
+   match find 0 with
+   | Some t -> main_window#set_title t
+   | None -> ());
   notebook_ref := Some notebook;
   let toolbar = Jas.Toolbar.create ~get_model () in
   toolbar_ref := Some toolbar;

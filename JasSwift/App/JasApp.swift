@@ -39,11 +39,15 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         // edge. Apply on launch and again whenever a new window
         // becomes key (covers File > New windows).
         applyContentMinSize()
+        // The initial window isn't up yet at didFinishLaunching; apply the
+        // optional --title override once it exists.
+        DispatchQueue.main.async { JasAppDelegate.applyWindowTitle() }
         NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: nil, queue: .main
         ) { _ in
             JasAppDelegate.applyContentMinSize()
+            JasAppDelegate.applyWindowTitle()
         }
         // SIGINT (^C from the terminal that launched `swift run Jas`)
         // and SIGTERM (orderly shutdown) bypass the AppDelegate quit
@@ -83,6 +87,25 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func applyContentMinSize() { JasAppDelegate.applyContentMinSize() }
+
+    /// Optional window-title override from `--title <name>` on the command
+    /// line. The OS window owner name is always "Jas", so several instances
+    /// (or the menu-bar strips) are ambiguous to a screen-capture / UI-test
+    /// harness; a unique title lets it find this window deterministically.
+    /// Applied on launch and whenever a window becomes key (File > New).
+    static let windowTitleOverride: String? = {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--title"), i + 1 < args.count {
+            return args[i + 1]
+        }
+        return nil
+    }()
+    static func applyWindowTitle() {
+        guard let title = windowTitleOverride else { return }
+        for window in NSApp.windows where window.isVisible {
+            window.title = title
+        }
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let workspace = workspace else { return .terminateNow }

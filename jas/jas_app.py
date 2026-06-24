@@ -2072,6 +2072,13 @@ def main():
     )
     app = QApplication([])
     window = MainWindow()
+    # Optional window-title override from `--title <name>` on the command line.
+    # The window is otherwise titled "Jas"; a unique title lets a screen-capture
+    # / UI-test harness find this window deterministically.
+    if "--title" in sys.argv:
+        _ti = sys.argv.index("--title")
+        if _ti + 1 < len(sys.argv):
+            window.setWindowTitle(sys.argv[_ti + 1])
     window.resize(1200, 900)
     window.show()
 
