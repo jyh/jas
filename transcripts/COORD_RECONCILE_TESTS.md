@@ -221,19 +221,16 @@ exercise the implemented rollback.)
 
 ## Session D — Blob Brush path-follow `doc.blob_brush.sweep_sample` (~5 min)
 
-- [ ] **CR-040** [wired] **P0.** Curved drag follows the path.
+- [x] **CR-040** [wired] **P0.** Curved drag follows the path.
       Do: Blob Brush, drag a clear S-curve or loop in one continuous gesture.
       Expect: the committed shape traces the **whole curve** (a ribbon along
       the path) — **not** a single straight band from the press point to the
       release point. (Pre-fix the buffer held only press + release.)
-      _Harness-BLOCKED (2026-06-24): the Blob Brush is a long-press flyout
-      alternate of the Paintbrush and its `Shift+B` shortcut did not switch
-      tools via synthetic keyboard, so the curve never painted (selection tool
-      stayed active). Needs a HUMAN, or harness work to drive the long-press
-      flyout. The `doc.blob_brush.sweep_sample` code (84d2de5d) + algorithm are
-      in place; only the visual is unconfirmed. (Possible side-finding: Shift+
-      letter tool shortcuts may not route via synthetic keyboard — unconfirmed
-      whether harness or app.)_
+      _PASS — user-confirmed manually 2026-06-24 (the blob draws a curve
+      following the path), AND then harness-verified: after fixing synthetic
+      modifier delivery (a settle delay so the modifier state propagates before
+      the main key), Shift+B selects the Blob Brush and the curve-drag paints a
+      ribbon tracing the whole zigzag, not a straight band._
 
 - [ ] **CR-041** [wired] **P1.** Dab spacing is continuous.
       Do: drag slowly, then quickly. Expect: continuous coverage along the
