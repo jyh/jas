@@ -256,6 +256,9 @@ let tokenize (source : string) : token array =
       else if c = '>' && next = '=' then begin add_token (mk_tok Tk_gte); i := !i + 2 end
       (* -> must come before single - *)
       else if c = '-' && next = '>' then begin add_token (mk_tok Tk_arrow); i := !i + 2 end
+      (* C-style logical operators are synonyms for the and / or keywords *)
+      else if c = '&' && next = '&' then begin add_token (mk_tok Tk_and); i := !i + 2 end
+      else if c = '|' && next = '|' then begin add_token (mk_tok Tk_or); i := !i + 2 end
       else begin
         (match c with
          | '<' -> add_token (mk_tok Tk_lt)

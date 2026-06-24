@@ -150,6 +150,13 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             match (c, next) {
                 ('=', '=') => { tokens.push(Token { kind: TokenKind::Eq }); i += 2; continue; }
                 ('!', '=') => { tokens.push(Token { kind: TokenKind::Neq }); i += 2; continue; }
+                // C-style logical operators — synonyms for the `and`/`or`
+                // keywords (same And/Or tokens, same precedence). The bundle
+                // uses && / || pervasively; without these they lex to Error
+                // tokens and the (lenient) parser silently drops everything
+                // after the first operand.
+                ('&', '&') => { tokens.push(Token { kind: TokenKind::And }); i += 2; continue; }
+                ('|', '|') => { tokens.push(Token { kind: TokenKind::Or }); i += 2; continue; }
                 // <- must come before < alone (greedy)
                 ('<', '-') => { tokens.push(Token { kind: TokenKind::LArrow }); i += 2; continue; }
                 ('<', '=') => { tokens.push(Token { kind: TokenKind::Lte }); i += 2; continue; }

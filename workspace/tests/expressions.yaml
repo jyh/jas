@@ -81,6 +81,83 @@ tests:
     expected: false
     type: bool
 
+  # Logical operators — && / || are synonyms for the `and` / `or`
+  # keywords: same And/Or tokens, same precedence (&& binds tighter
+  # than ||, both looser than comparison and `not`). Pinned across all
+  # 5 apps. Before this, the lexers had no && / || and the lenient
+  # parsers (Rust/Swift) silently dropped everything after the first
+  # operand while the strict ones (OCaml/Python) errored to null.
+  - expr: "true && true"
+    expected: true
+    type: bool
+
+  - expr: "true && false"
+    expected: false
+    type: bool
+
+  - expr: "false || false"
+    expected: false
+    type: bool
+
+  - expr: "false || true"
+    expected: true
+    type: bool
+
+  - expr: "true && true && false"
+    expected: false
+    type: bool
+
+  - expr: "false || false || true"
+    expected: true
+    type: bool
+
+  # Precedence: && binds tighter than ||
+  - expr: "true || false && false"
+    expected: true
+    type: bool
+    note: "parses as true || (false && false)"
+
+  - expr: "false && false || true"
+    expected: true
+    type: bool
+    note: "parses as (false && false) || true"
+
+  - expr: "false && (false || true)"
+    expected: false
+    type: bool
+    note: "parens override precedence"
+
+  # Precedence: comparison binds tighter than && / ||
+  - expr: "1 < 2 && 3 < 4"
+    expected: true
+    type: bool
+
+  - expr: "1 < 2 && 3 > 4"
+    expected: false
+    type: bool
+
+  - expr: "1 > 2 || 3 > 1"
+    expected: true
+    type: bool
+    note: "canonical case: lenient parsers previously truncated to (1 > 2) = false"
+
+  # Precedence: `not` binds tighter than ||
+  - expr: "not false || false"
+    expected: true
+    type: bool
+    note: "parses as (not false) || false"
+
+  # State operands
+  - expr: "state.a && state.b"
+    state: { a: true, b: false }
+    expected: false
+    type: bool
+
+  - expr: "state.a || state.b"
+    state: { a: false, b: true }
+    expected: true
+    type: bool
+
   # Function calls
   - expr: "hsb_h(#ff0000)"
     expected: 0

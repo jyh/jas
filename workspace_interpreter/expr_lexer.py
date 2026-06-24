@@ -156,6 +156,18 @@ def tokenize(source: str) -> list[Token]:
             tokens.append(Token(TokenKind.NEQ))
             i += 2
             continue
+        # C-style logical operators — synonyms for the `and`/`or`
+        # keywords (same AND/OR tokens, same precedence). The bundle
+        # uses && / || pervasively; without these they lex to ERROR
+        # tokens and the parser drops/errors after the first operand.
+        if c == "&" and i + 1 < n and source[i + 1] == "&":
+            tokens.append(Token(TokenKind.AND))
+            i += 2
+            continue
+        if c == "|" and i + 1 < n and source[i + 1] == "|":
+            tokens.append(Token(TokenKind.OR))
+            i += 2
+            continue
         # <- : no space between < and -
         if c == "<" and i + 1 < n and source[i + 1] == "-":
             tokens.append(Token(TokenKind.LARROW))

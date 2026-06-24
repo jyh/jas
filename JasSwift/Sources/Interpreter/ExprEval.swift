@@ -238,6 +238,13 @@ private func tokenize(_ source: String) -> [Token] {
         if c == "!" && i + 1 < n && chars[i + 1] == "=" {
             tokens.append(Token(kind: .neq)); i += 2; continue
         }
+        // && and || : C-style synonyms for the 'and'/'or' keywords
+        if c == "&" && i + 1 < n && chars[i + 1] == "&" {
+            tokens.append(Token(kind: .and)); i += 2; continue
+        }
+        if c == "|" && i + 1 < n && chars[i + 1] == "|" {
+            tokens.append(Token(kind: .or)); i += 2; continue
+        }
         // <- : no space between < and - (greedy)
         if c == "<" && i + 1 < n && chars[i + 1] == "-" {
             tokens.append(Token(kind: .larrow)); i += 2; continue
