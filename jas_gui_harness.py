@@ -21,6 +21,16 @@ Coordinates are WINDOW FRACTIONS (0..1) mapped to logical screen points
 (window_origin + frac*size), so they are resolution / Retina independent and
 work wherever the window sits (including a second display).
 
+RUST/DIOXUS app (chromeless desktop window — see run_dioxus_desktop.sh): it is
+wasm-only, so it runs in a chromeless Chrome window. Drive it with:
+    export JAS_TITLE=Jas JAS_PROC="Google Chrome"
+    python3 jas_gui_harness.py click 0.5 0.5   # FOCUS-CLICK first to raise this
+    python3 jas_gui_harness.py key m            # window, then drive normally.
+JAS_PROC sets the `activate` process; JAS_TITLE matches the window title by
+SUBSTRING ("Jas — Vector Drawing"). The web app uses Ctrl, not Cmd, for menu
+shortcuts. With another Chrome already open, prefer a focus-click over
+`activate` (the AppleScript target is ambiguous across Chrome instances).
+
 Verbs:
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
@@ -45,10 +55,14 @@ import subprocess, sys, time, os
 import Quartz
 
 APP = "Jas"
-# When set (export JAS_TITLE=...), find the window by its TITLE (kCGWindowName)
-# instead of the shared owner name — deterministic across instances / menu-bar
-# strips. Launch the app with `--title <JAS_TITLE>`.
+# When set (export JAS_TITLE=...), find the window whose TITLE (kCGWindowName)
+# CONTAINS it — deterministic across instances / menu-bar strips. Substring so
+# the Chrome-app desktop window (title = page title "Jas — Vector Drawing")
+# matches JAS_TITLE=Jas. Launch the native apps with `--title <JAS_TITLE>`.
 TITLE = os.environ.get("JAS_TITLE")
+# Process name used by `activate` (AppleScript). "Jas" for the native Swift app;
+# set JAS_PROC="Google Chrome" for the chromeless-Chrome Dioxus desktop window.
+PROC = os.environ.get("JAS_PROC", "Jas")
 KEYCODE = {  # ANSI virtual keycodes
  'a':0,'s':1,'d':2,'f':3,'h':4,'g':5,'z':6,'x':7,'c':8,'v':9,'b':11,'q':12,'w':13,
  'e':14,'r':15,'y':16,'t':17,'o':31,'u':32,'i':34,'p':35,'l':37,'j':38,'k':40,'n':45,'m':46,
@@ -74,7 +88,7 @@ def find_window():
             if b["Height"] <= 100: continue
             name = w.get(Quartz.kCGWindowName) or ""
             owner = w.get(Quartz.kCGWindowOwnerName, "")
-            match = (name == TITLE) if TITLE else (APP.lower() in owner.lower())
+            match = (TITLE in name) if TITLE else (APP.lower() in owner.lower())
             if match:
                 cand={"id":w.get(Quartz.kCGWindowNumber),"x":b["X"],"y":b["Y"],"w":b["Width"],"h":b["Height"]}
                 if best is None or b["Width"]*b["Height"]>best["w"]*best["h"]:
@@ -178,8 +192,8 @@ if __name__=="__main__":
         # Unminimize + frontmost WITHOUT clicking (title-bar clicks risk a
         # double-click-minimize). Does NOT require the window to be found.
         subprocess.run(["osascript",
-            "-e",'tell application "System Events" to tell (first process whose name is "Jas") to set value of attribute "AXMinimized" of every window to false',
-            "-e",'tell application "System Events" to set frontmost of (first process whose name is "Jas") to true'])
+            "-e",f'tell application "System Events" to tell (first process whose name is "{PROC}") to set value of attribute "AXMinimized" of every window to false',
+            "-e",f'tell application "System Events" to set frontmost of (first process whose name is "{PROC}") to true'])
         time.sleep(0.3)
         print("activated"); sys.exit(0)
     if v=="clearmods":
