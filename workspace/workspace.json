@@ -23446,22 +23446,22 @@
           },
           {
             "set": {
-              "tool.rotate.press_x": "event.x"
+              "tool.rotate.press_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.rotate.press_y": "event.y"
+              "tool.rotate.press_y": "event.doc_y"
             }
           },
           {
             "set": {
-              "tool.rotate.cursor_x": "event.x"
+              "tool.rotate.cursor_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.rotate.cursor_y": "event.y"
+              "tool.rotate.cursor_y": "event.doc_y"
             }
           },
           {
@@ -23491,12 +23491,12 @@
             "then": [
               {
                 "set": {
-                  "tool.rotate.cursor_x": "event.x"
+                  "tool.rotate.cursor_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.rotate.cursor_y": "event.y"
+                  "tool.rotate.cursor_y": "event.doc_y"
                 }
               },
               {
@@ -23505,7 +23505,7 @@
                 }
               },
               {
-                "if": "abs(event.x - tool.rotate.press_x) > 2 || abs(event.y - tool.rotate.press_y) > 2",
+                "if": "abs(event.doc_x - tool.rotate.press_x) > 2 || abs(event.doc_y - tool.rotate.press_y) > 2",
                 "then": [
                   {
                     "set": {
@@ -23528,8 +23528,8 @@
                     "doc.rotate.apply": {
                       "press_x": "tool.rotate.press_x",
                       "press_y": "tool.rotate.press_y",
-                      "cursor_x": "event.x",
-                      "cursor_y": "event.y",
+                      "cursor_x": "event.doc_x",
+                      "cursor_y": "event.doc_y",
                       "shift": "event.modifiers.shift",
                       "copy": "false",
                       "journal": true
@@ -23539,7 +23539,7 @@
                 "else": [
                   {
                     "set": {
-                      "transform_reference_point": "[event.x, event.y]"
+                      "transform_reference_point": "[event.doc_x, event.doc_y]"
                     }
                   },
                   {
@@ -23839,22 +23839,22 @@
           },
           {
             "set": {
-              "tool.scale.press_x": "event.x"
+              "tool.scale.press_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.scale.press_y": "event.y"
+              "tool.scale.press_y": "event.doc_y"
             }
           },
           {
             "set": {
-              "tool.scale.cursor_x": "event.x"
+              "tool.scale.cursor_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.scale.cursor_y": "event.y"
+              "tool.scale.cursor_y": "event.doc_y"
             }
           },
           {
@@ -23884,12 +23884,12 @@
             "then": [
               {
                 "set": {
-                  "tool.scale.cursor_x": "event.x"
+                  "tool.scale.cursor_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.scale.cursor_y": "event.y"
+                  "tool.scale.cursor_y": "event.doc_y"
                 }
               },
               {
@@ -23898,7 +23898,7 @@
                 }
               },
               {
-                "if": "abs(event.x - tool.scale.press_x) > 2 || abs(event.y - tool.scale.press_y) > 2",
+                "if": "abs(event.doc_x - tool.scale.press_x) > 2 || abs(event.doc_y - tool.scale.press_y) > 2",
                 "then": [
                   {
                     "set": {
@@ -23921,8 +23921,8 @@
                     "doc.scale.apply": {
                       "press_x": "tool.scale.press_x",
                       "press_y": "tool.scale.press_y",
-                      "cursor_x": "event.x",
-                      "cursor_y": "event.y",
+                      "cursor_x": "event.doc_x",
+                      "cursor_y": "event.doc_y",
                       "shift": "event.modifiers.shift",
                       "copy": "false",
                       "journal": true
@@ -23932,7 +23932,7 @@
                 "else": [
                   {
                     "set": {
-                      "transform_reference_point": "[event.x, event.y]"
+                      "transform_reference_point": "[event.doc_x, event.doc_y]"
                     }
                   },
                   {
@@ -24573,22 +24573,22 @@
           },
           {
             "set": {
-              "tool.shear.press_x": "event.x"
+              "tool.shear.press_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.shear.press_y": "event.y"
+              "tool.shear.press_y": "event.doc_y"
             }
           },
           {
             "set": {
-              "tool.shear.cursor_x": "event.x"
+              "tool.shear.cursor_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.shear.cursor_y": "event.y"
+              "tool.shear.cursor_y": "event.doc_y"
             }
           },
           {
@@ -24618,12 +24618,12 @@
             "then": [
               {
                 "set": {
-                  "tool.shear.cursor_x": "event.x"
+                  "tool.shear.cursor_x": "event.doc_x"
                 }
               },
               {
                 "set": {
-                  "tool.shear.cursor_y": "event.y"
+                  "tool.shear.cursor_y": "event.doc_y"
                 }
               },
               {
@@ -24632,7 +24632,7 @@
                 }
               },
               {
-                "if": "abs(event.x - tool.shear.press_x) > 2 || abs(event.y - tool.shear.press_y) > 2",
+                "if": "abs(event.doc_x - tool.shear.press_x) > 2 || abs(event.doc_y - tool.shear.press_y) > 2",
                 "then": [
                   {
                     "set": {
@@ -24655,8 +24655,8 @@
                     "doc.shear.apply": {
                       "press_x": "tool.shear.press_x",
                       "press_y": "tool.shear.press_y",
-                      "cursor_x": "event.x",
-                      "cursor_y": "event.y",
+                      "cursor_x": "event.doc_x",
+                      "cursor_y": "event.doc_y",
                       "shift": "event.modifiers.shift",
                       "copy": "false",
                       "journal": true
@@ -24666,7 +24666,7 @@
                 "else": [
                   {
                     "set": {
-                      "transform_reference_point": "[event.x, event.y]"
+                      "transform_reference_point": "[event.doc_x, event.doc_y]"
                     }
                   },
                   {

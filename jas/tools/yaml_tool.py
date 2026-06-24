@@ -321,10 +321,10 @@ class YamlTool(CanvasTool):
                     _draw_cursor_color_chip_overlay(painter, render, eval_ctx)
                 elif render_type == "reference_point_cross":
                     _draw_reference_point_cross(
-                        painter, render, eval_ctx, ctx.document)
+                        painter, render, eval_ctx, ctx.model)
                 elif render_type == "bbox_ghost":
                     _draw_bbox_ghost(
-                        painter, render, eval_ctx, ctx.document)
+                        painter, render, eval_ctx, ctx.model)
                 elif render_type == "marquee_rect":
                     _draw_marquee_rect_overlay(
                         painter, render, eval_ctx)
@@ -1287,16 +1287,25 @@ def _resolve_overlay_ref_point(render: dict, eval_ctx: dict, document):
 
 
 def _draw_reference_point_cross(painter, render: dict,
-                                eval_ctx: dict, document) -> None:
+                                eval_ctx: dict, model) -> None:
     """Cyan-blue 12 px crosshair + 2 px center dot at the
     reference point. Hidden when there is no selection. See
     SCALE_TOOL.md §Reference-point cross overlay."""
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QColor, QPen
+    document = model.document
     pt = _resolve_overlay_ref_point(render, eval_ctx, document)
     if pt is None:
         return None
-    rx, ry = pt
+    doc_rx, doc_ry = pt
+    # Reference point is document-space; map to screen. Crosshair is a
+    # fixed-size screen widget -- arms and dot stay in PIXELS, never
+    # scaled by zoom.
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    rx = doc_rx * zoom + offx
+    ry = doc_ry * zoom + offy
     color = QColor(0x4A, 0x9E, 0xFF)
     pen = QPen(color, 1.0)
     painter.setPen(pen)
@@ -1309,7 +1318,7 @@ def _draw_reference_point_cross(painter, render: dict,
 
 
 def _draw_bbox_ghost(painter, render: dict,
-                     eval_ctx: dict, document) -> None:
+                     eval_ctx: dict, model) -> None:
     """Dashed cyan-blue parallelogram tracking the selection's
     post-transform bounding box during a drag. Builds the matrix
     from (transform_kind, press, cursor, ref, shift_held) using
@@ -1322,6 +1331,7 @@ def _draw_bbox_ghost(painter, render: dict,
         scale_matrix, rotate_matrix, shear_matrix)
     from jas.geometry.element import Transform
     import math
+    document = model.document
     pt = _resolve_overlay_ref_point(render, eval_ctx, document)
     if pt is None:
         return None
@@ -1399,11 +1409,21 @@ def _draw_bbox_ghost(painter, render: dict,
         matrix.apply_point(bx + bw,   by + bh),
         matrix.apply_point(bx,        by + bh),
     ]
+    # The matrix/pivot math above stays in document space; only the
+    # final doc-space corners map to screen. The dashed (4,2) stroke
+    # pattern stays in PIXELS (not scaled by zoom).
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+
+    def to_screen(p):
+        return (p[0] * zoom + offx, p[1] * zoom + offy)
+
     color = QColor(0x4A, 0x9E, 0xFF)
     pen = QPen(color, 1.0)
     pen.setStyle(Qt.PenStyle.CustomDashLine)
     pen.setDashPattern([4.0, 2.0])
     painter.setPen(pen)
     _clear_brush(painter)
-    poly = QPolygonF([QPointF(c[0], c[1]) for c in corners])
+    poly = QPolygonF([QPointF(*to_screen(c)) for c in corners])
     painter.drawPolygon(poly)

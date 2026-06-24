@@ -1223,8 +1223,15 @@ private func drawReferencePointCross(
     _ cgCtx: CGContext, _ render: [String: Any],
     _ evalCtx: [String: Any], model: Model
 ) {
-    guard let (rx, ry) = resolveOverlayRefPoint(render, evalCtx, model: model)
+    guard let (docRx, docRy) = resolveOverlayRefPoint(render, evalCtx,
+                                                       model: model)
     else { return }
+    // The ref point is document-space; map it to screen. The crosshair is a
+    // fixed-size screen widget — arms and dot stay in PIXELS, never scaled by
+    // zoom. Mirrors jas_dioxus draw_reference_point_cross.
+    let z = model.zoomLevel
+    let rx = docRx * z + model.viewOffsetX
+    let ry = docRy * z + model.viewOffsetY
     let color = CGColor(red: 0x4A / 255.0, green: 0x9E / 255.0,
                         blue: 0xFF / 255.0, alpha: 1)
     cgCtx.setStrokeColor(color)
@@ -1331,20 +1338,33 @@ private func drawBBoxGhost(
     }
     if elements.isEmpty { return }
     let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // Transform the four corners in DOCUMENT space — the matrix, its pivot
+    // (rx, ry), and the bbox are all doc-space — then map each corner to
+    // screen for drawing. The dashed stroke pattern stays in screen pixels
+    // (a fixed 4/2 dash, not scaled by zoom). Mirrors jas_dioxus
+    // draw_bbox_ghost.
     let corners = [
         matrix.applyPoint(bb.x,             bb.y),
         matrix.applyPoint(bb.x + bb.width,  bb.y),
         matrix.applyPoint(bb.x + bb.width,  bb.y + bb.height),
         matrix.applyPoint(bb.x,             bb.y + bb.height),
     ]
+    let z = model.zoomLevel
+    let offx = model.viewOffsetX
+    let offy = model.viewOffsetY
+    let toScreen = { (p: (Double, Double)) -> (Double, Double) in
+        (p.0 * z + offx, p.1 * z + offy)
+    }
     cgCtx.setStrokeColor(CGColor(red: 0x4A / 255.0, green: 0x9E / 255.0,
                                   blue: 0xFF / 255.0, alpha: 1))
     cgCtx.setLineWidth(1.0)
     cgCtx.setLineDash(phase: 0, lengths: [4, 2])
     cgCtx.beginPath()
-    cgCtx.move(to: CGPoint(x: corners[0].0, y: corners[0].1))
+    let c0 = toScreen(corners[0])
+    cgCtx.move(to: CGPoint(x: c0.0, y: c0.1))
     for c in corners.dropFirst() {
-        cgCtx.addLine(to: CGPoint(x: c.0, y: c.1))
+        let s = toScreen(c)
+        cgCtx.addLine(to: CGPoint(x: s.0, y: s.1))
     }
     cgCtx.closePath()
     cgCtx.strokePath()
