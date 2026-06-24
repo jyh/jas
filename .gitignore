@@ -23,6 +23,9 @@ __pycache__/
 # Editor backup files (emacs, etc.)
 *~
 
+# Screenshot output from capture.sh (capture.sh <AppName> screenshot.png)
+screenshot.png
+
 # NOTE: workspace/workspace.json is COMMITTED. Regenerate with:
 #   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
 # CI enforces freshness; see scripts/check_workspace_json.sh.
