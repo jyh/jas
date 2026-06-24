@@ -132,6 +132,18 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ctrl#model#begin_txn;
     `Null
   in
+  let doc_snapshot_restore _ _ _ =
+    (* Escape-cancel for the transform tools (Scale / Rotate / Shear):
+       roll back the in-progress gesture undo transaction opened by
+       [doc.snapshot]. The live drag preview is the bbox_ghost OVERLAY
+       (the document is only mutated on the journaled mouseup apply),
+       so for those tools this just discards the still-open begin_txn;
+       for any tool that edited the document mid-gesture it restores
+       the pre-edit document and closes the transaction.
+       Mirrors Rust [doc.snapshot.restore] -> [model.abort_txn]. *)
+    ctrl#model#abort_txn;
+    `Null
+  in
   let doc_clear_selection _ _ _ =
     ctrl#set_selection Document.PathMap.empty;
     `Null
@@ -1378,6 +1390,37 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
       { doc with layers = Array.mapi (fun i l ->
           if i = layer_idx then new_layer else l) doc.Document.layers }
     end
+  in
+
+  let doc_blob_brush_sweep_sample spec ctx store =
+    (* Blob Brush on_mousemove dab accumulation (BLOB_BRUSH_TOOL.md
+       section Gestures): push the current point into the named buffer
+       only when the arc-length since the last buffered point exceeds
+       the tip spacing, so a curved drag deposits dabs ALONG the path
+       instead of leaving the buffer with only the press + release
+       points (which would sweep a single straight segment). Spacing is
+       half the tip min dimension, floored at 0.5, matching the dab
+       size used by doc.blob_brush.commit_painting. First point always
+       lands. Mirrors Rust [doc.blob_brush.sweep_sample]. *)
+    (match spec with
+     | `Assoc args ->
+       (match List.assoc_opt "buffer" args with
+        | Some (`String name) when name <> "" ->
+          let x = eval_number (List.assoc_opt "x" args) store ctx in
+          let y = eval_number (List.assoc_opt "y" args) store ctx in
+          let (size, _angle, roundness) = blob_brush_effective_tip store ctx in
+          let min_dim = Float.min size (size *. roundness /. 100.0) in
+          let spacing = Float.max (min_dim *. 0.5) 0.5 in
+          let push =
+            match List.rev (Point_buffers.points name) with
+            | [] -> true
+            | (lx, ly) :: _ ->
+              sqrt ((x -. lx) ** 2.0 +. (y -. ly) ** 2.0) >= spacing
+          in
+          if push then Point_buffers.push name x y
+        | _ -> ())
+     | _ -> ());
+    `Null
   in
 
   let doc_blob_brush_commit_painting spec ctx store =
@@ -3970,6 +4013,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
   in
 
   [ ("doc.snapshot", doc_snapshot);
+    ("doc.snapshot.restore", doc_snapshot_restore);
     ("doc.set_document_setup_field", doc_set_document_setup_field);
     ("doc.set_advanced_field", doc_set_advanced_field);
     ("doc.set_print_preferences_field", doc_set_print_preferences_field);
@@ -4038,6 +4082,7 @@ let build (ctrl : Controller.controller) : (string * Effects.platform_effect) li
     ("doc.preview.clear", doc_preview_clear);
     ("doc.paintbrush.edit_start", doc_paintbrush_edit_start);
     ("doc.paintbrush.edit_commit", doc_paintbrush_edit_commit);
+    ("doc.blob_brush.sweep_sample", doc_blob_brush_sweep_sample);
     ("doc.blob_brush.commit_painting", doc_blob_brush_commit_painting);
     ("doc.blob_brush.commit_erasing", doc_blob_brush_commit_erasing);
     ("doc.path.probe_anchor_hit", doc_path_probe_anchor_hit);

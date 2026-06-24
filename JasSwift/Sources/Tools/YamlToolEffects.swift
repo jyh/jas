@@ -44,6 +44,19 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // doc.snapshot.restore — Escape-cancel for the transform tools (Scale /
+    // Rotate / Shear): roll back the in-progress gesture's undo transaction
+    // opened by `doc.snapshot`. The live drag preview is the bbox_ghost
+    // OVERLAY (the document is only mutated on the journaled mouseup apply),
+    // so for those tools this just discards the still-open beginTxn; for any
+    // tool that edited the document mid-gesture it restores the pre-edit
+    // document and closes the transaction. Mirrors Rust's
+    // `doc.snapshot.restore` -> `model.abort_txn()`.
+    effects["doc.snapshot.restore"] = { _, _, _ in
+        model.abortTxn()
+        return nil
+    }
+
     // doc.clear_selection — drop the whole selection.
     effects["doc.clear_selection"] = { _, _, _ in
         Controller(model: model).setSelection([])
@@ -484,6 +497,37 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         paintbrushEditCommit(model: model, store: store,
                              buffer: buffer, fitError: fitError,
                              within: within)
+        return nil
+    }
+
+    // doc.blob_brush.sweep_sample — { buffer, x, y }.
+    // Blob Brush on_mousemove dab accumulation (BLOB_BRUSH_TOOL.md
+    // §Gestures): push the current point into the named buffer only when the
+    // cumulative arc-length since the last buffered point exceeds the tip's
+    // spacing — so a curved drag deposits dabs ALONG the path instead of
+    // leaving the buffer with only the press + release points (which would
+    // sweep a single straight segment). Spacing matches the painted dab size:
+    // half the tip's min dimension, floored at 0.5. First point always lands.
+    // Mirrors Rust's `doc.blob_brush.sweep_sample`.
+    effects["doc.blob_brush.sweep_sample"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let name = args["buffer"] as? String,
+              !name.isEmpty else { return nil }
+        let x = evalNumber(args["x"], store: store, ctx: ctx)
+        let y = evalNumber(args["y"], store: store, ctx: ctx)
+        let (size, _, roundness) = blobBrushEffectiveTip(store: store, ctx: ctx)
+        let minDim = min(size, size * roundness / 100.0)
+        let spacing = max(minDim * 0.5, 0.5)
+        let push: Bool
+        if let last = pointBuffersPoints(name).last {
+            let (lx, ly) = last
+            push = ((x - lx) * (x - lx) + (y - ly) * (y - ly)).squareRoot() >= spacing
+        } else {
+            push = true
+        }
+        if push {
+            pointBuffersPush(name, x, y)
+        }
         return nil
     }
 
