@@ -48,7 +48,7 @@ handlers:
   on_mousedown:
     - "doc.snapshot": {}
     - "buffer.clear": { buffer: "blob_brush" }
-    - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+    - "buffer.push": { buffer: "blob_brush", x: "event.doc_x", y: "event.doc_y" }
     # Alt-at-press latches erase mode per BLOB_BRUSH_TOOL.md
     # §Gestures. Mode is locked; later Alt toggles are ignored.
     - if: "event.modifiers.alt"
@@ -58,8 +58,8 @@ handlers:
         - set: { tool.blob_brush.mode: "'painting'" }
 
   on_mousemove:
-    - set: { tool.blob_brush.hover_x: "event.x" }
-    - set: { tool.blob_brush.hover_y: "event.y" }
+    - set: { tool.blob_brush.hover_x: "event.doc_x" }
+    - set: { tool.blob_brush.hover_y: "event.doc_y" }
     - set: { tool.blob_brush.has_hovered: "true" }
     - set: { tool.blob_brush.alt_held: "event.modifiers.alt" }
     # During painting/erasing, arc-length dab accumulation is
@@ -70,14 +70,14 @@ handlers:
       then:
         - "doc.blob_brush.sweep_sample":
             buffer: "blob_brush"
-            x: "event.x"
-            y: "event.y"
+            x: "event.doc_x"
+            y: "event.doc_y"
 
   on_mouseup:
     - if: "tool.blob_brush.mode == 'painting'"
       then:
         # Always force a final dab at release to avoid a bald spot.
-        - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "blob_brush", x: "event.doc_x", y: "event.doc_y" }
         - "doc.blob_brush.commit_painting":
             buffer: "blob_brush"
             fidelity_epsilon: "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5"
@@ -85,7 +85,7 @@ handlers:
             keep_selected: "state.blob_brush_keep_selected"
     - if: "tool.blob_brush.mode == 'erasing'"
       then:
-        - "buffer.push": { buffer: "blob_brush", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "blob_brush", x: "event.doc_x", y: "event.doc_y" }
         - "doc.blob_brush.commit_erasing":
             buffer: "blob_brush"
             fidelity_epsilon: "if state.blob_brush_fidelity == 1 then 0.5 else (state.blob_brush_fidelity - 1) * 2.5"

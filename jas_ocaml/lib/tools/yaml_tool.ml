@@ -961,9 +961,23 @@ let draw_bbox_ghost (cr : Cairo.context) (render : Yojson.Safe.t)
     end
 
 let draw_oval_cursor_overlay (cr : Cairo.context)
-    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t) : unit =
-  let cx = eval_number_field eval_ctx (render_get render "x") in
-  let cy = eval_number_field eval_ctx (render_get render "y") in
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
+    (model : Model.model) : unit =
+  (* The hover position + buffered dab points are document-space (Blob
+     Brush writes event.doc_x/doc_y); this overlay draws post-restore in
+     screen space (canvas_subwindow restores the view transform before
+     active_tool#draw_overlay), so map positions through the view
+     transform and SCALE the tip radius by zoom so the cursor oval
+     matches the doc-space painted dab. Mirrors the Swift
+     drawOvalCursorOverlay and the manual map in
+     draw_artboard_resize_handles. The angle and roundness ratio are
+     dimensionless and unchanged; the crosshair offsets and 1 px outline
+     stay in viewport pixels. *)
+  let z = model#zoom_level in
+  let ox = model#view_offset_x in
+  let oy = model#view_offset_y in
+  let cx = (eval_number_field eval_ctx (render_get render "x")) *. z +. ox in
+  let cy = (eval_number_field eval_ctx (render_get render "y")) *. z +. oy in
   let size = Float.max 1.0
                (eval_number_field eval_ctx (render_get render "default_size")) in
   let angle_deg = eval_number_field eval_ctx
@@ -998,16 +1012,18 @@ let draw_oval_cursor_overlay (cr : Cairo.context)
       trimmed
     | _ -> "idle"
   in
-  let rx = size *. 0.5 in
-  let ry = size *. (roundness /. 100.0) *. 0.5 in
+  let rx = size *. 0.5 *. z in
+  let ry = size *. (roundness /. 100.0) *. 0.5 *. z in
   let rad = angle_deg *. Float.pi /. 180.0 in
   (* Drag preview: if a buffer is named and mode != idle, draw each
      buffered point as an oval. Painting = semi-transparent fill;
-     erasing = dashed outline. *)
+     erasing = dashed outline. Buffered points are document-space, so
+     map each through the view transform (matches the hover above). *)
   if mode <> "idle" then begin
     match render_get render "buffer" with
     | Some (`String buffer_name) when buffer_name <> "" ->
-      let points = Point_buffers.points buffer_name in
+      let points = Point_buffers.points buffer_name
+                   |> List.map (fun (px, py) -> (px *. z +. ox, py *. z +. oy)) in
       if List.length points >= 2 then begin
         let (r, g, b, _) = stroke_rgba in
         if mode = "painting" then begin
@@ -1345,6 +1361,7 @@ class yaml_tool (spec : tool_spec) = object (_self)
             ctx.controller#document
         | "oval_cursor" ->
           draw_oval_cursor_overlay cr overlay.render eval_ctx
+            ctx.controller#model
         | "cursor_color_chip" ->
           draw_cursor_color_chip_overlay cr overlay.render eval_ctx
         | "reference_point_cross" ->

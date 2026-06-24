@@ -294,7 +294,7 @@ final class YamlTool: CanvasTool {
                 drawPartialSelectionOverlay(cgCtx, render, evalCtx,
                                              model: ctx.model)
             case "oval_cursor":
-                drawOvalCursorOverlay(cgCtx, render, evalCtx)
+                drawOvalCursorOverlay(cgCtx, render, evalCtx, model: ctx.model)
             case "cursor_color_chip":
                 drawCursorColorChipOverlay(cgCtx, render, evalCtx)
             case "reference_point_cross":
@@ -937,10 +937,18 @@ private func drawBufferPolylineOverlay(
 ///   buffer            point-buffer name (for drag preview)
 ///   mode              string tool mode (idle / painting / erasing)
 private func drawOvalCursorOverlay(
-    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any],
+    model: Model
 ) {
-    let cx = evalOverlayNumber(spec["x"], ctx)
-    let cy = evalOverlayNumber(spec["y"], ctx)
+    // Hover position + buffered dab points are document-space (Blob Brush
+    // writes event.doc_x/doc_y); this overlay draws post-restore in screen
+    // space, so map positions through the view transform and scale the tip
+    // radius by zoom so the cursor oval matches the doc-space painted dab.
+    let z = model.zoomLevel
+    let ox = model.viewOffsetX
+    let oy = model.viewOffsetY
+    let cx = evalOverlayNumber(spec["x"], ctx) * z + ox
+    let cy = evalOverlayNumber(spec["y"], ctx) * z + oy
     let size = max(1.0, evalOverlayNumber(spec["default_size"], ctx))
     let angleDeg = evalOverlayNumber(spec["default_angle"], ctx)
     let roundness = max(1.0, evalOverlayNumber(spec["default_roundness"], ctx))
@@ -975,8 +983,8 @@ private func drawOvalCursorOverlay(
         }
     }()
 
-    let rx = size * 0.5
-    let ry = size * (roundness / 100.0) * 0.5
+    let rx = size * 0.5 * z
+    let ry = size * (roundness / 100.0) * 0.5 * z
     let rad = angleDeg * .pi / 180.0
 
     // Drag preview: if a buffer is named and mode != idle, draw each
@@ -984,7 +992,9 @@ private func drawOvalCursorOverlay(
     // erasing = dashed outline.
     if mode != "idle",
        let bufferName = spec["buffer"] as? String {
-        let pts = pointBuffersPoints(bufferName)
+        let pts = pointBuffersPoints(bufferName).map { p -> (Double, Double) in
+            (p.0 * z + ox, p.1 * z + oy)
+        }
         if pts.count >= 2 {
             if mode == "painting" {
                 cgCtx.saveGState()

@@ -591,7 +591,7 @@ impl CanvasTool for YamlTool {
                 "partial_selection_overlay" => {
                     draw_partial_selection_overlay(ctx, render, &eval_ctx, model);
                 }
-                "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx),
+                "oval_cursor" => draw_oval_cursor_overlay(ctx, render, &eval_ctx, model),
                 "cursor_color_chip" => draw_cursor_color_chip_overlay(ctx, render, &eval_ctx),
                 "reference_point_cross" => {
                     draw_reference_point_cross(ctx, render, &eval_ctx, model);
@@ -1139,9 +1139,17 @@ fn draw_oval_cursor_overlay(
     ctx: &CanvasRenderingContext2d,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
+    model: &Model,
 ) {
-    let cx = eval_number_field(eval_ctx, render.get("x"));
-    let cy = eval_number_field(eval_ctx, render.get("y"));
+    // Hover position + buffered dab points are document-space (Blob Brush
+    // writes event.doc_x/doc_y); this overlay draws post-restore in screen
+    // space, so map positions through the view transform and scale the tip
+    // radius by zoom so the cursor oval matches the doc-space painted dab.
+    let z = model.zoom_level;
+    let ox = model.view_offset_x;
+    let oy = model.view_offset_y;
+    let cx = eval_number_field(eval_ctx, render.get("x")) * z + ox;
+    let cy = eval_number_field(eval_ctx, render.get("y")) * z + oy;
     let size = eval_number_field(eval_ctx, render.get("default_size"))
         .max(1.0);
     let angle_deg = eval_number_field(eval_ctx, render.get("default_angle"));
@@ -1182,8 +1190,8 @@ fn draw_oval_cursor_overlay(
         })
         .unwrap_or_else(|| "idle".to_string());
 
-    let rx = size * 0.5;
-    let ry = size * (roundness / 100.0) * 0.5;
+    let rx = size * 0.5 * z;
+    let ry = size * (roundness / 100.0) * 0.5 * z;
     let rad = angle_deg * std::f64::consts::PI / 180.0;
 
     // Drag preview: if a buffer is named and mode != idle, draw
@@ -1193,7 +1201,11 @@ fn draw_oval_cursor_overlay(
         if let Some(buffer_name) = render.get("buffer").and_then(|v| v.as_str()) {
             let pts: Vec<(f64, f64)> =
                 crate::interpreter::point_buffers::with_points(
-                    buffer_name, |p| p.to_vec());
+                    buffer_name, |pts| {
+                        pts.iter()
+                            .map(|p| (p.0 * z + ox, p.1 * z + oy))
+                            .collect()
+                    });
             if pts.len() >= 2 {
                 ctx.set_stroke_style_str(&stroke_color);
                 ctx.set_fill_style_str(&stroke_color);
