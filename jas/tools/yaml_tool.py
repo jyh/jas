@@ -307,9 +307,10 @@ class YamlTool(CanvasTool):
                 elif render_type == "buffer_polygon":
                     _draw_buffer_polygon_overlay(painter, render)
                 elif render_type == "buffer_polyline":
-                    _draw_buffer_polyline_overlay(painter, render, eval_ctx)
+                    _draw_buffer_polyline_overlay(
+                        painter, render, eval_ctx, ctx.model)
                 elif render_type == "pen_overlay":
-                    _draw_pen_overlay(painter, render, eval_ctx)
+                    _draw_pen_overlay(painter, render, eval_ctx, ctx.model)
                 elif render_type == "partial_selection_overlay":
                     _draw_partial_selection_overlay(
                         painter, render, eval_ctx, ctx.document)
@@ -758,11 +759,19 @@ def _draw_buffer_polygon_overlay(painter, render: dict) -> None:
 
 
 def _draw_buffer_polyline_overlay(painter, render: dict,
-                                  eval_ctx: dict) -> None:
+                                  eval_ctx: dict, model) -> None:
     name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
     if not name:
         return
-    points = point_buffers.points(name)
+    # Buffer points are document-space (the Paintbrush point buffer is fed
+    # from event.doc_x/doc_y); the overlay draws post-restore in viewport
+    # pixels, so map each point through the active view transform here.
+    # Line width + dash lengths stay in pixels.
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    points = [(px * zoom + offx, py * zoom + offy)
+              for px, py in point_buffers.points(name)]
     if len(points) < 2:
         return
     style = parse_style(render.get("style", ""))
@@ -868,20 +877,50 @@ def _draw_partial_selection_overlay(painter, render: dict, eval_ctx: dict,
         painter.drawRect(QRectF(rx, ry, rw, rh))
 
 
-def _draw_pen_overlay(painter, render: dict, eval_ctx: dict) -> None:
+def _draw_pen_overlay(painter, render: dict, eval_ctx: dict, model) -> None:
     """Pen tool overlay: committed Bezier curves, preview curve to
-    mouse, handle lines + dots, anchor squares, close indicator."""
+    mouse, handle lines + dots, anchor squares, close indicator.
+
+    Anchors live in document-space (the Pen anchor buffer is fed from
+    event.doc_x/doc_y and feeds add_path_from_anchor_buffer directly);
+    this overlay draws post-restore in viewport-pixel space, so every
+    anchor coordinate (x/y AND the in/out handle coords) and the
+    mouse preview point are mapped through the active view transform
+    (d * zoom + offset) here. close_radius, dot/handle radii, anchor
+    square size, and line widths stay in viewport pixels. Mirrors Rust
+    draw_pen_overlay.
+    """
+    import dataclasses
     from PySide6.QtCore import QPointF, QRectF, Qt
     from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen
 
     name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
     if not name:
         return
-    anchors = anchor_buffers.anchors(name)
-    if not anchors:
+    raw_anchors = anchor_buffers.anchors(name)
+    if not raw_anchors:
         return
-    mouse_x = _eval_number_field(eval_ctx, render.get("mouse_x"))
-    mouse_y = _eval_number_field(eval_ctx, render.get("mouse_y"))
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    # Map each anchor (x/y + both handles) into viewport pixels. Same
+    # shape as the buffered Anchor; smooth flag preserved.
+    anchors = [
+        dataclasses.replace(
+            a,
+            x=a.x * zoom + offx,
+            y=a.y * zoom + offy,
+            hx_in=a.hx_in * zoom + offx,
+            hy_in=a.hy_in * zoom + offy,
+            hx_out=a.hx_out * zoom + offx,
+            hy_out=a.hy_out * zoom + offy,
+        )
+        for a in raw_anchors
+    ]
+    # mouse_x / mouse_y in the YAML are doc-space (Pen writes them from
+    # event.doc_x / event.doc_y), so map them too.
+    mouse_x = _eval_number_field(eval_ctx, render.get("mouse_x")) * zoom + offx
+    mouse_y = _eval_number_field(eval_ctx, render.get("mouse_y")) * zoom + offy
     close_radius = max(1.0, _eval_number_field(
         eval_ctx, render.get("close_radius")))
     placing = _eval_bool_field(eval_ctx, render.get("placing"))
