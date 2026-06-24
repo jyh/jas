@@ -153,6 +153,12 @@ Selection of two rects; view panned + zoomed per Default setup.
       the crosshair stays fixed on screen throughout the drag **and** after
       commit. (Pre-fix this pivot was displaced, because a clicked ref stored
       *screen* coords into a field the apply reads as *document* coords.)
+      _Geometric substance now automated in Swift:
+      `JasTests…ToolInteractionTests.scaleCustomRefPivotsAboutDocPointAtNonIdentityView`
+      drives this gesture at zoom=2/offset=(10,20) and asserts the pivot is
+      doc (0,0). Verified non-vacuous (fails on the pre-fix ref line). This
+      manual test remains for the visual "crosshair stays put" confirmation and
+      for Rust/OCaml/Python._
 
 - [ ] **CR-013** [wired] **P1.** Shift uniform-aspect still pivots correctly.
       Do: Shift+drag a scale. Expect: uniform aspect, still anchored at the
@@ -258,5 +264,7 @@ _None._
   this regression doc.
 - **CR-E2.** A gesture-corpus entry that drives a transform tool at a
   non-identity view (non-zero `view_offset`, `zoom ≠ 1`) would move CR-011 /
-  CR-012 from manual-floor to CI-gated. Blocked on the gesture corpus
-  carrying view state at the CanvasTool seam.
+  CR-012 from manual-floor to *cross-language* CI-gated. Blocked on the
+  gesture corpus carrying view state at the CanvasTool seam. _Partial:
+  CR-012's geometry is now a Swift unit test (see CR-012); mirroring it to
+  Rust / OCaml / Python would guard all four pending the corpus work._
