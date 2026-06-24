@@ -158,6 +158,24 @@ tests:
     expected: true
     type: bool
 
+  # Strict parsing — a complete expression must consume all its tokens.
+  # Trailing tokens mean malformed input, which evaluates to null in every
+  # app. (Before strictness, lenient parsers returned the first operand:
+  # "1 2" => 1, "true false" => true, "1 + 2 3" => 3.)
+  - expr: "1 2"
+    expected: null
+    type: "null"
+    note: "two numbers, no operator — rejected, not truncated to 1"
+
+  - expr: "true false"
+    expected: null
+    type: "null"
+
+  - expr: "1 + 2 3"
+    expected: null
+    type: "null"
+    note: "valid (1 + 2) followed by garbage — rejected, not truncated to 3"
+
   # Function calls
   - expr: "hsb_h(#ff0000)"
     expected: 0
