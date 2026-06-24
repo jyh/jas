@@ -314,7 +314,8 @@ class YamlTool(CanvasTool):
                     _draw_partial_selection_overlay(
                         painter, render, eval_ctx, ctx.document)
                 elif render_type == "oval_cursor":
-                    _draw_oval_cursor_overlay(painter, render, eval_ctx)
+                    _draw_oval_cursor_overlay(
+                        painter, render, eval_ctx, ctx.model)
                 elif render_type == "cursor_color_chip":
                     _draw_cursor_color_chip_overlay(painter, render, eval_ctx)
                 elif render_type == "reference_point_cross":
@@ -983,7 +984,8 @@ def _add_oval_path(cx: float, cy: float, rx: float, ry: float, rad: float):
     return path
 
 
-def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
+def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict,
+                              model) -> None:
     """Blob Brush oval cursor + drag preview.
     BLOB_BRUSH_TOOL.md Overlay.
 
@@ -994,12 +996,26 @@ def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
     2. Drag preview -- when mode != "idle" and a buffer is named,
        each buffered pointer sample gets an ellipse. Painting mode
        fills semi-transparent; erasing mode strokes dashed outlines.
+
+    The hover position and every buffered dab point are document-space
+    (Blob Brush writes event.doc_x/doc_y); this overlay draws
+    post-restore in screen space, so map positions through the active
+    view transform and SCALE the tip radius by zoom so the cursor oval
+    matches the doc-space painted dab. Mirrors Swift
+    drawOvalCursorOverlay. The angle and roundness ratio are
+    dimensionless (unchanged); the crosshair offsets and line widths
+    stay in viewport pixels (positions are already screen after the
+    transform).
     """
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QBrush, QPen
 
-    cx = _eval_number_field(eval_ctx, render.get("x"))
-    cy = _eval_number_field(eval_ctx, render.get("y"))
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+
+    cx = _eval_number_field(eval_ctx, render.get("x")) * zoom + offx
+    cy = _eval_number_field(eval_ctx, render.get("y")) * zoom + offy
     size = max(1.0, _eval_number_field(eval_ctx, render.get("default_size")))
     angle_deg = _eval_number_field(eval_ctx, render.get("default_angle"))
     roundness = max(1.0,
@@ -1026,8 +1042,8 @@ def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
             else:
                 mode = mode_raw
 
-    rx = size * 0.5
-    ry = size * (roundness / 100.0) * 0.5
+    rx = size * 0.5 * zoom
+    ry = size * (roundness / 100.0) * 0.5 * zoom
     rad = math.radians(angle_deg)
 
     # Drag preview: if a buffer is named and mode != idle, draw each
@@ -1037,7 +1053,8 @@ def _draw_oval_cursor_overlay(painter, render: dict, eval_ctx: dict) -> None:
         buffer_name = (render.get("buffer")
                        if isinstance(render.get("buffer"), str) else "")
         if buffer_name:
-            points = point_buffers.points(buffer_name)
+            points = [(px * zoom + offx, py * zoom + offy)
+                      for px, py in point_buffers.points(buffer_name)]
             if len(points) >= 2:
                 if mode == "painting":
                     r, g, b, _ = rgba

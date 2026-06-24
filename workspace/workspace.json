@@ -20778,8 +20778,8 @@
           {
             "buffer.push": {
               "buffer": "blob_brush",
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -20803,12 +20803,12 @@
         "on_mousemove": [
           {
             "set": {
-              "tool.blob_brush.hover_x": "event.x"
+              "tool.blob_brush.hover_x": "event.doc_x"
             }
           },
           {
             "set": {
-              "tool.blob_brush.hover_y": "event.y"
+              "tool.blob_brush.hover_y": "event.doc_y"
             }
           },
           {
@@ -20827,8 +20827,8 @@
               {
                 "doc.blob_brush.sweep_sample": {
                   "buffer": "blob_brush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               }
             ]
@@ -20841,8 +20841,8 @@
               {
                 "buffer.push": {
                   "buffer": "blob_brush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
@@ -20861,8 +20861,8 @@
               {
                 "buffer.push": {
                   "buffer": "blob_brush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
