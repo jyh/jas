@@ -22611,6 +22611,55 @@
               "tool.partial_selection.alt_preview": "false"
             }
           }
+        ],
+        "on_keydown": [
+          {
+            "if": "event.key == 'Escape'",
+            "then": [
+              {
+                "if": "tool.partial_selection.mode == 'moving' and tool.partial_selection.snapshotted",
+                "then": [
+                  {
+                    "doc.preview.restore": {}
+                  },
+                  {
+                    "doc.preview.clear": {}
+                  },
+                  {
+                    "doc.snapshot.restore": {}
+                  }
+                ]
+              },
+              {
+                "if": "tool.partial_selection.mode == 'handle' and tool.partial_selection.snapshotted",
+                "then": [
+                  {
+                    "doc.snapshot.restore": {}
+                  }
+                ]
+              },
+              {
+                "set": {
+                  "tool.partial_selection.mode": "'idle'"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.alt_preview": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.snapshotted": "false"
+                }
+              },
+              {
+                "set": {
+                  "tool.partial_selection.copied": "false"
+                }
+              }
+            ]
+          }
         ]
       },
       "overlay": {
