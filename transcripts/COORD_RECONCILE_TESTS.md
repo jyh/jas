@@ -193,16 +193,18 @@ This is the behavior the new effect enables — pre-implementation Escape
 no-op'd. (Complements `SCL-015` / `ROT-014` / `SHR-015`, which now actually
 exercise the implemented rollback.)
 
-- [ ] **CR-030** [wired] **P0.** Escape mid scale-drag reverts.
+- [x] **CR-030** [wired] **P0.** Escape mid scale-drag reverts.
       Do: begin a scale drag (ghost showing), press **Escape** before
       releasing. Expect: the selection snaps back to its original size and
       position; the ghost clears; the tool returns to idle.
-      _INCONCLUSIVE via harness (2026-06-24): synthetic Escape during a
-      HID-held drag did not cancel — the ghost stayed and the mouse-release
-      committed the scale. Cannot distinguish "Escape not delivered mid-held-
-      drag" (likely harness limit) from "doc.snapshot.restore no-ops". NEEDS A
-      HUMAN check: real Escape during a real scale drag. If it also fails for a
-      human, that's a real bug in the Escape-cancel effect (84d2de5d)._
+      _Was a REAL BUG (user-confirmed: "esc is rejected"), not a harness limit.
+      Root cause: Swift CanvasSubwindow.keyDown routed Escape to mask-handling /
+      super and NEVER to the active tool's on_keydown (onKeyEvent was gated
+      behind capturesKeyboard(), true only for type tools) — so Escape-cancel
+      was dead for EVERY tool (scale/rotate/shear, pen, rect, lasso, ...). Fixed:
+      Escape now gives the active tool's on_keydown first crack. PASS via the
+      harness 2026-06-24: ghost clears on Escape mid-drag and the release no
+      longer commits._
 
 - [ ] **CR-031** [wired] **P1.** No stray undo entry after Escape.
       Do: after CR-030, open the undo history / press ⌘Z once.

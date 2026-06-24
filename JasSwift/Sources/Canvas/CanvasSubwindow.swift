@@ -2767,14 +2767,25 @@ class CanvasNSView: NSView {
                 model.editDocument(doc.deleteSelection())
             }
         case "\u{1B}":  // Escape
-            // OPACITY.md §Preview interactions: Escape exits
-            // mask-isolation first (if active); otherwise exits
-            // mask-editing mode back to content-mode.
+            // OPACITY.md §Preview interactions: Escape exits mask-isolation
+            // first (if active); then mask-editing back to content-mode.
+            // Otherwise give the ACTIVE TOOL's on_keydown a crack — this is how
+            // every tool cancels an in-progress gesture (scale/rotate/shear,
+            // pen, rect, lasso, ...). onKeyEvent is otherwise only reached on
+            // the capturesKeyboard path (type tools), so without this Escape
+            // never reaches a non-type tool's on_keydown and an in-flight
+            // gesture can't be cancelled.
             if let model = controller?.model {
                 if model.maskIsolationPath != nil {
                     model.maskIsolationPath = nil
                 } else if case .mask = model.editingTarget {
                     model.editingTarget = .content
+                } else if let ctx = toolContext, activeTool.onKeyEvent(ctx, "Escape", KeyMods(
+                    shift: event.modifierFlags.contains(.shift),
+                    ctrl: event.modifierFlags.contains(.control),
+                    alt: event.modifierFlags.contains(.option),
+                    cmd: event.modifierFlags.contains(.command))) {
+                    // active tool consumed Escape (in-progress gesture cancel)
                 } else {
                     super.keyDown(with: event)
                 }
