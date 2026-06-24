@@ -551,11 +551,23 @@ let draw_buffer_polygon_overlay (cr : Cairo.context)
     draw_closed_polygon_from_points cr points render
 
 let draw_buffer_polyline_overlay (cr : Cairo.context)
-    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t) : unit =
+    (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
+    (model : Model.model) : unit =
   let name = render_string render "buffer" in
   if name = "" then ()
   else
-    let points = Point_buffers.points name in
+    (* Buffer points are document-space (the Paintbrush writes
+       event.doc_x/doc_y); this overlay draws post-restore in screen
+       space, so map every point through the active view transform
+       d *. z +. off. Line width + dash lengths stay in viewport
+       pixels. Mirrors the Rust draw_buffer_polyline_overlay. *)
+    let z = model#zoom_level in
+    let ox = model#view_offset_x in
+    let oy = model#view_offset_y in
+    let points =
+      List.map (fun (px, py) -> (px *. z +. ox, py *. z +. oy))
+        (Point_buffers.points name)
+    in
     if List.length points < 2 then ()
     else begin
       let style = parse_style (render_string render "style") in
@@ -670,15 +682,39 @@ let draw_partial_selection_overlay (cr : Cairo.context)
     curve from last anchor to mouse, handle lines + dots, anchor
     squares, close indicator on hover. *)
 let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
-    (eval_ctx : Yojson.Safe.t) : unit =
+    (eval_ctx : Yojson.Safe.t) (model : Model.model) : unit =
   let name = render_string render "buffer" in
   if name = "" then ()
   else
-    let anchors = Anchor_buffers.anchors name in
-    if anchors = [] then ()
+    let raw_anchors = Anchor_buffers.anchors name in
+    if raw_anchors = [] then ()
     else begin
-      let mouse_x = eval_number_field eval_ctx (render_get render "mouse_x") in
-      let mouse_y = eval_number_field eval_ctx (render_get render "mouse_y") in
+      (* Anchors live in document-space (the buffer feeds
+         add_path_from_anchor_buffer directly) and mouse_x/mouse_y are
+         doc-space too (the Pen writes them from event.doc_x/doc_y);
+         this overlay draws post-restore in screen space, so map every
+         anchor coordinate (position AND in/out handles) plus the mouse
+         preview point through the active view transform d *. z +. off.
+         close_radius, the handle/dot sizes, and the line widths stay in
+         viewport pixels. Mirrors the Rust draw_pen_overlay. *)
+      let z = model#zoom_level in
+      let ox = model#view_offset_x in
+      let oy = model#view_offset_y in
+      let anchors =
+        List.map (fun (a : Anchor_buffers.anchor) ->
+          { a with
+            Anchor_buffers.x = a.x *. z +. ox;
+            y = a.y *. z +. oy;
+            hx_in = a.hx_in *. z +. ox;
+            hy_in = a.hy_in *. z +. oy;
+            hx_out = a.hx_out *. z +. ox;
+            hy_out = a.hy_out *. z +. oy;
+          }) raw_anchors
+      in
+      let mouse_x =
+        (eval_number_field eval_ctx (render_get render "mouse_x")) *. z +. ox in
+      let mouse_y =
+        (eval_number_field eval_ctx (render_get render "mouse_y")) *. z +. oy in
       let close_radius = Float.max 1.0
                            (eval_number_field eval_ctx
                               (render_get render "close_radius")) in
@@ -1355,7 +1391,10 @@ class yaml_tool (spec : tool_spec) = object (_self)
         | "buffer_polygon" -> draw_buffer_polygon_overlay cr overlay.render
         | "buffer_polyline" ->
           draw_buffer_polyline_overlay cr overlay.render eval_ctx
-        | "pen_overlay" -> draw_pen_overlay cr overlay.render eval_ctx
+            ctx.controller#model
+        | "pen_overlay" ->
+          draw_pen_overlay cr overlay.render eval_ctx
+            ctx.controller#model
         | "partial_selection_overlay" ->
           draw_partial_selection_overlay cr overlay.render eval_ctx
             ctx.controller#document
