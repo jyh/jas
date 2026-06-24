@@ -22052,8 +22052,8 @@
           {
             "buffer.push": {
               "buffer": "paintbrush",
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -22066,8 +22066,8 @@
             "then": [
               {
                 "doc.paintbrush.edit_start": {
-                  "x": "event.x",
-                  "y": "event.y",
+                  "x": "event.doc_x",
+                  "y": "event.doc_y",
                   "within": "state.paintbrush_edit_within"
                 }
               }
@@ -22086,8 +22086,8 @@
               {
                 "buffer.push": {
                   "buffer": "paintbrush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               }
             ]
@@ -22100,8 +22100,8 @@
               {
                 "buffer.push": {
                   "buffer": "paintbrush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
@@ -22122,8 +22122,8 @@
               {
                 "buffer.push": {
                   "buffer": "paintbrush",
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               },
               {
@@ -24768,8 +24768,8 @@
           },
           {
             "doc.path.smooth_at_cursor": {
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -24784,8 +24784,8 @@
             "then": [
               {
                 "doc.path.smooth_at_cursor": {
-                  "x": "event.x",
-                  "y": "event.y"
+                  "x": "event.doc_x",
+                  "y": "event.doc_y"
                 }
               }
             ]
