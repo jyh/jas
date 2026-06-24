@@ -4,8 +4,9 @@ Index of every `transcripts/*_TESTS.md` in the repo. Pair with
 `MANUAL_TESTING.md` (procedure / methodology) and the individual
 `*_TESTS.md` files (the test bodies).
 
-**Total: 36 test files** covering 27 tools + 13 of 14 panels +
-2 native text tools. Every `workspace/panels/*.yaml` and
+**Total: 37 test files** covering 27 tools + 13 of 14 panels +
+2 native text tools, plus 1 cross-cutting regression pass
+(`COORD_RECONCILE_TESTS.md`). Every `workspace/panels/*.yaml` and
 `workspace/tools/*.yaml` is covered. (Some files cover multiple
 yaml — e.g. `SELECTION_TOOL_TESTS.md` covers
 selection + partial_selection + interior_selection.)
@@ -144,6 +145,19 @@ Panels that operate on attributes already produced by other tools.
 
 ---
 
+## Cross-cutting regression passes
+
+Not tied to a single component — targeted passes for changes whose
+behavior the cross-language corpora cannot see (e.g. anything that
+only manifests at a non-identity view, or live-tool effects with no
+corpus entry). Run after touching the relevant subsystem.
+
+| File | Covers | Notes |
+|------|--------|-------|
+| [COORD_RECONCILE_TESTS.md](transcripts/COORD_RECONCILE_TESTS.md) | scale / rotate / shear / blob_brush at a **panned + zoomed** view | The per-tool suites run at the identity view (where doc == screen) and pass even pre-fix. This pass adds the non-identity dimension + the `doc.snapshot.restore` (Escape) and `doc.blob_brush.sweep_sample` effects. Branch `testing-strategy` (`ad79310b`, `84d2de5d`). |
+
+---
+
 ## Cross-app parity
 
 Every `_TESTS.md` ends with a per-platform parity section
@@ -187,6 +201,7 @@ has icon / dblclick deferrals (see each file's Known broken).
 | [BRUSHES_TESTS.md](transcripts/BRUSHES_TESTS.md) | 6 |
 | [CHARACTER_TESTS.md](transcripts/CHARACTER_TESTS.md) | 7 |
 | [COLOR_TESTS.md](transcripts/COLOR_TESTS.md) | 2 |
+| [COORD_RECONCILE_TESTS.md](transcripts/COORD_RECONCILE_TESTS.md) | X-cut |
 | [ELLIPSE_TOOL_TESTS.md](transcripts/ELLIPSE_TOOL_TESTS.md) | 1 |
 | [EYEDROPPER_TOOL_TESTS.md](transcripts/EYEDROPPER_TOOL_TESTS.md) | 6 |
 | [GRADIENT_TESTS.md](transcripts/GRADIENT_TESTS.md) | 7 |
