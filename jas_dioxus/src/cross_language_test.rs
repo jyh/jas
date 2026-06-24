@@ -3525,8 +3525,11 @@ mod tests {
         let journal_len_before = model.journal().len();
 
         // on_mousedown at (0,0): doc.snapshot + record press, mode='scaling'.
+        // doc_x/doc_y mirror what pointer_event_payload supplies in the app
+        // (here == x/y at the identity view); the move-guard + apply read
+        // event.doc_x/doc_y (scale.yaml operates in document space).
         let down_ctx = serde_json::json!({
-            "event": { "x": 0.0, "y": 0.0, "modifiers": { "alt": false, "shift": false } }
+            "event": { "x": 0.0, "y": 0.0, "doc_x": 0.0, "doc_y": 0.0, "modifiers": { "alt": false, "shift": false } }
         });
         run_effects(&handler("on_mousedown"), &down_ctx, &mut store,
             Some(&mut model), None, None, Some("scale_tool.on_mousedown"));
@@ -3535,7 +3538,7 @@ mod tests {
         // NO journal entry (the preview is the overlay, out-of-band).
         let journal_len_after_down = model.journal().len();
         let move_ctx = serde_json::json!({
-            "event": { "x": 96.0, "y": 96.0, "modifiers": { "alt": false, "shift": false } }
+            "event": { "x": 96.0, "y": 96.0, "doc_x": 96.0, "doc_y": 96.0, "modifiers": { "alt": false, "shift": false } }
         });
         run_effects(&handler("on_mousemove"), &move_ctx, &mut store,
             Some(&mut model), None, None, Some("scale_tool.on_mousemove"));
