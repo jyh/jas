@@ -169,6 +169,10 @@ pub fn tokenize(source: &str) -> Vec<Token> {
 
         // Single-character operators
         match c {
+            // Prefix logical NOT — synonym for the `not` keyword (same Not
+            // token). `!=` is handled above in the two-char block, so a bare
+            // `!` only reaches here.
+            '!' => tokens.push(Token { kind: TokenKind::Not }),
             '<' => tokens.push(Token { kind: TokenKind::Lt }),
             '>' => tokens.push(Token { kind: TokenKind::Gt }),
             '=' => tokens.push(Token { kind: TokenKind::Equals }),

@@ -112,6 +112,34 @@
     "type": "bool"
   },
   {
+    "expr": "!true",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "!false",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "!state.x",
+    "state": {
+      "x": 0
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "!(false || true)",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "!false || false",
+    "expected": true,
+    "type": "bool"
+  },
+  {
     "expr": "true && true",
     "expected": true,
     "type": "bool"
