@@ -298,6 +298,60 @@ let () =
         | _ -> assert false);
     ];
 
+    "scale tool", [
+      (* CR-012: at a non-identity view a custom clicked reference point
+         must pivot a committed Scale about the DOCUMENT point under the
+         cursor, not the raw screen point. The plain click that sets the
+         reference must be unprojected from screen to document space before
+         being stored. Pre-fix the screen point was stored as the doc-space
+         reference, giving the wrong pivot. *)
+      Alcotest.test_case
+        "scale custom ref pivots about doc point at non-identity view"
+        `Quick (fun () ->
+        let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Scale in
+        (* Rect at document (0,0), 100x100, with a stroke, selected at [0,0]. *)
+        let rect = make_rect
+          ~stroke:(Some (make_stroke (make_color 0.0 0.0 0.0)))
+          0.0 0.0 100.0 100.0 in
+        let layer = make_layer ~name:"L" [|rect|] in
+        let sel = Jas.Document.PathMap.singleton [0; 0]
+          (Jas.Document.element_selection_all [0; 0]) in
+        let doc = Jas.Document.make_document ~selection:sel [|layer|] in
+        let model = Jas.Model.create ~document:doc () in
+        (* Non-identity view: screen = doc * 2 + (10, 20),
+           so doc = (screen - offset) / 2. The event payload builder
+           computes event.doc_x = (x - view_offset_x) / zoom, so we feed
+           SCREEN coords to the tool. *)
+        model#set_zoom_level 2.0;
+        model#set_view_offset_x 10.0;
+        model#set_view_offset_y 20.0;
+        let (ctx, _model, _ctrl) = make_ctx ~model () in
+        (* Gesture 1: plain click at SCREEN (10,20) -> doc (0,0) sets the
+           custom reference to [0,0]. *)
+        tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
+        tool#on_release ctx 10.0 20.0 ~shift:false ~alt:false;
+        (* Gesture 2: drag-scale. Press SCREEN (210,220) -> doc (100,100);
+           move to SCREEN (410,420) -> doc (200,200) with dragging set;
+           release. With pivot (0,0) this is sx = sy = 200/100 = 2.0. *)
+        tool#on_press ctx 210.0 220.0 ~shift:false ~alt:false;
+        tool#on_move ctx 410.0 420.0 ~shift:false ~dragging:true;
+        tool#on_release ctx 410.0 420.0 ~shift:false ~alt:false;
+        (* The committed scale is carried in the ELEMENT TRANSFORM; the
+           rect local x/y/w/h stay unchanged. *)
+        let elem = (layer_children model).(0) in
+        let t = match Jas.Element.transform_of elem with
+          | Some t -> t
+          | None -> Jas.Element.identity_transform in
+        (* Reference point (0,0) is the FIXED point. *)
+        let (fx, fy) = Jas.Element.apply_point t 0.0 0.0 in
+        assert (abs_float fx < 1e-6);
+        assert (abs_float fy < 1e-6);
+        (* Opposite corner (100,100) doubles to (200,200). *)
+        let (cx, cy) = Jas.Element.apply_point t 100.0 100.0 in
+        assert (abs_float (cx -. 200.0) < 1e-6);
+        assert (abs_float (cy -. 200.0) < 1e-6));
+    ];
+
     "add anchor point tool", [
       Alcotest.test_case "add anchor point: click on path adds point" `Quick (fun () ->
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Add_anchor_point in

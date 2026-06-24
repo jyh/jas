@@ -4871,4 +4871,107 @@ mod tests {
              is captured at press time",
         );
     }
+
+    // ── Scale tool — CR-012 regression ─────────────────────────────
+    //
+    // Mirror of JasSwift scaleCustomRefPivotsAboutDocPointAtNonIdentityView.
+    // Guards CR-012: at a non-identity view, a plain-click reference
+    // point must be UNPROJECTED from screen to DOCUMENT space before it
+    // is stored, so a later Scale drag pivots about the document point
+    // under the cursor, not about the raw screen pixel. The fix lives in
+    // scale.yaml's on_mouseup (set transform_reference_point from
+    // event.doc_x/doc_y) plus the payload builder that converts screen ->
+    // doc using the model view transform; this test would FAIL pre-fix
+    // (pivot at doc (10,20) gives apply_point(0,0) ~= (-10,-20)).
+
+    /// Load the real Scale tool from the embedded workspace bundle.
+    fn scale_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let scale_spec = ws.data().get("tools")?.get("scale")?;
+        YamlTool::from_workspace_tool(scale_spec)
+    }
+
+    /// One-layer document with a single stroked 100x100 rect at doc
+    /// (0,0), selected via element path [0,0] — the CR-012 fixture.
+    fn scale_cr012_model() -> Model {
+        use crate::document::document::ElementSelection;
+        use crate::geometry::element::Stroke;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: vec![ElementSelection::all(vec![0, 0])],
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn scale_custom_ref_pivots_about_doc_point_at_non_identity_view() {
+        let Some(mut tool) = scale_yaml_tool() else { return };
+        let mut model = scale_cr012_model();
+        // Non-identity view: screen = doc*2 + (10,20)
+        //   => doc = (screen - offset) / zoom.
+        model.zoom_level    = 2.0;
+        model.view_offset_x = 10.0;
+        model.view_offset_y = 20.0;
+
+        // Gesture 1 — plain click at SCREEN (10,20) -> doc (0,0):
+        // set the custom reference point. No move => no scale, just the
+        // transform_reference_point write.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+
+        // Gesture 2 — scale drag:
+        //   press  SCREEN (210,220) -> doc (100,100)
+        //   move   SCREEN (410,420) -> doc (200,200)  [dragging set]
+        //   release SCREEN (410,420)
+        // With pivot (0,0): sx = sy = (200-0)/(100-0) = 2.
+        tool.on_press(&mut model, 210.0, 220.0, false, false);
+        tool.on_move(&mut model, 410.0, 420.0, false, false, true);
+        tool.on_release(&mut model, 410.0, 420.0, false, false);
+
+        // The committed scale lives in the ELEMENT TRANSFORM matrix
+        // (compose_matrix_over_paths writes common.transform); the rect's
+        // local x/y/w/h stay unchanged.
+        let elem = model
+            .document()
+            .get_element(&vec![0, 0])
+            .expect("selected rect must exist after the gesture");
+        let t = elem.transform().copied().unwrap_or_default();
+
+        let tol = 1e-6;
+        // The reference (doc (0,0)) is the FIXED point of the scale.
+        let (fx, fy) = t.apply_point(0.0, 0.0);
+        assert!(
+            (fx - 0.0).abs() < tol && (fy - 0.0).abs() < tol,
+            "reference point must be the fixed point: apply_point(0,0) = \
+             ({fx}, {fy}), expected (0, 0). A pre-fix screen-space pivot \
+             would land near (-10, -20).",
+        );
+        // The opposite corner doubles about (0,0).
+        let (ox, oy) = t.apply_point(100.0, 100.0);
+        assert!(
+            (ox - 200.0).abs() < tol && (oy - 200.0).abs() < tol,
+            "opposite corner must double: apply_point(100,100) = \
+             ({ox}, {oy}), expected (200, 200).",
+        );
+    }
 }
