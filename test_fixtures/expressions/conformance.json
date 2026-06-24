@@ -112,6 +112,89 @@
     "type": "bool"
   },
   {
+    "expr": "true && true",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "true && false",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "false || false",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "false || true",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "true && true && false",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "false || false || true",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "true || false && false",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "false && false || true",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "false && (false || true)",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "1 < 2 && 3 < 4",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "1 < 2 && 3 > 4",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "1 > 2 || 3 > 1",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "not false || false",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "state.a && state.b",
+    "state": {
+      "a": true,
+      "b": false
+    },
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "state.a || state.b",
+    "state": {
+      "a": false,
+      "b": true
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
     "expr": "hsb_h(#ff0000)",
     "expected": 0,
     "type": "number"
