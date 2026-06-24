@@ -2289,39 +2289,43 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
 
     method forward_key_event ev =
       let ctx = _self#tool_context in
-      if not (active_tool#captures_keyboard ()) then false
-      else begin
-        let keyval = GdkEvent.Key.keyval ev in
-        let state = GdkEvent.Key.state ev in
-        let mods : Canvas_tool.key_mods = {
-          shift = List.mem `SHIFT state;
-          ctrl = List.mem `CONTROL state;
-          alt = List.mem `MOD1 state;
-          meta = List.mem `META state;
-        } in
-        let key_name =
-          if keyval = GdkKeysyms._Escape then Some "Escape"
-          else if keyval = GdkKeysyms._Return || keyval = GdkKeysyms._KP_Enter then Some "Enter"
-          else if keyval = GdkKeysyms._BackSpace then Some "Backspace"
-          else if keyval = GdkKeysyms._Delete then Some "Delete"
-          else if keyval = GdkKeysyms._Left then Some "ArrowLeft"
-          else if keyval = GdkKeysyms._Right then Some "ArrowRight"
-          else if keyval = GdkKeysyms._Up then Some "ArrowUp"
-          else if keyval = GdkKeysyms._Down then Some "ArrowDown"
-          else if keyval = GdkKeysyms._Home then Some "Home"
-          else if keyval = GdkKeysyms._End then Some "End"
-          else if keyval = GdkKeysyms._Tab then Some "Tab"
-          else
-            let s = GdkEvent.Key.string ev in
-            if String.length s = 1 then Some s
-            else if keyval >= 0x20 && keyval <= 0x7e then
-              Some (String.make 1 (Char.chr keyval))
-            else None
-        in
-        match key_name with
-        | None -> false
-        | Some k -> active_tool#on_key_event ctx k mods
-      end
+      let keyval = GdkEvent.Key.keyval ev in
+      let state = GdkEvent.Key.state ev in
+      let mods : Canvas_tool.key_mods = {
+        shift = List.mem `SHIFT state;
+        ctrl = List.mem `CONTROL state;
+        alt = List.mem `MOD1 state;
+        meta = List.mem `META state;
+      } in
+      let key_name =
+        if keyval = GdkKeysyms._Escape then Some "Escape"
+        else if keyval = GdkKeysyms._Return || keyval = GdkKeysyms._KP_Enter then Some "Enter"
+        else if keyval = GdkKeysyms._BackSpace then Some "Backspace"
+        else if keyval = GdkKeysyms._Delete then Some "Delete"
+        else if keyval = GdkKeysyms._Left then Some "ArrowLeft"
+        else if keyval = GdkKeysyms._Right then Some "ArrowRight"
+        else if keyval = GdkKeysyms._Up then Some "ArrowUp"
+        else if keyval = GdkKeysyms._Down then Some "ArrowDown"
+        else if keyval = GdkKeysyms._Home then Some "Home"
+        else if keyval = GdkKeysyms._End then Some "End"
+        else if keyval = GdkKeysyms._Tab then Some "Tab"
+        else
+          let s = GdkEvent.Key.string ev in
+          if String.length s = 1 then Some s
+          else if keyval >= 0x20 && keyval <= 0x7e then
+            Some (String.make 1 (Char.chr keyval))
+          else None
+      in
+      (match key_name with
+       | None -> false
+       | Some k ->
+         (* Escape / Enter must reach the active tool on_keydown even for
+            non-capturing tools (every tool cancels or finishes an in-progress
+            gesture this way); other keys only when the tool captures keyboard
+            for a text-edit session. Mirrors the Rust keyboard router. *)
+         if active_tool#captures_keyboard () || k = "Escape" || k = "Enter"
+         then active_tool#on_key_event ctx k mods
+         else false)
 
     initializer
       (* Register for document changes *)

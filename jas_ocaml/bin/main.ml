@@ -389,17 +389,28 @@ let () =
       true
     end else if key = GdkKeysyms._Escape
              || key = GdkKeysyms._Return || key = GdkKeysyms._KP_Enter then begin
-      (match !active_canvas with Some c -> c#pen_finish | None -> ());
-      (* OPACITY.md section Preview interactions: Escape exits
-         mask-isolation first (if active); otherwise exits
-         mask-editing mode back to content-mode. *)
-      if key = GdkKeysyms._Escape then begin
-        let m = !active_model in
-        if m#mask_isolation_path <> None then
-          m#set_mask_isolation_path None
-        else match m#editing_target with
-          | Jas.Model.Mask _ -> m#set_editing_target Jas.Model.Content
-          | Jas.Model.Content -> ()
+      (* OPACITY.md section Preview interactions: Escape exits mask-isolation
+         first (if active); then mask-editing back to content. Otherwise route
+         to the active tool on_keydown (every tool cancels or finishes an
+         in-progress gesture this way); the pen_finish reset is the last-resort
+         fallback for any tool that declares no on_keydown. Mirrors Rust. *)
+      let handled_mask =
+        if key = GdkKeysyms._Escape then begin
+          let m = !active_model in
+          if m#mask_isolation_path <> None then begin
+            m#set_mask_isolation_path None; true
+          end else match m#editing_target with
+            | Jas.Model.Mask _ -> m#set_editing_target Jas.Model.Content; true
+            | Jas.Model.Content -> false
+        end else false
+      in
+      if not handled_mask then begin
+        let consumed = match !active_canvas with
+          | Some c -> c#forward_key_event ev
+          | None -> false
+        in
+        if not consumed then
+          (match !active_canvas with Some c -> c#pen_finish | None -> ())
       end;
       true
     end else if (key = GdkKeysyms._Delete || key = GdkKeysyms._BackSpace)

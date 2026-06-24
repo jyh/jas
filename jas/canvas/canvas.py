@@ -2229,6 +2229,14 @@ class CanvasWidget(QWidget):
                     self._model, "panel_state_version", 0) + 1
                 self.update()
                 return
+            # Give the active tool's on_keydown a crack at Escape — this is how
+            # every tool cancels an in-progress gesture (scale/rotate/shear,
+            # pen, rect, lasso, ...). on_key_event is otherwise only reached on
+            # the captures_keyboard path (type tools), so without this Escape
+            # never reaches a non-type tool's on_keydown. Mirrors Rust.
+            mods = self._build_key_mods(event)
+            if self._active_tool.on_key_event(self._tool_ctx, "Escape", mods):
+                return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
