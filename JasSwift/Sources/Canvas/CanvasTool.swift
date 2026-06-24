@@ -160,6 +160,28 @@ func createTools() -> [Tool: CanvasTool] {
         (.polygon,             "polygon"),
         (.star,                "star"),
         (.lasso,               "lasso"),
+        // Navigation + transform + utility tools. These are ordinary bundle
+        // YamlTools (workspace/tools/*.yaml) and were simply never added to
+        // this list, so `activeTool` fell back to the selection tool — they
+        // were SELECTED (highlight + cursor from the Tool enum) but a drag
+        // did selection instead of acting. Their handler effects are
+        // implemented in YamlToolEffects (doc.pan.apply / doc.zoom.* /
+        // doc.scale|rotate|shear.apply / doc.magic_wand.apply / doc.paintbrush
+        // / doc.blob_brush / doc.artboard.* / doc.eyedropper.*). The few
+        // verbs not yet in the Swift runtime (doc.snapshot.restore for the
+        // transform tools' Escape-cancel; doc.blob_brush.sweep_sample for the
+        // blob hover preview) no-op via runEffects' unknown-verb skip, so the
+        // core drag still works; those are filled in separately.
+        (.hand,                "hand"),
+        (.zoom,                "zoom"),
+        (.scale,               "scale"),
+        (.rotate,              "rotate"),
+        (.shear,               "shear"),
+        (.magicWand,           "magic_wand"),
+        (.paintbrush,          "paintbrush"),
+        (.blobBrush,           "blob_brush"),
+        (.artboard,            "artboard"),
+        (.eyedropper,          "eyedropper"),
     ]
     var registry: [Tool: CanvasTool] = [
         .typeTool:   TypeTool(),
