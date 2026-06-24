@@ -48,10 +48,14 @@ handlers:
 
   on_mousedown:
     - "doc.snapshot": {}
-    - set: { tool.shear.press_x:    "event.x" }
-    - set: { tool.shear.press_y:    "event.y" }
-    - set: { tool.shear.cursor_x:   "event.x" }
-    - set: { tool.shear.cursor_y:   "event.y" }
+    # Coords stored in DOCUMENT space (event.doc_x/doc_y) so the derived
+    # matrix, the bbox_ghost preview, and the apply all stay correct at any
+    # pan/zoom. The reference point is likewise document-space (see the
+    # transform_reference_point schema). Overlays map doc->screen at draw time.
+    - set: { tool.shear.press_x:    "event.doc_x" }
+    - set: { tool.shear.press_y:    "event.doc_y" }
+    - set: { tool.shear.cursor_x:   "event.doc_x" }
+    - set: { tool.shear.cursor_y:   "event.doc_y" }
     - set: { tool.shear.alt_held:   "event.modifiers.alt" }
     - set: { tool.shear.shift_held: "event.modifiers.shift" }
     - set: { tool.shear.moved:      "false" }
@@ -60,10 +64,10 @@ handlers:
   on_mousemove:
     - if: "tool.shear.mode == 'shearing'"
       then:
-        - set: { tool.shear.cursor_x:   "event.x" }
-        - set: { tool.shear.cursor_y:   "event.y" }
+        - set: { tool.shear.cursor_x:   "event.doc_x" }
+        - set: { tool.shear.cursor_y:   "event.doc_y" }
         - set: { tool.shear.shift_held: "event.modifiers.shift" }
-        - if: "abs(event.x - tool.shear.press_x) > 2 || abs(event.y - tool.shear.press_y) > 2"
+        - if: "abs(event.doc_x - tool.shear.press_x) > 2 || abs(event.doc_y - tool.shear.press_y) > 2"
           then:
             - set: { tool.shear.moved: "true" }
 
@@ -75,15 +79,15 @@ handlers:
             - "doc.shear.apply":
                 press_x: "tool.shear.press_x"
                 press_y: "tool.shear.press_y"
-                cursor_x: "event.x"
-                cursor_y: "event.y"
+                cursor_x: "event.doc_x"
+                cursor_y: "event.doc_y"
                 shift:   "event.modifiers.shift"
                 copy:    "false"
                 # OP_LOG.md §9 Phase P7: the drag-release commit journals one
                 # shear_transform op (joining the doc.snapshot transaction).
                 journal: true
           else:
-            - set: { transform_reference_point: "[event.x, event.y]" }
+            - set: { transform_reference_point: "[event.doc_x, event.doc_y]" }
             - if: "tool.shear.alt_held"
               then:
                 - "open_dialog": { id: "shear_options" }

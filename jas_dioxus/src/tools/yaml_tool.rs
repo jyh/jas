@@ -1817,9 +1817,15 @@ fn draw_reference_point_cross(
     eval_ctx: &serde_json::Value,
     model: &Model,
 ) {
-    let Some((rx, ry)) = resolve_overlay_reference_point(eval_ctx, render, model) else {
+    let Some((doc_rx, doc_ry)) = resolve_overlay_reference_point(eval_ctx, render, model) else {
         return;
     };
+    // The reference point is document-space (scale/rotate/shear store it in
+    // doc coords); map it to screen for drawing. The crosshair is a fixed-size
+    // screen widget — arms and dot stay in pixels, never scaled by zoom.
+    let z = model.zoom_level;
+    let rx = doc_rx * z + model.view_offset_x;
+    let ry = doc_ry * z + model.view_offset_y;
     const COLOR: &str = "#4A9EFF";
     const ARM: f64 = 6.0; // half-length → 12 px crosshair
     const DOT: f64 = 2.0;
@@ -1946,13 +1952,20 @@ fn draw_bbox_ghost(
     }
     let (bx, by, bw, bh) = align::union_bounds(&elements, align::geometric_bounds);
 
-    // Transform the four corners and draw a closed quad.
+    // Transform the four corners in DOCUMENT space — the matrix, its pivot
+    // (rx, ry), and the bbox are all doc-space — then map each corner to
+    // screen for drawing. The dashed stroke pattern stays in screen pixels
+    // (a fixed 4/2 dash, not scaled by zoom).
     let corners = [
         matrix.apply_point(bx,        by),
         matrix.apply_point(bx + bw,   by),
         matrix.apply_point(bx + bw,   by + bh),
         matrix.apply_point(bx,        by + bh),
     ];
+    let z = model.zoom_level;
+    let offx = model.view_offset_x;
+    let offy = model.view_offset_y;
+    let to_screen = |p: (f64, f64)| (p.0 * z + offx, p.1 * z + offy);
 
     ctx.set_stroke_style_str("#4A9EFF");
     ctx.set_line_width(1.0);
@@ -1961,9 +1974,11 @@ fn draw_bbox_ghost(
     dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
     let _ = ctx.set_line_dash(&dash);
     ctx.begin_path();
-    ctx.move_to(corners[0].0, corners[0].1);
+    let c0 = to_screen(corners[0]);
+    ctx.move_to(c0.0, c0.1);
     for c in &corners[1..] {
-        ctx.line_to(c.0, c.1);
+        let s = to_screen(*c);
+        ctx.line_to(s.0, s.1);
     }
     ctx.close_path();
     ctx.stroke();

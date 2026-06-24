@@ -903,10 +903,21 @@ let resolve_overlay_ref_point (render : Yojson.Safe.t)
     cross overlay. *)
 let draw_reference_point_cross (cr : Cairo.context)
     (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
-    (doc : Document.document) : unit =
+    (doc : Document.document) (model : Model.model) : unit =
   match resolve_overlay_ref_point render eval_ctx doc with
   | None -> ()
-  | Some (rx, ry) ->
+  | Some (doc_rx, doc_ry) ->
+    (* The resolved reference point is document-space; this overlay draws
+       post-restore in screen space, so map the draw position through the
+       active view transform d times z plus off. The crosshair is a
+       fixed-size screen widget, so the arm half-length and center-dot
+       radius stay in viewport pixels and are never scaled by zoom.
+       Mirrors the Rust draw_reference_point_cross. *)
+    let z = model#zoom_level in
+    let ox = model#view_offset_x in
+    let oy = model#view_offset_y in
+    let rx = doc_rx *. z +. ox in
+    let ry = doc_ry *. z +. oy in
     let r = float_of_int 0x4A /. 255.0
     and g = float_of_int 0x9E /. 255.0
     and b = float_of_int 0xFF /. 255.0 in
@@ -927,7 +938,8 @@ let draw_reference_point_cross (cr : Cairo.context)
     cursor + shift_held, composes the matrix via [Transform_apply]
     and renders the union bbox of the selection under that matrix. *)
 let draw_bbox_ghost (cr : Cairo.context) (render : Yojson.Safe.t)
-    (eval_ctx : Yojson.Safe.t) (doc : Document.document) : unit =
+    (eval_ctx : Yojson.Safe.t) (doc : Document.document)
+    (model : Model.model) : unit =
   match resolve_overlay_ref_point render eval_ctx doc with
   | None -> ()
   | Some (rx, ry) ->
@@ -1008,16 +1020,33 @@ let draw_bbox_ghost (cr : Cairo.context) (render : Yojson.Safe.t)
       let c1 = p (bx +. bw) by in
       let c2 = p (bx +. bw) (by +. bh) in
       let c3 = p bx (by +. bh) in
+      (* The reference point above is the matrix pivot and the matrix is
+         built from doc-space ref, press, and cursor, so the pivot and all
+         the scale, rotate, and shear math stay in document space and are
+         left untouched. Applying the matrix to the doc-space union bbox
+         yields four doc-space corners; this overlay draws post-restore in
+         screen space, so map only those four corners through the active
+         view transform d times z plus off right before move_to and
+         line_to. The dashed stroke pattern stays in viewport pixels and is
+         never scaled by zoom. Mirrors the Rust draw_bbox_ghost. *)
+      let z = model#zoom_level in
+      let offx = model#view_offset_x in
+      let offy = model#view_offset_y in
+      let to_screen (qx, qy) = (qx *. z +. offx, qy *. z +. offy) in
+      let s0 = to_screen c0 in
+      let s1 = to_screen c1 in
+      let s2 = to_screen c2 in
+      let s3 = to_screen c3 in
       let r = float_of_int 0x4A /. 255.0
     and g = float_of_int 0x9E /. 255.0
     and b = float_of_int 0xFF /. 255.0 in
       Cairo.set_source_rgba cr r g b 1.0;
       Cairo.set_line_width cr 1.0;
       Cairo.set_dash cr [| 4.0; 2.0 |];
-      Cairo.move_to cr (fst c0) (snd c0);
-      Cairo.line_to cr (fst c1) (snd c1);
-      Cairo.line_to cr (fst c2) (snd c2);
-      Cairo.line_to cr (fst c3) (snd c3);
+      Cairo.move_to cr (fst s0) (snd s0);
+      Cairo.line_to cr (fst s1) (snd s1);
+      Cairo.line_to cr (fst s2) (snd s2);
+      Cairo.line_to cr (fst s3) (snd s3);
       Cairo.Path.close cr;
       Cairo.stroke cr;
       Cairo.set_dash cr [||]
@@ -1434,10 +1463,10 @@ class yaml_tool (spec : tool_spec) = object (_self)
           draw_cursor_color_chip_overlay cr overlay.render eval_ctx
         | "reference_point_cross" ->
           draw_reference_point_cross cr overlay.render eval_ctx
-            ctx.controller#document
+            ctx.controller#document ctx.controller#model
         | "bbox_ghost" ->
           draw_bbox_ghost cr overlay.render eval_ctx
-            ctx.controller#document
+            ctx.controller#document ctx.controller#model
         | "marquee_rect" ->
           draw_marquee_rect_overlay cr overlay.render eval_ctx
         | "artboard_resize_handles" ->
