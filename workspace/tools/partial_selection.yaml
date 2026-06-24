@@ -229,6 +229,29 @@ handlers:
     - set: { tool.partial_selection.mode: "'idle'" }
     - set: { tool.partial_selection.alt_preview: "false" }
 
+  on_keydown:
+    # Mid-drag cancel. partial_selection had no Escape handler, so an
+    # in-progress anchor / handle drag could not be cancelled.
+    - if: "event.key == 'Escape'"
+      then:
+        # Both drag flavors mutate the document live under a doc.snapshot
+        # transaction (taken at the drag threshold), so aborting that
+        # transaction rolls the document back to the pre-drag state.
+        # 'moving' also clears its preview copy first.
+        - if: "tool.partial_selection.mode == 'moving' and tool.partial_selection.snapshotted"
+          then:
+            - "doc.preview.restore": {}
+            - "doc.preview.clear": {}
+            - "doc.snapshot.restore": {}
+        - if: "tool.partial_selection.mode == 'handle' and tool.partial_selection.snapshotted"
+          then:
+            - "doc.snapshot.restore": {}
+        # moving_pending / marquee never mutate the document — just reset.
+        - set: { tool.partial_selection.mode: "'idle'" }
+        - set: { tool.partial_selection.alt_preview: "false" }
+        - set: { tool.partial_selection.snapshotted: "false" }
+        - set: { tool.partial_selection.copied: "false" }
+
 overlay:
   # Always render — draws selected-path handles regardless of mode,
   # plus the marquee rect when mode == "marquee". The render fn
