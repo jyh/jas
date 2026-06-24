@@ -289,7 +289,7 @@ final class YamlTool: CanvasTool {
             case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
             case "buffer_polyline":
                 drawBufferPolylineOverlay(cgCtx, render, evalCtx)
-            case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx)
+            case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx, model: ctx.model)
             case "partial_selection_overlay":
                 drawPartialSelectionOverlay(cgCtx, render, evalCtx,
                                              model: ctx.model)
@@ -702,13 +702,32 @@ private func drawBufferPolygonOverlay(
 /// a dashed preview curve from the last anchor to the current
 /// cursor (only when not actively dragging).
 private func drawPenOverlay(
-    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any]
+    _ cgCtx: CGContext, _ spec: [String: Any], _ ctx: [String: Any],
+    model: Model
 ) {
     guard let name = spec["buffer"] as? String else { return }
-    let anchors = anchorBuffersAnchors(name)
+    // Anchors live in document-space (they feed add_path_from_anchor_buffer
+    // directly); this overlay draws post-restore in viewport-pixel/screen
+    // space, so each coordinate must go through the active view transform
+    // here. Mirrors jas_dioxus draw_pen_overlay. Without this the preview
+    // sits at the doc coords interpreted as screen — offset by the view
+    // pan/zoom — while the committed path (doc coords) is correct, so the
+    // path "pops into place" once a non-pen tool re-renders it.
+    let z = model.zoomLevel
+    let ox = model.viewOffsetX
+    let oy = model.viewOffsetY
+    let anchors = anchorBuffersAnchors(name).map { a -> PenAnchor in
+        var c = a
+        c.x = a.x * z + ox; c.y = a.y * z + oy
+        c.hxIn = a.hxIn * z + ox; c.hyIn = a.hyIn * z + oy
+        c.hxOut = a.hxOut * z + ox; c.hyOut = a.hyOut * z + oy
+        return c
+    }
     guard !anchors.isEmpty else { return }
-    let mouseX = evalOverlayNumber(spec["mouse_x"], ctx)
-    let mouseY = evalOverlayNumber(spec["mouse_y"], ctx)
+    // mouse_x / mouse_y are doc-space too (Pen writes event.doc_x/doc_y).
+    let mouseX = evalOverlayNumber(spec["mouse_x"], ctx) * z + ox
+    let mouseY = evalOverlayNumber(spec["mouse_y"], ctx) * z + oy
+    // close_radius stays in viewport pixels (constant on-screen feel).
     let closeR = max(1.0, evalOverlayNumber(spec["close_radius"], ctx))
     let placing = evaluateOverlayBool(spec["placing"], ctx)
 
