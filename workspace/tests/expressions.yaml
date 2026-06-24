@@ -81,6 +81,33 @@ tests:
     expected: false
     type: bool
 
+  # Prefix NOT via ! — synonym for the `not` keyword (same Not token, same
+  # precedence: binds tighter than ||). `!=` still wins via greedy two-char
+  # lexing (see the != cases above).
+  - expr: "!true"
+    expected: false
+    type: bool
+
+  - expr: "!false"
+    expected: true
+    type: bool
+
+  - expr: "!state.x"
+    state: { x: 0 }
+    expected: true
+    type: bool
+    note: "mirrors `not state.x`; 0 is falsy"
+
+  - expr: "!(false || true)"
+    expected: false
+    type: bool
+    note: "parens: !(false || true) = !true = false"
+
+  - expr: "!false || false"
+    expected: true
+    type: bool
+    note: "precedence: (!false) || false = true"
+
   # Logical operators — && / || are synonyms for the `and` / `or`
   # keywords: same And/Or tokens, same precedence (&& binds tighter
   # than ||, both looser than comparison and `not`). Pinned across all

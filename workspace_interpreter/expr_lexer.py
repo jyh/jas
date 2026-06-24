@@ -188,7 +188,10 @@ def tokenize(source: str) -> list[Token]:
             continue
 
         # Single-character operators
-        if c == "<":
+        # Prefix logical NOT — != is handled above, so a bare ! is `not`.
+        if c == "!":
+            tokens.append(Token(TokenKind.NOT))
+        elif c == "<":
             tokens.append(Token(TokenKind.LT))
         elif c == ">":
             tokens.append(Token(TokenKind.GT))

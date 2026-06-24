@@ -262,6 +262,8 @@ private func tokenize(_ source: String) -> [Token] {
 
         // Single-character operators
         switch c {
+        // Prefix logical NOT — `!=` is handled above, so a bare `!` is `not`.
+        case "!": tokens.append(Token(kind: .not))
         case "<": tokens.append(Token(kind: .lt))
         case ">": tokens.append(Token(kind: .gt))
         case "=": tokens.append(Token(kind: .equals))

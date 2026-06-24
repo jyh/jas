@@ -261,6 +261,7 @@ let tokenize (source : string) : token array =
       else if c = '|' && next = '|' then begin add_token (mk_tok Tk_or); i := !i + 2 end
       else begin
         (match c with
+         | '!' -> add_token (mk_tok Tk_not)
          | '<' -> add_token (mk_tok Tk_lt)
          | '>' -> add_token (mk_tok Tk_gt)
          | '=' -> add_token (mk_tok Tk_equals)
