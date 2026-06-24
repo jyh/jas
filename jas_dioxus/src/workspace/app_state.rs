@@ -79,6 +79,13 @@ impl TabState {
         tools.insert(ToolKind::PartialSelection, yaml_tool("partial_selection"));
         tools.insert(ToolKind::InteriorSelection, yaml_tool("interior_selection"));
         tools.insert(ToolKind::MagicWand, yaml_tool("magic_wand"));
+        // Transform tools (selection-aware, like MagicWand). Without these the
+        // active_tool resolves to Scale/Rotate/Shear but tab.tools.get returns
+        // None, so the tool draws no overlay and dispatches no gesture — i.e.
+        // selecting Scale/Rotate/Shear did nothing.
+        tools.insert(ToolKind::Scale, yaml_tool("scale"));
+        tools.insert(ToolKind::Rotate, yaml_tool("rotate"));
+        tools.insert(ToolKind::Shear, yaml_tool("shear"));
         tools.insert(ToolKind::Pen, yaml_tool("pen"));
         tools.insert(ToolKind::AddAnchorPoint, yaml_tool("add_anchor_point"));
         tools.insert(ToolKind::DeleteAnchorPoint, yaml_tool("delete_anchor_point"));
