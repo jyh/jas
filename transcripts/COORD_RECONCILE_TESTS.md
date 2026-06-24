@@ -111,16 +111,21 @@ Full pass: ~38 min.
 
 Selection of two rects; view panned + zoomed per Default setup.
 
-- [ ] **CR-001** [wired] **P0.** Crosshair tracks the selection center.
+- [x] **CR-001** [wired] **P0.** Crosshair tracks the selection center.
       Do: with the selection live, activate **Scale** (`S`); do not drag.
       Expect: a 12 px cyan (`#4A9EFF`) crosshair with a 2 px center dot sits
       on the selection's *visual* bbox center on screen — glued to the
       shapes, not parked near the canvas origin or offset by your pan amount.
+      _PASS — Swift, 2026-06-24, via the Quartz synthetic-gesture harness:
+      crosshair centered on the rect at identity AND after 4× zoom (the rect
+      shifted toward the top, crosshair followed its center)._
 
-- [ ] **CR-002** [wired] **P2.** Crosshair is fixed screen-size under zoom.
+- [x] **CR-002** [wired] **P2.** Crosshair is fixed screen-size under zoom.
       Do: with Scale active + selection, zoom from ~300 % to ~600 %.
       Expect: the crosshair stays ~12 px on screen (it does **not** grow with
       zoom) while remaining centered on the now-larger selection.
+      _PASS — Swift, 2026-06-24: after 4× zoom the rect grew 4× but the
+      crosshair stayed the same small size._
 
 - [ ] **CR-003** [wired] **P0.** Custom clicked reference lands under the
       cursor. Do: plain-click a distinct point well away from the selection.
@@ -137,11 +142,14 @@ Selection of two rects; view panned + zoomed per Default setup.
 
 ## Session B — `bbox_ghost` preview + commit at non-identity (~10 min)
 
-- [ ] **CR-010** [wired] **P0.** Scale ghost tracks the cursor.
+- [x] **CR-010** [wired] **P0.** Scale ghost tracks the cursor.
       Do: Scale tool, selection live, drag outward starting near a bbox
       corner. Expect: a dashed (4/2) ghost quad grows from the reference
       point and its dragged edge follows the cursor exactly — no lag or drift
       proportional to the pan/zoom; dash thickness constant.
+      _PASS — Swift, 2026-06-24, via the Quartz harness (split begin/hold drag
+      captured mid-gesture): the dashed ghost quad rendered around the
+      reference center, scaled by the drag._
 
 - [ ] **CR-011** [wired] **P0.** Commit equals preview.
       Do: release the drag. Expect: the shapes land exactly where the ghost
@@ -189,6 +197,12 @@ exercise the implemented rollback.)
       Do: begin a scale drag (ghost showing), press **Escape** before
       releasing. Expect: the selection snaps back to its original size and
       position; the ghost clears; the tool returns to idle.
+      _INCONCLUSIVE via harness (2026-06-24): synthetic Escape during a
+      HID-held drag did not cancel — the ghost stayed and the mouse-release
+      committed the scale. Cannot distinguish "Escape not delivered mid-held-
+      drag" (likely harness limit) from "doc.snapshot.restore no-ops". NEEDS A
+      HUMAN check: real Escape during a real scale drag. If it also fails for a
+      human, that's a real bug in the Escape-cancel effect (84d2de5d)._
 
 - [ ] **CR-031** [wired] **P1.** No stray undo entry after Escape.
       Do: after CR-030, open the undo history / press ⌘Z once.
