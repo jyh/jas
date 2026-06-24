@@ -409,7 +409,11 @@ private class Parser {
     func parse() -> Expr? {
         if case .eof = peek() { return nil }
         let node = parseSequence()
-        // Ignore trailing tokens
+        // Strict: a complete expression must consume all its tokens. Leftover
+        // tokens mean malformed input (an unsupported operator that lexed to
+        // error, a stray token, a typo), so reject rather than silently
+        // dropping the tail — matching the Rust / OCaml / Python parsers.
+        guard case .eof = peek() else { return nil }
         return node
     }
 

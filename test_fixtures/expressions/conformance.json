@@ -195,6 +195,21 @@
     "type": "bool"
   },
   {
+    "expr": "1 2",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "true false",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "1 + 2 3",
+    "expected": null,
+    "type": "null"
+  },
+  {
     "expr": "hsb_h(#ff0000)",
     "expected": 0,
     "type": "number"

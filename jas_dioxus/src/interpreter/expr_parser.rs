@@ -120,7 +120,15 @@ impl Parser {
             return None;
         }
         let node = self.parse_sequence();
-        // Ignore trailing tokens rather than failing hard.
+        // Strict: a complete expression must consume all its tokens. Leftover
+        // tokens mean malformed input (an unsupported operator that lexed to
+        // Error, a stray token, a typo), so reject rather than silently
+        // dropping the tail — matching the OCaml and Python parsers. Without
+        // this, `a && b` with an unlexed `&&` would quietly evaluate to just
+        // `a`; the gate corpus pins `1 2` / `1 + 2 3` => null.
+        if !matches!(self.peek(), TokenKind::Eof) {
+            return None;
+        }
         Some(node)
     }
 
