@@ -305,7 +305,7 @@ class YamlTool(CanvasTool):
                 elif render_type == "star":
                     _draw_star_overlay(painter, render, eval_ctx)
                 elif render_type == "buffer_polygon":
-                    _draw_buffer_polygon_overlay(painter, render)
+                    _draw_buffer_polygon_overlay(painter, render, ctx.model)
                 elif render_type == "buffer_polyline":
                     _draw_buffer_polyline_overlay(
                         painter, render, eval_ctx, ctx.model)
@@ -313,7 +313,7 @@ class YamlTool(CanvasTool):
                     _draw_pen_overlay(painter, render, eval_ctx, ctx.model)
                 elif render_type == "partial_selection_overlay":
                     _draw_partial_selection_overlay(
-                        painter, render, eval_ctx, ctx.document)
+                        painter, render, eval_ctx, ctx.model)
                 elif render_type == "oval_cursor":
                     _draw_oval_cursor_overlay(
                         painter, render, eval_ctx, ctx.model)
@@ -750,11 +750,19 @@ def _draw_closed_polygon_from_points(painter, points, render: dict) -> None:
         painter.drawPath(path)
 
 
-def _draw_buffer_polygon_overlay(painter, render: dict) -> None:
+def _draw_buffer_polygon_overlay(painter, render: dict, model) -> None:
     name = render.get("buffer") if isinstance(render.get("buffer"), str) else ""
     if not name:
         return
-    points = point_buffers.points(name)
+    # Buffer points are document-space (the Lasso point buffer is fed
+    # from event.doc_x/doc_y); the overlay draws post-restore in viewport
+    # pixels, so map each point through the active view transform here.
+    # Mirrors Rust draw_buffer_polygon_overlay.
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+    points = [(px * zoom + offx, py * zoom + offy)
+              for px, py in point_buffers.points(name)]
     _draw_closed_polygon_from_points(painter, points, render)
 
 
@@ -831,13 +839,30 @@ def _draw_star_overlay(painter, render: dict, eval_ctx: dict) -> None:
 
 
 def _draw_partial_selection_overlay(painter, render: dict, eval_ctx: dict,
-                                    document) -> None:
+                                    model) -> None:
     """Partial Selection tool overlay: blue handle circles on every
-    selected Path plus a blue rubber-band rectangle in marquee mode."""
+    selected Path plus a blue rubber-band rectangle in marquee mode.
+
+    Anchor + handle positions come back from control_points and
+    path_handle_positions in document coordinates; the overlay draws
+    post-restore in viewport pixels, so every anchor coordinate AND
+    handle endpoint is mapped through the active view transform
+    (d * zoom + offset). Marker radii and line widths stay in viewport
+    pixels. The marquee rectangle is screen-space (cursor coords) and
+    is left raw. Mirrors Rust draw_partial_selection_overlay.
+    """
     from PySide6.QtCore import QPointF, QRectF, Qt
     from PySide6.QtGui import QBrush, QColor, QPen
     from geometry.element import Path as PathElem
     from geometry.element import control_points, path_handle_positions
+
+    document = model.document
+    zoom = float(getattr(model, "zoom_level", 1.0))
+    offx = float(getattr(model, "view_offset_x", 0.0))
+    offy = float(getattr(model, "view_offset_y", 0.0))
+
+    def to_vp(x, y):
+        return (x * zoom + offx, y * zoom + offy)
 
     sel_color = QColor(0, 120, 255)
     for es in document.selection:
@@ -853,13 +878,14 @@ def _draw_partial_selection_overlay(painter, render: dict, eval_ctx: dict,
             for h in (h_in, h_out):
                 if h is None:
                     continue
-                hx, hy = h
+                vax, vay = to_vp(ax, ay)
+                vhx, vhy = to_vp(h[0], h[1])
                 painter.setPen(QPen(sel_color, 1))
                 _clear_brush(painter)
-                painter.drawLine(ax, ay, hx, hy)
+                painter.drawLine(vax, vay, vhx, vhy)
                 painter.setBrush(QBrush(QColor(255, 255, 255)))
-                painter.drawEllipse(QPointF(hx, hy), 3.0, 3.0)
-    # Marquee rectangle.
+                painter.drawEllipse(QPointF(vhx, vhy), 3.0, 3.0)
+    # Marquee rectangle (screen-space cursor coords — left raw).
     mode = _eval_string_field(eval_ctx, render.get("mode"))
     if mode == "marquee":
         sx = _eval_number_field(eval_ctx, render.get("marquee_start_x"))

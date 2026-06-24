@@ -543,11 +543,25 @@ let draw_closed_polygon_from_points (cr : Cairo.context)
     end
 
 let draw_buffer_polygon_overlay (cr : Cairo.context)
-    (render : Yojson.Safe.t) : unit =
+    (render : Yojson.Safe.t) (model : Model.model) : unit =
   let name = render_string render "buffer" in
   if name = "" then ()
   else
-    let points = Point_buffers.points name in
+    (* The lasso buffer points are document-space (the Lasso writes
+       event.doc_x/doc_y); this overlay draws post-restore in screen
+       space, so map every point through the active view transform
+       d *. z +. off before building the closed polygon. The shared
+       helper is also fed by the regular-polygon and star overlays
+       whose inputs are already screen-space, so the mapping is done
+       here on the lasso points only. Mirrors the Rust
+       draw_buffer_polygon_overlay. *)
+    let z = model#zoom_level in
+    let ox = model#view_offset_x in
+    let oy = model#view_offset_y in
+    let points =
+      List.map (fun (px, py) -> (px *. z +. ox, py *. z +. oy))
+        (Point_buffers.points name)
+    in
     draw_closed_polygon_from_points cr points render
 
 let draw_buffer_polyline_overlay (cr : Cairo.context)
@@ -631,22 +645,35 @@ let draw_star_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     selected Path plus a blue rubber-band rectangle in marquee mode. *)
 let draw_partial_selection_overlay (cr : Cairo.context)
     (render : Yojson.Safe.t) (eval_ctx : Yojson.Safe.t)
-    (doc : Document.document) : unit =
+    (model : Model.model) : unit =
   let (sr, sg, sb) = (0.0, 120.0 /. 255.0, 1.0) in
+  let doc = model#document in
+  (* Anchor and handle positions come back from control_points and
+     path_handle_positions in document coordinates; this overlay draws
+     post-restore in screen space, so map every control point AND
+     handle endpoint through the active view transform d *. z +. off.
+     Marker radii and line widths stay in viewport pixels. Mirrors the
+     Rust draw_partial_selection_overlay. *)
+  let z = model#zoom_level in
+  let ox = model#view_offset_x in
+  let oy = model#view_offset_y in
+  let to_vp (x, y) = (x *. z +. ox, y *. z +. oy) in
   Document.PathMap.iter (fun path _ ->
     match Document.get_element doc path with
     | Element.Path pe ->
       let anchors = Element.control_points (Element.Path pe) in
       List.iteri (fun ai (ax, ay) ->
+        let (vax, vay) = to_vp (ax, ay) in
         let (h_in_opt, h_out_opt) = Element.path_handle_positions pe.d ai in
         let draw_handle = function
           | Some (hx, hy) ->
+            let (vhx, vhy) = to_vp (hx, hy) in
             Cairo.set_source_rgba cr sr sg sb 1.0;
             Cairo.set_line_width cr 1.0;
-            Cairo.move_to cr ax ay;
-            Cairo.line_to cr hx hy;
+            Cairo.move_to cr vax vay;
+            Cairo.line_to cr vhx vhy;
             Cairo.stroke cr;
-            Cairo.arc cr hx hy ~r:3.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+            Cairo.arc cr vhx vhy ~r:3.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
             Cairo.set_source_rgba cr 1.0 1.0 1.0 1.0;
             Cairo.fill_preserve cr;
             Cairo.set_source_rgba cr sr sg sb 1.0;
@@ -1388,7 +1415,9 @@ class yaml_tool (spec : tool_spec) = object (_self)
         | "line" -> draw_line_overlay cr overlay.render eval_ctx
         | "polygon" -> draw_regular_polygon_overlay cr overlay.render eval_ctx
         | "star" -> draw_star_overlay cr overlay.render eval_ctx
-        | "buffer_polygon" -> draw_buffer_polygon_overlay cr overlay.render
+        | "buffer_polygon" ->
+          draw_buffer_polygon_overlay cr overlay.render
+            ctx.controller#model
         | "buffer_polyline" ->
           draw_buffer_polyline_overlay cr overlay.render eval_ctx
             ctx.controller#model
@@ -1397,7 +1426,7 @@ class yaml_tool (spec : tool_spec) = object (_self)
             ctx.controller#model
         | "partial_selection_overlay" ->
           draw_partial_selection_overlay cr overlay.render eval_ctx
-            ctx.controller#document
+            ctx.controller#model
         | "oval_cursor" ->
           draw_oval_cursor_overlay cr overlay.render eval_ctx
             ctx.controller#model

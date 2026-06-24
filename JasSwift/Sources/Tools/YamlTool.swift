@@ -286,7 +286,8 @@ final class YamlTool: CanvasTool {
             case "line": drawLineOverlay(cgCtx, render, evalCtx)
             case "polygon": drawPolygonOverlay(cgCtx, render, evalCtx)
             case "star": drawStarOverlay(cgCtx, render, evalCtx)
-            case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
+            case "buffer_polygon":
+                drawBufferPolygonOverlay(cgCtx, render, model: ctx.model)
             case "buffer_polyline":
                 drawBufferPolylineOverlay(cgCtx, render, evalCtx, model: ctx.model)
             case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx, model: ctx.model)
@@ -688,11 +689,18 @@ private func drawStarOverlay(
 /// Stroke/fill a closed polygon made of the named point buffer's
 /// points. Used by the Lasso tool's overlay.
 private func drawBufferPolygonOverlay(
-    _ cgCtx: CGContext, _ spec: [String: Any]
+    _ cgCtx: CGContext, _ spec: [String: Any], model: Model
 ) {
     guard let name = spec["buffer"] as? String else { return }
-    let pts = pointBuffersPoints(name)
-    guard pts.count >= 2 else { return }
+    let raw = pointBuffersPoints(name)
+    guard raw.count >= 2 else { return }
+    // Buffer points are in document-space; map to viewport pixels here
+    // because the overlay draws post-restore (identity transform).
+    // Mirrors jas_dioxus draw_buffer_polygon_overlay.
+    let z = model.zoomLevel
+    let ox = model.viewOffsetX
+    let oy = model.viewOffsetY
+    let pts = raw.map { ($0.0 * z + ox, $0.1 * z + oy) }
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")
     strokePolygonOverlay(cgCtx, pts, style)
 }
@@ -801,34 +809,51 @@ private func drawPartialSelectionOverlay(
     cgCtx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
     cgCtx.setLineWidth(1)
 
+    // Anchor + handle positions come back from controlPointPositions /
+    // pathHandlePositions in document coordinates. The overlay draws
+    // post-restore (identity transform), so map each point through the
+    // active view transform: viewport_x = doc_x * zoom + view_offset_x.
+    // Mirrors jas_dioxus draw_partial_selection_overlay. Marker radii
+    // and line widths stay in viewport pixels. Without this the handles
+    // land far off-screen whenever view_offset != 0.
+    let z = model.zoomLevel
+    let ox = model.viewOffsetX
+    let oy = model.viewOffsetY
+
     // Anchor + handle markers on every selected Path.
     for es in model.document.selection {
         guard case .path(let pe) = model.document.getElement(es.path) else { continue }
         let anchors = Element.path(pe).controlPointPositions
         for (ai, pt) in anchors.enumerated() {
+            let vax = pt.0 * z + ox
+            let vay = pt.1 * z + oy
             let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
             if let h = hIn {
-                cgCtx.move(to: CGPoint(x: pt.0, y: pt.1))
-                cgCtx.addLine(to: CGPoint(x: h.0, y: h.1))
+                let vhx = h.0 * z + ox
+                let vhy = h.1 * z + oy
+                cgCtx.move(to: CGPoint(x: vax, y: vay))
+                cgCtx.addLine(to: CGPoint(x: vhx, y: vhy))
                 cgCtx.strokePath()
-                cgCtx.fillEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                cgCtx.fillEllipse(in: CGRect(x: vhx - 2, y: vhy - 2,
                                               width: 4, height: 4))
-                cgCtx.strokeEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                cgCtx.strokeEllipse(in: CGRect(x: vhx - 2, y: vhy - 2,
                                                 width: 4, height: 4))
             }
             if let h = hOut {
-                cgCtx.move(to: CGPoint(x: pt.0, y: pt.1))
-                cgCtx.addLine(to: CGPoint(x: h.0, y: h.1))
+                let vhx = h.0 * z + ox
+                let vhy = h.1 * z + oy
+                cgCtx.move(to: CGPoint(x: vax, y: vay))
+                cgCtx.addLine(to: CGPoint(x: vhx, y: vhy))
                 cgCtx.strokePath()
-                cgCtx.fillEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                cgCtx.fillEllipse(in: CGRect(x: vhx - 2, y: vhy - 2,
                                               width: 4, height: 4))
-                cgCtx.strokeEllipse(in: CGRect(x: h.0 - 2, y: h.1 - 2,
+                cgCtx.strokeEllipse(in: CGRect(x: vhx - 2, y: vhy - 2,
                                                 width: 4, height: 4))
             }
             // Anchor square.
-            cgCtx.fill(CGRect(x: pt.0 - 2.5, y: pt.1 - 2.5,
+            cgCtx.fill(CGRect(x: vax - 2.5, y: vay - 2.5,
                               width: 5, height: 5))
-            cgCtx.stroke(CGRect(x: pt.0 - 2.5, y: pt.1 - 2.5,
+            cgCtx.stroke(CGRect(x: vax - 2.5, y: vay - 2.5,
                                 width: 5, height: 5))
         }
     }
