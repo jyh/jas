@@ -288,7 +288,7 @@ final class YamlTool: CanvasTool {
             case "star": drawStarOverlay(cgCtx, render, evalCtx)
             case "buffer_polygon": drawBufferPolygonOverlay(cgCtx, render)
             case "buffer_polyline":
-                drawBufferPolylineOverlay(cgCtx, render, evalCtx)
+                drawBufferPolylineOverlay(cgCtx, render, evalCtx, model: ctx.model)
             case "pen_overlay": drawPenOverlay(cgCtx, render, evalCtx, model: ctx.model)
             case "partial_selection_overlay":
                 drawPartialSelectionOverlay(cgCtx, render, evalCtx,
@@ -866,10 +866,21 @@ private func evaluateOverlayBool(_ field: Any?, _ ctx: [String: Any]) -> Bool {
 /// close-at-release preview per PAINTBRUSH_TOOL.md §Overlay.
 private func drawBufferPolylineOverlay(
     _ cgCtx: CGContext, _ spec: [String: Any],
-    _ evalCtx: [String: Any]
+    _ evalCtx: [String: Any], model: Model
 ) {
     guard let name = spec["buffer"] as? String else { return }
-    let pts = pointBuffersPoints(name)
+    // Buffer points are in document-space (Paintbrush writes
+    // event.doc_x/doc_y and add_path_from_buffer commits them directly);
+    // this overlay draws post-restore in screen space, so map each point
+    // through the active view transform. Mirrors jas_dioxus
+    // draw_buffer_polyline. Without this the stroke preview sits at the
+    // doc coords interpreted as screen — offset by the view pan/zoom.
+    let z = model.zoomLevel
+    let ox = model.viewOffsetX
+    let oy = model.viewOffsetY
+    let pts = pointBuffersPoints(name).map { p -> (Double, Double) in
+        (p.0 * z + ox, p.1 * z + oy)
+    }
     guard let first = pts.first, pts.count >= 2 else { return }
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")
     cgCtx.move(to: CGPoint(x: first.0, y: first.1))

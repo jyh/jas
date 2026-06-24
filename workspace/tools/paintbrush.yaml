@@ -60,7 +60,7 @@ handlers:
   on_mousedown:
     - "doc.snapshot": {}
     - "buffer.clear": { buffer: "paintbrush" }
-    - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+    - "buffer.push": { buffer: "paintbrush", x: "event.doc_x", y: "event.doc_y" }
     - set: { tool.paintbrush.mode: "'drawing'" }
     # Alt + edit_selected_paths opt-in: try to promote to edit mode.
     # edit_start leaves mode='drawing' when no selected Path is
@@ -68,15 +68,15 @@ handlers:
     - if: "event.modifiers.alt && state.paintbrush_edit_selected_paths"
       then:
         - "doc.paintbrush.edit_start":
-            x: "event.x"
-            y: "event.y"
+            x: "event.doc_x"
+            y: "event.doc_y"
             within: "state.paintbrush_edit_within"
 
   on_mousemove:
     - set: { tool.paintbrush.alt_held: "event.modifiers.alt" }
     - if: "tool.paintbrush.mode == 'drawing' || tool.paintbrush.mode == 'edit'"
       then:
-        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "paintbrush", x: "event.doc_x", y: "event.doc_y" }
 
   on_mouseup:
     - if: "tool.paintbrush.mode == 'drawing'"
@@ -84,7 +84,7 @@ handlers:
         # Final point on release, mirroring Pencil's behaviour — without
         # this a click (press+release at same point) leaves a 1-point
         # buffer that fit_curve rejects.
-        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "paintbrush", x: "event.doc_x", y: "event.doc_y" }
         - "doc.add_path_from_buffer":
             buffer: "paintbrush"
             # fidelity (1..5) → fit_error: 1→0.5, else (n-1)*2.5.
@@ -99,7 +99,7 @@ handlers:
             close: "event.modifiers.alt"
     - if: "tool.paintbrush.mode == 'edit'"
       then:
-        - "buffer.push": { buffer: "paintbrush", x: "event.x", y: "event.y" }
+        - "buffer.push": { buffer: "paintbrush", x: "event.doc_x", y: "event.doc_y" }
         - "doc.paintbrush.edit_commit":
             buffer: "paintbrush"
             fit_error: "if state.paintbrush_fidelity == 1 then 0.5 else (state.paintbrush_fidelity - 1) * 2.5"
