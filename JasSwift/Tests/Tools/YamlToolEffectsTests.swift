@@ -1381,3 +1381,78 @@ private func artboardModel(_ artboards: [Artboard]) -> Model {
     )
     #expect(model.document.selection.isEmpty)
 }
+
+// MARK: - Partial Selection control-point DRAG (SEL-130 CP translate)
+//
+// Dragging a selected control point is `doc.translate_selection` over a
+// PARTIAL selection: `Controller.moveSelection` calls
+// `elem.moveControlPoints(es.kind, …)`, so ONLY the selected CPs move. A rect's
+// corners are not independently movable, so these use a triangle Path whose
+// anchors are cp0=(0,0), cp1=(100,0), cp2=(50,100)
+// (Element.controlPointPositions == pathAnchorPoints(d)).
+
+private func trianglePathModel() -> Model {
+    let tri: Element = .path(Path(
+        d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(50, 100), .closePath],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+    return Model(document: Document(
+        layers: [Layer(children: [tri])], selectedLayer: 0, selection: []))
+}
+
+private func cpsEqual(_ a: (Double, Double), _ x: Double, _ y: Double) -> Bool {
+    abs(a.0 - x) < 1e-9 && abs(a.1 - y) < 1e-9
+}
+
+/// SEL-130: dragging a single selected control point translates ONLY that
+/// anchor; the other anchors of the same path stay put.
+@Test func partialSelectionCpDragTranslatesOnlySelectedControlPoint() {
+    let model = trianglePathModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Select anchor 0 = (0,0).
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.first { $0.path == [0, 0] }?.kind.contains(0) == true)
+    // Drag that CP by (+20, +30).
+    runEffects(
+        [["doc.translate_selection": ["dx": 20, "dy": 30]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let cps = model.document.layers[0].children[0].controlPointPositions
+    #expect(cps.count == 3)
+    #expect(cpsEqual(cps[0], 20, 30))     // anchor 0 moved …
+    #expect(cpsEqual(cps[1], 100, 0))     // … anchors 1 and 2 unchanged
+    #expect(cpsEqual(cps[2], 50, 100))
+    // Selection preserved (still the same single CP).
+    #expect(model.document.selection.first { $0.path == [0, 0] }?.kind.count(total: 3) == 1)
+}
+
+/// SEL-130: dragging a multi-CP selection translates EVERY selected anchor by
+/// the same delta and leaves the unselected anchor put.
+@Test func partialSelectionCpDragTranslatesAllSelectedControlPoints() {
+    let model = trianglePathModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Select anchor 0 = (0,0), then shift-add anchor 2 = (50,100).
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    runEffects(
+        [["doc.path.probe_partial_hit":
+            ["x": 50, "y": 100, "hit_radius": 8, "shift": true]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.first { $0.path == [0, 0] }?.kind.count(total: 3) == 2)
+    // Drag the pair by (+10, -10).
+    runEffects(
+        [["doc.translate_selection": ["dx": 10, "dy": -10]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let cps = model.document.layers[0].children[0].controlPointPositions
+    #expect(cpsEqual(cps[0], 10, -10))    // anchor 0 moved
+    #expect(cpsEqual(cps[1], 100, 0))     // anchor 1 NOT selected → unchanged
+    #expect(cpsEqual(cps[2], 60, 90))     // anchor 2 moved
+}

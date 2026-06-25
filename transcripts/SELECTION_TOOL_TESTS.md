@@ -214,15 +214,16 @@ just which element is touched):
 | SEL-105 marquee selects only the enclosed CP (partial granularity) | `partialSelectionMarqueeSelectsOnlyEnclosedControlPoint` | PASS |
 | SEL-105 marquee over all corners selects every CP (isAll) | `partialSelectionMarqueeSelectsAllEnclosedControlPoints` | PASS |
 | SEL-106 empty marquee clears the CP selection | `partialSelectionEmptyMarqueeClearsSelection` | PASS |
+| SEL-130 CP drag translates ONLY the selected anchor(s) | `partialSelectionCpDragTranslatesOnlySelectedControlPoint`, `…AllSelectedControlPoints` | PASS |
 | CP-hit → moving_pending / miss → marquee mode | `docPathProbePartialHit*` | PASS |
 | corner→smooth / idle / tiny-move no-ops | `docPathCommitAnchorEdit*` | PASS |
 | registration (toolbar/registry/alternates) | `Toolbar*`, `CanvasToolRegistry*` | PASS |
 
-Still NOT covered at the seam (narrower remaining gap): the actual CP-DRAG
-TRANSLATE position (`doc.move_path_point` moving a selected anchor), handle-drag
-bezier MIRROR semantics (SEL-130s/306), and the partial-selection OVERLAY render
-(anchors+handles, SEL-151 visual). Those need either a CP-translate position
-test (writable) or GUI/hands-on (the overlay one).
+Still NOT covered at the seam (narrowed gap): handle-drag bezier MIRROR
+semantics (SEL-131/306 — moving a smooth anchor's handle reflects the opposite
+handle) and the partial-selection OVERLAY render (anchors+handles, SEL-151
+visual). The overlay one needs GUI/hands-on; the handle-mirror one is writable
+as a `doc.move_path_handle` position test on a curved path.
 
 **Swift gaps (vs the Rust harness run):** anything purely visual — cursor
 glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
