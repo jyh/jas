@@ -9125,6 +9125,48 @@
       }
     },
     {
+      "key": "Shift+V",
+      "action": "select_tool",
+      "params": {
+        "tool": "interior_selection"
+      }
+    },
+    {
+      "key": "Shift+M",
+      "action": "select_tool",
+      "params": {
+        "tool": "rounded_rect"
+      }
+    },
+    {
+      "key": "Shift+G",
+      "action": "select_tool",
+      "params": {
+        "tool": "polygon"
+      }
+    },
+    {
+      "key": "Shift+K",
+      "action": "select_tool",
+      "params": {
+        "tool": "star"
+      }
+    },
+    {
+      "key": "Shift+S",
+      "action": "select_tool",
+      "params": {
+        "tool": "shear"
+      }
+    },
+    {
+      "key": "Shift+N",
+      "action": "select_tool",
+      "params": {
+        "tool": "smooth"
+      }
+    },
+    {
       "key": "D",
       "action": "reset_fill_stroke"
     },
@@ -21327,6 +21369,7 @@
       "id": "interior_selection",
       "cursor": "hollow_arrow_plus",
       "menu_label": "Interior Selection Tool",
+      "shortcut": "Shift+V",
       "state": {
         "mode": {
           "default": "idle",
@@ -23116,6 +23159,7 @@
       "id": "polygon",
       "cursor": "crosshair",
       "menu_label": "Polygon Tool",
+      "shortcut": "Shift+G",
       "state": {
         "mode": {
           "default": "idle",
@@ -23664,6 +23708,7 @@
       "id": "rounded_rect",
       "cursor": "crosshair",
       "menu_label": "Rounded Rectangle Tool",
+      "shortcut": "Shift+M",
       "state": {
         "mode": {
           "default": "idle",
@@ -24559,6 +24604,7 @@
       "id": "shear",
       "cursor": "crosshair",
       "menu_label": "Shear Tool",
+      "shortcut": "Shift+S",
       "tool_options_dialog": "shear_options",
       "tool_options_dialog_on_alt_click": true,
       "state": {
@@ -24791,6 +24837,7 @@
       "id": "smooth",
       "cursor": "crosshair",
       "menu_label": "Smooth Tool",
+      "shortcut": "Shift+N",
       "state": {
         "smoothing": {
           "default": false
@@ -24853,6 +24900,7 @@
       "id": "star",
       "cursor": "crosshair",
       "menu_label": "Star Tool",
+      "shortcut": "Shift+K",
       "state": {
         "mode": {
           "default": "idle",

@@ -55,6 +55,13 @@
       { "name": "tool_artboard",          "chord": { "key": "O", "shift": true } },
       { "name": "tool_artboard_alias",    "chord": { "key": "O" } },
 
+      { "name": "tool_interior_selection", "chord": { "key": "V", "shift": true } },
+      { "name": "tool_rounded_rect",      "chord": { "key": "M", "shift": true } },
+      { "name": "tool_polygon",           "chord": { "key": "G", "shift": true } },
+      { "name": "tool_star",              "chord": { "key": "K", "shift": true } },
+      { "name": "tool_shear",             "chord": { "key": "S", "shift": true } },
+      { "name": "tool_smooth",            "chord": { "key": "N", "shift": true } },
+
       { "name": "fill_reset",             "chord": { "key": "D" } },
       { "name": "fill_toggle_on_top",     "chord": { "key": "X" } },
       { "name": "fill_swap",              "chord": { "key": "X", "shift": true } },

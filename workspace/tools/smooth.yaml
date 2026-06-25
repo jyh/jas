@@ -14,6 +14,7 @@
 id: smooth
 cursor: crosshair
 menu_label: "Smooth Tool"
+shortcut: "Shift+N"
 
 state:
   smoothing: { default: false }

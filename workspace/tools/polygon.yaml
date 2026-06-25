@@ -15,6 +15,7 @@
 id: polygon
 cursor: crosshair
 menu_label: "Polygon Tool"
+shortcut: "Shift+G"
 
 state:
   mode:
