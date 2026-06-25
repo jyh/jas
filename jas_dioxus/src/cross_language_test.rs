@@ -767,6 +767,15 @@ mod tests {
         // don't matter, and the result is unambiguously both elements:
         // [{kind:"all", path:[0,0]}, {kind:"all", path:[0,1]}].
         "select_marquee.json",
+        // Blob Brush paint with an app-level fill precondition (the
+        // hollow-blob regression gate). The case sets `app_state`:
+        // {fill_color:#ff0000, blob_brush_size:10}, which the runner
+        // routes through the production CanvasTool::sync_global_state
+        // bridge before the gesture — exactly as the canvas does. The
+        // committed Path MUST carry fill=red; before the bridge existed
+        // the blob committed fill=null (hollow). Pins the white/null fill
+        // contract cross-language. See BLOB_BRUSH_TOOL.md.
+        "blob_paint_fill.json",
     ];
 
     /// Build the YamlTool for `tool_id` from the embedded workspace
@@ -799,6 +808,15 @@ mod tests {
         let tool_id = tc["tool"].as_str().unwrap();
         let mut tool = build_gesture_tool(tool_id);
         tool.activate(&mut model);
+
+        // Optional `app_state` precondition: route the case's app-level
+        // state (fill_color, blob_brush_*) through the SAME production
+        // bridge the canvas uses (CanvasTool::sync_global_state in
+        // workspace/app.rs), so the corpus exercises the real path. A
+        // blob paint without this would commit fill=None (hollow).
+        if let Some(app_state) = tc.get("app_state").and_then(|v| v.as_object()) {
+            tool.sync_global_state(app_state);
+        }
 
         for ev in tc["events"].as_array().unwrap() {
             let x = ev["x"].as_f64().unwrap();
