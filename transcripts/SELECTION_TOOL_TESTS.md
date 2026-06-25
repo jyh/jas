@@ -80,8 +80,9 @@ selection handles / CP fills / overlays appear in screenshots.
 - I: SEL-151 (anchor+handle overlay)
 - J: SEL-170 (=054), 172 (=135)
 - Plus: built the Pen curved-path fixture via the harness; Ctrl-A select-all (objects
-  and CPs) confirmed. SEL-131 shows smooth-symmetric handle reflection = the known
-  SEL-306 spec/impl disagreement (Rust mirrors; spec says cusp), not a new bug.
+  and CPs) confirmed. SEL-131 shows smooth-symmetric handle reflection = the SHIPPED behavior in
+  every app (RESOLVED 2026-06-25: mirror is canonical; the prose spec + the
+  SEL-306 row were updated from "cusp" to "mirror" to match the code).
 
 **FLAKY via harness (synthetic-input artifacts, NOT app bugs):**
 - C: SEL-034 (up-left marquee), 035 (far marquee) — the synthetic multi-segment
@@ -223,15 +224,13 @@ just which element is touched):
 Still NOT covered at the seam (only the visual case left): the partial-selection
 OVERLAY render (anchors+handles drawn, SEL-151 visual) — needs GUI/hands-on.
 
-> **SEL-306 note:** the handle-drag tests pin the SHIPPED smooth-symmetric
-> MIRROR behavior (opposite handle reflects through the anchor), which matches
-> Rust/Flask (`geometry::move_path_handle`) and is now gate-pinned in Swift.
-> This CONTRADICTS the prose spec (SELECTION_TOOL.md §"cusp") and the SEL-306
-> manual-test expectation below (still worded "in-handle stays put / cusp").
-> Docs and code disagree across ALL apps (long-known, recorded at the §Automation
-> coverage update). Reconcile: update the prose + the SEL-306 expected-result to
-> "smooth-symmetric mirror" so docs match code, OR (if cusp is truly intended)
-> change `move_path_handle` in all 5 apps — a behavior change, not a doc edit.
+> **SEL-306 (RESOLVED 2026-06-25):** the handle-drag tests pin the SHIPPED
+> smooth-symmetric MIRROR behavior (opposite handle reflects through the anchor,
+> keeping its own length), matching Rust/Flask (`geometry::move_path_handle`) and
+> now gate-pinned in Swift. Mirror is canonical (user decision): the prose spec
+> (SELECTION_TOOL.md) and the SEL-306 expected-result below were updated from
+> "cusp" to "smooth-symmetric mirror" so docs match code across all 5 apps. The
+> long-standing docs-vs-code disagreement is closed.
 
 **Swift gaps (vs the Rust harness run):** anything purely visual — cursor
 glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
@@ -690,13 +689,13 @@ If any P0 here fails, stop and flag.
               anchor.
       — last: 2026-05-01 (Rust)
 
-- [x] **SEL-131** [wired] Dragging a latched handle moves only the
-  single handle (cusp).
+- [x] **SEL-131** [wired] Dragging a latched handle reflects the
+  opposite handle (smooth-symmetric mirror).
       Setup: SEL-102 state — handle latched.
       Do: Drag 40 px perpendicular to the tangent.
       Expect: The dragged handle moves; the opposite handle of the same
-              anchor stays put (not mirrored). Curve shape changes on
-              just one side.
+              anchor reflects through the anchor (stays collinear, keeps
+              its own length), so the anchor stays a smooth point.
       — last: 2026-05-01 (Rust)
 
 - [x] **SEL-132** [wired] Alt+drag on a CP duplicates the path.
@@ -942,11 +941,12 @@ If any P0 here fails, stop and flag.
       - [ ] Python     last: —
       - [x] Flask      last: 2026-04-27  · note: implemented Group / Ungroup actions (JAS.groupSelection / ungroupSelection routed through app.js dispatch), split hit_test into a flat layer-children variant + recursive hit_test_deep, and dispatched doc.partial_select_in_rect for the marquee. Interior Selection tool has no shortcut binding; set `state.active_tool='interior_selection'` via devtools.
 
-- **SEL-306** [wired] Partial Selection handle-drag cusp semantics.
+- **SEL-306** [wired] Partial Selection handle-drag mirror semantics.
       Do: Curved path; Partial Selection; drag a smooth anchor's
           out-handle.
-      Expect: Out-handle moves, in-handle stays put (cusp behavior) in
-              every app.
+      Expect: Out-handle moves, in-handle reflects through the anchor
+              (smooth-symmetric mirror) in every app. Gate-pinned in
+              Swift by partialSelectionHandleDrag* and in Rust.
       - [ ] Rust       last: —
       - [ ] Swift      last: —
       - [ ] OCaml      last: —

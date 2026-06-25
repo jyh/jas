@@ -67,8 +67,9 @@ it's been drawn.
 **Hit-test priority on mousedown:**
 
 1. **Bezier handle on a selected Path** — latches the handle for
-   dragging. Moves that handle independently of its opposite
-   handle (the "cusp" operation).
+   dragging. Moves that handle and reflects the opposite handle
+   through the anchor (smooth-symmetric mirror), keeping the
+   opposite handle's own length so the anchor stays a smooth point.
 2. **Control point on any unlocked element** — makes the CP the
    selection. Plain click replaces, Shift+click toggles.
 3. **Empty space** — starts a marquee that selects whatever CPs
@@ -83,9 +84,11 @@ it's been drawn.
 - Alt+drag mirrors Selection's Alt+drag: copies the selection on
   the first move, translates the copies on every subsequent
   move.
-- Dragging a latched handle updates only that side's tangent —
-  neither mirror nor opposite adjustments. Threshold for a
-  handle drag is 0.5 px (tighter than the CP-move threshold).
+- Dragging a latched handle reflects the OPPOSITE handle through
+  the anchor (smooth-symmetric mirror — `move_path_handle`): the
+  opposite handle stays collinear through the anchor and keeps its
+  own length, so the anchor remains a smooth point. Threshold for
+  a handle drag is 0.5 px (tighter than the CP-move threshold).
 
 **Overlay:** always on while the tool is active. Shows anchor
 squares and in/out handle bars on every selected Path, plus the
