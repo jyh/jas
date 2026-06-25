@@ -172,6 +172,56 @@ tool-switch / Ctrl-Z immediately after a synthetic drag (focus settle).
 
 ---
 
+## Swift automated-test coverage
+
+_2026-06-25 — JasSwift, `swift test`._ There is NO Swift GUI harness (the
+Rust `jas_gui_harness.py` is browser/Quartz-specific), so the Swift Selection
+suite is verified at the **seam** instead: tests drive the real Selection YAML
+spec (loaded from `workspace.json`) through `YamlTool.onPress/onMove/onRelease/
+onKeyEvent` and the `runGestureModel` gesture seam, then assert document /
+selection / journal state DETERMINISTICALLY. This is stricter than the Rust
+harness's visual checks on the behaviors it covers, but it cannot see purely
+visual things (cursor glyphs, overlay legibility, theming).
+
+**Main Selection tool — ALL PASS** (`YamlSelectionToolTests` + gesture/coalesce):
+
+| SEL behavior | Swift test | Result |
+|---|---|---|
+| Tool config (V shortcut, arrow cursor) | `yamlSelectionToolLoadsFromWorkspace` | PASS |
+| A: SEL-001/002 click selects | `yamlSelectionClickOnElementSelects` | PASS |
+| A: SEL-005 click empty clears | `yamlSelectionClickEmptySpaceClears` | PASS |
+| B: SEL-010/011/012 shift-click add/remove | `yamlSelectionShiftClickTogglesSelection` | PASS |
+| C: SEL-030/031 marquee selects | `yamlSelectionMarqueeReleaseSelectsElements` | PASS |
+| D: SEL-050 drag-move | `yamlSelectionDragMovesSelectedElement` | PASS |
+| D: SEL-052 alt-drag copy (PATH A) | `yamlSelectionAltDragCopiesSelection`, `gestureAltAtPressCopyIsOneUndoStep` | PASS |
+| J: SEL-171/136 alt-copy ONE undo step (PATH B) | `gestureAltMidDragCopyIsOneUndoStep` | PASS |
+| D/H: SEL-054/135 drag + undo lock-step | `dragCoalesce*`, `operationUndoRedoLaws`, `modelUndoRedo` | PASS |
+| I: SEL-150/151 overlay rendering | `yamlToolDrawOverlay*`, `parseOverlay*` | PASS |
+| E: SEL-070 Escape idles mid-gesture | `yamlSelectionEscapeIdlesState` | PASS |
+
+SEL-171 (alt-copy undo) is GREEN here — Swift gets today's coalescer fix
+end-to-end (the case that was inconclusive in the Rust GUI run). PATH B works
+because the `on_move` seam now carries `alt` (commit 11af3b4e).
+
+**Partial / Interior Selection — PARTIAL coverage, all green:** registration
+(`partialSelection`/`interiorSelection` present in toolbar/registry/alternates)
+plus seam-level mode/anchor-edit cases in `YamlToolEffectsTests`:
+`docPathProbePartialHitMarqueeOnMiss` (CP miss → marquee, ~SEL-105 start),
+`docPathProbePartialHitMovingPendingOnCpHit` (CP hit → moving_pending, ~SEL-130
+start), `docPathCommitAnchorEditCornerToSmoothDrag` (~SEL-130s corner→smooth),
+and the idle/tiny-move no-ops. NO dedicated tests yet for full CP-click-select /
+CP-marquee-select / CP-designate / handle-drag-mirror (SEL-100s/130s/151) —
+those remain GUI/hands-on (or Rust-harness) territory.
+
+**Swift gaps (vs the Rust harness run):** anything purely visual — cursor
+glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
+(SEL-190/192), locked-element via Layers panel (SEL-017/055), sub-pixel
+tolerances (SEL-107/133/134) — plus the CP-level Partial-Selection behaviors
+above. The behavioral core (Sessions A/B/C/D/E/I/J for the main tool) is fully
+green at the seam.
+
+---
+
 ## Default setup
 
 Unless a session or test says otherwise:
