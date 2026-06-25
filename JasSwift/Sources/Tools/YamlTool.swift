@@ -140,6 +140,18 @@ final class YamlTool: CanvasTool {
         store.getTool(spec.id, key)
     }
 
+    /// Seed an app-level `state.<key>` value into this tool's own
+    /// (otherwise self-contained) store. Mirrors Rust's
+    /// `tool.store.set(...)`: some tool handlers read app-level state —
+    /// e.g. blob_brush's commit reads `state.blob_brush_size`,
+    /// `state.fill_color`, fidelity, and the merge/keep filters — which
+    /// are NOT part of the tool's own `state_defaults`. Tests that drive
+    /// the full gesture pipeline must seed those before the gesture, the
+    /// same way the standalone blob effect tests seed the StateStore.
+    func seedAppState(_ key: String, _ value: Any?) {
+        store.set(key, value)
+    }
+
     // MARK: Event payload builders
 
     private func pointerPayload(

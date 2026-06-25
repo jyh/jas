@@ -11,18 +11,21 @@ platforms covered in Session I parity sweep.
 
 ## Known broken
 
-_Last reviewed: 2026-04-24_
+_Last reviewed: 2026-06-25_
 
-- **oval_cursor overlay (hover cursor + drag preview)** — Rust and
-  Swift render the oval outline at the pointer plus the
-  semi-transparent filled ovals during a `painting` drag and the
-  dashed outline ovals during an `erasing` drag. OCaml and Python
-  `yaml_tool.draw_overlay` are still Phase-5a stubs — no tool-overlay
-  rendering at all, so the user sees the platform default cursor
-  and no drag preview. Commits still work end-to-end on all four
-  native apps. BB-200 (commit behavior) passes everywhere;
-  BB-130 / BB-131 (overlay) pass only on Rust + Swift. Tracked in
-  `project_yaml_tool_overlay_stubs.md`.
+- ~~**oval_cursor overlay stub (OCaml / Python)**~~ — **RESOLVED**
+  (verified 2026-06-25). The earlier note claimed OCaml and Python
+  `yaml_tool.draw_overlay` were Phase-5a stubs with no tool-overlay
+  rendering. That is now stale: all four native renderers dispatch
+  `oval_cursor` and carry a full `draw_oval_cursor_overlay`
+  implementation (Rust `yaml_tool.rs`, Swift `YamlTool.swift`
+  `drawOvalCursorOverlay`, OCaml `yaml_tool.ml:1093` dispatched at
+  `:1497`, Python `yaml_tool.py:1071` dispatched at `:317`). Each maps
+  the hover position through the view transform, scales the tip radius
+  by zoom, draws the oval outline (dashed in erase mode), and renders
+  the per-dab drag preview when `mode != idle`. BB-130 / BB-131
+  (overlay) now pass on all four. See
+  `project_yaml_tool_overlay_stubs.md` (overlay-phase-5b + oval_cursor).
 - **Pressure / tilt / bearing variation** — synthesizes a fixed 0.5
   at stroke time. Calligraphic brushes with these variation modes
   render at their base size / angle / roundness. Phase 2 (shared
@@ -42,7 +45,53 @@ _Last reviewed: 2026-04-24_
 
 ## Automation coverage
 
-_Last synced: 2026-04-24_
+_Last synced: 2026-06-25_
+
+### Gesture-seam tests (full press → drag → release pipeline)
+
+_Added 2026-06-25._ The unit tests below exercise the commit **effects**
+and **primitives** directly (a pre-seeded buffer handed to
+`commit_painting` / `commit_erasing`). They do NOT drive the tool. The
+gesture-seam tests close that gap: they load the production `blob_brush`
+tool from `workspace/workspace.json` and drive it through
+`on_press` / `on_move` / `on_release` / key-event, so the press-time mode
+latch (Alt → erasing), the per-move `doc.blob_brush.sweep_sample` dab
+accumulation, and the on-release commit are all exercised end-to-end.
+
+Six cases, identical across all four native apps (each + a
+loader/non-vacuity guard):
+
+| Case | ID | Asserts |
+|------|----|---------|
+| paint commits tagged Path | BB-010/011 | one Path, `jas:tool-origin="blob_brush"`, fill set, **no** stroke, ≥3 path cmds |
+| undo / redo round-trips | BB-016 | paint→1, undo→0, redo→1 |
+| Escape during drag cancels | BB-004 | press+drag, Escape via key-event, release → 0 children |
+| Alt-erase removes covered blob | BB-100/101 | seeded blob square fully under the sweep is deleted → 0 |
+| Alt-erase leaves non-blob | BB-104 | bystander square (no tool-origin) untouched → still 1, origin `None` |
+| overlapping same-fill merges | BB-070 | second overlapping same-fill paint unions into the first → still 1 (no prior effect-test coverage) |
+
+- **Rust** — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)],
+  `blob_brush_parity_*`) — reference; mutation-proven (merge case 1≠2).
+- **Swift** — `JasSwift/Tests/Tools/YamlToolBlobBrushTests.swift` — 8/8
+  green (`swift test --filter BlobBrush`).
+- **OCaml** — `jas_ocaml/test/tools/yaml_tool_blob_brush_test.ml`
+  (registered in `test/tools/dune`) — 7/7 green.
+- **Python** — `jas/tools/yaml_tool_blob_brush_test.py` — 7/7 green.
+
+Each app independently mutation-proven non-vacuous (loader returns a real
+tool; merge/erase/escape assertions fail under a flipped expectation).
+The commit reads app-level `state.blob_brush_*` / `state.fill_color`,
+which the YamlTool's self-contained store does not carry by default, so
+the seam tests seed them before driving the gesture — exactly as the
+effect tests below seed the StateStore. Rust reaches `tool.store.set`
+directly (`pub(crate)`); the other apps' tests live in separate modules,
+so a narrow, documented **test-only** seeding accessor was added to the
+production tool (OCaml `yaml_tool#seed_state` + `.mli`, Swift
+`YamlTool.seedAppState`; Python uses the `_store` convention — no
+production change). The accessors forward to the already-public
+`StateStore.set` and change no behavior.
+
+### Effect / primitive unit tests
 
 **Rust — `jas_dioxus/src/interpreter/effects.rs` (#[cfg(test)])**
 - 3 unit tests on `doc.blob_brush.commit_painting` /

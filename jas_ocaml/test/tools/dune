@@ -44,6 +44,11 @@
  (libraries jas lablgtk3 alcotest))
 
 (test
+ (name yaml_tool_blob_brush_test)
+ (modules yaml_tool_blob_brush_test)
+ (libraries jas lablgtk3 alcotest))
+
+(test
  (name type_tool_test)
  (modules type_tool_test)
  (libraries jas alcotest))
