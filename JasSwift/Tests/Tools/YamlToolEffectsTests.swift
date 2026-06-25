@@ -1456,3 +1456,148 @@ private func cpsEqual(_ a: (Double, Double), _ x: Double, _ y: Double) -> Bool {
     #expect(cpsEqual(cps[1], 100, 0))     // anchor 1 NOT selected → unchanged
     #expect(cpsEqual(cps[2], 60, 90))     // anchor 2 moved
 }
+
+// MARK: - Partial Selection Bezier HANDLE drag (SEL-131 / SEL-306)
+//
+// Dragging a Bezier HANDLE (not the anchor) of a SMOOTH path anchor is
+// `doc.move_path_handle`. The effect reads the latched handle target from
+// partial_selection tool state — `handle_path` (encoded ElementPath),
+// `handle_anchor_idx`, `handle_type` ("in"|"out") — and applies (dx,dy) to
+// the named handle. The opposite handle is then rotated to stay COLLINEAR
+// through the anchor while keeping its OWN distance (smooth-point semantics,
+// `reflectHandleKeepDistance` in Element.swift), and the anchor stays put.
+//
+// The CP/marquee tests above use a POLYLINE triangle, which has no handles.
+// Handle drags need a CURVED Path: a smooth middle anchor whose in- and
+// out-handles are collinear-through-the-anchor and equidistant, so the
+// reflection is an exact point-reflection (clean integer assertions).
+//
+// Fixture — a two-segment cubic path:
+//   moveTo(0,100)                                          anchor 0 = (0,100)
+//   curveTo(20,100, 80,100, 100,100)   anchor 1 = (100,100), in-handle (80,100)
+//   curveTo(120,100, 180,100, 200,100) anchor 2 = (200,100), out-handle of
+//                                       anchor 1 = (120,100)
+// Anchor 1 is the SMOOTH anchor under test: in-handle (80,100) and out-handle
+// (120,100) sit on opposite sides of the anchor, both 20 units away — a true
+// smooth point. (pathHandlePositions returns (in, out) for an anchor index.)
+
+// Anchor (end-point) position of a path command, for asserting the anchor
+// stays put. Mirrors the anchor read in pathHandlePositions / movePathHandle.
+private func anchorPos(_ d: [PathCommand], _ anchorIdx: Int) -> (Double, Double) {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    switch d[cmdIndices[anchorIdx]] {
+    case .moveTo(let x, let y), .lineTo(let x, let y): return (x, y)
+    case .curveTo(_, _, _, _, let x, let y): return (x, y)
+    default: fatalError("anchor command has no end point")
+    }
+}
+
+// decodePath in YamlToolEffects reads handle_path as ["__path__": [Int]]; mirror
+// its encoding here (encodePath itself is file-private to that module).
+private func latchedPath(_ p: ElementPath) -> [String: Any] {
+    ["__path__": p as [Any]]
+}
+
+private func smoothCurvePathModel() -> Model {
+    let curve: Element = .path(Path(
+        d: [
+            .moveTo(0, 100),
+            .curveTo(x1: 20, y1: 100, x2: 80, y2: 100, x: 100, y: 100),
+            .curveTo(x1: 120, y1: 100, x2: 180, y2: 100, x: 200, y: 100),
+        ],
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+    return Model(document: Document(
+        layers: [Layer(children: [curve])], selectedLayer: 0, selection: []))
+}
+
+/// SEL-131/306: dragging the OUT handle of a smooth anchor moves that handle
+/// by (dx,dy); the opposite IN handle is reflected through the anchor (mirror /
+/// smooth-point behavior), and the anchor itself does not move.
+///
+/// Empirically observed (this is the ACTUAL impl behavior, not an assumption):
+///   anchor 1 = (100,100) before and after — stays put.
+///   out-handle (120,100) --[drag (-20,+20)]--> (100,120)   moved by (dx,dy)
+///   in-handle  (80,100)  --[MIRRORED]--------> (100, 80)   reflected through
+///       the anchor: 2*anchor - newOut = (200,200)-(100,120) = (100,80).
+/// The drag was chosen so the new out-handle keeps the in-handle's distance
+/// (both 20 from the anchor), making the collinear reflection an exact
+/// point-reflection. A broken/independent mirror would leave the in-handle at
+/// (80,100) and fail the (100,80) assertion below.
+@Test func partialSelectionHandleDragOutMirrorsOppositeInHandle() {
+    let model = smoothCurvePathModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+
+    // BEFORE: confirm the smooth-point fixture.
+    let d0 = { () -> [PathCommand] in
+        guard case .path(let p) = model.document.layers[0].children[0] else {
+            fatalError("expected path element")
+        }
+        return p.d
+    }()
+    let (in0, out0) = pathHandlePositions(d0, anchorIdx: 1)
+    #expect(in0 != nil && cpsEqual(in0!, 80, 100))     // in-handle  (80,100)
+    #expect(out0 != nil && cpsEqual(out0!, 120, 100))  // out-handle (120,100)
+    #expect(cpsEqual(anchorPos(d0, 1), 100, 100))      // anchor (100,100)
+
+    // Latch the handle target the way probe_partial_hit would: anchor 1's
+    // OUT handle on element [0,0].
+    store.setTool("partial_selection", "handle_path", latchedPath([0, 0]))
+    store.setTool("partial_selection", "handle_anchor_idx", 1)
+    store.setTool("partial_selection", "handle_type", "out")
+
+    // Drag the OUT handle by (dx=-20, dy=+20): (120,100) -> (100,120).
+    runEffects(
+        [["doc.move_path_handle": ["dx": -20, "dy": 20]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+
+    // AFTER.
+    guard case .path(let p1) = model.document.layers[0].children[0] else {
+        fatalError("expected path element")
+    }
+    let (in1, out1) = pathHandlePositions(p1.d, anchorIdx: 1)
+    // Dragged handle moved by exactly (dx,dy).
+    #expect(out1 != nil && cpsEqual(out1!, 100, 120))
+    // Opposite handle MIRRORED through the anchor (non-vacuous: a no-op /
+    // independent impl would leave this at (80,100)).
+    #expect(in1 != nil && cpsEqual(in1!, 100, 80))
+    // Anchor unmoved.
+    #expect(cpsEqual(anchorPos(p1.d, 1), 100, 100))
+    // The other anchors' positions are untouched too.
+    #expect(cpsEqual(anchorPos(p1.d, 0), 0, 100))
+    #expect(cpsEqual(anchorPos(p1.d, 2), 200, 100))
+}
+
+/// SEL-131/306 (symmetric case): dragging the IN handle mirrors the OUT handle.
+/// Drag the in-handle (80,100) by (dx=+20, dy=+20) -> (100,120); the out-handle
+/// reflects through the anchor to (100,80) = 2*(100,100)-(100,120). Same
+/// smooth-point semantics, exercised from the opposite handle so neither
+/// branch of movePathHandle is left unpinned.
+@Test func partialSelectionHandleDragInMirrorsOppositeOutHandle() {
+    let model = smoothCurvePathModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+
+    store.setTool("partial_selection", "handle_path", latchedPath([0, 0]))
+    store.setTool("partial_selection", "handle_anchor_idx", 1)
+    store.setTool("partial_selection", "handle_type", "in")
+
+    // Drag the IN handle by (dx=+20, dy=+20): (80,100) -> (100,120).
+    runEffects(
+        [["doc.move_path_handle": ["dx": 20, "dy": 20]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+
+    guard case .path(let p1) = model.document.layers[0].children[0] else {
+        fatalError("expected path element")
+    }
+    let (in1, out1) = pathHandlePositions(p1.d, anchorIdx: 1)
+    #expect(in1 != nil && cpsEqual(in1!, 100, 120))    // dragged in-handle
+    #expect(out1 != nil && cpsEqual(out1!, 100, 80))   // MIRRORED out-handle
+    #expect(cpsEqual(anchorPos(p1.d, 1), 100, 100))    // anchor put
+}
