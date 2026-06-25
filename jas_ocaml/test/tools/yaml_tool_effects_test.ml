@@ -606,6 +606,376 @@ let artboard_move_tests = [
     Alcotest.(check (float 0.001)) "y" 70.0 result.y);
 ]
 
+(* ── Partial Selection control-point selection (SEL-100/103/105/106) ──
+
+   CP-LEVEL selection through the Partial Selection effects. two_rect_model's
+   first rect (0,0,10,10) exposes four control points at its corners:
+   cp0=(0,0), cp1=(10,0), cp2=(10,10), cp3=(0,10)
+   (Element.control_points). [doc.path.probe_partial_hit] selects the CP under
+   the cursor (or shift-toggles it into the per-element partial set);
+   [doc.path.commit_partial_marquee] selects every CP inside the rubber-band
+   rect. These assert the CP-level selection_kind (SelKindPartial carrying the
+   enclosed indices), not just which element is touched. The second rect lives
+   at path [0; 1] and must stay untouched.
+
+   These use the PRODUCTION effects (doc.path.probe_partial_hit /
+   doc.path.commit_partial_marquee, matching workspace/tools/partial_selection.yaml),
+   NOT the legacy doc.partial_select_in_rect. *)
+
+(* Helper — fetch the per-element selection entry at [path], if present. *)
+let sel_entry (m : Model.model) path =
+  Document.PathMap.find_opt path m#document.Document.selection
+
+(* Helper — kind of the entry at [path], or fail. *)
+let sel_kind m path =
+  match sel_entry m path with
+  | Some es -> es.Document.es_kind
+  | None -> Alcotest.failf "expected selection entry at path"
+
+let partial_selection_cp_tests = [
+  (* SEL-100: clicking a single CP selects exactly that CP (a partial
+     selection of one), not the whole element. *)
+  Alcotest.test_case "cp_click_selects_single_control_point" `Quick (fun () ->
+    let m = two_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 0); ("y", `Int 0);
+                        ("hit_radius", `Int 8)])]]
+      ctrl;
+    assert (sel_entry m [0; 0] <> None);
+    let kind = sel_kind m [0; 0] in
+    assert (Document.selection_kind_contains kind 0);          (* cp0=(0,0) *)
+    Alcotest.(check int) "exactly one CP" 1
+      (Document.selection_kind_count kind ~total:4);
+    assert (not (Document.selection_kind_is_all kind ~total:4));(* not whole *)
+    let mode = State_store.get_tool store "partial_selection" "mode" in
+    Alcotest.(check string) "mode moving_pending" "moving_pending"
+      (match mode with `String s -> s | _ -> "");
+    assert (not (Document.PathMap.mem [0; 1] m#document.selection)));
+
+  (* SEL-103/104: shift-click ADDS CPs to the per-element partial set, and
+     shift-clicking a selected CP toggles it OFF. *)
+  Alcotest.test_case "shift_click_adds_and_toggles_control_points" `Quick (fun () ->
+    let m = two_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Plain click cp0. *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 0); ("y", `Int 0);
+                        ("hit_radius", `Int 8)])]]
+      ctrl;
+    Alcotest.(check int) "one CP after plain click" 1
+      (Document.selection_kind_count (sel_kind m [0; 0]) ~total:4);
+    (* Shift-click cp1=(10,0): ADDS it -> two CPs on the same element. *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 10); ("y", `Int 0);
+                        ("hit_radius", `Int 8);
+                        ("shift", `Bool true)])]]
+      ctrl;
+    let two = sel_kind m [0; 0] in
+    Alcotest.(check int) "two CPs after shift-add" 2
+      (Document.selection_kind_count two ~total:4);
+    assert (Document.selection_kind_contains two 0);
+    assert (Document.selection_kind_contains two 1);
+    (* Shift-click cp1 AGAIN: toggles it OFF -> back to just cp0. *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 10); ("y", `Int 0);
+                        ("hit_radius", `Int 8);
+                        ("shift", `Bool true)])]]
+      ctrl;
+    let one = sel_kind m [0; 0] in
+    Alcotest.(check int) "one CP after shift-toggle-off" 1
+      (Document.selection_kind_count one ~total:4);
+    assert (Document.selection_kind_contains one 0);
+    assert (not (Document.selection_kind_contains one 1)));
+
+  (* SEL-105: a marquee enclosing only one corner selects exactly that one CP
+     (proving CP-level, not whole-element, marquee granularity). *)
+  Alcotest.test_case "marquee_selects_only_enclosed_control_point" `Quick (fun () ->
+    let m = two_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Rect (-5,-5)..(5,5) encloses cp0=(0,0) only; the others are at x or y=10. *)
+    run_with_effects store
+      [`Assoc [("doc.path.commit_partial_marquee",
+                `Assoc [("x1", `Int (-5)); ("y1", `Int (-5));
+                        ("x2", `Int 5); ("y2", `Int 5)])]]
+      ctrl;
+    assert (sel_entry m [0; 0] <> None);
+    let kind = sel_kind m [0; 0] in
+    assert (Document.selection_kind_contains kind 0);
+    Alcotest.(check int) "exactly one CP" 1
+      (Document.selection_kind_count kind ~total:4);
+    assert (not (Document.selection_kind_is_all kind ~total:4));
+    assert (not (Document.PathMap.mem [0; 1] m#document.selection)));
+
+  (* SEL-105: a marquee enclosing all four corners selects every CP of the
+     element, and leaves the out-of-rect element untouched. *)
+  Alcotest.test_case "marquee_selects_all_enclosed_control_points" `Quick (fun () ->
+    let m = two_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Rect (-5,-5)..(15,15) encloses all four corners of rect[0,0]; rect[0,1]
+       lives at (50,50) and is fully outside. *)
+    run_with_effects store
+      [`Assoc [("doc.path.commit_partial_marquee",
+                `Assoc [("x1", `Int (-5)); ("y1", `Int (-5));
+                        ("x2", `Int 15); ("y2", `Int 15)])]]
+      ctrl;
+    assert (sel_entry m [0; 0] <> None);
+    let kind = sel_kind m [0; 0] in
+    Alcotest.(check int) "all four CPs" 4
+      (Document.selection_kind_count kind ~total:4);
+    assert (Document.selection_kind_is_all kind ~total:4);
+    assert (not (Document.PathMap.mem [0; 1] m#document.selection)));
+
+  (* SEL-106: an empty (zero-size) marquee with no shift clears the CP
+     selection. *)
+  Alcotest.test_case "empty_marquee_clears_selection" `Quick (fun () ->
+    let m = two_rect_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Select a CP first. *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 0); ("y", `Int 0);
+                        ("hit_radius", `Int 8)])]]
+      ctrl;
+    assert (not (Document.PathMap.is_empty m#document.selection));
+    (* A zero-size marquee (rw,rh <= 1), non-additive, clears the selection. *)
+    run_with_effects store
+      [`Assoc [("doc.path.commit_partial_marquee",
+                `Assoc [("x1", `Int 100); ("y1", `Int 100);
+                        ("x2", `Int 100); ("y2", `Int 100)])]]
+      ctrl;
+    assert (Document.PathMap.is_empty m#document.selection));
+]
+
+(* ── Partial Selection control-point DRAG (SEL-130 CP translate) ──
+
+   Dragging a selected control point is [doc.translate_selection] over a PARTIAL
+   selection: the move calls Element.move_control_points on the kind, so ONLY
+   the selected CPs move. A rect's corners are not independently movable, so
+   these use a triangle Path whose anchors are cp0=(0,0), cp1=(100,0),
+   cp2=(50,100) (Element.control_points == path_anchor_points d). *)
+
+let make_path_element d =
+  Element.Path { name = None; id = None;
+    d;
+    fill = None; stroke = None; width_points = [];
+    opacity = 1.0; transform = None; locked = false;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    fill_gradient = None; stroke_gradient = None;
+    stroke_brush = None; stroke_brush_overrides = None;
+    tool_origin = None;
+  }
+
+let path_children_model d =
+  let layer = Element.Layer {
+    name = Some "L"; id = None; children = [| make_path_element d |];
+    transform = None; locked = false; opacity = 1.0;
+    visibility = Preview; blend_mode = Normal; mask = None;
+    isolated_blending = false; knockout_group = false;
+  } in
+  let doc = Document.make_document [| layer |] in
+  let m = Model.create () in
+  m#set_document_unbracketed doc;
+  m
+
+let triangle_path_model () =
+  path_children_model
+    [ Element.MoveTo (0.0, 0.0);
+      Element.LineTo (100.0, 0.0);
+      Element.LineTo (50.0, 100.0);
+      Element.ClosePath ]
+
+(* Read the control-point positions of the single path child. *)
+let cps_of (m : Model.model) =
+  match m#document.Document.layers.(0) with
+  | Element.Layer { children; _ } -> Element.control_points children.(0)
+  | _ -> Alcotest.fail "expected layer"
+
+let cp_eq (ax, ay) x y = Float.abs (ax -. x) < 1e-9 && Float.abs (ay -. y) < 1e-9
+
+let partial_selection_cp_drag_tests = [
+  (* SEL-130: dragging a single selected CP translates ONLY that anchor; the
+     other anchors of the same path stay put. *)
+  Alcotest.test_case "cp_drag_translates_only_selected_control_point" `Quick (fun () ->
+    let m = triangle_path_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Select anchor 0 = (0,0). *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 0); ("y", `Int 0);
+                        ("hit_radius", `Int 8)])]]
+      ctrl;
+    assert (Document.selection_kind_contains (sel_kind m [0; 0]) 0);
+    (* Drag that CP by (+20, +30). *)
+    run_with_effects store
+      [`Assoc [("doc.translate_selection",
+                `Assoc [("dx", `Int 20); ("dy", `Int 30)])]]
+      ctrl;
+    let cps = cps_of m in
+    Alcotest.(check int) "three CPs" 3 (List.length cps);
+    assert (cp_eq (List.nth cps 0) 20.0 30.0);    (* anchor 0 moved *)
+    assert (cp_eq (List.nth cps 1) 100.0 0.0);    (* anchor 1 unchanged *)
+    assert (cp_eq (List.nth cps 2) 50.0 100.0);   (* anchor 2 unchanged *)
+    (* Selection preserved (still the same single CP). *)
+    Alcotest.(check int) "still one CP selected" 1
+      (Document.selection_kind_count (sel_kind m [0; 0]) ~total:3));
+
+  (* SEL-130: dragging a multi-CP selection translates EVERY selected anchor by
+     the same delta and leaves the unselected anchor put. *)
+  Alcotest.test_case "cp_drag_translates_all_selected_control_points" `Quick (fun () ->
+    let m = triangle_path_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* Select anchor 0 = (0,0), then shift-add anchor 2 = (50,100). *)
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 0); ("y", `Int 0);
+                        ("hit_radius", `Int 8)])]]
+      ctrl;
+    run_with_effects store
+      [`Assoc [("doc.path.probe_partial_hit",
+                `Assoc [("x", `Int 50); ("y", `Int 100);
+                        ("hit_radius", `Int 8);
+                        ("shift", `Bool true)])]]
+      ctrl;
+    Alcotest.(check int) "two CPs selected" 2
+      (Document.selection_kind_count (sel_kind m [0; 0]) ~total:3);
+    (* Drag the pair by (+10, -10). *)
+    run_with_effects store
+      [`Assoc [("doc.translate_selection",
+                `Assoc [("dx", `Int 10); ("dy", `Int (-10))])]]
+      ctrl;
+    let cps = cps_of m in
+    assert (cp_eq (List.nth cps 0) 10.0 (-10.0));  (* anchor 0 moved *)
+    assert (cp_eq (List.nth cps 1) 100.0 0.0);     (* anchor 1 not selected *)
+    assert (cp_eq (List.nth cps 2) 60.0 90.0));    (* anchor 2 moved *)
+]
+
+(* ── Partial Selection Bezier HANDLE drag (SEL-131 / SEL-306) ──
+
+   Dragging a Bezier HANDLE (not the anchor) of a SMOOTH path anchor is
+   [doc.move_path_handle]. The effect reads the latched handle target from
+   partial_selection tool state — handle_path (encoded element path as
+   {"__path__": [..]}), handle_anchor_idx, handle_type ("in"|"out") — and
+   applies (dx,dy) to the named handle. The opposite handle is then rotated to
+   stay COLLINEAR through the anchor while keeping its OWN distance
+   (smooth-point semantics), and the anchor stays put.
+
+   Handle drags need a CURVED Path: a smooth middle anchor whose in- and
+   out-handles are collinear-through-the-anchor and equidistant, so the
+   reflection is an exact point-reflection (clean integer assertions).
+
+   Fixture — a two-segment cubic path:
+     MoveTo(0,100)                                     anchor 0 = (0,100)
+     CurveTo(20,100, 80,100, 100,100)   anchor 1 = (100,100), in-handle (80,100)
+     CurveTo(120,100, 180,100, 200,100) anchor 2 = (200,100), out-handle of
+                                        anchor 1 = (120,100)
+   Anchor 1 is the SMOOTH anchor under test: in-handle (80,100) and out-handle
+   (120,100) sit on opposite sides of the anchor, both 20 units away — a true
+   smooth point. (path_handle_positions returns (in, out) for an anchor index.) *)
+
+let smooth_curve_path_model () =
+  path_children_model
+    [ Element.MoveTo (0.0, 100.0);
+      Element.CurveTo (20.0, 100.0, 80.0, 100.0, 100.0, 100.0);
+      Element.CurveTo (120.0, 100.0, 180.0, 100.0, 200.0, 100.0) ]
+
+(* Anchor (end-point) position of a path command, for asserting the anchor
+   stays put. *)
+let anchor_pos d anchor_idx =
+  let cmd_indices = ref [] in
+  List.iteri (fun ci cmd ->
+    match cmd with
+    | Element.ClosePath -> ()
+    | _ -> cmd_indices := ci :: !cmd_indices) d;
+  let cmd_indices = List.rev !cmd_indices in
+  match List.nth d (List.nth cmd_indices anchor_idx) with
+  | Element.MoveTo (x, y) | Element.LineTo (x, y) -> (x, y)
+  | Element.CurveTo (_, _, _, _, x, y) -> (x, y)
+  | _ -> Alcotest.fail "anchor command has no end point"
+
+let path_d_of (m : Model.model) =
+  match m#document.Document.layers.(0) with
+  | Element.Layer { children; _ } ->
+    (match children.(0) with
+     | Element.Path { d; _ } -> d
+     | _ -> Alcotest.fail "expected path element")
+  | _ -> Alcotest.fail "expected layer"
+
+let opt_eq o x y = match o with Some p -> cp_eq p x y | None -> false
+
+let partial_selection_handle_tests = [
+  (* SEL-131/306: dragging the OUT handle of a smooth anchor moves that handle
+     by (dx,dy); the opposite IN handle is reflected through the anchor (mirror
+     / smooth-point behavior), and the anchor itself does not move.
+
+       anchor 1 = (100,100) before and after — stays put.
+       out-handle (120,100) --[drag (-20,+20)]--> (100,120)   moved by (dx,dy)
+       in-handle  (80,100)  --[MIRRORED]--------> (100, 80)   reflected through
+           the anchor: 2*anchor - new_out = (200,200)-(100,120) = (100,80). *)
+  Alcotest.test_case "handle_drag_out_mirrors_opposite_in_handle" `Quick (fun () ->
+    let m = smooth_curve_path_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    (* BEFORE: confirm the smooth-point fixture. *)
+    let d0 = path_d_of m in
+    let (in0, out0) = Element.path_handle_positions d0 1 in
+    assert (opt_eq in0 80.0 100.0);    (* in-handle  (80,100) *)
+    assert (opt_eq out0 120.0 100.0);  (* out-handle (120,100) *)
+    assert (cp_eq (anchor_pos d0 1) 100.0 100.0);  (* anchor (100,100) *)
+    (* Latch the handle target the way probe_partial_hit would: anchor 1's OUT
+       handle on element [0;0]. *)
+    State_store.set_tool store "partial_selection" "handle_path"
+      (`Assoc [("__path__", `List [`Int 0; `Int 0])]);
+    State_store.set_tool store "partial_selection" "handle_anchor_idx" (`Int 1);
+    State_store.set_tool store "partial_selection" "handle_type" (`String "out");
+    (* Drag the OUT handle by (dx=-20, dy=+20): (120,100) -> (100,120). *)
+    run_with_effects store
+      [`Assoc [("doc.move_path_handle",
+                `Assoc [("dx", `Int (-20)); ("dy", `Int 20)])]]
+      ctrl;
+    (* AFTER. *)
+    let d1 = path_d_of m in
+    let (in1, out1) = Element.path_handle_positions d1 1 in
+    assert (opt_eq out1 100.0 120.0);  (* dragged handle moved by (dx,dy) *)
+    assert (opt_eq in1 100.0 80.0);    (* opposite handle MIRRORED *)
+    assert (cp_eq (anchor_pos d1 1) 100.0 100.0);  (* anchor unmoved *)
+    assert (cp_eq (anchor_pos d1 0) 0.0 100.0);    (* other anchors untouched *)
+    assert (cp_eq (anchor_pos d1 2) 200.0 100.0));
+
+  (* SEL-131/306 (symmetric case): dragging the IN handle mirrors the OUT
+     handle. Drag the in-handle (80,100) by (dx=+20, dy=+20) -> (100,120); the
+     out-handle reflects through the anchor to (100,80) = 2*(100,100)-(100,120). *)
+  Alcotest.test_case "handle_drag_in_mirrors_opposite_out_handle" `Quick (fun () ->
+    let m = smooth_curve_path_model () in
+    let ctrl = make_ctrl_with m in
+    let store = State_store.create () in
+    State_store.set_tool store "partial_selection" "handle_path"
+      (`Assoc [("__path__", `List [`Int 0; `Int 0])]);
+    State_store.set_tool store "partial_selection" "handle_anchor_idx" (`Int 1);
+    State_store.set_tool store "partial_selection" "handle_type" (`String "in");
+    (* Drag the IN handle by (dx=+20, dy=+20): (80,100) -> (100,120). *)
+    run_with_effects store
+      [`Assoc [("doc.move_path_handle",
+                `Assoc [("dx", `Int 20); ("dy", `Int 20)])]]
+      ctrl;
+    let d1 = path_d_of m in
+    let (in1, out1) = Element.path_handle_positions d1 1 in
+    assert (opt_eq in1 100.0 120.0);   (* dragged in-handle *)
+    assert (opt_eq out1 100.0 80.0);   (* MIRRORED out-handle *)
+    assert (cp_eq (anchor_pos d1 1) 100.0 100.0));  (* anchor put *)
+]
+
 let () =
   Alcotest.run "Yaml_tool_effects" [
     "doc.snapshot", snapshot_tests;
@@ -622,4 +992,7 @@ let () =
     "doc.artboard.probe_hit", artboard_probe_hit_tests;
     "doc.artboard.probe_hover", artboard_probe_hover_tests;
     "doc.artboard.move_apply", artboard_move_tests;
+    "Partial Selection CP", partial_selection_cp_tests;
+    "Partial Selection CP drag", partial_selection_cp_drag_tests;
+    "Partial Selection handle", partial_selection_handle_tests;
   ]
