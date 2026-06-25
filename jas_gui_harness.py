@@ -141,9 +141,18 @@ def clear_mods():
     for kc in (55,56,58,59):
         keyev(kc, False, 0)
 
-def do_click(fx, fy):
-    x,y=pt(fx,fy); mouse(Quartz.kCGEventMouseMoved,x,y)
-    mouse(Quartz.kCGEventLeftMouseDown,x,y); time.sleep(0.06); mouse(Quartz.kCGEventLeftMouseUp,x,y)
+def do_click(fx, fy, mods=()):
+    # Modifier-aware click: hold REAL modifier keys (down/up) AND set the
+    # CGEvent flags, so shift/alt-click reach the app's mousedown handler
+    # (flag-only modifiers proved flaky — mirror do_key's real-keydown path).
+    f=flags(mods); x,y=pt(fx,fy)
+    for m in mods:
+        if m in MODKEY: keyev(MODKEY[m], True, f)
+    if mods: time.sleep(0.06)
+    mouse(Quartz.kCGEventMouseMoved,x,y,f)
+    mouse(Quartz.kCGEventLeftMouseDown,x,y,f); time.sleep(0.06); mouse(Quartz.kCGEventLeftMouseUp,x,y,f)
+    for m in reversed(mods):
+        if m in MODKEY: keyev(MODKEY[m], False)
 
 def do_drag(fx1,fy1,fx2,fy2,mods):
     f=flags(mods); x1,y1=pt(fx1,fy1); x2,y2=pt(fx2,fy2)
@@ -203,7 +212,9 @@ if __name__=="__main__":
     if not WIN: print("WINDOW NOT FOUND"); sys.exit(1)
     if v=="geom": print(WIN)
     elif v=="shot": do_shot(sys.argv[2]); print("shot",sys.argv[2])
-    elif v=="click": do_click(float(sys.argv[2]),float(sys.argv[3])); print("click",sys.argv[2],sys.argv[3])
+    elif v=="click":
+        cmods=sys.argv[4].split(",") if len(sys.argv)>4 else []
+        do_click(float(sys.argv[2]),float(sys.argv[3]),cmods); print("click",sys.argv[2],sys.argv[3],cmods)
     elif v=="key":
         mods=sys.argv[3].split(",") if len(sys.argv)>3 else []
         do_key(sys.argv[2],mods); print("key",sys.argv[2],mods)
