@@ -1410,7 +1410,21 @@ fn set_app_state_field(
         }
         "active_tool" => {
             if let Some(kind) = val.as_str().and_then(parse_tool_kind) {
-                st.active_tool = kind;
+                if st.active_tool != kind {
+                    // Route through the tool lifecycle rather than a bare
+                    // field write: deactivate the previous tool (on_leave)
+                    // and activate the new one (init_tool resets its state
+                    // defaults, then on_enter). A bare `st.active_tool = kind`
+                    // left newly-selectable YAML tools un-activated, so their
+                    // tool-local state was never initialized — the source of
+                    // the inconsistent state read on first repaint.
+                    st.set_tool(kind);
+                    if let Some(tab) = st.tab_mut() {
+                        if let Some(tool) = tab.tools.get_mut(&kind) {
+                            tool.activate(&mut tab.model);
+                        }
+                    }
+                }
             }
         }
         "fill_color" => {
@@ -2040,6 +2054,12 @@ fn build_appstate_ctx(
         "fill_color": fill_color,
         "stroke_color": stroke_color,
         "active_tool": tool_name,
+        // Tab bookkeeping — read by menu `enabled_when` (e.g.
+        // "state.tab_count > 0") and the new_document action's
+        // active_tab assignment. Without these the expressions evaluate
+        // against null and silently disable items / no-op.
+        "tab_count": st.tabs.len(),
+        "active_tab": st.active_tab,
         "stroke_width": stroke_width,
         "stroke_cap": sp.cap,
         "stroke_join": sp.join,
