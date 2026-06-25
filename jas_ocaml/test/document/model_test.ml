@@ -10,6 +10,24 @@ let () =
         let model2 = Jas.Model.create ~filename:"Test" () in
         assert (model2#filename = "Test"));
 
+      Alcotest.test_case "advance_next_untitled_past avoids restored collision" `Quick (fun () ->
+        (* File-New must not reuse an Untitled-N restored from a session.
+           advance_next_untitled_past (run on restore) pushes next_untitled
+           past the highest restored Untitled-N; it is forward-only and
+           ignores non-Untitled names. The counter is a process-global, so a
+           large sentinel keeps this deterministic regardless of how many
+           models earlier cases created. Mirrors the Rust, Swift and Python
+           model tests. *)
+        let suffix s = int_of_string (String.sub s 9 (String.length s - 9)) in
+        Jas.Model.advance_next_untitled_past
+          ["Untitled-9000"; "logo.svg"; "Untitled-9002"; "Untitled-9001"];
+        let m1 = Jas.Model.create () in
+        assert (suffix m1#filename = 9003);
+        (* Forward-only: a lower restored set does not move the counter back. *)
+        Jas.Model.advance_next_untitled_past ["Untitled-5"];
+        let m2 = Jas.Model.create () in
+        assert (suffix m2#filename = 9004));
+
       Alcotest.test_case "set_document notifies" `Quick (fun () ->
         let model3 = Jas.Model.create () in
         let received = ref [] in
