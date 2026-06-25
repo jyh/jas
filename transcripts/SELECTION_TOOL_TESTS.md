@@ -61,6 +61,67 @@ three tools' overlays.
 
 ---
 
+## Harness-driven run log
+
+_2026-06-25 — Rust (jas_dioxus), driven by `jas_gui_harness.py` (Quartz synthetic
+input + `screencapture`), visual verification only._ This was an experiment to
+gauge how much of the suite the GUI harness can cover for Rust; it does NOT
+replace the human-run checkboxes above. The harness cannot inspect document state
+(selection length, exact coords), so results are judged by whether the correct
+selection handles / CP fills / overlays appear in screenshots.
+
+**PASS (clean visual verification):**
+- A: SEL-001, 002, 005
+- B: SEL-010, 011, 012, 013, 014, 015 (shift-click add/remove/empty all work)
+- C: SEL-030, 031, 032, 033, 036 (down-right marquee)
+- D: SEL-050, 051, 052, 054, 056 (drag-move, multi-drag, alt-drag copy, undo, alt-click)
+- G: SEL-100, 101, 103, 104 (CP click / clear / designate / shift-toggle)
+- H: SEL-130, 131, 132, 135 (CP drag, handle drag, alt-drag path-dup, CP-drag undo)
+- I: SEL-151 (anchor+handle overlay)
+- J: SEL-170 (=054), 172 (=135)
+- Plus: built the Pen curved-path fixture via the harness; Ctrl-A select-all (objects
+  and CPs) confirmed. SEL-131 shows smooth-symmetric handle reflection = the known
+  SEL-306 spec/impl disagreement (Rust mirrors; spec says cusp), not a new bug.
+
+**FLAKY via harness (synthetic-input artifacts, NOT app bugs):**
+- C: SEL-034 (up-left marquee), 035 (far marquee) — the synthetic multi-segment
+  drag races the canvas live-marquee selection; down-right is reliable, up-left/edge
+  gave inconsistent results across runs.
+- E: SEL-070/071/072 (Esc / tool-switch mid-drag) — confounded: the harness must
+  send a `mouseup` to release the held button after Esc, and that release re-commits
+  the move, so mid-gesture cancel can't be cleanly isolated. Needs hands-on.
+
+**NOT FEASIBLE via this harness:**
+- Cursor glyphs: SEL-003, 152 — `screencapture` omits the system cursor.
+- Interior Selection: SEL-004 + all of Session F + SEL-305 — flyout-only tool with no
+  shortcut; synthetic long-press does not trip the native flyout.
+- Locked element: SEL-017, 055 — needs Layers-panel lock interaction (small targets).
+- Sub-pixel tolerances: SEL-107 (7/9px), 133 (4px), 134 (0.5px) — below reliable
+  synthetic precision.
+- SEL-150 marquee overlay styling — the thin dashed rect isn't legible at capture scale.
+- SEL-136 mid-drag Alt — complex modal sequence.
+- Session L parity exact-coordinate assertions — harness sees only what's rendered.
+
+**NOT RUN (feasible, skipped for time):** SEL-016 (overlap→topmost), 105/106 (CP
+marquee), 153 (switch hides overlay), 171/173 (alt-copy/handle undo), K (theming
+190–192), L Rust column (visual-only).
+
+**Key techniques / gotchas discovered:**
+- Reading 8px CP fills + ~5px handle dots needs a TIGHT `screencapture -R` crop that
+  upscales the path region; full-window captures are illegible for partial-selection.
+- Run `clearmods` between modifier ops — a stuck modifier (missed key-up) silently
+  makes a later plain click additive and contaminates selections.
+- Use the slow button-held `dragbegin`/`dragpath`/`dragend` for any sizable drag; the
+  single-shot `drag` is too coarse for large marquees.
+- Harness gained `\`/digits in KEYCODE and a modifier-aware `click FX FY shift|alt`
+  for this run (commit cf42f92d).
+
+**Estimated coverage:** ~75–80% of the suite is harness-driveable for Rust with
+visual verification. Genuine gaps: Interior Selection (unreachable), px-tolerance
+cases, mid-gesture Esc, cursor glyphs.
+
+---
+
 ## Default setup
 
 Unless a session or test says otherwise:
