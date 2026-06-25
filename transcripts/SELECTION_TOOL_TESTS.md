@@ -116,9 +116,17 @@ marquee), 153 (switch hides overlay), 171/173 (alt-copy/handle undo), K (theming
 - Harness gained `\`/digits in KEYCODE and a modifier-aware `click FX FY shift|alt`
   for this run (commit cf42f92d).
 
-**Estimated coverage:** ~75–80% of the suite is harness-driveable for Rust with
-visual verification. Genuine gaps: Interior Selection (unreachable), px-tolerance
-cases, mid-gesture Esc, cursor glyphs.
+**Update 2026-06-25 (after `5cbfda13` added Shift+ tool shortcuts):** Interior
+Selection is now reachable via Shift+V, so **Session F runs and passes** — SEL-080
+(interior click selects the leaf), SEL-081 (Selection selects the whole group),
+SEL-083 (interior drag moves the leaf, sibling stays) all PASS. SEL-082 (interior
+marquee over a path's CPs) not run (needs a path-in-group fixture + marquee, which
+is flaky); SEL-084 stays the documented empty-group skip. The 6 flyout-only tools
+(interior_selection/rounded_rect/polygon/star/shear/smooth) are no longer a gap.
+
+**Estimated coverage:** ~80% of the suite is harness-driveable for Rust with
+visual verification. Remaining genuine gaps: px-tolerance cases, mid-gesture Esc,
+cursor glyphs, and marquee edge cases (up-left/far flakiness).
 
 ---
 
