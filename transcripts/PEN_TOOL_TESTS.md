@@ -61,22 +61,29 @@ type with close-hit indicator, handle bars, preview curve), tool
 lifecycle, double-click commit, cross-tool interaction, undo, and
 appearance theming.
 
-**GUI overlay verification (2026-06-25, Session G).** The pen overlay was
-GUI-verified on the native **Swift** app via the Quartz harness
-(`jas_gui_harness.py`, which gained a bare-cursor `move` verb for the
-hover-dependent overlay): pen tool active, three corner anchors placed, cursor
-hovered near the first anchor. The capture shows the full overlay — filled blue
-**anchor dots** (PEN-100/013), the SOLID blue path-so-far, the DASHED blue
-**preview curve** from the last anchor to the cursor (PEN-101), and the orange
-**close-hit ring** around the first anchor when within the 8 px radius (PEN-052).
-The `pen_overlay` render is bundle-driven (one shared spec across apps) and also
-has automated coverage in Flask (`test_canvas.mjs`: path-so-far / anchor squares
-/ close-hit ring). Native OCaml/Python overlay captures hit Quartz keyboard /
-focus flakiness (tool-switch keys not reaching the canvas first-responder;
-worked around on Swift via a toolbar-icon click) and are deferred — the behavior
-is gate-pinned by the seam tests above, and the rendering is the same shared
-spec verified on Swift + Flask. Session H parity behaviors (PEN-200–206) are now
-seam-covered in all four native apps (Rust reference + the three new ports).
+**GUI overlay verification (2026-06-25, Session G).** GUI-verified on the native
+**Swift, OCaml, and Python** apps via the Quartz harness (`jas_gui_harness.py`,
+which gained a bare-cursor `move` verb for the hover-dependent overlay; drive
+recipe: focus-click → `key p` → corner-anchor clicks → hover near the first
+anchor). The full overlay renders in all three: filled blue **anchor dots**
+(PEN-100/013), SOLID blue path-so-far, DASHED gray **preview curve** to the
+cursor (PEN-101), and the orange **close-hit ring** around the first anchor
+within the 8 px radius (PEN-052).
+
+> **Overlay styling canonicalized into the spec (2026-06-25).** The GUI pass
+> SURFACED a real cross-app visual divergence: the `pen_overlay` colors were
+> hardcoded in each native renderer and had drifted — Swift drew blue / orange
+> / dots (matching the doc), while **Rust, OCaml, and Python drew black path /
+> GREEN close-hit ring / blue squares**. Fixed by lifting the styling into the
+> shared bundle (`pen.yaml` overlay block: `path_color #0078FF`, `preview_color
+> #646464`, `anchor_color`/`handle_color #0078FF`, `close_hit_color #FF7800`,
+> `anchor_marker dot`); all four renderers now read those params (with defensive
+> fallbacks) instead of hardcoding. Canonical look = the documented spec
+> (blue/orange/dots), user-chosen. Re-verified via the harness: OCaml and Python
+> both converged from green/black/squares to blue/orange/dots, now pixel-matching
+> Swift; Rust takes the same change (builds, pen_parity green, reads the same
+> spec). Session H parity behaviors (PEN-200–206) are seam-covered in all four
+> native apps (Rust reference + the three new ports).
 
 ---
 

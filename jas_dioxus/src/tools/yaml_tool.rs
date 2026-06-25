@@ -1538,9 +1538,37 @@ fn draw_pen_overlay(
         _ => false,
     };
 
+    // Overlay styling read from the bundle spec (pen.yaml overlay.render),
+    // same string-param pattern as the `buffer` read above. Defensive
+    // fallbacks keep the prior hardcoded look if a key is missing.
+    let path_color = render
+        .get("path_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("black");
+    let preview_color = render
+        .get("preview_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("rgb(100,100,100)");
+    let anchor_color = render
+        .get("anchor_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("rgb(0,120,255)");
+    let handle_color = render
+        .get("handle_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("rgb(0,120,255)");
+    let close_hit_color = render
+        .get("close_hit_color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("rgb(0,200,0)");
+    let anchor_marker = render
+        .get("anchor_marker")
+        .and_then(|v| v.as_str())
+        .unwrap_or("square");
+
     // 1. Committed curves between consecutive anchors.
     if anchors.len() >= 2 {
-        ctx.set_stroke_style_str("black");
+        ctx.set_stroke_style_str(path_color);
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(anchors[0].x, anchors[0].y);
@@ -1565,7 +1593,7 @@ fn draw_pen_overlay(
         let near_start = anchors.len() >= 2
             && (mouse_x - first.x).hypot(mouse_y - first.y) <= close_radius;
 
-        ctx.set_stroke_style_str("rgb(100,100,100)");
+        ctx.set_stroke_style_str(preview_color);
         ctx.set_line_width(1.0);
         let dash = js_sys::Array::of2(&4.0.into(), &4.0.into());
         let _ = ctx.set_line_dash(&dash);
@@ -1589,13 +1617,13 @@ fn draw_pen_overlay(
         let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
 
-    // 3. Handle lines + 4. Anchor squares.
-    let sel_color = "rgb(0,120,255)";
+    // 3. Handle lines + 4. Anchor markers.
     let handle_r = 3.0;
     let anchor_half = 5.0; // HANDLE_DRAW_SIZE / 2
+    let anchor_dot_r = 4.0; // filled-circle marker radius when anchor_marker == "dot"
     for a in &anchors {
         if a.smooth {
-            ctx.set_stroke_style_str(sel_color);
+            ctx.set_stroke_style_str(handle_color);
             ctx.set_line_width(1.0);
             ctx.begin_path();
             ctx.move_to(a.hx_in, a.hy_in);
@@ -1603,7 +1631,7 @@ fn draw_pen_overlay(
             ctx.stroke();
 
             ctx.set_fill_style_str("white");
-            ctx.set_stroke_style_str(sel_color);
+            ctx.set_stroke_style_str(handle_color);
             ctx.begin_path();
             let _ = ctx.arc(
                 a.hx_in, a.hy_in, handle_r,
@@ -1620,24 +1648,34 @@ fn draw_pen_overlay(
             ctx.stroke();
         }
 
-        ctx.set_fill_style_str(sel_color);
-        ctx.set_stroke_style_str(sel_color);
-        ctx.fill_rect(
-            a.x - anchor_half, a.y - anchor_half,
-            anchor_half * 2.0, anchor_half * 2.0,
-        );
-        ctx.stroke_rect(
-            a.x - anchor_half, a.y - anchor_half,
-            anchor_half * 2.0, anchor_half * 2.0,
-        );
+        ctx.set_fill_style_str(anchor_color);
+        ctx.set_stroke_style_str(anchor_color);
+        if anchor_marker == "dot" {
+            // Filled circle marker (canonical look).
+            ctx.begin_path();
+            let _ = ctx.arc(
+                a.x, a.y, anchor_dot_r,
+                0.0, std::f64::consts::TAU,
+            );
+            ctx.fill();
+        } else {
+            ctx.fill_rect(
+                a.x - anchor_half, a.y - anchor_half,
+                anchor_half * 2.0, anchor_half * 2.0,
+            );
+            ctx.stroke_rect(
+                a.x - anchor_half, a.y - anchor_half,
+                anchor_half * 2.0, anchor_half * 2.0,
+            );
+        }
     }
 
-    // 5. Close indicator: green circle around the first anchor when
-    //    the cursor is within close_radius of it.
+    // 5. Close indicator: ring around the first anchor when the cursor
+    //    is within close_radius of it (close_hit_color from the spec).
     if anchors.len() >= 2 {
         let first = &anchors[0];
         if (mouse_x - first.x).hypot(mouse_y - first.y) <= close_radius {
-            ctx.set_stroke_style_str("rgb(0,200,0)");
+            ctx.set_stroke_style_str(close_hit_color);
             ctx.set_line_width(2.0);
             ctx.begin_path();
             let _ = ctx.arc(

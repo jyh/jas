@@ -705,9 +705,29 @@ let draw_partial_selection_overlay (cr : Cairo.context)
     Cairo.stroke cr
   end
 
+(** Read a hash-prefixed RRGGBB overlay color param from the render
+    dict by key, returning Cairo float components (r, g, b) in 0..1.
+    Uses the same render_get read pattern as the other render-dict
+    keys; falls back to the supplied default hex when the key is absent
+    or not a string (defensive — keeps the prior hardcoded look if the
+    bundle lacks the param). *)
+let render_color (render : Yojson.Safe.t) (key : string)
+    (default_hex : string) : float * float * float =
+  let hex =
+    match render_get render key with
+    | Some (`String s) -> s
+    | _ -> default_hex
+  in
+  let (r, g, b) = Color_util.parse_hex hex in
+  (float_of_int r /. 255.0, float_of_int g /. 255.0, float_of_int b /. 255.0)
+
 (** Pen tool overlay: committed curves between anchors, preview
     curve from last anchor to mouse, handle lines + dots, anchor
-    squares, close indicator on hover. *)
+    markers, close indicator on hover. Marker colors and shape come
+    from the render dict (path_color / preview_color / anchor_color /
+    handle_color / close_hit_color / anchor_marker); line widths, dash
+    pattern, handle-dot styling, ring sizes, and all geometry stay
+    fixed. *)
 let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
     (eval_ctx : Yojson.Safe.t) (model : Model.model) : unit =
   let name = render_string render "buffer" in
@@ -746,9 +766,21 @@ let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
                            (eval_number_field eval_ctx
                               (render_get render "close_radius")) in
       let placing = eval_bool_field eval_ctx (render_get render "placing") in
+      (* Overlay colors + marker shape from the render dict; fall back to
+         the prior hardcoded values when a param is missing (defensive). *)
+      let (pr, pg, pb) = render_color render "path_color" "#000000" in
+      let (vr, vg, vb) = render_color render "preview_color" "#646464" in
+      let (ar, ag, ab) = render_color render "anchor_color" "#0078FF" in
+      let (hr, hg, hb) = render_color render "handle_color" "#0078FF" in
+      let (cr_, cg, cb) = render_color render "close_hit_color" "#00C800" in
+      let anchor_marker =
+        match render_get render "anchor_marker" with
+        | Some (`String s) -> s
+        | _ -> "square"
+      in
       (* 1. Committed curves between consecutive anchors. *)
       if List.length anchors >= 2 then begin
-        Cairo.set_source_rgba cr 0.0 0.0 0.0 1.0;
+        Cairo.set_source_rgba cr pr pg pb 1.0;
         Cairo.set_line_width cr 1.0;
         let first = List.hd anchors in
         Cairo.move_to cr first.Anchor_buffers.x first.Anchor_buffers.y;
@@ -772,8 +804,7 @@ let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
         let dy = mouse_y -. first.y in
         let near_start = List.length anchors >= 2
                          && Float.hypot dx dy <= close_radius in
-        Cairo.set_source_rgba cr (100.0 /. 255.0) (100.0 /. 255.0)
-          (100.0 /. 255.0) 1.0;
+        Cairo.set_source_rgba cr vr vg vb 1.0;
         Cairo.set_line_width cr 1.0;
         Cairo.set_dash cr [| 4.0; 4.0 |];
         Cairo.move_to cr last.x last.y;
@@ -790,13 +821,14 @@ let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
         Cairo.stroke cr;
         Cairo.set_dash cr [||]
       end;
-      (* 3. Handle lines + 4. Anchor squares. *)
-      let (sr, sg, sb) = (0.0, 120.0 /. 255.0, 1.0) in
+      (* 3. Handle lines (handle_color) + 4. Anchor markers (anchor_color).
+         anchor_marker chooses a filled dot (radius 4) or a square. *)
       let handle_r = 3.0 in
       let anchor_half = 5.0 in
+      let anchor_dot_r = 4.0 in
       List.iter (fun (a : Anchor_buffers.anchor) ->
         if a.smooth then begin
-          Cairo.set_source_rgba cr sr sg sb 1.0;
+          Cairo.set_source_rgba cr hr hg hb 1.0;
           Cairo.set_line_width cr 1.0;
           Cairo.move_to cr a.hx_in a.hy_in;
           Cairo.line_to cr a.hx_out a.hy_out;
@@ -805,29 +837,35 @@ let draw_pen_overlay (cr : Cairo.context) (render : Yojson.Safe.t)
             ~r:handle_r ~a1:0.0 ~a2:(2.0 *. Float.pi);
           Cairo.set_source_rgba cr 1.0 1.0 1.0 1.0;
           Cairo.fill_preserve cr;
-          Cairo.set_source_rgba cr sr sg sb 1.0;
+          Cairo.set_source_rgba cr hr hg hb 1.0;
           Cairo.stroke cr;
           Cairo.arc cr a.hx_out a.hy_out
             ~r:handle_r ~a1:0.0 ~a2:(2.0 *. Float.pi);
           Cairo.set_source_rgba cr 1.0 1.0 1.0 1.0;
           Cairo.fill_preserve cr;
-          Cairo.set_source_rgba cr sr sg sb 1.0;
+          Cairo.set_source_rgba cr hr hg hb 1.0;
           Cairo.stroke cr
         end;
-        Cairo.set_source_rgba cr sr sg sb 1.0;
-        Cairo.rectangle cr (a.x -. anchor_half) (a.y -. anchor_half)
-          ~w:(anchor_half *. 2.0) ~h:(anchor_half *. 2.0);
-        Cairo.fill_preserve cr;
-        Cairo.stroke cr
+        Cairo.set_source_rgba cr ar ag ab 1.0;
+        if anchor_marker = "dot" then begin
+          Cairo.arc cr a.x a.y
+            ~r:anchor_dot_r ~a1:0.0 ~a2:(2.0 *. Float.pi);
+          Cairo.fill cr
+        end else begin
+          Cairo.rectangle cr (a.x -. anchor_half) (a.y -. anchor_half)
+            ~w:(anchor_half *. 2.0) ~h:(anchor_half *. 2.0);
+          Cairo.fill_preserve cr;
+          Cairo.stroke cr
+        end
       ) anchors;
-      (* 5. Close indicator: green circle around the first anchor
-         when the cursor is within close_radius. *)
+      (* 5. Close indicator: close_hit_color ring around the first
+         anchor when the cursor is within close_radius. *)
       if List.length anchors >= 2 then begin
         let first = List.hd anchors in
         let dx = mouse_x -. first.x in
         let dy = mouse_y -. first.y in
         if Float.hypot dx dy <= close_radius then begin
-          Cairo.set_source_rgba cr 0.0 (200.0 /. 255.0) 0.0 1.0;
+          Cairo.set_source_rgba cr cr_ cg cb 1.0;
           Cairo.set_line_width cr 2.0;
           Cairo.arc cr first.x first.y
             ~r:(anchor_half +. 2.0) ~a1:0.0 ~a2:(2.0 *. Float.pi);

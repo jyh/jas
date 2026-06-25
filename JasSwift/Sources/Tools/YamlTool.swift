@@ -739,8 +739,26 @@ private func drawPenOverlay(
     let closeR = max(1.0, evalOverlayNumber(spec["close_radius"], ctx))
     let placing = evaluateOverlayBool(spec["placing"], ctx)
 
-    let stroke = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1)
-    cgCtx.setStrokeColor(stroke)
+    // Overlay colors + anchor-marker shape come from the render dict so the
+    // native renderer matches the workspace spec instead of hardcoding. Read
+    // each with the established overlay-param pattern (spec["key"] as? String
+    // then parseOverlayColor, with the prior hardcoded value as a defensive
+    // fallback when a key is missing). Hardcoded fallbacks: path/anchor/handle
+    // = blue (0,0.47,1), preview = gray (0.4), close-hit = orange (1,0.47,0).
+    let blueFallback = CGColor(red: 0, green: 0.47, blue: 1.0, alpha: 1)
+    let pathColor = parseOverlayColor((spec["path_color"] as? String) ?? "")
+        ?? blueFallback
+    let previewColor = parseOverlayColor((spec["preview_color"] as? String) ?? "")
+        ?? CGColor(gray: 0.4, alpha: 1.0)
+    let anchorColor = parseOverlayColor((spec["anchor_color"] as? String) ?? "")
+        ?? blueFallback
+    let handleColor = parseOverlayColor((spec["handle_color"] as? String) ?? "")
+        ?? blueFallback
+    let closeHitColor = parseOverlayColor((spec["close_hit_color"] as? String) ?? "")
+        ?? CGColor(red: 1, green: 0.47, blue: 0, alpha: 1)
+    let anchorMarker = (spec["anchor_marker"] as? String) ?? "dot"
+
+    cgCtx.setStrokeColor(pathColor)
     cgCtx.setLineWidth(1)
 
     // Committed curve: MoveTo(first) + CurveTo(...) through pairs.
@@ -758,15 +776,24 @@ private func drawPenOverlay(
         cgCtx.strokePath()
     }
 
-    // Anchor dots.
-    cgCtx.setFillColor(stroke)
+    // Anchor markers: "dot" → filled circle (radius 4) in anchor_color;
+    // "square" → filled square. Canonical is "dot".
+    cgCtx.setFillColor(anchorColor)
     for a in anchors {
-        cgCtx.fillEllipse(in: CGRect(x: a.x - 3, y: a.y - 3,
-                                      width: 6, height: 6))
+        if anchorMarker == "square" {
+            cgCtx.fill(CGRect(x: a.x - 3, y: a.y - 3,
+                              width: 6, height: 6))
+        } else {
+            cgCtx.fillEllipse(in: CGRect(x: a.x - 4, y: a.y - 4,
+                                          width: 8, height: 8))
+        }
     }
 
-    // Handle bar for the last anchor (when smooth).
+    // Handle bar + handle dot for the last anchor (when smooth), in
+    // handle_color.
     if let last = anchors.last, last.smooth {
+        cgCtx.setStrokeColor(handleColor)
+        cgCtx.setFillColor(handleColor)
         cgCtx.move(to: CGPoint(x: last.hxIn, y: last.hyIn))
         cgCtx.addLine(to: CGPoint(x: last.hxOut, y: last.hyOut))
         cgCtx.strokePath()
@@ -777,6 +804,7 @@ private func drawPenOverlay(
     // Preview curve: dashed segment from last anchor to cursor when
     // placing the next anchor (not during an active handle drag).
     if placing, let last = anchors.last {
+        cgCtx.setStrokeColor(previewColor)
         cgCtx.setLineDash(phase: 0, lengths: [3, 3])
         cgCtx.move(to: CGPoint(x: last.x, y: last.y))
         cgCtx.addLine(to: CGPoint(x: mouseX, y: mouseY))
@@ -788,7 +816,7 @@ private func drawPenOverlay(
     if anchors.count >= 2, placing, let first = anchors.first {
         let dx = mouseX - first.x, dy = mouseY - first.y
         if (dx * dx + dy * dy).squareRoot() < closeR {
-            cgCtx.setStrokeColor(CGColor(red: 1, green: 0.47, blue: 0, alpha: 1))
+            cgCtx.setStrokeColor(closeHitColor)
             cgCtx.strokeEllipse(in: CGRect(
                 x: first.x - closeR, y: first.y - closeR,
                 width: closeR * 2, height: closeR * 2))
