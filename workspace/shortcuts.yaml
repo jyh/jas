@@ -59,6 +59,17 @@ shortcuts:
   - { key: "H",            action: select_tool,      params: { tool: hand } }
   - { key: "Shift+O",      action: select_tool,      params: { tool: artboard } }
   - { key: "O",            action: select_tool,      params: { tool: artboard } }   # alias
+  # Tool alternates — flyout-only tools given direct Shift+ shortcuts so every
+  # tool is keyboard-reachable without opening its toolbar flyout. Grouped under
+  # the flyout primary key where it reads naturally (Shift+V selection family,
+  # Shift+M rect family, Shift+S scale family, Shift+N pencil family); polygon
+  # and star take free Shift+letters (no single-letter mnemonic available).
+  - { key: "Shift+V",      action: select_tool,      params: { tool: interior_selection } }
+  - { key: "Shift+M",      action: select_tool,      params: { tool: rounded_rect } }
+  - { key: "Shift+G",      action: select_tool,      params: { tool: polygon } }
+  - { key: "Shift+K",      action: select_tool,      params: { tool: star } }
+  - { key: "Shift+S",      action: select_tool,      params: { tool: shear } }
+  - { key: "Shift+N",      action: select_tool,      params: { tool: smooth } }
   # Fill / Stroke
   - { key: "D",            action: reset_fill_stroke }
   - { key: "X",            action: toggle_fill_on_top }

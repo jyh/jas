@@ -16,6 +16,7 @@
 id: star
 cursor: crosshair
 menu_label: "Star Tool"
+shortcut: "Shift+K"
 
 state:
   mode:
