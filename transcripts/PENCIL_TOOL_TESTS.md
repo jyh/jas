@@ -20,20 +20,22 @@ Smoothness panel are **not-yet-implemented** (ENH entries).
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-06-25._ **Correction (2026-06-25):** the prior entries for
+Swift / OCaml / Python claimed dedicated pencil test files that did NOT exist
+(pencil behavior was effectively RUST-ONLY). The dedicated files were created
+2026-06-25 — each ports the five Rust `pencil_parity_*` gesture-seam tests
+(freehand-draw→smoothed Path, zero-length→degenerate Path, stroke-but-no-fill
+defaults, release-without-press noop, path-starts-at-press-point) + a
+loader-sanity case, driving the PRODUCTION pencil tool loaded from the bundle.
+Adversarially verified at parity with the Rust twins, mutation-proven non-vacuous.
 
-**Python — `workspace_interpreter/point_buffers_test.py`**
-(if present) + `jas/tools/yaml_tool_test.py` dispatch cases.
-- Point buffer push / clear / length primitives.
-- Dispatch covers the pencil handler YAML through the shared
-  validation flow.
+**Swift — `JasSwift/Tests/Tools/YamlToolPencilTests.swift`** (NEW) — 6/6 green.
 
-**Swift — `JasSwift/Tests/Tools/YamlToolPencilTests.swift`**
-- Press / drag / release → point-buffer accumulation → fit_curve →
-  path commit. FIT_ERROR=4.0 verified against fixture.
+**OCaml — `jas_ocaml/test/tools/yaml_tool_pencil_test.ml`** (NEW, registered in
+`test/tools/dune` + `@runtest`) — 6/6 green.
 
-**OCaml — `jas_ocaml/test/tools/yaml_tool_pencil_test.ml`**
-- Mirror of Python / Swift coverage.
+**Python — `jas/tools/yaml_tool_pencil_test.py`** (NEW) — 6 passed (previously
+the pencil was covered only INDIRECTLY via shared dispatch).
 
 **Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)])**
 - Reference implementation; pencil pipeline inline.
@@ -49,6 +51,17 @@ _Last synced: 2026-04-23_
 The manual suite below covers overlay rendering (buffer_polyline
 preview), fit smoothness intuition, cross-tool interaction, undo, and
 appearance theming.
+
+**Overlay note (2026-06-25).** Unlike the pen tool (whose `pen_overlay` colors
+were hardcoded per-renderer and had to be canonicalized into the spec — see
+PEN_TOOL_TESTS.md), the pencil preview's `buffer_polyline` is ALREADY
+spec-driven: `pencil.yaml` carries `style: "stroke: black; stroke-width: 1;"`
+and all four native renderers read+apply that `style` param (Rust
+`draw_buffer_polyline_overlay`, Swift `drawBufferPolylineOverlay`, OCaml
+`draw_buffer_polyline_overlay`, Python `_draw_buffer_polyline_overlay`). So the
+PNC-070 preview (1 px black polyline) is consistent across apps by construction —
+no divergence. GUI-confirmed on the native Swift app via the Quartz harness: a
+button-held pencil drag renders the thin black `buffer_polyline` preview.
 
 ---
 
