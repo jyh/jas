@@ -128,9 +128,24 @@ are no longer a gap. Two fixture gotchas confirmed building SEL-082: a reliable
 File>New needs the dropdown to fully render before the New click (a longer settle),
 and the Pen path only draws on a freshly-focused clean canvas.
 
+**P2 follow-up (2026-06-25):** SEL-016 (click overlap selects topmost/z-top) PASS;
+SEL-105 (Partial-Selection marquee selects the enclosed CPs) PASS; SEL-106 (empty
+marquee clears the CP selection) PASS (it fully deselects the path — a touch more
+than SEL-101's "anchors stay shown" wording, but the CP selection clears). SEL-171
+(undo an Alt-copy) INCONCLUSIVE — the copy was created but the follow-up Ctrl-Z
+didn't remove it; undo itself is proven (SEL-054/135 reverted cleanly), so this
+reads as a Ctrl-Z focus/timing miss right after the synthetic single-shot alt-drag.
+SEL-153 (switching tools hides the CP overlay) INCONCLUSIVE — a path selected with
+the Selection tool keeps showing anchor squares at its vertices rather than an
+obvious bounding box, and `key v` after a marquee didn't reliably switch, so the
+clean CP→bbox transition wasn't captured (the overlay *difference* is shown
+elsewhere: CPs+handles in partial vs a bbox for groups/rects). Theming SEL-190/192
+not run (menu-driven appearance switch + subjective "readability" judgement).
+
 **Estimated coverage:** ~80% of the suite is harness-driveable for Rust with
 visual verification. Remaining genuine gaps: px-tolerance cases, mid-gesture Esc,
-cursor glyphs, and marquee edge cases (up-left/far flakiness).
+cursor glyphs, marquee edge cases (up-left/far flakiness), and the keyboard
+tool-switch / Ctrl-Z immediately after a synthetic drag (focus settle).
 
 ---
 
