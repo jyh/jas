@@ -134,3 +134,16 @@ overlay:
     # Preview curve from last anchor to cursor only renders when
     # placing (not actively dragging a handle).
     placing: "tool.pen.mode == 'placing'"
+    # Overlay styling — canonicalized into the spec (2026-06-25) so every app's
+    # native pen_overlay renderer reads the SAME colors instead of hardcoding
+    # them (they had drifted: black-vs-blue path, green-vs-orange close-hit,
+    # square-vs-dot markers). Literal hex color strings; each renderer parses
+    # them with its existing overlay-color helper. The canonical look matches
+    # the documented spec (blue path-so-far + anchors, gray dashed preview,
+    # round anchor dots, orange close-hit ring).
+    path_color: "#0078FF"        # path-so-far between committed anchors (blue)
+    preview_color: "#646464"     # dashed preview from last anchor to cursor (gray)
+    anchor_color: "#0078FF"      # anchor markers + handle bars / dots (blue)
+    handle_color: "#0078FF"      # smooth-anchor handle bars and handle dots (blue)
+    close_hit_color: "#FF7800"   # close-hit ring near the first anchor (orange)
+    anchor_marker: "dot"         # anchor marker shape: dot | square (canonical: dot)

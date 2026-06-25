@@ -951,9 +951,25 @@ def _draw_pen_overlay(painter, render: dict, eval_ctx: dict, model) -> None:
         eval_ctx, render.get("close_radius")))
     placing = _eval_bool_field(eval_ctx, render.get("placing"))
 
+    # Overlay styling read from the spec render dict (literal hex
+    # strings, same read pattern as the `buffer` key above); each
+    # falls back to the historical hardcoded color when absent.
+    def _color(key: str, default) -> QColor:
+        raw = render.get(key)
+        return QColor(raw) if isinstance(raw, str) and raw else QColor(default)
+
+    path_color = _color("path_color", QColor(0, 0, 0))
+    preview_color = _color("preview_color", QColor(100, 100, 100))
+    anchor_color = _color("anchor_color", QColor(0, 120, 255))
+    handle_color = _color("handle_color", QColor(0, 120, 255))
+    close_hit_color = _color("close_hit_color", QColor(0, 200, 0))
+    raw_marker = render.get("anchor_marker")
+    anchor_marker = raw_marker if isinstance(raw_marker, str) and raw_marker \
+        else "square"
+
     # 1. Committed Bezier curves between consecutive anchors.
     if len(anchors) >= 2:
-        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.setPen(QPen(path_color, 1))
         _clear_brush(painter)
         path = QPainterPath()
         path.moveTo(anchors[0].x, anchors[0].y)
@@ -974,7 +990,7 @@ def _draw_pen_overlay(painter, render: dict, eval_ctx: dict, model) -> None:
         dx = mouse_x - first.x
         dy = mouse_y - first.y
         near_start = len(anchors) >= 2 and math.hypot(dx, dy) <= close_radius
-        preview_pen = QPen(QColor(100, 100, 100), 1)
+        preview_pen = QPen(preview_color, 1)
         preview_pen.setStyle(Qt.PenStyle.CustomDashLine)
         preview_pen.setDashPattern([4.0, 4.0])
         painter.setPen(preview_pen)
@@ -991,27 +1007,30 @@ def _draw_pen_overlay(painter, render: dict, eval_ctx: dict, model) -> None:
                          mouse_x, mouse_y)
         painter.drawPath(path)
 
-    # 3. Handle lines + 4. Anchor squares.
-    sel_color = QColor(0, 120, 255)
+    # 3. Handle lines + 4. Anchor markers.
     handle_r = 3.0
     anchor_half = 5.0
+    dot_r = 4.0
     for a in anchors:
         if a.smooth:
-            painter.setPen(QPen(sel_color, 1))
+            painter.setPen(QPen(handle_color, 1))
             _clear_brush(painter)
             painter.drawLine(a.hx_in, a.hy_in, a.hx_out, a.hy_out)
             painter.setBrush(QBrush(QColor(255, 255, 255)))
-            painter.setPen(QPen(sel_color, 1))
+            painter.setPen(QPen(handle_color, 1))
             painter.drawEllipse(QPointF(a.hx_in, a.hy_in),
                                 handle_r, handle_r)
             painter.drawEllipse(QPointF(a.hx_out, a.hy_out),
                                 handle_r, handle_r)
-        painter.setPen(QPen(sel_color, 1))
-        painter.setBrush(QBrush(sel_color))
-        painter.drawRect(QRectF(
-            a.x - anchor_half, a.y - anchor_half,
-            anchor_half * 2, anchor_half * 2,
-        ))
+        painter.setPen(QPen(anchor_color, 1))
+        painter.setBrush(QBrush(anchor_color))
+        if anchor_marker == "dot":
+            painter.drawEllipse(QPointF(a.x, a.y), dot_r, dot_r)
+        else:
+            painter.drawRect(QRectF(
+                a.x - anchor_half, a.y - anchor_half,
+                anchor_half * 2, anchor_half * 2,
+            ))
 
     # 5. Close indicator around the first anchor when cursor is within
     # close_radius of it.
@@ -1020,7 +1039,7 @@ def _draw_pen_overlay(painter, render: dict, eval_ctx: dict, model) -> None:
         dx = mouse_x - first.x
         dy = mouse_y - first.y
         if math.hypot(dx, dy) <= close_radius:
-            painter.setPen(QPen(QColor(0, 200, 0), 2))
+            painter.setPen(QPen(close_hit_color, 2))
             _clear_brush(painter)
             painter.drawEllipse(
                 QPointF(first.x, first.y),

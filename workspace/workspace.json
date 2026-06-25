@@ -23019,7 +23019,13 @@
           "mouse_x": "tool.pen.mouse_x",
           "mouse_y": "tool.pen.mouse_y",
           "close_radius": "8",
-          "placing": "tool.pen.mode == 'placing'"
+          "placing": "tool.pen.mode == 'placing'",
+          "path_color": "#0078FF",
+          "preview_color": "#646464",
+          "anchor_color": "#0078FF",
+          "handle_color": "#0078FF",
+          "close_hit_color": "#FF7800",
+          "anchor_marker": "dot"
         }
       }
     },
