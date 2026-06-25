@@ -99,7 +99,8 @@ selection handles / CP fills / overlays appear in screenshots.
 - Sub-pixel tolerances: SEL-107 (7/9px), 133 (4px), 134 (0.5px) — below reliable
   synthetic precision.
 - SEL-150 marquee overlay styling — the thin dashed rect isn't legible at capture scale.
-- SEL-136 mid-drag Alt — complex modal sequence.
+- SEL-136 mid-drag Alt — complex modal sequence (harness limit only; the feature
+  itself now works by hand — see the 2026-06-25 alt-copy-undo update below).
 - Session L parity exact-coordinate assertions — harness sees only what's rendered.
 
 **NOT RUN (feasible, skipped for time):** SEL-016 (overlap→topmost), 105/106 (CP
@@ -132,15 +133,37 @@ and the Pen path only draws on a freshly-focused clean canvas.
 SEL-105 (Partial-Selection marquee selects the enclosed CPs) PASS; SEL-106 (empty
 marquee clears the CP selection) PASS (it fully deselects the path — a touch more
 than SEL-101's "anchors stay shown" wording, but the CP selection clears). SEL-171
-(undo an Alt-copy) INCONCLUSIVE — the copy was created but the follow-up Ctrl-Z
-didn't remove it; undo itself is proven (SEL-054/135 reverted cleanly), so this
-reads as a Ctrl-Z focus/timing miss right after the synthetic single-shot alt-drag.
+(undo an Alt-copy) INCONCLUSIVE [RESOLVED — this was a real bug, not a timing
+miss; see the 2026-06-25 alt-copy-undo update below] — the copy was created but
+the follow-up Ctrl-Z didn't remove it; undo itself is proven (SEL-054/135
+reverted cleanly), so this reads as a Ctrl-Z focus/timing miss right after the
+synthetic single-shot alt-drag.
 SEL-153 (switching tools hides the CP overlay) INCONCLUSIVE — a path selected with
 the Selection tool keeps showing anchor squares at its vertices rather than an
 obvious bounding box, and `key v` after a marquee didn't reliably switch, so the
 clean CP→bbox transition wasn't captured (the overlay *difference* is shown
 elsewhere: CPs+handles in partial vs a bbox for groups/rects). Theming SEL-190/192
 not run (menu-driven appearance switch + subjective "readability" judgement).
+
+**Update 2026-06-25 (alt-copy undo fix — SEL-171 RESOLVED → PASS):** The
+SEL-171 INCONCLUSIVE above was NOT a harness timing miss — it was a real bug.
+The Selection tool's alt-drag-copy committed the copy and its trailing
+drag-frames as SEPARATE undo transactions (the per-frame drag coalescer refused
+to bridge a `copy_selection`), so Ctrl-Z reverted only the trailing move and
+left the copy at the option-press point — exactly the symptom recorded above.
+Fixed in the drag coalescer: a copy now absorbs its trailing drag, and a
+pre-copy move that `doc.preview.restore` reverted (PATH B) is dropped (Rust
+commit `0f959415`; ported to Swift/OCaml/Python in `b6e8eb05`; gate-green op
+corpus `drag_coalesce_copy_absorbs_trailing_drag`, plus a PATH A/B gesture test
+per app). **SEL-171 now PASS — user-confirmed by hand** (create rect → select →
+drag → press Option → Ctrl-Z removes the copy in one step). SEL-136 (mid-drag
+Alt) exercises the same PATH B and is now functional in Rust; that gesture was
+also made reachable in Swift/OCaml/Python by threading `alt` through
+`on_move` (commit `11af3b4e`) — they previously dropped the modifier on move
+events. Still open from a fresh hands-on pass: **SEL-153** (CP→bbox overlay
+transition), **SEL-173** (handle-drag undo, unrun), **SEL-190/192** (theming),
+and the not-feasible-via-harness set (SEL-070/071/072 mid-gesture Esc, cursor
+glyphs, locked-element, sub-pixel tolerances).
 
 **Estimated coverage:** ~80% of the suite is harness-driveable for Rust with
 visual verification. Remaining genuine gaps: px-tolerance cases, mid-gesture Esc,
