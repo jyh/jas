@@ -20,22 +20,26 @@ rubber-banding previous-anchor handles are **not-yet-implemented**
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-06-25._ **Correction (2026-06-25):** the prior entries for
+Swift / OCaml / Python claimed dedicated pen test files that did NOT actually
+exist (`workspace_interpreter/anchor_buffers_test.py` was never created either);
+pen behavior was effectively RUST-ONLY. The dedicated files were created
+2026-06-25 — each ports the five Rust `pen_parity_*` gesture-seam tests
+(three-clicks+double-click polyline, click-drag out-handle, click-near-first
+closes, Escape-via-shell-key commits, Escape-1-anchor discards) + a
+loader-sanity case, driving the PRODUCTION bundle pen tool. All three were
+adversarially verified at parity with the Rust + Swift twins (same coords, `d`
+commands, out-handle coords, discard), mutation-proven non-vacuous; the Escape
+case uses `on_key_event` — the real shell entry each canvas dispatches for a
+non-capturing tool (the equivalent of Rust's `on_key` regression guard).
 
-**Python — `jas/tools/yaml_tool_test.py`** + anchor-buffer primitives
-in `workspace_interpreter/anchor_buffers_test.py` (if present).
-- YamlTool pipeline covers pen state machine indirectly via the
-  shared dispatch test cases.
-- Anchor-buffer primitives (push, set_last_out_handle, close_hit,
-  pop) covered at unit level.
+**Swift — `JasSwift/Tests/Tools/YamlToolPenTests.swift`** (NEW) — 6/6 green.
 
-**Swift — `JasSwift/Tests/Tools/YamlToolPenTests.swift`**
-- idle → dragging → placing transitions; click-to-place corner anchor;
-  click-and-drag smooth anchor; close-path near first anchor; Esc
-  commits if ≥ 2 anchors.
+**OCaml — `jas_ocaml/test/tools/yaml_tool_pen_test.ml`** (NEW, registered in
+`test/tools/dune` + `@runtest`) — 6/6 green.
 
-**OCaml — `jas_ocaml/test/tools/yaml_tool_pen_test.ml`**
-- Mirror of Python / Swift coverage.
+**Python — `jas/tools/yaml_tool_pen_test.py`** (NEW) — 6 passed (previously the
+pen was only covered INDIRECTLY via shared dispatch).
 
 **Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)])**
 - Reference implementation; pen state machine + anchor-buffer +
@@ -56,6 +60,23 @@ The manual suite below covers overlay rendering (pen_overlay render
 type with close-hit indicator, handle bars, preview curve), tool
 lifecycle, double-click commit, cross-tool interaction, undo, and
 appearance theming.
+
+**GUI overlay verification (2026-06-25, Session G).** The pen overlay was
+GUI-verified on the native **Swift** app via the Quartz harness
+(`jas_gui_harness.py`, which gained a bare-cursor `move` verb for the
+hover-dependent overlay): pen tool active, three corner anchors placed, cursor
+hovered near the first anchor. The capture shows the full overlay — filled blue
+**anchor dots** (PEN-100/013), the SOLID blue path-so-far, the DASHED blue
+**preview curve** from the last anchor to the cursor (PEN-101), and the orange
+**close-hit ring** around the first anchor when within the 8 px radius (PEN-052).
+The `pen_overlay` render is bundle-driven (one shared spec across apps) and also
+has automated coverage in Flask (`test_canvas.mjs`: path-so-far / anchor squares
+/ close-hit ring). Native OCaml/Python overlay captures hit Quartz keyboard /
+focus flakiness (tool-switch keys not reaching the canvas first-responder;
+worked around on Swift via a toolbar-icon click) and are deferred — the behavior
+is gate-pinned by the seam tests above, and the rendering is the same shared
+spec verified on Swift + Flask. Session H parity behaviors (PEN-200–206) are now
+seam-covered in all four native apps (Rust reference + the three new ports).
 
 ---
 
