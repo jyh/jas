@@ -76,9 +76,9 @@
     "expect_undo_steps": 2
   },
   {
-    "name": "drag_coalesce_breaks_copy_between",
+    "name": "drag_coalesce_copy_absorbs_trailing_drag",
     "setup_svg": "eye.svg",
-    "comment": "A copy_selection between two moves breaks the run: copy is non-additive and never coalesces, and it changes the target set, so the trailing move stays its own txn.",
+    "comment": "The alt-drag-copy gesture (selection.yaml) journals copy_selection and then drags the NEW duplicate with move_selection frames — drag-to-duplicate is ONE action, so the trailing move FOLDS into the copy's own offset (commit_txn Branch A): copy(dx:0) + move(dx:7) => copy(dx:7), ONE undo step. The PRECEDING move on the ORIGINAL (dx:5, kept — not reverted by preview.restore here) is a different op on a different target set and stays its own step. Two same-name moves separated by a copy are therefore TWO undo steps, not three: [move-original, copy-dragged]. (A copy still never coalesces with another copy, and never folds BACKWARD into a kept preceding move.)",
     "txns": [
       { "name": "selection on_mousemove", "ops": [
         { "op": "select_rect", "x": -5, "y": -5, "width": 55, "height": 55, "extend": false },
@@ -91,7 +91,7 @@
         { "op": "move_selection", "dx": 7, "dy": 0 }
       ]}
     ],
-    "expect_journal_txns": 3,
-    "expect_undo_steps": 3
+    "expect_journal_txns": 2,
+    "expect_undo_steps": 2
   }
 ]
