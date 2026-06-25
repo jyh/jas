@@ -167,19 +167,31 @@ def do_drag(fx1,fy1,fx2,fy2,mods):
     time.sleep(0.05); mouse(Quartz.kCGEventLeftMouseUp,x2,y2,f)
     if space_held: keyev(KEYCODE['space'], False)
 
-def do_dragbegin(fx1,fy1,fx2,fy2):
+def do_dragbegin(fx1,fy1,fx2,fy2,mods=()):
     # Mouse down at start, drag to end, but LEAVE the button held (the HID
     # button state persists across processes). Use dragend to release.
-    x1,y1=pt(fx1,fy1); x2,y2=pt(fx2,fy2)
-    mouse(Quartz.kCGEventMouseMoved,x1,y1)
-    mouse(Quartz.kCGEventLeftMouseDown,x1,y1); time.sleep(0.05)
+    # `mods` (e.g. alt/shift) are carried as CGEvent flags on every event AND
+    # held as real modifier keys (released by dragend) — this is the modifier
+    # path for drags (Alt-copy etc.). Prefer this over the single-shot `drag`
+    # when the test sends a key/click AFTER the drag: the single-shot `drag`
+    # leaves the canvas unable to receive the next synthetic input, but the
+    # button-held begin/end path does not.
+    # FLAG-ONLY modifiers (no real key held): the modifier rides on the CGEvent
+    # flags of every mouse event, which is what the app reads for a drag
+    # modifier (event.modifiers.alt). Holding a REAL modifier key across the
+    # begin/end process boundary disrupted subsequent synthetic input
+    # (a later Ctrl-Z / drag didn't register); flag-only avoids that.
+    f=flags(mods); x1,y1=pt(fx1,fy1); x2,y2=pt(fx2,fy2)
+    mouse(Quartz.kCGEventMouseMoved,x1,y1,f)
+    mouse(Quartz.kCGEventLeftMouseDown,x1,y1,f); time.sleep(0.05)
     N=12
     for i in range(1,N+1):
         x=x1+(x2-x1)*i/N; y=y1+(y2-y1)*i/N
-        mouse(Quartz.kCGEventLeftMouseDragged,x,y); time.sleep(0.015)
+        mouse(Quartz.kCGEventLeftMouseDragged,x,y,f); time.sleep(0.015)
 
-def do_dragend(fx,fy):
-    x,y=pt(fx,fy); mouse(Quartz.kCGEventLeftMouseUp,x,y)
+def do_dragend(fx,fy,mods=()):
+    f=flags(mods); x,y=pt(fx,fy)
+    mouse(Quartz.kCGEventLeftMouseUp,x,y,f)
 
 def do_dragpath(points):
     # Continuous drag through N waypoints (a curve). Down at first, interpolated
@@ -193,6 +205,17 @@ def do_dragpath(points):
             x=a[0]+(b[0]-a[0])*i/8; y=a[1]+(b[1]-a[1])*i/8
             mouse(Quartz.kCGEventLeftMouseDragged,x,y); time.sleep(0.012)
     time.sleep(0.05); mouse(Quartz.kCGEventLeftMouseUp,*pts[-1])
+
+def do_move(fx,fy):
+    # Bare cursor move, NO button — for hover-dependent overlays (e.g. the
+    # Pen tool's live preview curve and the close-hit ring near the first
+    # anchor) that track the cursor via on_mousemove. After a click the cursor
+    # sits on the last anchor, so the preview is zero-length; this repositions
+    # it without placing an anchor. A couple of moves + settle so on_mousemove
+    # fires and the overlay repaints before the next `shot`.
+    x,y=pt(fx,fy)
+    mouse(Quartz.kCGEventMouseMoved,x,y); time.sleep(0.03)
+    mouse(Quartz.kCGEventMouseMoved,x,y); time.sleep(0.06)
 
 def do_shot(path):
     subprocess.run(f"screencapture -o -l{WIN['id']} {path}", shell=True)
@@ -222,12 +245,16 @@ if __name__=="__main__":
         mods=sys.argv[6].split(",") if len(sys.argv)>6 else []
         do_drag(*[float(a) for a in sys.argv[2:6]],mods); print("drag",sys.argv[2:6],mods)
     elif v=="dragbegin":
-        do_dragbegin(*[float(a) for a in sys.argv[2:6]]); print("dragbegin",sys.argv[2:6])
+        bmods=sys.argv[6].split(",") if len(sys.argv)>6 else []
+        do_dragbegin(*[float(a) for a in sys.argv[2:6]],bmods); print("dragbegin",sys.argv[2:6],bmods)
     elif v=="dragend":
-        do_dragend(float(sys.argv[2]),float(sys.argv[3])); print("dragend",sys.argv[2:4])
+        emods=sys.argv[4].split(",") if len(sys.argv)>4 else []
+        do_dragend(float(sys.argv[2]),float(sys.argv[3]),emods); print("dragend",sys.argv[2:4],emods)
     elif v=="dragpath":
         nums=[float(a) for a in sys.argv[2:]]
         points=list(zip(nums[0::2],nums[1::2]))
         do_dragpath(points); print("dragpath",points)
+    elif v=="move":
+        do_move(float(sys.argv[2]),float(sys.argv[3])); print("move",sys.argv[2],sys.argv[3])
     else:
         print("unknown verb:", v); sys.exit(2)
