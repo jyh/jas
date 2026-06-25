@@ -1146,6 +1146,93 @@ let drag_coalesce_post_undo_no_merge () =
   assert (model#journal_head = 0);
   assert (not model#can_undo)
 
+(* Alt-copy "one undo step" at the GESTURE seam (drives the production
+   CanvasTool seam via [run_gesture_model], then asserts undo on the Model).
+   Mirrors the Rust [gesture_alt_at_press_copy_is_one_undo_step].
+
+   PATH A (Alt held AT press, drag-to-duplicate from the start): the selection
+   tool journals copy_selection on the first move and then drags the duplicate
+   with move_selection frames. With commit_txn Branch A, every trailing drag
+   frame folds its delta INTO the copy op own offset, so the whole gesture is
+   ONE undo step; one undo restores the pre-drag document (copy gone, original
+   in place, selection restored).
+
+   NOTE on PATH B (Alt pressed MID drag): the Rust PATH B test cannot be
+   faithfully ported here. The OCaml [Canvas_tool.on_move] signature carries NO
+   alt flag (shift:bool -> dragging:bool -> unit) and [Yaml_tool.on_move]
+   hardcodes alt=false, so the selection tool never sees event.modifiers.alt
+   during a move. The mid-drag doc.preview.restore + copy_selection that PATH B
+   depends on therefore never fires through this seam (a probe confirmed PATH B
+   produces a 2-txn [move_selection; copy_selection] journal here, because the
+   pre-copy move was a real kept move, NOT a round-tripped one). The PATH B
+   shape (a dead round-tripped move under a landing copy) IS pinned by the
+   shared op corpus drag_coalesce_copy_absorbs_trailing_drag, which exercises
+   drop_round_tripped_move_before_copy directly. Threading alt through on_move
+   is a cross-app Canvas_tool interface change, out of scope here. *)
+
+(* Oracle for the alt-copy undo test: the document the gesture must undo back to
+   -- rect[0,0] selected, both originals in place, NO copy. Captured by driving
+   ONLY the selecting press (which selects but commits nothing), so it includes
+   the post-select selection that the first-move snapshot captured. Mirrors the
+   Rust [before_drag_oracle]. *)
+let alt_copy_before_drag_oracle () : string =
+  let tc = `Assoc [
+    ("setup_svg", `String "two_rects.svg");
+    ("tool", `String "selection");
+    ("events", `List [
+      `Assoc [("kind", `String "press"); ("x", `Float 36.); ("y", `Float 36.)]
+    ]);
+  ] in
+  Jas.Test_json.document_to_test_json (run_gesture_model tc)#document
+
+let gesture_alt_at_press_copy_is_one_undo_step () =
+  let before_drag = alt_copy_before_drag_oracle () in
+  let ev ?(dragging=false) ?(alt=false) kind x y =
+    `Assoc [
+      ("kind", `String kind);
+      ("x", `Float x); ("y", `Float y);
+      ("dragging", `Bool dragging); ("alt", `Bool alt);
+    ]
+  in
+  let tc = `Assoc [
+    ("setup_svg", `String "two_rects.svg");
+    ("tool", `String "selection");
+    ("events", `List [
+      ev ~alt:true "press" 36. 36.;
+      ev ~dragging:true ~alt:true "move" 50. 36.;
+      ev ~dragging:true ~alt:true "move" 60. 36.;
+      ev ~dragging:true ~alt:true "move" 80. 36.;
+      ev ~alt:true "release" 80. 36.;
+    ]);
+  ] in
+  let model = run_gesture_model tc in
+  let after = Jas.Test_json.document_to_test_json model#document in
+  if after = before_drag then
+    failwith "the alt-drag must have produced a copy";
+  if not model#can_undo then
+    failwith "the gesture committed an undoable transaction";
+  if model#journal_head <> 1 then
+    failwith (Printf.sprintf
+      "alt-at-press drag-to-duplicate must be exactly ONE undo step (got head=%d, depth=%d)"
+      model#journal_head (List.length model#journal));
+  (match List.rev model#journal with
+   | tip :: _ ->
+     (match List.rev tip.Jas.Op_log.ops with
+      | last :: _ when last.Jas.Op_log.op = "copy_selection" -> ()
+      | last :: _ ->
+        failwith (Printf.sprintf
+          "the single undo step must be the copy (tip last op = %s)" last.Jas.Op_log.op)
+      | [] -> failwith "tip txn has no ops")
+   | [] -> failwith "journal is empty after the gesture");
+  model#undo;
+  let restored = Jas.Test_json.document_to_test_json model#document in
+  if restored <> before_drag then
+    failwith "one undo must restore the original and remove the copy";
+  if model#can_undo then
+    failwith "after one undo the journal cursor is back at the origin (lock-step)";
+  if model#journal_head <> 0 then
+    failwith "cursor back at origin"
+
 (* 3c-1 determinism check (OP_LOG.md section 7): an id-primary op reads its
    operand ids from its OWN params, NEVER from doc.selection, so it applies the
    SAME operands regardless of the ambient selection. Drive [move_by_ids{["eye"]}]
@@ -2575,6 +2662,12 @@ let () =
         drag_coalesce_target_break;
       Alcotest.test_case "drag_coalesce post-undo no merge (tip guard)" `Quick
         drag_coalesce_post_undo_no_merge;
+      (* Alt-copy one-undo-step at the GESTURE seam (PATH A: alt at press).
+         Mirrors the Rust [gesture_alt_at_press_copy_is_one_undo_step]. PATH B
+         (alt mid-drag) is undrivable through the OCaml on_move seam (no alt
+         flag) and is pinned by the op corpus instead -- see the test comment. *)
+      Alcotest.test_case "gesture alt-at-press copy is one undo step" `Quick
+        gesture_alt_at_press_copy_is_one_undo_step;
 
       (* OP_LOG.md section 9 verb33 P1-P7 (the actions.yaml<->op_apply
          unification). Each shared source fixture replays through

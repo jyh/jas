@@ -658,10 +658,22 @@ public class Model: ObservableObject {
         //
         // Coalescable verbs are EXACTLY the additive translates of the same
         // target set via `Controller.moveSelection`: `move_selection` and its
-        // id-primary twin `move_by_ids`. Never copy_selection/copy_by_ids (a
-        // copy is non-additive — two copies != one copy), never the
-        // selection-only verbs (run boundaries). Mirrors Rust
-        // `Model::commit_txn` -> `try_coalesce_drag_frame`.
+        // id-primary twin `move_by_ids`. A `copy_selection`/`copy_by_ids` is
+        // non-additive (two copies != one copy) so two copies never merge — but
+        // a drag-move that CONTINUES a just-laid copy DOES fold into that copy's
+        // offset (`tryCoalesceDragFrame` Branch A), so the alt-drag-copy gesture
+        // is one undo step. Selection-only verbs are run boundaries. Mirrors
+        // Rust `Model::commit_txn` -> `try_coalesce_drag_frame`.
+        //
+        // ALT-COPY PATH B (selection.yaml: Alt pressed MID-drag): the pre-copy
+        // drag moved the original, then `doc.preview.restore` reverted it
+        // OUTSIDE the journal before `doc.copy_selection` ran. That leaves the
+        // tip move dead (its target round-tripped) yet still journaled. Drop it
+        // first, so the copy lands on the pre-drag checkpoint as the sole entry
+        // — one undo step, and a journal that still replays to the live
+        // document. Mirrors Rust `drop_round_tripped_move_before_copy`.
+        _ = dropRoundTrippedMoveBeforeCopy(pending)
+
         if tryCoalesceDragFrame(pending) {
             // Merged into the journal tip in place; the pending txn is dropped
             // and its redundant undo checkpoint popped, so the undo stack and
@@ -748,6 +760,37 @@ public class Model: ObservableObject {
         guard let prevOp = prev.ops.last else {
             return false
         }
+
+        // --- Branch A: a drag-move that CONTINUES a just-laid copy. ---------
+        // The alt-drag-copy gesture (selection.yaml) journals `copy_selection`
+        // and then drags the new duplicate with `move_selection` frames. The
+        // copy's RESULTING selection is what each move translates, so summing
+        // the move delta into the copy op's own dx/dy reproduces the final
+        // position as ONE op / ONE undo step. We do NOT compare targets here:
+        // the copy op records the SOURCE ids (the duplicate is born id-less),
+        // while the move records the COPY's ids, so they legitimately differ
+        // for id-bearing elements — the journal-tip + same-name + single-move
+        // adjacency is the drag-continuation signal (mirrors the move+move
+        // case, where the gesture boundary is likewise the discriminator).
+        // Mirrors Rust `try_coalesce_drag_frame` Branch A.
+        let copyVerbs: Set<String> = ["copy_selection", "copy_by_ids"]
+        if copyVerbs.contains(prevOp.op) {
+            let newDx = (newOp.params["dx"] as? NSNumber)?.doubleValue ?? 0.0
+            let newDy = (newOp.params["dy"] as? NSNumber)?.doubleValue ?? 0.0
+            let tipIdx = opJournal.count - 1
+            let prevOpIdx = opJournal[tipIdx].ops.count - 1
+            let mergedDx =
+                ((opJournal[tipIdx].ops[prevOpIdx].params["dx"] as? NSNumber)?.doubleValue ?? 0.0) + newDx
+            let mergedDy =
+                ((opJournal[tipIdx].ops[prevOpIdx].params["dy"] as? NSNumber)?.doubleValue ?? 0.0) + newDy
+            opJournal[tipIdx].ops[prevOpIdx].params["dx"] = mergedDx
+            opJournal[tipIdx].ops[prevOpIdx].params["dy"] = mergedDy
+            // Drop the per-frame checkpoint — this frame adds no undo step.
+            if !undoStack.isEmpty { undoStack.removeLast() }
+            return true
+        }
+
+        // --- Branch B: the original move+move fold (same verb). ------------
         // (b) same verb.
         if prevOp.op != newOp.op {
             return false
@@ -815,6 +858,81 @@ public class Model: ObservableObject {
                 if !undoStack.isEmpty { undoStack.removeLast() }
             }
         }
+        return true
+    }
+
+    /// ALT-COPY PATH B cleanup (called by ``commitTxn()`` just before the
+    /// coalesce/append, when the committing transaction `tNew` is a
+    /// `copy_selection`/`copy_by_ids`). The Selection tool's mid-drag-Alt
+    /// gesture (selection.yaml PATH B) drags the original first — journaling a
+    /// `move_selection` — then on Alt-press does `doc.preview.restore` (which
+    /// reverts that move in the DOCUMENT but NOT in the journal, because the
+    /// preview restore writes outside any transaction) followed by
+    /// `doc.copy_selection`. The journal tip is therefore a move whose target
+    /// round-tripped: it leaves no net change yet still occupies an undo step,
+    /// and replaying it would move the original the copy was supposed to leave
+    /// behind. Detect that exact shape and drop the dead move, so the copy
+    /// lands on the pre-drag checkpoint as the sole entry — keeping the whole
+    /// gesture ONE undo step and the journal faithful to the live document.
+    ///
+    /// Fires ONLY when (guard) we are at the journal tip, `tNew` is a single
+    /// copy op, the tip is a single-named move with the SAME drag-scoped name,
+    /// and — the discriminating test — the copy's ORIGIN checkpoint (the
+    /// document just before the copy, i.e. after the restore) is BYTE-EQUAL to
+    /// the tip move's ORIGIN checkpoint (the pre-drag document). Those are the
+    /// top two undo checkpoints; equality means the move genuinely round-tripped
+    /// (a real, kept move would leave the copy's origin different from the
+    /// pre-move state, so the rule correctly leaves it as its own undo step).
+    /// Returns whether it fired (the caller ignores the bool; kept for symmetry
+    /// and testability). Mirrors Rust's `drop_round_tripped_move_before_copy`.
+    @discardableResult
+    private func dropRoundTrippedMoveBeforeCopy(_ pending: PendingTxn?) -> Bool {
+        let copyVerbs: Set<String> = ["copy_selection", "copy_by_ids"]
+        let moveVerbs: Set<String> = ["move_selection", "move_by_ids"]
+
+        // (guard) only at the journal tip.
+        if journalHead != opJournal.count {
+            return false
+        }
+        // tNew is exactly one copy op.
+        guard let pending = pending, pending.ops.count == 1,
+              copyVerbs.contains(pending.ops[0].op) else {
+            return false
+        }
+        // Tip is a single move with the same drag-scoped name.
+        guard let prev = opJournal.last else {
+            return false
+        }
+        if prev.name != pending.name || prev.ops.count != 1 {
+            return false
+        }
+        if !moveVerbs.contains(prev.ops[0].op) {
+            return false
+        }
+        // The move round-tripped iff the copy's origin checkpoint (top) byte-
+        // equals the move's origin checkpoint (second from top). `beginTxn`
+        // pushed the copy's origin when the copy opened; the move's origin is
+        // directly beneath it (the move already coalesced to a single entry, so
+        // it owns exactly one checkpoint). Reuse the same canonical compare the
+        // no-op rule and the net-zero whole-drag block use.
+        let n = undoStack.count
+        if n < 2 {
+            return false
+        }
+        let copyOrigin = undoStack[n - 1].0
+        let moveOrigin = undoStack[n - 2].0
+        let roundTripped = documentToTestJson(copyOrigin) == documentToTestJson(moveOrigin)
+            && copyOrigin.layers == moveOrigin.layers
+            && copyOrigin.symbols == moveOrigin.symbols
+        if !roundTripped {
+            return false
+        }
+        // Drop the dead move from the journal and remove the now-duplicate copy
+        // origin checkpoint (the top), leaving the move's (identical) origin as
+        // the copy's checkpoint. The caller then appends the copy at journalHead.
+        opJournal.removeLast()
+        journalHead = opJournal.count
+        undoStack.remove(at: n - 1)
         return true
     }
 

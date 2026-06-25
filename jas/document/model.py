@@ -436,6 +436,16 @@ class Model:
         # translates of the same target set (move_selection / move_by_ids);
         # never copy_selection/copy_by_ids (non-additive), never select_* (run
         # boundaries). Mirrors the Rust try_coalesce_drag_frame.
+        #
+        # ALT-COPY PATH B (selection.yaml: Alt pressed MID-drag): the pre-copy
+        # drag moved the original, then doc.preview.restore reverted it OUTSIDE
+        # the journal before doc.copy_selection ran. That leaves the tip move
+        # dead (its target round-tripped) yet still journaled. Drop it first, so
+        # the copy lands on the pre-drag checkpoint as the sole entry — one undo
+        # step, and a journal that still replays to the live document. Mirrors
+        # the Rust drop_round_tripped_move_before_copy.
+        self._drop_round_tripped_move_before_copy(pending)
+
         if self._try_coalesce_drag_frame(pending):
             # Merged into the journal tip in place; the pending txn is dropped
             # and its redundant undo checkpoint popped, so the undo stack and
@@ -461,6 +471,12 @@ class Model:
     # copy_selection/copy_by_ids (a copy is non-additive — two copies != one),
     # never the selection-only verbs (run boundaries).
     _COALESCABLE = ("move_selection", "move_by_ids")
+    # The copy verbs. A drag-move that CONTINUES a just-laid copy folds into
+    # that copy's own offset (Branch A); a copy that lands on a round-tripped
+    # tip move drops the dead move (_drop_round_tripped_move_before_copy). Two
+    # copies still never coalesce. Mirrors the Rust COPY_VERBS / MOVE_VERBS.
+    _COPY_VERBS = ("copy_selection", "copy_by_ids")
+    _MOVE_VERBS = ("move_selection", "move_by_ids")
 
     def _try_coalesce_drag_frame(self, pending: "_PendingTxn | None") -> bool:
         """Per-frame drag coalescing (OP_LOG.md §9 follow-up). Called by
@@ -517,6 +533,36 @@ class Model:
         if not prev.ops:
             return False
         prev_op = prev.ops[-1]
+
+        def num(p: dict, key: str) -> float:
+            v = p.get(key)
+            return float(v) if isinstance(v, (int, float)) \
+                and not isinstance(v, bool) else 0.0
+
+        # ── Branch A: a drag-move that CONTINUES a just-laid copy. ─────────
+        # The alt-drag-copy gesture (selection.yaml) journals copy_selection
+        # and then drags the new duplicate with move_selection frames. The
+        # copy's RESULTING selection is what each move translates, so summing
+        # the move delta into the copy op's own dx/dy reproduces the final
+        # position as ONE op / ONE undo step. We do NOT compare targets here:
+        # the copy op records the SOURCE ids (the duplicate is born id-less),
+        # while the move records the COPY's ids, so they legitimately differ
+        # for id-bearing elements — the journal-tip + same-name + single-move
+        # adjacency is the drag-continuation signal (mirrors the move+move
+        # case, where the gesture boundary is likewise the discriminator).
+        # Runs BEFORE the move+move (b) same-verb branch. Mirrors the Rust
+        # try_coalesce_drag_frame Branch A.
+        if prev_op.op in self._COPY_VERBS:
+            merged_dx = num(prev_op.params, "dx") + num(new_op.params, "dx")
+            merged_dy = num(prev_op.params, "dy") + num(new_op.params, "dy")
+            prev_op.params["dx"] = merged_dx
+            prev_op.params["dy"] = merged_dy
+            # Drop the per-frame checkpoint — this frame adds no undo step.
+            if self._undo_stack:
+                self._undo_stack.pop()
+            return True
+
+        # ── Branch B: the original move+move fold (same verb). ────────────
         # (b) same verb.
         if prev_op.op != new_op.op:
             return False
@@ -533,11 +579,6 @@ class Model:
             return {k: v for k, v in p.items() if k not in ("dx", "dy")}
         if strip(prev_op.params) != strip(new_op.params):
             return False
-
-        def num(p: dict, key: str) -> float:
-            v = p.get(key)
-            return float(v) if isinstance(v, (int, float)) \
-                and not isinstance(v, bool) else 0.0
 
         # ── MERGE: sum dx/dy into T_prev's last op in place. ──────────────
         merged_dx = num(prev_op.params, "dx") + num(new_op.params, "dx")
@@ -570,6 +611,78 @@ class Model:
                 self._op_journal.pop()
                 self._journal_head = len(self._op_journal)
                 self._undo_stack.pop()
+        return True
+
+    def _drop_round_tripped_move_before_copy(
+            self, pending: "_PendingTxn | None") -> bool:
+        """ALT-COPY PATH B cleanup. Called by ``commit_txn`` just before the
+        coalesce/append, when the committing transaction ``T_new`` is a
+        copy_selection/copy_by_ids. The Selection tool's mid-drag-Alt gesture
+        (selection.yaml PATH B) drags the original first — journaling a
+        move_selection — then on Alt-press does doc.preview.restore (which
+        reverts that move in the DOCUMENT but NOT in the journal, because
+        restore_preview_snapshot writes outside any transaction) followed by
+        doc.copy_selection. The journal tip is therefore a move whose target
+        round-tripped: it leaves no net change yet still occupies an undo step,
+        and replaying it would move the original the copy was supposed to leave
+        behind. Detect that exact shape and drop the dead move, so the copy
+        lands on the pre-drag checkpoint as the sole entry — keeping the whole
+        gesture ONE undo step and the journal faithful to the live document.
+
+        Fires ONLY when (guard) we are at the journal tip, ``T_new`` is a single
+        copy op, the tip is a single-named move with the SAME drag-scoped name,
+        the undo stack has >= 2 checkpoints, and — the discriminating test — the
+        copy's ORIGIN checkpoint (the document just before the copy, i.e. after
+        the restore) is BYTE-EQUAL to the tip move's ORIGIN checkpoint (the
+        pre-drag document). Those are the top two undo checkpoints; equality
+        means the move genuinely round-tripped (a real, kept move would leave
+        the copy's origin different from the pre-move state, so the rule
+        correctly leaves it as its own undo step). Reuses THIS app's checkpoint-
+        equality compare (the document_to_test_json compare plus the
+        layers/symbols structural compare, as in the net-zero block / no-op
+        rule). The caller then appends the copy at journal_head. Returns whether
+        it fired (caller ignores the bool; kept for symmetry/testability).
+        Mirrors the Rust drop_round_tripped_move_before_copy.
+        """
+        # (guard) only at the journal tip.
+        if self._journal_head != len(self._op_journal):
+            return False
+        # T_new is exactly one copy op.
+        if pending is None or len(pending.ops) != 1 \
+                or pending.ops[0].op not in self._COPY_VERBS:
+            return False
+        # Tip is a single move with the same drag-scoped name.
+        if not self._op_journal:
+            return False
+        prev = self._op_journal[-1]
+        if prev.name != pending.name or len(prev.ops) != 1:
+            return False
+        if prev.ops[0].op not in self._MOVE_VERBS:
+            return False
+        # The move round-tripped iff the copy's origin checkpoint (top) byte-
+        # equals the move's origin checkpoint (second from top). begin_txn
+        # pushed the copy's origin when the copy opened; the move's origin is
+        # directly beneath it (the move already coalesced to a single entry, so
+        # it owns exactly one checkpoint).
+        n = len(self._undo_stack)
+        if n < 2:
+            return False
+        copy_origin = self._undo_stack[n - 1]
+        move_origin = self._undo_stack[n - 2]
+        round_tripped = (
+            document_to_test_json(copy_origin)
+            == document_to_test_json(move_origin)
+            and copy_origin.layers == move_origin.layers
+            and copy_origin.symbols == move_origin.symbols
+        )
+        if not round_tripped:
+            return False
+        # Drop the dead move from the journal and remove the now-duplicate copy
+        # origin checkpoint, leaving the move's (identical) origin as the copy's
+        # checkpoint. The caller then appends the copy at journal_head.
+        self._op_journal.pop()
+        self._journal_head = len(self._op_journal)
+        del self._undo_stack[n - 1]
         return True
 
     def abort_txn(self) -> None:

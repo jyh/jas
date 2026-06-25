@@ -454,7 +454,18 @@ class model ?(document = Document.default_document ()) ?filename () =
         if no_net_change then begin
           (* Drop the no-op checkpoint; leave redo and the journal untouched. *)
           (match undo_stack with _ :: rest -> undo_stack <- rest | [] -> ())
-        end else if _self#try_coalesce_drag_frame pending then begin
+        end else begin
+          (* ALT-COPY PATH B (selection.yaml, Alt pressed MID-drag): the
+             pre-copy drag moved the original, then doc.preview.restore reverted
+             it OUTSIDE the journal before doc.copy_selection ran. That leaves
+             the tip move dead (its target round-tripped) yet still journaled.
+             Drop it first, so the copy lands on the pre-drag checkpoint as the
+             sole entry -- one undo step, and a journal that still replays to
+             the live document. The returned bool is ignored here (the no-op /
+             coalesce / append decision below does not depend on it); it exists
+             for symmetry with the Rust helper and for direct testability. *)
+          ignore (_self#drop_round_tripped_move_before_copy pending);
+          if _self#try_coalesce_drag_frame pending then begin
           (* Per-frame drag coalescing (OP_LOG.md section 9 follow-up). The
              just-finalized pending transaction was absorbed into the journal
              tip in place (its summed delta) and its redundant per-frame undo
@@ -492,6 +503,7 @@ class model ?(document = Document.default_document ()) ?filename () =
           next_txn_counter <- next_txn_counter + 1;
           op_journal <- op_journal @ [txn];
           journal_head <- List.length op_journal
+          end
         end
       end
 
@@ -590,10 +602,57 @@ class model ?(document = Document.default_document ()) ?filename () =
              (match List.rev prev.Op_log.ops with
               | [] -> false
               | prev_op :: _ ->
-                (* (d) same drag-scoped name; (b) same verb; (c) byte-equal
-                   targets (and, for move_by_ids, byte-equal ids); (e) only
-                   dx/dy differ. *)
+                let copy_verb v =
+                  v = "copy_selection" || v = "copy_by_ids" in
+                (* (d) same drag-scoped name guards BOTH branches below. *)
                 if prev.Op_log.name <> new_name then false
+                (* Branch A: a drag-move that CONTINUES a just-laid copy. The
+                   alt-drag-copy gesture (selection.yaml) journals copy_selection
+                   and then drags the new duplicate with move_selection frames.
+                   The copy resulting selection is what each move translates, so
+                   summing the move delta into the copy op own dx/dy reproduces
+                   the final position as ONE op and ONE undo step. We do NOT
+                   compare targets here: the copy op records the SOURCE ids (the
+                   duplicate is born id-less), while the move records the COPY
+                   ids, so they legitimately differ for id-bearing elements --
+                   the journal-tip plus same-name plus single-move adjacency is
+                   the drag-continuation signal (mirrors the move+move case,
+                   where the gesture boundary is likewise the discriminator).
+                   Runs BEFORE the same-verb move+move branch. Mirrors the Rust
+                   [try_coalesce_drag_frame] Branch A. *)
+                else if copy_verb prev_op.Op_log.op then begin
+                  let new_dx = num new_op.Op_log.params "dx" in
+                  let new_dy = num new_op.Op_log.params "dy" in
+                  let merged_dx = num prev_op.Op_log.params "dx" +. new_dx in
+                  let merged_dy = num prev_op.Op_log.params "dy" +. new_dy in
+                  let merged_params = match prev_op.Op_log.params with
+                    | `Assoc fields ->
+                      `Assoc (List.map (fun (k, v) ->
+                        if k = "dx" then (k, `Float merged_dx)
+                        else if k = "dy" then (k, `Float merged_dy)
+                        else (k, v)) fields)
+                    | other -> other
+                  in
+                  let merged_op = { prev_op with Op_log.params = merged_params } in
+                  let tip_idx = List.length op_journal - 1 in
+                  let n_prev_ops = List.length prev.Op_log.ops in
+                  let new_prev_ops =
+                    List.mapi (fun i o ->
+                      if i = n_prev_ops - 1 then merged_op else o)
+                      prev.Op_log.ops
+                  in
+                  let merged_prev =
+                    { prev with Op_log.ops = new_prev_ops } in
+                  op_journal <- List.mapi (fun i t ->
+                    if i = tip_idx then merged_prev else t) op_journal;
+                  (* Drop the per-frame checkpoint -- this frame adds no undo
+                     step. *)
+                  (match undo_stack with _ :: rest -> undo_stack <- rest | [] -> ());
+                  true
+                end
+                (* Branch B: the original move+move fold (same verb).
+                   (b) same verb; (c) byte-equal targets (and, for move_by_ids,
+                   byte-equal ids); (e) only dx/dy differ. *)
                 else if prev_op.Op_log.op <> new_op.Op_log.op then false
                 else if prev_op.Op_log.targets <> new_op.Op_log.targets then false
                 else if new_op.Op_log.op = "move_by_ids"
@@ -662,6 +721,91 @@ class model ?(document = Document.default_document ()) ?filename () =
                   end;
                   true
                 end))
+
+    (* ALT-COPY PATH B cleanup (called by [commit_txn] just before the
+       coalesce/append, when the committing transaction [T_new] is a
+       copy_selection / copy_by_ids). The Selection tool mid-drag-Alt gesture
+       (selection.yaml PATH B) drags the original first -- journaling a
+       move_selection -- then on Alt-press does doc.preview.restore (which
+       reverts that move in the DOCUMENT but NOT in the journal, because
+       restore_preview_snapshot writes outside any transaction) followed by
+       doc.copy_selection. The journal tip is therefore a move whose target
+       round-tripped: it leaves no net change yet still occupies an undo step,
+       and replaying it would move the original the copy was supposed to leave
+       behind. Detect that exact shape and drop the dead move, so the copy lands
+       on the pre-drag checkpoint as the sole entry -- keeping the whole gesture
+       ONE undo step and the journal faithful to the live document.
+
+       Fires ONLY when (guard) we are at the journal tip, [T_new] is a single
+       copy op, the tip is a single-named move with the SAME drag-scoped name,
+       the undo stack has at least 2 checkpoints, and -- the discriminating test
+       -- the copy ORIGIN checkpoint (the document just before the copy, i.e.
+       after the restore; top of the undo stack) is BYTE-EQUAL to the tip move
+       ORIGIN checkpoint (the pre-drag document; second from top). Equality
+       means the move genuinely round-tripped (a real, kept move would leave the
+       copy origin different from the pre-move state, so the rule correctly
+       leaves it as its own undo step). Reuses the same checkpoint-equality
+       compare as the no-op rule and the net-zero whole-drag block (canonical
+       document_to_test_json plus the layers / symbols structural compare).
+
+       When all hold: pop the dead move off the journal, set journal_head to the
+       journal length, and remove the now-duplicate top checkpoint (leaving the
+       move identical origin as the copy checkpoint). The caller then appends the
+       copy as the sole entry. Returns whether it fired (the caller ignores the
+       bool; kept for symmetry and direct testability). Mirrors the Rust
+       [Model::drop_round_tripped_move_before_copy]. *)
+    method private drop_round_tripped_move_before_copy pending : bool =
+      let copy_verb v = v = "copy_selection" || v = "copy_by_ids" in
+      let move_verb v = v = "move_selection" || v = "move_by_ids" in
+      (* (guard) only at the journal tip. *)
+      if journal_head <> List.length op_journal then false
+      else
+        (* T_new is exactly one copy op. *)
+        let new_copy = match pending with
+          | Some (_, [ op ], _) when copy_verb op.Op_log.op -> Some op
+          | _ -> None
+        in
+        match new_copy with
+        | None -> false
+        | Some _ ->
+          let new_name = match pending with Some (n, _, _) -> n | None -> None in
+          (* Tip is a single move with the same drag-scoped name. *)
+          (match List.rev op_journal with
+           | [] -> false
+           | prev :: _ ->
+             if prev.Op_log.name <> new_name then false
+             else match prev.Op_log.ops with
+               | [ tip_op ] when move_verb tip_op.Op_log.op ->
+                 (* The move round-tripped iff the copy ORIGIN checkpoint (top of
+                    the undo stack) byte-equals the move ORIGIN checkpoint
+                    (second from top). begin_txn pushed the copy origin when the
+                    copy opened; the move origin is directly beneath it (the move
+                    already coalesced to a single entry, so it owns exactly one
+                    checkpoint). *)
+                 (match undo_stack with
+                  | (copy_origin, _) :: (move_origin, move_index) :: rest ->
+                    let round_tripped =
+                      Test_json.document_to_test_json copy_origin
+                      = Test_json.document_to_test_json move_origin
+                      && copy_origin.Document.layers = move_origin.Document.layers
+                      && copy_origin.Document.symbols
+                         = move_origin.Document.symbols
+                    in
+                    if not round_tripped then false
+                    else begin
+                      (* Drop the dead move from the journal and remove the
+                         now-duplicate copy-origin checkpoint (the top), leaving
+                         the move identical origin as the copy checkpoint. The
+                         caller then appends the copy at journal_head. *)
+                      let drop_idx = List.length op_journal - 1 in
+                      op_journal <-
+                        List.filteri (fun i _ -> i <> drop_idx) op_journal;
+                      journal_head <- List.length op_journal;
+                      undo_stack <- (move_origin, move_index) :: rest;
+                      true
+                    end
+                  | _ -> false)
+               | _ -> false)
 
     (* Roll back the open transaction to its checkpoint, discarding it (no redo
        entry, no journal entry, no cursor move). A begin_txn immediately
