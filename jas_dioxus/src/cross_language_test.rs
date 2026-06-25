@@ -876,6 +876,122 @@ mod tests {
     }
 
     // ===============================================================
+    // ALT-COPY drag gesture: ONE undo step (regression for the
+    // "Ctrl+Z reverts the copy to the option-press position but does
+    // not remove it" bug). The Selection tool's alt-drag-copy lays a
+    // `copy_selection` op mid-gesture; the per-frame drag coalescer
+    // (`try_coalesce_drag_frame`) refuses to bridge across a copy, so
+    // the post-copy moves land as a SEPARATE undo step. The whole
+    // select->drag->alt->move->release gesture must be exactly ONE
+    // undo step: one Ctrl+Z restores the pre-gesture document
+    // (original in place, copy gone). Drives the production CanvasTool
+    // seam via `run_gesture_model`, then asserts undo on the Model.
+    // ---------------------------------------------------------------
+
+    /// Dump the journal (head + per-txn name/verbs) for diagnosis.
+    fn dump_journal(label: &str, model: &Model) {
+        eprintln!("--- {label}: journal_head={} len={} can_undo={}",
+            model.journal_head(), model.journal().len(), model.can_undo());
+        for (i, t) in model.journal().iter().enumerate() {
+            let ops: Vec<String> = t.ops.iter()
+                .map(|o| format!("{}{:?}{}", o.op, o.targets,
+                    o.params.get("dx").and_then(|v| v.as_f64())
+                        .map(|dx| format!("@dx={dx}")).unwrap_or_default()))
+                .collect();
+            eprintln!("    [{i}] name={:?} ops={:?}", t.name, ops);
+        }
+    }
+
+    /// PATH B — Alt pressed MID-drag (the user's exact gesture): drag
+    /// the original, then hold Option, then keep dragging the copy,
+    /// then release. Must collapse to ONE undo step.
+    /// Oracle for the alt-copy undo tests: the document the gesture must undo
+    /// back to — rect[0,0] selected, both originals in place, NO copy. Captured
+    /// by driving ONLY the selecting press (which selects but commits nothing),
+    /// so it includes the post-select selection that the first-move snapshot
+    /// captured. (NOT the fresh import, whose selection is empty.)
+    fn before_drag_oracle() -> String {
+        document_to_test_json(run_gesture_model(&serde_json::json!({
+            "setup_svg": "two_rects.svg",
+            "tool": "selection",
+            "events": [ { "kind": "press", "x": 36, "y": 36 } ]
+        })).document())
+    }
+
+    #[test]
+    fn gesture_alt_mid_drag_copy_is_one_undo_step() {
+        // two_rects.svg: rect[0] spans doc 0..72; press (36,36) hits its center.
+        let before_drag = before_drag_oracle();
+
+        let tc = serde_json::json!({
+            "setup_svg": "two_rects.svg",
+            "tool": "selection",
+            "events": [
+                { "kind": "press",   "x": 36, "y": 36 },
+                { "kind": "move",    "x": 50, "y": 36, "dragging": true },
+                { "kind": "move",    "x": 60, "y": 36, "dragging": true },
+                { "kind": "move",    "x": 60, "y": 36, "dragging": true, "alt": true },
+                { "kind": "move",    "x": 80, "y": 36, "dragging": true, "alt": true },
+                { "kind": "release", "x": 80, "y": 36, "alt": true }
+            ]
+        });
+
+        let mut model = run_gesture_model(&tc);
+        dump_journal("PATH B after gesture", &model);
+
+        let after = document_to_test_json(model.document());
+        assert_ne!(after, before_drag, "the alt-drag must have produced a copy");
+        assert!(model.can_undo(), "the gesture committed an undoable transaction");
+        assert_eq!(model.journal_head(), 1,
+            "select->drag->alt->move->release must be exactly ONE undo step");
+        assert_eq!(model.journal().last().and_then(|t| t.ops.last()).map(|o| o.op.as_str()),
+            Some("copy_selection"), "the single undo step is the copy");
+
+        model.undo();
+        dump_journal("PATH B after 1 undo", &model);
+        assert_eq!(document_to_test_json(model.document()), before_drag,
+            "one undo must restore the original and remove the copy");
+        assert!(!model.can_undo(),
+            "after one undo the journal cursor is back at the origin (lock-step)");
+        assert_eq!(model.journal_head(), 0, "cursor back at origin");
+    }
+
+    /// PATH A — Alt held AT press (drag-to-duplicate from the start).
+    #[test]
+    fn gesture_alt_at_press_copy_is_one_undo_step() {
+        let before_drag = before_drag_oracle();
+
+        let tc = serde_json::json!({
+            "setup_svg": "two_rects.svg",
+            "tool": "selection",
+            "events": [
+                { "kind": "press",   "x": 36, "y": 36, "alt": true },
+                { "kind": "move",    "x": 50, "y": 36, "dragging": true, "alt": true },
+                { "kind": "move",    "x": 60, "y": 36, "dragging": true, "alt": true },
+                { "kind": "move",    "x": 80, "y": 36, "dragging": true, "alt": true },
+                { "kind": "release", "x": 80, "y": 36, "alt": true }
+            ]
+        });
+
+        let mut model = run_gesture_model(&tc);
+        dump_journal("PATH A after gesture", &model);
+
+        let after = document_to_test_json(model.document());
+        assert_ne!(after, before_drag, "the alt-drag must have produced a copy");
+        assert!(model.can_undo(), "the gesture committed an undoable transaction");
+        assert_eq!(model.journal_head(), 1,
+            "alt-at-press drag-to-duplicate must be exactly ONE undo step");
+        assert_eq!(model.journal().last().and_then(|t| t.ops.last()).map(|o| o.op.as_str()),
+            Some("copy_selection"), "the single undo step is the copy");
+
+        model.undo();
+        dump_journal("PATH A after 1 undo", &model);
+        assert_eq!(document_to_test_json(model.document()), before_drag,
+            "one undo must restore the original and remove the copy");
+        assert!(!model.can_undo(), "lock-step: cursor back at origin");
+    }
+
+    // ===============================================================
     // ACTION corpus (TESTING_STRATEGY.md §5 rec 2)
     // ---------------------------------------------------------------
     // Sibling to the GESTURE corpus above and the OPERATIONS corpus.

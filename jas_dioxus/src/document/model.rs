@@ -710,9 +710,20 @@ impl Model {
         //
         // Coalescable verbs are EXACTLY the additive translates of the same
         // target set via `Controller::move_selection`: `move_selection` and its
-        // id-primary twin `move_by_ids`. Never copy_selection/copy_by_ids (a
-        // copy is non-additive — two copies != one copy), never the
-        // selection-only verbs (run boundaries).
+        // id-primary twin `move_by_ids`. A `copy_selection`/`copy_by_ids` is
+        // non-additive (two copies != one copy) so two copies never merge — but
+        // a drag-move that CONTINUES a just-laid copy DOES fold into that copy's
+        // offset (`try_coalesce_drag_frame` Branch A), so the alt-drag-copy
+        // gesture is one undo step. Selection-only verbs are run boundaries.
+        //
+        // ALT-COPY PATH B (selection.yaml: Alt pressed MID-drag): the pre-copy
+        // drag moved the original, then `doc.preview.restore` reverted it
+        // OUTSIDE the journal before `doc.copy_selection` ran. That leaves the
+        // tip move dead (its target round-tripped) yet still journaled. Drop it
+        // first, so the copy lands on the pre-drag checkpoint as the sole entry
+        // — one undo step, and a journal that still replays to the live document.
+        self.drop_round_tripped_move_before_copy(pending.as_ref());
+
         if self.try_coalesce_drag_frame(pending.as_ref()) {
             // Merged into the journal tip in place; the pending txn is dropped
             // and its redundant undo checkpoint popped, so the undo stack and
@@ -800,6 +811,38 @@ impl Model {
         let Some(prev_op) = prev.ops.last() else {
             return false;
         };
+
+        // --- Branch A: a drag-move that CONTINUES a just-laid copy. ---------
+        // The alt-drag-copy gesture (selection.yaml) journals `copy_selection`
+        // and then drags the new duplicate with `move_selection` frames. The
+        // copy's RESULTING selection is what each move translates, so summing
+        // the move delta into the copy op's own dx/dy reproduces the final
+        // position as ONE op / ONE undo step. We do NOT compare targets here:
+        // the copy op records the SOURCE ids (the duplicate is born id-less),
+        // while the move records the COPY's ids, so they legitimately differ
+        // for id-bearing elements — the journal-tip + same-name + single-move
+        // adjacency is the drag-continuation signal (mirrors the move+move
+        // case, where the gesture boundary is likewise the discriminator).
+        const COPY_VERBS: [&str; 2] = ["copy_selection", "copy_by_ids"];
+        if COPY_VERBS.contains(&prev_op.op.as_str()) {
+            let new_dx = new_op.params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let new_dy = new_op.params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let tip_idx = self.op_journal.len() - 1;
+            let prev_op = self.op_journal[tip_idx].ops.last_mut().expect("non-empty");
+            let merged_dx =
+                prev_op.params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) + new_dx;
+            let merged_dy =
+                prev_op.params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) + new_dy;
+            if let serde_json::Value::Object(m) = &mut prev_op.params {
+                m.insert("dx".into(), serde_json::json!(merged_dx));
+                m.insert("dy".into(), serde_json::json!(merged_dy));
+            }
+            // Drop the per-frame checkpoint — this frame adds no undo step.
+            self.undo_stack.pop();
+            return true;
+        }
+
+        // --- Branch B: the original move+move fold (same verb). ------------
         // (b) same verb.
         if prev_op.op != new_op.op {
             return false;
@@ -869,6 +912,78 @@ impl Model {
                 self.undo_stack.pop();
             }
         }
+        true
+    }
+
+    /// ALT-COPY PATH B cleanup (called by [`commit_txn`] just before the
+    /// coalesce/append, when the committing transaction `T_new` is a
+    /// `copy_selection`/`copy_by_ids`). The Selection tool's mid-drag-Alt
+    /// gesture (selection.yaml PATH B) drags the original first — journaling a
+    /// `move_selection` — then on Alt-press does `doc.preview.restore` (which
+    /// reverts that move in the DOCUMENT but NOT in the journal, because
+    /// `restore_preview_snapshot` writes outside any transaction) followed by
+    /// `doc.copy_selection`. The journal tip is therefore a move whose target
+    /// round-tripped: it leaves no net change yet still occupies an undo step,
+    /// and replaying it would move the original the copy was supposed to leave
+    /// behind. Detect that exact shape and drop the dead move, so the copy
+    /// lands on the pre-drag checkpoint as the sole entry — keeping the whole
+    /// gesture ONE undo step and the journal faithful to the live document.
+    ///
+    /// Fires ONLY when (guard) we are at the journal tip, `T_new` is a single
+    /// copy op, the tip is a single-named move with the SAME drag-scoped name,
+    /// and — the discriminating test — the copy's ORIGIN checkpoint (the
+    /// document just before the copy, i.e. after the restore) is BYTE-EQUAL to
+    /// the tip move's ORIGIN checkpoint (the pre-drag document). Those are the
+    /// top two undo checkpoints; equality means the move genuinely round-tripped
+    /// (a real, kept move would leave the copy's origin different from the
+    /// pre-move state, so the rule correctly leaves it as its own undo step).
+    fn drop_round_tripped_move_before_copy(&mut self, pending: Option<&PendingTxn>) -> bool {
+        const COPY_VERBS: [&str; 2] = ["copy_selection", "copy_by_ids"];
+        const MOVE_VERBS: [&str; 2] = ["move_selection", "move_by_ids"];
+
+        // (guard) only at the journal tip.
+        if self.journal_head != self.op_journal.len() {
+            return false;
+        }
+        // T_new is exactly one copy op.
+        let Some(pending) = pending else { return false };
+        if pending.ops.len() != 1 || !COPY_VERBS.contains(&pending.ops[0].op.as_str()) {
+            return false;
+        }
+        // Tip is a single move with the same drag-scoped name.
+        let Some(prev) = self.op_journal.last() else {
+            return false;
+        };
+        if prev.name != pending.name || prev.ops.len() != 1 {
+            return false;
+        }
+        if !MOVE_VERBS.contains(&prev.ops[0].op.as_str()) {
+            return false;
+        }
+        // The move round-tripped iff the copy's origin checkpoint (top) byte-
+        // equals the move's origin checkpoint (second from top). `begin_txn`
+        // pushed the copy's origin when the copy opened; the move's origin is
+        // directly beneath it (the move already coalesced to a single entry, so
+        // it owns exactly one checkpoint).
+        let n = self.undo_stack.len();
+        if n < 2 {
+            return false;
+        }
+        let copy_origin = &self.undo_stack[n - 1].0;
+        let move_origin = &self.undo_stack[n - 2].0;
+        let round_tripped = document_to_test_json(copy_origin)
+            == document_to_test_json(move_origin)
+            && copy_origin.layers == move_origin.layers
+            && copy_origin.symbols == move_origin.symbols;
+        if !round_tripped {
+            return false;
+        }
+        // Drop the dead move from the journal and pop the now-duplicate copy
+        // origin checkpoint, leaving the move's (identical) origin as the
+        // copy's checkpoint. The caller then appends the copy at journal_head.
+        self.op_journal.pop();
+        self.journal_head = self.op_journal.len();
+        self.undo_stack.remove(n - 1);
         true
     }
 
