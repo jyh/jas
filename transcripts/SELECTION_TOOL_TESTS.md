@@ -290,6 +290,45 @@ behavioral surface at the seam + the visual overlay via the GUI harness.
 
 ---
 
+## Python automated-test coverage
+
+_2026-06-25 — jas (PySide6), `pytest`._ Same seam-level approach, at PARITY with
+the Swift and OCaml suites.
+
+**Main Selection tool** — `cross_language_test.py` carries the gesture PATH A/B
+(alt-copy one undo step) tests; the selection-family effect cases live in
+`tools/yaml_tool_effects_test.py`. Green.
+
+**Partial Selection CP behaviors** — `tools/yaml_tool_effects_test.py` (9 cases
+added 2026-06-25, classes `TestPartialSelectionCp` / `…CpDrag` / `…Handle`),
+ported from and verified at parity with BOTH twins, driving the PRODUCTION
+effects (`doc.path.probe_partial_hit`, `doc.path.commit_partial_marquee`,
+`doc.translate_selection`, `doc.move_path_handle`) and asserting the CP-level
+`SelectionKind` (`_SelectionPartial` via `selection_kind_contains`/`_count`/
+`_is_all`): CP click → single CP (SEL-100); shift designate (SEL-103/104);
+marquee only-enclosed + all (SEL-105); empty marquee clears (SEL-106); CP drag
+translates only-selected + all-selected (SEL-130); handle drag mirrors the
+opposite handle, out + in (SEL-131/306). Adversarially verified: identical
+fixtures/deltas/coords as the twins, non-vacuous, and Python
+`_reflect_handle_keep_distance` is character-for-character the same formula as
+Rust/Swift/OCaml. `pytest yaml_tool_effects_test.py`: 35 passed (9 new).
+
+**SEL-151 overlay render — VERIFIED via the Quartz GUI harness** driving the
+native PySide6 app (`python -m jas_app --title JasHarnessPython`; pen-draw a
+smooth curve; `key a`; `Cmd+A`; `shot`). The capture shows the full partial
+overlay — anchor squares + in/out handle bars terminating in handle dots (drawn
+as concentric double-circles in Qt, the same overlay). Python Selection coverage
+is COMPLETE.
+
+> **All four native apps now match.** Every Selection CP behavior
+> (select/designate/marquee/CP-translate/handle-mirror) is gate-pinned at the
+> seam in Rust/Swift/OCaml/Python, and the SEL-151 partial overlay render is
+> GUI-verified (Quartz harness) in Swift/OCaml/Python (Rust = the original
+> Quartz experiment). Remaining gaps are the same purely-visual cases in every
+> app (cursor glyphs, theming, overlay-styling legibility, sub-pixel).
+
+---
+
 ## Default setup
 
 Unless a session or test says otherwise:
