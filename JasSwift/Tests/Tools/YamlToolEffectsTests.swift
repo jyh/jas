@@ -1255,3 +1255,129 @@ private func artboardModel(_ artboards: [Artboard]) -> Model {
 // active_document scope plumbing — covered indirectly by the
 // run-time behavior verified by the manual test suite
 // (ARTBOARD_TOOL_TESTS.md §Session G).
+
+// MARK: - Partial Selection control-point selection (SEL-100/103/105/106)
+//
+// CP-LEVEL selection through the Partial Selection effects. twoRectModel's
+// first rect (0,0,10,10) exposes four control points at its corners:
+// cp0=(0,0), cp1=(10,0), cp2=(10,10), cp3=(0,10) (Element.controlPointPositions).
+// `doc.path.probe_partial_hit` selects the CP under the cursor (or shift-toggles
+// it into the per-element partial set); `doc.path.commit_partial_marquee`
+// selects every CP inside the rubber-band rect. These assert the CP-level
+// SelectionKind (.partial carrying the enclosed indices), not just which
+// element is touched — the granularity the Rust GUI run could only judge
+// visually. The second rect lives at path [0, 1] and must stay untouched.
+
+/// SEL-100: clicking a single control point selects exactly that CP (a
+/// `.partial` selection of one), not the whole element.
+@Test func partialSelectionCpClickSelectsSingleControlPoint() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let entry = model.document.selection.first { $0.path == [0, 0] }
+    #expect(entry != nil)
+    #expect(entry?.kind.contains(0) == true)        // cp0 = (0,0) is selected
+    #expect(entry?.kind.count(total: 4) == 1)       // exactly one CP …
+    #expect(entry?.kind.isAll(total: 4) == false)   // … so NOT the whole element
+    #expect(store.getTool("partial_selection", "mode") as? String == "moving_pending")
+    #expect(!model.document.selection.contains { $0.path == [0, 1] })
+}
+
+/// SEL-103/104 (designate): shift-clicking control points adds them to the
+/// per-element partial set, and shift-clicking a selected CP toggles it off.
+@Test func partialSelectionShiftClickAddsAndTogglesControlPoints() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Plain click cp0.
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.first { $0.path == [0, 0] }?
+        .kind.count(total: 4) == 1)
+    // Shift-click cp1 = (10,0): ADDS it → two CPs selected on the same element.
+    runEffects(
+        [["doc.path.probe_partial_hit":
+            ["x": 10, "y": 0, "hit_radius": 8, "shift": true]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let two = model.document.selection.first { $0.path == [0, 0] }
+    #expect(two?.kind.count(total: 4) == 2)
+    #expect(two?.kind.contains(0) == true)
+    #expect(two?.kind.contains(1) == true)
+    // Shift-click cp1 AGAIN: toggles it OFF → back to just cp0.
+    runEffects(
+        [["doc.path.probe_partial_hit":
+            ["x": 10, "y": 0, "hit_radius": 8, "shift": true]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let one = model.document.selection.first { $0.path == [0, 0] }
+    #expect(one?.kind.count(total: 4) == 1)
+    #expect(one?.kind.contains(0) == true)
+    #expect(one?.kind.contains(1) == false)
+}
+
+/// SEL-105: a marquee enclosing only one corner selects exactly that one CP
+/// (proving CP-level, not whole-element, marquee granularity).
+@Test func partialSelectionMarqueeSelectsOnlyEnclosedControlPoint() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Rect (-5,-5)..(5,5) encloses cp0=(0,0) only; cp1/cp2/cp3 are at x or y = 10.
+    runEffects(
+        [["doc.path.commit_partial_marquee":
+            ["x1": -5, "y1": -5, "x2": 5, "y2": 5]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let entry = model.document.selection.first { $0.path == [0, 0] }
+    #expect(entry != nil)
+    #expect(entry?.kind.contains(0) == true)
+    #expect(entry?.kind.count(total: 4) == 1)
+    #expect(entry?.kind.isAll(total: 4) == false)
+    #expect(!model.document.selection.contains { $0.path == [0, 1] })
+}
+
+/// SEL-105: a marquee enclosing all four corners selects every CP of the
+/// element, and leaves the out-of-rect element untouched.
+@Test func partialSelectionMarqueeSelectsAllEnclosedControlPoints() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Rect (-5,-5)..(15,15) encloses all four corners of rect[0,0]; rect[0,1]
+    // lives at (50,50) and is fully outside.
+    runEffects(
+        [["doc.path.commit_partial_marquee":
+            ["x1": -5, "y1": -5, "x2": 15, "y2": 15]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let entry = model.document.selection.first { $0.path == [0, 0] }
+    #expect(entry != nil)
+    #expect(entry?.kind.count(total: 4) == 4)
+    #expect(entry?.kind.isAll(total: 4) == true)
+    #expect(!model.document.selection.contains { $0.path == [0, 1] })
+}
+
+/// SEL-106: an empty (zero-size) marquee with no shift clears the CP selection.
+@Test func partialSelectionEmptyMarqueeClearsSelection() {
+    let model = twoRectModel()
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    // Select a CP first.
+    runEffects(
+        [["doc.path.probe_partial_hit": ["x": 0, "y": 0, "hit_radius": 8]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(!model.document.selection.isEmpty)
+    // A zero-size marquee (rw,rh <= 1), non-additive, clears the selection.
+    runEffects(
+        [["doc.path.commit_partial_marquee":
+            ["x1": 100, "y1": 100, "x2": 100, "y2": 100]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    #expect(model.document.selection.isEmpty)
+}
