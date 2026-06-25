@@ -91,10 +91,11 @@ independently GUI-driven).**
 
 ## Minor observations (not blockers)
 
-- Rust File▸New labels the new tab `Untitled-1` again (duplicate) rather than
-  advancing to `Untitled-2`, when the session already restored an `Untitled-1`.
-  The untitled counter is not advanced past the restored document's name. Cosmetic;
-  the document itself is created correctly (fresh empty artboard, made active).
+- ~~Rust File▸New labels the new tab `Untitled-1` again (duplicate) rather than
+  advancing to `Untitled-2`, when the session already restored an `Untitled-1`.~~
+  **RESOLVED (72459a07)** — the untitled counter is now advanced past restored
+  docs on session restore in Rust and Swift (OCaml/Python already did this);
+  File▸New gives a unique `Untitled-N`. GUI-verified in the Rust app.
 - All four native apps restore the previous session's document, so rectangles drawn
   in earlier smoke runs accumulate across launches. Expected (persistence), not a bug.
 - Harness/window-management notes: `JAS_TITLE` is a substring match (`JasSwift`
