@@ -476,6 +476,16 @@ class CrossLanguageTest(absltest.TestCase):
         # enters marquee mode; mouseup commits doc.select_in_rect over the
         # normalized marquee bounds. Drag encloses both rects -> [0,0]+[0,1].
         "select_marquee.json",
+        # Blob Brush paint with an app-level fill precondition (the
+        # hollow-blob regression gate). The case sets `app_state`:
+        # {fill_color:#ff0000, blob_brush_size:10}, which the runner
+        # routes through the production app-state -> tool-store bridge
+        # (StateStore.seed_globals_from via ToolContext.app_state) before
+        # the gesture — exactly as the canvas does. The committed Path
+        # MUST carry fill=red; before the bridge existed the blob
+        # committed fill=null (hollow). Pins the white/null fill contract
+        # cross-language. See BLOB_BRUSH_TOOL.md.
+        "blob_paint_fill.json",
     ]
 
     @staticmethod
@@ -503,6 +513,18 @@ class CrossLanguageTest(absltest.TestCase):
         setup_svg = _read_fixture(f"svg/{tc['setup_svg']}")
         model = Model(document=svg_to_document(setup_svg))
         ctrl = Controller(model=model)
+        # Optional `app_state` precondition (the blob_paint_fill gate):
+        # build a throwaway global state store from the case's app-level
+        # values (fill_color, blob_brush_*) and thread it through the
+        # ToolContext.app_state seam so the YamlTool runs the SAME
+        # production bridge (StateStore.seed_globals_from in _dispatch)
+        # the canvas uses. A blob paint without this would commit
+        # fill=None (hollow). Cases without app_state pass None — the
+        # tool then reads its own seeded white-fill default.
+        app_state = None
+        case_app_state = tc.get("app_state")
+        if isinstance(case_app_state, dict):
+            app_state = StateStore(dict(case_app_state))
         # The rect gesture uses no hit-testing; pass inert callbacks so
         # ToolContext stays a faithful (live-document) headless seam.
         ctx = ToolContext(
@@ -513,6 +535,7 @@ class CrossLanguageTest(absltest.TestCase):
             hit_test_text=lambda x, y: None,
             hit_test_path_curve=lambda x, y: None,
             request_update=lambda: None,
+            app_state=app_state,
         )
         tool = self._build_gesture_tool(tc["tool"])
         tool.activate(ctx)

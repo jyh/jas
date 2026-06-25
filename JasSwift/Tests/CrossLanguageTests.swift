@@ -2128,7 +2128,49 @@ private let gestureFixtures = [
     // marquee mode; mouseup commits doc.select_in_rect over the normalized
     // marquee bounds. Drag encloses both rects -> [0,0]+[0,1].
     "select_marquee.json",
+    // Blob Brush paint with an app-level fill precondition (the
+    // hollow-blob regression gate). The case sets `app_state`:
+    // {fill_color:#ff0000, blob_brush_size:10}, which the runner routes
+    // through the production `YamlTool.syncAppState` bridge before the
+    // gesture — exactly as the canvas does on every dispatch. The
+    // committed Path MUST carry fill=red; before the bridge existed the
+    // blob committed fill=nil (hollow). Pins the white/null fill contract
+    // cross-language. See BLOB_BRUSH_TOOL.md.
+    "blob_paint_fill.json",
 ]
+
+/// Apply a gesture fixture's optional `app_state` precondition onto the
+/// model's app-level state so the production `YamlTool.syncAppState` bridge
+/// (run at the top of every `dispatch`) delivers it to the tool store — the
+/// SAME path the live canvas uses, NOT a test-only store poke.
+///
+/// `fill_color` / `stroke_color` map onto the model's default fill / stroke
+/// (where the Color panel writes them); the blob-brush tip params and stroke
+/// brush slug/overrides ride `model.stateStore` (where the Brushes / blob
+/// options panels write them). Only the allowlisted bridged keys are honored.
+/// Mirrors Rust's `tool.sync_global_state(app_state)` precondition in
+/// `run_gesture_model`.
+private func applyGestureAppState(_ appState: [String: Any], to model: Model) {
+    for (k, v) in appState {
+        switch k {
+        case "fill_color":
+            if let hex = v as? String, let c = Color.fromHex(hex) {
+                model.defaultFill = Fill(color: c)
+            }
+        case "stroke_color":
+            if let hex = v as? String, let c = Color.fromHex(hex) {
+                model.defaultStroke = Stroke(color: c)
+            }
+        case "stroke_brush", "stroke_brush_overrides",
+             "blob_brush_size", "blob_brush_angle", "blob_brush_roundness",
+             "blob_brush_fidelity", "blob_brush_keep_selected",
+             "blob_brush_merge_only_with_selection":
+            model.stateStore.set(k, v)
+        default:
+            break // non-bridged keys are ignored (allowlist)
+        }
+    }
+}
 
 /// Build a minimal ToolContext for replaying gestures: a YamlTool reads only
 /// `ctx.model` and `ctx.requestUpdate` on the pointer path, so the hit-test
@@ -2166,6 +2208,18 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
 
     let ctx = gestureToolContext(model)
     tool.activate(ctx)
+
+    // Optional `app_state` precondition: stage the case's app-level state
+    // (fill_color, blob_brush_*) onto the model, then route it through the
+    // SAME production bridge the canvas uses (`YamlTool.syncAppState`) so the
+    // corpus exercises the real path. A blob paint without this would commit
+    // fill=nil (hollow). The per-dispatch `syncAppState` inside `dispatch`
+    // re-applies it on every event too, but calling it explicitly here pins
+    // the bridge as the single source even before the first event.
+    if let appState = tc["app_state"] as? [String: Any] {
+        applyGestureAppState(appState, to: model)
+        tool.syncAppState(model)
+    }
 
     for ev in tc["events"] as! [[String: Any]] {
         let x = (ev["x"] as! NSNumber).doubleValue

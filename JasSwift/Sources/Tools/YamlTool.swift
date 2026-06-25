@@ -110,6 +110,29 @@ private func parseOverlay(_ val: Any?) -> [OverlaySpec] {
 
 // MARK: - YamlTool
 
+/// App-level `state.*` keys bridged into a tool's self-contained store
+/// before each event dispatch (via `syncAppState`) so commit-effects read
+/// live document values instead of the tool store's empty defaults. This
+/// is an ALLOWLIST: keys a tool's own handlers WRITE to the global
+/// namespace (e.g. `transform_reference_point`, written by the
+/// scale/rotate/shear tools mid-gesture) are deliberately absent so the
+/// bridge can never clobber a mid-gesture handler write. The set must stay
+/// identical across all four apps for cross-language equivalence. Mirrors
+/// the Rust `BRIDGED_STATE_KEYS` in jas_dioxus/src/tools/yaml_tool.rs. See
+/// BLOB_BRUSH_TOOL.md and TESTING_STRATEGY.md.
+let bridgedStateKeys: [String] = [
+    "fill_color",
+    "stroke_color",
+    "stroke_brush",
+    "stroke_brush_overrides",
+    "blob_brush_size",
+    "blob_brush_angle",
+    "blob_brush_roundness",
+    "blob_brush_fidelity",
+    "blob_brush_keep_selected",
+    "blob_brush_merge_only_with_selection",
+]
+
 /// YAML-driven tool. Holds a parsed ToolSpec and a private StateStore
 /// seeded with the tool's defaults. CanvasTool methods build the
 /// `$event` scope, register the current document for doc-aware
@@ -140,16 +163,50 @@ final class YamlTool: CanvasTool {
         store.getTool(spec.id, key)
     }
 
-    /// Seed an app-level `state.<key>` value into this tool's own
-    /// (otherwise self-contained) store. Mirrors Rust's
-    /// `tool.store.set(...)`: some tool handlers read app-level state —
-    /// e.g. blob_brush's commit reads `state.blob_brush_size`,
-    /// `state.fill_color`, fidelity, and the merge/keep filters — which
-    /// are NOT part of the tool's own `state_defaults`. Tests that drive
-    /// the full gesture pipeline must seed those before the gesture, the
-    /// same way the standalone blob effect tests seed the StateStore.
-    func seedAppState(_ key: String, _ value: Any?) {
-        store.set(key, value)
+    /// Bridge an ALLOWLIST of app-level keys into this tool's global
+    /// `state.*` namespace (StateStore.set writes `state`, never the
+    /// per-tool `tools` slots), so commit-effects read LIVE document
+    /// values instead of the tool store's empty defaults. Without this
+    /// the blob brush commits `fill=nil` (hollow) because its
+    /// self-contained store never carries the document fill, and the tip
+    /// only "worked" via the hardcoded 10.0 fallback in
+    /// `blobBrushEffectiveTip`. Mirrors Rust's
+    /// `CanvasTool::sync_global_state` override in
+    /// jas_dioxus/src/tools/yaml_tool.rs.
+    ///
+    /// The allowlist — not a denylist — is what keeps handler-owned
+    /// globals (e.g. `transform_reference_point`, written by the
+    /// scale/rotate/shear tools mid-gesture) from being clobbered: they
+    /// simply aren't in `bridgedStateKeys`.
+    ///
+    /// `fill_color` / `stroke_color` come from the model's tab-level
+    /// default fill / stroke, defaulting to white `#ffffff` (the
+    /// workspace `state.fill_color` default) when there is no app default
+    /// — NOT nil. A genuine "no fill" only arises when the user
+    /// explicitly clears fill on a selection (out of scope for the blob
+    /// brush, which always paints from the active fill). The blob-brush
+    /// tip params + stroke brush slug/overrides ride `model.stateStore`,
+    /// where the Color / Brushes panels write them, so they are copied
+    /// from there when present.
+    ///
+    /// Called per-dispatch (at the top of `dispatch`, before `runEffects`)
+    /// so a Color-panel fill change WHILE the blob brush is active is seen
+    /// by the very next paint commit. Reuses the existing `store.set`
+    /// path the seed helper used.
+    func syncAppState(_ model: Model) {
+        store.set("fill_color",
+                  model.defaultFill.map { "#" + $0.color.toHex() } ?? "#ffffff")
+        store.set("stroke_color",
+                  model.defaultStroke.map { "#" + $0.color.toHex() } ?? "#ffffff")
+        // The remaining bridged keys (blob brush tip params + stroke
+        // brush slug/overrides) live on the shared model state store; copy
+        // each through only when present so an absent key falls back to
+        // the tool/workspace default rather than nil.
+        for k in bridgedStateKeys where k != "fill_color" && k != "stroke_color" {
+            if let v = model.stateStore.get(k) {
+                store.set(k, v)
+            }
+        }
     }
 
     // MARK: Event payload builders
@@ -194,6 +251,16 @@ final class YamlTool: CanvasTool {
     ) {
         let handlerEffects = spec.handler(eventName)
         if handlerEffects.isEmpty { return }
+        // Bridge live app-level state (fill/stroke + blob brush tip params)
+        // into this tool's global state.* namespace BEFORE running the
+        // handler effects, so commit-effects (e.g. blob_brush's
+        // doc.blob_brush.commit_painting reading state.fill_color) see real
+        // document values rather than the tool store's empty defaults.
+        // Runs per-dispatch — the same seam the live canvas exercises on
+        // every press / move / release — so a mid-gesture Color-panel fill
+        // change reaches the next commit. Mirrors Rust's
+        // tool.sync_global_state(&app_state) call in workspace/app.rs.
+        syncAppState(model)
         let ctx: [String: Any] = ["event": payload]
         // Registration tears down on DocRegistration deinit — handler
         // panics still leave the doc-primitive slot clean.

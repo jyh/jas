@@ -54,17 +54,27 @@ let blob_brush_tool () : Yaml_tool.yaml_tool option =
        | None -> None)
     | _ -> None
 
-(** Seed the app-level state.blob_brush_* and state.fill_color that the
-    commit reads (tip shape, fill, fidelity, merge filter, keep-
-    selected). Mirrors the Rust seed_blob_brush_app_state helper. *)
-let seed_blob_brush_app_state (tool : Yaml_tool.yaml_tool) : unit =
-  tool#seed_state "fill_color" (`String "#ff0000");
-  tool#seed_state "blob_brush_size" (`Float 10.0);
-  tool#seed_state "blob_brush_angle" (`Float 0.0);
-  tool#seed_state "blob_brush_roundness" (`Float 100.0);
-  tool#seed_state "blob_brush_fidelity" (`Float 1.0);
-  tool#seed_state "blob_brush_merge_only_with_selection" (`Bool false);
-  tool#seed_state "blob_brush_keep_selected" (`Bool false)
+(** Seed the app-level state.fill_color and state.blob_brush_* that the
+    commit reads (tip shape, fill, fidelity, merge filter, keep-selected)
+    by routing through the PRODUCTION bridge ([bridge_app_state]) rather
+    than poking the tool store directly — so these seam tests exercise the
+    same path the canvas uses per-dispatch.
+
+    fill_color is delivered by setting its PRODUCTION source (the Model
+    active default fill) to red; [bridge_app_state] reads it and writes
+    state.fill_color=#ff0000 into the tool global namespace, proving the
+    bridge delivers the live document fill to the commit (the hollow-blob
+    regression guard). The blob_brush_* tip params are seeded by the same
+    bridge from the workspace defaults (size=10, angle=0, roundness=100,
+    merge=false, keep=false), pinning the tip shape. Before the bridge
+    existed the blob committed fill=None (hollow) in the live app.
+    Mirrors the Rust seed_blob_brush_app_state helper, which routes the
+    same app-level state through sync_global_state. *)
+let seed_blob_brush_app_state (tool : Yaml_tool.yaml_tool)
+    (model : Model.model) : unit =
+  model#set_default_fill
+    (Some (Element.make_fill (Element.color_rgb 1.0 0.0 0.0)));
+  tool#bridge_app_state model
 
 (** Document with a single empty layer (no children). *)
 let empty_layer_model () : Model.model =
@@ -167,8 +177,8 @@ let paint_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       let m = empty_layer_model () in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       blob_brush_sweep tool ctx 0.0 50.0 false;
       let children = layer0_children m in
@@ -192,8 +202,8 @@ let undo_redo_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       let m = empty_layer_model () in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       blob_brush_sweep tool ctx 0.0 50.0 false;
       assert (Array.length (layer0_children m) = 1);
@@ -212,8 +222,8 @@ let escape_cancel_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       let m = empty_layer_model () in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       (* Begin a paint drag. *)
       tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
@@ -237,9 +247,9 @@ let alt_erase_removes_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       (* Square (23,-1)-(27,1): fully inside a 0..50 sweep, 10pt tip. *)
       let m = model_with_square 23.0 (-1.0) 27.0 1.0 true in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       assert (Array.length (layer0_children m) = 1);
       (* alt = erase. *)
@@ -255,9 +265,9 @@ let alt_erase_leaves_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       (* Same square but with no tool-origin. *)
       let m = model_with_square 23.0 (-1.0) 27.0 1.0 false in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       (* alt = erase. *)
       blob_brush_sweep tool ctx 0.0 50.0 true;
@@ -276,8 +286,8 @@ let merge_tests = [
     match blob_brush_tool () with
     | None -> Alcotest.skip ()
     | Some tool ->
-      seed_blob_brush_app_state tool;
       let m = empty_layer_model () in
+      seed_blob_brush_app_state tool m;
       let (ctx, _) = make_ctx m in
       blob_brush_sweep tool ctx 0.0 50.0 false;
       assert (Array.length (layer0_children m) = 1);

@@ -275,10 +275,19 @@ let make_gesture_ctx (model : Jas.Model.model)
     draw_element_overlay = (fun _cr _elem ~is_partial:_ _cps -> ());
   }
 
-(* Build the Yaml_tool for [tool_id] from the embedded workspace bundle, the
-   same path the running app uses (Tool_factory.load_yaml_tool reads the
-   identical bundle by string id). Mirrors the Rust [build_gesture_tool]. *)
-let build_gesture_tool (tool_id : string) : Jas.Canvas_tool.canvas_tool =
+
+(* Replay one gesture case and return the resulting Model. Loads [setup_svg]
+   into a Model under the default identity view, builds the tool from the
+   bundle, activates it, then dispatches each event through on_press / on_move
+   / on_release with the OCaml labeled-arg shapes. Mirrors the Rust
+   [run_gesture_model]. *)
+
+(* Build the concrete [Yaml_tool.yaml_tool] for [tool_id] from the embedded
+   workspace bundle (the same path the running app uses), keeping the concrete
+   type — not upcasting to [canvas_tool] — so a gesture case can route its
+   [app_state] precondition through the production [bridge_app_state] method.
+   Mirrors the Rust [build_gesture_tool]. *)
+let build_gesture_yaml_tool (tool_id : string) : Jas.Yaml_tool.yaml_tool =
   let ws = match Jas.Workspace_loader.load () with
     | Some ws -> ws
     | None -> failwith "embedded workspace must load" in
@@ -286,14 +295,9 @@ let build_gesture_tool (tool_id : string) : Jas.Canvas_tool.canvas_tool =
   | None -> failwith (Printf.sprintf "workspace declares no tool '%s'" tool_id)
   | Some spec ->
     (match Jas.Yaml_tool.from_workspace_tool spec with
-     | Some t -> (t :> Jas.Canvas_tool.canvas_tool)
+     | Some t -> t
      | None -> failwith (Printf.sprintf "tool spec '%s' failed to parse" tool_id))
 
-(* Replay one gesture case and return the resulting Model. Loads [setup_svg]
-   into a Model under the default identity view, builds the tool from the
-   bundle, activates it, then dispatches each event through on_press / on_move
-   / on_release with the OCaml labeled-arg shapes. Mirrors the Rust
-   [run_gesture_model]. *)
 let run_gesture_model (tc : Yojson.Safe.t) : Jas.Model.model =
   let open Yojson.Safe.Util in
   let setup_svg_file = tc |> member "setup_svg" |> to_string in
@@ -302,7 +306,27 @@ let run_gesture_model (tc : Yojson.Safe.t) : Jas.Model.model =
   let model = Jas.Model.create ~document:doc () in
   let ctrl = Jas.Controller.create ~model () in
   let ctx = make_gesture_ctx model ctrl in
-  let tool = build_gesture_tool (tc |> member "tool" |> to_string) in
+  let tool = build_gesture_yaml_tool (tc |> member "tool" |> to_string) in
+  (* Optional [app_state] precondition (e.g. blob_paint_fill): the case sets
+     app-level state the commit reads, such as {fill_color, blob_brush_*}.
+     The OCaml production bridge ([Yaml_tool.bridge_app_state]) reads
+     [fill_color] from the Model active default fill, so the precondition is
+     applied by setting that PRODUCTION source on the Model — NOT by poking
+     the tool store. [bridge_app_state] then delivers it (and seeds the
+     blob_brush_* tip params from the workspace defaults the fixture mirrors)
+     exactly as the canvas does per-dispatch. This routes through the same
+     production path the live app uses; a blob paint without it would commit
+     fill=None (hollow). Mirrors the Rust runner sync_global_state call. *)
+  (match tc |> member "app_state" with
+   | `Assoc _ as app_state ->
+     (match app_state |> member "fill_color" with
+      | `String hex ->
+        (match Jas.Element.color_from_hex hex with
+         | Some color -> model#set_default_fill (Some (Jas.Element.make_fill color))
+         | None -> ())
+      | _ -> ());
+     tool#bridge_app_state model
+   | _ -> ());
   tool#activate ctx;
   let bool_field ev key =
     match ev |> member key with `Bool b -> b | _ -> false in
@@ -2639,6 +2663,16 @@ let () =
          normalized marquee bounds. Drag encloses both rects -> [0,0]+[0,1]. *)
       Alcotest.test_case "select_marquee gesture" `Quick (fun () ->
         run_gesture_fixture "select_marquee.json");
+      (* Blob Brush paint with an app-level fill precondition (the
+         hollow-blob regression gate). The case sets [app_state]:
+         {fill_color:#ff0000, blob_brush_size:10}, which the runner routes
+         through the production [Yaml_tool.bridge_app_state] bridge before
+         the gesture — exactly as the canvas does per-dispatch. The committed
+         Path MUST carry fill=red; before the bridge existed the blob
+         committed fill=null (hollow). Pins the white/null fill contract
+         cross-language. See BLOB_BRUSH_TOOL.md. *)
+      Alcotest.test_case "blob_paint_fill gesture" `Quick (fun () ->
+        run_gesture_fixture "blob_paint_fill.json");
     ];
 
     (* Action equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b):

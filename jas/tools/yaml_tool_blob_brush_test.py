@@ -75,19 +75,33 @@ def _blob_brush_tool() -> YamlTool | None:
 def _seed_blob_brush_app_state(tool: YamlTool) -> None:
     """Seed the app-level ``state.blob_brush_*`` + ``state.fill_color`` that the
     commit reads (tip shape, fill, fidelity, merge filter). The YamlTool store
-    is self-contained, so these app-level values must be seeded directly — they
-    are NOT part of the tool's own state defaults (mode / hover / alt_held).
+    is self-contained, so these app-level values must be bridged in — they are
+    NOT part of the tool's own state defaults (mode / hover / alt_held).
+
+    Routes the app-level state through the PRODUCTION bridge
+    (``StateStore.seed_globals_from``) rather than poking ``tool._store``
+    directly — so these seam tests exercise the same path the canvas uses (via
+    ``ToolContext.app_state`` in ``YamlTool._dispatch``). ``fill_color=#ff0000``
+    proves the bridge delivers the live document fill to the commit (the
+    hollow-blob regression guard); the ``blob_brush_*`` values pin the tip
+    shape. Before the bridge existed, the blob committed ``fill=None`` (hollow)
+    in the live app.
 
     Mirrors ``_blob_brush_defaults`` in yaml_tool_effects_test.py and
     ``seed_blob_brush_app_state`` in the Rust reference (same keys/values)."""
-    store = tool._store
-    store.set("fill_color", "#ff0000")
-    store.set("blob_brush_size", 10.0)
-    store.set("blob_brush_angle", 0.0)
-    store.set("blob_brush_roundness", 100.0)
-    store.set("blob_brush_fidelity", 1.0)
-    store.set("blob_brush_merge_only_with_selection", False)
-    store.set("blob_brush_keep_selected", False)
+    from workspace_interpreter.state_store import StateStore
+    from tools.yaml_tool import BRIDGED_STATE_KEYS
+
+    app_state = StateStore({
+        "fill_color": "#ff0000",
+        "blob_brush_size": 10.0,
+        "blob_brush_angle": 0.0,
+        "blob_brush_roundness": 100.0,
+        "blob_brush_fidelity": 1.0,
+        "blob_brush_merge_only_with_selection": False,
+        "blob_brush_keep_selected": False,
+    })
+    tool._store.seed_globals_from(app_state, BRIDGED_STATE_KEYS)
 
 
 def _empty_layer_model() -> Model:
