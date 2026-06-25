@@ -284,6 +284,21 @@ pub trait CanvasTool {
     ) -> Vec<(String, String, serde_json::Value)> {
         Vec::new()
     }
+
+    /// Seed the tool's global `state.*` namespace from the app-level
+    /// state map before an event dispatch, so tool commit-effects that
+    /// read `state.fill_color` / `state.blob_brush_*` see LIVE app
+    /// values instead of the tool store's empty defaults. Without this
+    /// bridge the blob brush commits `fill=None` (hollow) because its
+    /// self-contained store never carries the document fill. Default
+    /// no-op: native (non-YAML) tools run no state store. YAML-driven
+    /// tools override to copy an allowlist of app-level keys into their
+    /// store. See BLOB_BRUSH_TOOL.md and TESTING_STRATEGY.md.
+    fn sync_global_state(
+        &mut self,
+        _state: &serde_json::Map<String, serde_json::Value>,
+    ) {
+    }
 }
 
 #[cfg(test)]

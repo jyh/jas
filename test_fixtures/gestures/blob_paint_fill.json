@@ -1,0 +1,15 @@
+[
+  {
+    "name": "blob_paint_fill",
+    "setup_svg": "empty_layer.svg",
+    "tool": "blob_brush",
+    "app_state": { "fill_color": "#ff0000", "blob_brush_size": 10.0 },
+    "events": [
+      {"kind": "press", "x": 50, "y": 50},
+      {"kind": "move", "x": 65, "y": 50, "dragging": true},
+      {"kind": "move", "x": 80, "y": 50, "dragging": true},
+      {"kind": "release", "x": 80, "y": 50}
+    ],
+    "expected_json": "blob_paint_fill_expected.json"
+  }
+]

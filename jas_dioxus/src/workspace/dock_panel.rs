@@ -686,50 +686,7 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // / app-level defaults when nothing is selected. Empty string for
     // "uniform but no fill" (the swatch renderer treats empty as the
     // diagonal-line "no fill" indicator).
-    let (sel_fill_summary, sel_stroke_summary) = st.tab()
-        .map(|t| (
-            crate::document::controller::selection_fill_summary(t.model.document()),
-            crate::document::controller::selection_stroke_summary(t.model.document()),
-        ))
-        .unwrap_or_else(|| (
-            crate::document::controller::FillSummary::NoSelection,
-            crate::document::controller::StrokeSummary::NoSelection,
-        ));
-    use crate::document::controller::{FillSummary, StrokeSummary};
-    let fill_string: Option<String> = match sel_fill_summary {
-        FillSummary::Uniform(Some(f)) => {
-            let (r, g, b, _) = f.color.to_rgba();
-            Some(format!("#{:02x}{:02x}{:02x}",
-                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8))
-        }
-        FillSummary::Uniform(None) => Some(String::new()),
-        FillSummary::Mixed => None,
-        FillSummary::NoSelection => st.tab()
-            .and_then(|t| t.model.default_fill)
-            .or(st.app_default_fill)
-            .map(|f| {
-                let (r, g, b, _) = f.color.to_rgba();
-                format!("#{:02x}{:02x}{:02x}",
-                    (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
-            }),
-    };
-    let stroke_string: Option<String> = match sel_stroke_summary {
-        StrokeSummary::Uniform(Some(s)) => {
-            let (r, g, b, _) = s.color.to_rgba();
-            Some(format!("#{:02x}{:02x}{:02x}",
-                (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8))
-        }
-        StrokeSummary::Uniform(None) => Some(String::new()),
-        StrokeSummary::Mixed => None,
-        StrokeSummary::NoSelection => st.tab()
-            .and_then(|t| t.model.default_stroke)
-            .or(st.app_default_stroke)
-            .map(|s| {
-                let (r, g, b, _) = s.color.to_rgba();
-                format!("#{:02x}{:02x}{:02x}",
-                    (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
-            }),
-    };
+    let (fill_string, stroke_string) = live_fill_stroke_strings(st);
     if let Some(s) = fill_string {
         m.insert("fill_color".into(), J::String(s));
     }
@@ -773,6 +730,83 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     m.insert("_layers_hidden_types_count".into(), serde_json::Value::Number(st.layers_hidden_types.len().into()));
     m.insert("_layers_filter_open".into(), serde_json::Value::Bool(st.layers_filter_dropdown_open));
 
+    m
+}
+
+/// Resolve the live `fill_color` / `stroke_color` strings from the active
+/// selection's fill/stroke summary, falling back to the tab- / app-level
+/// default. `Some("")` means "uniform but explicitly no fill" (the swatch
+/// renderer draws the diagonal-line no-fill indicator, and a blob commit
+/// reads it as an empty hex → genuinely unfilled). `None` means leave the
+/// caller's existing value in place (Mixed selection, or NoSelection with
+/// no default — the workspace `#ffffff` default then stands). Shared by
+/// `build_live_state_map` (panel render) and `build_tool_state_map` (the
+/// per-tool bridge) so both agree on the white-by-default contract.
+pub(crate) fn live_fill_stroke_strings(
+    st: &AppState,
+) -> (Option<String>, Option<String>) {
+    use crate::document::controller::{FillSummary, StrokeSummary};
+    let (sel_fill_summary, sel_stroke_summary) = st.tab()
+        .map(|t| (
+            crate::document::controller::selection_fill_summary(t.model.document()),
+            crate::document::controller::selection_stroke_summary(t.model.document()),
+        ))
+        .unwrap_or((FillSummary::NoSelection, StrokeSummary::NoSelection));
+    let hex = |r: f64, g: f64, b: f64| format!("#{:02x}{:02x}{:02x}",
+        (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
+    let fill_string: Option<String> = match sel_fill_summary {
+        FillSummary::Uniform(Some(f)) => { let (r, g, b, _) = f.color.to_rgba(); Some(hex(r, g, b)) }
+        FillSummary::Uniform(None) => Some(String::new()),
+        FillSummary::Mixed => None,
+        FillSummary::NoSelection => st.tab()
+            .and_then(|t| t.model.default_fill)
+            .or(st.app_default_fill)
+            .map(|f| { let (r, g, b, _) = f.color.to_rgba(); hex(r, g, b) }),
+    };
+    let stroke_string: Option<String> = match sel_stroke_summary {
+        StrokeSummary::Uniform(Some(s)) => { let (r, g, b, _) = s.color.to_rgba(); Some(hex(r, g, b)) }
+        StrokeSummary::Uniform(None) => Some(String::new()),
+        StrokeSummary::Mixed => None,
+        StrokeSummary::NoSelection => st.tab()
+            .and_then(|t| t.model.default_stroke)
+            .or(st.app_default_stroke)
+            .map(|s| { let (r, g, b, _) = s.color.to_rgba(); hex(r, g, b) }),
+    };
+    (fill_string, stroke_string)
+}
+
+/// Lean app-state map for the per-tool bridge (`CanvasTool::sync_global_state`).
+/// Carries only the global `state.*` keys a tool's commit-effects read —
+/// the live fill/stroke (white `#ffffff` workspace default when nothing is
+/// selected) plus the blob-brush tip params from the workspace defaults —
+/// and deliberately omits the `_swatch_libraries` / `_doc_generation` /
+/// `_layers_*` panel-render extras that `build_live_state_map` clones, since
+/// this runs on the mousemove hot path. The tool side allowlists from this
+/// map (see `BRIDGED_STATE_KEYS`).
+pub(crate) fn build_tool_state_map(
+    st: &AppState,
+) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::Value as J;
+    let ws = Workspace::load();
+    let defaults: serde_json::Map<String, serde_json::Value> = ws
+        .map(|w| w.state_defaults().into_iter().collect())
+        .unwrap_or_default();
+    let mut m = serde_json::Map::new();
+    // Base each bridged key on its workspace default (so fill_color
+    // starts at #ffffff and blob_brush_* at 10/0/100/3/false), then
+    // overlay the live fill/stroke below.
+    for k in crate::tools::yaml_tool::BRIDGED_STATE_KEYS {
+        if let Some(v) = defaults.get(*k) {
+            m.insert((*k).to_string(), v.clone());
+        }
+    }
+    let (fill_string, stroke_string) = live_fill_stroke_strings(st);
+    if let Some(s) = fill_string {
+        m.insert("fill_color".into(), J::String(s));
+    }
+    if let Some(s) = stroke_string {
+        m.insert("stroke_color".into(), J::String(s));
+    }
     m
 }
 

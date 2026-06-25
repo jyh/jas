@@ -324,6 +324,26 @@ impl YamlTool {
     }
 }
 
+/// App-level `state.*` keys bridged into a tool's self-contained store
+/// before each event dispatch (via `sync_global_state`) so commit-effects
+/// read live document values instead of the tool store's empty defaults.
+/// This is an ALLOWLIST: keys a tool's own handlers WRITE to the global
+/// namespace (e.g. `transform_reference_point`) are deliberately absent so
+/// the bridge can never clobber a mid-gesture handler write. The set must
+/// stay identical across all four apps for cross-language equivalence.
+pub(crate) const BRIDGED_STATE_KEYS: &[&str] = &[
+    "fill_color",
+    "stroke_color",
+    "stroke_brush",
+    "stroke_brush_overrides",
+    "blob_brush_size",
+    "blob_brush_angle",
+    "blob_brush_roundness",
+    "blob_brush_fidelity",
+    "blob_brush_keep_selected",
+    "blob_brush_merge_only_with_selection",
+];
+
 impl CanvasTool for YamlTool {
     fn on_press(
         &mut self,
@@ -624,6 +644,24 @@ impl CanvasTool for YamlTool {
         // routing in workspace/app.rs drains and applies them after
         // each event dispatch. See ARTBOARD_TOOL.md §Selection coupling.
         self.store.drain_panel_state_writes()
+    }
+
+    fn sync_global_state(
+        &mut self,
+        state: &serde_json::Map<String, serde_json::Value>,
+    ) {
+        // Copy an ALLOWLIST of app-level keys into this tool's global
+        // state.* namespace (StateStore.set writes `self.state`, never
+        // `self.tools`), so commit-effects read live values. The
+        // allowlist — not a denylist — is what keeps handler-owned
+        // globals (e.g. transform_reference_point, written by the
+        // scale/rotate/shear tools mid-gesture) from being clobbered:
+        // they simply aren't in the set. See BLOB_BRUSH_TOOL.md.
+        for k in BRIDGED_STATE_KEYS {
+            if let Some(v) = state.get(*k) {
+                self.store.set(k, v.clone());
+            }
+        }
     }
 }
 
@@ -4294,17 +4332,25 @@ mod tests {
     /// defaults (mode / hover / alt_held). Mirrors the
     /// `blob_brush_state_defaults` helper in interpreter/effects.rs.
     fn seed_blob_brush_app_state(tool: &mut YamlTool) {
-        tool.store.set("fill_color", serde_json::json!("#ff0000"));
-        tool.store.set("blob_brush_size", serde_json::json!(10.0));
-        tool.store.set("blob_brush_angle", serde_json::json!(0.0));
-        tool.store.set("blob_brush_roundness", serde_json::json!(100.0));
-        tool.store.set("blob_brush_fidelity", serde_json::json!(1.0));
-        tool.store.set(
-            "blob_brush_merge_only_with_selection",
+        // Route the app-level state through the PRODUCTION bridge
+        // (sync_global_state) rather than poking tool.store directly —
+        // so these seam tests exercise the same path the canvas uses in
+        // app.rs. fill_color=#ff0000 proves the bridge delivers the live
+        // document fill to the commit (the hollow-blob regression guard);
+        // the blob_brush_* values pin the tip shape. Before the bridge
+        // existed, the blob committed fill=None (hollow) in the live app.
+        let mut state = serde_json::Map::new();
+        state.insert("fill_color".into(), serde_json::json!("#ff0000"));
+        state.insert("blob_brush_size".into(), serde_json::json!(10.0));
+        state.insert("blob_brush_angle".into(), serde_json::json!(0.0));
+        state.insert("blob_brush_roundness".into(), serde_json::json!(100.0));
+        state.insert("blob_brush_fidelity".into(), serde_json::json!(1.0));
+        state.insert(
+            "blob_brush_merge_only_with_selection".into(),
             serde_json::json!(false),
         );
-        tool.store
-            .set("blob_brush_keep_selected", serde_json::json!(false));
+        state.insert("blob_brush_keep_selected".into(), serde_json::json!(false));
+        tool.sync_global_state(&state);
     }
 
     /// Drive a left-to-right paint (or erase, when `alt` is true) sweep

@@ -480,8 +480,15 @@ pub fn App() -> Element {
                     return;
                 }
                 let kind = st.active_tool;
+                // Bridge live app-level state (fill/stroke + blob brush
+                // tip params) into the tool's store before dispatch so
+                // commit-effects read real values, not the tool store's
+                // empty defaults (else the blob brush commits fill=None).
+                // Built from &st BEFORE the mutable tab borrow below.
+                let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.sync_global_state(&app_state);
                         tool.on_press(&mut tab.model, cx, cy, shift, alt);
                         tool.drain_pending_panel_writes()
                     } else {
@@ -517,8 +524,10 @@ pub fn App() -> Element {
             let dragging = evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary);
             (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
+                let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.sync_global_state(&app_state);
                         tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
                         tool.drain_pending_panel_writes()
                     } else {
@@ -540,8 +549,10 @@ pub fn App() -> Element {
             let alt = mods.alt();
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
+                let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.sync_global_state(&app_state);
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
                         tool.drain_pending_panel_writes()
                     } else {
