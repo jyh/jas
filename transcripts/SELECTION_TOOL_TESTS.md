@@ -203,15 +203,26 @@ SEL-171 (alt-copy undo) is GREEN here — Swift gets today's coalescer fix
 end-to-end (the case that was inconclusive in the Rust GUI run). PATH B works
 because the `on_move` seam now carries `alt` (commit 11af3b4e).
 
-**Partial / Interior Selection — PARTIAL coverage, all green:** registration
-(`partialSelection`/`interiorSelection` present in toolbar/registry/alternates)
-plus seam-level mode/anchor-edit cases in `YamlToolEffectsTests`:
-`docPathProbePartialHitMarqueeOnMiss` (CP miss → marquee, ~SEL-105 start),
-`docPathProbePartialHitMovingPendingOnCpHit` (CP hit → moving_pending, ~SEL-130
-start), `docPathCommitAnchorEditCornerToSmoothDrag` (~SEL-130s corner→smooth),
-and the idle/tiny-move no-ops. NO dedicated tests yet for full CP-click-select /
-CP-marquee-select / CP-designate / handle-drag-mirror (SEL-100s/130s/151) —
-those remain GUI/hands-on (or Rust-harness) territory.
+**Partial / Interior Selection — control-point coverage now green** (added
+2026-06-25, `YamlToolEffectsTests` — assert the CP-level `SelectionKind`, not
+just which element is touched):
+
+| SEL behavior | Swift test | Result |
+|---|---|---|
+| SEL-100 CP click selects that one CP (partial, not whole) | `partialSelectionCpClickSelectsSingleControlPoint` | PASS |
+| SEL-103/104 shift-click designate (add + toggle off) | `partialSelectionShiftClickAddsAndTogglesControlPoints` | PASS |
+| SEL-105 marquee selects only the enclosed CP (partial granularity) | `partialSelectionMarqueeSelectsOnlyEnclosedControlPoint` | PASS |
+| SEL-105 marquee over all corners selects every CP (isAll) | `partialSelectionMarqueeSelectsAllEnclosedControlPoints` | PASS |
+| SEL-106 empty marquee clears the CP selection | `partialSelectionEmptyMarqueeClearsSelection` | PASS |
+| CP-hit → moving_pending / miss → marquee mode | `docPathProbePartialHit*` | PASS |
+| corner→smooth / idle / tiny-move no-ops | `docPathCommitAnchorEdit*` | PASS |
+| registration (toolbar/registry/alternates) | `Toolbar*`, `CanvasToolRegistry*` | PASS |
+
+Still NOT covered at the seam (narrower remaining gap): the actual CP-DRAG
+TRANSLATE position (`doc.move_path_point` moving a selected anchor), handle-drag
+bezier MIRROR semantics (SEL-130s/306), and the partial-selection OVERLAY render
+(anchors+handles, SEL-151 visual). Those need either a CP-translate position
+test (writable) or GUI/hands-on (the overlay one).
 
 **Swift gaps (vs the Rust harness run):** anything purely visual — cursor
 glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
