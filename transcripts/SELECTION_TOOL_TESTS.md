@@ -221,8 +221,15 @@ just which element is touched):
 | corner→smooth / idle / tiny-move no-ops | `docPathCommitAnchorEdit*` | PASS |
 | registration (toolbar/registry/alternates) | `Toolbar*`, `CanvasToolRegistry*` | PASS |
 
-Still NOT covered at the seam (only the visual case left): the partial-selection
-OVERLAY render (anchors+handles drawn, SEL-151 visual) — needs GUI/hands-on.
+Visual overlay render (SEL-151) — **VERIFIED 2026-06-25 via the Quartz GUI
+harness** (`jas_gui_harness.py` driving the native Swift app, the same harness
+used for Rust). Repro: launch `swift run Jas --title JasHarness`; pen-draw a
+smooth curve; `key a` (Partial Selection); `Cmd+A`; `shot`. The capture shows
+the full overlay on the selected path — anchor squares at each smooth anchor
+PLUS in/out handle bars terminating in handle dots (a tight crop of the pen
+curve makes the bars unambiguous). With this, Swift Selection coverage is
+COMPLETE: the whole behavioral surface at the seam (deterministic) AND the
+visual overlay via the GUI harness.
 
 > **SEL-306 (RESOLVED 2026-06-25):** the handle-drag tests pin the SHIPPED
 > smooth-symmetric MIRROR behavior (opposite handle reflects through the anchor,
