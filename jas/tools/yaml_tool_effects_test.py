@@ -559,3 +559,363 @@ class TestDocArtboardMoveApply:
         result = model.document.artboards[0]
         assert result.x == 180.0
         assert result.y == 100.0  # locked
+
+
+# ── Partial Selection control-point selection (SEL-100/103/105/106) ──
+#
+# CP-LEVEL selection through the Partial Selection effects. _two_rect_model's
+# first rect (0,0,10,10) exposes four control points at its corners:
+# cp0=(0,0), cp1=(10,0), cp2=(10,10), cp3=(0,10) (element.control_points).
+# `doc.path.probe_partial_hit` selects the CP under the cursor (or
+# shift-toggles it into the per-element partial set);
+# `doc.path.commit_partial_marquee` selects every CP inside the rubber-band
+# rect. These assert the CP-level SelectionKind (.partial carrying the
+# enclosed indices), not just which element is touched. The second rect lives
+# at path (0, 1) and must stay untouched.
+#
+# These use the PRODUCTION effects (doc.path.probe_partial_hit /
+# doc.path.commit_partial_marquee, matching
+# workspace/tools/partial_selection.yaml), NOT the legacy
+# doc.partial_select_in_rect.
+
+from document.document import (selection_kind_contains,  # noqa: E402
+                               selection_kind_count,
+                               selection_kind_is_all)
+
+
+def _sel_entry(model, path):
+    """Fetch the per-element selection entry at `path`, or None."""
+    for es in model.document.selection:
+        if es.path == path:
+            return es
+    return None
+
+
+def _sel_kind(model, path):
+    """Kind of the entry at `path`, or fail."""
+    es = _sel_entry(model, path)
+    assert es is not None, "expected selection entry at path"
+    return es.kind
+
+
+class TestPartialSelectionCp:
+    def test_cp_click_selects_single_control_point(self):
+        # SEL-100: clicking a single CP selects exactly that CP (a partial
+        # selection of one), not the whole element.
+        model = _two_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {"x": 0, "y": 0, "hit_radius": 8},
+        }])
+        assert _sel_entry(model, (0, 0)) is not None
+        kind = _sel_kind(model, (0, 0))
+        assert selection_kind_contains(kind, 0)            # cp0 = (0,0)
+        assert selection_kind_count(kind, total=4) == 1    # exactly one CP …
+        assert not selection_kind_is_all(kind, total=4)    # … not whole element
+        assert store.get_tool("partial_selection", "mode") == "moving_pending"
+        assert _sel_entry(model, (0, 1)) is None
+
+    def test_shift_click_adds_and_toggles_control_points(self):
+        # SEL-103/104: shift-click ADDS CPs to the per-element partial set,
+        # and shift-clicking a selected CP toggles it OFF.
+        model = _two_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Plain click cp0.
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {"x": 0, "y": 0, "hit_radius": 8},
+        }])
+        assert selection_kind_count(_sel_kind(model, (0, 0)), total=4) == 1
+        # Shift-click cp1 = (10,0): ADDS it -> two CPs on the same element.
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {
+                "x": 10, "y": 0, "hit_radius": 8, "shift": True,
+            },
+        }])
+        two = _sel_kind(model, (0, 0))
+        assert selection_kind_count(two, total=4) == 2
+        assert selection_kind_contains(two, 0)
+        assert selection_kind_contains(two, 1)
+        # Shift-click cp1 AGAIN: toggles it OFF -> back to just cp0.
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {
+                "x": 10, "y": 0, "hit_radius": 8, "shift": True,
+            },
+        }])
+        one = _sel_kind(model, (0, 0))
+        assert selection_kind_count(one, total=4) == 1
+        assert selection_kind_contains(one, 0)
+        assert not selection_kind_contains(one, 1)
+
+    def test_marquee_selects_only_enclosed_control_point(self):
+        # SEL-105: a marquee enclosing only one corner selects exactly that
+        # one CP (proving CP-level, not whole-element, marquee granularity).
+        model = _two_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Rect (-5,-5)..(5,5) encloses cp0=(0,0) only; the others are at
+        # x or y = 10.
+        _run(store, ctrl, [{
+            "doc.path.commit_partial_marquee": {
+                "x1": -5, "y1": -5, "x2": 5, "y2": 5,
+            },
+        }])
+        assert _sel_entry(model, (0, 0)) is not None
+        kind = _sel_kind(model, (0, 0))
+        assert selection_kind_contains(kind, 0)
+        assert selection_kind_count(kind, total=4) == 1
+        assert not selection_kind_is_all(kind, total=4)
+        assert _sel_entry(model, (0, 1)) is None
+
+    def test_marquee_selects_all_enclosed_control_points(self):
+        # SEL-105: a marquee enclosing all four corners selects every CP of
+        # the element, and leaves the out-of-rect element untouched.
+        model = _two_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Rect (-5,-5)..(15,15) encloses all four corners of rect[0,0];
+        # rect[0,1] lives at (50,50) and is fully outside.
+        _run(store, ctrl, [{
+            "doc.path.commit_partial_marquee": {
+                "x1": -5, "y1": -5, "x2": 15, "y2": 15,
+            },
+        }])
+        assert _sel_entry(model, (0, 0)) is not None
+        kind = _sel_kind(model, (0, 0))
+        assert selection_kind_count(kind, total=4) == 4
+        assert selection_kind_is_all(kind, total=4)
+        assert _sel_entry(model, (0, 1)) is None
+
+    def test_empty_marquee_clears_selection(self):
+        # SEL-106: an empty (zero-size) marquee with no shift clears the CP
+        # selection.
+        model = _two_rect_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Select a CP first.
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {"x": 0, "y": 0, "hit_radius": 8},
+        }])
+        assert len(model.document.selection) != 0
+        # A zero-size marquee (rw,rh <= 1), non-additive, clears the
+        # selection.
+        _run(store, ctrl, [{
+            "doc.path.commit_partial_marquee": {
+                "x1": 100, "y1": 100, "x2": 100, "y2": 100,
+            },
+        }])
+        assert len(model.document.selection) == 0
+
+
+# ── Partial Selection control-point DRAG (SEL-130 CP translate) ──
+#
+# Dragging a selected control point is `doc.translate_selection` over a
+# PARTIAL selection: the move calls element.move_control_points on the kind,
+# so ONLY the selected CPs move. A rect's corners are not independently
+# movable, so these use a triangle Path whose anchors are cp0=(0,0),
+# cp1=(100,0), cp2=(50,100) (element.control_points == path anchor points).
+
+
+def _make_path_element(d):
+    from geometry.element import Path as PathElem
+    from geometry.element import Color, Stroke
+    return PathElem(d=d,
+                    stroke=Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=1.0))
+
+
+def _path_children_model(d):
+    layer = Layer(name="L", children=(_make_path_element(d),))
+    doc = Document(layers=(layer,))
+    return Model(document=doc)
+
+
+def _triangle_path_model():
+    from geometry.element import ClosePath, LineTo, MoveTo
+    return _path_children_model((
+        MoveTo(0.0, 0.0), LineTo(100.0, 0.0),
+        LineTo(50.0, 100.0), ClosePath(),
+    ))
+
+
+def _cps_of(model):
+    """Control-point positions of the single path child."""
+    from geometry.element import control_points
+    return control_points(model.document.layers[0].children[0])
+
+
+def _cp_eq(a, x, y):
+    return abs(a[0] - x) < 1e-9 and abs(a[1] - y) < 1e-9
+
+
+class TestPartialSelectionCpDrag:
+    def test_cp_drag_translates_only_selected_control_point(self):
+        # SEL-130: dragging a single selected CP translates ONLY that anchor;
+        # the other anchors of the same path stay put.
+        model = _triangle_path_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Select anchor 0 = (0,0).
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {"x": 0, "y": 0, "hit_radius": 8},
+        }])
+        assert selection_kind_contains(_sel_kind(model, (0, 0)), 0)
+        # Drag that CP by (+20, +30).
+        _run(store, ctrl, [{
+            "doc.translate_selection": {"dx": 20, "dy": 30},
+        }])
+        cps = _cps_of(model)
+        assert len(cps) == 3
+        assert _cp_eq(cps[0], 20.0, 30.0)     # anchor 0 moved …
+        assert _cp_eq(cps[1], 100.0, 0.0)     # … anchor 1 unchanged
+        assert _cp_eq(cps[2], 50.0, 100.0)    # … anchor 2 unchanged
+        # Selection preserved (still the same single CP).
+        assert selection_kind_count(_sel_kind(model, (0, 0)), total=3) == 1
+
+    def test_cp_drag_translates_all_selected_control_points(self):
+        # SEL-130: dragging a multi-CP selection translates EVERY selected
+        # anchor by the same delta and leaves the unselected anchor put.
+        model = _triangle_path_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # Select anchor 0 = (0,0), then shift-add anchor 2 = (50,100).
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {"x": 0, "y": 0, "hit_radius": 8},
+        }])
+        _run(store, ctrl, [{
+            "doc.path.probe_partial_hit": {
+                "x": 50, "y": 100, "hit_radius": 8, "shift": True,
+            },
+        }])
+        assert selection_kind_count(_sel_kind(model, (0, 0)), total=3) == 2
+        # Drag the pair by (+10, -10).
+        _run(store, ctrl, [{
+            "doc.translate_selection": {"dx": 10, "dy": -10},
+        }])
+        cps = _cps_of(model)
+        assert _cp_eq(cps[0], 10.0, -10.0)    # anchor 0 moved
+        assert _cp_eq(cps[1], 100.0, 0.0)     # anchor 1 not selected
+        assert _cp_eq(cps[2], 60.0, 90.0)     # anchor 2 moved
+
+
+# ── Partial Selection Bezier HANDLE drag (SEL-131 / SEL-306) ──
+#
+# Dragging a Bezier HANDLE (not the anchor) of a SMOOTH path anchor is
+# `doc.move_path_handle`. The effect reads the latched handle target from
+# partial_selection tool state — handle_path (encoded element path as
+# {"__path__": [..]}), handle_anchor_idx, handle_type ("in"|"out") — and
+# applies (dx,dy) to the named handle. The opposite handle is then rotated to
+# stay COLLINEAR through the anchor while keeping its OWN distance
+# (smooth-point semantics), and the anchor stays put.
+#
+# Handle drags need a CURVED Path: a smooth middle anchor whose in- and
+# out-handles are collinear-through-the-anchor and equidistant, so the
+# reflection is an exact point-reflection (clean integer assertions).
+#
+# Fixture — a two-segment cubic path:
+#   MoveTo(0,100)                                     anchor 0 = (0,100)
+#   CurveTo(20,100, 80,100, 100,100)   anchor 1 = (100,100), in-handle (80,100)
+#   CurveTo(120,100, 180,100, 200,100) anchor 2 = (200,100), out-handle of
+#                                      anchor 1 = (120,100)
+# Anchor 1 is the SMOOTH anchor under test: in-handle (80,100) and out-handle
+# (120,100) sit on opposite sides of the anchor, both 20 units away — a true
+# smooth point. (path_handle_positions returns (in, out) for an anchor index.)
+
+
+def _smooth_curve_path_model():
+    from geometry.element import CurveTo, MoveTo
+    return _path_children_model((
+        MoveTo(0.0, 100.0),
+        CurveTo(20.0, 100.0, 80.0, 100.0, 100.0, 100.0),
+        CurveTo(120.0, 100.0, 180.0, 100.0, 200.0, 100.0),
+    ))
+
+
+def _path_d_of(model):
+    from geometry.element import Path as PathElem
+    elem = model.document.layers[0].children[0]
+    assert isinstance(elem, PathElem)
+    return elem.d
+
+
+def _anchor_pos(d, anchor_idx):
+    # Anchor (end-point) position of a path command, for asserting the anchor
+    # stays put. Mirrors the anchor read in path_handle_positions.
+    from geometry.element import ClosePath, CurveTo, LineTo, MoveTo
+    cmd_indices = [ci for ci, cmd in enumerate(d)
+                   if not isinstance(cmd, ClosePath)]
+    cmd = d[cmd_indices[anchor_idx]]
+    if isinstance(cmd, (MoveTo, LineTo)):
+        return (cmd.x, cmd.y)
+    if isinstance(cmd, CurveTo):
+        return (cmd.x, cmd.y)
+    raise AssertionError("anchor command has no end point")
+
+
+def _opt_eq(o, x, y):
+    return o is not None and _cp_eq(o, x, y)
+
+
+class TestPartialSelectionHandle:
+    def test_handle_drag_out_mirrors_opposite_in_handle(self):
+        # SEL-131/306: dragging the OUT handle of a smooth anchor moves that
+        # handle by (dx,dy); the opposite IN handle is reflected through the
+        # anchor (mirror / smooth-point behavior), and the anchor itself does
+        # not move.
+        #
+        #   anchor 1 = (100,100) before and after — stays put.
+        #   out-handle (120,100) --[drag (-20,+20)]--> (100,120)  moved
+        #   in-handle  (80,100)  --[MIRRORED]--------> (100, 80)  reflected
+        #       through the anchor: 2*anchor - new_out
+        #       = (200,200)-(100,120) = (100,80).
+        from geometry.element import path_handle_positions
+        model = _smooth_curve_path_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        # BEFORE: confirm the smooth-point fixture.
+        d0 = _path_d_of(model)
+        in0, out0 = path_handle_positions(d0, 1)
+        assert _opt_eq(in0, 80.0, 100.0)     # in-handle  (80,100)
+        assert _opt_eq(out0, 120.0, 100.0)   # out-handle (120,100)
+        assert _cp_eq(_anchor_pos(d0, 1), 100.0, 100.0)  # anchor (100,100)
+        # Latch the handle target the way probe_partial_hit would: anchor 1's
+        # OUT handle on element (0,0).
+        store.set_tool("partial_selection", "handle_path",
+                       {"__path__": [0, 0]})
+        store.set_tool("partial_selection", "handle_anchor_idx", 1)
+        store.set_tool("partial_selection", "handle_type", "out")
+        # Drag the OUT handle by (dx=-20, dy=+20): (120,100) -> (100,120).
+        _run(store, ctrl, [{
+            "doc.move_path_handle": {"dx": -20, "dy": 20},
+        }])
+        # AFTER.
+        d1 = _path_d_of(model)
+        in1, out1 = path_handle_positions(d1, 1)
+        assert _opt_eq(out1, 100.0, 120.0)   # dragged handle moved by (dx,dy)
+        assert _opt_eq(in1, 100.0, 80.0)     # opposite handle MIRRORED
+        assert _cp_eq(_anchor_pos(d1, 1), 100.0, 100.0)  # anchor unmoved
+        assert _cp_eq(_anchor_pos(d1, 0), 0.0, 100.0)    # others untouched
+        assert _cp_eq(_anchor_pos(d1, 2), 200.0, 100.0)
+
+    def test_handle_drag_in_mirrors_opposite_out_handle(self):
+        # SEL-131/306 (symmetric case): dragging the IN handle mirrors the OUT
+        # handle. Drag the in-handle (80,100) by (dx=+20, dy=+20) -> (100,120);
+        # the out-handle reflects through the anchor to (100,80) =
+        # 2*(100,100)-(100,120).
+        from geometry.element import path_handle_positions
+        model = _smooth_curve_path_model()
+        ctrl = _ctrl(model)
+        store = StateStore()
+        store.set_tool("partial_selection", "handle_path",
+                       {"__path__": [0, 0]})
+        store.set_tool("partial_selection", "handle_anchor_idx", 1)
+        store.set_tool("partial_selection", "handle_type", "in")
+        # Drag the IN handle by (dx=+20, dy=+20): (80,100) -> (100,120).
+        _run(store, ctrl, [{
+            "doc.move_path_handle": {"dx": 20, "dy": 20},
+        }])
+        d1 = _path_d_of(model)
+        in1, out1 = path_handle_positions(d1, 1)
+        assert _opt_eq(in1, 100.0, 120.0)    # dragged in-handle
+        assert _opt_eq(out1, 100.0, 80.0)    # MIRRORED out-handle
+        assert _cp_eq(_anchor_pos(d1, 1), 100.0, 100.0)  # anchor put
