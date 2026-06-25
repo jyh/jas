@@ -1367,6 +1367,14 @@ class yaml_tool (spec : tool_spec) = object (_self)
   method tool_state (key : string) : Yojson.Safe.t =
     State_store.get_tool store spec.id key
 
+  method seed_state (key : string) (value : Yojson.Safe.t) : unit =
+    (* Test-only: write an app-level (global) state value into this
+       tool own store, so handlers reading [state.<key>] resolve it.
+       Mirrors the Rust seam tests that reach [tool.store.set] directly
+       for tools whose commit reads app-level state the YamlTool store
+       does not carry by default (blob brush tip shape, fill, fidelity). *)
+    State_store.set store key value
+
   method private dispatch
       (event_name : string) (event : Yojson.Safe.t)
       (ctrl : Controller.controller) : unit =

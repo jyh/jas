@@ -71,6 +71,14 @@ class yaml_tool : tool_spec -> object
       what a handler wrote to [$tool.<id>.<key>]. *)
   method tool_state : string -> Yojson.Safe.t
 
+  (** Test-only: write an app-level (global) state value into this
+      tool own store, so handlers reading [state.<key>] resolve it.
+      Mirrors the Rust seam tests that reach the YamlTool store
+      directly to seed app-level state the store does not carry by
+      default (e.g. the blob brush tip shape / fill / fidelity the
+      commit reads). *)
+  method seed_state : string -> Yojson.Safe.t -> unit
+
   method on_press :
     Canvas_tool.tool_context -> float -> float ->
     shift:bool -> alt:bool -> unit
