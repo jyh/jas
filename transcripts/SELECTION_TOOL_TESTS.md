@@ -117,12 +117,16 @@ marquee), 153 (switch hides overlay), 171/173 (alt-copy/handle undo), K (theming
   for this run (commit cf42f92d).
 
 **Update 2026-06-25 (after `5cbfda13` added Shift+ tool shortcuts):** Interior
-Selection is now reachable via Shift+V, so **Session F runs and passes** — SEL-080
-(interior click selects the leaf), SEL-081 (Selection selects the whole group),
-SEL-083 (interior drag moves the leaf, sibling stays) all PASS. SEL-082 (interior
-marquee over a path's CPs) not run (needs a path-in-group fixture + marquee, which
-is flaky); SEL-084 stays the documented empty-group skip. The 6 flyout-only tools
-(interior_selection/rounded_rect/polygon/star/shear/smooth) are no longer a gap.
+Selection is now reachable via Shift+V, so **Session F runs and fully passes** —
+SEL-080 (interior click selects the leaf), SEL-081 (Selection selects the whole
+group), SEL-082 (interior marquee selects the enclosed CPs of a path INSIDE a
+group — confirmed the path was grouped via a plain-Selection click selecting the
+whole group), SEL-083 (interior drag moves the leaf, sibling stays) all PASS.
+SEL-084 stays the documented empty-group skip (no UI way to make an empty group).
+The 6 flyout-only tools (interior_selection/rounded_rect/polygon/star/shear/smooth)
+are no longer a gap. Two fixture gotchas confirmed building SEL-082: a reliable
+File>New needs the dropdown to fully render before the New click (a longer settle),
+and the Pen path only draws on a freshly-focused clean canvas.
 
 **Estimated coverage:** ~80% of the suite is harness-driveable for Rust with
 visual verification. Remaining genuine gaps: px-tolerance cases, mid-gesture Esc,
