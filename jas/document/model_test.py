@@ -16,6 +16,25 @@ class ModelTest(absltest.TestCase):
         model = Model(filename="Test")
         self.assertEqual(model.filename, "Test")
 
+    def test_advance_next_untitled_past_avoids_collision(self):
+        # File>New must not reuse an Untitled-N restored from a session.
+        # advance_next_untitled_past (run on restore) pushes the counter past
+        # the highest restored Untitled-N; it is forward-only and ignores
+        # non-Untitled names. Mirrors the Rust / Swift / OCaml model tests.
+        from document import model as model_mod
+        from workspace.session import advance_next_untitled_past
+        saved = model_mod._next_untitled
+        try:
+            model_mod._next_untitled = 1
+            advance_next_untitled_past(["Untitled-1", "Untitled-3", "logo.svg"])
+            self.assertEqual(model_mod._next_untitled, 4)  # past the max (3)
+            self.assertEqual(Model().filename, "Untitled-4")  # next fresh name
+            # Forward-only: a lower restored set does not move the counter back.
+            advance_next_untitled_past(["Untitled-2"])
+            self.assertEqual(model_mod._next_untitled, 5)
+        finally:
+            model_mod._next_untitled = saved
+
     def test_set_document_notifies(self):
         model = Model()
         received = []
