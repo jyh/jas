@@ -39,6 +39,11 @@
  (libraries jas lablgtk3 alcotest))
 
 (test
+ (name yaml_tool_pencil_test)
+ (modules yaml_tool_pencil_test)
+ (libraries jas lablgtk3 alcotest))
+
+(test
  (name type_tool_test)
  (modules type_tool_test)
  (libraries jas alcotest))
