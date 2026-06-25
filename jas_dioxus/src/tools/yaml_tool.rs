@@ -4255,6 +4255,278 @@ mod tests {
         );
     }
 
+    // ── Blob Brush tool gesture-seam tests ─────────────────────────
+    //
+    // Drive the production blob_brush tool (loaded from the bundle)
+    // through on_press / on_move / on_release / on_key_event and assert
+    // the committed Path. These complement the effect/primitive unit
+    // tests in interpreter/effects.rs (which call commit_painting /
+    // commit_erasing directly with a PRE-SEEDED buffer): the seam tests
+    // exercise the FULL gesture pipeline — mode latching on press
+    // (Alt → erasing), arc-length dab accumulation via
+    // doc.blob_brush.sweep_sample on each move, and the commit on
+    // release. See transcripts/BLOB_BRUSH_TOOL_TESTS.md.
+
+    fn blob_brush_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("blob_brush")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    /// Seed the app-level `state.blob_brush_*` + `state.fill_color` that
+    /// the commit reads (tip shape, fill, fidelity, merge filter). The
+    /// YamlTool store is self-contained, so these app-level values must
+    /// be seeded directly — they are NOT part of the tool's own state
+    /// defaults (mode / hover / alt_held). Mirrors the
+    /// `blob_brush_state_defaults` helper in interpreter/effects.rs.
+    fn seed_blob_brush_app_state(tool: &mut YamlTool) {
+        tool.store.set("fill_color", serde_json::json!("#ff0000"));
+        tool.store.set("blob_brush_size", serde_json::json!(10.0));
+        tool.store.set("blob_brush_angle", serde_json::json!(0.0));
+        tool.store.set("blob_brush_roundness", serde_json::json!(100.0));
+        tool.store.set("blob_brush_fidelity", serde_json::json!(1.0));
+        tool.store.set(
+            "blob_brush_merge_only_with_selection",
+            serde_json::json!(false),
+        );
+        tool.store
+            .set("blob_brush_keep_selected", serde_json::json!(false));
+    }
+
+    /// Drive a left-to-right paint (or erase, when `alt` is true) sweep
+    /// along y=0 from x0 to x1 with a dab every 10pt — enough arc-length
+    /// for sweep_sample to push a dab on each move (tip size 10 →
+    /// ½ min-dimension = 5pt threshold). press latches the mode (Alt →
+    /// erasing), release commits.
+    fn blob_brush_sweep(
+        tool: &mut YamlTool,
+        model: &mut Model,
+        x0: f64,
+        x1: f64,
+        alt: bool,
+    ) {
+        tool.on_press(model, x0, 0.0, false, alt);
+        let mut x = x0 + 10.0;
+        while x < x1 {
+            tool.on_move(model, x, 0.0, false, alt, true);
+            x += 10.0;
+        }
+        tool.on_release(model, x1, 0.0, false, alt);
+    }
+
+    /// Single-layer model holding one filled square spanning
+    /// (x0,y0)-(x1,y1). When `blob_origin` is true the square carries
+    /// jas:tool-origin="blob_brush" (an erase target); otherwise it has
+    /// no tool-origin (an erase bystander).
+    fn model_with_square(
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+        blob_origin: bool,
+    ) -> Model {
+        use crate::document::document::Document;
+        use crate::geometry::element::{
+            Color, Fill, FillRule, LayerElem, PathCommand, PathElem,
+        };
+        let mut common = CommonProps::default();
+        if blob_origin {
+            common.tool_origin = Some("blob_brush".to_string());
+        }
+        let square = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: x0, y: y0 },
+                PathCommand::LineTo { x: x1, y: y0 },
+                PathCommand::LineTo { x: x1, y: y1 },
+                PathCommand::LineTo { x: x0, y: y1 },
+                PathCommand::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::from_hex("#ff0000").unwrap())),
+            stroke: None,
+            width_points: Vec::new(),
+            common,
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: FillRule::NonZero,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(square)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("L".to_string()),
+                ..Default::default()
+            },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn blob_brush_parity_paint_commits_tagged_path() {
+        // BB-010/011: a paint gesture commits exactly one Path tagged
+        // jas:tool-origin="blob_brush", fill-only (no stroke). The tip
+        // is swept along the drag and unioned into one closed region.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        let mut model = empty_layer_model();
+        blob_brush_sweep(&mut tool, &mut model, 0.0, 50.0, false);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "paint commits exactly one Path");
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert_eq!(
+                    pe.common.tool_origin.as_deref(),
+                    Some("blob_brush"),
+                    "committed path carries jas:tool-origin=blob_brush",
+                );
+                assert!(pe.fill.is_some(), "blob path is filled");
+                assert!(pe.stroke.is_none(), "blob path has no stroke");
+                assert!(
+                    pe.d.len() >= 3,
+                    "closed swept region: MoveTo + LineTos + ClosePath",
+                );
+            }
+            _ => panic!("expected Path element"),
+        }
+    }
+
+    #[test]
+    fn blob_brush_parity_undo_redo_round_trips() {
+        // BB-016: on_mousedown's doc.snapshot checkpoints the empty doc;
+        // undo restores zero children, redo restores the blob.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        let mut model = empty_layer_model();
+        blob_brush_sweep(&mut tool, &mut model, 0.0, 50.0, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+        model.undo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "undo removes the blob",
+        );
+        model.redo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "redo restores the blob",
+        );
+    }
+
+    #[test]
+    fn blob_brush_parity_escape_during_drag_cancels() {
+        // BB-004: Escape mid-drag flips mode to idle (on_keydown), so
+        // on_mouseup's painting commit branch (guarded by mode ==
+        // 'painting') is skipped — nothing lands. Escape arrives via
+        // on_key_event, the non-capturing-tool shell entry.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 0.0, 0.0, false, false);
+        tool.on_move(&mut model, 20.0, 0.0, false, false, true);
+        tool.on_move(&mut model, 40.0, 0.0, false, false, true);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "Esc during drag cancels — no blob committed",
+        );
+    }
+
+    #[test]
+    fn blob_brush_parity_alt_erase_removes_covered_blob() {
+        // BB-100/101: Alt-at-press latches erasing mode; the swept
+        // region boolean-subtracts from overlapping blob-brush elements.
+        // A small blob square fully inside the sweep is deleted.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        // Square (23,-1)-(27,1): fully inside a 0..50 sweep, 10pt tip.
+        let mut model = model_with_square(23.0, -1.0, 27.0, 1.0, true);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+        blob_brush_sweep(&mut tool, &mut model, 0.0, 50.0, true); // alt = erase
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "Alt-erase deletes a fully-covered blob-brush element",
+        );
+    }
+
+    #[test]
+    fn blob_brush_parity_alt_erase_leaves_non_blob() {
+        // BB-104: erase only subtracts from elements tagged
+        // jas:tool-origin="blob_brush". A bystander square without that
+        // tag is left untouched even when fully under the sweep.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        let mut model = model_with_square(23.0, -1.0, 27.0, 1.0, false); // no origin
+        blob_brush_sweep(&mut tool, &mut model, 0.0, 50.0, true); // alt = erase
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(
+            children.len(),
+            1,
+            "erase must not touch non-blob-brush elements",
+        );
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert!(pe.common.tool_origin.is_none())
+            }
+            _ => panic!("expected the untouched Path"),
+        }
+    }
+
+    #[test]
+    fn blob_brush_parity_overlapping_same_fill_merges() {
+        // BB-070: a second paint overlapping an existing blob-brush
+        // element of the same fill is unioned into it — the layer still
+        // holds exactly one Path, not two.
+        let Some(mut tool) = blob_brush_yaml_tool() else { return };
+        seed_blob_brush_app_state(&mut tool);
+        let mut model = empty_layer_model();
+        blob_brush_sweep(&mut tool, &mut model, 0.0, 50.0, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+        // Second stroke (25..75) overlaps the first (0..50).
+        blob_brush_sweep(&mut tool, &mut model, 25.0, 75.0, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "overlapping same-fill paint merges into one Path",
+        );
+    }
+
     // ── Lasso tool behavioral tests ────────────────────────────────
 
     fn lasso_yaml_tool() -> Option<YamlTool> {
