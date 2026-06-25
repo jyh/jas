@@ -95,7 +95,8 @@ class CanvasTool(ABC):
 
     @abstractmethod
     def on_move(self, ctx: ToolContext, x: float, y: float,
-                shift: bool = False, dragging: bool = False) -> None:
+                shift: bool = False, alt: bool = False,
+                dragging: bool = False) -> None:
         ...
 
     @abstractmethod

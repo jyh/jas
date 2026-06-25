@@ -200,7 +200,7 @@ private func makeCtx(model: Model) -> ToolContext {
     let model = twoRectModel()
     let ctx = makeCtx(model: model)
     tool.onPress(ctx, x: 5, y: 5, shift: false, alt: false)
-    tool.onMove(ctx, x: 15, y: 15, shift: false, dragging: true)
+    tool.onMove(ctx, x: 15, y: 15, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 15, y: 15, shift: false, alt: false)
     if case .rect(let r) = model.document.layers[0].children[0] {
         #expect(r.x == 10 && r.y == 10)
@@ -217,7 +217,7 @@ private func makeCtx(model: Model) -> ToolContext {
     let ctx = makeCtx(model: model)
     // Start in empty space, drag over the first rect, release.
     tool.onPress(ctx, x: -5, y: -5, shift: false, alt: false)
-    tool.onMove(ctx, x: 12, y: 12, shift: false, dragging: true)
+    tool.onMove(ctx, x: 12, y: 12, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 12, y: 12, shift: false, alt: false)
     #expect(model.document.selection.contains { $0.path == [0, 0] })
 }
@@ -230,7 +230,7 @@ private func makeCtx(model: Model) -> ToolContext {
     let ctx = makeCtx(model: model)
     // Click to select, then Alt+drag. Alt is captured at press time.
     tool.onPress(ctx, x: 5, y: 5, shift: false, alt: true)
-    tool.onMove(ctx, x: 100, y: 100, shift: false, dragging: true)
+    tool.onMove(ctx, x: 100, y: 100, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: true)
     // Originals at (0,0) and (50,50) still there; a new copy appended.
     #expect(model.document.layers[0].children.count == 3)

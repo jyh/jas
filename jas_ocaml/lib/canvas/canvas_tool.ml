@@ -40,7 +40,7 @@ let key_mods_cmd m = m.meta || m.ctrl
 
 class type canvas_tool = object
   method on_press : tool_context -> float -> float -> shift:bool -> alt:bool -> unit
-  method on_move : tool_context -> float -> float -> shift:bool -> dragging:bool -> unit
+  method on_move : tool_context -> float -> float -> shift:bool -> alt:bool -> dragging:bool -> unit
   method on_release : tool_context -> float -> float -> shift:bool -> alt:bool -> unit
   method on_double_click : tool_context -> float -> float -> unit
   method on_key : tool_context -> int -> bool

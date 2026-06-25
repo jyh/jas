@@ -270,7 +270,8 @@ class TypeOnPathTool(CanvasTool):
         self._control = None
 
     def on_move(self, ctx: ToolContext, x: float, y: float,
-                shift: bool = False, dragging: bool = False) -> None:
+                shift: bool = False, alt: bool = False,
+                dragging: bool = False) -> None:
 
         if self.session is not None and self.session.drag_active and dragging:
             cursor = self._cursor_at(ctx, x, y)

@@ -315,7 +315,7 @@ let run_gesture_model (tc : Yojson.Safe.t) : Jas.Model.model =
     | "press" -> tool#on_press ctx x y ~shift ~alt
     | "move" ->
       let dragging = bool_field ev "dragging" in
-      tool#on_move ctx x y ~shift ~dragging
+      tool#on_move ctx x y ~shift ~alt ~dragging
     | "release" -> tool#on_release ctx x y ~shift ~alt
     | other -> failwith (Printf.sprintf "unknown gesture event kind: %s" other)
   ) (tc |> member "events" |> to_list);
@@ -1157,18 +1157,17 @@ let drag_coalesce_post_undo_no_merge () =
    ONE undo step; one undo restores the pre-drag document (copy gone, original
    in place, selection restored).
 
-   NOTE on PATH B (Alt pressed MID drag): the Rust PATH B test cannot be
-   faithfully ported here. The OCaml [Canvas_tool.on_move] signature carries NO
-   alt flag (shift:bool -> dragging:bool -> unit) and [Yaml_tool.on_move]
-   hardcodes alt=false, so the selection tool never sees event.modifiers.alt
-   during a move. The mid-drag doc.preview.restore + copy_selection that PATH B
-   depends on therefore never fires through this seam (a probe confirmed PATH B
-   produces a 2-txn [move_selection; copy_selection] journal here, because the
-   pre-copy move was a real kept move, NOT a round-tripped one). The PATH B
-   shape (a dead round-tripped move under a landing copy) IS pinned by the
-   shared op corpus drag_coalesce_copy_absorbs_trailing_drag, which exercises
-   drop_round_tripped_move_before_copy directly. Threading alt through on_move
-   is a cross-app Canvas_tool interface change, out of scope here. *)
+   PATH B (Alt pressed MID drag, the user exact gesture): drag the original,
+   THEN hold Option, then keep dragging the copy, then release. Now that the
+   [Canvas_tool.on_move] seam carries the alt flag (shift -> alt -> dragging) and
+   [Yaml_tool.on_move] threads the real alt into the mousemove pointer payload,
+   the selection tool sees event.modifiers.alt the moment Option goes down
+   mid-drag: it round-trips the in-progress move (doc.preview.restore) and lays a
+   copy_selection. The per-frame drag coalescer then drops the dead round-tripped
+   move ahead of the landing copy (drop_round_tripped_move_before_copy, also
+   pinned directly by the shared op corpus drag_coalesce_copy_absorbs_trailing_drag),
+   so the whole gesture collapses to ONE undo step. Mirrors the Rust
+   [gesture_alt_mid_drag_copy_is_one_undo_step]. *)
 
 (* Oracle for the alt-copy undo test: the document the gesture must undo back to
    -- rect[0,0] selected, both originals in place, NO copy. Captured by driving
@@ -1214,6 +1213,64 @@ let gesture_alt_at_press_copy_is_one_undo_step () =
   if model#journal_head <> 1 then
     failwith (Printf.sprintf
       "alt-at-press drag-to-duplicate must be exactly ONE undo step (got head=%d, depth=%d)"
+      model#journal_head (List.length model#journal));
+  (match List.rev model#journal with
+   | tip :: _ ->
+     (match List.rev tip.Jas.Op_log.ops with
+      | last :: _ when last.Jas.Op_log.op = "copy_selection" -> ()
+      | last :: _ ->
+        failwith (Printf.sprintf
+          "the single undo step must be the copy (tip last op = %s)" last.Jas.Op_log.op)
+      | [] -> failwith "tip txn has no ops")
+   | [] -> failwith "journal is empty after the gesture");
+  model#undo;
+  let restored = Jas.Test_json.document_to_test_json model#document in
+  if restored <> before_drag then
+    failwith "one undo must restore the original and remove the copy";
+  if model#can_undo then
+    failwith "after one undo the journal cursor is back at the origin (lock-step)";
+  if model#journal_head <> 0 then
+    failwith "cursor back at origin"
+
+(* PATH B -- Alt pressed MID-drag. Event tape on two_rects.svg: press(36,36),
+   then drag (50,36)/(60,36) with NO alt, then Option goes down mid-drag so the
+   next two moves (60,36)/(80,36) carry alt, then release(80,36) with alt. The
+   alt now reaches the move seam, so the selection tool round-trips the pre-copy
+   move and lays a single copy_selection; the drag coalescer drops the dead
+   round-tripped move ahead of the copy, collapsing the whole gesture to ONE undo
+   step. One undo restores the select-only pre-drag document (copy gone, original
+   in place); can_undo is then false and journal_head is 0. Mirrors the Rust
+   [gesture_alt_mid_drag_copy_is_one_undo_step]. *)
+let gesture_alt_mid_drag_copy_is_one_undo_step () =
+  let before_drag = alt_copy_before_drag_oracle () in
+  let ev ?(dragging=false) ?(alt=false) kind x y =
+    `Assoc [
+      ("kind", `String kind);
+      ("x", `Float x); ("y", `Float y);
+      ("dragging", `Bool dragging); ("alt", `Bool alt);
+    ]
+  in
+  let tc = `Assoc [
+    ("setup_svg", `String "two_rects.svg");
+    ("tool", `String "selection");
+    ("events", `List [
+      ev "press" 36. 36.;
+      ev ~dragging:true "move" 50. 36.;
+      ev ~dragging:true "move" 60. 36.;
+      ev ~dragging:true ~alt:true "move" 60. 36.;
+      ev ~dragging:true ~alt:true "move" 80. 36.;
+      ev ~alt:true "release" 80. 36.;
+    ]);
+  ] in
+  let model = run_gesture_model tc in
+  let after = Jas.Test_json.document_to_test_json model#document in
+  if after = before_drag then
+    failwith "the alt-drag must have produced a copy";
+  if not model#can_undo then
+    failwith "the gesture committed an undoable transaction";
+  if model#journal_head <> 1 then
+    failwith (Printf.sprintf
+      "select->drag->alt->move->release must be exactly ONE undo step (got head=%d, depth=%d)"
       model#journal_head (List.length model#journal));
   (match List.rev model#journal with
    | tip :: _ ->
@@ -2662,12 +2719,16 @@ let () =
         drag_coalesce_target_break;
       Alcotest.test_case "drag_coalesce post-undo no merge (tip guard)" `Quick
         drag_coalesce_post_undo_no_merge;
-      (* Alt-copy one-undo-step at the GESTURE seam (PATH A: alt at press).
-         Mirrors the Rust [gesture_alt_at_press_copy_is_one_undo_step]. PATH B
-         (alt mid-drag) is undrivable through the OCaml on_move seam (no alt
-         flag) and is pinned by the op corpus instead -- see the test comment. *)
+      (* Alt-copy one-undo-step at the GESTURE seam. PATH A (alt at press) and
+         PATH B (alt pressed mid-drag) both drive the production CanvasTool seam
+         via [run_gesture_model]: the move seam now carries alt, so the selection
+         tool sees Option go down mid-drag. Mirror the Rust
+         [gesture_alt_at_press_copy_is_one_undo_step] /
+         [gesture_alt_mid_drag_copy_is_one_undo_step]. *)
       Alcotest.test_case "gesture alt-at-press copy is one undo step" `Quick
         gesture_alt_at_press_copy_is_one_undo_step;
+      Alcotest.test_case "gesture alt-mid-drag copy is one undo step" `Quick
+        gesture_alt_mid_drag_copy_is_one_undo_step;
 
       (* OP_LOG.md section 9 verb33 P1-P7 (the actions.yaml<->op_apply
          unification). Each shared source fixture replays through

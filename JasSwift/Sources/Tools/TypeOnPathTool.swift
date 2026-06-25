@@ -175,7 +175,7 @@ class TypeOnPathTool: CanvasTool {
         controlPt = nil
     }
 
-    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
+    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool, dragging: Bool) {
         // Editing-session selection drag
         if let s = session, s.dragActive, dragging {
             let cursor = cursorAt(ctx, x, y)

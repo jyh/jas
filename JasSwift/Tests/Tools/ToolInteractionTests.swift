@@ -33,7 +33,7 @@ private func lineTool() -> CanvasTool {
     let tool = lineTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
-    tool.onMove(ctx, x: 30, y: 40, shift: false, dragging: true)
+    tool.onMove(ctx, x: 30, y: 40, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
     let children = layerChildren(model)
     #expect(children.count == 1)
@@ -253,7 +253,7 @@ private func selectionTool() -> CanvasTool {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 45, y: 45, shift: false, alt: false)
-    tool.onMove(ctx, x: 75, y: 75, shift: false, dragging: true)
+    tool.onMove(ctx, x: 75, y: 75, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 75, y: 75, shift: false, alt: false)
     #expect(!model.document.selection.isEmpty)
 }
@@ -267,7 +267,7 @@ private func selectionTool() -> CanvasTool {
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
-    tool.onMove(ctx, x: 10, y: 10, shift: false, dragging: true)
+    tool.onMove(ctx, x: 10, y: 10, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 10, y: 10, shift: false, alt: false)
     #expect(model.document.selection.isEmpty)
 }
@@ -282,7 +282,7 @@ private func selectionTool() -> CanvasTool {
     let (ctx, _, _) = makeCtx(model: model)
     // Click on the rect to select it, then drag to move.
     tool.onPress(ctx, x: 60, y: 60, shift: false, alt: false)
-    tool.onMove(ctx, x: 70, y: 70, shift: false, dragging: true)
+    tool.onMove(ctx, x: 70, y: 70, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 70, y: 70, shift: false, alt: false)
     let moved = layerChildren(model)[0]
     if case .rect(let r) = moved {
@@ -331,7 +331,7 @@ private func scaleTool() -> CanvasTool {
     //    SCREEN (410, 420) -> doc (200, 200). With pivot (0,0) that is
     //    sx = sy = 200 / 100 = 2.0.
     tool.onPress(ctx, x: 210, y: 220, shift: false, alt: false)
-    tool.onMove(ctx, x: 410, y: 420, shift: false, dragging: true)
+    tool.onMove(ctx, x: 410, y: 420, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 410, y: 420, shift: false, alt: false)
 
     // The committed scale is carried in the element transform (rect x/y/w/h
@@ -481,7 +481,7 @@ private func pencilTool() -> CanvasTool {
     for i in 1...20 {
         let x = Double(i) * 5.0
         let y = sin(Double(i) * 0.1) * 20.0
-        tool.onMove(ctx, x: x, y: y, shift: false, dragging: true)
+        tool.onMove(ctx, x: x, y: y, shift: false, alt: false, dragging: true)
     }
     tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
     let children = layerChildren(model)
@@ -512,7 +512,7 @@ private func pencilTool() -> CanvasTool {
     let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
     let children = layerChildren(model)
     if case .path(let p) = children[0] {
@@ -533,7 +533,7 @@ private func pencilTool() -> CanvasTool {
 @Test func pencilToolMoveWithoutPressIsNoop() {
     let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
-    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, alt: false, dragging: true)
     #expect(layerChildren(model).isEmpty)
 }
 
@@ -541,7 +541,7 @@ private func pencilTool() -> CanvasTool {
     let tool = pencilTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 15, y: 25, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 100, y: 0, shift: false, alt: false)
     let children = layerChildren(model)
     if case .path(let p) = children[0] {
@@ -652,7 +652,7 @@ private func pathEraserTool() -> CanvasTool {
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
     let (ctx, _, _) = makeCtx(model: model)
-    tool.onMove(ctx, x: 75, y: 0, shift: false, dragging: true)
+    tool.onMove(ctx, x: 75, y: 0, shift: false, alt: false, dragging: true)
     #expect(layerChildren(model).count == 1)
 }
 
@@ -752,7 +752,7 @@ private func pathEraserTool() -> CanvasTool {
     let tool = TypeTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
-    tool.onMove(ctx, x: 60, y: 70, shift: false, dragging: true)
+    tool.onMove(ctx, x: 60, y: 70, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 110, y: 80, shift: false, alt: false)
     let children = layerChildren(model)
     #expect(children.count == 1)
@@ -793,7 +793,7 @@ private func pathEraserTool() -> CanvasTool {
 @Test func typeToolMoveWithoutPressIsNoop() {
     let tool = TypeTool()
     let (ctx, model, _) = makeCtx()
-    tool.onMove(ctx, x: 100, y: 100, shift: false, dragging: false)
+    tool.onMove(ctx, x: 100, y: 100, shift: false, alt: false, dragging: false)
     let children = layerChildren(model)
     #expect(children.isEmpty)
 }
@@ -821,7 +821,7 @@ private func pathEraserTool() -> CanvasTool {
     let tool = TypeOnPathTool()
     let (ctx, _, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, alt: false, dragging: true)
     #expect(tool.dragEnd?.0 == 50 && tool.dragEnd?.1 == 60)
     // Distance ≈ 56 > dragThreshold, so a control point is set.
     #expect(tool.controlPt != nil)
@@ -831,14 +831,14 @@ private func pathEraserTool() -> CanvasTool {
     let tool = TypeOnPathTool()
     let (ctx, _, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
-    tool.onMove(ctx, x: 11, y: 21, shift: false, dragging: true)
+    tool.onMove(ctx, x: 11, y: 21, shift: false, alt: false, dragging: true)
     #expect(tool.controlPt == nil)
 }
 
 @Test func typeOnPathToolMoveWithoutPressIsNoop() {
     let tool = TypeOnPathTool()
     let (ctx, _, _) = makeCtx()
-    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, alt: false, dragging: true)
     #expect(tool.dragStart == nil)
     #expect(tool.controlPt == nil)
 }
@@ -847,7 +847,7 @@ private func pathEraserTool() -> CanvasTool {
     let tool = TypeOnPathTool()
     let (ctx, model, _) = makeCtx()
     tool.onPress(ctx, x: 10, y: 20, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 60, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 60, shift: false, alt: false, dragging: true)
     tool.onRelease(ctx, x: 50, y: 60, shift: false, alt: false)
     let children = layerChildren(model)
     #expect(children.count == 1)

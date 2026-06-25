@@ -208,10 +208,10 @@ class YamlTool(CanvasTool):
         )
         ctx.request_update()
 
-    def on_move(self, ctx, x, y, shift=False, dragging=False):
+    def on_move(self, ctx, x, y, shift=False, alt=False, dragging=False):
         self._dispatch(
             "on_mousemove",
-            _pointer_payload("mousemove", x, y, shift, False, ctx.model,
+            _pointer_payload("mousemove", x, y, shift, alt, ctx.model,
                              dragging=dragging),
             ctx,
         )

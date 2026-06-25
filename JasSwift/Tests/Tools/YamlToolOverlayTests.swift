@@ -95,7 +95,7 @@ private func makeCtxFor(_ model: Model) -> ToolContext {
     ))
     let ctx = makeCtxFor(model)
     tool.onPress(ctx, x: 10, y: 10, shift: false, alt: false)
-    tool.onMove(ctx, x: 30, y: 40, shift: false, dragging: true)
+    tool.onMove(ctx, x: 30, y: 40, shift: false, alt: false, dragging: true)
     // mode is now "drawing" — overlay will render.
     let bmp = makeBitmapContext()
     tool.drawOverlay(ctx, bmp)
@@ -132,7 +132,7 @@ private func makeCtxFor(_ model: Model) -> ToolContext {
     ))
     let ctx = makeCtxFor(model)
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
-    tool.onMove(ctx, x: 50, y: 50, shift: false, dragging: true)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, alt: false, dragging: true)
     let bmp = makeBitmapContext()
     tool.drawOverlay(ctx, bmp)
 }
