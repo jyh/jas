@@ -29,6 +29,29 @@ fn fresh_filename() -> String {
     format!("Untitled-{n}")
 }
 
+/// Highest `N` among `Untitled-N` names in `existing` (0 if none). Pure —
+/// the unit-testable core of [`advance_next_untitled_past`].
+fn max_untitled_n(existing: &[String]) -> usize {
+    existing
+        .iter()
+        .filter_map(|f| f.strip_prefix("Untitled-").and_then(|s| s.parse::<usize>().ok()))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Bump the `Untitled-N` counter past any names already in use (e.g. from
+/// session restore) so the next [`fresh_filename`] cannot collide. Without
+/// this, restoring a session that contains `Untitled-1` and then doing
+/// File > New produces a second `Untitled-1` tab. Mirrors OCaml
+/// `Model.advance_next_untitled_past` and the Python equivalent. Only ever
+/// moves the counter forward.
+pub(crate) fn advance_next_untitled_past(existing: &[String]) {
+    NEXT_UNTITLED.fetch_max(
+        max_untitled_n(existing) + 1,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
 /// The target that drawing tools operate on. The default is the
 /// document's normal content; mask-editing mode switches the target
 /// to a specific element's mask subtree so new shapes land inside
@@ -911,6 +934,35 @@ mod tests {
     fn new_model_with_filename() {
         let model = Model::new(Document::default(), Some("test.svg".to_string()));
         assert_eq!(model.filename, "test.svg");
+    }
+
+    #[test]
+    fn max_untitled_n_finds_highest() {
+        assert_eq!(max_untitled_n(&[]), 0);
+        assert_eq!(max_untitled_n(&["drawing.svg".to_string()]), 0);
+        assert_eq!(max_untitled_n(&["Untitled-1".to_string()]), 1);
+        assert_eq!(
+            max_untitled_n(&[
+                "Untitled-1".to_string(),
+                "Untitled-3".to_string(),
+                "logo.svg".to_string(),
+            ]),
+            3
+        );
+        // Non-numeric / malformed suffixes are ignored.
+        assert_eq!(max_untitled_n(&["Untitled-".to_string(), "Untitled-x".to_string()]), 0);
+    }
+
+    #[test]
+    fn advance_past_restored_untitled_avoids_collision() {
+        // A restored `Untitled-1` must push the next fresh name past it.
+        // The counter is a process-global, so other tests may have advanced
+        // it further; the invariant is only that the next name never collides
+        // with the restored `Untitled-1` (i.e. its N is >= 2).
+        advance_next_untitled_past(&["Untitled-1".to_string()]);
+        let name = fresh_filename();
+        let n: usize = name.strip_prefix("Untitled-").unwrap().parse().unwrap();
+        assert!(n >= 2, "expected Untitled-2 or later, got {name}");
     }
 
     #[test]

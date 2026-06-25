@@ -42,6 +42,23 @@ private func freshFilename() -> String {
     return name
 }
 
+/// Highest `N` among `Untitled-N` names in `filenames` (0 if none). Pure —
+/// the unit-testable core of `advanceNextUntitledPast`.
+func maxUntitledN(_ filenames: [String]) -> Int {
+    filenames.compactMap { name -> Int? in
+        guard name.hasPrefix("Untitled-") else { return nil }
+        return Int(name.dropFirst("Untitled-".count))
+    }.max() ?? 0
+}
+
+/// Bump the `Untitled-N` counter past any names already in use (e.g. from
+/// session restore) so the next `freshFilename()` cannot collide. Without
+/// this, restoring a session containing `Untitled-1` then File > New produces
+/// a second `Untitled-1`. Mirrors OCaml / Python / Rust. Only moves forward.
+func advanceNextUntitledPast(_ filenames: [String]) {
+    nextUntitled = max(nextUntitled, maxUntitledN(filenames) + 1)
+}
+
 /// The transaction being accumulated between ``Model/beginTxn()`` and
 /// ``Model/commitTxn()`` (OP_LOG.md Increment 2). ``name`` / ``ops`` are
 /// populated by the op-apply path; ``genAtBegin`` snapshots the generation at

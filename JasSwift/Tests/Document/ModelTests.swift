@@ -12,6 +12,26 @@ import Testing
     #expect(model.filename == "Test")
 }
 
+@Test func modelMaxUntitledNFindsHighest() {
+    #expect(maxUntitledN([]) == 0)
+    #expect(maxUntitledN(["drawing.svg"]) == 0)
+    #expect(maxUntitledN(["Untitled-1"]) == 1)
+    #expect(maxUntitledN(["Untitled-1", "Untitled-3", "logo.svg"]) == 3)
+    // Non-numeric / empty suffixes are ignored.
+    #expect(maxUntitledN(["Untitled-", "Untitled-x"]) == 0)
+}
+
+@Test func modelAdvancePastRestoredAvoidsCollision() {
+    // A restored Untitled-1 must push the next fresh name past it. The
+    // nextUntitled counter is process-global, so other tests may have
+    // advanced it further; the invariant is only that the next name never
+    // collides with the restored Untitled-1 (its N is >= 2).
+    advanceNextUntitledPast(["Untitled-1"])
+    let name = Model().filename  // nil filename -> freshFilename()
+    let n = Int(name.dropFirst("Untitled-".count)) ?? 0
+    #expect(n >= 2, "expected Untitled-2 or later, got \(name)")
+}
+
 @Test func modelSetDocumentNotifies() {
     let model = Model()
     var received: [Int] = []

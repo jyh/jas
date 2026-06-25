@@ -688,6 +688,13 @@ impl AppState {
         // Restore tabs from previous session, if any.
         let (tabs, active_tab) =
             if let Some((saved_active, restored)) = super::session::load_session() {
+                // Advance the Untitled-N counter past any restored slot so a
+                // later File > New gets a unique name — a restored Untitled-1
+                // plus File > New would otherwise produce a duplicate
+                // Untitled-1. Mirrors OCaml / Python which advance on restore.
+                crate::document::model::advance_next_untitled_past(
+                    &restored.iter().map(|(f, _)| f.clone()).collect::<Vec<_>>(),
+                );
                 let tabs: Vec<TabState> = restored
                     .into_iter()
                     .map(|(filename, doc)| TabState::with_model(Model::new(doc, Some(filename))))

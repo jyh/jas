@@ -139,6 +139,11 @@ public extension WorkspaceState {
             }
         }
         guard !loaded.isEmpty else { return 0 }
+        // Advance the Untitled-N counter past any restored slot so a later
+        // File > New gets a unique name — a restored Untitled-1 plus File > New
+        // would otherwise produce a duplicate Untitled-1. Mirrors OCaml /
+        // Python / Rust which advance on restore.
+        advanceNextUntitledPast(loaded.map { $0.model.filename })
         canvases = loaded
         if let idx = index.activeIndex, idx >= 0, idx < loaded.count {
             selectedTab = loaded[idx].id
