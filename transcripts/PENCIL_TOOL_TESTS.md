@@ -28,6 +28,9 @@ Swift / OCaml / Python claimed dedicated pencil test files that did NOT exist
 defaults, release-without-press noop, path-starts-at-press-point) + a
 loader-sanity case, driving the PRODUCTION pencil tool loaded from the bundle.
 Adversarially verified at parity with the Rust twins, mutation-proven non-vacuous.
+Extended 2026-06-25 with Esc-during-drag-cancel (PNC-052/202) and undo/redo
+round-trip (PNC-053/203) cases in all four apps (Esc via `on_key_event`, the
+non-capturing-tool shell entry; undo/redo via the Model API).
 
 **Swift — `JasSwift/Tests/Tools/YamlToolPencilTests.swift`** (NEW) — 6/6 green.
 
