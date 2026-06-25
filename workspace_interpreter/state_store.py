@@ -164,6 +164,39 @@ class StateStore:
     def get_all(self) -> dict:
         return dict(self._state)
 
+    def seed_globals_from(self, other: "StateStore", allowlist) -> None:
+        """Copy an ALLOWLIST of global ``state.*`` keys from ``other`` into
+        this store's global namespace, silently (no ``_notify``).
+
+        This is the per-app side of the app-state -> tool-store bridge
+        (BLOB_BRUSH_TOOL.md / TESTING_STRATEGY.md): a YAML tool owns a
+        self-contained store whose global ``state.*`` namespace is empty,
+        so its commit-effects that read ``state.fill_color`` /
+        ``state.blob_brush_*`` would resolve to null (the blob brush
+        commits ``fill=None`` -> hollow). Before each event dispatch the
+        live app's unified store is bridged in here.
+
+        An ALLOWLIST (not a denylist): keys a tool's own handlers WRITE to
+        the global namespace (e.g. ``transform_reference_point``,
+        ``eyedropper_cache``) are deliberately absent so the bridge can
+        never clobber a mid-gesture handler write. The set must stay
+        identical across all four apps for cross-language equivalence.
+
+        A ``None`` source value is SKIPPED rather than copied, so a
+        white ``#ffffff`` fill default already sitting in this store is
+        left standing — mirroring the Rust ``live_fill_stroke_strings``
+        returning ``None`` ("leave the existing value; the workspace
+        ``#ffffff`` default then stands"). Genuine "no fill" is the
+        empty-string hex ``""`` (a uniform selection with fill cleared),
+        which DOES copy through. Writes ``self._state`` directly, never
+        ``self._tools``, so it lands in the global namespace the
+        commit-effects read as ``state.<key>``."""
+        for key in allowlist:
+            value = other._state.get(key)
+            if value is None:
+                continue
+            self._state[key] = value
+
     # ── Data namespace ───────────────────────────────────────
 
     def set_data(self, data: dict) -> None:

@@ -35,6 +35,52 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
 
 
+# App-level ``state.*`` keys bridged from the live app store into a
+# tool's self-contained store before each event dispatch (via
+# ToolContext.app_state in _dispatch) so commit-effects read live
+# document values instead of the tool store's empty defaults. This is an
+# ALLOWLIST: keys a tool's own handlers WRITE to the global namespace
+# (e.g. transform_reference_point, eyedropper_cache) are deliberately
+# absent so the bridge can never clobber a mid-gesture handler write. The
+# set must stay identical across all four apps for cross-language
+# equivalence — it mirrors Rust's BRIDGED_STATE_KEYS. See
+# BLOB_BRUSH_TOOL.md and TESTING_STRATEGY.md.
+BRIDGED_STATE_KEYS: tuple[str, ...] = (
+    "fill_color",
+    "stroke_color",
+    "stroke_brush",
+    "stroke_brush_overrides",
+    "blob_brush_size",
+    "blob_brush_angle",
+    "blob_brush_roundness",
+    "blob_brush_fidelity",
+    "blob_brush_keep_selected",
+    "blob_brush_merge_only_with_selection",
+)
+
+# Workspace defaults for the bridged keys, seeded into a fresh tool
+# store's GLOBAL state.* namespace at construction so the white #ffffff
+# fill (and the blob tip params) stand when the live app store carries a
+# null fill (no selection, no app/tab default). The per-dispatch bridge
+# (seed_globals_from) overlays live values but SKIPS None, leaving these
+# defaults in place — mirroring Rust's build_tool_state_map, which seeds
+# each bridged key from the workspace state_defaults (fill_color=#ffffff,
+# stroke_color=#000000) before overlaying live_fill_stroke_strings. The
+# values match workspace/workspace.json `state`.
+_BRIDGED_STATE_DEFAULTS: dict = {
+    "fill_color": "#ffffff",
+    "stroke_color": "#000000",
+    "stroke_brush": None,
+    "stroke_brush_overrides": None,
+    "blob_brush_size": 10,
+    "blob_brush_angle": 0,
+    "blob_brush_roundness": 100,
+    "blob_brush_fidelity": 3,
+    "blob_brush_keep_selected": False,
+    "blob_brush_merge_only_with_selection": False,
+}
+
+
 @dataclass(frozen=True)
 class OverlaySpec:
     """Tool-overlay declaration — guard expression plus render JSON."""
@@ -162,6 +208,14 @@ class YamlTool(CanvasTool):
         self._spec = spec
         self._store = StateStore()
         self._store.init_tool(spec.id, dict(spec.state_defaults))
+        # Seed the GLOBAL state.* namespace with the bridged-key
+        # workspace defaults (fill_color=#ffffff, blob tip params) so a
+        # commit-effect reads a sane fill even before any app-state
+        # bridge — and so a null live fill (no selection, no default)
+        # leaves white standing rather than committing fill=None
+        # (hollow). The per-dispatch bridge overlays live values on top.
+        for _k, _v in _BRIDGED_STATE_DEFAULTS.items():
+            self._store.set(_k, _v)
 
     @classmethod
     def from_workspace_tool(cls, spec: Any) -> "YamlTool | None":
@@ -183,6 +237,20 @@ class YamlTool(CanvasTool):
         effects = self._handler(event_name)
         if not effects:
             return
+        # Bridge the live app-state into this tool's GLOBAL state.*
+        # namespace before the handler runs, so commit-effects that read
+        # state.fill_color / state.blob_brush_* see LIVE document values
+        # instead of the tool store's seeded defaults. Per-dispatch (not
+        # only on activate) so a Color-panel fill change while the blob
+        # brush is already active is picked up. An ALLOWLIST copy that
+        # SKIPS None values, leaving the white-fill default standing —
+        # without this the blob brush commits fill=None (hollow). See
+        # BLOB_BRUSH_TOOL.md.
+        # getattr fallback so ad-hoc test ToolContext stubs that predate
+        # the app_state field still dispatch (they bridge nothing).
+        app_state = getattr(ctx, "app_state", None)
+        if app_state is not None:
+            self._store.seed_globals_from(app_state, BRIDGED_STATE_KEYS)
         eff_ctx = {"event": payload}
         guard = doc_primitives.register_document(ctx.document)
         try:

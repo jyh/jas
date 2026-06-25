@@ -23,9 +23,12 @@ import Foundation
 //   on_release      -> onRelease(ctx, x:, y:, shift:, alt:)
 //   on_key_event    -> onKeyEvent(ctx, "Escape", KeyMods())  (the same
 //                      non-capturing-tool shell entry the pencil Esc test uses)
-//   tool.store.set  -> tool.seedAppState(key, value)  (seeds app-level
-//                      state.blob_brush_* / state.fill_color that the commit +
-//                      sweep_sample read; NOT part of the tool's own defaults)
+//   tool.store.set  -> stage app-level state on the MODEL (defaultFill +
+//                      model.stateStore) and route it through the PRODUCTION
+//                      bridge tool.syncAppState(model) — the same seam the
+//                      canvas runs on every dispatch — instead of poking the
+//                      tool store directly. (De-seeded to mirror the Rust blob
+//                      seam helper, which routes through sync_global_state.)
 //
 // The committed element is a Path; in Swift the Path-case payload (`pe`) is the
 // Path struct, with pe.d : [PathCommand], pe.fill : Fill?, pe.stroke : Stroke?,
@@ -60,19 +63,25 @@ private func makeCtx(model: Model) -> ToolContext {
     )
 }
 
-/// Seed the app-level `state.blob_brush_*` + `state.fill_color` that the
-/// commit reads (tip shape, fill, fidelity, merge filter). These app-level
-/// values are NOT part of the tool's own state defaults (mode / hover / alt)
-/// so they must be seeded directly. Mirrors seed_blob_brush_app_state in the
-/// Rust reference and blobBrushStateDefaults in YamlToolEffectsTests.swift.
-private func seedBlobBrushAppState(_ tool: YamlTool) {
-    tool.seedAppState("fill_color", "#ff0000")
-    tool.seedAppState("blob_brush_size", 10.0)
-    tool.seedAppState("blob_brush_angle", 0.0)
-    tool.seedAppState("blob_brush_roundness", 100.0)
-    tool.seedAppState("blob_brush_fidelity", 1.0)
-    tool.seedAppState("blob_brush_merge_only_with_selection", false)
-    tool.seedAppState("blob_brush_keep_selected", false)
+/// Stage the app-level `state.blob_brush_*` + `state.fill_color` that the
+/// commit reads (tip shape, fill, fidelity, merge filter) onto the MODEL,
+/// then route them through the PRODUCTION bridge `tool.syncAppState(model)` —
+/// the same path the canvas runs at the top of every dispatch — rather than
+/// poking the tool store directly. `fill_color=#ff0000` proves the bridge
+/// delivers the live document fill to the commit (the hollow-blob regression
+/// guard); the blob_brush_* values pin the tip shape. These app-level values
+/// are NOT part of the tool's own state defaults (mode / hover / alt). Mirrors
+/// the de-seeded seed_blob_brush_app_state in the Rust reference (which routes
+/// through sync_global_state).
+private func seedBlobBrushAppState(_ tool: YamlTool, _ model: Model) {
+    model.defaultFill = Fill(color: Color.fromHex("#ff0000")!)
+    model.stateStore.set("blob_brush_size", 10.0)
+    model.stateStore.set("blob_brush_angle", 0.0)
+    model.stateStore.set("blob_brush_roundness", 100.0)
+    model.stateStore.set("blob_brush_fidelity", 1.0)
+    model.stateStore.set("blob_brush_merge_only_with_selection", false)
+    model.stateStore.set("blob_brush_keep_selected", false)
+    tool.syncAppState(model)
 }
 
 /// Drive a left-to-right paint (or erase, when `alt` is true) sweep along
@@ -127,8 +136,8 @@ private func modelWithSquare(
     // jas:tool-origin="blob_brush", fill-only (no stroke). The tip is swept
     // along the drag and unioned into one closed region.
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     let model = emptyLayerModel()
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
     blobBrushSweep(tool, ctx, 0, 50, false)
 
@@ -152,8 +161,8 @@ private func modelWithSquare(
     // on_mousedown's doc.snapshot checkpoints the empty doc; undo restores
     // zero children, redo restores the blob.
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     let model = emptyLayerModel()
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
     blobBrushSweep(tool, ctx, 0, 50, false)
     #expect(model.document.layers[0].children.count == 1)
@@ -175,8 +184,8 @@ private func modelWithSquare(
     // nothing lands. Escape arrives via onKeyEvent, the non-capturing-tool
     // shell entry (the same path the pencil Esc test uses).
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     let model = emptyLayerModel()
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
     tool.onPress(ctx, x: 0, y: 0, shift: false, alt: false)
     tool.onMove(ctx, x: 20, y: 0, shift: false, alt: false, dragging: true)
@@ -195,9 +204,9 @@ private func modelWithSquare(
     // from overlapping blob-brush elements. A small blob square fully inside
     // the sweep is deleted.
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     // Square (23,-1)-(27,1): fully inside a 0..50 sweep, 10pt tip.
     let model = modelWithSquare(23, -1, 27, 1, blobOrigin: true)
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
     #expect(model.document.layers[0].children.count == 1)
 
@@ -213,8 +222,8 @@ private func modelWithSquare(
     // jas:tool-origin="blob_brush". A bystander square without that tag is
     // left untouched even when fully under the sweep.
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     let model = modelWithSquare(23, -1, 27, 1, blobOrigin: false) // no origin
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
 
     blobBrushSweep(tool, ctx, 0, 50, true) // alt = erase
@@ -235,8 +244,8 @@ private func modelWithSquare(
     // fill is unioned into it — the layer still holds exactly one Path, not
     // two.
     let tool = try #require(blobBrushTool())
-    seedBlobBrushAppState(tool)
     let model = emptyLayerModel()
+    seedBlobBrushAppState(tool, model)
     let ctx = makeCtx(model: model)
     blobBrushSweep(tool, ctx, 0, 50, false)
     #expect(model.document.layers[0].children.count == 1)

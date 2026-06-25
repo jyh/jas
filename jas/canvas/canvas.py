@@ -1926,8 +1926,16 @@ class CanvasWidget(QWidget):
     _HIT_RADIUS = HIT_RADIUS
 
     def __init__(self, model: Model, controller: Controller,
-                 bbox: BoundingBox = BoundingBox(0, 0, 800, 600)):
+                 bbox: BoundingBox = BoundingBox(0, 0, 800, 600),
+                 app_state=None):
         super().__init__()
+        # The app's unified state store (jas_app._yaml_state), bridged
+        # into the active YAML tool's self-contained store before each
+        # event dispatch so tool commit-effects read the live document
+        # fill/stroke + blob-brush tip params (else the blob brush
+        # commits fill=None -> hollow). Threaded into the ToolContext
+        # below. None in headless tests. See BLOB_BRUSH_TOOL.md.
+        self._app_state = app_state
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._model = model
         self._controller = controller
@@ -1954,6 +1962,7 @@ class CanvasWidget(QWidget):
             hit_test_text=self._hit_test_text,
             hit_test_path_curve=self._hit_test_path_curve,
             request_update=self.update,
+            app_state=app_state,
         )
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)

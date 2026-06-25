@@ -1350,6 +1350,43 @@ let pointer_payload ?(dragging : bool option) (event_type : string)
   in
   `Assoc pairs
 
+(** App-level global [state.*] keys bridged into the self-contained store
+    of a tool before each event dispatch (see [bridge_app_state]) so commit
+    effects read live document values instead of the empty defaults of the
+    tool store. This is an ALLOWLIST: keys a tool own handlers WRITE to the
+    global namespace (e.g. [transform_reference_point], written by the
+    scale/rotate/shear tools mid-gesture) are deliberately absent, so the
+    bridge can never clobber a mid-gesture handler write. The set must
+    stay identical across all four apps for cross-language equivalence;
+    mirrors the Rust [BRIDGED_STATE_KEYS]. *)
+let bridged_state_keys = [
+  "fill_color";
+  "stroke_color";
+  "stroke_brush";
+  "stroke_brush_overrides";
+  "blob_brush_size";
+  "blob_brush_angle";
+  "blob_brush_roundness";
+  "blob_brush_fidelity";
+  "blob_brush_keep_selected";
+  "blob_brush_merge_only_with_selection";
+]
+
+(** Memoized workspace [state] defaults, restricted to the bridged keys.
+    The blob-brush tip params ([blob_brush_size]=10, etc.) have no durable
+    home on the Model, so they are seeded from the workspace defaults the
+    same source the running app loads (mirrors the Rust [build_tool_state_map]
+    seeding from [state_defaults]). Loaded once and cached: the bundle is
+    immutable for the process lifetime. *)
+let bridged_state_defaults : (string * Yojson.Safe.t) list Lazy.t =
+  lazy (
+    match Workspace_loader.load () with
+    | None -> []
+    | Some ws ->
+      let defaults = Workspace_loader.state_defaults ws in
+      List.filter (fun (k, _) -> List.mem k bridged_state_keys) defaults
+  )
+
 (** YAML-driven tool. Holds a [tool_spec] and a private [State_store]
     seeded with the tool's state defaults. Each [canvas_tool] method
     builds the [$event] scope, registers the current document for
@@ -1375,11 +1412,48 @@ class yaml_tool (spec : tool_spec) = object (_self)
        does not carry by default (blob brush tip shape, fill, fidelity). *)
     State_store.set store key value
 
+  method bridge_app_state (model : Model.model) : unit =
+    (* Bridge an ALLOWLIST of app-level keys into this tool global
+       [state.*] namespace ([State_store.set] writes the global scope,
+       never a tool scope) so commit effects read LIVE document values
+       instead of the tool store empty defaults. Without this the blob
+       brush commits fill=None (hollow) because its self-contained store
+       never carries the document fill, and the tip params resolve to
+       null. Mirrors the Rust [sync_global_state] override fed by
+       [build_tool_state_map]; the allowlist — not a denylist — keeps
+       handler-owned globals (e.g. [transform_reference_point]) from being
+       clobbered, since they simply are not in the set.
+
+       Seed the blob-brush tip params (and any other bridged key with no
+       durable Model home) from the workspace defaults, seed-if-absent so a
+       handler write earlier in the same activation is not overwritten.
+       Then write [fill_color] from the Model active default fill, falling
+       back to white "#ffffff" (the workspace default) when there is no
+       default fill — NOT null. Genuine no-fill is a separate explicit-clear
+       case out of scope here. *)
+    List.iter (fun (key, default_val) ->
+      if State_store.get store key = `Null then
+        State_store.set store key default_val
+    ) (Lazy.force bridged_state_defaults);
+    let fill_value =
+      match model#default_fill with
+      | Some f -> `String ("#" ^ Element.color_to_hex f.Element.fill_color)
+      | None -> `String "#ffffff"
+    in
+    State_store.set store "fill_color" fill_value
+
   method private dispatch
       (event_name : string) (event : Yojson.Safe.t)
       (ctrl : Controller.controller) : unit =
     let effects = handler spec event_name in
     if effects <> [] then begin
+      (* Bridge live app-level state (fill + blob brush tip params) into
+         this tool global namespace BEFORE the handler runs, so commit
+         effects read real values rather than the tool store empty
+         defaults (else the blob brush commits fill=None). Per-dispatch —
+         the user can change the fill via the Color panel while the tool is
+         already active. Mirrors the Rust per-dispatch [sync_global_state]. *)
+      _self#bridge_app_state ctrl#model;
       let ctx = [("event", event)] in
       let guard = Doc_primitives.register_document ctrl#document in
       let platform_effects = Yaml_tool_effects.build ctrl in
@@ -1432,6 +1506,11 @@ class yaml_tool (spec : tool_spec) = object (_self)
   method activate (ctx : Canvas_tool.tool_context) =
     (* Reset tool-local state to declared defaults, then fire on_enter. *)
     State_store.init_tool store spec.id spec.state_defaults;
+    (* Bridge live app-level state into the global namespace as part of
+       activation, so a tool whose on_enter reads [state.fill_color] /
+       [state.blob_brush_*] sees live values from the first event. Mirrors
+       the Rust [sync_global_state] call in App on activation. *)
+    _self#bridge_app_state ctx.model;
     let payload = `Assoc [("type", `String "enter")] in
     _self#dispatch "on_enter" payload ctx.controller;
     ctx.request_update ()

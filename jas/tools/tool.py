@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from document.document import Document
     from geometry.element import Element, Text, TextPath
     from document.model import Model
+    from workspace_interpreter.state_store import StateStore
 
 
 # Shared tool constants
@@ -41,6 +42,7 @@ class ToolContext:
         hit_test_text: "Callable[[float, float], tuple[tuple[int, ...], Text] | None]",
         hit_test_path_curve: "Callable[[float, float], tuple[tuple[int, ...], Element] | None]",
         request_update: "Callable[[], None]",
+        app_state: "StateStore | None" = None,
     ):
         self.model = model
         self.controller = controller
@@ -49,6 +51,17 @@ class ToolContext:
         self.hit_test_text = hit_test_text
         self.hit_test_path_curve = hit_test_path_curve
         self.request_update = request_update
+        # The live app's unified state store (jas_app._yaml_state),
+        # carrying the document fill/stroke + blob-brush tip params. A
+        # YamlTool owns a self-contained store whose global state.*
+        # namespace is empty, so its commit-effects that read
+        # state.fill_color / state.blob_brush_* would resolve to null
+        # (the blob brush commits fill=None -> hollow). At each event
+        # dispatch YamlTool bridges an ALLOWLIST of these keys into its
+        # own store. None in headless seam tests that pass an explicit
+        # tool store directly. See BLOB_BRUSH_TOOL.md and
+        # TESTING_STRATEGY.md.
+        self.app_state = app_state
 
     @property
     def document(self) -> Document:

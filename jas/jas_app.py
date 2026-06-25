@@ -1049,7 +1049,13 @@ class MainWindow(QMainWindow):
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""
         controller = Controller(model=model)
-        canvas = CanvasWidget(model=model, controller=controller)
+        # Pass the app's unified state store so the canvas can bridge
+        # the live document fill/stroke + blob-brush tip params into the
+        # active YAML tool's self-contained store before each event
+        # dispatch (else the blob brush commits fill=None -> hollow).
+        # See BLOB_BRUSH_TOOL.md.
+        canvas = CanvasWidget(model=model, controller=controller,
+                              app_state=self._yaml_state)
         self.toolbar.tool_changed.connect(canvas.set_tool)
         # Spacebar pass-through routes through the toolbar so its UI
         # stays in sync. Per HAND_TOOL.md §Spacebar pass-through.

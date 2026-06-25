@@ -79,6 +79,16 @@ class yaml_tool : tool_spec -> object
       commit reads). *)
   method seed_state : string -> Yojson.Safe.t -> unit
 
+  (** Bridge an allowlist of app-level keys into this tool global
+      [state.*] namespace before a dispatch, so commit effects read LIVE
+      document values instead of the tool store empty defaults (else the
+      blob brush commits fill=None, hollow). Seeds the blob-brush tip
+      params from the workspace defaults (no durable Model home) and writes
+      [fill_color] from the Model active default fill (white "#ffffff" when
+      none). Called per-dispatch and on activation. Mirrors the Rust
+      [sync_global_state] override. *)
+  method bridge_app_state : Model.model -> unit
+
   method on_press :
     Canvas_tool.tool_context -> float -> float ->
     shift:bool -> alt:bool -> unit
