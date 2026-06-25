@@ -4202,6 +4202,59 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pencil_parity_escape_during_drag_cancels() {
+        // PNC-052/202: Escape mid-drag flips mode to idle, so the
+        // on_mouseup commit branch (guarded by mode == 'drawing') is
+        // skipped — no Path lands and the document is unchanged. The
+        // Escape arrives via on_key_event (the same key entry the
+        // canvas shell dispatches for a non-capturing tool, as in the
+        // pen Escape tests). Non-vacuous: a broken Esc-cancel would
+        // leave mode == 'drawing', commit a path, and fail the count.
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "Esc during drag cancels — no path committed",
+        );
+    }
+
+    #[test]
+    fn pencil_parity_undo_redo_round_trips_path() {
+        // PNC-053/203: a freehand drag commits exactly one Path. The
+        // on_mousedown doc.snapshot pushed the empty document onto the
+        // undo stack, so undo restores zero children and redo restores
+        // the path. Non-vacuous: a broken undo/redo would land on the
+        // wrong child count at some step.
+        let Some(mut tool) = pencil_yaml_tool() else { return };
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 10.0, 10.0, false, false);
+        tool.on_move(&mut model, 50.0, 50.0, false, false, true);
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "drag commits exactly one Path",
+        );
+        model.undo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "undo removes the pencil path",
+        );
+        model.redo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "redo restores the pencil path",
+        );
+    }
+
     // ── Lasso tool behavioral tests ────────────────────────────────
 
     fn lasso_yaml_tool() -> Option<YamlTool> {
