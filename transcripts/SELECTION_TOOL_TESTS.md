@@ -239,12 +239,54 @@ visual overlay via the GUI harness.
 > "cusp" to "smooth-symmetric mirror" so docs match code across all 5 apps. The
 > long-standing docs-vs-code disagreement is closed.
 
-**Swift gaps (vs the Rust harness run):** anything purely visual — cursor
-glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
-(SEL-190/192), locked-element via Layers panel (SEL-017/055), sub-pixel
-tolerances (SEL-107/133/134) — plus the CP-level Partial-Selection behaviors
-above. The behavioral core (Sessions A/B/C/D/E/I/J for the main tool) is fully
-green at the seam.
+**Swift gaps (vs the Rust harness run):** the behavioral core (main tool
+Sessions A/B/C/D/E/I/J + the Partial-Selection CP behaviors) is fully green at
+the seam, and SEL-151 (the partial overlay render) is GUI-verified — so the only
+remaining gaps are the OTHER purely-visual cases: cursor glyphs (SEL-003/152),
+overlay styling legibility (SEL-150 visual), theming (SEL-190/192), locked-
+element via Layers panel (SEL-017/055), sub-pixel tolerances (SEL-107/133/134).
+
+---
+
+## OCaml automated-test coverage
+
+_2026-06-25 — jas_ocaml, `dune exec`._ Same seam-level approach as Swift: tests
+drive the real Selection spec / production effects and assert `Model` state
+deterministically; the `jas_gui_harness.py` Quartz harness covers the one visual
+case. At PARITY with the Swift suite.
+
+**Main Selection tool** — `yaml_selection_tool_test.ml` (8 cases) drives
+`on_press`/`on_move`/`on_release` and asserts `document.selection` (tool config,
+click-select, click-empty-clears, shift-toggle, drag-move). Gesture PATH A/B
+(alt-copy one undo step) live in `cross_language_test.ml`
+(`gesture_alt_at_press_*` / `gesture_alt_mid_drag_*`). All green.
+
+**Partial Selection CP behaviors** — `yaml_tool_effects_test.ml` (9 cases added
+2026-06-25), ported from and verified at parity with the Swift suite, driving the
+PRODUCTION effects (`doc.path.probe_partial_hit`, `doc.path.commit_partial_marquee`,
+`doc.translate_selection`, `doc.move_path_handle`) and asserting the CP-level
+`selection_kind` (`SelKindPartial` via `selection_kind_contains`/`_count`):
+
+| SEL | OCaml test | Result |
+|---|---|---|
+| SEL-100 CP click → single CP | `cp_click_selects_single_control_point` | PASS |
+| SEL-103/104 shift designate | `shift_click_adds_and_toggles_control_points` | PASS |
+| SEL-105 marquee → only enclosed / all CPs | `marquee_selects_only_enclosed_control_point`, `…all_enclosed…` | PASS |
+| SEL-106 empty marquee clears | `empty_marquee_clears_selection` | PASS |
+| SEL-130 CP drag translates only selected | `cp_drag_translates_only_selected_control_point`, `…all_selected…` | PASS |
+| SEL-131/306 handle drag mirrors opposite | `handle_drag_out_mirrors_opposite_in_handle`, `…in_mirrors_opposite_out…` | PASS |
+
+Adversarially verified: identical fixtures/deltas/expected coords as the Swift
+twins, non-vacuous, and OCaml `reflect_handle_keep_distance`/`move_path_handle`
+mirror byte-for-byte like Rust/Swift. `dune exec yaml_tool_effects_test.exe`:
+34/34 green.
+
+**SEL-151 overlay render — VERIFIED via the Quartz GUI harness** driving the
+native OCaml app (`dune exec bin/main.exe -- --title JasHarnessOCaml`; pen-draw a
+smooth curve; `key a` Partial Selection; `shot`). The capture shows the full
+partial overlay — anchor squares + in/out handle bars terminating in handle dots
+— visually identical to Swift. OCaml Selection coverage is COMPLETE: the
+behavioral surface at the seam + the visual overlay via the GUI harness.
 
 ---
 
