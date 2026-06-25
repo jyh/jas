@@ -13,7 +13,17 @@
     Seam mapping from Rust to OCaml:
       on_press        -> on_press ctx x y ~shift ~alt
       on_move(drag)   -> on_move ctx x y ~shift ~alt ~dragging
-      on_release      -> on_release ctx x y ~shift ~alt *)
+      on_release      -> on_release ctx x y ~shift ~alt
+      on_key_event    -> on_key_event ctx key mods
+
+    Escape entry point. The GTK canvas shell, for a non-capturing tool,
+    routes Escape and Enter through [active_tool#on_key_event ctx k mods]
+    (Canvas_subwindow.forward_key_event), and the YamlTool maps the
+    string-based [on_key_event] onto the spec on_keydown handler with
+    [event.key] bound to the key string. So driving Escape through
+    [on_key_event ctx "Escape" no_mods] is exactly the shell dispatch a
+    non-capturing pencil tool receives, matching the pen tests Escape
+    case (pen_parity_escape_via_shell_key_path). *)
 
 open Jas
 
@@ -43,6 +53,9 @@ let empty_layer_model () : Model.model =
   let m = Model.create () in
   m#set_document_unbracketed (Document.make_document [| layer |]);
   m
+
+let no_mods : Canvas_tool.key_mods =
+  { shift = false; ctrl = false; alt = false; meta = false }
 
 let make_ctx model =
   let ctrl = new Controller.controller ~model () in
@@ -192,6 +205,60 @@ let start_point_tests = [
        | _ -> assert false));
 ]
 
+(* ── Esc during drag cancels (PNC-052/202) ──────────── *)
+
+let escape_cancel_tests = [
+  Alcotest.test_case "escape_during_drag_cancels_commit" `Quick (fun () ->
+    match pencil_tool () with
+    | None -> Alcotest.skip ()
+    | Some tool ->
+      let m = empty_layer_model () in
+      let (ctx, _) = make_ctx m in
+      (* Begin a freehand drag. *)
+      tool#on_press ctx 10.0 10.0 ~shift:false ~alt:false;
+      tool#on_move ctx 50.0 50.0 ~shift:false ~alt:false ~dragging:true;
+      (* Esc via the SAME key entry the canvas shell dispatches for a
+         non-capturing tool. The spec on_keydown Escape branch sets
+         mode=idle and clears the buffer. *)
+      let _ = tool#on_key_event ctx "Escape" no_mods in
+      (* on_mouseup now takes the non-drawing branch (mode != drawing),
+         so it must NOT commit. *)
+      tool#on_release ctx 100.0 100.0 ~shift:false ~alt:false;
+
+      (* ZERO children committed: the document is unchanged. *)
+      assert (Array.length (layer0_children m) = 0));
+]
+
+(* ── undo/redo round-trips a pencil path (PNC-053/203) ── *)
+
+let undo_redo_tests = [
+  Alcotest.test_case "undo_redo_round_trips_pencil_path" `Quick (fun () ->
+    match pencil_tool () with
+    | None -> Alcotest.skip ()
+    | Some tool ->
+      let m = empty_layer_model () in
+      let (ctx, _) = make_ctx m in
+      (* A freehand drag commits exactly one Path. *)
+      tool#on_press ctx 10.0 10.0 ~shift:false ~alt:false;
+      tool#on_move ctx 50.0 50.0 ~shift:false ~alt:false ~dragging:true;
+      tool#on_release ctx 100.0 100.0 ~shift:false ~alt:false;
+      assert (Array.length (layer0_children m) = 1);
+      (match committed_path m with
+       | Element.Path _ -> ()
+       | _ -> assert false);
+
+      (* undo removes the pencil path. *)
+      m#undo;
+      assert (Array.length (layer0_children m) = 0);
+
+      (* redo restores it. *)
+      m#redo;
+      assert (Array.length (layer0_children m) = 1);
+      (match committed_path m with
+       | Element.Path _ -> ()
+       | _ -> assert false));
+]
+
 let () =
   Alcotest.run "Yaml pencil tool" [
     "Tool load", load_tests;
@@ -200,4 +267,6 @@ let () =
     "Defaults", defaults_tests;
     "Release no-op", noop_tests;
     "Start point", start_point_tests;
+    "Escape cancel", escape_cancel_tests;
+    "Undo redo", undo_redo_tests;
   ]

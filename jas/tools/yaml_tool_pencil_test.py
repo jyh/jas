@@ -39,7 +39,7 @@ from document.model import Model
 from geometry.element import (
     CurveTo, Layer, MoveTo, Path,
 )
-from tools.tool import ToolContext
+from tools.tool import KeyMods, ToolContext
 from tools.yaml_tool import YamlTool
 
 
@@ -187,3 +187,52 @@ class TestPencilTool:
         assert isinstance(pe.d[0], MoveTo), "first command should be MoveTo"
         assert pe.d[0].x == 15.0
         assert pe.d[0].y == 25.0
+
+    # ── 6. Escape during a drag cancels the stroke (PNC-052/202) ─
+
+    def test_escape_during_drag_cancels(self):
+        # Press + drag put the pencil in mode='drawing'. Delivering Escape via
+        # the SAME key entry the canvas shell dispatches for a non-capturing
+        # tool (on_key_event "Escape" -> on_keydown) sets mode='idle' and
+        # clears the buffer. The subsequent on_release then takes the
+        # NON-drawing branch (mode != 'drawing') and does NOT commit, so the
+        # document is left unchanged with zero children.
+        tool = _pencil_tool()
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        model = _empty_layer_model()
+        ctx = _ctx(model)
+        tool.on_press(ctx, 10.0, 10.0, False, False)
+        tool.on_move(ctx, 50.0, 50.0, False, False, True)
+        # The canvas's actual Escape dispatch for a non-capturing tool.
+        tool.on_key_event(ctx, "Escape", KeyMods())
+        tool.on_release(ctx, 100.0, 100.0, False, False)
+
+        assert len(model.document.layers[0].children) == 0, (
+            "Escape during the drag should cancel: on_mouseup takes the "
+            "non-drawing branch and commits nothing")
+
+    # ── 7. Undo / redo round-trips a pencil path (PNC-053/203) ──
+
+    def test_undo_redo_round_trips_path(self):
+        # on_mousedown runs doc.snapshot, so the committed pencil path is one
+        # undoable edit: undo restores the pre-press (empty) document and redo
+        # restores the committed path.
+        tool = _pencil_tool()
+        if tool is None:
+            pytest.skip("workspace.json not available")
+        model = _empty_layer_model()
+        ctx = _ctx(model)
+        tool.on_press(ctx, 10.0, 10.0, False, False)
+        tool.on_move(ctx, 50.0, 50.0, False, False, True)
+        tool.on_release(ctx, 100.0, 100.0, False, False)
+        assert len(model.document.layers[0].children) == 1, (
+            "drag + release should commit exactly one Path")
+
+        model.undo()
+        assert len(model.document.layers[0].children) == 0, (
+            "undo should remove the pencil path")
+
+        model.redo()
+        assert len(model.document.layers[0].children) == 1, (
+            "redo should restore the pencil path")

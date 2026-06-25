@@ -161,3 +161,61 @@ private func makeCtx(model: Model) -> ToolContext {
         Issue.record("d[0] expected MoveTo(15,25), got \(pe.d[0])")
     }
 }
+
+// MARK: - Escape during a drag cancels the stroke (PNC-052/202)
+
+@Test func pencilEscDuringDragCancels() throws {
+    // Press + drag puts the tool in mode='drawing' with points in the buffer.
+    // Escape (the on_keydown handler) sets mode='idle' and clears the buffer.
+    // The subsequent on_mouseup then takes the NON-drawing branch — it does NOT
+    // call doc.add_path_from_buffer — so nothing is committed and the document
+    // is left exactly as it started (zero children).
+    //
+    // The Escape entry is the SAME one the canvas shell dispatches for a
+    // non-capturing tool: CanvasSubwindow.keyDown -> activeTool.onKeyEvent(
+    // ctx, "Escape", KeyMods), the established path used by the pen Escape test.
+    let tool = try #require(pencilTool())
+    let model = emptyLayerModel()
+    let ctx = makeCtx(model: model)
+    tool.onPress(ctx, x: 10, y: 10, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, alt: false, dragging: true)
+    // The shell's actual Escape dispatch for a non-capturing tool.
+    _ = tool.onKeyEvent(ctx, "Escape", KeyMods())
+    tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: false)
+
+    #expect(model.document.layers[0].children.isEmpty,
+            "Esc set mode=idle, so on_mouseup must not commit a path")
+}
+
+// MARK: - Undo/redo round-trips a committed pencil path (PNC-053/203)
+
+@Test func pencilUndoRedoRoundTrip() throws {
+    // A normal drag commits exactly one Path (on_mousedown does doc.snapshot
+    // first, so the commit is a single undoable transaction). undo() pops that
+    // snapshot, restoring the empty document; redo() re-applies it.
+    let tool = try #require(pencilTool())
+    let model = emptyLayerModel()
+    let ctx = makeCtx(model: model)
+    tool.onPress(ctx, x: 10, y: 10, shift: false, alt: false)
+    tool.onMove(ctx, x: 50, y: 50, shift: false, alt: false, dragging: true)
+    tool.onRelease(ctx, x: 100, y: 100, shift: false, alt: false)
+
+    #expect(model.document.layers[0].children.count == 1,
+            "drag should commit exactly one Path")
+    guard case .path = model.document.layers[0].children[0] else {
+        Issue.record("expected Path, got \(model.document.layers[0].children[0])")
+        return
+    }
+
+    model.undo()
+    #expect(model.document.layers[0].children.isEmpty,
+            "undo should remove the committed pencil path")
+
+    model.redo()
+    #expect(model.document.layers[0].children.count == 1,
+            "redo should restore the pencil path")
+    guard case .path = model.document.layers[0].children[0] else {
+        Issue.record("expected restored Path, got \(model.document.layers[0].children[0])")
+        return
+    }
+}
