@@ -215,15 +215,23 @@ just which element is touched):
 | SEL-105 marquee over all corners selects every CP (isAll) | `partialSelectionMarqueeSelectsAllEnclosedControlPoints` | PASS |
 | SEL-106 empty marquee clears the CP selection | `partialSelectionEmptyMarqueeClearsSelection` | PASS |
 | SEL-130 CP drag translates ONLY the selected anchor(s) | `partialSelectionCpDragTranslatesOnlySelectedControlPoint`, `…AllSelectedControlPoints` | PASS |
+| SEL-131/306 handle drag mirrors the opposite handle (smooth) | `partialSelectionHandleDragOutMirrorsOppositeInHandle`, `…InMirrorsOppositeOutHandle` | PASS |
 | CP-hit → moving_pending / miss → marquee mode | `docPathProbePartialHit*` | PASS |
 | corner→smooth / idle / tiny-move no-ops | `docPathCommitAnchorEdit*` | PASS |
 | registration (toolbar/registry/alternates) | `Toolbar*`, `CanvasToolRegistry*` | PASS |
 
-Still NOT covered at the seam (narrowed gap): handle-drag bezier MIRROR
-semantics (SEL-131/306 — moving a smooth anchor's handle reflects the opposite
-handle) and the partial-selection OVERLAY render (anchors+handles, SEL-151
-visual). The overlay one needs GUI/hands-on; the handle-mirror one is writable
-as a `doc.move_path_handle` position test on a curved path.
+Still NOT covered at the seam (only the visual case left): the partial-selection
+OVERLAY render (anchors+handles drawn, SEL-151 visual) — needs GUI/hands-on.
+
+> **SEL-306 note:** the handle-drag tests pin the SHIPPED smooth-symmetric
+> MIRROR behavior (opposite handle reflects through the anchor), which matches
+> Rust/Flask (`geometry::move_path_handle`) and is now gate-pinned in Swift.
+> This CONTRADICTS the prose spec (SELECTION_TOOL.md §"cusp") and the SEL-306
+> manual-test expectation below (still worded "in-handle stays put / cusp").
+> Docs and code disagree across ALL apps (long-known, recorded at the §Automation
+> coverage update). Reconcile: update the prose + the SEL-306 expected-result to
+> "smooth-symmetric mirror" so docs match code, OR (if cusp is truly intended)
+> change `move_path_handle` in all 5 apps — a behavior change, not a doc edit.
 
 **Swift gaps (vs the Rust harness run):** anything purely visual — cursor
 glyphs (SEL-003/152), overlay styling legibility (SEL-150 visual), theming
