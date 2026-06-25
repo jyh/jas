@@ -56,7 +56,7 @@ public struct KeyMods {
 /// Interface for canvas interaction tools.
 protocol CanvasTool: AnyObject {
     func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool)
-    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool)
+    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool, dragging: Bool)
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool)
     func onDoubleClick(_ ctx: ToolContext, x: Double, y: Double)
     func onKey(_ ctx: ToolContext, keyCode: UInt16) -> Bool

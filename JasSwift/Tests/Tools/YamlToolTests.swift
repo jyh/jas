@@ -222,7 +222,7 @@ private func simpleSpec(_ id: String, _ handlers: [String: [Any]],
         selectedLayer: 0, selection: []
     ))
     let ctx = makeCtx(model: model)
-    tool.onMove(ctx, x: 5, y: 0, shift: false, dragging: true)
+    tool.onMove(ctx, x: 5, y: 0, shift: false, alt: false, dragging: true)
 
     #expect(model.journal.count == 1, "one production transaction committed")
     #expect(model.journal.first?.name == "mover on_mousemove",

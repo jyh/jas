@@ -2480,10 +2480,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
         let x = GdkEvent.Motion.x ev in
         let y = GdkEvent.Motion.y ev in
         let shift = Gdk.Convert.test_modifier `SHIFT (GdkEvent.Motion.state ev) in
+        let alt = Gdk.Convert.test_modifier `MOD1 (GdkEvent.Motion.state ev) in
         let buttons = GdkEvent.Motion.state ev in
         let dragging = Gdk.Convert.test_modifier `BUTTON1 buttons in
         let ctx = _self#tool_context in
-        active_tool#on_move ctx x y ~shift ~dragging;
+        active_tool#on_move ctx x y ~shift ~alt ~dragging;
         true
       ) |> ignore;
       canvas_area#event#connect#button_release ~callback:(fun ev ->

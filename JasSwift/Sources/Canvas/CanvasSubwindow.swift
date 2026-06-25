@@ -3082,7 +3082,8 @@ class CanvasNSView: NSView {
     override func mouseMoved(with event: NSEvent) {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
-        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: false, dragging: false)
+        let alt = event.modifierFlags.contains(.option)
+        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: false, alt: alt, dragging: false)
         // Cursor override (e.g. "none" inside the edited text) depends on
         // the live pointer position, so invalidate the cursor rects on
         // every move while a tool is editing.
@@ -3095,7 +3096,12 @@ class CanvasNSView: NSView {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
         let shift = event.modifierFlags.contains(.shift)
-        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: shift, dragging: true)
+        // PATH B: read the LIVE Option modifier here, mirroring how mouseDown /
+        // mouseUp already read it for onPress / onRelease. This is the seam that
+        // lets the Selection tool's mid-drag alt-copy branch (selection.yaml) fire
+        // when the user presses Option AFTER the drag begins.
+        let alt = event.modifierFlags.contains(.option)
+        activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt, dragging: true)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -3112,7 +3118,7 @@ class CanvasNSView: NSView {
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         guard let ctx = toolContext else { return }
         activeTool.onPress(ctx, x: start.x, y: start.y, shift: extend, alt: false)
-        activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, dragging: true)
+        activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, alt: false, dragging: true)
         activeTool.onRelease(ctx, x: end.x, y: end.y, shift: extend, alt: false)
     }
 }

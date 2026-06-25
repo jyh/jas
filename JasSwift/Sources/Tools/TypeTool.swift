@@ -230,7 +230,7 @@ class TypeTool: CanvasTool {
         }
     }
 
-    func onMove(_ ctx: ToolContext, x screenX: Double, y screenY: Double, shift: Bool, dragging: Bool) {
+    func onMove(_ ctx: ToolContext, x screenX: Double, y screenY: Double, shift: Bool, alt: Bool, dragging: Bool) {
         let (x, y) = toDoc(ctx, screenX, screenY)
         if let s = session, s.dragActive, dragging {
             let cursor = cursorAt(ctx, x, y)

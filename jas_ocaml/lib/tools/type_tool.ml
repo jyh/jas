@@ -312,8 +312,9 @@ class type_tool = object (_self)
           drag_start <- Some (x, y);
           drag_end <- Some (x, y)))
 
-  method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(dragging : bool) =
+  method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) ~(dragging : bool) =
     ignore shift;
+    ignore alt;
     let (dx, dy) = _self#to_doc ctx x y in
     match session with
     | Some s when Text_edit.drag_active s && dragging ->

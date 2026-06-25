@@ -76,7 +76,7 @@ class yaml_tool : tool_spec -> object
     shift:bool -> alt:bool -> unit
   method on_move :
     Canvas_tool.tool_context -> float -> float ->
-    shift:bool -> dragging:bool -> unit
+    shift:bool -> alt:bool -> dragging:bool -> unit
   method on_release :
     Canvas_tool.tool_context -> float -> float ->
     shift:bool -> alt:bool -> unit

@@ -1356,10 +1356,10 @@ class yaml_tool (spec : tool_spec) = object (_self)
     ctx.request_update ()
 
   method on_move (ctx : Canvas_tool.tool_context)
-      (x : float) (y : float) ~(shift : bool) ~(dragging : bool) =
+      (x : float) (y : float) ~(shift : bool) ~(alt : bool) ~(dragging : bool) =
     _self#dispatch "on_mousemove"
       (pointer_payload "mousemove" ~model:ctx.model ~x ~y
-                       ~shift ~alt:false ~dragging)
+                       ~shift ~alt ~dragging)
       ctx.controller;
     ctx.request_update ()
 

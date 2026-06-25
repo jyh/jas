@@ -213,10 +213,10 @@ final class YamlTool: CanvasTool {
         ctx.requestUpdate()
     }
 
-    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, dragging: Bool) {
+    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool, dragging: Bool) {
         dispatch("on_mousemove",
                  payload: pointerPayload("mousemove", x: x, y: y,
-                                         shift: shift, alt: false,
+                                         shift: shift, alt: alt,
                                          model: ctx.model,
                                          dragging: dragging),
                  model: ctx.model)

@@ -120,7 +120,7 @@ let drag_tests = [
       let m = two_rect_model () in
       let (ctx, _) = make_ctx m in
       tool#on_press ctx 5.0 5.0 ~shift:false ~alt:false;
-      tool#on_move ctx 15.0 15.0 ~shift:false ~dragging:true;
+      tool#on_move ctx 15.0 15.0 ~shift:false ~alt:false ~dragging:true;
       tool#on_release ctx 15.0 15.0 ~shift:false ~alt:false;
       let child = match m#document.layers.(0) with
         | Element.Layer { children; _ } -> children.(0)
@@ -143,7 +143,7 @@ let marquee_tests = [
       let (ctx, _) = make_ctx m in
       (* Start in empty space, drag over the first rect, release. *)
       tool#on_press ctx (-. 5.0) (-. 5.0) ~shift:false ~alt:false;
-      tool#on_move ctx 12.0 12.0 ~shift:false ~dragging:true;
+      tool#on_move ctx 12.0 12.0 ~shift:false ~alt:false ~dragging:true;
       tool#on_release ctx 12.0 12.0 ~shift:false ~alt:false;
       assert (Document.PathMap.mem [0; 0] m#document.selection));
 ]
@@ -158,7 +158,7 @@ let alt_drag_tests = [
       let m = two_rect_model () in
       let (ctx, _) = make_ctx m in
       tool#on_press ctx 5.0 5.0 ~shift:false ~alt:true;
-      tool#on_move ctx 100.0 100.0 ~shift:false ~dragging:true;
+      tool#on_move ctx 100.0 100.0 ~shift:false ~alt:false ~dragging:true;
       tool#on_release ctx 100.0 100.0 ~shift:false ~alt:true;
       let children = match m#document.layers.(0) with
         | Element.Layer { children; _ } -> children

@@ -527,7 +527,7 @@ class CrossLanguageTest(absltest.TestCase):
                 tool.on_press(ctx, x, y, shift, alt)
             elif kind == "move":
                 dragging = bool(ev.get("dragging", False))
-                tool.on_move(ctx, x, y, shift, dragging)
+                tool.on_move(ctx, x, y, shift, alt, dragging)
             elif kind == "release":
                 tool.on_release(ctx, x, y, shift, alt)
             else:
@@ -568,16 +568,12 @@ class CrossLanguageTest(absltest.TestCase):
         # into the copy op's own dx/dy. The whole press->move->move->release
         # gesture is therefore exactly ONE undo step: copy_selection(dx:44).
         #
-        # PATH B (Alt pressed MID-drag, the Rust test's exact path) is NOT
-        # driveable through this app's gesture seam: CanvasTool.on_move carries
-        # no `alt` (signature `on_move(ctx, x, y, shift, dragging)` — production
-        # canvas.py and the gesture harness both omit alt on move events),
-        # unlike Rust's `on_move(model, x, y, shift, alt, dragging)`. So a move
-        # event's `alt` never reaches selection.yaml's mid-drag preview branch;
-        # the gesture falls through to the on_mouseup copy. The op corpus
-        # (drag_coalesce_copy_absorbs_trailing_drag) pins PATH B's coalescer
-        # contract instead, and _drop_round_tripped_move_before_copy is covered
-        # there. Threading alt through the move seam is a separate change.
+        # PATH B (Alt pressed MID-drag, the Rust test's exact path) is now
+        # ALSO driveable end-to-end: CanvasTool.on_move carries `alt`
+        # (signature `on_move(ctx, x, y, shift, alt, dragging)` — production
+        # canvas.py and the gesture harness both thread alt on move events),
+        # matching Rust's `on_move(model, x, y, shift, alt, dragging)`. See
+        # test_gesture_alt_mid_drag_copy_is_one_undo_step below.
         #
         # Oracle: the document the gesture must undo back to — captured by
         # driving ONLY the selecting press (selects, commits nothing), so it
@@ -612,6 +608,62 @@ class CrossLanguageTest(absltest.TestCase):
         self.assertEqual(model.journal_head, 1,
             "alt-at-press drag-to-duplicate must be exactly ONE undo step "
             "(commit_txn Branch A folds the trailing moves into the copy)")
+        self.assertEqual(model.journal[-1].ops[-1].op, "copy_selection",
+            "the single undo step is the copy")
+
+        model.undo()
+        self.assertEqual(document_to_test_json(model.document), before_drag,
+            "one undo must restore the original and remove the copy")
+        self.assertFalse(model.can_undo,
+            "after one undo the journal cursor is back at the origin "
+            "(lock-step)")
+        self.assertEqual(model.journal_head, 0, "cursor back at origin")
+
+    def test_gesture_alt_mid_drag_copy_is_one_undo_step(self):
+        # PATH B — Alt pressed MID-drag (the user's exact gesture, and the
+        # Rust gesture_alt_mid_drag_copy_is_one_undo_step analog): drag the
+        # original, THEN hold Option, then keep dragging the copy, then
+        # release. Now driveable end-to-end because CanvasTool.on_move carries
+        # `alt` through the seam (production canvas.py + this harness), so the
+        # mid-drag alt move reaches selection.yaml's mid-drag copy branch and
+        # journals copy_selection. The per-frame drag coalescer refuses to
+        # bridge across the copy and Rule 2
+        # (_drop_round_tripped_move_before_copy) drops the pre-copy
+        # round-tripped move, so the whole select->drag->alt->move->release
+        # gesture collapses to exactly ONE undo step.
+        #
+        # Oracle: the document the gesture must undo back to — captured by
+        # driving ONLY the selecting press (selects, commits nothing), so it
+        # includes the post-select selection the first-move snapshot saw.
+        before_drag = document_to_test_json(self._run_gesture_model({
+            "setup_svg": "two_rects.svg",
+            "tool": "selection",
+            "events": [{"kind": "press", "x": 36, "y": 36}],
+        }).document)
+
+        tc = {
+            "setup_svg": "two_rects.svg",
+            "tool": "selection",
+            "events": [
+                {"kind": "press",   "x": 36, "y": 36},
+                {"kind": "move",    "x": 50, "y": 36, "dragging": True},
+                {"kind": "move",    "x": 60, "y": 36, "dragging": True},
+                {"kind": "move",    "x": 60, "y": 36, "dragging": True,
+                 "alt": True},
+                {"kind": "move",    "x": 80, "y": 36, "dragging": True,
+                 "alt": True},
+                {"kind": "release", "x": 80, "y": 36, "alt": True},
+            ],
+        }
+
+        model = self._run_gesture_model(tc)
+        after = document_to_test_json(model.document)
+        self.assertNotEqual(after, before_drag,
+            "the alt-drag must have produced a copy")
+        self.assertTrue(model.can_undo,
+            "the gesture committed an undoable transaction")
+        self.assertEqual(model.journal_head, 1,
+            "select->drag->alt->move->release must be exactly ONE undo step")
         self.assertEqual(model.journal[-1].ops[-1].op, "copy_selection",
             "the single undo step is the copy")
 

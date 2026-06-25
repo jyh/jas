@@ -38,7 +38,7 @@ let () =
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Line in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 30.0 40.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 30.0 40.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 1);
@@ -252,7 +252,7 @@ let () =
         let model = Jas.Model.create ~document:doc () in
         let (ctx, _model, _ctrl) = make_ctx ~model () in
         tool#on_press ctx 45.0 45.0 ~shift:false ~alt:false;
-        tool#on_move ctx 75.0 75.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 75.0 75.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 75.0 75.0 ~shift:false ~alt:false;
         assert (not (Jas.Document.PathMap.is_empty model#document.Jas.Document.selection)));
 
@@ -264,7 +264,7 @@ let () =
         let model = Jas.Model.create ~document:doc () in
         let (ctx, _model, _ctrl) = make_ctx ~model () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
-        tool#on_move ctx 10.0 10.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 10.0 10.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 10.0 10.0 ~shift:false ~alt:false;
         assert (Jas.Document.PathMap.is_empty model#document.Jas.Document.selection));
 
@@ -288,7 +288,7 @@ let () =
           draw_element_overlay = (fun _cr _elem ~is_partial:_ _cps -> ());
         } in
         tool#on_press ctx 60.0 60.0 ~shift:false ~alt:false;
-        tool#on_move ctx 70.0 70.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 70.0 70.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 70.0 70.0 ~shift:false ~alt:false;
         let moved = (layer_children model).(0) in
         match moved with
@@ -334,7 +334,7 @@ let () =
            move to SCREEN (410,420) -> doc (200,200) with dragging set;
            release. With pivot (0,0) this is sx = sy = 200/100 = 2.0. *)
         tool#on_press ctx 210.0 220.0 ~shift:false ~alt:false;
-        tool#on_move ctx 410.0 420.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 410.0 420.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 410.0 420.0 ~shift:false ~alt:false;
         (* The committed scale is carried in the ELEMENT TRANSFORM; the
            rect local x/y/w/h stay unchanged. *)
@@ -479,7 +479,7 @@ let () =
         for i = 1 to 20 do
           let x = float_of_int i *. 5.0 in
           let y = sin (float_of_int i *. 0.1) *. 20.0 in
-          tool#on_move ctx x y ~shift:false ~dragging:true
+          tool#on_move ctx x y ~shift:false ~alt:false ~dragging:true
         done;
         tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
         let children = layer_children model in
@@ -509,7 +509,7 @@ let () =
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 0.0 0.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 50.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 1);
@@ -529,7 +529,7 @@ let () =
       Alcotest.test_case "pencil tool: move without press is noop" `Quick (fun () ->
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         let children = layer_children model in
         assert (Array.length children = 0));
 
@@ -537,7 +537,7 @@ let () =
         let tool = Jas.Tool_factory.create_tool Jas.Toolbar.Pencil in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 15.0 25.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 50.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 50.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 100.0 0.0 ~shift:false ~alt:false;
         let children = layer_children model in
         match children.(0) with
@@ -630,7 +630,7 @@ let () =
         let doc = Jas.Document.make_document [|layer|] in
         let model = Jas.Model.create ~document:doc () in
         let (ctx, _model, _ctrl) = make_ctx ~model () in
-        tool#on_move ctx 75.0 0.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 75.0 0.0 ~shift:false ~alt:false ~dragging:true;
         let children = layer_children model in
         assert (Array.length children = 1));
 
@@ -736,7 +736,7 @@ let () =
         let tool = new Jas.Type_tool.type_tool in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 60.0 70.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 60.0 70.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 110.0 80.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 1);
@@ -772,7 +772,7 @@ let () =
       Alcotest.test_case "type tool: move without press is noop" `Quick (fun () ->
         let tool = new Jas.Type_tool.type_tool in
         let (ctx, model, _ctrl) = make_ctx () in
-        tool#on_move ctx 100.0 100.0 ~shift:false ~dragging:false;
+        tool#on_move ctx 100.0 100.0 ~shift:false ~alt:false ~dragging:false;
         let children = layer_children model in
         assert (Array.length children = 0));
 
@@ -865,7 +865,7 @@ let () =
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 1);
@@ -938,7 +938,7 @@ let () =
       Alcotest.test_case "type-on-path tool: move without press is noop" `Quick (fun () ->
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let (ctx, model, _ctrl) = make_ctx () in
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         let children = layer_children model in
         assert (Array.length children = 0));
 
@@ -946,7 +946,7 @@ let () =
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         let children = layer_children model in
         assert (Array.length children = 1);
@@ -1000,7 +1000,7 @@ let () =
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let (ctx, model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         let mods : Jas.Canvas_tool.key_mods =
           { shift = false; ctrl = false; alt = false; meta = false } in
@@ -1014,7 +1014,7 @@ let () =
         let tool = new Jas.Type_on_path_tool.type_on_path_tool in
         let (ctx, _model, _ctrl) = make_ctx () in
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         assert (tool#is_editing ());
         let mods : Jas.Canvas_tool.key_mods =
@@ -1027,7 +1027,7 @@ let () =
         let (ctx, model, _ctrl) = make_ctx () in
         assert (not model#can_undo);
         tool#on_press ctx 10.0 20.0 ~shift:false ~alt:false;
-        tool#on_move ctx 50.0 60.0 ~shift:false ~dragging:true;
+        tool#on_move ctx 50.0 60.0 ~shift:false ~alt:false ~dragging:true;
         tool#on_release ctx 50.0 60.0 ~shift:false ~alt:false;
         assert model#can_undo);
     ];

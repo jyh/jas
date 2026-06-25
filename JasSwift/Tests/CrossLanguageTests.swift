@@ -2178,7 +2178,7 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
             tool.onPress(ctx, x: x, y: y, shift: shift, alt: alt)
         case "move":
             let dragging = (ev["dragging"] as? Bool) ?? false
-            tool.onMove(ctx, x: x, y: y, shift: shift, dragging: dragging)
+            tool.onMove(ctx, x: x, y: y, shift: shift, alt: alt, dragging: dragging)
         case "release":
             tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
         default:
@@ -2219,6 +2219,122 @@ private func assertGestureTest(_ tc: [String: Any]) {
             assertGestureTest(tc)
         }
     }
+}
+
+// ===============================================================
+// ALT-COPY drag gesture: ONE undo step. The Selection tool's
+// alt-drag-copy lays a `copy_selection` op mid-gesture; the per-frame
+// drag coalescer (Rule 2 / drop_round_tripped_move_before_copy) refuses
+// to bridge across a copy, so the whole select->drag->alt->move->release
+// gesture must collapse to exactly ONE undo step: one undo restores the
+// pre-gesture document (original in place, copy gone). Drives the
+// production CanvasTool seam via `runGestureModel`, then asserts undo on
+// the Model. Mirrors Rust `gesture_alt_mid_drag_copy_is_one_undo_step`
+// (PATH B) and `gesture_alt_at_press_copy_is_one_undo_step` (PATH A).
+// ---------------------------------------------------------------
+
+/// Dump the journal (head + per-txn name/verbs) for diagnosis.
+private func dumpJournal(_ label: String, _ model: Model) {
+    print("--- \(label): journalHead=\(model.journalHeadValue) len=\(model.journal.count) canUndo=\(model.canUndo)")
+    for (i, t) in model.journal.enumerated() {
+        let ops = t.ops.map { o -> String in
+            let dx = (o.params["dx"] as? NSNumber).map { "@dx=\($0.doubleValue)" } ?? ""
+            return "\(o.op)\(o.targets)\(dx)"
+        }
+        print("    [\(i)] name=\(t.name ?? "nil") ops=\(ops)")
+    }
+}
+
+/// Oracle for the alt-copy undo tests: the document the gesture must undo
+/// back to — rect[0,0] selected, both originals in place, NO copy. Captured
+/// by driving ONLY the selecting press (which selects but commits nothing),
+/// so it includes the post-select selection that the first-move snapshot
+/// captured. Mirrors Rust `before_drag_oracle`.
+private func beforeDragOracle() -> String {
+    documentToTestJson(runGestureModel([
+        "setup_svg": "two_rects.svg",
+        "tool": "selection",
+        "events": [["kind": "press", "x": 36, "y": 36]],
+    ]).document)
+}
+
+/// PATH B — Alt pressed MID-drag (the user's exact gesture): drag the
+/// original, then hold Option, then keep dragging the copy, then release.
+/// Must collapse to ONE undo step. This is the end-to-end proof the MOVE
+/// seam now carries `alt` (so selection.yaml's mid-drag copy branch fires)
+/// AND that Rule 2 (drop_round_tripped_move_before_copy) collapses the
+/// gesture to a single undo step. Mirrors Rust
+/// `gesture_alt_mid_drag_copy_is_one_undo_step`.
+@Test func gestureAltMidDragCopyIsOneUndoStep() {
+    // two_rects.svg: rect[0] spans doc 0..72; press (36,36) hits its center.
+    let beforeDrag = beforeDragOracle()
+
+    let tc: [String: Any] = [
+        "setup_svg": "two_rects.svg",
+        "tool": "selection",
+        "events": [
+            ["kind": "press",   "x": 36, "y": 36],
+            ["kind": "move",    "x": 50, "y": 36, "dragging": true],
+            ["kind": "move",    "x": 60, "y": 36, "dragging": true],
+            ["kind": "move",    "x": 60, "y": 36, "dragging": true, "alt": true],
+            ["kind": "move",    "x": 80, "y": 36, "dragging": true, "alt": true],
+            ["kind": "release", "x": 80, "y": 36, "alt": true],
+        ],
+    ]
+
+    let model = runGestureModel(tc)
+    dumpJournal("PATH B after gesture", model)
+
+    let after = documentToTestJson(model.document)
+    #expect(after != beforeDrag, "the alt-drag must have produced a copy")
+    #expect(model.canUndo, "the gesture committed an undoable transaction")
+    #expect(model.journalHeadValue == 1,
+        "select->drag->alt->move->release must be exactly ONE undo step")
+    #expect(model.journal.last?.ops.last?.op == "copy_selection",
+        "the single undo step is the copy")
+
+    model.undo()
+    dumpJournal("PATH B after 1 undo", model)
+    #expect(documentToTestJson(model.document) == beforeDrag,
+        "one undo must restore the original and remove the copy")
+    #expect(!model.canUndo,
+        "after one undo the journal cursor is back at the origin (lock-step)")
+    #expect(model.journalHeadValue == 0, "cursor back at origin")
+}
+
+/// PATH A — Alt held AT press (drag-to-duplicate from the start). Mirrors
+/// Rust `gesture_alt_at_press_copy_is_one_undo_step`.
+@Test func gestureAltAtPressCopyIsOneUndoStep() {
+    let beforeDrag = beforeDragOracle()
+
+    let tc: [String: Any] = [
+        "setup_svg": "two_rects.svg",
+        "tool": "selection",
+        "events": [
+            ["kind": "press",   "x": 36, "y": 36, "alt": true],
+            ["kind": "move",    "x": 50, "y": 36, "dragging": true, "alt": true],
+            ["kind": "move",    "x": 60, "y": 36, "dragging": true, "alt": true],
+            ["kind": "move",    "x": 80, "y": 36, "dragging": true, "alt": true],
+            ["kind": "release", "x": 80, "y": 36, "alt": true],
+        ],
+    ]
+
+    let model = runGestureModel(tc)
+    dumpJournal("PATH A after gesture", model)
+
+    let after = documentToTestJson(model.document)
+    #expect(after != beforeDrag, "the alt-drag must have produced a copy")
+    #expect(model.canUndo, "the gesture committed an undoable transaction")
+    #expect(model.journalHeadValue == 1,
+        "alt-at-press drag-to-duplicate must be exactly ONE undo step")
+    #expect(model.journal.last?.ops.last?.op == "copy_selection",
+        "the single undo step is the copy")
+
+    model.undo()
+    dumpJournal("PATH A after 1 undo", model)
+    #expect(documentToTestJson(model.document) == beforeDrag,
+        "one undo must restore the original and remove the copy")
+    #expect(!model.canUndo, "lock-step: cursor back at origin")
 }
 
 // MARK: - Action equivalence corpus (CROSS_LANGUAGE_TESTING.md §3b)

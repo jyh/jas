@@ -2281,8 +2281,9 @@ class CanvasWidget(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position()
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         dragging = bool(event.buttons() & Qt.MouseButton.LeftButton)
-        self._active_tool.on_move(self._tool_ctx, pos.x(), pos.y(), shift, dragging)
+        self._active_tool.on_move(self._tool_ctx, pos.x(), pos.y(), shift, alt, dragging)
         self._update_cursor_for_tool()
 
     def mouseReleaseEvent(self, event: QMouseEvent):

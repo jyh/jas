@@ -255,13 +255,14 @@ class type_on_path_tool = object (_self)
           drag_end <- Some (wx, wy);
           control_pt <- None))
 
-  method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(dragging : bool) =
+  method on_move (ctx : Canvas_tool.tool_context) x y ~(shift : bool) ~(alt : bool) ~(dragging : bool) =
     (* drag_start/drag_end and control_pt are stored in widget coords
        so the screen-space draw_overlay marquee draws at the cursor.
        Hit-tests / cursor / path math need doc coords. *)
     let wx, wy = x, y in
     let (x, y) = _self#to_doc ctx x y in
     ignore shift;
+    ignore alt;
     (match session with
      | Some s when Text_edit.drag_active s && dragging ->
        let cursor = _self#cursor_at ctx x y in
