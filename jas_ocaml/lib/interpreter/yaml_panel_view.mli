@@ -173,6 +173,10 @@ val paragraph_panel_resync_from_active_model : unit -> unit
     selection. No-op when no Stroke panel is open. *)
 val stroke_panel_resync_from_active_model : unit -> unit
 
+(** Re-sync the open Properties panel X/Y/W/H from the active model's
+    selection. No-op when no Properties panel is open. *)
+val properties_panel_resync_from_active_model : unit -> unit
+
 (* ── Render entry points ─────────────────────────────────────────── *)
 
 (** Render a single YAML element node into the given packing slot,

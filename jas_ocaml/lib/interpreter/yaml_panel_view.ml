@@ -435,6 +435,13 @@ let _paragraph_panel_sync : (unit -> unit) option ref = ref None
     field refreshes whenever the active model selection changes. *)
 let _stroke_panel_sync : (unit -> unit) option ref = ref None
 
+(** Hook fired by [properties_panel_resync_from_active_model] — set by
+    [create_panel_body] when the Properties panel mounts. None when no
+    Properties panel is open. Mirrors [_stroke_panel_sync]: each canvas
+    [model#on_document_changed] calls the resync helper so the X/Y/W/H
+    fields refresh whenever the active model selection changes. *)
+let _properties_panel_sync : (unit -> unit) option ref = ref None
+
 (** Hook fired after a fill/stroke swatch click flips
     [state.fill_on_top]. Set by [render_fill_stroke_widget] with the
     captured parent [GPack.fixed] and per-child positions; rerunning
@@ -584,6 +591,15 @@ let paragraph_panel_resync_from_active_model () : unit =
     resolves the active model lazily. *)
 let stroke_panel_resync_from_active_model () : unit =
   match !_stroke_panel_sync with
+  | Some f -> f ()
+  | None -> ()
+
+(** Trigger a re-sync of the open Properties panel X/Y/W/H from the active
+    model current selection. No-op when no Properties panel is open. Safe to
+    call from any model [on_document_changed] listener — the sync resolves
+    the active model lazily. *)
+let properties_panel_resync_from_active_model () : unit =
+  match !_properties_panel_sync with
   | Some f -> f ()
   | None -> ()
 
@@ -5417,6 +5433,22 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          in
          sync ();
          _stroke_panel_sync := Some sync
+       end);
+      (* Properties panel X/Y/W/H sync from selection (decision-5 Part B.1):
+         mirror the selection evaluated bounding box into the panel
+         prop_x/prop_y/prop_w/prop_h keys. Fires once at render and registers
+         a global hook so any later document change re-syncs (mirrors the
+         Stroke hook above). *)
+      (if kind = Properties then begin
+         let sync () =
+           match get_model () with
+           | Some m ->
+             let ctrl = new Controller.controller ~model:m () in
+             Effects.sync_properties_panel_from_selection store ctrl
+           | None -> ()
+         in
+         sync ();
+         _properties_panel_sync := Some sync
        end);
       (* Active-color writes (set_active_color YAML action et al.)
          must also propagate to the selected element. The Color
