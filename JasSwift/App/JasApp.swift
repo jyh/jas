@@ -16,6 +16,16 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
     /// installed signal handler.
     private var signalSources: [DispatchSourceSignal] = []
 
+    // Test-only FIFO command channel (gated behind --test-fifo PATH).
+    // State lives here because stored properties can't be added in the
+    // extension (TestFifo.swift) that owns the logic. All zero / nil on a
+    // normal launch — no FIFO is created unless the flag is present.
+    var testFifoFd: Int32 = -1
+    var testFifoBuffer = Data()
+    /// Retained so the main-queue read source isn't cancelled when
+    /// applicationDidFinishLaunching returns.
+    var testFifoSource: DispatchSourceRead?
+
     /// Promote the process to a regular foreground app and steal the
     /// menu bar before any window is shown. When we relied on
     /// `WindowGroup`'s `.onAppear` for this, macOS sometimes left the
@@ -58,6 +68,14 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         // dispatch event runs.
         installSessionSaveSignalHandler(signal: SIGINT)
         installSessionSaveSignalHandler(signal: SIGTERM)
+
+        // Test-only deterministic command channel for the GUI harness.
+        // Entirely gated behind the flag: with no --test-fifo, nothing is
+        // created and normal launch is byte-for-byte unaffected. See
+        // TestFifo.swift for the protocol + dispatch.
+        if let path = JasAppDelegate.testFifoPath {
+            setupTestFifo(path: path)
+        }
     }
 
     private func installSessionSaveSignalHandler(signal sig: Int32) {

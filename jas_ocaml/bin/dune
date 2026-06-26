@@ -1,6 +1,6 @@
 (executable
  (name main)
- (libraries jas lablgtk3))
+ (libraries jas lablgtk3 unix yojson))
 
 (executable
  (name svg_roundtrip)
