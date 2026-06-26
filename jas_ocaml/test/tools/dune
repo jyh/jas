@@ -39,6 +39,11 @@
  (libraries jas lablgtk3 alcotest))
 
 (test
+ (name yaml_tool_artboard_test)
+ (modules yaml_tool_artboard_test)
+ (libraries jas lablgtk3 alcotest))
+
+(test
  (name yaml_tool_hit_test_test)
  (modules yaml_tool_hit_test_test)
  (libraries jas lablgtk3 alcotest))
