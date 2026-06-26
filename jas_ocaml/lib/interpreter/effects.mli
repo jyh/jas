@@ -64,6 +64,21 @@ val apply_stroke_panel_to_selection :
 val sync_stroke_panel_from_selection :
   State_store.t -> Controller.controller -> unit
 
+(** Union document-space bounding box [(x, y, w, h)] of the selection — each
+    selected element geometric bbox mapped through its own + ancestor
+    transforms, axis-aligned, unioned. [(0, 0, 0, 0)] when nothing is
+    selected. The effective (post-transform) values the Properties panel
+    shows. *)
+val selection_evaluated_bounds :
+  Document.document -> float * float * float * float
+
+(** Sync the Properties panel X/Y/W/H ([prop_x] / [prop_y] / [prop_w] /
+    [prop_h] panel keys, rounded to 2dp) from the selection evaluated
+    bounding box (decision-5 Part B.1). Display-only. Wired on document
+    change via {!Yaml_panel_view.properties_panel_resync_from_active_model}. *)
+val sync_properties_panel_from_selection :
+  State_store.t -> Controller.controller -> unit
+
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
 

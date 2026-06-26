@@ -797,6 +797,122 @@ let sync_stroke_panel_from_selection (store : State_store.t)
   in
   State_store.set_panel store "stroke_panel_content" "weight" (`Float width)
 
+(* ── Properties panel: selection evaluated bounds (decision-5 Part B.1) ── *)
+
+(* Transform accessor over all element variants, incl. Live. Mirrors the
+   local helper in canvas_subwindow.ml. *)
+let prop_elem_transform (elem : Element.element) : Element.transform option =
+  match elem with
+  | Element.Line { transform; _ } | Element.Rect { transform; _ }
+  | Element.Circle { transform; _ } | Element.Ellipse { transform; _ }
+  | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
+  | Element.Path { transform; _ } | Element.Text { transform; _ }
+  | Element.Text_path { transform; _ }
+  | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
+  | Element.Live (Element.Compound_shape cs) -> cs.transform
+  | Element.Live (Element.Reference r) -> r.Element.ref_transform
+  | Element.Live (Element.Recorded rec_) -> rec_.Element.rec_transform
+  | Element.Live (Element.Generated gen) -> gen.Element.gen_transform
+
+let prop_elem_children (elem : Element.element)
+    : Element.element array option =
+  match elem with
+  | Element.Group { children; _ } | Element.Layer { children; _ } ->
+    Some children
+  | _ -> None
+
+(* Document-space AABB (x, y, w, h) of the element at [path]: its
+   geometric-bounds corners mapped through its own transform and every
+   ancestor (group / layer) transform, axis-aligned. [None] when the path
+   does not resolve. Transforms are applied innermost-first (element own,
+   then each ancestor outward) to match the rendered combined CTM. *)
+let element_evaluated_bbox (doc : Document.document)
+    (path : Document.element_path) : (float * float * float * float) option =
+  match path with
+  | [] -> None
+  | first :: _ ->
+    let layers = doc.Document.layers in
+    if first < 0 || first >= Array.length layers then None
+    else begin
+      let node = ref layers.(first) in
+      (* [ancestors] is kept innermost-first (each deeper container is
+         prepended), so the chain below needs no reversal. *)
+      let ancestors = ref [] in
+      let abort = ref false in
+      let n = List.length path in
+      if n > 1 then begin
+        ancestors := [ prop_elem_transform !node ];  (* layer *)
+        let rest = List.tl path in
+        let intermediate =
+          List.filteri (fun i _ -> i < List.length rest - 1) rest in
+        List.iter (fun idx ->
+          if not !abort then
+            match prop_elem_children !node with
+            | Some children when idx >= 0 && idx < Array.length children ->
+              node := children.(idx);
+              ancestors := prop_elem_transform !node :: !ancestors
+            | _ -> abort := true
+        ) intermediate;
+        if not !abort then begin
+          let last = List.nth rest (List.length rest - 1) in
+          match prop_elem_children !node with
+          | Some children when last >= 0 && last < Array.length children ->
+            node := children.(last)
+          | _ -> abort := true
+        end
+      end;
+      if !abort then None
+      else begin
+        let elem = !node in
+        let (bx, by, bw, bh) = Element.geometric_bounds elem in
+        let chain = prop_elem_transform elem :: !ancestors in
+        let corners =
+          [ (bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh) ] in
+        let pts = List.map (fun (px, py) ->
+          List.fold_left (fun (px, py) t ->
+            match t with
+            | Some tr -> Element.apply_point tr px py
+            | None -> (px, py)) (px, py) chain) corners in
+        let xs = List.map fst pts and ys = List.map snd pts in
+        let min_x = List.fold_left Float.min infinity xs in
+        let max_x = List.fold_left Float.max neg_infinity xs in
+        let min_y = List.fold_left Float.min infinity ys in
+        let max_y = List.fold_left Float.max neg_infinity ys in
+        Some (min_x, min_y, max_x -. min_x, max_y -. min_y)
+      end
+    end
+
+let selection_evaluated_bounds (doc : Document.document)
+    : float * float * float * float =
+  let boxes =
+    Document.PathMap.bindings doc.Document.selection
+    |> List.filter_map (fun (path, _) -> element_evaluated_bbox doc path) in
+  match boxes with
+  | [] -> (0.0, 0.0, 0.0, 0.0)
+  | _ ->
+    let min_x =
+      List.fold_left (fun a (x, _, _, _) -> Float.min a x) infinity boxes in
+    let min_y =
+      List.fold_left (fun a (_, y, _, _) -> Float.min a y) infinity boxes in
+    let max_x =
+      List.fold_left (fun a (x, _, w, _) -> Float.max a (x +. w))
+        neg_infinity boxes in
+    let max_y =
+      List.fold_left (fun a (_, y, _, h) -> Float.max a (y +. h))
+        neg_infinity boxes in
+    (min_x, min_y, max_x -. min_x, max_y -. min_y)
+
+let prop_round2 v = Float.round (v *. 100.0) /. 100.0
+
+let sync_properties_panel_from_selection (store : State_store.t)
+    (ctrl : Controller.controller) =
+  let (x, y, w, h) = selection_evaluated_bounds ctrl#document in
+  let pid = "properties_panel_content" in
+  State_store.set_panel store pid "prop_x" (`Float (prop_round2 x));
+  State_store.set_panel store pid "prop_y" (`Float (prop_round2 y));
+  State_store.set_panel store pid "prop_w" (`Float (prop_round2 w));
+  State_store.set_panel store pid "prop_h" (`Float (prop_round2 h))
+
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =
   List.mem key stroke_render_keys

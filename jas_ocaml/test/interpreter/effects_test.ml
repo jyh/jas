@@ -536,6 +536,76 @@ let stroke_sync_tests = [
             = _expected_default_weight model));
 ]
 
+(* ── selection_evaluated_bounds / Properties panel (decision-5 Part B.1) ── *)
+(* The Properties panel X/Y/W/H = the selection EVALUATED bounding box: each
+   element geometric bbox mapped through its own + ancestor transforms, then
+   axis-aligned and unioned. *)
+
+let props_scale2 = Some Jas.Element.{ a = 2.0; b = 0.0; c = 0.0; d = 2.0; e = 0.0; f = 0.0 }
+let props_tr57 = Some Jas.Element.{ a = 1.0; b = 0.0; c = 0.0; d = 1.0; e = 5.0; f = 7.0 }
+(* exact 90deg rotation: maps (x, y) -> (-y, x). *)
+let props_rot90 = Some Jas.Element.{ a = 0.0; b = 1.0; c = -1.0; d = 0.0; e = 0.0; f = 0.0 }
+
+let props_doc_rect (transform : Jas.Element.transform option) =
+  let rect = Jas.Element.make_rect ~transform 10.0 20.0 30.0 40.0 in
+  let layer = Jas.Element.make_layer [| rect |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+  Jas.Document.make_document ~selection [| layer |]
+
+let properties_sync_tests = [
+  Alcotest.test_case "bounds_untransformed" `Quick (fun () ->
+    let (x, y, w, h) = selection_evaluated_bounds (props_doc_rect None) in
+    assert (x = 10.0 && y = 20.0 && w = 30.0 && h = 40.0));
+
+  Alcotest.test_case "bounds_scaled_grows" `Quick (fun () ->
+    let (x, y, w, h) = selection_evaluated_bounds (props_doc_rect props_scale2) in
+    assert (x = 20.0 && y = 40.0 && w = 60.0 && h = 80.0));
+
+  Alcotest.test_case "bounds_translated_shifts" `Quick (fun () ->
+    let (x, y, w, h) = selection_evaluated_bounds (props_doc_rect props_tr57) in
+    assert (x = 15.0 && y = 27.0 && w = 30.0 && h = 40.0));
+
+  Alcotest.test_case "bounds_rotate_90_swaps" `Quick (fun () ->
+    (* rect (10,20,30,40) rotated 90 -> 40 x 30 bbox. *)
+    let (_x, _y, w, h) = selection_evaluated_bounds (props_doc_rect props_rot90) in
+    assert (Float.abs (w -. 40.0) < 1e-6 && Float.abs (h -. 30.0) < 1e-6));
+
+  Alcotest.test_case "bounds_union_two" `Quick (fun () ->
+    let r0 = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let r1 = Jas.Element.make_rect 100.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| r0; r1 |] in
+    let selection =
+      Jas.Document.PathMap.empty
+      |> Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+      |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let (x, y, w, h) = selection_evaluated_bounds doc in
+    assert (x = 0.0 && y = 0.0 && w = 110.0 && h = 10.0));
+
+  Alcotest.test_case "bounds_empty_is_zero" `Quick (fun () ->
+    let rect = Jas.Element.make_rect 10.0 20.0 30.0 40.0 in
+    let layer = Jas.Element.make_layer [| rect |] in
+    let doc = Jas.Document.make_document [| layer |] in  (* no selection *)
+    let (x, y, w, h) = selection_evaluated_bounds doc in
+    assert (x = 0.0 && y = 0.0 && w = 0.0 && h = 0.0));
+
+  Alcotest.test_case "sync_writes_prop_keys" `Quick (fun () ->
+    let doc = props_doc_rect props_scale2 in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "properties_panel_content"
+      [("prop_x", `Float 0.0); ("prop_y", `Float 0.0);
+       ("prop_w", `Float 0.0); ("prop_h", `Float 0.0)];
+    sync_properties_panel_from_selection store ctrl;
+    assert (get_panel store "properties_panel_content" "prop_x" = `Float 20.0);
+    assert (get_panel store "properties_panel_content" "prop_y" = `Float 40.0);
+    assert (get_panel store "properties_panel_content" "prop_w" = `Float 60.0);
+    assert (get_panel store "properties_panel_content" "prop_h" = `Float 80.0));
+]
+
 (* ── Phase 3: Character panel → pending override routing ──────── *)
 
 let _default_text_elem () =
@@ -1684,6 +1754,7 @@ let () =
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
     "Stroke sync", stroke_sync_tests;
+    "Properties sync", properties_sync_tests;
     "Phase3 pending", phase3_pending_tests;
     "Character auto-leading", character_auto_leading_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;
