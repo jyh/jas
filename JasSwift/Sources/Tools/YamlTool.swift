@@ -282,7 +282,29 @@ final class YamlTool: CanvasTool {
         // change reaches the next commit. Mirrors Rust's
         // tool.sync_global_state(&app_state) call in workspace/app.rs.
         syncAppState(model)
-        let ctx: [String: Any] = ["event": payload]
+        // Tools can `dispatch:` workspace actions from their handlers (e.g.
+        // zoom.yaml's on_mouseup fires `dispatch: { action: zoom_in }` for
+        // click-to-zoom). Without the actions catalog AND preferences in the
+        // eval ctx, those dispatches silently no-op — and the Zoom/Hand tools
+        // read view-state baselines via `active_document.zoom_level` /
+        // `view_offset_x` / `view_offset_y`, so without an `active_document`
+        // namespace those references resolve to null/0 and the very first
+        // pan/zoom drag jumps from offset 0 instead of the current view
+        // position. Mirrors Rust YamlTool::dispatch (loads actions +
+        // preferences + active_document_payload into ctx). Workspace load is
+        // cached, so this is cheap per-dispatch.
+        let ws = WorkspaceData.load()
+        let actions = ws?.actions()
+        let preferences = ws?.data["preferences"] ?? NSNull()
+        let ctx: [String: Any] = [
+            "event": payload,
+            "active_document": [
+                "view_offset_x": model.viewOffsetX,
+                "view_offset_y": model.viewOffsetY,
+                "zoom_level": model.zoomLevel,
+            ] as [String: Any],
+            "preferences": preferences,
+        ]
         // Registration tears down on DocRegistration deinit — handler
         // panics still leave the doc-primitive slot clean.
         let _reg = registerDocument(model.document)
@@ -297,6 +319,7 @@ final class YamlTool: CanvasTool {
         // shared goldens for every real gesture.
         let actionName = "\(spec.id) \(eventName)"
         runEffects(handlerEffects, ctx: ctx, store: store,
+                   actions: actions,
                    platformEffects: effects,
                    model: model, actionName: actionName)
         _ = _reg

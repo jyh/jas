@@ -96,6 +96,69 @@ _BRIDGED_STATE_DEFAULTS: dict = {
 }
 
 
+# Cached workspace bundle (actions catalog + preferences), loaded once
+# per process — the Python analogue of Rust's Workspace::load() OnceLock.
+# Tools that `dispatch:` a workspace action (e.g. zoom.yaml's on_mouseup
+# fires `dispatch: { action: zoom_in }`) need the actions catalog AND
+# `preferences` threaded into the eval ctx; without them the dispatch
+# silently no-ops and `preferences.viewport.zoom_step` resolves to
+# Null/0.0 inside the dispatched action. Mirrors Rust yaml_tool.rs
+# dispatch(), which loads `actions` + `preferences` the same way.
+_WS_BUNDLE: dict | None = None
+
+
+def _workspace_bundle() -> dict:
+    """Load the compiled workspace.json once per process and cache it.
+
+    Returns an empty dict if the bundle can't be found — the tool still
+    dispatches its `set:` effects, only the action/preferences-dependent
+    branches degrade, matching Rust's unwrap_or(Null)."""
+    global _WS_BUNDLE
+    if _WS_BUNDLE is None:
+        import json
+        import os
+        here = os.path.abspath(os.path.dirname(__file__))
+        # jas/tools/yaml_tool.py — repo root is three directories up.
+        candidates = [
+            os.path.abspath(os.path.join(
+                here, "..", "..", "..", "workspace", "workspace.json")),
+            os.path.abspath(os.path.join(
+                here, "..", "..", "workspace", "workspace.json")),
+        ]
+        loaded: dict = {}
+        for path in candidates:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        loaded = json.load(f)
+                except Exception:
+                    loaded = {}
+                break
+        _WS_BUNDLE = loaded if isinstance(loaded, dict) else {}
+    return _WS_BUNDLE
+
+
+def _active_document_payload(model) -> dict:
+    """Build the ``active_document`` view-state namespace the VIEWPORT
+    tools read on mousedown to snapshot the pre-drag baseline.
+
+    The Hand and Zoom tools capture ``active_document.view_offset_x`` /
+    ``view_offset_y`` / ``zoom_level`` at mousedown so the very first
+    drag pans/zooms from the CURRENT view, not from offset 0. Without
+    this the dispatch ctx has no ``active_document`` namespace and those
+    references resolve to Null -> 0.0. Mirrors Rust's
+    ``active_document_payload``.
+
+    (The StateStore's own ``active_document`` view is rebuilt from the
+    document TREE and carries no view state, so we overlay these three
+    live model fields via the per-dispatch ctx ``extra``.)"""
+    return {
+        "view_offset_x": model.view_offset_x,
+        "view_offset_y": model.view_offset_y,
+        "zoom_level": model.zoom_level,
+    }
+
+
 @dataclass(frozen=True)
 class OverlaySpec:
     """Tool-overlay declaration — guard expression plus render JSON."""
@@ -267,6 +330,26 @@ class YamlTool(CanvasTool):
         if app_state is not None:
             self._store.seed_globals_from(app_state, BRIDGED_STATE_KEYS)
         eff_ctx = {"event": payload}
+        # Surface the actions catalog + preferences + the live view-state
+        # into the dispatch ctx so handlers that `dispatch:` a workspace
+        # action (zoom_in / zoom_out) or read preferences.viewport.* /
+        # active_document.{zoom_level,view_offset_*} resolve them against
+        # the REAL bundle and the CURRENT view. Mirrors Rust yaml_tool.rs
+        # dispatch(). Without this the VIEWPORT tools (Hand / Zoom)
+        # silently no-op: the dispatch finds no actions catalog and the
+        # mousedown baseline snapshots resolve to 0.
+        bundle = _workspace_bundle()
+        actions = bundle.get("actions") if isinstance(bundle, dict) else None
+        prefs = bundle.get("preferences") if isinstance(bundle, dict) else None
+        if isinstance(prefs, dict):
+            eff_ctx["preferences"] = prefs
+        # Overlay the live model view-state onto the store's own
+        # active_document view (which is rebuilt from the document tree
+        # and carries no view state). Merge — not replace — so the
+        # document-tree fields other tools read stay intact.
+        ad = dict(self._store.eval_context().get("active_document", {}))
+        ad.update(_active_document_payload(ctx.model))
+        eff_ctx["active_document"] = ad
         guard = doc_primitives.register_document(ctx.document)
         try:
             platform_effects = yaml_tool_effects.build(ctx.controller)
@@ -275,6 +358,7 @@ class YamlTool(CanvasTool):
             # commits the lazily-opened transaction once (one undo step) and
             # names it with the event handler (e.g. "select on_mouseup").
             run_effects(effects, eff_ctx, self._store,
+                        actions=actions,
                         platform_effects=platform_effects,
                         model=ctx.model,
                         action_name=f"{self._spec.id} {event_name}")
