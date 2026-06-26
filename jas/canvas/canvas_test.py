@@ -705,6 +705,51 @@ class SelectionHandleRectsTest(absltest.TestCase):
         self.assertEqual(selection_handle_rects(doc, (0, 0)), [])
 
 
+class ElementStrokeCounterScaleTest(absltest.TestCase):
+    """An element's own STROKE is drawn under the element transform, so the
+    matrix would scale the stroke width (on top of any scale_strokes bake) —
+    a double-scale. `_counter_scaled_element(elem, element_scale)` divides the
+    stroke width by the combined element-transform scale (= element_scale *
+    sqrt(|det|)) so the element transform never thickens the stroke (it stays
+    zoom-scaled). `transform_scale_factor(t)` is the per-transform sqrt(|det|).
+    """
+
+    def test_transform_scale_factor(self):
+        from canvas.canvas import transform_scale_factor
+        self.assertEqual(transform_scale_factor(None), 1.0)
+        self.assertEqual(transform_scale_factor(Transform(2, 0, 0, 2, 0, 0)), 2.0)
+        # det = 2 * 8 = 16 -> sqrt = 4.
+        self.assertEqual(transform_scale_factor(Transform(2, 0, 0, 8, 0, 0)), 4.0)
+
+    def test_stroke_divided_by_element_scale(self):
+        from canvas.canvas import _counter_scaled_element
+        rect = Rect(x=0, y=0, width=100, height=100,
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=4.0),
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        out, scale = _counter_scaled_element(rect, 1.0)
+        self.assertEqual(scale, 2.0)
+        self.assertEqual(out.stroke.width, 2.0)  # 4 / 2
+
+    def test_no_transform_unchanged(self):
+        from canvas.canvas import _counter_scaled_element
+        rect = Rect(x=0, y=0, width=10, height=10,
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=4.0))
+        out, scale = _counter_scaled_element(rect, 1.0)
+        self.assertEqual(scale, 1.0)
+        self.assertIs(out, rect)  # no copy when there is no scale
+        self.assertEqual(out.stroke.width, 4.0)
+
+    def test_accumulates_with_parent_scale(self):
+        from canvas.canvas import _counter_scaled_element
+        # Stroked rect with its own 2x, inside a parent already at 3x.
+        rect = Rect(x=0, y=0, width=10, height=10,
+                    stroke=Stroke(color=RgbColor(0, 0, 0), width=12.0),
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        out, scale = _counter_scaled_element(rect, 3.0)
+        self.assertEqual(scale, 6.0)        # 3 * 2
+        self.assertEqual(out.stroke.width, 2.0)  # 12 / 6
+
+
 class SelectionOutlineScaleTest(absltest.TestCase):
     """The selection OUTLINE + bezier handles are drawn under the element
     transform; their fixed pen widths / radii are divided by
