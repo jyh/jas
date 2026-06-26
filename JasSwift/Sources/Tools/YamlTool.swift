@@ -131,6 +131,16 @@ let bridgedStateKeys: [String] = [
     "blob_brush_fidelity",
     "blob_brush_keep_selected",
     "blob_brush_merge_only_with_selection",
+    // Paintbrush tool options (state.paintbrush_*). All declared in
+    // state.yaml; none are handler-written (the runtime edit state is
+    // tool-scoped tool.paintbrush.*), so they are safe to bridge. Without
+    // these the live paintbrush commits with fit_error=0 (no smoothing),
+    // ignores fill_new_strokes, and the Alt-edit threshold collapses to 0.
+    "paintbrush_fidelity",
+    "paintbrush_fill_new_strokes",
+    "paintbrush_keep_selected",
+    "paintbrush_edit_selected_paths",
+    "paintbrush_edit_within",
 ]
 
 /// YAML-driven tool. Holds a parsed ToolSpec and a private StateStore

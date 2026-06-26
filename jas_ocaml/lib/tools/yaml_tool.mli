@@ -86,8 +86,19 @@ class yaml_tool : tool_spec -> object
       params from the workspace defaults (no durable Model home) and writes
       [fill_color] from the Model active default fill (white "#ffffff" when
       none). Called per-dispatch and on activation. Mirrors the Rust
-      [sync_global_state] override. *)
-  method bridge_app_state : Model.model -> unit
+      [sync_global_state] override.
+
+      [overrides] supplies per-call app-level values, FILTERED by the same
+      allowlist: a pair is written only if its key is bridged, so a
+      non-bridged key is dropped (the allowlist invariant holds for caller
+      input too). A bridged override wins over the workspace default and,
+      for [fill_color], over the Model default fill. This is how a gesture
+      corpus case (or the live per-dispatch state map) honors an option set
+      AWAY from its default, e.g. paintbrush_fill_new_strokes=true.
+      Mirrors the Rust runner passing the whole app_state map through
+      [sync_global_state]. *)
+  method bridge_app_state :
+    ?overrides:(string * Yojson.Safe.t) list -> Model.model -> unit
 
   method on_press :
     Canvas_tool.tool_context -> float -> float ->

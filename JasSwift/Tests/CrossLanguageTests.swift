@@ -2137,6 +2137,14 @@ private let gestureFixtures = [
     // blob committed fill=nil (hollow). Pins the white/null fill contract
     // cross-language. See BLOB_BRUSH_TOOL.md.
     "blob_paint_fill.json",
+    // Paintbrush paint with app-level options (the paintbrush_*
+    // disconnect gate). app_state sets paintbrush_fidelity:3 (=>
+    // fit_error 5.0, a SMOOTHED fit) + paintbrush_fill_new_strokes:true
+    // + fill_color, routed through syncAppState. The committed Path must
+    // be filled blue AND smoothed; before the paintbrush_* keys were
+    // bridged the live tool used fit_error=0 (no smoothing) and dropped
+    // the fill. See PAINTBRUSH_TOOL.md.
+    "paintbrush_paint_fill.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -2164,7 +2172,10 @@ private func applyGestureAppState(_ appState: [String: Any], to model: Model) {
         case "stroke_brush", "stroke_brush_overrides",
              "blob_brush_size", "blob_brush_angle", "blob_brush_roundness",
              "blob_brush_fidelity", "blob_brush_keep_selected",
-             "blob_brush_merge_only_with_selection":
+             "blob_brush_merge_only_with_selection",
+             "paintbrush_fidelity", "paintbrush_fill_new_strokes",
+             "paintbrush_keep_selected", "paintbrush_edit_selected_paths",
+             "paintbrush_edit_within":
             model.stateStore.set(k, v)
         default:
             break // non-bridged keys are ignored (allowlist)
