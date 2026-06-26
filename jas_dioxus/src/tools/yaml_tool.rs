@@ -5556,4 +5556,372 @@ mod tests {
              ({ox}, {oy}), expected (200, 200).",
         );
     }
+
+    // ── Rotate / Shear tools — gesture-seam parity ─────────────────
+    //
+    // The REFERENCE seam tests for the Rotate and Shear transform
+    // tools (the other three apps port from these). They exercise the
+    // shared transform-tool gesture contract through the live YamlTool
+    // event seam (on_press / on_move / on_release / on_key_event),
+    // never poking handlers directly:
+    //
+    //   1. click-only (press+release, no move) WRITES the pivot
+    //      (state.transform_reference_point) and mutates NOTHING in the
+    //      document — moved stays false so the apply branch never runs.
+    //   2. a real drag (move past the >2px threshold) APPLIES the
+    //      transform. Proven by the post-transform SELECTION BBOX dims:
+    //      a 100x40 rect rotated 90deg about its centre swaps to ~40x100;
+    //      sheared 45deg horizontally widens to ~140x40 (and the bbox
+    //      shifts left). can_undo is true after the journaled commit.
+    //   3. a SUB-THRESHOLD drag (<2px) leaves moved=false -> the apply
+    //      branch never runs -> document UNCHANGED, can_undo false.
+    //   4. Escape MID-DRAG (mode back to idle) makes the following
+    //      mouseup's `mode == 'rotating'/'shearing'` guard fail, so the
+    //      transform that case 2 proves WOULD fire is suppressed ->
+    //      document UNCHANGED. Non-vacuous precisely because case 2
+    //      shows the identical press+move+release path DOES mutate.
+    //
+    // The load-bearing geometry check is the transformed bbox (computed
+    // by `selection_transformed_bbox`, which DOES apply common.transform
+    // — Element::bounds() reports only LOCAL geometry and would be blind
+    // to the baked matrix). Mutation-proven: flipping an expected bbox
+    // dim makes the apply case fail (see the commit message / report).
+
+    /// Load the real Rotate tool from the embedded workspace bundle.
+    fn rotate_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("rotate")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// Load the real Shear tool from the embedded workspace bundle.
+    fn shear_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("shear")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// One-layer document with a single stroked NON-SQUARE 100x40 rect
+    /// at doc (0,0), selected via element path [0,0]. The aspect ratio
+    /// is the whole point: a 90deg rotation about the centre SWAPS the
+    /// bbox dims (100x40 -> 40x100), a swap a square could never show.
+    fn transform_nonsquare_model() -> Model {
+        use crate::document::document::ElementSelection;
+        use crate::geometry::element::Stroke;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 40.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: vec![ElementSelection::all(vec![0, 0])],
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    /// Axis-aligned bounding box of the element at `path`, in DOCUMENT
+    /// space, WITH its `common.transform` applied. Returns
+    /// `(min_x, min_y, width, height)`.
+    ///
+    /// This is the load-bearing helper: the transform tools bake their
+    /// matrix into `common.transform` (via `compose_matrix_over_paths`),
+    /// leaving the rect's LOCAL x/y/w/h untouched — so the element's
+    /// local bounds alone are blind to a rotate/shear. We therefore take
+    /// the element's LOCAL geometric bounds, map its four corners through
+    /// the transform, and re-derive the axis-aligned box. With identity
+    /// transform this is a no-op, so it also validates the click-only /
+    /// sub-threshold / escape cases honestly (their bbox stays 100x40).
+    ///
+    /// `geometric_bounds` (not `bounds`) so the 1px stroke inflation does
+    /// not bleed into the dims — the fixture's stroke is there only to
+    /// match the scale fixture, not to be measured.
+    fn selection_transformed_bbox(
+        model: &Model, path: &[usize],
+    ) -> (f64, f64, f64, f64) {
+        let elem = model
+            .document()
+            .get_element(&path.to_vec())
+            .expect("selected element must exist");
+        let (lx, ly, lw, lh) = elem.geometric_bounds(); // LOCAL geometry, no stroke
+        let t = elem.transform().copied().unwrap_or_default();
+        let corners = [
+            (lx, ly), (lx + lw, ly), (lx + lw, ly + lh), (lx, ly + lh),
+        ];
+        let mut min_x = f64::INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        for (cx, cy) in corners {
+            let (tx, ty) = t.apply_point(cx, cy);
+            min_x = min_x.min(tx);
+            min_y = min_y.min(ty);
+            max_x = max_x.max(tx);
+            max_y = max_y.max(ty);
+        }
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+
+    /// Canonical document JSON for the "unchanged?" comparison — the
+    /// same canonicalization the cross-language byte-gate uses.
+    fn doc_json(model: &Model) -> String {
+        crate::geometry::test_json::document_to_test_json(model.document())
+    }
+
+    /// Read `state.transform_reference_point` back out of the tool's
+    /// own store as `(rx, ry)`, or `None` if unset / malformed. The
+    /// stored list elements may be int- or float-typed JSON (see
+    /// `value_to_json`'s whole-number folding), so we coerce via `as_f64`.
+    fn read_ref_point(tool: &YamlTool) -> Option<(f64, f64)> {
+        let ctx = tool.store.eval_context();
+        let arr = ctx.get("state")?.get("transform_reference_point")?.as_array()?;
+        if arr.len() < 2 {
+            return None;
+        }
+        Some((arr[0].as_f64()?, arr[1].as_f64()?))
+    }
+
+    // ── Rotate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn rotate_parity_click_only_sets_ref_and_does_not_transform() {
+        let Some(mut tool) = rotate_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        let before = doc_json(&model);
+
+        // Plain click at doc (10, 20): press+release at the SAME point,
+        // no move => moved stays false => the apply branch never runs,
+        // the else branch writes transform_reference_point.
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+
+        // Pivot was stored in the tool's global state (handler-written,
+        // not bridged), readable as state.transform_reference_point.
+        // Compare numerically (the list may carry int- or float-typed
+        // JSON depending on value_to_json's whole-number folding).
+        let rp = read_ref_point(&tool);
+        assert!(
+            rp.is_some_and(|(rx, ry)| (rx - 10.0).abs() < 1e-9 && (ry - 20.0).abs() < 1e-9),
+            "click-only must store the pivot at the click's doc point, got {rp:?}",
+        );
+
+        // Document is byte-identical and nothing is undoable.
+        assert_eq!(doc_json(&model), before, "click-only must not mutate the document");
+        assert!(!model.can_undo(), "click-only must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after a click-only gesture, got {w}x{h}",
+        );
+    }
+
+    #[test]
+    fn rotate_parity_drag_applies_90deg_and_swaps_bbox() {
+        let Some(mut tool) = rotate_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+
+        // Seed the pivot at the selection CENTRE (50, 20) via a
+        // click-only gesture (the production path that writes it).
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        assert!(!model.can_undo(), "seeding the pivot must not create an undo step");
+
+        // Rotate drag for theta = +90deg about (50, 20):
+        //   press  doc (150, 20)  -> atan2(0, 100)   = 0deg
+        //   cursor doc (50, 120)  -> atan2(100, 0)   = 90deg
+        //   theta = 90 - 0 = 90deg. Move is >2px => moved = true.
+        tool.on_press(&mut model, 150.0, 20.0, false, false);
+        tool.on_move(&mut model, 50.0, 120.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 120.0, false, false);
+
+        // A 90deg rotation about the centre SWAPS the bbox dims.
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 40.0).abs() < 0.5 && (h - 100.0).abs() < 0.5,
+            "90deg rotation must swap bbox dims to ~40x100, got {w}x{h}",
+        );
+        assert!(model.can_undo(), "the journaled rotate commit must be undoable");
+    }
+
+    #[test]
+    fn rotate_parity_subthreshold_drag_does_not_transform() {
+        let Some(mut tool) = rotate_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        // Pre-seed a pivot so the only variable is the drag distance.
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        let before = doc_json(&model);
+
+        // Press, then a 1px move (<2px on both axes => moved stays
+        // false), then release. The apply branch must not run.
+        tool.on_press(&mut model, 150.0, 20.0, false, false);
+        tool.on_move(&mut model, 151.0, 21.0, false, false, true);
+        tool.on_release(&mut model, 151.0, 21.0, false, false);
+
+        assert_eq!(doc_json(&model), before, "a sub-threshold drag must not mutate");
+        assert!(!model.can_undo(), "a sub-threshold drag must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after a sub-threshold drag, got {w}x{h}",
+        );
+    }
+
+    #[test]
+    fn rotate_parity_escape_mid_drag_suppresses_apply() {
+        let Some(mut tool) = rotate_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        let before = doc_json(&model);
+
+        // Begin the SAME 90deg drag proven to mutate in the apply
+        // case, but press Escape BEFORE releasing. Escape sets mode
+        // back to idle, so the subsequent mouseup's
+        // `mode == 'rotating'` guard fails and the apply is suppressed.
+        tool.on_press(&mut model, 150.0, 20.0, false, false);
+        tool.on_move(&mut model, 50.0, 120.0, false, false, true);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        tool.on_release(&mut model, 50.0, 120.0, false, false);
+
+        assert_eq!(
+            doc_json(&model), before,
+            "Escape mid-drag must suppress the apply that case 2 proves would fire",
+        );
+        assert!(!model.can_undo(), "an escaped rotate must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after an escaped rotate, got {w}x{h}",
+        );
+    }
+
+    // ── Shear ──────────────────────────────────────────────────────
+
+    #[test]
+    fn shear_parity_click_only_sets_ref_and_does_not_transform() {
+        let Some(mut tool) = shear_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        let before = doc_json(&model);
+
+        tool.on_press(&mut model, 10.0, 20.0, false, false);
+        tool.on_release(&mut model, 10.0, 20.0, false, false);
+
+        let rp = read_ref_point(&tool);
+        assert!(
+            rp.is_some_and(|(rx, ry)| (rx - 10.0).abs() < 1e-9 && (ry - 20.0).abs() < 1e-9),
+            "click-only must store the pivot at the click's doc point, got {rp:?}",
+        );
+
+        assert_eq!(doc_json(&model), before, "click-only must not mutate the document");
+        assert!(!model.can_undo(), "click-only must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after a click-only gesture, got {w}x{h}",
+        );
+    }
+
+    #[test]
+    fn shear_parity_drag_applies_horizontal_shear_and_widens_bbox() {
+        let Some(mut tool) = shear_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+
+        // Seed the pivot at the selection CENTRE (50, 20).
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        assert!(!model.can_undo(), "seeding the pivot must not create an undo step");
+
+        // Shift-constrained HORIZONTAL shear, k = 1 (angle = 45deg):
+        //   press  doc (50, 60)  -> |press_y - ref_y| = 40
+        //   cursor doc (90, 60)  -> dx = 40 (dominant-x), dy = 0
+        //   k = dx / 40 = 1.0  =>  angle = atan(1) = 45deg.
+        // Shift is the FIRST bool arg to the seam methods.
+        tool.on_press(&mut model, 50.0, 60.0, true, false);
+        tool.on_move(&mut model, 90.0, 60.0, true, false, true);
+        tool.on_release(&mut model, 90.0, 60.0, true, false);
+
+        // Horizontal shear widens the bbox (100 + k*height = 140),
+        // keeps the height (40), and shifts the box LEFT (min_x = -20:
+        // the top edge slides left, the bottom edge slides right).
+        let (min_x, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 140.0).abs() < 0.5,
+            "horizontal shear must widen bbox to ~140, got width {w}",
+        );
+        assert!(
+            (h - 40.0).abs() < 0.5,
+            "horizontal shear must keep height ~40, got {h}",
+        );
+        assert!(
+            (min_x - (-20.0)).abs() < 0.5,
+            "horizontal shear about the centre must push min_x to ~-20, got {min_x}",
+        );
+        assert!(model.can_undo(), "the journaled shear commit must be undoable");
+    }
+
+    #[test]
+    fn shear_parity_subthreshold_drag_does_not_transform() {
+        let Some(mut tool) = shear_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        let before = doc_json(&model);
+
+        // 1px move on both axes (<2px => moved stays false).
+        tool.on_press(&mut model, 50.0, 60.0, true, false);
+        tool.on_move(&mut model, 51.0, 61.0, true, false, true);
+        tool.on_release(&mut model, 51.0, 61.0, true, false);
+
+        assert_eq!(doc_json(&model), before, "a sub-threshold drag must not mutate");
+        assert!(!model.can_undo(), "a sub-threshold drag must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after a sub-threshold drag, got {w}x{h}",
+        );
+    }
+
+    #[test]
+    fn shear_parity_escape_mid_drag_suppresses_apply() {
+        let Some(mut tool) = shear_yaml_tool() else { return };
+        let mut model = transform_nonsquare_model();
+        tool.on_press(&mut model, 50.0, 20.0, false, false);
+        tool.on_release(&mut model, 50.0, 20.0, false, false);
+        let before = doc_json(&model);
+
+        // The SAME k=1 shear drag that case 2 proves mutates, but
+        // Escape before release suppresses the apply.
+        tool.on_press(&mut model, 50.0, 60.0, true, false);
+        tool.on_move(&mut model, 90.0, 60.0, true, false, true);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        tool.on_release(&mut model, 90.0, 60.0, true, false);
+
+        assert_eq!(
+            doc_json(&model), before,
+            "Escape mid-drag must suppress the apply that case 2 proves would fire",
+        );
+        assert!(!model.can_undo(), "an escaped shear must leave no undo step");
+        let (_, _, w, h) = selection_transformed_bbox(&model, &[0, 0]);
+        assert!(
+            (w - 100.0).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+            "bbox must stay 100x40 after an escaped shear, got {w}x{h}",
+        );
+    }
 }
