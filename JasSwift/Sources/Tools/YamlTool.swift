@@ -173,6 +173,17 @@ final class YamlTool: CanvasTool {
         store.getTool(spec.id, key)
     }
 
+    /// Read a GLOBAL `state.<key>` value out of this tool's own store.
+    /// Primary use: tests observing handler-owned globals the
+    /// transform-tool family writes mid-gesture (e.g.
+    /// `transform_reference_point`, set by the rotate / shear / scale
+    /// tools via an unscoped `set:` effect → StateStore.set → `state`).
+    /// Mirrors Rust's `store.eval_context()["state"][key]` read in the
+    /// rotate / shear seam tests.
+    func globalState(_ key: String) -> Any? {
+        store.get(key)
+    }
+
     /// Bridge an ALLOWLIST of app-level keys into this tool's global
     /// `state.*` namespace (StateStore.set writes `state`, never the
     /// per-tool `tools` slots), so commit-effects read LIVE document
