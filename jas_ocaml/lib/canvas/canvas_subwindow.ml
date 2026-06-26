@@ -1632,6 +1632,63 @@ let element_transform (elem : Element.element) : Element.transform option =
   | Element.Live (Element.Recorded rec_) -> rec_.Element.rec_transform
   | Element.Live (Element.Generated gen) -> gen.Element.gen_transform
 
+(** Combined transform SCALE of the element at [path] — the geometric
+    mean of the linear part, [sqrt(|det|)] with [det = a*.d -. b*.c],
+    multiplied over the element's own transform and every ancestor
+    (group/layer) transform.
+
+    The selection OUTLINE trace and the bezier tangent handles are drawn
+    UNDER the element transform; dividing their fixed pen widths / circle
+    radii by this factor cancels the element transform's scaling, so they
+    render at a constant size (still scaled by zoom, like the handle
+    squares). Returns [1.0] when there is no transform. [det] is
+    multiplicative, so the order of the chain does not matter. Mirrors the
+    Python [selection_outline_scale]. *)
+let selection_outline_scale (doc : Document.document)
+    (path : Document.element_path) : float =
+  match path with
+  | [] -> 1.0
+  | first :: _ ->
+    (* Resolve the element along [path], collecting the transform option
+       at every node on the way (layer, each intermediate group, and the
+       element itself). Bail to [1.0] if the path runs through a
+       non-container (mirrors the Python early returns). *)
+    let node = ref doc.Document.layers.(first) in
+    let transforms = ref [] in
+    let abort = ref false in
+    if List.length path > 1 then begin
+      transforms := [ element_transform !node ];  (* layer *)
+      let rest = List.tl path in
+      let intermediate =
+        List.filteri (fun i _ -> i < List.length rest - 1) rest in
+      List.iter (fun idx ->
+        if not !abort then begin
+          match !node with
+          | Element.Group { children; _ } | Element.Layer { children; _ } ->
+            node := children.(idx);
+            transforms := element_transform !node :: !transforms
+          | _ -> abort := true
+        end
+      ) intermediate;
+      if not !abort then begin
+        match !node with
+        | Element.Group { children; _ } | Element.Layer { children; _ } ->
+          node := children.(List.nth rest (List.length rest - 1))
+        | _ -> abort := true
+      end
+    end;
+    if !abort then 1.0
+    else begin
+      transforms := element_transform !node :: !transforms;
+      List.fold_left (fun scale t ->
+        match t with
+        | Some (tr : Element.transform) ->
+          let det = Float.abs (tr.a *. tr.d -. tr.b *. tr.c) in
+          if det > 0.0 then scale *. sqrt det else scale
+        | None -> scale
+      ) 1.0 !transforms
+    end
+
 (** Document-space control-point handle rects [(x, y, w, h)] for the
     element at [path].
 
@@ -1716,10 +1773,17 @@ let selection_handle_rects (doc : Document.document)
     are individually in the selection (see [select_element]) and
     draw their own highlights. *)
 let draw_element_overlay cr (elem : Element.element)
+    ?(outline_scale = 1.0)
     ~is_partial:(_ : bool) (selected_cps : int list) =
   let open Element in
+  (* Counter-scale fixed pen widths / circle radii by the element
+     transform's scale ([outline_scale]) so the overlay — drawn UNDER
+     that transform — renders at a constant width regardless of the
+     element's scale (it stays zoom-scaled, like the handle squares).
+     Mirrors the Python [_draw_element_overlay] [inv]. *)
+  let inv = if outline_scale > 1e-6 then 1.0 /. outline_scale else 1.0 in
   Cairo.set_source_rgb cr 0.0 0.47 1.0;
-  Cairo.set_line_width cr 1.0;
+  Cairo.set_line_width cr inv;
   Cairo.set_dash cr [||];
 
   (* Text and Text_path: bounding-box highlight only. No CP squares. *)
@@ -1765,8 +1829,10 @@ let draw_element_overlay cr (elem : Element.element)
     Cairo.stroke cr
   | _ -> ()
   end;
-  (* Draw Bezier handles for selected path control points. *)
-  let handle_circle_radius = 3.0 in
+  (* Draw Bezier handles for selected path control points. The pen width
+     and circle radii are counter-scaled by [inv] for the same reason as
+     the outline pen above. *)
+  let handle_circle_radius = 3.0 *. inv in
   (match elem with
    | Path { d; _ } when selected_cps <> [] ->
      let anchors = control_points elem in
@@ -1775,7 +1841,7 @@ let draw_element_overlay cr (elem : Element.element)
        if cp_idx < List.length anchors then begin
          let (h_in, h_out) = Element.path_handle_positions d cp_idx in
          Cairo.set_source_rgb cr 0.0 0.47 1.0;
-         Cairo.set_line_width cr 1.0;
+         Cairo.set_line_width cr inv;
          (match h_in with
           | Some (hx, hy) ->
             Cairo.move_to cr ax ay;
@@ -2002,7 +2068,9 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Document.SelKindPartial _ -> true
         | Document.SelKindAll -> false
       in
-      draw_element_overlay cr !node ~is_partial cps;
+      draw_element_overlay cr !node
+        ~outline_scale:(selection_outline_scale doc path)
+        ~is_partial cps;
       Cairo.restore cr;
       (* Control-point handles: FIXED size at element-transformed
          positions, drawn under the VIEW (pan/zoom) transform only — the
@@ -2149,7 +2217,11 @@ class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controll
       hit_test_text = (fun x y -> _self#hit_test_text x y);
       hit_test_path_curve = (fun x y -> _self#hit_test_path_curve x y);
       request_update = (fun () -> canvas_area#misc#queue_draw ());
-      draw_element_overlay = draw_element_overlay;
+      (* Tools that draw an element overlay carry no ancestor context, so
+         the outline scale defaults to 1.0 (no counter-scaling). *)
+      draw_element_overlay =
+        (fun cr elem ~is_partial cps ->
+          draw_element_overlay cr elem ~is_partial cps);
     }
 
     method private update_cursor =

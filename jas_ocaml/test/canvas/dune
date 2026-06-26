@@ -13,3 +13,7 @@
 (test
  (name selection_handle_rects_test)
  (libraries jas lablgtk3 alcotest))
+
+(test
+ (name selection_outline_scale_test)
+ (libraries jas lablgtk3 alcotest))
