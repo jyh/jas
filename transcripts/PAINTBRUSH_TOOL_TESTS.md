@@ -11,16 +11,23 @@ covered in Session H parity sweep.
 
 ## Known broken
 
-_Last reviewed: 2026-04-24_
+_Last reviewed: 2026-06-25_
 
-- **Close-at-release hint overlay** — Rust and Swift render the
-  dashed line from cursor to press-point when Option/Alt is held
-  during drawing. OCaml and Python `yaml_tool.draw_overlay` are
-  still Phase 5a stubs — no tool-overlay polyline renders at all
-  there, so neither the main preview nor the close hint is visible.
-  close-at-release itself (the commit) works on all four apps.
-  PBR-100 (commit behavior) passes everywhere; PBR-011 (preview)
-  passes only on Rust + Swift.
+- ~~**Close-at-release hint overlay (OCaml / Python stub)**~~ —
+  **RESOLVED** (verified 2026-06-25). The earlier note claimed OCaml/Python
+  `yaml_tool.draw_overlay` were Phase-5a stubs with no polyline. Stale: both
+  now carry a full `buffer_polyline` renderer that draws the live preview AND
+  the dashed close-at-release hint when `close_hint` is truthy (OCaml
+  `yaml_tool.ml:567` dispatched `:1610`; Python `yaml_tool.py:852` dispatched
+  `:392`). PBR-011 (preview) + the close hint now render on all four.
+- **Live `paintbrush_*` options disconnect** — **FIXED 2026-06-25**
+  (commits `74d11eba` + `fd6fa8b9`). The paintbrush commit reads
+  `state.paintbrush_fidelity` / `_fill_new_strokes` / `_edit_within`, which the
+  per-tool self-contained store never carried, so the live tool committed with
+  `fit_error=0` (no smoothing), ignored `fill_new_strokes`, and the Alt-edit
+  threshold collapsed to 0. Fixed by adding the 5 `paintbrush_*` options to the
+  app-state→tool-store bridge allowlist (the same bridge as the blob fix). See
+  the coverage section + `project_tool_store_appstate_disconnect`.
 - _Tool-options dialog double-click — wired in all four native apps
   as of 2026-04-24 (Rust 346bc04, Python 3ebaae6, Swift 8271808,
   OCaml 88fe830). OCaml wires only the pencil slot (where
@@ -36,7 +43,32 @@ _Last reviewed: 2026-04-24_
 
 ## Automation coverage
 
-_Last synced: 2026-04-24_
+_Last synced: 2026-06-25_
+
+### Gesture-seam tests + cross-language gate (added 2026-06-25)
+
+The effect tests below seed a pre-built buffer and call the commit effects
+directly. The gesture-seam tests drive the production paintbrush tool through
+`on_press`/`on_move`/`on_release`/key-event, seeding app-level state through the
+production bridge (`sync_global_state`/`syncAppState`/`bridge_app_state`/
+`seed_globals_from`) — so they exercise the full pipeline AND the app-state
+bridge (fidelity→fit_error smoothing, fill_new_strokes→fill). 5 cases per app:
+paint-commits-smoothed-stroke, fill_new_strokes on/off, undo/redo, Esc-cancel.
+
+- **Rust** — `jas_dioxus/src/tools/yaml_tool.rs` `paintbrush_parity_*` (reference).
+- **Swift** — `JasSwift/Tests/Tools/YamlToolPaintbrushTests.swift` (6, incl. loader).
+- **OCaml** — `jas_ocaml/test/tools/yaml_tool_paintbrush_test.ml` (dune-registered).
+- **Python** — `jas/tools/yaml_tool_paintbrush_test.py`.
+
+**Cross-language gate:** `test_fixtures/gestures/paintbrush_paint_fill.json`
+(app_state: fidelity=3 + fill_new_strokes=true + fill_color, routed through each
+app's production bridge) → golden pins a SMOOTHED (`fit_error` 5.0, MoveTo+2
+CurveTo) BLUE-FILLED Path; all four apps byte-match. Mutation-proven: removing
+the `paintbrush_*` allowlist keys fails the case (fit_error=0 + fill dropped).
+GUI-smoke-confirmed on the live Python app (a wobbly drag commits a smoothed
+bézier stroke).
+
+### Effect / primitive unit tests
 
 **Rust — `jas_dioxus/src/interpreter/effects.rs` (#[cfg(test)])**
 - 10 unit tests for `doc.add_path_from_buffer` extensions
@@ -46,10 +78,9 @@ _Last synced: 2026-04-24_
   (target-selection within/out-of-range, splice-with-brush-
   preservation, exit-too-far abort, commit-without-start no-op).
 
-**Swift / OCaml / Python** — port coverage is currently implicit
-(existing `yaml_tool_test.py` / equivalents exercise the pencil
-handler through the shared dispatch path). Paintbrush-specific unit
-tests are a follow-up.
+**Swift / OCaml / Python** — effect-level port coverage remains implicit
+(shared pencil dispatch path); the dedicated paintbrush coverage above is the
+gesture-seam layer.
 
 ---
 
