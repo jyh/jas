@@ -2110,6 +2110,83 @@ pub fn selection_handle_rects(
         .collect()
 }
 
+/// Axis-aligned bounding box `(x, y, w, h)` of the element at `path` in
+/// DOCUMENT space: its geometric bbox corners mapped through its own transform
+/// and every ancestor (group / layer) transform, then axis-aligned. Mirrors the
+/// `selection_handle_rects` ancestor walk (so the Properties panel numbers match
+/// the visible selection box) but applies to the four geometric-bounds corners
+/// of EVERY element kind (groups / text contribute their bounds). Returns `None`
+/// when `path` does not resolve.
+fn element_evaluated_bbox(doc: &Document, path: &[usize]) -> Option<(f64, f64, f64, f64)> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut node = doc.layers.get(path[0])?;
+    let mut ancestors: Vec<Option<Transform>> = Vec::new();
+    if path.len() > 1 {
+        ancestors.push(node.transform().copied()); // layer
+        for &idx in &path[1..path.len() - 1] {
+            node = node.children().and_then(|c| c.get(idx))?;
+            ancestors.push(node.transform().copied());
+        }
+        node = node.children().and_then(|c| c.get(path[path.len() - 1]))?;
+    }
+    let elem = node;
+    let (bx, by, bw, bh) = elem.geometric_bounds();
+    // Apply innermost-first: the element's own transform, then each ancestor
+    // outward (layer last) — matching the rendered combined CTM.
+    let mut chain: Vec<Transform> = Vec::new();
+    if let Some(t) = elem.transform() {
+        chain.push(*t);
+    }
+    for t in ancestors.iter().rev() {
+        if let Some(t) = t {
+            chain.push(*t);
+        }
+    }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (mut px, mut py) in [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)] {
+        for t in &chain {
+            let (nx, ny) = t.apply_point(px, py);
+            px = nx;
+            py = ny;
+        }
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        max_x = max_x.max(px);
+        max_y = max_y.max(py);
+    }
+    Some((min_x, min_y, max_x - min_x, max_y - min_y))
+}
+
+/// Union `(x, y, w, h)` of every selected element's evaluated geometric bbox
+/// (see [`element_evaluated_bbox`]) in DOCUMENT space — the post-transform
+/// values the Properties panel shows. `(0, 0, 0, 0)` when the selection is empty
+/// or nothing resolves. Mirrors the Python `selection_evaluated_bounds`.
+pub fn selection_evaluated_bounds(doc: &Document) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut any = false;
+    for es in &doc.selection {
+        if let Some((x, y, w, h)) = element_evaluated_bbox(doc, &es.path) {
+            any = true;
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x + w);
+            max_y = max_y.max(y + h);
+        }
+    }
+    if !any {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
 /// Combined transform SCALE of the element at `path` — the geometric mean of
 /// the linear part, `sqrt(|det|)`, multiplied over the element's own transform
 /// and every ancestor (layer/group) transform. `det = a*d - b*c`.
@@ -3343,6 +3420,85 @@ mod tests {
             .collect();
         cs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         cs
+    }
+
+    // ── selection_evaluated_bounds (decision-5 Part B.1) ──────────────
+    // The Properties panel X/Y/W/H = the selection's EVALUATED bounding box:
+    // each element's geometric bbox mapped through its own + ancestor
+    // transforms, axis-aligned, unioned. Mirrors the Python
+    // selection_evaluated_bounds tests (commit 31e10cf9).
+
+    #[cfg(test)]
+    fn eb_rect(x: f64, y: f64, w: f64, h: f64, t: Option<Transform>) -> Element {
+        use crate::geometry::element::{RectElem, CommonProps};
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { transform: t, ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    #[cfg(test)]
+    fn eb_doc(elems: Vec<Element>, selected: Vec<Vec<usize>>) -> Document {
+        use crate::document::document::ElementSelection;
+        let mut doc = Document::default();
+        {
+            let children = doc.layers[0].children_mut().unwrap();
+            for e in elems {
+                children.push(std::rc::Rc::new(e));
+            }
+        }
+        doc.selection = selected.into_iter().map(ElementSelection::all).collect();
+        doc
+    }
+
+    #[test]
+    fn eval_bounds_untransformed_rect() {
+        let doc = eb_doc(vec![eb_rect(10.0, 20.0, 30.0, 40.0, None)], vec![vec![0, 0]]);
+        assert_eq!(selection_evaluated_bounds(&doc), (10.0, 20.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn eval_bounds_scaled_rect_grows() {
+        let doc = eb_doc(
+            vec![eb_rect(10.0, 20.0, 30.0, 40.0, Some(Transform::scale(2.0, 2.0)))],
+            vec![vec![0, 0]]);
+        assert_eq!(selection_evaluated_bounds(&doc), (20.0, 40.0, 60.0, 80.0));
+    }
+
+    #[test]
+    fn eval_bounds_translated_rect_shifts() {
+        let doc = eb_doc(
+            vec![eb_rect(10.0, 20.0, 30.0, 40.0, Some(Transform::translate(5.0, 7.0)))],
+            vec![vec![0, 0]]);
+        assert_eq!(selection_evaluated_bounds(&doc), (15.0, 27.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn eval_bounds_rotate_90_swaps_extents() {
+        // 10x20 rect rotated 90deg -> 20x10 bbox.
+        let doc = eb_doc(
+            vec![eb_rect(0.0, 0.0, 10.0, 20.0, Some(Transform::rotate(90.0)))],
+            vec![vec![0, 0]]);
+        let (_x, _y, w, h) = selection_evaluated_bounds(&doc);
+        assert!((w - 20.0).abs() < 1e-6, "w={}", w);
+        assert!((h - 10.0).abs() < 1e-6, "h={}", h);
+    }
+
+    #[test]
+    fn eval_bounds_union_of_two() {
+        let doc = eb_doc(
+            vec![eb_rect(0.0, 0.0, 10.0, 10.0, None),
+                 eb_rect(100.0, 0.0, 10.0, 10.0, None)],
+            vec![vec![0, 0], vec![0, 1]]);
+        assert_eq!(selection_evaluated_bounds(&doc), (0.0, 0.0, 110.0, 10.0));
+    }
+
+    #[test]
+    fn eval_bounds_empty_selection_is_zero() {
+        let doc = eb_doc(vec![eb_rect(10.0, 20.0, 30.0, 40.0, None)], vec![]);
+        assert_eq!(selection_evaluated_bounds(&doc), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]

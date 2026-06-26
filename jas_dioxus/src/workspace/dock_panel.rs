@@ -633,6 +633,20 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         },
     );
 
+    // Properties panel: the selection's EVALUATED bounding box (document
+    // space, post-transform) in points — decision-5 Part B.1. The keys are
+    // prop_-prefixed so they never collide with the Color panel's short y / h
+    // keys (this map is applied to every panel by leaf-name match).
+    if let Some(tab) = st.tab() {
+        let (px, py, pw, ph) =
+            crate::canvas::render::selection_evaluated_bounds(tab.model.document());
+        let r2 = |v: f64| (v * 100.0).round() / 100.0;
+        m.insert("prop_x".into(), serde_json::json!(r2(px)));
+        m.insert("prop_y".into(), serde_json::json!(r2(py)));
+        m.insert("prop_w".into(), serde_json::json!(r2(pw)));
+        m.insert("prop_h".into(), serde_json::json!(r2(ph)));
+    }
+
     m
 }
 
