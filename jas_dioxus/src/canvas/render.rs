@@ -1950,6 +1950,76 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
     }
 }
 
+/// Document-space control-point handle rects `(x, y, w, h)` for the element
+/// at `path`.
+///
+/// Each rect is centered at the element-transformed control point and is a
+/// constant `HANDLE_DRAW_SIZE` square, so an element's transform MOVES the
+/// handles but never SCALES the handle glyphs (they stay a fixed grab size).
+/// Returns `[]` for containers (Group / Layer) and Text / TextPath, which
+/// carry no control-point squares (mirrors the in-transform overlay draw).
+/// The caller draws these under the VIEW (pan/zoom) transform only, NOT the
+/// element transform. Mirrors the Python reference `selection_handle_rects`.
+pub fn selection_handle_rects(
+    doc: &Document,
+    path: &[usize],
+) -> Vec<(f64, f64, f64, f64)> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+    // Resolve the element + collect ancestor transforms (outermost first):
+    // the root layer, then each intervening group on the path.
+    let mut node = match doc.layers.get(path[0]) {
+        Some(n) => n,
+        None => return Vec::new(),
+    };
+    let mut ancestors: Vec<Option<Transform>> = Vec::new();
+    if path.len() > 1 {
+        ancestors.push(node.transform().copied()); // layer
+        for &idx in &path[1..path.len() - 1] {
+            node = match node.children().and_then(|c| c.get(idx)) {
+                Some(n) => n,
+                None => return Vec::new(),
+            };
+            ancestors.push(node.transform().copied());
+        }
+        node = match node.children().and_then(|c| c.get(path[path.len() - 1])) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+    }
+    let elem = node;
+    if matches!(
+        elem,
+        Element::Text(_) | Element::TextPath(_) | Element::Group(_) | Element::Layer(_)
+    ) {
+        return Vec::new();
+    }
+    // Apply transforms innermost-first: the element's own transform, then each
+    // ancestor outward (layer last) — matching the rendered combined CTM.
+    let mut chain: Vec<Transform> = Vec::new();
+    if let Some(t) = elem.transform() {
+        chain.push(*t);
+    }
+    for t in ancestors.iter().rev() {
+        if let Some(t) = t {
+            chain.push(*t);
+        }
+    }
+    let half = HANDLE_DRAW_SIZE / 2.0;
+    control_points(elem)
+        .into_iter()
+        .map(|(mut px, mut py)| {
+            for t in &chain {
+                let (nx, ny) = t.apply_point(px, py);
+                px = nx;
+                py = ny;
+            }
+            (px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE)
+        })
+        .collect()
+}
+
 fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
     let sel_color = "rgba(0, 120, 215, 0.9)";
     ctx.set_stroke_style_str(sel_color);
@@ -2005,26 +2075,34 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
                 ctx.stroke();
             }
 
-            // Draw the control-point squares. A selected CP (per the
-            // `Partial` set, or any CP when kind is `All`) gets the
-            // solid blue fill; others get white. On `All`, every CP
-            // is filled blue — the whole element is grabbable.
-            let cps = control_points(elem);
-            let half = HANDLE_DRAW_SIZE / 2.0;
-            // Re-apply stroke color (stroke() above may leave it as-is
-            // but be explicit for the rect strokes below).
-            ctx.set_stroke_style_str(sel_color);
-            for (i, &(px, py)) in cps.iter().enumerate() {
-                if es.kind.contains(i) {
-                    ctx.set_fill_style_str(sel_color);
-                } else {
-                    ctx.set_fill_style_str("white");
-                }
-                ctx.fill_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-                ctx.stroke_rect(px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE);
-            }
+            // NOTE: the control-point handle SQUARES are intentionally NOT
+            // drawn here. They are drawn below via `selection_handle_rects`
+            // at a FIXED screen size under the view (pan/zoom) transform only
+            // — the element transform was restored — so an element's
+            // transform moves them but never scales the glyphs. The outline
+            // trace above stays under the element transform (it traces the
+            // geometry).
         }
         ctx.restore();
+
+        // Control-point handles: FIXED size at element-transformed positions,
+        // drawn under the VIEW (pan/zoom) transform only — the element
+        // transform was restored above — so the element's transform moves the
+        // handles but never scales the glyphs. A selected CP (per the
+        // `Partial` set, or any CP when kind is `All`) gets the solid blue
+        // fill; others get white.
+        ctx.set_stroke_style_str(sel_color);
+        for (i, (hx, hy, hw, hh)) in
+            selection_handle_rects(doc, &es.path).into_iter().enumerate()
+        {
+            if es.kind.contains(i) {
+                ctx.set_fill_style_str(sel_color);
+            } else {
+                ctx.set_fill_style_str("white");
+            }
+            ctx.fill_rect(hx, hy, hw, hh);
+            ctx.stroke_rect(hx, hy, hw, hh);
+        }
     }
 }
 
@@ -3002,5 +3080,101 @@ mod tests {
     fn css_color_alpha_just_below_one() {
         let c = Color::Rgb { r: 0.0, g: 1.0, b: 0.0, a: 0.99 };
         assert_eq!(css_color(&c), "rgba(0,255,0,0.99)");
+    }
+
+    // --- Selection control-point handle rects (fixed-size handles) ---
+    //
+    // The selection control-point handle squares must be FIXED SIZE: an
+    // element's transform moves the handle POSITIONS but never scales the
+    // handle glyphs. `selection_handle_rects(doc, path)` returns
+    // document-space rects whose CENTER is the element-transformed control
+    // point and whose SIZE is the constant HANDLE_DRAW_SIZE (NOT multiplied
+    // by the element transform). Mirrors the Python reference (commit
+    // 08b3f3a9) so all 4 ports stay equivalent.
+
+    #[cfg(test)]
+    fn hr_doc_with(elem: Element) -> Document {
+        use crate::document::document::ElementSelection;
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap()
+            .push(std::rc::Rc::new(elem));
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        doc
+    }
+
+    #[cfg(test)]
+    fn hr_rect(transform: Option<Transform>) -> Element {
+        use crate::geometry::element::{RectElem, CommonProps};
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { transform, ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    /// Sorted (cx, cy) centers of the returned handle rects.
+    #[cfg(test)]
+    fn hr_centers(rects: &[(f64, f64, f64, f64)]) -> Vec<(f64, f64)> {
+        let mut cs: Vec<(f64, f64)> = rects.iter()
+            .map(|&(x, y, w, _h)| (x + w / 2.0, y + w / 2.0))
+            .collect();
+        cs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        cs
+    }
+
+    #[test]
+    fn handle_rects_identity_transform_at_control_points() {
+        use crate::geometry::element::{RectElem, CommonProps};
+        // Rect 10,20,30,40 with no transform -> handles at the raw corners,
+        // each of size HANDLE_DRAW_SIZE.
+        let rect = Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 30.0, height: 40.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let doc = hr_doc_with(rect);
+        let rects = selection_handle_rects(&doc, &[0, 0]);
+        let mut want = vec![(10.0, 20.0), (40.0, 20.0), (40.0, 60.0), (10.0, 60.0)];
+        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(hr_centers(&rects), want);
+        for &(_x, _y, w, h) in &rects {
+            assert_eq!((w, h), (HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE));
+        }
+    }
+
+    #[test]
+    fn handle_rects_scaled_element_move_but_do_not_grow() {
+        // 100x100 rect at origin with a 2x scale transform. The corner
+        // CENTERS are the TRANSFORMED corners (0,0),(200,0),(200,200),(0,200)
+        // but each handle is still HANDLE_DRAW_SIZE, NOT 2x.
+        let rect = hr_rect(Some(Transform::scale(2.0, 2.0)));
+        let doc = hr_doc_with(rect);
+        let rects = selection_handle_rects(&doc, &[0, 0]);
+        let mut want = vec![(0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0)];
+        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(hr_centers(&rects), want);
+        for &(_x, _y, w, h) in &rects {
+            assert_eq!((w, h), (HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE),
+                "handle stays fixed size, NOT scaled by the element transform");
+        }
+    }
+
+    #[test]
+    fn handle_rects_no_handles_for_group() {
+        use crate::geometry::element::{GroupElem, RectElem, CommonProps};
+        let inner = std::rc::Rc::new(Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        }));
+        let grp = Element::Group(GroupElem {
+            children: vec![inner],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = hr_doc_with(grp);
+        assert!(selection_handle_rects(&doc, &[0, 0]).is_empty(),
+            "containers (Group/Layer) carry no control-point handles");
     }
 }

@@ -11,6 +11,21 @@ type bounding_box = {
 val make_bounding_box :
   ?x:float -> ?y:float -> ?width:float -> ?height:float -> unit -> bounding_box
 
+(** Fixed pixel size of a selection control-point handle square. *)
+val handle_size : float
+
+(** Document-space control-point handle rects [(x, y, w, h)] for the
+    selected element at [path]. Each rect is centered at the
+    element-transformed control point (the element's own transform,
+    then each ancestor transform outward) and is a constant
+    [handle_size] square, so an element transform MOVES the handles but
+    never SCALES the handle glyphs. Returns [[]] for Group/Layer and
+    Text/Text_path (no control-point squares). Callers draw these under
+    the view (pan/zoom) transform only, NOT the element transform. *)
+val selection_handle_rects :
+  Document.document -> Document.element_path ->
+  (float * float * float * float) list
+
 val set_brush_libraries : Yojson.Safe.t -> unit
 (** Install the brush library registry consulted by the Path renderer
     when a path carries a stroke_brush slug. The brushed render then
