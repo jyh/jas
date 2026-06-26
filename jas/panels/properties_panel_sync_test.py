@@ -15,7 +15,7 @@ from workspace_interpreter.effects import (
 from workspace_interpreter.state_store import StateStore
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import Rect, Transform, Layer
+from geometry.element import Rect, Transform, Layer, BlendMode
 
 
 def _model(elements, selected):
@@ -95,6 +95,49 @@ class PropertiesPanelSyncTest(absltest.TestCase):
     def test_none_model_does_not_raise(self):
         store = self._store()
         sync_properties_panel_from_selection(store, None)
+
+
+class PropertiesPanelAttrsSyncTest(absltest.TestCase):
+    """Part B.3 — rotation / opacity / blend from the FIRST selected element."""
+
+    def _store(self):
+        store = StateStore()
+        store.init_panel("properties_panel_content",
+                         {"prop_rotation": 0, "prop_opacity": 100,
+                          "prop_blend": "normal"})
+        return store
+
+    def _panel(self, store, key):
+        return store.get_panel("properties_panel_content", key)
+
+    def test_rotation_from_transform(self):
+        store = self._store()
+        m = _model([Rect(x=0, y=0, width=10, height=10,
+                         transform=Transform.rotate(90))], [0])
+        sync_properties_panel_from_selection(store, m)
+        self.assertAlmostEqual(self._panel(store, "prop_rotation"), 90.0, places=3)
+
+    def test_opacity_as_percent(self):
+        store = self._store()
+        m = _model([Rect(x=0, y=0, width=10, height=10, opacity=0.5)], [0])
+        sync_properties_panel_from_selection(store, m)
+        self.assertEqual(self._panel(store, "prop_opacity"), 50.0)
+
+    def test_blend_mode_name(self):
+        store = self._store()
+        m = _model([Rect(x=0, y=0, width=10, height=10,
+                         blend_mode=BlendMode.MULTIPLY)], [0])
+        sync_properties_panel_from_selection(store, m)
+        self.assertEqual(self._panel(store, "prop_blend"), "multiply")
+
+    def test_defaults_when_no_selection(self):
+        store = self._store()
+        m = _model([Rect(x=0, y=0, width=10, height=10,
+                         opacity=0.5, blend_mode=BlendMode.SCREEN)], [])
+        sync_properties_panel_from_selection(store, m)
+        self.assertEqual(self._panel(store, "prop_rotation"), 0.0)
+        self.assertEqual(self._panel(store, "prop_opacity"), 100.0)
+        self.assertEqual(self._panel(store, "prop_blend"), "normal")
 
 
 if __name__ == "__main__":

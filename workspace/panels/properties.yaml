@@ -36,12 +36,46 @@ state:
     type: number
     default: 0
     description: "Selection bounding-box height, in points."
+  prop_rotation:
+    type: number
+    default: 0
+    description: >
+      Rotation angle of the FIRST selected element's transform, in degrees
+      (atan2 of the linear part). 0 when there is no rotation.
+  prop_opacity:
+    type: number
+    default: 100
+    description: "Opacity of the FIRST selected element, 0-100 percent."
+  prop_blend:
+    type: enum
+    values:
+      - normal
+      - darken
+      - multiply
+      - color_burn
+      - lighten
+      - screen
+      - color_dodge
+      - overlay
+      - soft_light
+      - hard_light
+      - difference
+      - exclusion
+      - hue
+      - saturation
+      - color
+      - luminosity
+    default: normal
+    description: "Blend mode of the FIRST selected element."
 
 init:
   prop_x: "0"
   prop_y: "0"
   prop_w: "0"
   prop_h: "0"
+  prop_rotation: "0"
+  prop_opacity: "100"
+  prop_blend: "'normal'"
 
 menu:
   - label: "Close Object properties"
@@ -120,3 +154,78 @@ content:
           style: { flex: 1 }
           bind:
             value: "panel.prop_h"
+
+    # ── Rotation ────────────────────────────────────────────
+    # Per-element attrs (rotation / opacity / blend) reflect the FIRST
+    # selected element, like the Stroke panel weight. Bound widgets so the
+    # value re-reads on the sync's panel write. Read-only this increment.
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "R"
+          style: { width: 14, font_size: 10 }
+        - id: prop_rotation_input
+          type: number_input
+          suffix: "°"
+          summary: "Selection rotation"
+          description: "Rotation angle of the first selected element, in degrees. Read-only this increment."
+          disabled: "true"
+          style: { flex: 1 }
+          bind:
+            value: "panel.prop_rotation"
+
+    # ── Opacity ─────────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Opacity"
+          style: { width: 44, font_size: 10 }
+        - id: prop_opacity_input
+          type: number_input
+          min: 0
+          max: 100
+          suffix: "%"
+          summary: "Selection opacity"
+          description: "Opacity of the first selected element, 0-100 percent. Read-only this increment."
+          disabled: "true"
+          style: { flex: 1 }
+          bind:
+            value: "panel.prop_opacity"
+
+    # ── Blend mode ──────────────────────────────────────────
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Blend"
+          style: { width: 44, font_size: 10 }
+        - id: prop_blend_select
+          type: select
+          summary: "Selection blend mode"
+          description: "Blend mode of the first selected element. Read-only this increment."
+          disabled: "true"
+          style: { flex: 1 }
+          bind:
+            value: "panel.prop_blend"
+          options:
+            - { value: normal,      label: "Normal" }
+            - { value: darken,      label: "Darken" }
+            - { value: multiply,    label: "Multiply" }
+            - { value: color_burn,  label: "Color Burn" }
+            - { value: lighten,     label: "Lighten" }
+            - { value: screen,      label: "Screen" }
+            - { value: color_dodge, label: "Color Dodge" }
+            - { value: overlay,     label: "Overlay" }
+            - { value: soft_light,  label: "Soft Light" }
+            - { value: hard_light,  label: "Hard Light" }
+            - { value: difference,  label: "Difference" }
+            - { value: exclusion,   label: "Exclusion" }
+            - { value: hue,         label: "Hue" }
+            - { value: saturation,  label: "Saturation" }
+            - { value: color,       label: "Color" }
+            - { value: luminosity,  label: "Luminosity" }

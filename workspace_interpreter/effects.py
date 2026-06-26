@@ -1246,7 +1246,9 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
     document/selection change."""
     if model is None:
         return
-    x, y, w, h = selection_evaluated_bounds(model.document)
+    import math
+    doc = model.document
+    x, y, w, h = selection_evaluated_bounds(doc)
     pid = "properties_panel_content"
     # Keys are prop_-prefixed to avoid colliding with another panel's short
     # leaf keys in renderers that feed live values through one shared override
@@ -1255,6 +1257,27 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
     store.set_panel(pid, "prop_y", round(float(y), 2))
     store.set_panel(pid, "prop_w", round(float(w), 2))
     store.set_panel(pid, "prop_h", round(float(h), 2))
+    # Per-element attrs (rotation / opacity / blend) reflect the FIRST
+    # selected element, like the Stroke panel weight (Part B.3). Defaults
+    # when nothing is selected: 0 degrees, 100%, normal.
+    rotation, opacity, blend = 0.0, 100.0, "normal"
+    if doc.selection:
+        first = next(iter(doc.selection))
+        try:
+            elem = doc.get_element(first.path)
+        except Exception:
+            elem = None
+        if elem is not None:
+            t = getattr(elem, "transform", None)
+            if t is not None:
+                rotation = math.degrees(math.atan2(t.b, t.a))
+            opacity = float(getattr(elem, "opacity", 1.0)) * 100.0
+            bm = getattr(elem, "blend_mode", None)
+            if bm is not None:
+                blend = getattr(bm, "value", "normal")
+    store.set_panel(pid, "prop_rotation", round(float(rotation), 2))
+    store.set_panel(pid, "prop_opacity", round(float(opacity), 2))
+    store.set_panel(pid, "prop_blend", blend)
 
 
 def subscribe_active_color(store: StateStore, controller_getter) -> None:
