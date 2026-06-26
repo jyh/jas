@@ -48,10 +48,13 @@ the line was only covered indirectly via the shared dispatch path).
 drives the line through the CanvasTool seam in every runner (golden-pinned),
 gating the commit cross-language.
 
-**GUI** — `tool line` via the `--test-fifo` command channel
-(`project_gui_test_fifo_channel`) then a harness drag commits a straight Line
-live in all three native apps (Python / Swift / OCaml); GUI-confirmed
-2026-06-25.
+**GUI** — GUI-confirmed live in ALL FOUR apps 2026-06-25 (a drag commits a
+straight Line). Python / Swift / OCaml driven via the `--test-fifo` command
+channel (`tool line`; see `project_gui_test_fifo_channel`). **Rust** (wasm in a
+Chrome sandbox — can't read a FIFO) driven via the existing harness instead:
+its keyboard + mouse DO reach the Chrome page, so `key \` (line shortcut) + a
+drag commits the segment directly. (Simple top-level tools work this way on
+Rust; flyout-alternate / freehand-buffer tools there still need a web channel.)
 
 **Flask — covered indirectly via shared Rect-shape pipeline.** Line's
 runtime uses the same engine effects exercised by `tests/js/test_phase12.mjs`
