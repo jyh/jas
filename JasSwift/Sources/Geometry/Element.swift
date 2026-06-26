@@ -1284,6 +1284,24 @@ public enum Element: Equatable {
         }
     }
 
+    /// The element's opacity (0.0–1.0).
+    public var opacity: Double {
+        switch self {
+        case .line(let v): return v.opacity
+        case .rect(let v): return v.opacity
+        case .circle(let v): return v.opacity
+        case .ellipse(let v): return v.opacity
+        case .polyline(let v): return v.opacity
+        case .polygon(let v): return v.opacity
+        case .path(let v): return v.opacity
+        case .text(let v): return v.opacity
+        case .textPath(let v): return v.opacity
+        case .group(let v): return v.opacity
+        case .layer(let v): return v.opacity
+        case .live(let v): return v.opacity
+        }
+    }
+
     /// Optional opacity mask attached to this element. Phase 3a storage-only.
     public var mask: Mask? {
         switch self {

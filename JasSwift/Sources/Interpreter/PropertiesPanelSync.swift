@@ -78,8 +78,22 @@ func selectionEvaluatedBounds(_ doc: Document) -> BBox {
 }
 
 public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
-    let b = selectionEvaluatedBounds(model.document)
+    let doc = model.document
+    let b = selectionEvaluatedBounds(doc)
     func r2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
+    // Part B.3: rotation / opacity / blend from the FIRST selected element
+    // (like the Stroke weight). Defaults 0deg / 100% / normal.
+    var rotation = 0.0, opacity = 100.0, blend = "normal"
+    if let first = doc.selection.first {
+        let elem = doc.getElement(first.path)
+        if let t = elem.transform {
+            rotation = atan2(t.b, t.a) * 180.0 / .pi
+        }
+        opacity = elem.opacity * 100.0
+        blend = elem.blendMode.rawValue
+    }
     return ["prop_x": r2(b.x), "prop_y": r2(b.y),
-            "prop_w": r2(b.width), "prop_h": r2(b.height)]
+            "prop_w": r2(b.width), "prop_h": r2(b.height),
+            "prop_rotation": r2(rotation), "prop_opacity": r2(opacity),
+            "prop_blend": blend]
 }

@@ -70,3 +70,24 @@ private func rectT(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
     #expect((o["prop_w"] as? Double) == 60)
     #expect((o["prop_h"] as? Double) == 80)
 }
+
+// MARK: - Part B.3: rotation / opacity / blend (first selected element)
+
+@Test func propertiesAttrsFromFirstSelected() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 opacity: 0.5,
+                                 transform: Transform.rotate(90),
+                                 blendMode: .multiply))
+    let o = propertiesPanelLiveOverrides(model: propModel([rect], selected: [[0, 0]]))
+    #expect(abs((o["prop_rotation"] as? Double ?? 0) - 90) < 0.01)
+    #expect((o["prop_opacity"] as? Double) == 50)
+    #expect((o["prop_blend"] as? String) == "multiply")
+}
+
+@Test func propertiesAttrsDefaultNoSelection() {
+    let o = propertiesPanelLiveOverrides(model: propModel([rectT(0, 0, 10, 10)],
+                                                          selected: []))
+    #expect((o["prop_rotation"] as? Double) == 0)
+    #expect((o["prop_opacity"] as? Double) == 100)
+    #expect((o["prop_blend"] as? String) == "normal")
+}
