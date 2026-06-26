@@ -93,6 +93,11 @@ let () =
          open. *)
       new_model#on_document_changed (fun _ ->
         Jas.Yaml_panel_view.paragraph_panel_resync_from_active_model ());
+      (* Refresh the Stroke panel Weight from the selection on every
+         document change (decision-5a). Safe no-op when no Stroke panel
+         is open. *)
+      new_model#on_document_changed (fun _ ->
+        Jas.Yaml_panel_view.stroke_panel_resync_from_active_model ());
       (* Also refresh the color panel's fill/stroke + hex widgets
          in-place on every document change — targeted update
          instead of a full body rebuild so the user doesn't see a

@@ -491,6 +491,51 @@ let stroke_subscribe_tests = [
     assert (ctrl#document == before));
 ]
 
+(* ── sync_stroke_panel_from_selection (decision-5a) ──────────── *)
+(* The Stroke panel WEIGHT must show the selected element stroke width
+   (its baked / effective width after the scale counter-scale work),
+   falling back to the model default stroke. The sync writes the PANEL
+   key [stroke_panel_content.weight] the weight widget binds. *)
+
+let _expected_default_weight model =
+  match model#default_stroke with
+  | Some s -> `Float s.Jas.Element.stroke_width
+  | None -> `Float 1.0
+
+let stroke_sync_tests = [
+  Alcotest.test_case "weight_from_selected_element" `Quick (fun () ->
+    let model = _make_stroked_rect_model () in  (* stroke width 2.0 *)
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "stroke_panel_content" [("weight", `Float 1.0)];
+    sync_stroke_panel_from_selection store ctrl;
+    assert (get_panel store "stroke_panel_content" "weight" = `Float 2.0));
+
+  Alcotest.test_case "no_selection_uses_default" `Quick (fun () ->
+    let model = Jas.Model.create () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "stroke_panel_content" [("weight", `Float 99.0)];
+    sync_stroke_panel_from_selection store ctrl;
+    assert (get_panel store "stroke_panel_content" "weight"
+            = _expected_default_weight model));
+
+  Alcotest.test_case "selected_without_stroke_uses_default" `Quick (fun () ->
+    let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in  (* no stroke *)
+    let layer = Jas.Element.make_layer [| rect |] in
+    let selection =
+      Jas.Document.PathMap.singleton [0; 0]
+        (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "stroke_panel_content" [("weight", `Float 99.0)];
+    sync_stroke_panel_from_selection store ctrl;
+    assert (get_panel store "stroke_panel_content" "weight"
+            = _expected_default_weight model));
+]
+
 (* ── Phase 3: Character panel → pending override routing ──────── *)
 
 let _default_text_elem () =
@@ -1638,6 +1683,7 @@ let () =
     "Character attrs", character_attrs_tests;
     "Character apply-to-elem", apply_to_elem_tests;
     "Stroke subscribe", stroke_subscribe_tests;
+    "Stroke sync", stroke_sync_tests;
     "Phase3 pending", phase3_pending_tests;
     "Character auto-leading", character_auto_leading_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;
