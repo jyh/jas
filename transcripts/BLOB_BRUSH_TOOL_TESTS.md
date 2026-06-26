@@ -91,6 +91,43 @@ production tool (OCaml `yaml_tool#seed_state` + `.mli`, Swift
 production change). The accessors forward to the already-public
 `StateStore.set` and change no behavior.
 
+### GUI fill bug (found 2026-06-25, FIXED) + the app-state bridge
+
+A GUI run (Quartz harness, native Python app) found the live blob brush committed
+a **hollow** Path (`fill=None`) even with a solid fill selected — the user-visible
+symptom was "it looks hollow." Root cause: each `YamlTool` owns a self-contained
+`StateStore` whose global `state.*` namespace is empty, so the commit's
+`state.fill_color` resolved to null. The Color panel writes fill into a *different*
+store, never bridged. (Tip size only "worked" via a hardcoded 10.0 fallback.) This
+affected **all four native apps**; the unit/gesture-seam tests masked it by seeding
+`fill_color` directly into the tool store.
+
+**Fix A — bridge an allowlist of app-level keys into the tool store's global
+`state.*` before each gesture dispatch** (commits `ae31f377` Rust + `6c327569`
+Swift/OCaml/Python). `CanvasTool::sync_global_state` / `syncAppState` /
+`bridge_app_state` / `seed_globals_from` copy `fill_color`, `stroke_color`,
+`stroke_brush[_overrides]`, `blob_brush_{size,angle,roundness,fidelity,
+keep_selected,merge_only_with_selection}` (an allowlist — handler-owned globals
+like `transform_reference_point` are never touched). `fill_color` defaults to white
+`#ffffff`, 6-digit hex.
+
+Gated by a new cross-language gesture case **`blob_paint_fill`** (app_state
+precondition routed through each app's production bridge; golden pins `fill=red`);
+mutation-proven (disable the sync → the case fails hollow). The seam-test seed
+helpers were de-seeded to route through the bridge. **GUI-confirmed** on the live
+Python app after the fix: a black-fill blob paints as a solid filled band (was a
+hollow outline).
+
+Two caveats from this work:
+- **Harness keyboard.** Synthetic keyboard (CGEvent *and* AppleScript) does not
+  reach the **OCaml** (GTK-on-Quartz) app — it never takes key focus from
+  synthetic activation. Mouse works; drive OCaml by mouse (toolbar/menu). The
+  Python (Qt) and Swift (AppKit) apps accept synthetic keys.
+- **Separate latent bug (NOT fixed here):** the Blob Brush options-dialog writes
+  are dropped (no schema entry / AppState field in Rust), so a *user-edited* tip
+  size evaporates on OK. Fix A makes the commit read the live *default* tip;
+  honoring user edits is a follow-up. See `project_tool_store_appstate_disconnect`.
+
 ### Effect / primitive unit tests
 
 **Rust — `jas_dioxus/src/interpreter/effects.rs` (#[cfg(test)])**
