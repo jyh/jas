@@ -5924,4 +5924,434 @@ mod tests {
             "bbox must stay 100x40 after an escaped shear, got {w}x{h}",
         );
     }
+
+    // ── Zoom / Hand tools — VIEWPORT gesture-seam parity ───────────
+    //
+    // The REFERENCE seam tests for the Zoom and Hand VIEWPORT tools.
+    // Unlike the transform tools (Scale/Rotate/Shear) these do NOT
+    // mutate the document — they change VIEW STATE only:
+    //   model.zoom_level, model.view_offset_x, model.view_offset_y.
+    // So the load-bearing assertions are on those three fields, read
+    // back directly off the model after driving the live YamlTool
+    // event seam (on_press / on_move / on_release / on_key_event),
+    // never poking handlers. The document must stay byte-identical and
+    // can_undo must stay false: a view change is not a journaled edit.
+    //
+    // The tools read SCREEN coords (event.x / event.y), so the seam is
+    // driven with screen pixels. At the default identity view (zoom 1,
+    // offset 0) screen == doc, but every assertion is against the raw
+    // view-state numbers, not doc coords.
+    //
+    // The exact numbers come straight from the production effects:
+    //
+    //   HAND  doc.pan.apply  (effects.rs):
+    //       view_offset_x = initial_offx + (cursor_x - press_x)
+    //       view_offset_y = initial_offy + (cursor_y - press_y)
+    //     i.e. the offset shifts by EXACTLY the screen drag delta,
+    //     SAME sign (drag right => offset increases). Idempotent:
+    //     recomputed from press+initial each move, not accumulated.
+    //
+    //   ZOOM  click (no drag) => dispatch zoom_in / zoom_out =>
+    //     doc.zoom.apply (effects.rs) with factor read from the
+    //     embedded bundle's preferences.viewport.zoom_step == 1.2:
+    //       z_new  = (z * factor).clamp(min,max)
+    //       doc_a  = (anchor - off) / z            (anchor = event.x/y)
+    //       off_new = anchor - doc_a * z_new
+    //     zoom_in  factor = zoom_step       = 1.2
+    //     zoom_out factor = 1.0 / zoom_step ~= 0.833333…
+    //     Direction is keyed on Alt AT PRESS (alt_at_press), not at
+    //     release. The anchor recenter keeps the clicked SCREEN point
+    //     glued to its document point: at identity view a click at
+    //     screen (sx,sy) gives off_new = sx - sx*z_new = sx*(1 - z_new).
+    //
+    // The zoom_step (1.2) is READ from the bundle at dispatch time
+    // (YamlTool::dispatch loads preferences from Workspace::load()),
+    // so these tests exercise the REAL production zoom factor — it is
+    // asserted, never hardcoded as a guess.
+    //
+    // Mutation-proven: the apply cases assert the exact post-gesture
+    // zoom_level / view_offset; flipping any expected number makes the
+    // case fail (see the report). The Escape / no-op cases are
+    // non-vacuous precisely because the matching apply case proves the
+    // identical-but-uninterrupted path DOES move the view.
+
+    /// Load the real Zoom tool from the embedded workspace bundle.
+    fn zoom_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("zoom")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// Load the real Hand tool from the embedded workspace bundle.
+    fn hand_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("hand")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// Read `preferences.viewport.zoom_step` out of the embedded bundle
+    /// so the tests assert against the REAL production factor rather
+    /// than a hardcoded guess. Panics loudly if the bundle is missing
+    /// the key (the tests are meaningless without it).
+    fn bundle_zoom_step() -> f64 {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load().expect("embedded workspace must parse");
+        ws.data()
+            .get("preferences")
+            .and_then(|p| p.get("viewport"))
+            .and_then(|v| v.get("zoom_step"))
+            .and_then(|z| z.as_f64())
+            .expect("preferences.viewport.zoom_step must exist in the bundle")
+    }
+
+    /// Minimal one-layer document for the VIEWPORT tools. They ignore
+    /// document content entirely (they touch only view state), so an
+    /// empty layer is enough; the fresh model starts at the identity
+    /// view (zoom 1.0, offset 0,0). The viewport_w / viewport_h
+    /// defaults are irrelevant here: the Zoom click passes real cursor
+    /// anchor coords (event.x/y, never -1), so the "viewport center"
+    /// branch in doc.zoom.apply is never taken.
+    fn viewport_model() -> Model {
+        let layer = Element::Layer(LayerElem {
+            children: vec![],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    // ── Hand ───────────────────────────────────────────────────────
+
+    #[test]
+    fn hand_parity_drag_pans_view_offset_by_screen_delta() {
+        let Some(mut tool) = hand_yaml_tool() else { return };
+        let mut model = viewport_model();
+        // Start from a NON-zero baseline offset so the test proves the
+        // pan is `initial + delta`, not just `delta`.
+        model.view_offset_x = 30.0;
+        model.view_offset_y = -10.0;
+        let before_doc = doc_json(&model);
+        let z_before = model.zoom_level;
+
+        // Press at screen (100,100); drag to (160,135).
+        //   delta = (160-100, 135-100) = (+60, +35)
+        // doc.pan.apply: off = initial + delta (SAME sign), so
+        //   off_x = 30 + 60 = 90
+        //   off_y = -10 + 35 = 25
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 160.0, 135.0, false, false, true);
+
+        assert!(
+            (model.view_offset_x - 90.0).abs() < 1e-9,
+            "pan must shift view_offset_x by the +60 screen delta from \
+             the initial 30 to 90, got {}",
+            model.view_offset_x,
+        );
+        assert!(
+            (model.view_offset_y - 25.0).abs() < 1e-9,
+            "pan must shift view_offset_y by the +35 screen delta from \
+             the initial -10 to 25, got {}",
+            model.view_offset_y,
+        );
+        // The pan must touch ONLY the offset — zoom and document stay put.
+        assert!(
+            (model.zoom_level - z_before).abs() < 1e-9,
+            "a Hand pan must not change zoom_level",
+        );
+        assert_eq!(doc_json(&model), before_doc, "a Hand pan must not mutate the document");
+        assert!(!model.can_undo(), "a view-only pan must leave no undo step");
+
+        // Idempotency: a SECOND move to the same cursor recomputes from
+        // press+initial, so the offset is identical (not doubled).
+        tool.on_move(&mut model, 160.0, 135.0, false, false, true);
+        assert!(
+            (model.view_offset_x - 90.0).abs() < 1e-9
+                && (model.view_offset_y - 25.0).abs() < 1e-9,
+            "doc.pan.apply must be idempotent: re-issuing the same cursor \
+             must not accumulate, got ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+    }
+
+    #[test]
+    fn hand_parity_escape_mid_pan_restores_initial_offset() {
+        let Some(mut tool) = hand_yaml_tool() else { return };
+        let mut model = viewport_model();
+        model.view_offset_x = 30.0;
+        model.view_offset_y = -10.0;
+        let off_x0 = model.view_offset_x;
+        let off_y0 = model.view_offset_y;
+        let before_doc = doc_json(&model);
+
+        // Begin the SAME pan proven to move the view in the drag case,
+        // but press Escape BEFORE the next event. Escape's on_keydown
+        // restores the pre-drag offset (initial_offx/offy) via
+        // doc.zoom.set_full and sets mode back to idle.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 160.0, 135.0, false, false, true);
+        // Mid-pan the view IS shifted (90, 25) — same as the drag case.
+        assert!(
+            (model.view_offset_x - 90.0).abs() < 1e-9
+                && (model.view_offset_y - 25.0).abs() < 1e-9,
+            "precondition: mid-pan offset must be the moved (90,25), got \
+             ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+
+        assert!(
+            (model.view_offset_x - off_x0).abs() < 1e-9
+                && (model.view_offset_y - off_y0).abs() < 1e-9,
+            "Escape mid-pan must restore the initial offset ({off_x0}, \
+             {off_y0}), got ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+
+        // A subsequent mousemove must NOT re-pan: Escape set mode=idle,
+        // so the on_mousemove `mode == 'panning'` guard now fails.
+        tool.on_move(&mut model, 300.0, 300.0, false, false, true);
+        assert!(
+            (model.view_offset_x - off_x0).abs() < 1e-9
+                && (model.view_offset_y - off_y0).abs() < 1e-9,
+            "after Escape (mode idle) a further move must not re-pan, got \
+             ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+        assert_eq!(doc_json(&model), before_doc, "an escaped pan must not mutate the document");
+        assert!(!model.can_undo(), "an escaped pan must leave no undo step");
+    }
+
+    #[test]
+    fn hand_parity_mode_idle_panning_idle_lifecycle() {
+        let Some(mut tool) = hand_yaml_tool() else { return };
+        let mut model = viewport_model();
+
+        // Helper to read tool.hand.mode out of the tool's own store.
+        let read_mode = |t: &YamlTool| -> String {
+            t.store
+                .eval_context()
+                .get("tool")
+                .and_then(|x| x.get("hand"))
+                .and_then(|h| h.get("mode"))
+                .and_then(|m| m.as_str())
+                .map(String::from)
+                .unwrap_or_default()
+        };
+
+        // on_enter resets to idle.
+        tool.activate(&mut model);
+        assert_eq!(read_mode(&tool), "idle", "mode must start idle after activate");
+
+        // mousedown => panning.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        assert_eq!(read_mode(&tool), "panning", "mousedown must enter panning");
+
+        // mouseup => idle.
+        tool.on_release(&mut model, 160.0, 135.0, false, false);
+        assert_eq!(read_mode(&tool), "idle", "mouseup must return to idle");
+    }
+
+    // ── Zoom ───────────────────────────────────────────────────────
+
+    #[test]
+    fn zoom_parity_plain_click_zooms_in_by_zoom_step() {
+        let Some(mut tool) = zoom_yaml_tool() else { return };
+        let mut model = viewport_model();
+        let before_doc = doc_json(&model);
+        let step = bundle_zoom_step();
+        // Sanity: the bundle ships the documented 1.2 step.
+        assert!(
+            (step - 1.2).abs() < 1e-9,
+            "zoom.yaml/preferences must ship zoom_step 1.2, read {step}",
+        );
+
+        // Plain CLICK: press + release at the SAME screen point, no
+        // intervening move => moved stays false => the not-moved branch
+        // dispatches zoom_in anchored at the click.
+        //   z_new   = 1.0 * 1.2 = 1.2
+        //   anchor  = (200, 150) (screen)
+        //   doc_a   = (200-0)/1, (150-0)/1 = (200, 150)
+        //   off_new = anchor - doc_a*z_new = 200 - 200*1.2 = -40
+        //                                    150 - 150*1.2 = -30
+        tool.on_press(&mut model, 200.0, 150.0, false, false);
+        tool.on_release(&mut model, 200.0, 150.0, false, false);
+
+        let expected_zoom = 1.0 * step; // 1.2
+        assert!(
+            (model.zoom_level - expected_zoom).abs() < 1e-9,
+            "a plain click must zoom IN to 1.0*{step} = {expected_zoom}, \
+             got {}",
+            model.zoom_level,
+        );
+        assert!(
+            (model.view_offset_x - (-40.0)).abs() < 1e-9
+                && (model.view_offset_y - (-30.0)).abs() < 1e-9,
+            "click-zoom must recenter offset to (-40,-30) so screen \
+             (200,150) stays glued to its doc point, got ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+        // The clicked SCREEN point maps to the SAME doc point before and
+        // after the zoom — the invariant the recenter exists to keep.
+        let doc_before = (200.0 - 0.0) / 1.0; // = 200
+        let doc_after = (200.0 - model.view_offset_x) / model.zoom_level;
+        assert!(
+            (doc_after - doc_before).abs() < 1e-9,
+            "the clicked screen x must map to the same doc x (={doc_before}) \
+             after the zoom, got {doc_after}",
+        );
+        assert_eq!(doc_json(&model), before_doc, "a zoom click must not mutate the document");
+        assert!(!model.can_undo(), "a view-only zoom must leave no undo step");
+    }
+
+    #[test]
+    fn zoom_parity_alt_click_zooms_out() {
+        let Some(mut tool) = zoom_yaml_tool() else { return };
+        let mut model = viewport_model();
+        let before_doc = doc_json(&model);
+        let step = bundle_zoom_step();
+
+        // ALT-click (alt = the LAST bool arg of the seam). alt_at_press
+        // latches true on mousedown, so the not-moved branch dispatches
+        // zoom_OUT with factor 1/step.
+        //   z_new   = 1.0 * (1/1.2) = 0.833333…
+        //   anchor  = (200, 150)
+        //   off_new = 200 - 200*z_new ; 150 - 150*z_new
+        tool.on_press(&mut model, 200.0, 150.0, false, true);
+        tool.on_release(&mut model, 200.0, 150.0, false, true);
+
+        let expected_zoom = 1.0 / step; // 0.83333…
+        assert!(
+            (model.zoom_level - expected_zoom).abs() < 1e-9,
+            "an Alt-click must zoom OUT to 1.0/{step} = {expected_zoom}, \
+             got {}",
+            model.zoom_level,
+        );
+        assert!(
+            model.zoom_level < 1.0,
+            "Alt-click must DECREASE zoom below 1.0, got {}",
+            model.zoom_level,
+        );
+        let expected_off_x = 200.0 - 200.0 * expected_zoom;
+        let expected_off_y = 150.0 - 150.0 * expected_zoom;
+        assert!(
+            (model.view_offset_x - expected_off_x).abs() < 1e-9
+                && (model.view_offset_y - expected_off_y).abs() < 1e-9,
+            "Alt-click recenter must put offset at ({expected_off_x}, \
+             {expected_off_y}), got ({}, {})",
+            model.view_offset_x, model.view_offset_y,
+        );
+        // Same screen->doc invariant under zoom-out.
+        let doc_after = (200.0 - model.view_offset_x) / model.zoom_level;
+        assert!(
+            (doc_after - 200.0).abs() < 1e-9,
+            "the clicked screen x must still map to doc 200 after zoom-out, \
+             got {doc_after}",
+        );
+        assert_eq!(doc_json(&model), before_doc, "an Alt zoom click must not mutate the document");
+        assert!(!model.can_undo(), "a view-only zoom must leave no undo step");
+    }
+
+    #[test]
+    fn zoom_parity_escape_mid_scrubby_drag_restores_initial_view() {
+        let Some(mut tool) = zoom_yaml_tool() else { return };
+        let mut model = viewport_model();
+        // Non-identity starting view so the restore target is distinctive.
+        model.zoom_level = 2.0;
+        model.view_offset_x = 15.0;
+        model.view_offset_y = 25.0;
+        let z0 = model.zoom_level;
+        let off_x0 = model.view_offset_x;
+        let off_y0 = model.view_offset_y;
+        let before_doc = doc_json(&model);
+
+        // Scrubby is on by default in the bundle, so a horizontal drag
+        // past the 4px threshold applies a continuous scrubby zoom on
+        // each move. Press captures the initial snapshot; the move
+        // (>4px in x) flips moved=true and writes a NEW zoom/offset.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 180.0, 100.0, false, false, true);
+
+        // Precondition: the scrubby move actually CHANGED the view (so
+        // the Escape restore is non-vacuous).
+        assert!(
+            (model.zoom_level - z0).abs() > 1e-6,
+            "precondition: a >4px scrubby drag must change zoom from {z0}, \
+             got {}",
+            model.zoom_level,
+        );
+
+        // Escape mid-drag: zoom.yaml restores the pre-drag snapshot
+        // (initial_zoom/offx/offy) via doc.zoom.set_full and idles.
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+
+        assert!(
+            (model.zoom_level - z0).abs() < 1e-9
+                && (model.view_offset_x - off_x0).abs() < 1e-9
+                && (model.view_offset_y - off_y0).abs() < 1e-9,
+            "Escape mid-scrubby must restore the pre-drag view (z={z0}, \
+             off=({off_x0},{off_y0})), got (z={}, off=({},{}))",
+            model.zoom_level, model.view_offset_x, model.view_offset_y,
+        );
+
+        // After Escape (mode idle) a further move must NOT re-zoom.
+        tool.on_move(&mut model, 300.0, 100.0, false, false, true);
+        assert!(
+            (model.zoom_level - z0).abs() < 1e-9,
+            "after Escape (mode idle) a further move must not re-zoom, got {}",
+            model.zoom_level,
+        );
+        assert_eq!(doc_json(&model), before_doc, "an escaped zoom must not mutate the document");
+        assert!(!model.can_undo(), "an escaped zoom must leave no undo step");
+    }
+
+    #[test]
+    fn zoom_parity_subthreshold_drag_is_a_click() {
+        // A press + tiny move (<=4px) + release is NOT a drag: moved
+        // stays false, so mouseup takes the click branch and zooms IN
+        // by zoom_step. Proves the 4px click-vs-drag threshold and that
+        // scrubby did NOT fire on the sub-threshold move.
+        let Some(mut tool) = zoom_yaml_tool() else { return };
+        let mut model = viewport_model();
+        let step = bundle_zoom_step();
+
+        tool.on_press(&mut model, 200.0, 150.0, false, false);
+        // 3px in x, 0 in y — both within the >4px gate, so moved stays
+        // false and no scrubby zoom is written on the move.
+        tool.on_move(&mut model, 203.0, 150.0, false, false, true);
+        assert!(
+            (model.zoom_level - 1.0).abs() < 1e-9,
+            "a sub-threshold move must NOT scrubby-zoom; zoom must still \
+             be 1.0, got {}",
+            model.zoom_level,
+        );
+
+        tool.on_release(&mut model, 203.0, 150.0, false, false);
+        // Release takes the click branch => zoom IN by step. Anchor is
+        // the RELEASE point (203,150): off_x = 203 - 203*1.2.
+        assert!(
+            (model.zoom_level - step).abs() < 1e-9,
+            "a sub-threshold gesture must commit as a click-zoom to {step}, \
+             got {}",
+            model.zoom_level,
+        );
+        let expected_off_x = 203.0 - 203.0 * step;
+        assert!(
+            (model.view_offset_x - expected_off_x).abs() < 1e-9,
+            "click-zoom anchor must be the release point (203): off_x = \
+             {expected_off_x}, got {}",
+            model.view_offset_x,
+        );
+        assert!(!model.can_undo(), "a view-only zoom must leave no undo step");
+    }
 }
