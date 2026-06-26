@@ -19,25 +19,39 @@ are **not-yet-implemented** (tracked as ENH entries, not regressions).
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-06-25._ **Correction (2026-06-25):** the prior entries for
+Swift / OCaml claimed dedicated line seam-test files that did NOT exist (line
+behavior was effectively RUST-ONLY), and the Python entry pointed at a generic
+dispatch suite with no line-specific cases. The dedicated files were created
+2026-06-25 — each ports the four Rust `line_parity_*` gesture-seam cases
+(draw-line exact endpoints 10,20→50,60; zero-length hypot rejection;
+idle→drawing→idle mode lifecycle; move-without-press no-op) + a loader-sanity
+case, driving the PRODUCTION line tool loaded from the bundle. Adversarially
+verified at 1:1 parity with the Rust twins, mutation-proven non-vacuous (a
+wrong endpoint coord fails the draw-line case). The line tool reads NO
+app-level `state.*`, so the app-state→tool-store bridge bug does not apply.
 
-**Python — `jas/tools/yaml_tool_test.py::TestDispatch`** (~11 tests)
-- ToolSpec parsing + dispatch pipeline; the Line handler-YAML exercises
-  the same path (mousedown → drag → mouseup with `doc.add_element`).
-- Hypot > 2 guard is covered generically by the drawing-tool validation
-  block.
+**Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)], `line_parity_*`)**
+- Reference: 4 inline cases (press/drag/release exact-coord commit, zero-length
+  suppression, mode lifecycle, move-without-press no-op).
 
-**Swift — `JasSwift/Tests/Tools/YamlToolLineTests.swift`**
-- Press / drag / release creates a Line; zero-length suppression; default
-  stroke applied; Escape cancels.
+**Swift — `JasSwift/Tests/Tools/YamlToolLineTests.swift`** (NEW) — 5/5 green
+(4 parity + loader; `swift test --filter Line`).
 
-**OCaml — `jas_ocaml/test/tools/yaml_tool_line_test.ml`**
-- Mirror of the Python / Swift flow; Alcotest cases covering non-zero-length
-  commit + hypot suppression.
+**OCaml — `jas_ocaml/test/tools/yaml_tool_line_test.ml`** (NEW, registered in
+`test/tools/dune`) — 5/5 green.
 
-**Rust — `jas_dioxus/src/tools/yaml_tool.rs` (#[cfg(test)])**
-- Reference implementation. Line handler exercised by inline cases for
-  press/drag/release pipeline and zero-length suppression.
+**Python — `jas/tools/yaml_tool_line_test.py`** (NEW) — 5 passed (previously
+the line was only covered indirectly via the shared dispatch path).
+
+**Cross-language gesture corpus** — `test_fixtures/gestures/draw_line.json`
+drives the line through the CanvasTool seam in every runner (golden-pinned),
+gating the commit cross-language.
+
+**GUI** — `tool line` via the `--test-fifo` command channel
+(`project_gui_test_fifo_channel`) then a harness drag commits a straight Line
+live in all three native apps (Python / Swift / OCaml); GUI-confirmed
+2026-06-25.
 
 **Flask — covered indirectly via shared Rect-shape pipeline.** Line's
 runtime uses the same engine effects exercised by `tests/js/test_phase12.mjs`
