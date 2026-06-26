@@ -1618,6 +1618,89 @@ let show_selection_bbox = Canvas_tool.show_selection_bbox
 let control_points (elem : Element.element) =
   Element.control_points elem
 
+(** Per-element transform option, for any element variant. *)
+let element_transform (elem : Element.element) : Element.transform option =
+  match elem with
+  | Element.Line { transform; _ } | Element.Rect { transform; _ }
+  | Element.Circle { transform; _ } | Element.Ellipse { transform; _ }
+  | Element.Polyline { transform; _ } | Element.Polygon { transform; _ }
+  | Element.Path { transform; _ } | Element.Text { transform; _ }
+  | Element.Text_path { transform; _ }
+  | Element.Group { transform; _ } | Element.Layer { transform; _ } -> transform
+  | Element.Live (Element.Compound_shape cs) -> cs.transform
+  | Element.Live (Element.Reference r) -> r.Element.ref_transform
+  | Element.Live (Element.Recorded rec_) -> rec_.Element.rec_transform
+  | Element.Live (Element.Generated gen) -> gen.Element.gen_transform
+
+(** Document-space control-point handle rects [(x, y, w, h)] for the
+    element at [path].
+
+    Each rect is centered at the element-transformed control point and
+    is a constant [handle_size] square, so an element transform MOVES
+    the handles but never SCALES the handle glyphs (they stay a fixed
+    grab size). Returns [[]] for containers (Group/Layer) and
+    Text/Text_path, which carry no control-point squares (mirrors
+    [draw_element_overlay]). The caller draws these under the VIEW
+    (pan/zoom) transform only, NOT the element transform. *)
+let selection_handle_rects (doc : Document.document)
+    (path : Document.element_path) : (float * float * float * float) list =
+  match path with
+  | [] -> []
+  | first :: _ ->
+    (* Resolve the element and collect ancestor transforms (outermost
+       first: layer, then each intermediate group outward to inward). *)
+    let node = ref doc.Document.layers.(first) in
+    let ancestors = ref [] in
+    let abort = ref false in
+    if List.length path > 1 then begin
+      ancestors := [ element_transform !node ];  (* layer *)
+      let rest = List.tl path in
+      let intermediate =
+        List.filteri (fun i _ -> i < List.length rest - 1) rest in
+      List.iter (fun idx ->
+        if not !abort then begin
+          (* A Layer is a container too (Python: [Layer] subclasses
+             [Group]); descend into either's children. *)
+          match !node with
+          | Element.Group { children; _ } | Element.Layer { children; _ } ->
+            node := children.(idx);
+            ancestors := element_transform !node :: !ancestors
+          | _ -> abort := true
+        end
+      ) intermediate;
+      if not !abort then begin
+        match !node with
+        | Element.Group { children; _ } | Element.Layer { children; _ } ->
+          node := children.(List.nth rest (List.length rest - 1))
+        | _ -> abort := true
+      end
+    end;
+    if !abort then []
+    else begin
+      let elem = !node in
+      match elem with
+      | Element.Text _ | Element.Text_path _
+      | Element.Group _ | Element.Layer _ -> []
+      | _ ->
+        (* Apply transforms innermost-first: the element's own
+           transform, then each ancestor outward (layer last) — matching
+           the painter combined CTM. [ancestors] was built outermost
+           first, so reversing it gives innermost-ancestor first. *)
+        let chain =
+          element_transform elem :: List.rev !ancestors in
+        let half = handle_size /. 2.0 in
+        List.map (fun (px, py) ->
+          let (px, py) =
+            List.fold_left (fun (px, py) t ->
+              match t with
+              | Some tr -> Element.apply_point tr px py
+              | None -> (px, py)
+            ) (px, py) chain
+          in
+          (px -. half, py -. half, handle_size, handle_size)
+        ) (control_points elem)
+    end
+
 (** Draw the selection overlay for one element.
 
     Rule: every selected element (except [Text]/[Text_path]) is
@@ -1718,19 +1801,13 @@ let draw_element_overlay cr (elem : Element.element)
        end
      ) selected_cps
    | _ -> ());
-  (* Draw control-point squares for every non-Text, non-container
-     selected element. *)
-  let half = handle_size /. 2.0 in
-  List.iteri (fun i (px, py) ->
-    Cairo.rectangle cr (px -. half) (py -. half) ~w:handle_size ~h:handle_size;
-    if List.mem i selected_cps then
-      Cairo.set_source_rgb cr 0.0 0.47 1.0
-    else
-      Cairo.set_source_rgb cr 1.0 1.0 1.0;
-    Cairo.fill_preserve cr;
-    Cairo.set_source_rgb cr 0.0 0.47 1.0;
-    Cairo.stroke cr
-  ) (control_points elem)
+  (* NOTE: the control-point handle SQUARES are intentionally NOT drawn
+     here. They are drawn by [draw_selection_overlays] via
+     [selection_handle_rects] at a FIXED size under the view (pan/zoom)
+     transform only, so an element transform moves them but never scales
+     the glyphs. The outline trace plus the bezier handles above stay
+     under the element transform (they trace the geometry). *)
+  ()
 
 (* ── Artboard rendering (ARTBOARDS.md §Canvas appearance) ──────────
    Z-order passes, back to front:
@@ -1926,7 +2003,24 @@ let draw_selection_overlays cr (doc : Document.document) =
         | Document.SelKindAll -> false
       in
       draw_element_overlay cr !node ~is_partial cps;
-      Cairo.restore cr
+      Cairo.restore cr;
+      (* Control-point handles: FIXED size at element-transformed
+         positions, drawn under the VIEW (pan/zoom) transform only — the
+         per-element transform was restored above — so the element
+         transform moves the handles but never scales the glyphs. The
+         filled-vs-white rule matches the old in-transform draw: a CP in
+         the selection kind is filled blue, the rest white. *)
+      Cairo.set_line_width cr 1.0;
+      List.iteri (fun i (hx, hy, hw, hh) ->
+        Cairo.rectangle cr hx hy ~w:hw ~h:hh;
+        if Document.selection_kind_contains es.es_kind i then
+          Cairo.set_source_rgb cr 0.0 0.47 1.0
+        else
+          Cairo.set_source_rgb cr 1.0 1.0 1.0;
+        Cairo.fill_preserve cr;
+        Cairo.set_source_rgb cr 0.0 0.47 1.0;
+        Cairo.stroke cr
+      ) (selection_handle_rects doc path)
   ) doc.selection
 
 class canvas_subwindow ~(model : Model.model) ~(controller : Controller.controller)

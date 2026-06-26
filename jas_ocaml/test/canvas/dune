@@ -9,3 +9,7 @@
 (test
  (name opacity_mask_test)
  (libraries jas alcotest))
+
+(test
+ (name selection_handle_rects_test)
+ (libraries jas lablgtk3 alcotest))

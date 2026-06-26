@@ -1859,20 +1859,11 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         }
     }
 
-    // Draw control-point squares for every non-Text, non-container
-    // selected element.
-    let half = handleSize / 2
-    for (i, (px, py)) in elem.controlPointPositions.enumerated() {
-        let r = CGRect(x: px - half, y: py - half, width: handleSize, height: handleSize)
-        if kind.contains(i) {
-            ctx.setFillColor(selectionColor)
-        } else {
-            ctx.setFillColor(.white)
-        }
-        ctx.fill(r)
-        ctx.setStrokeColor(selectionColor)
-        ctx.stroke(r)
-    }
+    // NOTE: the control-point handle SQUARES are intentionally NOT drawn here.
+    // They are drawn by `drawSelectionOverlays` via `selectionHandleRects` at a
+    // FIXED screen size under the view transform only, so an element's transform
+    // moves them but never scales the glyphs. The outline + bezier handles above
+    // stay under the element transform (they trace the geometry).
 }
 
 private func elemChildren(_ e: Element) -> [Element] {
@@ -2056,6 +2047,70 @@ private func drawArtboardDisplayMarks(_ ctx: CGContext, _ doc: Document) {
     }
 }
 
+/// Document-space control-point handle rects for the element at `path`.
+///
+/// Each rect is centered at the element-transformed control point and is a
+/// constant `handleDrawSize` square, so an element's transform MOVES the
+/// handles but never SCALES the handle glyphs (they stay a fixed grab size).
+/// Returns `[]` for containers (Group/Layer) and Text/TextPath, which carry
+/// no control-point squares (mirrors `drawElementOverlay`). The caller draws
+/// these under the VIEW (pan/zoom) transform only, NOT the element transform.
+///
+/// Mirrors the Python reference `selection_handle_rects` (ref commit
+/// 08b3f3a9): transforms are applied innermost-first — the element's own
+/// transform, then each ancestor outward (layer last) — matching the
+/// painter's combined CTM.
+func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
+    guard !path.isEmpty else { return [] }
+    // Resolve the element + collect ancestor transforms (outermost first).
+    var node: Element = .layer(doc.layers[path[0]])
+    var ancestors: [Transform?] = []
+    // A Layer is a Group subclass in the reference, so both `.group` and
+    // `.layer` are valid containers to descend through.
+    func isContainer(_ e: Element) -> Bool {
+        switch e {
+        case .group, .layer: return true
+        default: return false
+        }
+    }
+    if path.count > 1 {
+        ancestors.append(doc.layers[path[0]].transform)  // layer
+        for idx in path[1..<path.count - 1] {
+            guard isContainer(node) else { return [] }
+            let children = elemChildren(node)
+            guard idx < children.count else { return [] }
+            node = children[idx]
+            ancestors.append(node.transform)
+        }
+        guard isContainer(node) else { return [] }
+        let children = elemChildren(node)
+        guard let lastIdx = path.last, lastIdx < children.count else { return [] }
+        node = children[lastIdx]
+    }
+    let elem = node
+    switch elem {
+    case .text, .textPath, .group, .layer: return []
+    default: break
+    }
+    // Apply transforms innermost-first: the element's own transform, then each
+    // ancestor outward (layer last) — matching the painter's combined CTM.
+    let chain: [Transform?] = [elem.transform] + ancestors.reversed()
+    let half = handleDrawSize / 2
+    var rects: [CGRect] = []
+    for (px0, py0) in elem.controlPointPositions {
+        var px = px0
+        var py = py0
+        for t in chain {
+            if let t = t {
+                (px, py) = t.applyPoint(px, py)
+            }
+        }
+        rects.append(CGRect(x: px - half, y: py - half,
+                            width: handleDrawSize, height: handleDrawSize))
+    }
+    return rects
+}
+
 private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil) {
     for es in doc.selection {
         let path = es.path
@@ -2110,6 +2165,19 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
             ctx.strokePath()
         }
         ctx.restoreGState()
+        // Control-point handles: FIXED size at element-transformed positions,
+        // drawn under the VIEW (pan/zoom) transform only — the element
+        // transform was restored above — so the element's transform moves the
+        // handles but never scales the glyphs.
+        ctx.setLineWidth(1.0)
+        ctx.setLineDash(phase: 0, lengths: [])
+        ctx.setStrokeColor(selectionColor)
+        for (i, r) in selectionHandleRects(doc, path).enumerated() {
+            ctx.setFillColor(es.kind.contains(i) ? selectionColor : .white)
+            ctx.fill(r)
+            ctx.setStrokeColor(selectionColor)
+            ctx.stroke(r)
+        }
     }
 }
 
