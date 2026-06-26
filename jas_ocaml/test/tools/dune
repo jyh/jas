@@ -34,6 +34,11 @@
  (libraries jas lablgtk3 alcotest))
 
 (test
+ (name yaml_tool_selection_variants_test)
+ (modules yaml_tool_selection_variants_test)
+ (libraries jas lablgtk3 alcotest))
+
+(test
  (name yaml_tool_pen_test)
  (modules yaml_tool_pen_test)
  (libraries jas lablgtk3 alcotest))
