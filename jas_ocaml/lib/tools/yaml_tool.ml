@@ -1497,7 +1497,46 @@ class yaml_tool (spec : tool_spec) = object (_self)
          the user can change the fill via the Color panel while the tool is
          already active. Mirrors the Rust per-dispatch [sync_global_state]. *)
       _self#bridge_app_state ctrl#model;
-      let ctx = [("event", event)] in
+      (* Build the dispatch ctx mirroring the Rust [YamlTool::dispatch]:
+         [event] plus an [active_document] view-state namespace and the
+         bundle [preferences]. The VIEWPORT tools (Hand, Zoom) capture
+         their pre-drag baseline on mousedown via
+         [active_document.view_offset_x] / [view_offset_y] / [zoom_level],
+         and the Zoom scrubby / marquee branches gate on
+         [preferences.viewport.scrubby_zoom]; without these in ctx those
+         references resolve to Null, so a pan / zoom from a non-identity
+         view would jump from offset 0 and the scrubby branch would never
+         fire. Mirrors the Rust [active_document_payload] (deliberately
+         minimal — only the three view fields the tools read) plus the
+         workspace [preferences] subtree. *)
+      let m = ctrl#model in
+      let active_document : Yojson.Safe.t = `Assoc [
+        ("view_offset_x", `Float m#view_offset_x);
+        ("view_offset_y", `Float m#view_offset_y);
+        ("zoom_level",    `Float m#zoom_level);
+      ] in
+      let workspace = Workspace_loader.load () in
+      let preferences = match workspace with
+        | Some ws ->
+          (match Workspace_loader.json_member "preferences" ws.data with
+           | Some p -> p | None -> `Null)
+        | None -> `Null
+      in
+      (* The Zoom click branch fires [dispatch: { action: zoom_in/out }];
+         that resolves only when the [actions] catalog is threaded into
+         [run_effects] (the dispatch effect no-ops on a `Null catalog).
+         Load it from the bundle the same way Rust pulls [ws.actions()]. *)
+      let actions = match workspace with
+        | Some ws ->
+          (match Workspace_loader.json_member "actions" ws.data with
+           | Some a -> a | None -> `Null)
+        | None -> `Null
+      in
+      let ctx = [
+        ("event", event);
+        ("active_document", active_document);
+        ("preferences", preferences);
+      ] in
       let guard = Doc_primitives.register_document ctrl#document in
       let platform_effects = Yaml_tool_effects.build ctrl in
       (* OP_LOG.md section 9 (Increment 3b-B): this dispatch is a production batch
@@ -1505,7 +1544,7 @@ class yaml_tool (spec : tool_spec) = object (_self)
          doc.* handlers open, naming it with the tool event-handler verb so the
          journal's [name=None] hole is closed for tool gestures. Mirrors the Rust
          [run_effects] action_name at the tool event-handler call. *)
-      Effects.run_effects ~platform_effects
+      Effects.run_effects ~platform_effects ~actions
         ~owner_model:(Some ctrl#model) ~action_name:(Some event_name)
         effects ctx store;
       guard.restore ()
