@@ -776,6 +776,14 @@ mod tests {
         // the blob committed fill=null (hollow). Pins the white/null fill
         // contract cross-language. See BLOB_BRUSH_TOOL.md.
         "blob_paint_fill.json",
+        // Paintbrush paint with app-level options (the paintbrush_*
+        // disconnect gate). app_state sets paintbrush_fidelity:3 (=>
+        // fit_error 5.0, a SMOOTHED fit) + paintbrush_fill_new_strokes:true
+        // + fill_color, routed through sync_global_state. The committed
+        // Path must be filled blue AND smoothed; before the paintbrush_*
+        // keys were bridged the live tool used fit_error=0 (no smoothing)
+        // and dropped the fill. See PAINTBRUSH_TOOL.md.
+        "paintbrush_paint_fill.json",
     ];
 
     /// Build the YamlTool for `tool_id` from the embedded workspace
