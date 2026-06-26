@@ -110,9 +110,15 @@ extension JasAppDelegate {
             // which runs the full activation lifecycle).
             workspace?.activeModel?.requestTool(rest)
         case "action":
-            // action <name> [json]: dispatch a workspace action through the
-            // shared YAML effects pipeline (the generic action runner used
-            // by the panels / menu), with optional trailing JSON params.
+            // action <name> [json]: dispatch a workspace action with optional
+            // trailing JSON params. Routed NATIVE-FIRST (FifoActionRouting):
+            // document-mutating menubar/edit actions (select_all,
+            // delete_selection, ...) are native-intercepted — their
+            // actions.yaml `effects` are log/if stubs, so the generic panel
+            // dispatcher alone would no-op them. FifoActionRouting runs the
+            // SAME native ops the menu/keyboard handlers use and falls through
+            // to the generic dispatcher (LayersPanel.dispatchYamlAction) for
+            // genuine panel / generic-effect actions.
             let ap = rest.split(separator: " ", maxSplits: 1,
                                 omittingEmptySubsequences: true).map(String.init)
             guard let name = ap.first, !name.isEmpty else { return }
@@ -125,8 +131,18 @@ extension JasAppDelegate {
                     params = dict
                 }
             }
+            // new_document needs a fresh canvas appended + activated. The
+            // active model is gone if there are no canvases yet, so handle it
+            // before the activeModel guard (it does not need an active model).
+            if name == "new_document" {
+                // Document() defaults artboards: []; newEmptyDocument() seeds
+                // the at-least-one-artboard invariant, matching
+                // JasCommands' File>New (addCanvas(Model(...newEmptyDocument))).
+                workspace?.addCanvas(Model(document: Document.newEmptyDocument()))
+                return
+            }
             guard let model = workspace?.activeModel else { return }
-            LayersPanel.dispatchYamlAction(name, model: model, params: params)
+            FifoActionRouting.dispatch(name, model: model, params: params)
         default:
             NSLog("test-fifo: unknown command %@", cmd)
         }

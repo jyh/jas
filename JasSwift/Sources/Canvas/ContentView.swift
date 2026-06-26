@@ -260,6 +260,24 @@ public class WorkspaceState: ObservableObject {
         return canvases.first?.model
     }
 
+    /// Add a canvas for `model` and make it active. Mirrors
+    /// `ContentView.addCanvas` (which delegates the actual mutation to this
+    /// state object): if a non-untitled canvas for the same file already
+    /// exists, focus it instead of duplicating; otherwise append + select.
+    /// Exposed on `WorkspaceState` so the test-only FIFO `new_document` path
+    /// (which holds a `WorkspaceState` but not the SwiftUI `addCanvas`
+    /// closure) can open a fresh canvas through the same logic.
+    public func addCanvas(_ model: Model) {
+        if !model.filename.hasPrefix("Untitled-"),
+           let existing = canvases.first(where: { $0.model.filename == model.filename }) {
+            selectedTab = existing.id
+            return
+        }
+        let entry = CanvasEntry(model: model)
+        canvases.append(entry)
+        selectedTab = entry.id
+    }
+
     public var modifiedModels: [Model] {
         canvases.compactMap { $0.model.isModified ? $0.model : nil }
     }
@@ -642,15 +660,10 @@ public struct ContentView: View {
 
     /// Add a canvas for the given model. If a canvas for the same file
     /// already exists (non-untitled), focus it instead of creating a duplicate.
+    /// Delegates to `WorkspaceState.addCanvas` so the same open logic backs
+    /// both this SwiftUI entry point and the test-only FIFO `new_document`.
     private func addCanvas(_ model: Model) {
-        if !model.filename.hasPrefix("Untitled-"),
-           let existing = workspace.canvases.first(where: { $0.model.filename == model.filename }) {
-            workspace.selectedTab = existing.id
-            return
-        }
-        let entry = CanvasEntry(model: model)
-        workspace.canvases.append(entry)
-        workspace.selectedTab = entry.id
+        workspace.addCanvas(model)
     }
 
     /// Open a YAML dialog by id from a menu command. Builds liveState
