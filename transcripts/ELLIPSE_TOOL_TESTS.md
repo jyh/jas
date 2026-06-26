@@ -28,7 +28,9 @@ _None remaining — both prior wiring blockers resolved by commit
 
 ## Automation coverage
 
-_Last synced: 2026-04-30_
+_Last synced: 2026-06-25._
+
+**Cross-app gesture-seam coverage (added 2026-06-25).** The per-tool seam cases (press/drag/release → committed shape, driving the production tool from the bundle) now live in a combined geometry seam-test file in every app: `JasSwift/Tests/Tools/YamlToolGeometryTests.swift`, `jas_ocaml/test/tools/yaml_tool_geometry_test.ml`, `jas/tools/yaml_tool_geometry_test.py` (+ the Rust `*_parity` reference in `jas_dioxus/src/tools/yaml_tool.rs`). Ported 1:1 from the Rust cases, mutation-proven non-vacuous; cross-language gated by the `draw_*` gesture corpus. The Ellipse tool reads no app-level `state.*`, so the app-state→tool-store bridge does not apply. **Correction:** the listed Swift `CanvasTests.swift` / OCaml `tool_interaction_test.ml` / Python `TestEllipseTool` touch the ellipse only incidentally, not as dedicated gesture-seam tests.
 
 **Python — `tools/yaml_tool_test.py::TestEllipseTool`** covers
 draw / zero-size / negative-drag against the workspace-loaded spec.

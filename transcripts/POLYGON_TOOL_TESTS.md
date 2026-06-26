@@ -20,7 +20,9 @@ sides are **not-yet-implemented** (ENH entries).
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-06-25._
+
+**Cross-app gesture-seam coverage (added 2026-06-25).** The per-tool seam cases (press/drag/release → committed shape, driving the production tool from the bundle) now live in a combined geometry seam-test file in every app: `JasSwift/Tests/Tools/YamlToolGeometryTests.swift`, `jas_ocaml/test/tools/yaml_tool_geometry_test.ml`, `jas/tools/yaml_tool_geometry_test.py` (+ the Rust `*_parity` reference in `jas_dioxus/src/tools/yaml_tool.rs`). Ported 1:1 from the Rust cases, mutation-proven non-vacuous; cross-language gated by the `draw_*` gesture corpus. The Polygon tool reads no app-level `state.*`, so the app-state→tool-store bridge does not apply. **Correction:** the listed `RegularShapes` tests cover the shape-generation MATH, not the tool gesture-seam (press/drag/release commit).
 
 **Python — `jas/geometry/path_ops_test.py::TestRegularShapes`** (~2 tests)
 - `regular_polygon_points` for a triangle and the degenerate same-
