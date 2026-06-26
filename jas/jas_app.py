@@ -1267,6 +1267,30 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, _resync_color_panel)
         QTimer.singleShot(0, _resync_toolbar_fs)
 
+        # Re-sync the Stroke panel WEIGHT from the selection on every
+        # document change (decision-5): the weight field shows the
+        # selected element's stroke.width (its baked / effective width
+        # after the scale counter-scale work), not the YAML default.
+        # Busy-flag guards the resync re-entry, mirroring the color /
+        # paragraph panel syncs above.
+        stroke_busy = {"flag": False}
+
+        def _resync_stroke_panel(_doc=None):
+            if stroke_busy["flag"]:
+                return
+            from workspace_interpreter.effects import (
+                sync_stroke_panel_from_selection,
+            )
+            stroke_busy["flag"] = True
+            try:
+                sync_stroke_panel_from_selection(self._yaml_state, model)
+            finally:
+                stroke_busy["flag"] = False
+
+        model.on_document_changed(_resync_stroke_panel)
+        _resync_stroke_panel()
+        QTimer.singleShot(0, _resync_stroke_panel)
+
         tab_label()
         self._update_canvas_logo()
 
