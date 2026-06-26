@@ -352,6 +352,23 @@ pub(crate) const BRIDGED_STATE_KEYS: &[&str] = &[
     "paintbrush_keep_selected",
     "paintbrush_edit_selected_paths",
     "paintbrush_edit_within",
+    // Magic Wand tool options (state.magic_wand_*). All declared in
+    // state.yaml; none are handler-written (the wand is a single-click
+    // tool with no tool-scoped state), so they are safe to bridge.
+    // Without these the live wand commits against MagicWandConfig::
+    // default() and IGNORES every Magic Wand Panel adjustment — a user
+    // who tightens the fill tolerance or unchecks Fill Color sees no
+    // effect on the next click. Same self-contained-store disconnect
+    // the blob/paintbrush fill bug had. See MAGIC_WAND_TOOL.md.
+    "magic_wand_fill_color",
+    "magic_wand_fill_tolerance",
+    "magic_wand_stroke_color",
+    "magic_wand_stroke_tolerance",
+    "magic_wand_stroke_weight",
+    "magic_wand_stroke_weight_tolerance",
+    "magic_wand_opacity",
+    "magic_wand_opacity_tolerance",
+    "magic_wand_blending_mode",
 ];
 
 impl CanvasTool for YamlTool {
@@ -6353,5 +6370,413 @@ mod tests {
             model.view_offset_x,
         );
         assert!(!model.can_undo(), "a view-only zoom must leave no undo step");
+    }
+
+    // ── Magic Wand gesture seam ─────────────────────────────────────
+    //
+    // The Magic Wand is a single-click tool: on_mousedown hit-tests the
+    // cursor, and (on a hit) fires `doc.magic_wand.apply` with a mode
+    // chosen from the modifier (plain=replace, Shift=add, Alt=subtract);
+    // a click on empty space clears the selection. These tests DRIVE the
+    // tool through the CanvasTool seam (on_press/on_release) — NOT the
+    // doc.magic_wand.apply effect directly — so they prove the YAML wiring
+    // (hit_test → seed path → mode selection) end to end. The effect
+    // itself is pinned separately by the doc.magic_wand.apply tests in
+    // effects.rs; here we own the seam.
+    //
+    // The fixture is the same three-rect model the effect tests use
+    // (red @[0,0], red @[0,1], blue @[0,2]); hit_test resolves against
+    // the registered document headlessly (YamlTool::dispatch registers
+    // model.document() for the duration of each event — the same path the
+    // selection-tool seam tests rely on). Rect bounds at the identity
+    // view: [0,0]=(0,0,10,10), [0,1]=(20,0,10,10), [0,2]=(40,0,10,10), so
+    // screen (5,5)/(25,5)/(45,5) hit rects 0/1/2 and (100,100) is empty.
+    //
+    // ── LIVE BUG found + fixed ──
+    // The wand config (state.magic_wand_* — tolerance, match-by toggles)
+    // is APP-LEVEL state. doc.magic_wand.apply reads it via eval_expr
+    // against the tool's own StateStore. But the production bridge
+    // (CanvasTool::sync_global_state, fed by build_tool_state_map) only
+    // copies keys listed in BRIDGED_STATE_KEYS into the tool store, and
+    // the nine magic_wand_* keys were NOT in that allowlist. So the LIVE
+    // wand always fell back to MagicWandConfig::default() and silently
+    // IGNORED every Magic Wand Panel adjustment (tighten the fill
+    // tolerance, uncheck Fill Color → no effect on the next click). This
+    // is the same self-contained-store disconnect the blob/paintbrush
+    // fill bug had. Fix: the nine magic_wand_* keys were added to
+    // BRIDGED_STATE_KEYS (above), so the live tool now honours the panel
+    // AND the seam test below can seed a NON-default config through the
+    // real bridge. The `..._respects_bridged_nondefault_config` case is
+    // the regression gate: it routes magic_wand_fill_color=false through
+    // sync_global_state and proves it changes the wand result — flip the
+    // key back out of the allowlist and that test fails.
+
+    /// Load the real Magic Wand tool from the embedded workspace bundle,
+    /// the same path the running app uses.
+    fn magic_wand_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("magic_wand")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// Three rects in one layer — red @[0,0], red @[0,1], blue @[0,2] —
+    /// each 10x10 with an identical 1pt black stroke. Mirrors the
+    /// effect-level make_model_three_rects_red_red_blue() fixture so the
+    /// seam tests pin the SAME geometry the effect tests assert against.
+    fn magic_wand_seam_model() -> Model {
+        use crate::geometry::element::Stroke;
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        let blue = Fill::new(Color::rgb(0.0, 0.0, 1.0));
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |fill: Fill, x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill: Some(fill),
+            stroke: Some(stroke.clone()),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![
+                std::rc::Rc::new(make(red.clone(), 0.0)),
+                std::rc::Rc::new(make(red, 20.0)),
+                std::rc::Rc::new(make(blue, 40.0)),
+            ],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    /// The full default Magic Wand config as the workspace ships it,
+    /// routed through the PRODUCTION bridge (sync_global_state) so the
+    /// tool store carries it exactly as the live canvas would. Without
+    /// this, the wand would still work only because MagicWandConfig::
+    /// default() happens to agree with the workspace defaults — these
+    /// tests seed explicitly so they remain meaningful if either drifts.
+    fn seed_magic_wand_defaults(tool: &mut YamlTool) {
+        use serde_json::json;
+        let mut m = serde_json::Map::new();
+        m.insert("magic_wand_fill_color".into(), json!(true));
+        m.insert("magic_wand_fill_tolerance".into(), json!(32));
+        m.insert("magic_wand_stroke_color".into(), json!(true));
+        m.insert("magic_wand_stroke_tolerance".into(), json!(32));
+        m.insert("magic_wand_stroke_weight".into(), json!(true));
+        m.insert("magic_wand_stroke_weight_tolerance".into(), json!(5.0));
+        m.insert("magic_wand_opacity".into(), json!(true));
+        m.insert("magic_wand_opacity_tolerance".into(), json!(5));
+        m.insert("magic_wand_blending_mode".into(), json!(false));
+        tool.sync_global_state(&m);
+    }
+
+    /// Selected element paths as a set, for order-independent assertions.
+    fn selection_paths(model: &Model) -> std::collections::HashSet<Vec<usize>> {
+        model.document().selection.iter().map(|es| es.path.clone()).collect()
+    }
+
+    #[test]
+    fn magic_wand_parity_click_red_selects_both_reds_not_blue() {
+        let Some(mut tool) = magic_wand_yaml_tool() else { return };
+        let mut model = magic_wand_seam_model();
+        seed_magic_wand_defaults(&mut tool);
+
+        // Plain click on the first red rect at screen (5,5) → replace.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+
+        let paths = selection_paths(&model);
+        assert!(paths.contains(&vec![0, 0]), "seed red [0,0] selected, got {:?}", paths);
+        assert!(paths.contains(&vec![0, 1]), "matching red [0,1] selected, got {:?}", paths);
+        assert!(!paths.contains(&vec![0, 2]), "blue [0,2] must NOT be selected, got {:?}", paths);
+        assert_eq!(paths.len(), 2, "exactly the two reds, got {:?}", paths);
+    }
+
+    #[test]
+    fn magic_wand_parity_click_blue_selects_only_blue() {
+        let Some(mut tool) = magic_wand_yaml_tool() else { return };
+        let mut model = magic_wand_seam_model();
+        seed_magic_wand_defaults(&mut tool);
+
+        // Plain click on the blue rect at screen (45,5) → replace.
+        tool.on_press(&mut model, 45.0, 5.0, false, false);
+        tool.on_release(&mut model, 45.0, 5.0, false, false);
+
+        let paths = selection_paths(&model);
+        assert_eq!(
+            paths,
+            std::collections::HashSet::from([vec![0, 2]]),
+            "clicking blue selects ONLY blue [0,2] (no red matches), got {:?}",
+            paths,
+        );
+    }
+
+    #[test]
+    fn magic_wand_parity_shift_click_unions_alt_click_subtracts() {
+        let Some(mut tool) = magic_wand_yaml_tool() else { return };
+        let mut model = magic_wand_seam_model();
+        seed_magic_wand_defaults(&mut tool);
+
+        // Pre-select the blue rect [0,2].
+        Controller::set_selection(
+            &mut model,
+            vec![crate::document::document::ElementSelection::all(vec![0, 2])],
+        );
+
+        // Shift+click red [0,0] → ADD: {2} ∪ {0,1} = {0,1,2}.
+        tool.on_press(&mut model, 5.0, 5.0, true, false);
+        tool.on_release(&mut model, 5.0, 5.0, true, false);
+        assert_eq!(
+            selection_paths(&model),
+            std::collections::HashSet::from([vec![0, 0], vec![0, 1], vec![0, 2]]),
+            "Shift+click unions the wand result onto the existing selection",
+        );
+
+        // Alt+click red [0,0] → SUBTRACT the wand result {0,1}: leaves {2}.
+        tool.on_press(&mut model, 5.0, 5.0, false, true);
+        tool.on_release(&mut model, 5.0, 5.0, false, true);
+        assert_eq!(
+            selection_paths(&model),
+            std::collections::HashSet::from([vec![0, 2]]),
+            "Alt+click subtracts the wand result {{0,1}}, leaving blue {{2}}",
+        );
+    }
+
+    #[test]
+    fn magic_wand_parity_click_empty_clears_selection() {
+        let Some(mut tool) = magic_wand_yaml_tool() else { return };
+        let mut model = magic_wand_seam_model();
+        seed_magic_wand_defaults(&mut tool);
+
+        // Start with a non-empty selection.
+        Controller::set_selection(
+            &mut model,
+            vec![crate::document::document::ElementSelection::all(vec![0, 1])],
+        );
+        assert!(!model.document().selection.is_empty());
+
+        // Plain click on empty canvas (100,100) → selection cleared.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "plain click on empty canvas clears the selection, got {:?}",
+            selection_paths(&model),
+        );
+    }
+
+    #[test]
+    fn magic_wand_parity_respects_bridged_nondefault_config() {
+        // REGRESSION GATE for the live state-bridge fix. With Fill Color
+        // turned OFF and only stroke/weight/opacity matching the seed, the
+        // blue rect — which has the SAME 1pt black stroke and opacity as
+        // the reds — now also matches, so a click on a red selects ALL
+        // THREE rects. This non-default config only reaches the tool via
+        // sync_global_state, and only because magic_wand_* is now in
+        // BRIDGED_STATE_KEYS. Remove the key from the allowlist and the
+        // config falls back to MagicWandConfig::default() (Fill ON) → the
+        // blue stops matching → this assertion fails. That is the bridge
+        // proof.
+        let Some(mut tool) = magic_wand_yaml_tool() else { return };
+        let mut model = magic_wand_seam_model();
+
+        let mut m = serde_json::Map::new();
+        m.insert("magic_wand_fill_color".into(), serde_json::json!(false));
+        m.insert("magic_wand_fill_tolerance".into(), serde_json::json!(32));
+        m.insert("magic_wand_stroke_color".into(), serde_json::json!(true));
+        m.insert("magic_wand_stroke_tolerance".into(), serde_json::json!(32));
+        m.insert("magic_wand_stroke_weight".into(), serde_json::json!(true));
+        m.insert("magic_wand_stroke_weight_tolerance".into(), serde_json::json!(5.0));
+        m.insert("magic_wand_opacity".into(), serde_json::json!(true));
+        m.insert("magic_wand_opacity_tolerance".into(), serde_json::json!(5));
+        m.insert("magic_wand_blending_mode".into(), serde_json::json!(false));
+        tool.sync_global_state(&m);
+
+        // Click red [0,0]. Fill is ignored, stroke+weight+opacity are
+        // identical across all three rects → all three match.
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+
+        assert_eq!(
+            selection_paths(&model),
+            std::collections::HashSet::from([vec![0, 0], vec![0, 1], vec![0, 2]]),
+            "with Fill Color OFF (bridged), the wand matches on shared \
+             stroke/weight/opacity → all three rects; got {:?}",
+            selection_paths(&model),
+        );
+    }
+
+    // ── Eyedropper gesture seam ─────────────────────────────────────
+    //
+    // The Eyedropper is a single-click tool: on_mousedown hit-tests, and
+    // (on a hit) fires `doc.eyedropper.sample` (plain) or
+    // `doc.eyedropper.apply_loaded` (Alt). doc.eyedropper.sample snapshots
+    // the source element's appearance into state.eyedropper_cache AND —
+    // when the selection is non-empty — writes that appearance to every
+    // eligible selected target. A click on empty space is a no-op.
+    //
+    // These tests DRIVE the tool through the CanvasTool seam, not the
+    // effect directly. The cleanest mutation-provable assertion is the
+    // document mutation: pre-select a target, click a coloured source,
+    // and assert the target's fill becomes the source colour. The
+    // eyedropper toggles (state.eyedropper_*) all default true and
+    // EyedropperConfig::default() agrees, so the basic fill-copy path
+    // needs no bridge seeding (unlike the Magic Wand config above) — the
+    // cache write goes straight to the tool store and the config falls
+    // back to all-on. The empty-space click is asserted to be a true
+    // no-op (document unchanged, no undo step).
+    //
+    // Fixture: source rect [0,0] = green fill (0,0.6,0.2), target rect
+    // [0,1] = empty fill, both at the identity view so screen (5,5) hits
+    // the source and screen (25,5) hits the target.
+
+    /// Load the real Eyedropper tool from the embedded workspace bundle.
+    fn eyedropper_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("eyedropper")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// The exact green the eyedropper fixture source carries. A distinctive
+    /// non-primary colour so the apply assertion can't accidentally pass
+    /// against a stray black/red default.
+    fn eyedropper_source_color() -> Color {
+        Color::rgb(0.0, 0.6, 0.2)
+    }
+
+    /// Two rects in one layer: source [0,0] green-filled, target [0,1]
+    /// fill-less. Both 10x10 at the identity view, side by side.
+    fn eyedropper_seam_model() -> Model {
+        use crate::geometry::element::Stroke;
+        let green = Fill::new(eyedropper_source_color());
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let make = |fill: Option<Fill>, x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0,
+            fill,
+            stroke: Some(stroke.clone()),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![
+                std::rc::Rc::new(make(Some(green), 0.0)),
+                std::rc::Rc::new(make(None, 20.0)),
+            ],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        Model::new(
+            Document {
+                layers: vec![layer],
+                selected_layer: 0,
+                selection: Vec::new(),
+                ..Document::default()
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn eyedropper_parity_click_source_with_selection_copies_fill_to_target() {
+        let Some(mut tool) = eyedropper_yaml_tool() else { return };
+        let mut model = eyedropper_seam_model();
+
+        // Pre-select the empty target [0,1]; the source [0,0] is clicked.
+        Controller::set_selection(
+            &mut model,
+            vec![crate::document::document::ElementSelection::all(vec![0, 1])],
+        );
+        assert!(
+            model.document().get_element(&vec![0, 1]).unwrap().fill().is_none(),
+            "precondition: target starts with no fill",
+        );
+
+        // Plain click on the green source at screen (5,5) → sample, which
+        // (selection non-empty) also writes the appearance to [0,1].
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        let fill = target.fill().expect("target now carries the sampled fill");
+        assert_eq!(
+            fill.color,
+            eyedropper_source_color(),
+            "eyedropper sample must copy the EXACT source green (0,0.6,0.2) \
+             into the selected target, got {:?}",
+            fill.color,
+        );
+    }
+
+    #[test]
+    fn eyedropper_parity_alt_click_applies_cached_color_to_target() {
+        let Some(mut tool) = eyedropper_yaml_tool() else { return };
+        let mut model = eyedropper_seam_model();
+
+        // First, plain-click the source with NO selection → loads the
+        // cache (and mutates nothing, since the selection is empty).
+        tool.on_press(&mut model, 5.0, 5.0, false, false);
+        tool.on_release(&mut model, 5.0, 5.0, false, false);
+        assert!(
+            model.document().get_element(&vec![0, 1]).unwrap().fill().is_none(),
+            "a sample with no selection must not mutate other elements",
+        );
+
+        // Now Alt+click the empty target [0,1] at screen (25,5) →
+        // apply_loaded writes the cached green into the target.
+        tool.on_press(&mut model, 25.0, 5.0, false, true);
+        tool.on_release(&mut model, 25.0, 5.0, false, true);
+
+        let target = model.document().get_element(&vec![0, 1]).unwrap();
+        let fill = target.fill().expect("apply_loaded wrote the cached fill");
+        assert_eq!(
+            fill.color,
+            eyedropper_source_color(),
+            "Alt+click must apply the cached green (0,0.6,0.2) to the target, \
+             got {:?}",
+            fill.color,
+        );
+    }
+
+    #[test]
+    fn eyedropper_parity_click_empty_is_a_noop() {
+        let Some(mut tool) = eyedropper_yaml_tool() else { return };
+        let mut model = eyedropper_seam_model();
+
+        // Snapshot the document before the gesture for an exact-equality
+        // no-op proof.
+        let before = format!("{:?}", model.document().layers);
+
+        // Plain click on empty canvas (100,100) → no hit → no-op.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+
+        assert_eq!(
+            format!("{:?}", model.document().layers),
+            before,
+            "a click on empty space must not mutate the document",
+        );
+        // The source fill is untouched; the target is still fill-less.
+        assert_eq!(
+            model.document().get_element(&vec![0, 0]).unwrap().fill().unwrap().color,
+            eyedropper_source_color(),
+        );
+        assert!(
+            model.document().get_element(&vec![0, 1]).unwrap().fill().is_none(),
+            "target remains fill-less after an empty-space click",
+        );
     }
 }
