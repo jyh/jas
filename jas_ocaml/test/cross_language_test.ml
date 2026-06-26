@@ -307,25 +307,30 @@ let run_gesture_model (tc : Yojson.Safe.t) : Jas.Model.model =
   let ctrl = Jas.Controller.create ~model () in
   let ctx = make_gesture_ctx model ctrl in
   let tool = build_gesture_yaml_tool (tc |> member "tool" |> to_string) in
-  (* Optional [app_state] precondition (e.g. blob_paint_fill): the case sets
-     app-level state the commit reads, such as {fill_color, blob_brush_*}.
-     The OCaml production bridge ([Yaml_tool.bridge_app_state]) reads
-     [fill_color] from the Model active default fill, so the precondition is
-     applied by setting that PRODUCTION source on the Model — NOT by poking
-     the tool store. [bridge_app_state] then delivers it (and seeds the
-     blob_brush_* tip params from the workspace defaults the fixture mirrors)
-     exactly as the canvas does per-dispatch. This routes through the same
-     production path the live app uses; a blob paint without it would commit
-     fill=None (hollow). Mirrors the Rust runner sync_global_state call. *)
+  (* Optional [app_state] precondition (e.g. blob_paint_fill,
+     paintbrush_paint_fill): the case sets app-level state the commit reads,
+     such as {fill_color, blob_brush_*, paintbrush_*}. The OCaml production
+     bridge ([Yaml_tool.bridge_app_state]) reads [fill_color] from the Model
+     active default fill, so the fill precondition is applied by setting that
+     PRODUCTION source on the Model — NOT by poking the tool store. The rest
+     of the case app_state is passed to the bridge as [~overrides], which the
+     bridge FILTERS through the same allowlist (a non-bridged key is dropped)
+     — exactly mirroring the Rust runner passing the whole app_state map to
+     [sync_global_state], which itself filters by BRIDGED_STATE_KEYS. This is
+     what lets a case honor an option set AWAY from its workspace default
+     (paintbrush_fill_new_strokes:true, whose default is false); without it
+     the bridge would seed only the false default and the paintbrush would
+     commit an unfilled path. A blob/paintbrush paint without the bridge at
+     all would commit fill=None (hollow). *)
   (match tc |> member "app_state" with
-   | `Assoc _ as app_state ->
-     (match app_state |> member "fill_color" with
+   | `Assoc overrides ->
+     (match member "fill_color" (`Assoc overrides) with
       | `String hex ->
         (match Jas.Element.color_from_hex hex with
          | Some color -> model#set_default_fill (Some (Jas.Element.make_fill color))
          | None -> ())
       | _ -> ());
-     tool#bridge_app_state model
+     tool#bridge_app_state ~overrides model
    | _ -> ());
   tool#activate ctx;
   let bool_field ev key =
@@ -2673,6 +2678,19 @@ let () =
          cross-language. See BLOB_BRUSH_TOOL.md. *)
       Alcotest.test_case "blob_paint_fill gesture" `Quick (fun () ->
         run_gesture_fixture "blob_paint_fill.json");
+      (* Paintbrush paint with app-level options (the paintbrush_*
+         disconnect gate). The case sets [app_state]:
+         {paintbrush_fidelity:3, paintbrush_fill_new_strokes:true,
+         fill_color:#0000ff}, routed through the production
+         [Yaml_tool.bridge_app_state] bridge (fill_color via the Model
+         default fill, the paintbrush_* keys via the allowlisted overrides).
+         fidelity=3 maps to fit_error 5.0 (a SMOOTHED fit: MoveTo + a few
+         CurveTos, NOT a jagged over-fit), and fill_new_strokes=true fills
+         the Path blue. Before the paintbrush_* keys were bridged the live
+         tool used fit_error=0 (no smoothing) and dropped the fill. See
+         PAINTBRUSH_TOOL.md. *)
+      Alcotest.test_case "paintbrush_paint_fill gesture" `Quick (fun () ->
+        run_gesture_fixture "paintbrush_paint_fill.json");
     ];
 
     (* Action equivalence corpus (CROSS_LANGUAGE_TESTING.md section 3b):

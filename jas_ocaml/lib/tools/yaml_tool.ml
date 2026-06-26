@@ -1370,6 +1370,17 @@ let bridged_state_keys = [
   "blob_brush_fidelity";
   "blob_brush_keep_selected";
   "blob_brush_merge_only_with_selection";
+  (* Paintbrush tool options, the state-dot-paintbrush family. All
+     declared in state.yaml; none are handler-written (the runtime edit
+     state is tool-scoped under tool-dot-paintbrush), so they are safe to
+     bridge. Without these the live paintbrush commits with fit_error=0
+     (no smoothing), ignores fill_new_strokes, and the Alt-edit threshold
+     collapses to 0. Mirrors the Rust BRIDGED_STATE_KEYS paintbrush block. *)
+  "paintbrush_fidelity";
+  "paintbrush_fill_new_strokes";
+  "paintbrush_keep_selected";
+  "paintbrush_edit_selected_paths";
+  "paintbrush_edit_within";
 ]
 
 (** Memoized workspace [state] defaults, restricted to the bridged keys.
@@ -1412,7 +1423,7 @@ class yaml_tool (spec : tool_spec) = object (_self)
        does not carry by default (blob brush tip shape, fill, fidelity). *)
     State_store.set store key value
 
-  method bridge_app_state (model : Model.model) : unit =
+  method bridge_app_state ?(overrides = []) (model : Model.model) : unit =
     (* Bridge an ALLOWLIST of app-level keys into this tool global
        [state.*] namespace ([State_store.set] writes the global scope,
        never a tool scope) so commit effects read LIVE document values
@@ -1430,17 +1441,41 @@ class yaml_tool (spec : tool_spec) = object (_self)
        Then write [fill_color] from the Model active default fill, falling
        back to white "#ffffff" (the workspace default) when there is no
        default fill — NOT null. Genuine no-fill is a separate explicit-clear
-       case out of scope here. *)
+       case out of scope here.
+
+       [overrides] supplies per-call app-level values (the gesture corpus
+       case app_state, the live app per-dispatch state map): each pair is
+       written only if its key is in [bridged_state_keys], so this stays an
+       ALLOWLIST — a non-bridged key in [overrides] is dropped, never
+       written to the global namespace. This is how a case honors an option
+       set AWAY from its workspace default (e.g. paintbrush_fill_new_strokes
+       = true, whose default is false). Mirrors the Rust runner passing the
+       whole app_state map through [sync_global_state], which itself filters
+       by the allowlist. Applied AFTER the default-seed so an override wins,
+       and the [fill_color] override (if any) is honored below. *)
     List.iter (fun (key, default_val) ->
       if State_store.get store key = `Null then
         State_store.set store key default_val
     ) (Lazy.force bridged_state_defaults);
-    let fill_value =
-      match model#default_fill with
-      | Some f -> `String ("#" ^ Element.color_to_hex f.Element.fill_color)
-      | None -> `String "#ffffff"
+    List.iter (fun (key, value) ->
+      if List.mem key bridged_state_keys then
+        State_store.set store key value
+    ) overrides;
+    (* [fill_color] comes from the live document default fill unless an
+       allowlisted override supplied it above; only fall back to the Model
+       fill / white when the override did not set it. *)
+    let override_fill =
+      List.mem "fill_color" bridged_state_keys
+      && List.mem_assoc "fill_color" overrides
     in
-    State_store.set store "fill_color" fill_value
+    if not override_fill then begin
+      let fill_value =
+        match model#default_fill with
+        | Some f -> `String ("#" ^ Element.color_to_hex f.Element.fill_color)
+        | None -> `String "#ffffff"
+      in
+      State_store.set store "fill_color" fill_value
+    end
 
   method private dispatch
       (event_name : string) (event : Yojson.Safe.t)
