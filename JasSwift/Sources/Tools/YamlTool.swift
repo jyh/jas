@@ -141,6 +141,23 @@ let bridgedStateKeys: [String] = [
     "paintbrush_keep_selected",
     "paintbrush_edit_selected_paths",
     "paintbrush_edit_within",
+    // Magic Wand tool options (state.magic_wand_*). All declared in
+    // state.yaml; none are handler-written (the wand is a single-click
+    // tool with no tool-scoped state), so they are safe to bridge.
+    // Without these the live wand commits against the default
+    // MagicWandConfig and IGNORES every Magic Wand Panel adjustment — a
+    // user who tightens the fill tolerance or unchecks Fill Color sees no
+    // effect on the next click. Same self-contained-store disconnect the
+    // blob/paintbrush fill bug had. See MAGIC_WAND_TOOL.md.
+    "magic_wand_fill_color",
+    "magic_wand_fill_tolerance",
+    "magic_wand_stroke_color",
+    "magic_wand_stroke_tolerance",
+    "magic_wand_stroke_weight",
+    "magic_wand_stroke_weight_tolerance",
+    "magic_wand_opacity",
+    "magic_wand_opacity_tolerance",
+    "magic_wand_blending_mode",
 ]
 
 /// YAML-driven tool. Holds a parsed ToolSpec and a private StateStore

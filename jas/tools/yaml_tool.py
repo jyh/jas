@@ -66,6 +66,24 @@ BRIDGED_STATE_KEYS: tuple[str, ...] = (
     "paintbrush_keep_selected",
     "paintbrush_edit_selected_paths",
     "paintbrush_edit_within",
+    # Magic Wand tool options (state.magic_wand_*). All declared in
+    # state.yaml; none are handler-written (the wand operates on a
+    # single click with no tool-local state), so they are safe to
+    # bridge. Without these the live wand falls back to
+    # MagicWandConfig() defaults and silently IGNORES every Magic
+    # Wand Panel adjustment (tighten the fill tolerance, uncheck Fill
+    # Color -> no effect on the next click) — the same self-contained-
+    # store disconnect the blob/paintbrush fill bug had. Order mirrors
+    # Rust's BRIDGED_STATE_KEYS.
+    "magic_wand_fill_color",
+    "magic_wand_fill_tolerance",
+    "magic_wand_stroke_color",
+    "magic_wand_stroke_tolerance",
+    "magic_wand_stroke_weight",
+    "magic_wand_stroke_weight_tolerance",
+    "magic_wand_opacity",
+    "magic_wand_opacity_tolerance",
+    "magic_wand_blending_mode",
 )
 
 # Workspace defaults for the bridged keys, seeded into a fresh tool
@@ -93,6 +111,19 @@ _BRIDGED_STATE_DEFAULTS: dict = {
     "paintbrush_keep_selected": True,
     "paintbrush_edit_selected_paths": True,
     "paintbrush_edit_within": 12,
+    # Magic Wand defaults (workspace/state.yaml). Seeded so a fresh
+    # tool store reads a sane wand config even before any app-state
+    # bridge; the per-dispatch bridge overlays live panel values on
+    # top (skipping None).
+    "magic_wand_fill_color": True,
+    "magic_wand_fill_tolerance": 32,
+    "magic_wand_stroke_color": True,
+    "magic_wand_stroke_tolerance": 32,
+    "magic_wand_stroke_weight": True,
+    "magic_wand_stroke_weight_tolerance": 5.0,
+    "magic_wand_opacity": True,
+    "magic_wand_opacity_tolerance": 5,
+    "magic_wand_blending_mode": False,
 }
 
 

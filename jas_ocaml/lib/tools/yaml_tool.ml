@@ -1381,6 +1381,24 @@ let bridged_state_keys = [
   "paintbrush_keep_selected";
   "paintbrush_edit_selected_paths";
   "paintbrush_edit_within";
+  (* Magic Wand tool options, the state-dot-magic-wand family. All
+     declared in state.yaml; none are handler-written (the wand has no
+     tool-scoped runtime edit state), so they are safe to bridge. Without
+     these the live wand commit reads the empty tool store and falls back
+     to the default match config, so it SILENTLY IGNORES every Magic Wand
+     Panel adjustment (tighten the fill tolerance, uncheck Fill Color — no
+     effect on the next click). Same self-contained-store disconnect the
+     blob/paintbrush fill bug had. Mirrors the Rust BRIDGED_STATE_KEYS
+     magic_wand block. *)
+  "magic_wand_fill_color";
+  "magic_wand_fill_tolerance";
+  "magic_wand_stroke_color";
+  "magic_wand_stroke_tolerance";
+  "magic_wand_stroke_weight";
+  "magic_wand_stroke_weight_tolerance";
+  "magic_wand_opacity";
+  "magic_wand_opacity_tolerance";
+  "magic_wand_blending_mode";
 ]
 
 (** Memoized workspace [state] defaults, restricted to the bridged keys.
