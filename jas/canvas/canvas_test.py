@@ -705,5 +705,41 @@ class SelectionHandleRectsTest(absltest.TestCase):
         self.assertEqual(selection_handle_rects(doc, (0, 0)), [])
 
 
+class SelectionOutlineScaleTest(absltest.TestCase):
+    """The selection OUTLINE + bezier handles are drawn under the element
+    transform; their fixed pen widths / radii are divided by
+    `selection_outline_scale(doc, path)` (= sqrt(|det|) of the combined
+    transform) so the element transform never thickens them. 1x for no
+    transform, 2x for a uniform 2x scale, geometric mean for non-uniform.
+    """
+
+    def _doc_with(self, elem):
+        from document.document import Document, ElementSelection
+        layer = Layer(children=(elem,), name="L0")
+        return Document(layers=(layer,),
+                        selection=frozenset({ElementSelection.all((0, 0))}))
+
+    def test_identity_scale_is_one(self):
+        from canvas.canvas import selection_outline_scale
+        rect = Rect(x=0, y=0, width=10, height=10)
+        self.assertEqual(
+            selection_outline_scale(self._doc_with(rect), (0, 0)), 1.0)
+
+    def test_uniform_2x_scale(self):
+        from canvas.canvas import selection_outline_scale
+        rect = Rect(x=0, y=0, width=10, height=10,
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        self.assertEqual(
+            selection_outline_scale(self._doc_with(rect), (0, 0)), 2.0)
+
+    def test_nonuniform_geometric_mean(self):
+        from canvas.canvas import selection_outline_scale
+        # det = 2 * 8 = 16 -> sqrt = 4.
+        rect = Rect(x=0, y=0, width=10, height=10,
+                    transform=Transform(2, 0, 0, 8, 0, 0))
+        self.assertEqual(
+            selection_outline_scale(self._doc_with(rect), (0, 0)), 4.0)
+
+
 if __name__ == "__main__":
     absltest.main()
