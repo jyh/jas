@@ -714,5 +714,132 @@ let () =
     end
   ) |> ignore;
 
+  (* ── Test-only FIFO command channel ──────────────────────────────
+     A GUI-test harness cannot always reach a tool via synthetic
+     keyboard (GTK focus quirks) and the flyout-alternate tools
+     (paintbrush / blob brush) have no top-level toolbar icon, so a
+     deterministic activation path is needed. When launched with
+     [--test-fifo PATH] the app reads newline-delimited commands from
+     the FIFO and dispatches each through the SAME production action
+     runner the toolbar / menu use, with zero reliance on synthetic
+     input. Commands:
+         tool <id>             -> select_tool with { tool: <id> }
+         action <name> [json]  -> <name> with optional trailing JSON params
+     Gated entirely behind the flag: a normal launch is unaffected.
+     The reader runs on the GLib main loop via a GMain.Io watch, so a
+     command mutates the document / active tool ONLY on the main
+     thread (no off-thread tool or document mutation). *)
+  let dispatch_test_command (cmd : string) : unit =
+    Printf.printf "test-fifo: %s\n%!" cmd;
+    (* Split off the leading verb; the remainder is the verb-specific
+       argument string. *)
+    let verb, rest =
+      match String.index_opt cmd ' ' with
+      | Some i ->
+        (String.sub cmd 0 i,
+         String.trim (String.sub cmd (i + 1) (String.length cmd - i - 1)))
+      | None -> (cmd, "")
+    in
+    match verb with
+    | "tool" when rest <> "" ->
+      (* Route through the production toolbar click path: a synthetic
+         [select_tool] click behavior whose [tool] param is a quoted
+         string literal so the renderer expression resolver preserves
+         it (a bare word would resolve to an undefined identifier).
+         The [select_tool] arm fires [set_active_tool_hook], driving the
+         native toolbar select_tool, i.e. the full activation lifecycle. *)
+      let el = `Assoc [
+        ("type", `String "icon_button");
+        ("behavior", `List [
+          `Assoc [
+            ("event", `String "click");
+            ("action", `String "select_tool");
+            ("params", `Assoc [("tool", `String ("'" ^ rest ^ "'"))]);
+          ]
+        ]);
+      ] in
+      ignore (Jas.Yaml_panel_view.dispatch_click_behaviors el (`Assoc []))
+    | "action" when rest <> "" ->
+      (* [action <name> [json]] -> dispatch the named workspace action
+         through the production action runner, with optional trailing
+         JSON params passed verbatim (matching the toolbar / menu path). *)
+      let name, params_json =
+        match String.index_opt rest ' ' with
+        | Some i ->
+          (String.sub rest 0 i,
+           String.trim (String.sub rest (i + 1) (String.length rest - i - 1)))
+        | None -> (rest, "")
+      in
+      let params =
+        if params_json = "" then []
+        else
+          match (try Some (Yojson.Safe.from_string params_json) with _ -> None) with
+          | Some (`Assoc pairs) -> pairs
+          | _ -> []
+      in
+      if name <> "" then
+        Jas.Panel_menu.dispatch_yaml_action ~params name (get_model ())
+    | _ ->
+      Printf.printf "test-fifo: unknown command %s\n%!" cmd
+  in
+  (let n = Array.length Sys.argv in
+   let rec find i =
+     if i + 1 >= n then None
+     else if Sys.argv.(i) = "--test-fifo" then Some Sys.argv.(i + 1)
+     else find (i + 1)
+   in
+   match find 0 with
+   | None -> ()
+   | Some path ->
+     (* Create the FIFO if absent so the harness can launch the app
+        first and write afterward. *)
+     (if not (Sys.file_exists path) then
+        try Unix.mkfifo path 0o600 with _ -> ());
+     (* O_RDWR keeps a writer end open inside the process so the fd
+        never reaches end-of-file between harness writes — the watch
+        then fires only on real data, never on a spurious EOF.
+        O_NONBLOCK so the read in the callback never blocks the main
+        loop when the pipe is momentarily empty. *)
+     let fd = Unix.openfile path [Unix.O_RDWR; Unix.O_NONBLOCK] 0o600 in
+     let buf = Buffer.create 256 in
+     let read_chunk = Bytes.create 4096 in
+     (* Pull every complete newline-terminated line out of [buf],
+        trimming surrounding whitespace, ignoring blank lines, and
+        dispatching each through the production runner. A trailing
+        partial line (no newline yet) stays buffered for the next read. *)
+     let drain () =
+       let contents = Buffer.contents buf in
+       Buffer.clear buf;
+       let rec loop start =
+         match String.index_from_opt contents start '\n' with
+         | Some nl ->
+           let line = String.trim (String.sub contents start (nl - start)) in
+           if line <> "" then dispatch_test_command line;
+           loop (nl + 1)
+         | None ->
+           (* Re-buffer the trailing partial (post-last-newline) bytes. *)
+           if start < String.length contents then
+             Buffer.add_string buf
+               (String.sub contents start (String.length contents - start))
+       in
+       loop 0
+     in
+     let ch = GMain.Io.channel_of_descr fd in
+     ignore (GMain.Io.add_watch ch ~prio:0 ~cond:[`IN] ~callback:(fun _conds ->
+       (* Read whatever is available, append to the buffer, dispatch any
+          complete lines, and return true to keep the watch installed. *)
+       (let rec read_all () =
+          match (try Unix.read fd read_chunk 0 (Bytes.length read_chunk)
+                 with Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> 0) with
+          | 0 -> ()
+          | k ->
+            Buffer.add_subbytes buf read_chunk 0 k;
+            if k = Bytes.length read_chunk then read_all ()
+        in
+        read_all ());
+       drain ();
+       true));
+     Printf.printf "test-fifo: listening on %s\n%!" path);
+
   main_window#show ();
   GMain.main ()
