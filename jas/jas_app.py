@@ -1101,9 +1101,31 @@ class MainWindow(QMainWindow):
             name = ap[0] if ap else ""
             params = json.loads(ap[1]) if len(ap) > 1 else {}
             if name:
-                self.dock_panel._dispatch_yaml_action(name, params)
+                self._dispatch_action_by_name(name, params)
         else:
             logging.warning("test-fifo: unknown command %r", cmd)
+
+    def _dispatch_action_by_name(self, name: str, params: dict) -> None:
+        """Dispatch a named action the way the production UI does, so the
+        test-only FIFO ``action`` channel mutates the live document instead
+        of no-op'ing on a ``log`` stub. Document-mutating menubar / edit /
+        file actions (``new_document``, ``select_all``, ``delete_selection``,
+        ...) are native-intercepted — their actions.yaml ``effects`` are
+        stubs and the real work lives in ``menu._on_menu_action`` (menubar /
+        Edit / Object / View / Window) or in keyboard-only natives like
+        ``self._delete_selection``. Route native-first, then fall back to the
+        generic panel dispatcher for genuine panel / generic-effect actions
+        (``select_tool``, panel toggles)."""
+        from menu.menu import _on_menu_action
+        # Keyboard-only natives that are NOT menubar items.
+        if name == "delete_selection":
+            self._delete_selection()
+            return
+        # Menubar / Edit / Object / View / Window native handlers.
+        if _on_menu_action(self, name, params):
+            return
+        # Genuine panel / generic-effect actions.
+        self.dock_panel._dispatch_yaml_action(name, params)
 
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""
