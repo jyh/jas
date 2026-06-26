@@ -1698,6 +1698,56 @@ private let handleSize: CGFloat = handleDrawSize
 /// `true` to get the old behavior back.
 public let showSelectionBBox: Bool = false
 
+/// Combined transform SCALE of the element at `path` — the geometric mean of
+/// the linear part, `sqrt(|det|)`, multiplied over the element's own transform
+/// and every ancestor (group/layer) transform.
+///
+/// The selection OUTLINE trace and the bezier tangent handles are drawn UNDER
+/// the element transform; dividing their fixed pen widths / circle radii by this
+/// factor cancels the element transform's scaling, so they render at a constant
+/// size (still scaled by zoom, like the handle squares). Returns 1.0 when there
+/// is no transform.
+///
+/// Mirrors the Python reference `selection_outline_scale` (ref commit
+/// 107505da): `det` is multiplicative, so order does not matter — just multiply
+/// `sqrt(|det|)` of each non-nil transform on the path.
+func selectionOutlineScale(_ doc: Document, _ path: ElementPath) -> Double {
+    guard !path.isEmpty else { return 1.0 }
+    func isContainer(_ e: Element) -> Bool {
+        switch e {
+        case .group, .layer: return true
+        default: return false
+        }
+    }
+    var node: Element = .layer(doc.layers[path[0]])
+    var transforms: [Transform?] = []
+    if path.count > 1 {
+        transforms.append(doc.layers[path[0]].transform)
+        for idx in path[1..<path.count - 1] {
+            guard isContainer(node) else { return 1.0 }
+            let children = elemChildren(node)
+            guard idx < children.count else { return 1.0 }
+            node = children[idx]
+            transforms.append(node.transform)
+        }
+        guard isContainer(node) else { return 1.0 }
+        let children = elemChildren(node)
+        guard let lastIdx = path.last, lastIdx < children.count else { return 1.0 }
+        node = children[lastIdx]
+    }
+    transforms.append(node.transform)
+    var scale = 1.0
+    for t in transforms {
+        if let t = t {
+            let det = abs(t.a * t.d - t.b * t.c)
+            if det > 0.0 {
+                scale *= det.squareRoot()
+            }
+        }
+    }
+    return scale
+}
+
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
@@ -1717,9 +1767,15 @@ public let showSelectionBBox: Bool = false
 /// Groups and Layers emit no overlay themselves — their descendants
 /// are individually in the selection (see `selectElement`) and draw
 /// their own highlights.
-func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps())) {
+func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps()),
+                        outlineScale: Double = 1.0) {
+    // Counter-scale fixed pen widths / circle radii by the element transform's
+    // scale (`outlineScale`) so the overlay — drawn UNDER that transform —
+    // renders at a constant width regardless of the element's scale (it stays
+    // zoom-scaled, like the handle squares).
+    let inv: CGFloat = outlineScale > 1e-6 ? CGFloat(1.0 / outlineScale) : 1.0
     ctx.setStrokeColor(selectionColor)
-    ctx.setLineWidth(1.0)
+    ctx.setLineWidth(inv)
     ctx.setLineDash(phase: 0, lengths: [])
 
     // Text: bounding-box highlight + corner CP squares so the user
@@ -1814,8 +1870,10 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         break
     }
 
-    // Draw Bezier handles for selected path control points.
-    let handleCircleRadius: CGFloat = 3.0
+    // Draw Bezier handles for selected path control points. The pen width +
+    // circle radius are counter-scaled by `inv` so the element transform never
+    // thickens them (mirrors the outline pen above).
+    let handleCircleRadius: CGFloat = 3.0 * inv
     let pathD: [PathCommand]?
     switch elem {
     case .path(let v): pathD = v.d
@@ -1829,7 +1887,7 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
             let (ax, ay) = anchors[cpIdx]
             let (hIn, hOut) = pathHandlePositions(d, anchorIdx: cpIdx)
             ctx.setStrokeColor(selectionColor)
-            ctx.setLineWidth(1.0)
+            ctx.setLineWidth(inv)
             if let (hx, hy) = hIn {
                 ctx.move(to: CGPoint(x: ax, y: ay))
                 ctx.addLine(to: CGPoint(x: hx, y: hy))
@@ -2148,7 +2206,8 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
         case .layer(let v): applyTransform(ctx, v.transform)
         case .live(let v): applyTransform(ctx, v.transform)
         }
-        drawElementOverlay(ctx, node, kind: es.kind)
+        drawElementOverlay(ctx, node, kind: es.kind,
+                           outlineScale: selectionOutlineScale(doc, path))
         // Key-object indicator: thicker accent outline around the
         // element's bounds so the user can see which selected element
         // is currently the Align panel's key. Drawn on top of the

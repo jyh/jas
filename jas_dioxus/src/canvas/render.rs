@@ -2020,6 +2020,55 @@ pub fn selection_handle_rects(
         .collect()
 }
 
+/// Combined transform SCALE of the element at `path` — the geometric mean of
+/// the linear part, `sqrt(|det|)`, multiplied over the element's own transform
+/// and every ancestor (layer/group) transform. `det = a*d - b*c`.
+///
+/// The selection OUTLINE trace is drawn UNDER the element transform; dividing
+/// its fixed pen width by this factor cancels the element transform's scaling,
+/// so it renders at a constant size (still scaled by zoom, like the handle
+/// squares). Returns `1.0` when there is no transform.
+///
+/// `det` is multiplicative, so the chain order does not matter — we just
+/// multiply `sqrt(|det|)` of each non-identity transform on the path. Exact for
+/// uniform scale, geometric-mean (acceptable) under non-uniform/shear. Mirrors
+/// the Python reference `selection_outline_scale`.
+pub fn selection_outline_scale(doc: &Document, path: &[usize]) -> f64 {
+    if path.is_empty() {
+        return 1.0;
+    }
+    let mut node = match doc.layers.get(path[0]) {
+        Some(n) => n,
+        None => return 1.0,
+    };
+    // Collect the element's own transform plus every ancestor (layer/group)
+    // transform on the path, mirroring the Python walk.
+    let mut transforms: Vec<Option<Transform>> = Vec::new();
+    if path.len() > 1 {
+        transforms.push(node.transform().copied()); // layer
+        for &idx in &path[1..path.len() - 1] {
+            node = match node.children().and_then(|c| c.get(idx)) {
+                Some(n) => n,
+                None => return 1.0,
+            };
+            transforms.push(node.transform().copied());
+        }
+        node = match node.children().and_then(|c| c.get(path[path.len() - 1])) {
+            Some(n) => n,
+            None => return 1.0,
+        };
+    }
+    transforms.push(node.transform().copied()); // the element itself
+    let mut scale = 1.0_f64;
+    for t in transforms.into_iter().flatten() {
+        let det = (t.a * t.d - t.b * t.c).abs();
+        if det > 0.0 {
+            scale *= det.sqrt();
+        }
+    }
+    scale
+}
+
 fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
     let sel_color = "rgba(0, 120, 215, 0.9)";
     ctx.set_stroke_style_str(sel_color);
@@ -2037,6 +2086,14 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // selected element starts from the world transform.
         ctx.save();
         apply_transform(ctx, elem.transform());
+
+        // Counter-scale the fixed outline pen width by the element transform's
+        // scale (selection_outline_scale) so the outline trace — drawn UNDER
+        // that transform — renders at a constant width regardless of the
+        // element's scale (it stays zoom-scaled, like the handle squares).
+        let outline_scale = selection_outline_scale(doc, &es.path);
+        let inv = if outline_scale > 1e-6 { 1.0 / outline_scale } else { 1.0 };
+        ctx.set_line_width(inv);
 
         // Text and TextPath get a bounding-box highlight instead of
         // a path trace. For area text the bbox aligns with the area
@@ -2091,6 +2148,12 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // handles but never scales the glyphs. A selected CP (per the
         // `Partial` set, or any CP when kind is `All`) gets the solid blue
         // fill; others get white.
+        //
+        // Reset the line width to the fixed 1.0 px: the outline pass above may
+        // have set it to `inv` (counter-scaled), but the handle SQUARES are a
+        // separate fixed-size pass (drawn after `restore`, under the view
+        // transform only) and must NOT be counter-scaled by the element scale.
+        ctx.set_line_width(1.0);
         ctx.set_stroke_style_str(sel_color);
         for (i, (hx, hy, hw, hh)) in
             selection_handle_rects(doc, &es.path).into_iter().enumerate()
@@ -3176,5 +3239,34 @@ mod tests {
         let doc = hr_doc_with(grp);
         assert!(selection_handle_rects(&doc, &[0, 0]).is_empty(),
             "containers (Group/Layer) carry no control-point handles");
+    }
+
+    // --- Selection outline scale (fixed-width outline pen) ---
+    //
+    // The selection OUTLINE trace is drawn UNDER the element transform; its
+    // fixed pen width is divided by `selection_outline_scale(doc, path)`
+    // (= sqrt(|det|) of the combined transform) so the element transform never
+    // thickens it. 1x for no transform, 2x for a uniform 2x scale, geometric
+    // mean for non-uniform. Mirrors the Python reference.
+
+    #[test]
+    fn outline_scale_identity_is_one() {
+        // Rect with no transform -> scale 1.0.
+        let doc = hr_doc_with(hr_rect(None));
+        assert_eq!(selection_outline_scale(&doc, &[0, 0]), 1.0);
+    }
+
+    #[test]
+    fn outline_scale_uniform_2x() {
+        // Transform(2,0,0,2,0,0) -> det 4 -> sqrt = 2.0.
+        let doc = hr_doc_with(hr_rect(Some(Transform::scale(2.0, 2.0))));
+        assert_eq!(selection_outline_scale(&doc, &[0, 0]), 2.0);
+    }
+
+    #[test]
+    fn outline_scale_nonuniform_geometric_mean() {
+        // Transform(2,0,0,8,0,0) -> det 16 -> sqrt = 4.0.
+        let doc = hr_doc_with(hr_rect(Some(Transform::scale(2.0, 8.0))));
+        assert_eq!(selection_outline_scale(&doc, &[0, 0]), 4.0);
     }
 }

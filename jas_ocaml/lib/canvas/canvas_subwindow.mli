@@ -26,6 +26,20 @@ val selection_handle_rects :
   Document.document -> Document.element_path ->
   (float * float * float * float) list
 
+(** Combined transform SCALE of the element at [path] — the geometric
+    mean of the linear part, [sqrt(|det|)] with [det = a*.d -. b*.c],
+    multiplied over the element's own transform and every ancestor
+    (group/layer) transform. Returns [1.0] when there is no transform.
+
+    The selection OUTLINE trace and the bezier tangent handles are drawn
+    UNDER the element transform; dividing their fixed pen widths / circle
+    radii by this factor cancels the element transform's scaling so they
+    render at a constant size (still zoom-scaled, like the handle
+    squares). Exact for uniform scale; geometric mean under
+    non-uniform/shear. *)
+val selection_outline_scale :
+  Document.document -> Document.element_path -> float
+
 val set_brush_libraries : Yojson.Safe.t -> unit
 (** Install the brush library registry consulted by the Path renderer
     when a path carries a stroke_brush slug. The brushed render then
