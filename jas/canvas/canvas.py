@@ -1669,8 +1669,43 @@ def selection_handle_rects(
     return rects
 
 
+def selection_outline_scale(doc: Document, path: tuple) -> float:
+    """Combined transform SCALE of the element at ``path`` — the geometric mean
+    of the linear part, ``sqrt(|det|)``, multiplied over the element's own
+    transform and every ancestor (group/layer) transform.
+
+    The selection OUTLINE trace and the bezier tangent handles are drawn UNDER
+    the element transform; dividing their fixed pen widths / circle radii by
+    this factor cancels the element transform's scaling, so they render at a
+    constant size (still scaled by zoom, like the handle squares). Returns 1.0
+    when there is no transform.
+    """
+    if not path:
+        return 1.0
+    node: Element = doc.layers[path[0]]
+    transforms: list = []
+    if len(path) > 1:
+        transforms.append(getattr(node, 'transform', None))
+        for idx in path[1:-1]:
+            if not isinstance(node, Group):
+                return 1.0
+            node = node.children[idx]
+            transforms.append(getattr(node, 'transform', None))
+        if not isinstance(node, Group):
+            return 1.0
+        node = node.children[path[-1]]
+    transforms.append(getattr(node, 'transform', None))
+    scale = 1.0
+    for t in transforms:
+        if t is not None:
+            det = abs(t.a * t.d - t.b * t.c)
+            if det > 0.0:
+                scale *= det ** 0.5
+    return scale
+
+
 def _draw_element_overlay(painter: QPainter, elem: Element,
-                          kind=None) -> None:
+                          kind=None, outline_scale: float = 1.0) -> None:
     """Draw the selection overlay for one element.
 
     Rule: every selected element (except Text/TextPath) is outlined
@@ -1696,7 +1731,13 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
     if kind is None:
         kind = selection_partial([])
 
-    pen = QPen(_SELECTION_COLOR, 1.0)
+    # Counter-scale fixed pen widths / circle radii by the element transform's
+    # scale (outline_scale) so the overlay — drawn UNDER that transform —
+    # renders at a constant width regardless of the element's scale (it stays
+    # zoom-scaled, like the handle squares).
+    inv = 1.0 / outline_scale if outline_scale > 1e-6 else 1.0
+
+    pen = QPen(_SELECTION_COLOR, inv)
     painter.setPen(pen)
     painter.setBrush(QBrush())
 
@@ -1742,16 +1783,18 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
                 continue
             ax, ay = anchors[cp_idx]
             h_in, h_out = path_handle_positions(elem.d, cp_idx)
-            painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+            painter.setPen(QPen(_SELECTION_COLOR, inv))
             painter.setBrush(QBrush(QColor("white")))
             if h_in is not None:
                 painter.drawLine(QPointF(ax, ay), QPointF(*h_in))
                 painter.drawEllipse(QPointF(*h_in),
-                                    _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
+                                    _HANDLE_CIRCLE_RADIUS * inv,
+                                    _HANDLE_CIRCLE_RADIUS * inv)
             if h_out is not None:
                 painter.drawLine(QPointF(ax, ay), QPointF(*h_out))
                 painter.drawEllipse(QPointF(*h_out),
-                                    _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
+                                    _HANDLE_CIRCLE_RADIUS * inv,
+                                    _HANDLE_CIRCLE_RADIUS * inv)
 
     # NOTE: the control-point handle SQUARES are intentionally NOT drawn here.
     # They are drawn by `_draw_selection_overlays` via `selection_handle_rects`
@@ -1782,7 +1825,8 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
             node = node.children[path[-1]]
         # Apply the selected element's own transform
         _apply_transform(painter, getattr(node, 'transform', None))
-        _draw_element_overlay(painter, node, es.kind)
+        _draw_element_overlay(painter, node, es.kind,
+                              outline_scale=selection_outline_scale(doc, path))
         painter.restore()
         # Control-point handles: FIXED size at element-transformed positions,
         # drawn under the VIEW (pan/zoom) transform only — the element
