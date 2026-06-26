@@ -504,6 +504,19 @@ public struct Stroke: Equatable, Hashable {
         self.arrowAlign = arrowAlign
         self.opacity = opacity
     }
+
+    /// A copy of this stroke with its `width` replaced, preserving every
+    /// other field. Used by the element-stroke counter-scale to rewrite
+    /// `stroke.width` at the source so EVERY reader (the pen line width AND
+    /// the arrowhead setback) sees the divided width.
+    public func withWidth(_ width: Double) -> Stroke {
+        Stroke(color: color, width: width, linecap: linecap, linejoin: linejoin,
+               miterLimit: miterLimit, align: align,
+               dashPattern: dashPattern, dashAlignAnchors: dashAlignAnchors,
+               startArrow: startArrow, endArrow: endArrow,
+               startArrowScale: startArrowScale, endArrowScale: endArrowScale,
+               arrowAlign: arrowAlign, opacity: opacity)
+    }
 }
 
 /// A width control point for variable-width stroke profiles.
