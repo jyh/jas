@@ -354,41 +354,45 @@ fn transform_scale_factor(transform: Option<&Transform>) -> f64 {
     }
 }
 
-/// Accumulate this element's own transform scale onto `parent_scale`,
-/// returning the combined element-transform scale that the element's stroke
-/// must be divided by (and that is threaded to the element's children).
+/// Return `(element, accumulated_scale)` for rendering this element's body.
+///
+/// `accumulated_scale` = `element_scale` times this element's own transform
+/// scale (`transform_scale_factor`). When there is an actual scale (> 1e-6 and
+/// != 1.0) and the element carries a stroke, the returned element is a COPY
+/// whose `stroke.width` is divided by that scale; otherwise the element is
+/// returned unchanged.
 ///
 /// An element's own STROKE is drawn UNDER the element transform (the matrix is
 /// already on the painter), so the matrix would scale the stroke width — on
-/// top of any `scale_strokes` bake at apply time — a double-scale. Dividing the
-/// stroke width by this factor at the `set_line_width` site cancels the element
-/// transform's scaling, so the stroke renders at its nominal (still
-/// zoom-scaled) width. Uses the ELEMENT transform chain ONLY (never the
+/// top of any `scale_strokes` bake at apply time — a double-scale. Rewriting
+/// the stroke width at the SOURCE (so the copy carries the divided width)
+/// cancels the element transform's scaling for EVERY stroke.width reader: the
+/// pen line width AND the Line arrowhead SETBACK (which shortens the line by an
+/// amount derived from `stroke.width`). The stroke renders at its nominal
+/// (still zoom-scaled) width. Uses the ELEMENT transform chain ONLY (never the
 /// view/zoom transform), so the stroke still scales with zoom — matching the
-/// selection-outline counter-scale.
-fn accumulate_element_scale(parent_scale: f64, transform: Option<&Transform>) -> f64 {
-    parent_scale * transform_scale_factor(transform)
-}
-
-/// Counter-scale a stroke width by the accumulated element-transform scale.
-/// `element_scale` of 1.0 (or a degenerate near-zero) leaves the width
-/// unchanged; otherwise returns `width / element_scale`. This is the pure,
-/// unit-testable core of the stroke counter-scale applied in `apply_stroke`.
-fn counter_scaled_stroke_width(width: f64, element_scale: f64) -> f64 {
-    if element_scale > 1e-6 && (element_scale - 1.0).abs() > 1e-9 {
-        width / element_scale
-    } else {
-        width
+/// selection-outline counter-scale. The accumulated scale is threaded to
+/// children so a stroked shape inside a transformed group is counter-scaled by
+/// the full ancestor chain. Mirrors the Python `_counter_scaled_element`
+/// (8ac2f4d1) and OCaml `counter_scaled_element` (60ed68fb).
+fn counter_scaled_element(elem: &Element, element_scale: f64) -> (Element, f64) {
+    let elem_scale = element_scale * transform_scale_factor(elem.transform());
+    if elem_scale > 1e-6 && (elem_scale - 1.0).abs() > 1e-9 {
+        if let Some(s) = elem.stroke() {
+            let mut scaled = s.clone();
+            scaled.width = s.width / elem_scale;
+            return (with_stroke(elem, Some(scaled)), elem_scale);
+        }
     }
+    (elem.clone(), elem_scale)
 }
 
 /// Return value from apply_stroke: (opacity, alignment).
 fn apply_stroke(
     ctx: &CanvasRenderingContext2d,
     stroke: Option<&Stroke>,
-    element_scale: f64,
 ) -> (f64, StrokeAlign) {
-    apply_stroke_with_gradient(ctx, stroke, None, (0.0, 0.0, 0.0, 0.0), element_scale)
+    apply_stroke_with_gradient(ctx, stroke, None, (0.0, 0.0, 0.0, 0.0))
 }
 
 /// Phase 8: gradient-aware stroke. When `stroke_gradient` is set and
@@ -400,7 +404,6 @@ fn apply_stroke_with_gradient(
     stroke: Option<&Stroke>,
     stroke_gradient: Option<&Gradient>,
     bbox: (f64, f64, f64, f64),
-    element_scale: f64,
 ) -> (f64, StrokeAlign) {
     match stroke {
         Some(s) => {
@@ -415,14 +418,16 @@ fn apply_stroke_with_gradient(
                 ctx.set_stroke_style_str(&css_color(&s.color));
             }
             // Inside/outside use 2x width; the clip removes the unwanted half.
-            // Counter-scale by the accumulated element-transform scale so the
-            // element transform (already on the painter) does NOT thicken the
-            // stroke — it renders at the nominal, zoom-scaled width, cancelling
-            // the matrix's stroke scaling and the scale_strokes double-scale.
-            let nominal_width = counter_scaled_stroke_width(s.width, element_scale);
+            // The element-transform counter-scale is already baked into
+            // `s.width` here: `counter_scaled_element` rebinds the element to a
+            // copy whose stroke width is divided by the accumulated
+            // element-transform scale at body entry, so the element transform
+            // (already on the painter) does NOT thicken the stroke — it renders
+            // at the nominal, zoom-scaled width, cancelling the matrix's stroke
+            // scaling and the scale_strokes double-scale.
             let effective_width = match s.align {
-                StrokeAlign::Center => nominal_width,
-                StrokeAlign::Inside | StrokeAlign::Outside => nominal_width * 2.0,
+                StrokeAlign::Center => s.width,
+                StrokeAlign::Inside | StrokeAlign::Outside => s.width * 2.0,
             };
             ctx.set_line_width(effective_width);
             ctx.set_line_cap(match s.linecap {
@@ -986,12 +991,17 @@ fn draw_element_body(
     let parent_alpha = ctx.global_alpha();
     ctx.save();
     apply_transform(ctx, elem.transform());
-    // Accumulate this element's own transform scale onto the inherited chain.
-    // The element transform is now on the painter, so the element's own stroke
-    // is divided by elem_scale (in apply_stroke) to cancel the matrix's stroke
-    // scaling; elem_scale is threaded to children below. Uses the ELEMENT
-    // chain only — the stroke still scales with zoom.
-    let elem_scale = accumulate_element_scale(element_scale, elem.transform());
+    // Counter-scale the element's own stroke at the SOURCE: rebind `elem` to a
+    // copy whose stroke width is divided by the accumulated element-transform
+    // scale, so the element transform (now on the painter) does NOT thicken it
+    // — it renders at the nominal, zoom-scaled width, cancelling the matrix's
+    // stroke scaling and the scale_strokes double-scale. Because the divided
+    // width lives on the element itself, EVERY stroke.width reader below (the
+    // pen width AND the Line arrowhead setback) sees it. `elem_scale` is
+    // threaded to children. Uses the ELEMENT chain only — stroke still scales
+    // with zoom. Matches the Python/OCaml element-copy reference.
+    let (elem_copy, elem_scale) = counter_scaled_element(elem, element_scale);
+    let elem = &elem_copy;
     let base_alpha = parent_alpha * elem.opacity();
     ctx.set_global_alpha(base_alpha);
     ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
@@ -1002,7 +1012,7 @@ fn draw_element_body(
             if outline {
                 apply_outline_style(ctx);
             } else {
-                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref(), elem_scale);
+                (stroke_op, stroke_align) = apply_stroke(ctx, e.stroke.as_ref());
             }
             // Shorten line endpoints to accommodate arrowheads
             let (mut lx1, mut ly1, mut lx2, mut ly2) = (e.x1, e.y1, e.x2, e.y2);
@@ -1065,7 +1075,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox, elem_scale);
+                    e.stroke_gradient.as_deref(), bbox);
             }
             let has_fill = !outline && (e.fill.is_some() || e.fill_gradient.is_some());
             let has_stroke = outline || e.stroke.is_some();
@@ -1140,7 +1150,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox, elem_scale);
+                    e.stroke_gradient.as_deref(), bbox);
             }
             ctx.begin_path();
             ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
@@ -1163,7 +1173,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox, elem_scale);
+                    e.stroke_gradient.as_deref(), bbox);
             }
             ctx.begin_path();
             ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0.0, 0.0, std::f64::consts::TAU)
@@ -1187,7 +1197,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox, elem_scale);
+                    e.stroke_gradient.as_deref(), bbox);
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -1215,7 +1225,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), bbox);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox, elem_scale);
+                    e.stroke_gradient.as_deref(), bbox);
             }
             if !e.points.is_empty() {
                 ctx.begin_path();
@@ -1244,7 +1254,7 @@ fn draw_element_body(
                     e.fill_gradient.as_deref(), b);
                 (stroke_op, stroke_align) = apply_stroke_with_gradient(
                     ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), b, elem_scale);
+                    e.stroke_gradient.as_deref(), b);
             }
             // Fill uses the original path
             if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
@@ -1757,7 +1767,7 @@ fn draw_element_body(
                 apply_outline_style(ctx);
             } else {
                 fill_op = apply_fill(ctx, live_fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
-                (stroke_op, stroke_align) = apply_stroke(ctx, live_stroke.as_ref(), elem_scale);
+                (stroke_op, stroke_align) = apply_stroke(ctx, live_stroke.as_ref());
             }
             if ps.iter().any(|r| r.len() >= 2) {
                 ctx.begin_path();
@@ -2643,11 +2653,12 @@ mod tests {
     // An element's own STROKE is drawn UNDER the element transform, so the
     // matrix would scale the stroke width (on top of any scale_strokes bake) —
     // a double-scale. `transform_scale_factor` is the per-transform
-    // sqrt(|det|); `accumulate_element_scale` accumulates it down the ancestor
-    // chain; `counter_scaled_stroke_width` divides the stroke width by that
-    // scale at the set_line_width site so the element transform never thickens
-    // the stroke (it stays zoom-scaled). Mirrors the Python reference's
-    // ElementStrokeCounterScaleTest.
+    // sqrt(|det|); `counter_scaled_element` accumulates it down the ancestor
+    // chain and returns a COPY of the element whose stroke width is divided by
+    // that scale, so EVERY stroke.width reader (the pen width AND the Line
+    // arrowhead setback) sees the divided width — matching the Python/OCaml
+    // element-copy reference (8ac2f4d1 / 60ed68fb). The element transform never
+    // thickens the stroke (it stays zoom-scaled).
     #[test]
     fn transform_scale_factor_cases() {
         // None -> identity scale.
@@ -2663,32 +2674,49 @@ mod tests {
         assert_eq!(transform_scale_factor(Some(&t0)), 1.0);
     }
 
+    // Build a stroked rect (stroke width `w`) carrying the given own transform.
+    fn stroked_rect(w: f64, transform: Option<Transform>) -> Element {
+        use crate::geometry::element::{RectElem, CommonProps};
+        let mut common = CommonProps::default();
+        common.transform = transform;
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(Stroke::new(Color::new(0.0, 0.0, 0.0, 1.0), w)),
+            common,
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
     #[test]
-    fn stroke_divided_by_element_scale() {
-        // A stroked element (width 4) with its own 2x transform: combined
-        // scale is 2.0, so the rendered (counter-scaled) width is 4 / 2 = 2.0.
+    fn counter_scaled_element_divides_stroke() {
+        // A stroked rect (width 4) with its own 2x transform: combined scale is
+        // 2.0, so the returned COPY's stroke width is 4 / 2 = 2.0.
         let t2 = Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 0.0, f: 0.0 };
-        let scale = accumulate_element_scale(1.0, Some(&t2));
+        let rect = stroked_rect(4.0, Some(t2));
+        let (copy, scale) = counter_scaled_element(&rect, 1.0);
         assert_eq!(scale, 2.0);
-        assert_eq!(counter_scaled_stroke_width(4.0, scale), 2.0);
+        assert_eq!(copy.stroke().unwrap().width, 2.0);
     }
 
     #[test]
-    fn no_transform_leaves_stroke_unchanged() {
-        // No transform -> scale 1.0 -> stroke width unchanged.
-        let scale = accumulate_element_scale(1.0, None);
+    fn counter_scaled_element_no_transform_unchanged() {
+        // No transform -> scale 1.0 -> element returned unchanged (width 4).
+        let rect = stroked_rect(4.0, None);
+        let (copy, scale) = counter_scaled_element(&rect, 1.0);
         assert_eq!(scale, 1.0);
-        assert_eq!(counter_scaled_stroke_width(4.0, scale), 4.0);
+        assert_eq!(copy.stroke().unwrap().width, 4.0);
     }
 
     #[test]
-    fn element_scale_accumulates_with_parent() {
-        // A stroked element (width 12) with its own 2x, inside a parent already
-        // at 3x: combined scale is 3 * 2 = 6, so the width is 12 / 6 = 2.0.
+    fn counter_scaled_element_accumulates_with_parent() {
+        // A stroked rect (width 12) with its own 2x, inside a parent already at
+        // 3x: combined scale is 3 * 2 = 6, so the copy's width is 12 / 6 = 2.0.
         let t2 = Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 0.0, f: 0.0 };
-        let scale = accumulate_element_scale(3.0, Some(&t2));
+        let rect = stroked_rect(12.0, Some(t2));
+        let (copy, scale) = counter_scaled_element(&rect, 3.0);
         assert_eq!(scale, 6.0);
-        assert_eq!(counter_scaled_stroke_width(12.0, scale), 2.0);
+        assert_eq!(copy.stroke().unwrap().width, 2.0);
     }
 
     #[test]
