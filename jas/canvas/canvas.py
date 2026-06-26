@@ -1625,6 +1625,50 @@ def _control_points(elem: Element) -> list[tuple[float, float]]:
     return element_control_points(elem)
 
 
+def selection_handle_rects(
+    doc: Document, path: tuple,
+) -> list[tuple[float, float, float, float]]:
+    """Document-space control-point handle rects (x, y, w, h) for the element
+    at ``path``.
+
+    Each rect is centered at the element-transformed control point and is a
+    constant ``_HANDLE_SIZE`` square, so an element's transform MOVES the
+    handles but never SCALES the handle glyphs (they stay a fixed grab size).
+    Returns [] for containers (Group/Layer) and Text/TextPath, which carry no
+    control-point squares (mirrors ``_draw_element_overlay``). The caller draws
+    these under the VIEW (pan/zoom) transform only, NOT the element transform.
+    """
+    if not path:
+        return []
+    # Resolve the element + collect ancestor transforms (outermost first).
+    node: Element = doc.layers[path[0]]
+    ancestors: list = []
+    if len(path) > 1:
+        ancestors.append(getattr(node, 'transform', None))  # layer
+        for idx in path[1:-1]:
+            if not isinstance(node, Group):
+                return []
+            node = node.children[idx]
+            ancestors.append(getattr(node, 'transform', None))
+        if not isinstance(node, Group):
+            return []
+        node = node.children[path[-1]]
+    elem = node
+    if isinstance(elem, (Text, TextPath, Group, Layer)):
+        return []
+    # Apply transforms innermost-first: the element's own transform, then each
+    # ancestor outward (layer last) — matching the painter's combined CTM.
+    chain = [getattr(elem, 'transform', None)] + list(reversed(ancestors))
+    half = _HANDLE_SIZE / 2
+    rects: list[tuple[float, float, float, float]] = []
+    for (px, py) in _control_points(elem):
+        for t in chain:
+            if t is not None:
+                px, py = t.apply_point(px, py)
+        rects.append((px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
+    return rects
+
+
 def _draw_element_overlay(painter: QPainter, elem: Element,
                           kind=None) -> None:
     """Draw the selection overlay for one element.
@@ -1709,16 +1753,11 @@ def _draw_element_overlay(painter: QPainter, elem: Element,
                 painter.drawEllipse(QPointF(*h_out),
                                     _HANDLE_CIRCLE_RADIUS, _HANDLE_CIRCLE_RADIUS)
 
-    # Draw control-point squares for every non-Text, non-container
-    # selected element.
-    half = _HANDLE_SIZE / 2
-    painter.setPen(QPen(_SELECTION_COLOR, 1.0))
-    for i, (px, py) in enumerate(_control_points(elem)):
-        if _contains(kind, i):
-            painter.setBrush(QBrush(_SELECTION_COLOR))
-        else:
-            painter.setBrush(QBrush(QColor("white")))
-        painter.drawRect(QRectF(px - half, py - half, _HANDLE_SIZE, _HANDLE_SIZE))
+    # NOTE: the control-point handle SQUARES are intentionally NOT drawn here.
+    # They are drawn by `_draw_selection_overlays` via `selection_handle_rects`
+    # at a FIXED screen size under the view transform only, so an element's
+    # transform moves them but never scales the glyphs. The outline + bezier
+    # handles above stay under the element transform (they trace the geometry).
 
 
 def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
@@ -1745,6 +1784,17 @@ def _draw_selection_overlays(painter: QPainter, doc: Document) -> None:
         _apply_transform(painter, getattr(node, 'transform', None))
         _draw_element_overlay(painter, node, es.kind)
         painter.restore()
+        # Control-point handles: FIXED size at element-transformed positions,
+        # drawn under the VIEW (pan/zoom) transform only — the element
+        # transform was restored above — so the element's transform moves the
+        # handles but never scales the glyphs.
+        from document.document import selection_kind_contains as _kind_contains
+        painter.setPen(QPen(_SELECTION_COLOR, 1.0))
+        for i, (hx, hy, hw, hh) in enumerate(selection_handle_rects(doc, path)):
+            painter.setBrush(
+                QBrush(_SELECTION_COLOR) if _kind_contains(es.kind, i)
+                else QBrush(QColor("white")))
+            painter.drawRect(QRectF(hx, hy, hw, hh))
 
 
 # ---------------------------------------------------------------------------

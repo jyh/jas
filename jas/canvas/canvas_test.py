@@ -655,5 +655,55 @@ class ArtboardDrawTest(absltest.TestCase):
         p.end()
 
 
+class SelectionHandleRectsTest(absltest.TestCase):
+    """The selection control-point handles must be FIXED SIZE — the element's
+    transform moves the handle positions but never scales the handle glyphs.
+    `selection_handle_rects(doc, path)` returns document-space rects whose
+    CENTER is the element-transformed control point and whose SIZE is the
+    constant HANDLE_DRAW_SIZE (NOT multiplied by the element transform).
+    """
+
+    def _doc_with(self, elem):
+        from document.document import Document, ElementSelection
+        layer = Layer(children=(elem,), name="L0")
+        sel = frozenset({ElementSelection.all((0, 0))})
+        return Document(layers=(layer,), selection=sel)
+
+    def test_identity_transform_handles_at_control_points(self):
+        from canvas.canvas import selection_handle_rects, _HANDLE_SIZE
+        rect = Rect(x=10, y=20, width=30, height=40)
+        rects = selection_handle_rects(self._doc_with(rect), (0, 0))
+        half = _HANDLE_SIZE / 2
+        centers = sorted((x + half, y + half) for (x, y, w, h) in rects)
+        self.assertEqual(
+            centers, sorted([(10, 20), (40, 20), (40, 60), (10, 60)]))
+        for (_x, _y, w, h) in rects:
+            self.assertEqual((w, h), (_HANDLE_SIZE, _HANDLE_SIZE))
+
+    def test_scaled_element_handles_move_but_do_not_grow(self):
+        from canvas.canvas import selection_handle_rects, _HANDLE_SIZE
+        # 100x100 rect at origin with a 2x scale transform.
+        rect = Rect(x=0, y=0, width=100, height=100,
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        rects = selection_handle_rects(self._doc_with(rect), (0, 0))
+        half = _HANDLE_SIZE / 2
+        # Positions are the TRANSFORMED corners: (0,0),(200,0),(200,200),(0,200).
+        centers = sorted((x + half, y + half) for (x, y, w, h) in rects)
+        self.assertEqual(
+            centers, sorted([(0, 0), (200, 0), (200, 200), (0, 200)]))
+        # CRITICAL: each handle is still HANDLE_DRAW_SIZE, NOT 2x.
+        for (_x, _y, w, h) in rects:
+            self.assertEqual((w, h), (_HANDLE_SIZE, _HANDLE_SIZE))
+
+    def test_no_handles_for_group(self):
+        from canvas.canvas import selection_handle_rects
+        from document.document import Document, ElementSelection
+        grp = Group(children=(Rect(x=0, y=0, width=10, height=10),))
+        layer = Layer(children=(grp,), name="L0")
+        doc = Document(layers=(layer,),
+                       selection=frozenset({ElementSelection.all((0, 0))}))
+        self.assertEqual(selection_handle_rects(doc, (0, 0)), [])
+
+
 if __name__ == "__main__":
     absltest.main()
