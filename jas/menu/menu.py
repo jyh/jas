@@ -168,12 +168,17 @@ def _new_doc(window: QMainWindow) -> None:
 # function the hand-built menu used; behavior is unchanged. Actions that
 # need an active model resolve it inside the handler (no-op when absent),
 # preserving the old `_with_model` guard.
-def _on_menu_action(window: QMainWindow, action: str, params: dict) -> None:
+def _on_menu_action(window: QMainWindow, action: str, params: dict) -> bool:
     """Central menu-action router. Every menubar action is backed by a
     bespoke native handler (the actions.yaml entries are ``log`` / ``if``
     stubs whose real behavior lives natively, so routing them through the
     generic dispatcher would no-op them). ``params`` carries the bundle's
-    ``params`` (e.g. ``{"panel": "color"}``)."""
+    ``params`` (e.g. ``{"panel": "color"}``).
+
+    Returns ``True`` when ``action`` matched a native arm, ``False``
+    otherwise — so a name-driven caller (e.g. the test-only FIFO ``action``
+    channel) can fall back to the generic panel dispatcher for genuine
+    panel actions instead of silently dropping unknown names."""
     m = window.active_model()
 
     # --- File ---
@@ -270,6 +275,9 @@ def _on_menu_action(window: QMainWindow, action: str, params: dict) -> None:
         _toggle_pane_by_name(window, params.get("pane", ""))
     elif action == "toggle_panel":
         _toggle_panel_by_name(window, params.get("panel", ""))
+    else:
+        return False
+    return True
 
 
 def create_menus(window: QMainWindow) -> None:

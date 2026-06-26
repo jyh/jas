@@ -630,5 +630,77 @@ class ZoomRoutingTest(absltest.TestCase):
         self.assertEqual(model.zoom_level, 1.0)
 
 
+class FifoActionRoutingTest(absltest.TestCase):
+    """The test-only FIFO ``action <name>`` channel must route document-
+    mutating actions through their NATIVE handlers, not the generic panel
+    dispatcher. ``new_document`` / ``select_all`` / ``delete_selection``
+    carry actions.yaml ``log`` stubs whose real behavior lives natively
+    (see :func:`menu.menu._on_menu_action`), so the generic dispatcher
+    would no-op them. These pin the live-GUI contract: a FIFO
+    ``action select_all`` selects all, ``delete_selection`` deletes, and
+    ``new_document`` switches to a fresh blank canvas — while a genuine
+    panel action still falls through to the generic dispatcher.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.window = MainWindow()
+
+    def _add_model(self, *, selected: bool, n: int = 2) -> Model:
+        """Add (and activate) a canvas with n rects; selected toggles
+        whether they start selected."""
+        rects = tuple(_make_rect(x=i * 20) for i in range(n))
+        layer = Layer(children=rects, name="L0")
+        sel = (frozenset(ElementSelection.all((0, i)) for i in range(n))
+               if selected else frozenset())
+        model = Model(document=Document(layers=(layer,), selection=sel))
+        self.window.add_canvas(model)
+        return model
+
+    def test_fifo_select_all_selects_via_native_handler(self):
+        model = self._add_model(selected=False, n=2)
+        self.assertEqual(len(model.document.selection), 0)
+        self.window._dispatch_action_by_name("select_all", {})
+        # Native _select_all ran (NOT the log stub) -> both selected.
+        self.assertEqual(len(model.document.selection), 2)
+
+    def test_fifo_delete_selection_removes_selected(self):
+        model = self._add_model(selected=True, n=2)
+        self.assertEqual(len(model.document.layers[0].children), 2)
+        self.window._dispatch_action_by_name("delete_selection", {})
+        # Keyboard-only native delete ran -> both rects gone.
+        self.assertEqual(len(model.document.layers[0].children), 0)
+
+    def test_fifo_new_document_switches_to_fresh_canvas(self):
+        model = self._add_model(selected=False, n=2)
+        self.assertIs(self.window.active_model(), model)
+        self.window._dispatch_action_by_name("new_document", {})
+        new_m = self.window.active_model()
+        # A genuinely different, blank canvas became active (the very
+        # behavior that silently no-op'd over the FIFO before the fix).
+        self.assertIsNot(new_m, model)
+        self.assertEqual(
+            sum(len(l.children) for l in new_m.document.layers), 0)
+
+    def test_fifo_unknown_action_falls_through_to_panel_dispatcher(self):
+        self._add_model(selected=False, n=1)
+        calls = []
+        orig = self.window.dock_panel._dispatch_yaml_action
+        self.window.dock_panel._dispatch_yaml_action = (
+            lambda name, params: calls.append((name, params)))
+        try:
+            self.window._dispatch_action_by_name("some_panel_action", {"k": 1})
+        finally:
+            self.window.dock_panel._dispatch_yaml_action = orig
+        # Not a native action -> routed to the generic panel dispatcher.
+        self.assertEqual(calls, [("some_panel_action", {"k": 1})])
+
+
 if __name__ == "__main__":
     absltest.main()
