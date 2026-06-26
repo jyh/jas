@@ -79,6 +79,13 @@ class yaml_tool : tool_spec -> object
       commit reads). *)
   method seed_state : string -> Yojson.Safe.t -> unit
 
+  (** Test-only: read an app-level (global) [state.<key>] value back out
+      of this tool own store. Symmetric to [seed_state]. Mirrors the Rust
+      seam tests that reach [tool.store.eval_context] to read a
+      handler-written global the bridge never carries (e.g. the transform
+      tools writing [transform_reference_point] on a click-only gesture). *)
+  method read_global_state : string -> Yojson.Safe.t
+
   (** Bridge an allowlist of app-level keys into this tool global
       [state.*] namespace before a dispatch, so commit effects read LIVE
       document values instead of the tool store empty defaults (else the

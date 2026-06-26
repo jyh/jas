@@ -1423,6 +1423,14 @@ class yaml_tool (spec : tool_spec) = object (_self)
        does not carry by default (blob brush tip shape, fill, fidelity). *)
     State_store.set store key value
 
+  method read_global_state (key : string) : Yojson.Safe.t =
+    (* Test-only: read an app-level (global) [state.<key>] value back out
+       of this tool own store. Symmetric to [seed_state]. Mirrors the Rust
+       seam tests that reach [tool.store.eval_context] to read a
+       handler-written global the bridge never carries (e.g. the transform
+       tools writing [transform_reference_point] on a click-only gesture). *)
+    State_store.get store key
+
   method bridge_app_state ?(overrides = []) (model : Model.model) : unit =
     (* Bridge an ALLOWLIST of app-level keys into this tool global
        [state.*] namespace ([State_store.set] writes the global scope,
