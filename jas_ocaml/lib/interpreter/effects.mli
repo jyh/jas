@@ -54,9 +54,13 @@ val value_to_json : Expr_eval.value -> Yojson.Safe.t
 val apply_stroke_panel_to_selection :
   State_store.t -> Controller.controller -> unit
 
-(** Sync the state store's [stroke_*] keys from the first selected
-    element's stroke. Currently unwired in OCaml — see the note on
-    [apply_stroke_panel_to_selection]. *)
+(** Sync the Stroke panel WEIGHT from the first selected element stroke
+    width (its baked / effective width), into the panel key
+    [stroke_panel_content.weight] the weight widget binds. Falls back to
+    the model default stroke when nothing is selected or the element has
+    no stroke. Display-only: writes the panel key, not a global, so it
+    does not trigger the panel apply. Wired on document change via
+    {!Yaml_panel_view.stroke_panel_resync_from_active_model}. *)
 val sync_stroke_panel_from_selection :
   State_store.t -> Controller.controller -> unit
 

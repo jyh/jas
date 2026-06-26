@@ -645,7 +645,7 @@ let run_effects
 
 (** Rendering-affecting stroke state keys. *)
 let stroke_render_keys = [
-  "stroke_cap"; "stroke_join"; "stroke_weight"; "stroke_miter_limit";
+  "stroke_cap"; "stroke_join"; "stroke_width"; "stroke_miter_limit";
   "stroke_dashed"; "stroke_dash_1"; "stroke_gap_1";
   "stroke_dash_2"; "stroke_gap_2"; "stroke_dash_3"; "stroke_gap_3";
   "stroke_align_stroke"; "stroke_start_arrowhead"; "stroke_end_arrowhead";
@@ -761,66 +761,41 @@ let apply_stroke_panel_to_selection (store : State_store.t)
       ctrl#set_selection_width_profile width_pts)
   end
 
-(** Sync stroke panel state from the first selected element's stroke. *)
+(** Sync the Stroke panel WEIGHT from the first selected element stroke
+    width (its baked / effective width after the scale counter-scale
+    work) so the panel shows the selection effective weight rather than
+    the YAML default. Falls back to the model default stroke when nothing
+    is selected or the element has no stroke, then to 1.0. Writes the
+    PANEL key [stroke_panel_content.weight] the weight widget binds, NOT
+    a global key, so this DISPLAY sync does not trigger the panel apply
+    to selection (no clobber of other stroke props). Mirrors the Python
+    [sync_stroke_panel_from_selection] and the Rust dock
+    [build_live_panel_overrides] stroke block. *)
 let sync_stroke_panel_from_selection (store : State_store.t)
     (ctrl : Controller.controller) =
   let doc = ctrl#document in
-  match Document.PathMap.min_binding_opt doc.Document.selection with
-  | None -> ()
-  | Some (path, _) ->
-    let elem = Document.get_element doc path in
-    let stroke_opt = match elem with
-      | Element.Line { stroke; _ } | Element.Rect { stroke; _ }
-      | Element.Circle { stroke; _ } | Element.Ellipse { stroke; _ }
-      | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
-      | Element.Path { stroke; _ } | Element.Text { stroke; _ }
-      | Element.Text_path { stroke; _ } -> stroke
-      | _ -> None
-    in
-    match stroke_opt with
-    | None -> ()
-    | Some s ->
-      let cap_str = match s.stroke_linecap with
-        | Butt -> "butt" | Round_cap -> "round" | Square -> "square" in
-      let join_str = match s.stroke_linejoin with
-        | Miter -> "miter" | Round_join -> "round" | Bevel -> "bevel" in
-      State_store.set store "stroke_cap" (`String cap_str);
-      State_store.set store "stroke_join" (`String join_str);
-      State_store.set store "stroke_weight" (`Float s.stroke_width);
-      State_store.set store "stroke_miter_limit" (`Float s.stroke_miter_limit);
-      let align_str = match s.stroke_align with
-        | Center -> "center" | Inside -> "inside" | Outside -> "outside" in
-      State_store.set store "stroke_align_stroke" (`String align_str);
-      State_store.set store "stroke_dashed" (`Bool (s.stroke_dash_pattern <> []));
-      let dp = s.stroke_dash_pattern in
-      (match dp with
-       | d1 :: g1 :: rest ->
-         State_store.set store "stroke_dash_1" (`Float d1);
-         State_store.set store "stroke_gap_1" (`Float g1);
-         (match rest with
-          | d2 :: g2 :: rest2 ->
-            State_store.set store "stroke_dash_2" (`Float d2);
-            State_store.set store "stroke_gap_2" (`Float g2);
-            (match rest2 with
-             | d3 :: g3 :: _ ->
-               State_store.set store "stroke_dash_3" (`Float d3);
-               State_store.set store "stroke_gap_3" (`Float g3)
-             | _ -> ())
-          | _ -> ())
-       | _ -> ());
-      State_store.set store "stroke_start_arrowhead"
-        (`String (Element.string_of_arrowhead s.stroke_start_arrow));
-      State_store.set store "stroke_end_arrowhead"
-        (`String (Element.string_of_arrowhead s.stroke_end_arrow));
-      State_store.set store "stroke_start_arrowhead_scale"
-        (`Float s.stroke_start_arrow_scale);
-      State_store.set store "stroke_end_arrowhead_scale"
-        (`Float s.stroke_end_arrow_scale);
-      let arrow_align_str = match s.stroke_arrow_align with
-        | Tip_at_end -> "tip_at_end" | Center_at_end -> "center_at_end" in
-      State_store.set store "stroke_arrow_align" (`String arrow_align_str);
-      State_store.set store "stroke_dash_align_anchors"
-        (`Bool s.stroke_dash_align_anchors)
+  let sel_stroke =
+    match Document.PathMap.min_binding_opt doc.Document.selection with
+    | None -> None
+    | Some (path, _) ->
+      let elem = Document.get_element doc path in
+      (match elem with
+       | Element.Line { stroke; _ } | Element.Rect { stroke; _ }
+       | Element.Circle { stroke; _ } | Element.Ellipse { stroke; _ }
+       | Element.Polyline { stroke; _ } | Element.Polygon { stroke; _ }
+       | Element.Path { stroke; _ } | Element.Text { stroke; _ }
+       | Element.Text_path { stroke; _ } -> stroke
+       | _ -> None)
+  in
+  let stroke_opt = match sel_stroke with
+    | Some _ -> sel_stroke
+    | None -> ctrl#model#default_stroke
+  in
+  let width = match stroke_opt with
+    | Some s -> s.stroke_width
+    | None -> 1.0
+  in
+  State_store.set_panel store "stroke_panel_content" "weight" (`Float width)
 
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =

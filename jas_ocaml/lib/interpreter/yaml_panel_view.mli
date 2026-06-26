@@ -169,6 +169,10 @@ val install_recent_colors_bridge : unit -> unit
     No-op when no Paragraph panel is open. *)
 val paragraph_panel_resync_from_active_model : unit -> unit
 
+(** Re-sync the open Stroke panel WEIGHT from the active model's
+    selection. No-op when no Stroke panel is open. *)
+val stroke_panel_resync_from_active_model : unit -> unit
+
 (* ── Render entry points ─────────────────────────────────────────── *)
 
 (** Render a single YAML element node into the given packing slot,

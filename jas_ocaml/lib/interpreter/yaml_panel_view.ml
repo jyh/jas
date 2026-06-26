@@ -428,6 +428,13 @@ let _doc_listener_registered_for : Model.model option ref = ref None
     changes. *)
 let _paragraph_panel_sync : (unit -> unit) option ref = ref None
 
+(** Hook fired by [stroke_panel_resync_from_active_model] — set by
+    [create_panel_body] when the Stroke panel mounts. None when no
+    Stroke panel is open. Mirrors [_paragraph_panel_sync]: each canvas
+    [model#on_document_changed] calls the resync helper so the Weight
+    field refreshes whenever the active model selection changes. *)
+let _stroke_panel_sync : (unit -> unit) option ref = ref None
+
 (** Hook fired after a fill/stroke swatch click flips
     [state.fill_on_top]. Set by [render_fill_stroke_widget] with the
     captured parent [GPack.fixed] and per-child positions; rerunning
@@ -568,6 +575,15 @@ let resolve_size_token (v : Yojson.Safe.t) : int option =
     listener — the sync resolves the active model lazily. *)
 let paragraph_panel_resync_from_active_model () : unit =
   match !_paragraph_panel_sync with
+  | Some f -> f ()
+  | None -> ()
+
+(** Trigger a re-sync of the open Stroke panel WEIGHT from the active
+    model current selection. No-op when no Stroke panel is open. Safe to
+    call from any model [on_document_changed] listener — the sync
+    resolves the active model lazily. *)
+let stroke_panel_resync_from_active_model () : unit =
+  match !_stroke_panel_sync with
   | Some f -> f ()
   | None -> ()
 
@@ -5385,6 +5401,23 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          widget changes reach the selected element. *)
       (if kind = Stroke then
          Effects.subscribe_stroke_panel store (make_ctrl_getter ()));
+      (* Stroke panel WEIGHT sync from selection (decision-5a): mirror
+         the first selected element stroke width into
+         [stroke_panel_content.weight] so the panel shows the effective
+         / baked weight, not the YAML default. Fires once at render and
+         registers a global hook so any later document change on the
+         active model re-syncs (mirrors the Paragraph hook below). *)
+      (if kind = Stroke then begin
+         let sync () =
+           match get_model () with
+           | Some m ->
+             let ctrl = new Controller.controller ~model:m () in
+             Effects.sync_stroke_panel_from_selection store ctrl
+           | None -> ()
+         in
+         sync ();
+         _stroke_panel_sync := Some sync
+       end);
       (* Active-color writes (set_active_color YAML action et al.)
          must also propagate to the selected element. The Color
          Panel calls Panel_menu.set_active_color directly; the YAML
