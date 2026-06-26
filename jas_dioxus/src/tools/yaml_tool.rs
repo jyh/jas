@@ -6779,4 +6779,244 @@ mod tests {
             "target remains fill-less after an empty-space click",
         );
     }
+
+    // ── Artboard gesture seam ───────────────────────────────────────
+    //
+    // The Artboard tool is a state machine (artboard.yaml: idle /
+    // creating / moving_pending / moving / resizing /
+    // duplicating_pending / duplicating). It reads NO app-level
+    // state.* — every gesture decision comes from the cursor coords,
+    // modifiers, and the document's artboard list — so no bridge
+    // seeding is required (unlike the Magic Wand above).
+    //
+    // It operates in SCREEN coords (event.x / event.y). With the
+    // default identity view (zoom 1, offset 0) screen == doc, so a
+    // press at screen (100,100) lands at doc (100,100).
+    // doc.artboard.probe_hit hit-tests against doc.artboards, which the
+    // YamlTool seam registers headlessly (same doc-primitive
+    // registration the other tools use). on_mousedown latches the hit
+    // (empty → create; interior → move-pending; alt+interior →
+    // duplicate-pending); on_mousemove past the 4 px threshold
+    // promotes the *_pending mode, snapshots, captures the preview
+    // baseline, and applies the in-flight effect; on_mouseup commits.
+    //
+    // These tests DRIVE the tool through the CanvasTool press/move/
+    // release seam (NOT the effects directly) and assert against the
+    // document ARTBOARD LIST: model.document().artboards (each
+    // Artboard has id, name, x, y, width, height — the fields asserted
+    // here are x / y / width / height and the list length).
+    //
+    // RESIZE COVERAGE NOTE: the resize gesture is NOT covered through
+    // the press-on-handle seam. probe_hit's resize-handle branch only
+    // fires when active_document.artboards_panel_selection_ids holds
+    // exactly one id, and it reads that from store.eval_context() —
+    // which, in the headless CanvasTool dispatch path, never carries an
+    // active_document namespace (YamlTool::dispatch builds an
+    // active_document payload with only view_offset / zoom; the doc.*
+    // effect handlers read the StateStore's own eval_context, which has
+    // no active_document at all). So a real press on a corner cannot
+    // transition the machine to `resizing` here. The resize MATH is
+    // already pinned directly in effects.rs
+    // (test_artboard_resize_compute_*); driving it through the seam
+    // would require app-level panel-selection plumbing the headless
+    // harness lacks. Reported, not faked.
+
+    /// Load the real Artboard tool from the embedded workspace bundle,
+    /// the same path the running app uses.
+    fn artboard_yaml_tool() -> Option<YamlTool> {
+        use crate::interpreter::workspace::Workspace;
+        let ws = Workspace::load()?;
+        let spec = ws.data().get("tools")?.get("artboard")?;
+        YamlTool::from_workspace_tool(spec)
+    }
+
+    /// A document with exactly ONE artboard "A" at (0,0) 200x200 and no
+    /// document elements. The default Document seeds a Letter-sized
+    /// artboard via ensure_artboards_invariant, so we clear and push
+    /// our own to keep the geometry crisp (and the count assertions
+    /// unambiguous). Identity view → screen coords == doc coords.
+    fn model_with_one_artboard() -> Model {
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("A".into());
+        a.name = "Artboard A".into();
+        a.x = 0.0;
+        a.y = 0.0;
+        a.width = 200.0;
+        a.height = 200.0;
+        doc.artboards.push(a);
+        Model::new(doc, None)
+    }
+
+    /// The single artboard's (x, y, w, h) — id "A". Panics if absent so
+    /// a vanished artboard fails loudly instead of silently skipping.
+    fn artboard_a_rect(model: &Model) -> (f64, f64, f64, f64) {
+        let a = model
+            .document()
+            .artboards
+            .iter()
+            .find(|ab| ab.id == "A")
+            .expect("artboard A must still be present");
+        (a.x, a.y, a.width, a.height)
+    }
+
+    #[test]
+    fn artboard_parity_drag_empty_space_creates_artboard() {
+        let Some(mut tool) = artboard_yaml_tool() else { return };
+        let mut model = model_with_one_artboard();
+        tool.activate(&mut model);
+        assert_eq!(model.document().artboards.len(), 1, "precondition: one artboard");
+
+        // Press in EMPTY space at screen (300,300) — well clear of the
+        // 0..200 artboard — then drag to (450,420) (past the 4 px
+        // threshold) and release. create_commit builds the rect from
+        // press → release: x = min(300,450)=300, y = min(300,420)=300,
+        // w = |300-450| = 150, h = |300-420| = 120.
+        tool.on_press(&mut model, 300.0, 300.0, false, false);
+        tool.on_move(&mut model, 450.0, 420.0, false, false, true);
+        tool.on_release(&mut model, 450.0, 420.0, false, false);
+
+        let abs = &model.document().artboards;
+        assert_eq!(
+            abs.len(),
+            2,
+            "drag-to-create in empty space adds exactly one artboard, got {}",
+            abs.len(),
+        );
+        // The original "A" is untouched; the new one carries the drag
+        // bounds. Find the non-A artboard.
+        let created = abs
+            .iter()
+            .find(|ab| ab.id != "A")
+            .expect("the newly created artboard");
+        assert_eq!(
+            (created.x, created.y, created.width, created.height),
+            (300.0, 300.0, 150.0, 120.0),
+            "created artboard rect must equal the integer-rounded drag bounds \
+             (x300 y300 w150 h120), got {:?}",
+            (created.x, created.y, created.width, created.height),
+        );
+        // Original "A" is unchanged.
+        assert_eq!(
+            artboard_a_rect(&model),
+            (0.0, 0.0, 200.0, 200.0),
+            "the pre-existing artboard A is untouched by a create gesture",
+        );
+    }
+
+    #[test]
+    fn artboard_parity_drag_interior_moves_artboard() {
+        let Some(mut tool) = artboard_yaml_tool() else { return };
+        let mut model = model_with_one_artboard();
+        tool.activate(&mut model);
+
+        // Press INSIDE artboard A at screen (100,100) → moving_pending
+        // (probe_hit latches hit_artboard_id = "A"). Drag by (+50,+30)
+        // to (150,130) past threshold → moving + move_apply. Release →
+        // move_commit (integer rounding). move_apply / move_commit fall
+        // back to hit_artboard_id when panel-selection is empty, so the
+        // single-artboard move works end-to-end through the seam.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_move(&mut model, 150.0, 130.0, false, false, true);
+        tool.on_release(&mut model, 150.0, 130.0, false, false);
+
+        assert_eq!(
+            model.document().artboards.len(),
+            1,
+            "a move must not change the artboard count",
+        );
+        assert_eq!(
+            artboard_a_rect(&model),
+            (50.0, 30.0, 200.0, 200.0),
+            "artboard A shifts by exactly the drag delta (+50,+30); size \
+             unchanged, got {:?}",
+            artboard_a_rect(&model),
+        );
+    }
+
+    #[test]
+    fn artboard_parity_alt_drag_interior_duplicates_artboard() {
+        let Some(mut tool) = artboard_yaml_tool() else { return };
+        let mut model = model_with_one_artboard();
+        tool.activate(&mut model);
+        assert_eq!(model.document().artboards.len(), 1, "precondition: one artboard");
+
+        // ALT-press inside A at (100,100) → duplicating_pending. Drag by
+        // (+60,+40) past threshold → duplicate_init mints the copy at
+        // A's position and retargets translate ops at it, then
+        // duplicate_apply / duplicate_commit translate the COPY. The
+        // source A stays put; the copy lands at A + delta.
+        tool.on_press(&mut model, 100.0, 100.0, false, true);
+        tool.on_move(&mut model, 160.0, 140.0, false, true, true);
+        tool.on_release(&mut model, 160.0, 140.0, false, true);
+
+        let abs = &model.document().artboards;
+        assert_eq!(
+            abs.len(),
+            2,
+            "alt-drag duplicates: count grows by exactly one, got {}",
+            abs.len(),
+        );
+        // Source "A" is unmoved.
+        assert_eq!(
+            artboard_a_rect(&model),
+            (0.0, 0.0, 200.0, 200.0),
+            "the source artboard A stays at its origin during an alt-drag \
+             duplicate, got {:?}",
+            artboard_a_rect(&model),
+        );
+        // The copy carries A's size, shifted by the drag delta (+60,+40).
+        let copy = abs
+            .iter()
+            .find(|ab| ab.id != "A")
+            .expect("the duplicate artboard");
+        assert_eq!(
+            (copy.x, copy.y, copy.width, copy.height),
+            (60.0, 40.0, 200.0, 200.0),
+            "the duplicate lands at A + drag delta with A's dimensions, got {:?}",
+            (copy.x, copy.y, copy.width, copy.height),
+        );
+    }
+
+    #[test]
+    fn artboard_parity_press_release_no_drag_is_a_noop() {
+        let Some(mut tool) = artboard_yaml_tool() else { return };
+        let mut model = model_with_one_artboard();
+        tool.activate(&mut model);
+
+        // Snapshot the artboard list before the gesture for an exact
+        // no-op proof.
+        let before = format!("{:?}", model.document().artboards);
+
+        // Press inside A then release with NO intervening move — a
+        // sub-threshold click. `moved` stays false, so on_mouseup's
+        // mode-guarded commit arms never fire: no move, no create, no
+        // duplicate, no new artboard.
+        tool.on_press(&mut model, 100.0, 100.0, false, false);
+        tool.on_release(&mut model, 100.0, 100.0, false, false);
+
+        assert_eq!(
+            model.document().artboards.len(),
+            1,
+            "a sub-threshold click must not add or remove an artboard",
+        );
+        assert_eq!(
+            format!("{:?}", model.document().artboards),
+            before,
+            "a press+release with no drag leaves the artboard list byte-identical",
+        );
+
+        // Same for a press on EMPTY canvas with no drag — creating mode
+        // is latched but the sub-threshold mouseup commits nothing.
+        let before_empty = format!("{:?}", model.document().artboards);
+        tool.on_press(&mut model, 400.0, 400.0, false, false);
+        tool.on_release(&mut model, 400.0, 400.0, false, false);
+        assert_eq!(
+            format!("{:?}", model.document().artboards),
+            before_empty,
+            "a sub-threshold click on empty canvas creates nothing",
+        );
+    }
 }
