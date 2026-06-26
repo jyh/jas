@@ -1472,6 +1472,71 @@ pub(crate) fn FloatingDocksView() -> Element {
 }
 
 #[cfg(test)]
+mod stroke_panel_override_tests {
+    use super::*;
+    use crate::workspace::app_state::{AppState, TabState};
+    use crate::document::document::ElementSelection;
+    // `Element` in this module resolves to Dioxus's VNode result, so
+    // reach the geometry enum by an explicit alias.
+    use crate::geometry::element::{
+        CommonProps, Color, Stroke, RectElem, Element as GeoEl,
+    };
+
+    // decision-5a: the Stroke panel Weight must reflect the SELECTED
+    // element's stroke width (its baked / effective width after the
+    // scale counter-scale work), not the app default — and fall back to
+    // the app default stroke when nothing is selected. Rust already
+    // does this in build_live_panel_overrides; these lock the parity
+    // with the Python / Swift / OCaml ports.
+
+    fn select_rect_with_stroke(st: &mut AppState, stroke: Option<Stroke>) {
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let r = GeoEl::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(GeoEl::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(r)];
+        }
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+    }
+
+    #[test]
+    fn weight_from_selected_element() {
+        let mut st = AppState::new();
+        // A scaled element baked its stroke to 2.5pt — the panel shows it.
+        select_rect_with_stroke(&mut st, Some(Stroke::new(Color::BLACK, 2.5)));
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("weight").and_then(|v| v.as_f64()), Some(2.5));
+    }
+
+    #[test]
+    fn no_selection_uses_app_default() {
+        let mut st = AppState::new();  // app_default_stroke width 1.0
+        // Selection empty -> fall back to the app default stroke width.
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("weight").and_then(|v| v.as_f64()), Some(1.0));
+    }
+
+    #[test]
+    fn selected_without_stroke_uses_app_default() {
+        let mut st = AppState::new();
+        select_rect_with_stroke(&mut st, None);  // rect has no stroke
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("weight").and_then(|v| v.as_f64()), Some(1.0));
+    }
+}
+
+#[cfg(test)]
 mod concept_tests {
     use super::*;
 
