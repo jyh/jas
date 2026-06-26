@@ -271,6 +271,14 @@ public struct PanelGroupView: View {
             let overrides = strokePanelLiveOverrides(model: m)
             for (k, v) in overrides { panelMap[k] = v }
         }
+        // Properties panel — X/Y/W/H reflect the selection's evaluated
+        // bounding box (document space, post-transform), decision-5 Part B.1.
+        // Display-only merge into the render scope; never written to the
+        // selection. prop_-prefixed keys match properties.yaml.
+        if contentId == "properties_panel_content", let m = model {
+            let overrides = propertiesPanelLiveOverrides(model: m)
+            for (k, v) in overrides { panelMap[k] = v }
+        }
         // Render-time layers-panel selection, if the layers panel is
         // currently initialised in the shared store. buildPanelCtx runs
         // for whichever panel is being rendered, so it may not be the
