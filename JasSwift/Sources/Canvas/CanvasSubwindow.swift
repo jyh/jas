@@ -132,6 +132,40 @@ private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
 }
 
+/// The geometric-mean scale of a 2x3 affine — `sqrt(|det|)` of the linear part
+/// (`a*d - b*c`). 1.0 for `nil` or a degenerate (det 0) transform. The
+/// per-transform building block of `selectionOutlineScale` and the
+/// element-stroke counter-scale. Mirrors the Python `transform_scale_factor`
+/// (ref commit 8ac2f4d1).
+func transformScaleFactor(_ t: Transform?) -> Double {
+    guard let t = t else { return 1.0 }
+    let det = abs(t.a * t.d - t.b * t.c)
+    return det > 0.0 ? det.squareRoot() : 1.0
+}
+
+/// Fold this element's own `transform` scale into the inherited `elementScale`
+/// and counter-scale its stroke width by the result.
+///
+/// Returns `(width, accumulatedScale)` where `accumulatedScale = elementScale *
+/// transformScaleFactor(transform)` and `width` is `strokeWidth` divided by that
+/// scale. An element's own stroke is drawn UNDER the element transform, so the
+/// matrix would thicken it (on top of any `scale_strokes` bake at apply time) —
+/// a DOUBLE-scale. Dividing here cancels the matrix's stroke scaling so the
+/// stroke renders at its nominal, zoom-scaled width. The accumulated scale is
+/// threaded to children so a stroked shape inside a transformed group is
+/// counter-scaled by the full ancestor chain. Counter-scale uses the ELEMENT
+/// transform chain ONLY (not the view/zoom transform), so the stroke still
+/// scales with zoom. Mirrors the Python `_counter_scaled_element` (ref commit
+/// 8ac2f4d1).
+func counterScaledElementStroke(strokeWidth: Double, transform: Transform?,
+                                elementScale: Double) -> (width: Double, scale: Double) {
+    let scale = elementScale * transformScaleFactor(transform)
+    if scale > 1e-6 && abs(scale - 1.0) > 1e-9 {
+        return (strokeWidth / scale, scale)
+    }
+    return (strokeWidth, scale)
+}
+
 private func setFill(_ ctx: CGContext, _ fill: Fill?) {
     if let fill = fill {
         ctx.setFillColor(cgColor(fill.color))
@@ -215,10 +249,19 @@ private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox
 }
 
 /// Apply stroke properties to the context. Returns (opacity, align).
-private func setStroke(_ ctx: CGContext, _ stroke: Stroke?) -> (Double, StrokeAlign) {
+///
+/// `elementScale` is the accumulated element-transform scale (product of every
+/// ancestor + own transform `sqrt(|det|)`); the stroke width is divided by it so
+/// the element transform (already on the context) does NOT thicken the stroke —
+/// it renders at its nominal, zoom-scaled width, cancelling the matrix's stroke
+/// scaling and the `scale_strokes` double-scale. See `counterScaledElementStroke`.
+private func setStroke(_ ctx: CGContext, _ stroke: Stroke?,
+                       elementScale: Double = 1.0) -> (Double, StrokeAlign) {
     guard let stroke = stroke else { return (1.0, .center) }
     ctx.setStrokeColor(cgColor(stroke.color))
-    let effectiveWidth = stroke.align == .center ? stroke.width : stroke.width * 2.0
+    let nominalWidth = stroke.align == .center ? stroke.width : stroke.width * 2.0
+    let (effectiveWidth, _) = counterScaledElementStroke(
+        strokeWidth: nominalWidth, transform: nil, elementScale: elementScale)
     ctx.setLineWidth(effectiveWidth)
     switch stroke.linecap {
     case .butt: ctx.setLineCap(.butt)
@@ -466,12 +509,13 @@ private func buildCGPath(_ path: CGMutablePath, _ cmds: [PathCommand]) {
     }
 }
 
-private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
+private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?,
+                           elementScale: Double = 1.0) {
     let hasFill = fill != nil
     let hasStroke = stroke != nil
     if hasFill && hasStroke {
         setFill(ctx, fill)
-        let (_, align) = setStroke(ctx, stroke)
+        let (_, align) = setStroke(ctx, stroke, elementScale: elementScale)
         if align == .center {
             ctx.drawPath(using: .fillStroke)
         } else {
@@ -486,7 +530,7 @@ private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
         setFill(ctx, fill)
         ctx.fillPath()
     } else if hasStroke {
-        let (_, align) = setStroke(ctx, stroke)
+        let (_, align) = setStroke(ctx, stroke, elementScale: elementScale)
         strokeAligned(ctx, align)
     }
 }
@@ -507,15 +551,18 @@ private func applyOutlineStyle(_ ctx: CGContext) {
 /// Either fill+stroke as configured, or stroke a thin black outline
 /// when `outline == true`. Text and TextPath are not invoked through
 /// this helper — they always render in preview style.
-private func fillStrokeOrOutline(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?, outline: Bool) {
-    fillStrokeOrOutline(ctx, fill, stroke, fillGradient: nil, strokeGradient: nil, bbox: .zero, outline: outline)
+private func fillStrokeOrOutline(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?, outline: Bool,
+                                 elementScale: Double = 1.0) {
+    fillStrokeOrOutline(ctx, fill, stroke, fillGradient: nil, strokeGradient: nil, bbox: .zero,
+                        outline: outline, elementScale: elementScale)
 }
 
 private func fillStrokeOrOutline(
     _ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?,
-    fillGradient: Gradient?, bbox: CGRect, outline: Bool
+    fillGradient: Gradient?, bbox: CGRect, outline: Bool, elementScale: Double = 1.0
 ) {
-    fillStrokeOrOutline(ctx, fill, stroke, fillGradient: fillGradient, strokeGradient: nil, bbox: bbox, outline: outline)
+    fillStrokeOrOutline(ctx, fill, stroke, fillGradient: fillGradient, strokeGradient: nil, bbox: bbox,
+                        outline: outline, elementScale: elementScale)
 }
 
 /// Phase 6 + 8: gradient-aware fill + stroke. When fillGradient is
@@ -530,7 +577,8 @@ private func fillStrokeOrOutline(
     fillGradient: Gradient?,
     strokeGradient: Gradient?,
     bbox: CGRect,
-    outline: Bool
+    outline: Bool,
+    elementScale: Double = 1.0
 ) {
     if outline {
         applyOutlineStyle(ctx)
@@ -544,9 +592,10 @@ private func fillStrokeOrOutline(
         if let stroke = stroke {
             if let p = savedPath { ctx.addPath(p) }
             if strokeIsGradient, let sg = strokeGradient {
-                fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox)
+                fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox,
+                                            elementScale: elementScale)
             } else {
-                let (_, align) = setStroke(ctx, stroke)
+                let (_, align) = setStroke(ctx, stroke, elementScale: elementScale)
                 strokeAligned(ctx, align)
             }
         }
@@ -558,9 +607,10 @@ private func fillStrokeOrOutline(
             ctx.fillPath()
             if let p = savedPath { ctx.addPath(p) }
         }
-        fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox)
+        fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox,
+                                    elementScale: elementScale)
     } else {
-        fillAndStroke(ctx, fill, stroke)
+        fillAndStroke(ctx, fill, stroke, elementScale: elementScale)
     }
 }
 
@@ -568,10 +618,13 @@ private func fillStrokeOrOutline(
 /// fill the outline with a gradient. The stroke width / cap / join
 /// generate the outline; the gradient fills it.
 private func fillStrokedPathWithGradient(
-    _ ctx: CGContext, stroke: Stroke, gradient: Gradient, bbox: CGRect
+    _ ctx: CGContext, stroke: Stroke, gradient: Gradient, bbox: CGRect,
+    elementScale: Double = 1.0
 ) {
     ctx.saveGState()
-    ctx.setLineWidth(CGFloat(stroke.width))
+    let (lineWidth, _) = counterScaledElementStroke(
+        strokeWidth: stroke.width, transform: nil, elementScale: elementScale)
+    ctx.setLineWidth(CGFloat(lineWidth))
     switch stroke.linecap {
     case .butt: ctx.setLineCap(.butt)
     case .round: ctx.setLineCap(.round)
@@ -856,7 +909,8 @@ private func drawElementWithMask(
     _ elem: Element,
     _ mask: Mask,
     plan: MaskPlan,
-    ancestorVis: Visibility
+    ancestorVis: Visibility,
+    elementScale: Double = 1.0
 ) {
     ctx.saveGState()
     // Alpha + blend apply at layer-composite time.
@@ -868,7 +922,7 @@ private func drawElementWithMask(
     // outer alpha / blend.
     ctx.setAlpha(1.0)
     ctx.setBlendMode(.normal)
-    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale)
     // Apply the mask's effective transform (per
     // ``effectiveMaskTransform``), then composite the mask subtree
     // against the element body. Track C phase 3.
@@ -902,23 +956,35 @@ private func drawElementWithMask(
     ctx.restoreGState()
 }
 
-private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
+/// `elementScale` is the accumulated scale of the ANCESTOR element-transform
+/// chain (1.0 at the top level); it is folded with this element's own transform
+/// scale inside the body and used to counter-scale strokes / threaded to
+/// children. See `counterScaledElementStroke`.
+private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview,
+                         elementScale: Double = 1.0) {
     // Opacity mask: when an element carries an active mask,
     // redirect rendering through the mask composite path. The plan
     // encodes which of the three supported composite strategies to
     // use. ``disabled`` / ``linked: false`` fall through to the
     // plain path for now. OPACITY.md §Rendering.
     if let mask = elem.mask, let plan = maskPlan(mask) {
-        drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis)
+        drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis,
+                            elementScale: elementScale)
         return
     }
-    drawElementBody(ctx, elem, ancestorVis: ancestorVis)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale)
 }
 
-private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview) {
+private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview,
+                             elementScale: Double = 1.0) {
     let effective = min(ancestorVis, elem.visibility)
     if effective == .invisible { return }
     let outline = effective == .outline
+    // Fold this element's own transform scale into the inherited ancestor
+    // scale. The element's stroke is divided by `elemScale` at every setStroke
+    // site (so the element transform on the context does not thicken it); the
+    // accumulated `elemScale` is threaded to group/layer children below.
+    let elemScale = elementScale * transformScaleFactor(elem.transform)
     ctx.saveGState()
     ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
@@ -929,7 +995,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         if outline {
             applyOutlineStyle(ctx)
         } else {
-            let (op, al) = setStroke(ctx, v.stroke)
+            let (op, al) = setStroke(ctx, v.stroke, elementScale: elemScale)
             strokeAlign = al
             ctx.setAlpha(CGFloat(v.opacity * op))
         }
@@ -992,7 +1058,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                 .lineTo(v.x, v.y + v.height),
                 .closePath,
             ]
-            let (_, align) = setStroke(ctx, s)
+            let (_, align) = setStroke(ctx, s, elementScale: elemScale)
             let expanded = DashRenderer.expandDashedStroke(
                 path: cmds, dashArray: s.dashPattern, alignAnchors: true)
             for sub in expanded {
@@ -1006,7 +1072,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             } else {
                 ctx.addRect(rect)
             }
-            fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
+            fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline, elementScale: elemScale)
         }
 
     case .circle(let v):
@@ -1014,14 +1080,14 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2)
         ctx.addEllipse(in: rect)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline, elementScale: elemScale)
 
     case .ellipse(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2)
         ctx.addEllipse(in: rect)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline, elementScale: elemScale)
 
     case .polyline(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -1032,7 +1098,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
             ctx.addLine(to: CGPoint(x: v.points[i].0, y: v.points[i].1))
         }
         let pbbox = polyBBox(v.points)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline, elementScale: elemScale)
 
     case .polygon(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -1044,7 +1110,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         }
         ctx.closePath()
         let pbbox = polyBBox(v.points)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
+        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline, elementScale: elemScale)
 
     case .path(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -1101,7 +1167,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                     buildPath(ctx, v.d)
                     ctx.fillPath()
                 }
-                let (_, align) = setStroke(ctx, s)
+                let (_, align) = setStroke(ctx, s, elementScale: elemScale)
                 let expanded = DashRenderer.expandDashedStroke(
                     path: strokeCmds, dashArray: s.dashPattern, alignAnchors: true)
                 for sub in expanded {
@@ -1116,7 +1182,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
                 fillStrokeOrOutline(
                     ctx, v.fill, v.stroke,
                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    bbox: pbbox, outline: false
+                    bbox: pbbox, outline: false, elementScale: elemScale
                 )
             }
             // Arrowheads
@@ -1595,12 +1661,15 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
     case .group(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
+        // Thread the accumulated element scale (including this group's own
+        // transform) so a stroked descendant is counter-scaled by the full
+        // ancestor chain.
+        for child in v.children { drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale) }
 
     case .layer(let v):
         ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
-        for child in v.children { drawElement(ctx, child, ancestorVis: effective) }
+        for child in v.children { drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale) }
 
     case .live(let v):
         // Evaluate the live element, resolving references against the
@@ -1650,7 +1719,7 @@ private func drawElementBody(_ ctx: CGContext, _ elem: Element, ancestorVis: Vis
         } else {
             setFill(ctx, liveFill)
             fillOp = liveFill?.opacity ?? 1.0
-            (strokeOp, strokeAlign) = setStroke(ctx, liveStroke)
+            (strokeOp, strokeAlign) = setStroke(ctx, liveStroke, elementScale: elemScale)
         }
         if ps.contains(where: { $0.count >= 2 }) {
             ctx.beginPath()
