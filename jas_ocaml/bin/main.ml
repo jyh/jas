@@ -777,8 +777,27 @@ let () =
           | Some (`Assoc pairs) -> pairs
           | _ -> []
       in
-      if name <> "" then
-        Jas.Panel_menu.dispatch_yaml_action ~params name (get_model ())
+      if name <> "" then begin
+        (* new_document is a canvas-open action: it needs the App-level
+           [add_canvas] sink (the same sink the menubar new_document closure
+           binds [on_open] to), which the lib-level dispatcher cannot reach.
+           Build a fresh blank model exactly as the menubar closure does
+           (one empty layer + the seeded at-least-one artboard invariant so a
+           visible white artboard opens) and route it to [add_canvas]. Every
+           OTHER name goes through the native-first lib dispatcher: it routes
+           select_all / delete_selection through the SAME native ops the menu
+           and keyboard handlers use (their actions.yaml effects are log
+           stubs, so the generic dispatcher would no-op them), else falls
+           through to the generic panel dispatcher for genuine panel /
+           generic-effect actions. *)
+        if name = "new_document" then begin
+          let layers = [| Jas.Element.make_layer [||] |] in
+          let (abs, _) = Jas.Artboard.ensure_invariant [] in
+          let doc = Jas.Document.make_document ~artboards:abs layers in
+          add_canvas (Jas.Model.create ~document:doc ())
+        end else
+          Jas.Fifo_action_routing.dispatch ~params name (get_model ())
+      end
     | _ ->
       Printf.printf "test-fifo: unknown command %s\n%!" cmd
   in
