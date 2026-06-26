@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
@@ -902,22 +902,57 @@ def _effective_mask_transform(mask, elem) -> "Transform | None":
     return mask.unlink_transform
 
 
+def transform_scale_factor(transform) -> float:
+    """The geometric-mean scale of a 2x3 affine — ``sqrt(|det|)`` of the linear
+    part (``a*d - b*c``). 1.0 for ``None`` or a degenerate (det 0) transform.
+    The per-transform building block of selection_outline_scale and the
+    element-stroke counter-scale."""
+    if transform is None:
+        return 1.0
+    det = abs(transform.a * transform.d - transform.b * transform.c)
+    return det ** 0.5 if det > 0.0 else 1.0
+
+
+def _counter_scaled_element(elem: Element, element_scale: float):
+    """Return ``(element, accumulated_scale)``.
+
+    ``accumulated_scale`` = ``element_scale`` times this element's own transform
+    scale (``transform_scale_factor``). The returned element has its STROKE
+    width divided by that scale, so the element transform (applied to the
+    painter) does NOT thicken the stroke — it renders at the nominal
+    (zoom-scaled) width, cancelling the matrix's stroke scaling AND the
+    double-scale when ``scale_strokes`` baked the width at apply time. Only
+    copies when there is an actual scale; otherwise returns ``elem`` unchanged.
+    The accumulated scale is threaded to children so a stroked shape inside a
+    transformed group is counter-scaled by the full chain.
+    """
+    elem_scale = element_scale * transform_scale_factor(
+        getattr(elem, 'transform', None))
+    if elem_scale > 1e-6 and abs(elem_scale - 1.0) > 1e-9:
+        stroke = getattr(elem, 'stroke', None)
+        if stroke is not None:
+            elem = replace(elem, stroke=replace(
+                stroke, width=stroke.width / elem_scale))
+    return elem, elem_scale
+
+
 def _draw_element(painter: QPainter, elem: Element,
-                  ancestor_vis=None) -> None:
+                  ancestor_vis=None, element_scale: float = 1.0) -> None:
     """Draw a single element, dispatching to the mask composite
     path when the element carries an active mask."""
     mask = getattr(elem, 'mask', None)
     if mask is not None:
         plan = _mask_plan(mask)
         if plan is not None:
-            _draw_element_with_mask(painter, elem, mask, plan, ancestor_vis)
+            _draw_element_with_mask(painter, elem, mask, plan, ancestor_vis,
+                                    element_scale)
             return
-    _draw_element_body(painter, elem, ancestor_vis)
+    _draw_element_body(painter, elem, ancestor_vis, element_scale)
 
 
 def _draw_element_with_mask(painter: QPainter, elem: Element,
                             mask, plan: MaskPlan,
-                            ancestor_vis) -> None:
+                            ancestor_vis, element_scale: float = 1.0) -> None:
     """Render ``elem`` with its opacity mask composited in per
     ``plan``. The element body is drawn onto an offscreen
     ``QImage`` with the main painter's current world transform;
@@ -929,7 +964,7 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
     from PySide6.QtGui import QImage
     device = painter.device()
     if device is None:
-        _draw_element_body(painter, elem, ancestor_vis)
+        _draw_element_body(painter, elem, ancestor_vis, element_scale)
         return
     w = int(device.width())
     h = int(device.height())
@@ -945,7 +980,7 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
             bool(painter.renderHints() & QPainter.RenderHint.Antialiasing),
         )
         sub.setTransform(painter.transform())
-        _draw_element_body(sub, elem, ancestor_vis)
+        _draw_element_body(sub, elem, ancestor_vis, element_scale)
         # Apply the mask's effective transform (per
         # _effective_mask_transform), then composite the mask
         # subtree against the element body. Track C phase 3.
@@ -981,7 +1016,7 @@ def _draw_element_with_mask(painter: QPainter, elem: Element,
 
 
 def _draw_element_body(painter: QPainter, elem: Element,
-                       ancestor_vis=None) -> None:
+                       ancestor_vis=None, element_scale: float = 1.0) -> None:
     """Draw a single element using the QPainter.
 
     ``ancestor_vis`` is the capping visibility inherited from parent
@@ -1014,6 +1049,11 @@ def _draw_element_body(painter: QPainter, elem: Element,
 
     transform = getattr(elem, 'transform', None)
     _apply_transform(painter, transform)
+    # Counter-scale the element's own stroke so the element transform (now on
+    # the painter) does NOT thicken it — it renders at the nominal, zoom-scaled
+    # width, cancelling the matrix's stroke scaling and the scale_strokes
+    # double-scale. elem_scale is threaded to children below.
+    elem, elem_scale = _counter_scaled_element(elem, element_scale)
 
     match elem:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2, stroke=stroke):
@@ -1563,7 +1603,7 @@ def _draw_element_body(painter: QPainter, elem: Element,
 
         case Group(children=children) | Layer(children=children):
             for child in children:
-                _draw_element(painter, child, effective)
+                _draw_element(painter, child, effective, elem_scale)
 
         case LiveElement():
             # Live element (CompoundShape / ReferenceElem): evaluate to a
