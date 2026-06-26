@@ -638,13 +638,30 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
     // prop_-prefixed so they never collide with the Color panel's short y / h
     // keys (this map is applied to every panel by leaf-name match).
     if let Some(tab) = st.tab() {
-        let (px, py, pw, ph) =
-            crate::canvas::render::selection_evaluated_bounds(tab.model.document());
+        let doc = tab.model.document();
+        let (px, py, pw, ph) = crate::canvas::render::selection_evaluated_bounds(doc);
         let r2 = |v: f64| (v * 100.0).round() / 100.0;
         m.insert("prop_x".into(), serde_json::json!(r2(px)));
         m.insert("prop_y".into(), serde_json::json!(r2(py)));
         m.insert("prop_w".into(), serde_json::json!(r2(pw)));
         m.insert("prop_h".into(), serde_json::json!(r2(ph)));
+        // Part B.3: rotation / opacity / blend from the FIRST selected
+        // element (like the Stroke panel weight). Defaults 0deg / 100% /
+        // normal. Blend serializes to its snake_case id via serde.
+        let mut rot = 0.0_f64;
+        let mut op = 100.0_f64;
+        let mut blend = J::String("normal".into());
+        if let Some(e) = doc.selection.first().and_then(|es| doc.get_element(&es.path)) {
+            if let Some(t) = e.transform() {
+                rot = t.b.atan2(t.a).to_degrees();
+            }
+            op = e.opacity() * 100.0;
+            blend = serde_json::to_value(e.mode())
+                .unwrap_or_else(|_| J::String("normal".into()));
+        }
+        m.insert("prop_rotation".into(), serde_json::json!(r2(rot)));
+        m.insert("prop_opacity".into(), serde_json::json!(r2(op)));
+        m.insert("prop_blend".into(), blend);
     }
 
     m
@@ -1522,6 +1539,57 @@ mod stroke_panel_override_tests {
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
         st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+    }
+
+    fn select_element(st: &mut AppState, e: GeoEl) {
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(GeoEl::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(e)];
+        }
+        new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+    }
+
+    // Part B.3: rotation / opacity / blend from the first selected element.
+    #[test]
+    fn properties_attrs_from_first_selected() {
+        use crate::geometry::element::{Transform, BlendMode};
+        let mut st = AppState::new();
+        let e = GeoEl::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                transform: Some(Transform::rotate(90.0)),
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                ..Default::default()
+            },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        select_element(&mut st, e);
+        let m = build_live_panel_overrides(&st);
+        assert!((m.get("prop_rotation").and_then(|v| v.as_f64()).unwrap() - 90.0).abs() < 0.01);
+        assert_eq!(m.get("prop_opacity").and_then(|v| v.as_f64()), Some(50.0));
+        assert_eq!(m.get("prop_blend").and_then(|v| v.as_str()), Some("multiply"));
+    }
+
+    #[test]
+    fn properties_attrs_default_no_selection() {
+        // A tab with an empty selection (the realistic "nothing selected"
+        // case; the panel only renders with a document open).
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("prop_rotation").and_then(|v| v.as_f64()), Some(0.0));
+        assert_eq!(m.get("prop_opacity").and_then(|v| v.as_f64()), Some(100.0));
+        assert_eq!(m.get("prop_blend").and_then(|v| v.as_str()), Some("normal"));
     }
 
     #[test]
