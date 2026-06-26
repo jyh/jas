@@ -4137,10 +4137,17 @@ private func artboardDeletePanelSelected(model: Model, store: StateStore) {
 private func artboardMoveCommit(model: Model, store: StateStore) {
     let toolCtx = store.evalContext()["tool"] as? [String: Any]
     guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
-    let pressX = (abCtx["press_x"] as? Double) ?? 0
-    let pressY = (abCtx["press_y"] as? Double) ?? 0
-    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
-    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    // press_x / cursor_x are stored via `set: ... = event.x`, whose
+    // evaluator yields an *Int* whenever the coordinate is integral
+    // (a plain `as? Double` then fails and collapses the displacement
+    // to zero, snapping the artboard back to its pre-drag origin on
+    // mouse-up). Read through NSNumber so both Int and Double bridge,
+    // matching evalNumber's coercion (the live move_apply path already
+    // routes through evalNumber and so never hit this).
+    let pressX = (abCtx["press_x"] as? NSNumber)?.doubleValue ?? 0
+    let pressY = (abCtx["press_y"] as? NSNumber)?.doubleValue ?? 0
+    let cursorX = (abCtx["cursor_x"] as? NSNumber)?.doubleValue ?? 0
+    let cursorY = (abCtx["cursor_y"] as? NSNumber)?.doubleValue ?? 0
     let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
 
     var dx = cursorX - pressX
