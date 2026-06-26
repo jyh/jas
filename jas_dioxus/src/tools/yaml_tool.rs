@@ -342,6 +342,16 @@ pub(crate) const BRIDGED_STATE_KEYS: &[&str] = &[
     "blob_brush_fidelity",
     "blob_brush_keep_selected",
     "blob_brush_merge_only_with_selection",
+    // Paintbrush tool options (state.paintbrush_*). All declared in
+    // state.yaml; none are handler-written (the runtime edit state is
+    // tool-scoped tool.paintbrush.*), so they are safe to bridge. Without
+    // these the live paintbrush commits with fit_error=0 (no smoothing),
+    // ignores fill_new_strokes, and the Alt-edit threshold collapses to 0.
+    "paintbrush_fidelity",
+    "paintbrush_fill_new_strokes",
+    "paintbrush_keep_selected",
+    "paintbrush_edit_selected_paths",
+    "paintbrush_edit_within",
 ];
 
 impl CanvasTool for YamlTool {
@@ -4570,6 +4580,169 @@ mod tests {
             model.document().layers[0].children().unwrap().len(),
             1,
             "overlapping same-fill paint merges into one Path",
+        );
+    }
+
+    // ── Paintbrush tool gesture-seam tests ─────────────────────────
+    //
+    // Drive the production paintbrush tool through on_press/on_move/
+    // on_release, seeding app-level state through the bridge
+    // (sync_global_state) exactly as the canvas does. These complement
+    // the effect unit tests (add_path_from_buffer extensions +
+    // edit_start/commit, which seed a pre-built buffer) by exercising
+    // the FULL gesture pipeline AND the app-state bridge: fidelity ->
+    // fit_error (smoothing) and fill_new_strokes -> fill both arrive
+    // only via the bridge. See PAINTBRUSH_TOOL_TESTS.md.
+
+    fn paintbrush_yaml_tool() -> Option<YamlTool> {
+        use std::fs;
+        use std::path::PathBuf;
+        let ws_path: PathBuf = [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            "workspace",
+            "workspace.json",
+        ]
+        .iter()
+        .collect();
+        if !ws_path.exists() {
+            return None;
+        }
+        let raw = fs::read_to_string(&ws_path).ok()?;
+        let ws: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let spec_json = ws.get("tools")?.get("paintbrush")?;
+        YamlTool::from_workspace_tool(spec_json)
+    }
+
+    /// Seed the app-level state the paintbrush commit reads, through the
+    /// production bridge. fidelity=3 -> fit_error 5.0 (a smoothed fit);
+    /// pass `fill_new` to exercise fill_new_strokes + fill_color.
+    fn seed_paintbrush_app_state(tool: &mut YamlTool, fill_new: bool) {
+        let mut state = serde_json::Map::new();
+        state.insert("fill_color".into(), serde_json::json!("#ff0000"));
+        state.insert("paintbrush_fidelity".into(), serde_json::json!(3));
+        state.insert(
+            "paintbrush_fill_new_strokes".into(),
+            serde_json::json!(fill_new),
+        );
+        state.insert("paintbrush_edit_within".into(), serde_json::json!(12));
+        state.insert(
+            "paintbrush_edit_selected_paths".into(),
+            serde_json::json!(true),
+        );
+        state.insert("paintbrush_keep_selected".into(), serde_json::json!(true));
+        tool.sync_global_state(&state);
+    }
+
+    /// Drive a multi-point paintbrush zigzag: press -> moves -> release.
+    fn paintbrush_stroke(tool: &mut YamlTool, model: &mut Model) {
+        tool.on_press(model, 40.0, 60.0, false, false);
+        tool.on_move(model, 60.0, 40.0, false, false, true);
+        tool.on_move(model, 80.0, 60.0, false, false, true);
+        tool.on_move(model, 100.0, 40.0, false, false, true);
+        tool.on_release(model, 120.0, 60.0, false, false);
+    }
+
+    #[test]
+    fn paintbrush_parity_paint_commits_smoothed_stroke() {
+        use crate::geometry::element::PathCommand;
+        let Some(mut tool) = paintbrush_yaml_tool() else { return };
+        seed_paintbrush_app_state(&mut tool, false);
+        let mut model = empty_layer_model();
+        paintbrush_stroke(&mut tool, &mut model);
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "paint commits one Path");
+        match &*children[0] {
+            Element::Path(pe) => {
+                assert!(pe.stroke.is_some(), "paintbrush path has a stroke");
+                // fidelity=3 -> fit_error 5.0 (via the bridge): a SMOOTHED
+                // fit (MoveTo + CurveTos), not the degenerate fit_error=0
+                // over-fit that a null fidelity would produce.
+                assert!(matches!(pe.d[0], PathCommand::MoveTo { .. }));
+                assert!(
+                    pe.d.len() >= 2
+                        && pe.d[1..]
+                            .iter()
+                            .all(|c| matches!(c, PathCommand::CurveTo { .. })),
+                    "smoothed: MoveTo + CurveTo(s)",
+                );
+            }
+            _ => panic!("expected Path"),
+        }
+    }
+
+    #[test]
+    fn paintbrush_parity_fill_new_strokes_fills_via_bridge() {
+        // The fill (red) reaches the commit ONLY through the app-state
+        // bridge (fill_color), gated by fill_new_strokes=true. Before the
+        // bridge the live tool dropped it (fill_new_strokes -> null ->
+        // false). This is the paintbrush analogue of the blob fill bug.
+        let Some(mut tool) = paintbrush_yaml_tool() else { return };
+        seed_paintbrush_app_state(&mut tool, true);
+        let mut model = empty_layer_model();
+        paintbrush_stroke(&mut tool, &mut model);
+        match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => {
+                assert!(pe.fill.is_some(), "fill_new_strokes=true fills the path")
+            }
+            _ => panic!("expected Path"),
+        }
+    }
+
+    #[test]
+    fn paintbrush_parity_no_fill_when_option_off() {
+        // fill_new_strokes=false (default) -> open freehand stroke, no fill.
+        let Some(mut tool) = paintbrush_yaml_tool() else { return };
+        seed_paintbrush_app_state(&mut tool, false);
+        let mut model = empty_layer_model();
+        paintbrush_stroke(&mut tool, &mut model);
+        match &*model.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => {
+                assert!(pe.fill.is_none(), "no fill when fill_new_strokes is off")
+            }
+            _ => panic!("expected Path"),
+        }
+    }
+
+    #[test]
+    fn paintbrush_parity_undo_redo_round_trips() {
+        let Some(mut tool) = paintbrush_yaml_tool() else { return };
+        seed_paintbrush_app_state(&mut tool, false);
+        let mut model = empty_layer_model();
+        paintbrush_stroke(&mut tool, &mut model);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+        );
+        model.undo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "undo removes the stroke",
+        );
+        model.redo();
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "redo restores it",
+        );
+    }
+
+    #[test]
+    fn paintbrush_parity_escape_during_drag_cancels() {
+        // Esc mid-drag flips mode to idle (on_keydown), so the on_mouseup
+        // drawing-commit branch (guarded by mode == 'drawing') is skipped.
+        let Some(mut tool) = paintbrush_yaml_tool() else { return };
+        seed_paintbrush_app_state(&mut tool, false);
+        let mut model = empty_layer_model();
+        tool.on_press(&mut model, 40.0, 60.0, false, false);
+        tool.on_move(&mut model, 60.0, 40.0, false, false, true);
+        tool.on_key_event(&mut model, "Escape", KeyMods::default());
+        tool.on_release(&mut model, 80.0, 60.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            0,
+            "Esc during drag cancels — no stroke committed",
         );
     }
 

@@ -1,0 +1,16 @@
+[
+  {
+    "name": "paintbrush_paint_fill",
+    "setup_svg": "empty_layer.svg",
+    "tool": "paintbrush",
+    "app_state": { "paintbrush_fidelity": 3, "paintbrush_fill_new_strokes": true, "fill_color": "#0000ff" },
+    "events": [
+      {"kind": "press", "x": 40, "y": 60},
+      {"kind": "move", "x": 60, "y": 40, "dragging": true},
+      {"kind": "move", "x": 80, "y": 60, "dragging": true},
+      {"kind": "move", "x": 100, "y": 40, "dragging": true},
+      {"kind": "release", "x": 120, "y": 60}
+    ],
+    "expected_json": "paintbrush_paint_fill_expected.json"
+  }
+]
