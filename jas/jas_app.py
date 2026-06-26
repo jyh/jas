@@ -1291,6 +1291,27 @@ class MainWindow(QMainWindow):
         _resync_stroke_panel()
         QTimer.singleShot(0, _resync_stroke_panel)
 
+        # Re-sync the Properties panel X/Y/W/H from the selection's
+        # evaluated bounding box on every document change (decision-5
+        # Part B). Busy-flag guards re-entry, mirroring the stroke sync.
+        props_busy = {"flag": False}
+
+        def _resync_properties_panel(_doc=None):
+            if props_busy["flag"]:
+                return
+            from workspace_interpreter.effects import (
+                sync_properties_panel_from_selection,
+            )
+            props_busy["flag"] = True
+            try:
+                sync_properties_panel_from_selection(self._yaml_state, model)
+            finally:
+                props_busy["flag"] = False
+
+        model.on_document_changed(_resync_properties_panel)
+        _resync_properties_panel()
+        QTimer.singleShot(0, _resync_properties_panel)
+
         tab_label()
         self._update_canvas_logo()
 

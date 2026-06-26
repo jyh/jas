@@ -1163,6 +1163,100 @@ def sync_stroke_panel_from_selection(store: StateStore, model) -> None:
     store.set_panel("stroke_panel_content", "weight", float(width))
 
 
+def _element_evaluated_bbox(doc, path):
+    """Axis-aligned bounding box ``(x, y, w, h)`` of the element at ``path``
+    in DOCUMENT space: the element's geometric bbox corners mapped through
+    its own transform and every ancestor (group / layer) transform, then
+    axis-aligned. Mirrors the selection-highlight transform chain
+    (``canvas.selection_handle_rects``) so the Properties panel numbers match
+    the visible selection box. Returns ``None`` when ``path`` does not
+    resolve. Duck-typed (no geometry imports): a container exposes
+    ``children``; every element exposes ``geometric_bounds`` and an optional
+    ``transform`` with ``apply_point``."""
+    if not path:
+        return None
+    layers = getattr(doc, "layers", None)
+    if layers is None:
+        return None
+    try:
+        node = layers[path[0]]
+    except (IndexError, TypeError):
+        return None
+    ancestors = []  # outermost (layer) first
+    if len(path) > 1:
+        ancestors.append(getattr(node, "transform", None))
+        for idx in path[1:-1]:
+            children = getattr(node, "children", None)
+            if children is None:
+                return None
+            try:
+                node = children[idx]
+            except (IndexError, TypeError):
+                return None
+            ancestors.append(getattr(node, "transform", None))
+        children = getattr(node, "children", None)
+        if children is None:
+            return None
+        try:
+            node = children[path[-1]]
+        except (IndexError, TypeError):
+            return None
+    bounds_fn = getattr(node, "geometric_bounds", None)
+    if bounds_fn is None:
+        return None
+    bx, by, bw, bh = bounds_fn()
+    # Apply innermost-first: the element's own transform, then each ancestor
+    # outward (layer last) — matching the painter's combined CTM.
+    chain = [getattr(node, "transform", None)] + list(reversed(ancestors))
+    xs, ys = [], []
+    for (px, py) in ((bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)):
+        for t in chain:
+            if t is not None:
+                px, py = t.apply_point(px, py)
+        xs.append(px)
+        ys.append(py)
+    return (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+
+def selection_evaluated_bounds(doc):
+    """Union ``(x, y, w, h)`` of every selected element's evaluated geometric
+    bbox (see :func:`_element_evaluated_bbox`) in DOCUMENT space — the
+    post-transform values the Properties panel shows. ``(0, 0, 0, 0)`` when
+    the selection is empty or nothing resolves."""
+    boxes = []
+    for es in getattr(doc, "selection", None) or []:
+        bbox = _element_evaluated_bbox(doc, es.path)
+        if bbox is not None:
+            boxes.append(bbox)
+    if not boxes:
+        return (0.0, 0.0, 0.0, 0.0)
+    min_x = min(b[0] for b in boxes)
+    min_y = min(b[1] for b in boxes)
+    max_x = max(b[0] + b[2] for b in boxes)
+    max_y = max(b[1] + b[3] for b in boxes)
+    return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+def sync_properties_panel_from_selection(store: StateStore, model) -> None:
+    """Mirror the selection's evaluated bounding box into the Properties
+    panel's ``x`` / ``y`` / ``w`` / ``h`` fields (decision-5 Part B) — the
+    values the X/Y/W/H widgets bind. Display-only (panel keys, never the
+    selection). ``(0, 0, 0, 0)`` when nothing is selected. No-op until the
+    Properties panel state exists. The caller wires it on every
+    document/selection change."""
+    if model is None:
+        return
+    x, y, w, h = selection_evaluated_bounds(model.document)
+    pid = "properties_panel_content"
+    # Keys are prop_-prefixed to avoid colliding with another panel's short
+    # leaf keys in renderers that feed live values through one shared override
+    # map (the Color panel uses y / h). See properties.yaml.
+    store.set_panel(pid, "prop_x", round(float(x), 2))
+    store.set_panel(pid, "prop_y", round(float(y), 2))
+    store.set_panel(pid, "prop_w", round(float(w), 2))
+    store.set_panel(pid, "prop_h", round(float(h), 2))
+
+
 def subscribe_active_color(store: StateStore, controller_getter) -> None:
     """Wire a write-back to the canvas selection on every global
     write to ``fill_color`` or ``stroke_color``. The Color Panel

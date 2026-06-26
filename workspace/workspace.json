@@ -17722,9 +17722,36 @@
     },
     "properties_panel_content": {
       "id": "properties_panel_content",
-      "type": "placeholder",
       "summary": "Object properties",
-      "description": "Transform and appearance properties for the selected object(s): position (X, Y), size (W, H) with constrain-proportions lock, rotation angle, shear, opacity slider, and blend mode dropdown. When multiple objects are selected, shows shared values or blank for mixed values. All fields are editable and apply immediately.\n",
+      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nFields are read-only in this increment. Editing (move on X/Y, resize on W/H), the constrain-proportions lock, rotation angle, shear, the opacity slider and the blend-mode dropdown follow in later increments. When nothing is selected every field shows 0.\n",
+      "state": {
+        "prop_x": {
+          "type": "number",
+          "default": 0,
+          "description": "Selection bounding-box left edge (document X), in points."
+        },
+        "prop_y": {
+          "type": "number",
+          "default": 0,
+          "description": "Selection bounding-box top edge (document Y), in points."
+        },
+        "prop_w": {
+          "type": "number",
+          "default": 0,
+          "description": "Selection bounding-box width, in points."
+        },
+        "prop_h": {
+          "type": "number",
+          "default": 0,
+          "description": "Selection bounding-box height, in points."
+        }
+      },
+      "init": {
+        "prop_x": "0",
+        "prop_y": "0",
+        "prop_w": "0",
+        "prop_h": "0"
+      },
       "menu": [
         {
           "label": "Close Object properties",
@@ -17734,7 +17761,126 @@
           },
           "description": "Close the Object properties panel"
         }
-      ]
+      ],
+      "content": {
+        "type": "container",
+        "id": "prop_content",
+        "layout": "column",
+        "style": {
+          "padding": 4,
+          "gap": 6
+        },
+        "children": [
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "X",
+                "style": {
+                  "width": 14,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "prop_x",
+                "type": "length_input",
+                "unit": "pt",
+                "summary": "Selection X",
+                "description": "Left edge of the selection bounding box (document X), in points. Read-only this increment.",
+                "disabled": "true",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.prop_x"
+                }
+              },
+              {
+                "type": "text",
+                "content": "Y",
+                "style": {
+                  "width": 14,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "prop_y",
+                "type": "length_input",
+                "unit": "pt",
+                "summary": "Selection Y",
+                "description": "Top edge of the selection bounding box (document Y), in points. Read-only this increment.",
+                "disabled": "true",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.prop_y"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "W",
+                "style": {
+                  "width": 14,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "prop_w",
+                "type": "length_input",
+                "unit": "pt",
+                "summary": "Selection width",
+                "description": "Width of the selection bounding box, in points. Read-only this increment.",
+                "disabled": "true",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.prop_w"
+                }
+              },
+              {
+                "type": "text",
+                "content": "H",
+                "style": {
+                  "width": 14,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "prop_h",
+                "type": "length_input",
+                "unit": "pt",
+                "summary": "Selection height",
+                "description": "Height of the selection bounding box, in points. Read-only this increment.",
+                "disabled": "true",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.prop_h"
+                }
+              }
+            ]
+          }
+        ]
+      }
     },
     "stroke_panel_content": {
       "id": "stroke_panel_content",
