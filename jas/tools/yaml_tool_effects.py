@@ -2306,7 +2306,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
 
         if mode == "pressed_smooth":
             controller.model.begin_txn()
-            apply(convert_smooth_to_corner(elem.d, ai))
+            apply(convert_smooth_to_corner(elem, ai).d)
         elif mode == "pressed_corner":
             moved = ((tx - ox) ** 2 + (ty - oy) ** 2) ** 0.5
             if moved > 1.0:
