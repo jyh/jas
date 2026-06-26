@@ -604,6 +604,48 @@ let properties_sync_tests = [
     assert (get_panel store "properties_panel_content" "prop_y" = `Float 40.0);
     assert (get_panel store "properties_panel_content" "prop_w" = `Float 60.0);
     assert (get_panel store "properties_panel_content" "prop_h" = `Float 80.0));
+
+  (* Part B.3: rotation / opacity / blend from the first selected element. *)
+  Alcotest.test_case "attrs_rotation_from_transform" `Quick (fun () ->
+    let model = Jas.Model.create ~document:(props_doc_rect props_rot90) () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "properties_panel_content" [("prop_rotation", `Float 0.0)];
+    sync_properties_panel_from_selection store ctrl;
+    (match get_panel store "properties_panel_content" "prop_rotation" with
+     | `Float r -> assert (Float.abs (r -. 90.0) < 1e-6)
+     | _ -> assert false));
+
+  Alcotest.test_case "attrs_opacity_percent_and_blend" `Quick (fun () ->
+    let rect = Jas.Element.make_rect ~opacity:0.5 0.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| rect |] in
+    let selection =
+      Jas.Document.PathMap.singleton [0; 0]
+        (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "properties_panel_content"
+      [("prop_opacity", `Float 0.0); ("prop_blend", `String "x")];
+    sync_properties_panel_from_selection store ctrl;
+    assert (get_panel store "properties_panel_content" "prop_opacity" = `Float 50.0);
+    assert (get_panel store "properties_panel_content" "prop_blend" = `String "normal"));
+
+  Alcotest.test_case "attrs_defaults_no_selection" `Quick (fun () ->
+    let rect = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| rect |] in
+    let doc = Jas.Document.make_document [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "properties_panel_content"
+      [("prop_rotation", `Float 99.0); ("prop_opacity", `Float 0.0);
+       ("prop_blend", `String "x")];
+    sync_properties_panel_from_selection store ctrl;
+    assert (get_panel store "properties_panel_content" "prop_rotation" = `Float 0.0);
+    assert (get_panel store "properties_panel_content" "prop_opacity" = `Float 100.0);
+    assert (get_panel store "properties_panel_content" "prop_blend" = `String "normal"));
 ]
 
 (* ── Phase 3: Character panel → pending override routing ──────── *)

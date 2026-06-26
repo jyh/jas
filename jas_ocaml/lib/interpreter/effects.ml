@@ -821,6 +821,21 @@ let prop_elem_children (elem : Element.element)
     Some children
   | _ -> None
 
+(* Opacity accessor over all element variants (no global getter exists,
+   unlike get_blend_mode / get_transform). *)
+let prop_elem_opacity (elem : Element.element) : float =
+  match elem with
+  | Element.Line { opacity; _ } | Element.Rect { opacity; _ }
+  | Element.Circle { opacity; _ } | Element.Ellipse { opacity; _ }
+  | Element.Polyline { opacity; _ } | Element.Polygon { opacity; _ }
+  | Element.Path { opacity; _ } | Element.Text { opacity; _ }
+  | Element.Text_path { opacity; _ }
+  | Element.Group { opacity; _ } | Element.Layer { opacity; _ } -> opacity
+  | Element.Live (Element.Compound_shape cs) -> cs.opacity
+  | Element.Live (Element.Reference r) -> r.Element.ref_opacity
+  | Element.Live (Element.Recorded rec_) -> rec_.Element.rec_opacity
+  | Element.Live (Element.Generated gen) -> gen.Element.gen_opacity
+
 (* Document-space AABB (x, y, w, h) of the element at [path]: its
    geometric-bounds corners mapped through its own transform and every
    ancestor (group / layer) transform, axis-aligned. [None] when the path
@@ -906,12 +921,31 @@ let prop_round2 v = Float.round (v *. 100.0) /. 100.0
 
 let sync_properties_panel_from_selection (store : State_store.t)
     (ctrl : Controller.controller) =
-  let (x, y, w, h) = selection_evaluated_bounds ctrl#document in
+  let doc = ctrl#document in
+  let (x, y, w, h) = selection_evaluated_bounds doc in
   let pid = "properties_panel_content" in
   State_store.set_panel store pid "prop_x" (`Float (prop_round2 x));
   State_store.set_panel store pid "prop_y" (`Float (prop_round2 y));
   State_store.set_panel store pid "prop_w" (`Float (prop_round2 w));
-  State_store.set_panel store pid "prop_h" (`Float (prop_round2 h))
+  State_store.set_panel store pid "prop_h" (`Float (prop_round2 h));
+  (* Part B.3: rotation / opacity / blend from the FIRST selected element
+     (like the Stroke panel weight). Defaults 0 deg / 100 percent / normal. *)
+  let (rotation, opacity, blend) =
+    match Document.PathMap.min_binding_opt doc.Document.selection with
+    | None -> (0.0, 100.0, "normal")
+    | Some (path, _) ->
+      let elem = Document.get_element doc path in
+      let rot = match prop_elem_transform elem with
+        | Some (t : Element.transform) ->
+          atan2 t.b t.a *. (180.0 /. Float.pi)
+        | None -> 0.0 in
+      let op = prop_elem_opacity elem *. 100.0 in
+      let bl = Element.blend_mode_to_string (Element.get_blend_mode elem) in
+      (rot, op, bl)
+  in
+  State_store.set_panel store pid "prop_rotation" (`Float (prop_round2 rotation));
+  State_store.set_panel store pid "prop_opacity" (`Float (prop_round2 opacity));
+  State_store.set_panel store pid "prop_blend" (`String blend)
 
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =
