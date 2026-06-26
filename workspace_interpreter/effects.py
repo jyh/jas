@@ -1102,7 +1102,7 @@ def apply_stroke_panel_to_selection(store: StateStore, controller) -> None:
 # stroke_render_keys list — when any of these change in the global
 # store, subscribe_stroke_panel fires apply_stroke_panel_to_selection.
 STROKE_RENDER_KEYS: list[str] = [
-    "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
+    "stroke_cap", "stroke_join", "stroke_width", "stroke_miter_limit",
     "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
     "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
     "stroke_dash_align_anchors",
@@ -1128,6 +1128,39 @@ def subscribe_stroke_panel(store: StateStore, controller_getter) -> None:
             apply_stroke_panel_to_selection(store, controller_getter())
 
     store.subscribe(STROKE_RENDER_KEYS, _on_change)
+
+
+def sync_stroke_panel_from_selection(store: StateStore, model) -> None:
+    """Mirror the SELECTED element's stroke WEIGHT into the Stroke panel's
+    ``weight`` field so it shows the selection's effective (baked) stroke width
+    — not the YAML default. Reads the FIRST selected element's stroke; falls
+    back to ``model.default_stroke`` when nothing is selected or the element has
+    no stroke.
+
+    Sets the PANEL state (``stroke_panel_content.weight``, the value the weight
+    widget binds), NOT the global ``stroke_width`` — so this DISPLAY sync does
+    NOT trigger the panel->selection apply (``subscribe_stroke_panel`` listens
+    on the global key), avoiding a clobber of the selection's other stroke
+    props. The panel->selection EDIT path stays the widget's on_change ->
+    global ``stroke_width``. No-op until the Stroke panel state exists. The
+    caller wires it on every document/selection change.
+    """
+    if model is None:
+        return
+    doc = model.document
+    stroke = None
+    if doc.selection:
+        first = next(iter(doc.selection))
+        try:
+            elem = doc.get_element(first.path)
+        except Exception:
+            elem = None
+        if elem is not None:
+            stroke = getattr(elem, "stroke", None)
+    if stroke is None:
+        stroke = getattr(model, "default_stroke", None)
+    width = stroke.width if stroke is not None else 1.0
+    store.set_panel("stroke_panel_content", "weight", float(width))
 
 
 def subscribe_active_color(store: StateStore, controller_getter) -> None:
