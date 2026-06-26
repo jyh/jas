@@ -349,17 +349,63 @@ type mask_plan =
                             bounding box; [DEST_IN] is applied only
                             inside the bbox via a clipped sub-context *)
 
+(** Per-transform geometric-mean SCALE of a 2x3 affine — [sqrt(|det|)] of
+    the linear part with [det = a*.d -. b*.c]. Returns [1.0] for [None] or a
+    degenerate (det 0) transform. The building block of both
+    [selection_outline_scale] and the element-stroke counter-scale. Mirrors
+    the Python [transform_scale_factor]. *)
+let transform_scale_factor (transform : Element.transform option) : float =
+  match transform with
+  | None -> 1.0
+  | Some (tr : Element.transform) ->
+    let det = Float.abs (tr.a *. tr.d -. tr.b *. tr.c) in
+    if det > 0.0 then sqrt det else 1.0
+
+(** Counter-scale an element's own STROKE for rendering. Returns
+    [(element, accumulated_scale)] where [accumulated_scale = element_scale
+    *. transform_scale_factor elem_own_transform] and the returned element
+    has its stroke width DIVIDED by that scale.
+
+    The element's own transform is applied to the painter before its stroke
+    is drawn, so the matrix would thicken the stroke — on top of the
+    [scale_strokes] bake that already multiplied the stored width at apply
+    time. Dividing the stroke width here cancels the element-transform
+    scaling so the stroke renders at its nominal (still zoom-scaled) width:
+    [scale_strokes] ON scales the stroke ONCE with the object, OFF leaves it
+    at the stored width. Only the element-transform chain is cancelled — the
+    view/zoom transform is applied separately and still scales the stroke,
+    matching [selection_outline_scale]. Returns [elem] unchanged when the
+    accumulated scale is effectively 1.0 (or degenerate). The accumulated
+    scale is threaded to children so a stroked shape inside a transformed
+    group is counter-scaled by the full ancestor chain. Mirrors the Python
+    [_counter_scaled_element]. *)
+let counter_scaled_element (elem : Element.element) (element_scale : float)
+    : Element.element * float =
+  let elem_scale =
+    element_scale *. transform_scale_factor (Element.get_transform elem) in
+  if elem_scale > 1e-6 && Float.abs (elem_scale -. 1.0) > 1e-9 then
+    match _element_stroke elem with
+    | Some (s : Element.stroke) ->
+      let scaled =
+        Element.with_stroke elem
+          (Some { s with stroke_width = s.stroke_width /. elem_scale }) in
+      (scaled, elem_scale)
+    | None -> (elem, elem_scale)
+  else (elem, elem_scale)
+
 (** Render a document element. When the element carries an active
     mask, rendering is redirected through [draw_element_with_mask]
     which composites the element body against the mask's subtree
     according to [mask_plan]. OPACITY.md \167Rendering. *)
-let rec draw_element ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
+let rec draw_element ?(ancestor_vis = Element.Preview) ?(element_scale = 1.0)
+    cr (elem : Element.element) =
   match Element.get_mask elem with
   | Some mask ->
     (match mask_plan mask with
      | Some plan -> draw_element_with_mask cr elem mask plan ancestor_vis
-     | None -> draw_element_body ~ancestor_vis cr elem)
-  | None -> draw_element_body ~ancestor_vis cr elem
+                      element_scale
+     | None -> draw_element_body ~ancestor_vis ~element_scale cr elem)
+  | None -> draw_element_body ~ancestor_vis ~element_scale cr elem
 
 (** Pick a [mask_plan] for the mask, or [None] when the mask is
     inactive ([disabled: true]). *)
@@ -397,9 +443,9 @@ and effective_mask_transform (mask : Element.mask) (elem : Element.element)
     mask subtree is then painted on top of the group; the group is
     popped back onto the parent context.  OPACITY.md \167Rendering. *)
 and draw_element_with_mask cr (elem : Element.element)
-    (mask : Element.mask) (plan : mask_plan) ancestor_vis =
+    (mask : Element.mask) (plan : mask_plan) ancestor_vis element_scale =
   Cairo.Group.push cr;
-  draw_element_body ~ancestor_vis cr elem;
+  draw_element_body ~ancestor_vis ~element_scale cr elem;
   (* Apply the mask's effective transform (per
      [effective_mask_transform]), then composite the mask subtree
      against the element body. Track C phase 3. *)
@@ -436,7 +482,8 @@ and draw_element_with_mask cr (elem : Element.element)
   Cairo.Group.pop_to_source cr;
   Cairo.paint cr
 
-and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.element) =
+and draw_element_body ?(ancestor_vis = Element.Preview) ?(element_scale = 1.0)
+    cr (elem : Element.element) =
   let open Element in
   let elem_vis = Element.get_visibility elem in
   let effective = if compare elem_vis ancestor_vis < 0 then elem_vis else ancestor_vis in
@@ -451,6 +498,11 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
      library supports. Until the binding is upgraded (or a raw-cairo wrapper
      is added), all blend_mode values render as source-over. *)
   let _ = Element.get_blend_mode elem in
+  (* Counter-scale the element's own stroke so the element transform (applied
+     to [cr] per-shape below) does NOT thicken it — it renders at the nominal,
+     zoom-scaled width, cancelling the matrix stroke scaling and the
+     [scale_strokes] double-scale. [elem_scale] is threaded to children. *)
+  let (elem, elem_scale) = counter_scaled_element elem element_scale in
   begin match elem with
   | Line { x1; y1; x2; y2; stroke; width_points; opacity; transform; _ } ->
     Cairo.Group.push cr;
@@ -1216,14 +1268,18 @@ and draw_element_body ?(ancestor_vis = Element.Preview) cr (elem : Element.eleme
   | Group { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) children;
+    Array.iter (fun c ->
+      draw_element ~ancestor_vis:effective ~element_scale:elem_scale cr c)
+      children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
   | Layer { children; opacity; transform; _ } ->
     Cairo.Group.push cr;
     apply_transform cr transform;
-    Array.iter (fun c -> draw_element ~ancestor_vis:effective cr c) children;
+    Array.iter (fun c ->
+      draw_element ~ancestor_vis:effective ~element_scale:elem_scale cr c)
+      children;
     Cairo.Group.pop_to_source cr;
     Cairo.paint cr ~alpha:opacity
 
@@ -1680,13 +1736,8 @@ let selection_outline_scale (doc : Document.document)
     if !abort then 1.0
     else begin
       transforms := element_transform !node :: !transforms;
-      List.fold_left (fun scale t ->
-        match t with
-        | Some (tr : Element.transform) ->
-          let det = Float.abs (tr.a *. tr.d -. tr.b *. tr.c) in
-          if det > 0.0 then scale *. sqrt det else scale
-        | None -> scale
-      ) 1.0 !transforms
+      List.fold_left (fun scale t -> scale *. transform_scale_factor t)
+        1.0 !transforms
     end
 
 (** Document-space control-point handle rects [(x, y, w, h)] for the

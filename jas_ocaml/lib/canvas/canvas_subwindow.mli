@@ -26,6 +26,24 @@ val selection_handle_rects :
   Document.document -> Document.element_path ->
   (float * float * float * float) list
 
+(** Per-transform geometric-mean SCALE of a 2x3 affine — [sqrt(|det|)] of
+    the linear part with [det = a*.d -. b*.c]. Returns [1.0] for [None] or a
+    degenerate (det 0) transform. The building block of both
+    [selection_outline_scale] and the element-stroke counter-scale. *)
+val transform_scale_factor : Element.transform option -> float
+
+(** Counter-scale an element's own STROKE for rendering. Returns
+    [(element, accumulated_scale)] where [accumulated_scale = element_scale]
+    times [transform_scale_factor] of the element's own transform, and the
+    returned element has its stroke width DIVIDED by that scale (so the
+    element transform, applied to the painter, never thickens the stroke —
+    the stroke still scales with zoom). Returns the element unchanged when
+    the accumulated scale is effectively 1.0. The accumulated scale is
+    threaded to children so a stroked shape inside a transformed group is
+    counter-scaled by the full ancestor chain. *)
+val counter_scaled_element :
+  Element.element -> float -> Element.element * float
+
 (** Combined transform SCALE of the element at [path] — the geometric
     mean of the linear part, [sqrt(|det|)] with [det = a*.d -. b*.c],
     multiplied over the element's own transform and every ancestor
