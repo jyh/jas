@@ -1046,6 +1046,65 @@ class MainWindow(QMainWindow):
                 stack.extend(cur)
         return None
 
+    # ── Test-only FIFO command channel ────────────────────────────
+    # A GUI-test harness can't always reach a tool via synthetic keyboard
+    # (AppKit first-responder / GTK focus quirks) and the flyout-alternate
+    # tools (paintbrush / blob brush) need a deterministic activation path.
+    # When launched with `--test-fifo PATH`, the app reads newline commands
+    # from the FIFO and dispatches them through the SAME production action
+    # runner the toolbar/menu use, so a test drives real tool selection /
+    # actions with zero reliance on synthetic input. Commands:
+    #     tool <id>                 -> select_tool {tool: <id>}
+    #     action <name> [json]      -> <name> with optional JSON params
+    def _setup_test_fifo(self, path: str) -> None:
+        import os
+        from PySide6.QtCore import QSocketNotifier
+        if not os.path.exists(path):
+            os.mkfifo(path)
+        # O_RDWR keeps a writer end open so the fd never EOFs between
+        # harness writes — the notifier then fires only on real data.
+        self._test_fifo_fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        self._test_fifo_buf = b""
+        notifier = QSocketNotifier(
+            self._test_fifo_fd, QSocketNotifier.Type.Read, self)
+        notifier.activated.connect(self._on_test_fifo_readable)
+        self._test_fifo_notifier = notifier  # retain (avoid GC)
+        import logging
+        logging.info("test-fifo: listening on %s", path)
+
+    def _on_test_fifo_readable(self) -> None:
+        import os
+        try:
+            data = os.read(self._test_fifo_fd, 4096)
+        except BlockingIOError:
+            return
+        if not data:
+            return
+        self._test_fifo_buf += data
+        while b"\n" in self._test_fifo_buf:
+            line, self._test_fifo_buf = self._test_fifo_buf.split(b"\n", 1)
+            cmd = line.decode("utf-8", "replace").strip()
+            if cmd:
+                self._dispatch_test_command(cmd)
+
+    def _dispatch_test_command(self, cmd: str) -> None:
+        import json
+        import logging
+        parts = cmd.split(maxsplit=1)
+        verb = parts[0]
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if verb == "tool":
+            self.dock_panel._dispatch_yaml_action(
+                "select_tool", {"tool": rest})
+        elif verb == "action":
+            ap = rest.split(maxsplit=1)
+            name = ap[0] if ap else ""
+            params = json.loads(ap[1]) if len(ap) > 1 else {}
+            if name:
+                self.dock_panel._dispatch_yaml_action(name, params)
+        else:
+            logging.warning("test-fifo: unknown command %r", cmd)
+
     def add_canvas(self, model: Model) -> None:
         """Create a new canvas tab for the given model."""
         controller = Controller(model=model)
@@ -2085,6 +2144,11 @@ def main():
         _ti = sys.argv.index("--title")
         if _ti + 1 < len(sys.argv):
             window.setWindowTitle(sys.argv[_ti + 1])
+    # Test-only deterministic command channel for the GUI harness.
+    if "--test-fifo" in sys.argv:
+        _fi = sys.argv.index("--test-fifo")
+        if _fi + 1 < len(sys.argv):
+            window._setup_test_fifo(sys.argv[_fi + 1])
     window.resize(1200, 900)
     window.show()
 

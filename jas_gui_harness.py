@@ -217,6 +217,18 @@ def do_move(fx,fy):
     mouse(Quartz.kCGEventMouseMoved,x,y); time.sleep(0.03)
     mouse(Quartz.kCGEventMouseMoved,x,y); time.sleep(0.06)
 
+def do_presshold(fx, fy, ms=400):
+    # Clean press-and-HOLD-in-place then release — for long-press flyouts
+    # (e.g. the toolbar tool-slot alternates). Unlike `drag`/`dragbegin`,
+    # it sends NO dragged events, so a tool that distinguishes hold from
+    # drag sees a genuine long-press. The hold duration (default 400ms)
+    # exceeds the 250ms flyout threshold.
+    x,y=pt(fx,fy)
+    mouse(Quartz.kCGEventMouseMoved,x,y); time.sleep(0.03)
+    mouse(Quartz.kCGEventLeftMouseDown,x,y)
+    time.sleep(ms/1000.0)
+    mouse(Quartz.kCGEventLeftMouseUp,x,y); time.sleep(0.05)
+
 def do_shot(path):
     subprocess.run(f"screencapture -o -l{WIN['id']} {path}", shell=True)
 
@@ -256,5 +268,8 @@ if __name__=="__main__":
         do_dragpath(points); print("dragpath",points)
     elif v=="move":
         do_move(float(sys.argv[2]),float(sys.argv[3])); print("move",sys.argv[2],sys.argv[3])
+    elif v=="presshold":
+        ms=int(sys.argv[4]) if len(sys.argv)>4 else 400
+        do_presshold(float(sys.argv[2]),float(sys.argv[3]),ms); print("presshold",sys.argv[2:4],ms)
     else:
         print("unknown verb:", v); sys.exit(2)
