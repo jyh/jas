@@ -1177,38 +1177,13 @@ impl AppState {
         }
     }
 
-    /// Sync stroke panel state from the first selected element's stroke.
-    /// Called after selection changes so the panel reflects the selection.
-    pub(crate) fn sync_stroke_panel_from_selection(&mut self) {
-        let stroke = if let Some(tab) = self.tab() {
-            let doc = tab.model.document();
-            if let Some(es) = doc.selection.first() {
-                doc.get_element(&es.path).and_then(|e| e.stroke().cloned())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some(s) = stroke {
-            self.stroke_panel.cap = match s.linecap {
-                LineCap::Butt => "butt",
-                LineCap::Round => "round",
-                LineCap::Square => "square",
-            }.into();
-            self.stroke_panel.join = match s.linejoin {
-                LineJoin::Miter => "miter",
-                LineJoin::Round => "round",
-                LineJoin::Bevel => "bevel",
-            }.into();
-            self.stroke_panel.dash_align_anchors = s.dash_align_anchors;
-            // Update default stroke to match selection
-            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                tab.model.default_stroke = Some(s);
-            }
-            self.app_default_stroke = Some(s);
-        }
-    }
+    // NOTE: the Stroke panel reflects the selection (incl. the Weight
+    // field, decision-5a) via build_live_panel_overrides in
+    // workspace/dock_panel.rs — a per-render pull merged into the panel
+    // scope. The former push-style sync_stroke_panel_from_selection was
+    // dead (zero callers) and additionally mutated app_default_stroke
+    // (the new-element default), which the display path must not do; it
+    // was removed to avoid that landmine.
 
     /// Apply the current gradient panel state to the selected element(s).
     ///
