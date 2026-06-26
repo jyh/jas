@@ -261,6 +261,16 @@ public struct PanelGroupView: View {
            let overrides = colorPanelLiveOverrides(model: m) {
             for (k, v) in overrides { panelMap[k] = v }
         }
+        // Stroke panel — the Weight field must reflect the selection's
+        // stroke width (its baked / effective width after the scale
+        // counter-scale work), not the stored panel default. Mirrors the
+        // color block above and the Rust dock build_live_panel_overrides
+        // stroke block. Display-only: merged into the render scope, never
+        // written to the selection, so it can't clobber other stroke props.
+        if contentId == "stroke_panel_content", let m = model {
+            let overrides = strokePanelLiveOverrides(model: m)
+            for (k, v) in overrides { panelMap[k] = v }
+        }
         // Render-time layers-panel selection, if the layers panel is
         // currently initialised in the shared store. buildPanelCtx runs
         // for whichever panel is being rendered, so it may not be the
