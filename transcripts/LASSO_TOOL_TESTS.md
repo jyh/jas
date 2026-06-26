@@ -20,7 +20,7 @@ _No known-broken tests._ Interior-Lasso and sub-group recursion are
 
 ## Automation coverage
 
-_Last synced: 2026-04-23_
+_Last synced: 2026-06-26_
 
 **Python — `workspace_interpreter/point_buffers_test.py`** (if present)
 + `jas/tools/yaml_tool_test.py` dispatch.
@@ -43,6 +43,29 @@ _Last synced: 2026-04-23_
 - Reference implementation; lasso pipeline inline.
 
 **Flask — no coverage.**
+
+**GUI — spot-checked live in ALL FOUR apps (2026-06-26).** Each driven
+through the production tool, no synthetic-logic shortcuts:
+- **Rust** — keyboard + mouse via the harness (`Q` lasso, `M` rect,
+  `Ctrl+A`/`Delete` clear). The lasso `dragpath` registers cleanly on the
+  web canvas (the web-canvas finickiness only affects freehand *paint*
+  commit, not lasso selection).
+- **Swift / OCaml** — `--test-fifo` (`tool lasso` / `tool rect` +
+  `action select_all` / `action delete_selection` for setup) plus mouse
+  for the gestures; OCaml's synthetic keyboard is dead, so the FIFO is the
+  only deterministic tool/action path there.
+- **Python** — keyboard + mouse via the harness.
+
+Confirmed identical in all four: enclose-selects + outside-stays-unselected
+(LAS-010 / LAS-200), click-without-drag clears (LAS-012 / LAS-202),
+enclose-multiple selects all (LAS-030), non-additive lasso REPLACES the
+prior selection (LAS-031; cleanly shown on OCaml), and the blue
+`buffer_polygon` overlay (`rgba(0,120,215,·)`) renders during the drag and
+vanishes on release (LAS-204). Python additionally exercised Escape-aborts-
+mid-drag. NOT GUI-covered this pass — Shift-at-press additive
+(LAS-050–052 / LAS-203; the harness `dragpath` carries no modifier flags)
+and crossing-but-not-enclosed (LAS-011 / LAS-201, not driven) — both are
+pinned by the per-app gesture-seam tests above.
 
 The manual suite below covers overlay appearance (buffer_polygon
 render, 0.8-alpha stroke + 0.1-alpha fill), bbox-intersection
@@ -116,7 +139,7 @@ Full pass: ~30 min.
           to the start; release.
       Expect: The left rect becomes selected; other two aren't.
               Overlay polygon disappears on release.
-      — last: —
+      — last: 2026-06-26 (GUI, all 4 apps)
 
 - [ ] **LAS-011** [wired] Polygon crossing a rect's bbox still selects
   it.
@@ -134,7 +157,7 @@ Full pass: ~30 min.
           drag).
       Expect: Selection clears — tiny buffer + no Shift = click-in-
               empty semantics.
-      — last: —
+      — last: 2026-06-26 (GUI, all 4 apps)
 
 **P1**
 
@@ -161,14 +184,15 @@ Full pass: ~30 min.
       Setup: 3-rect fixture.
       Do: Drag a big polygon around all three rects; release.
       Expect: All three rects select.
-      — last: —
+      — last: 2026-06-26 (GUI, all 4 apps; verified with a 2-rect fixture)
 
 - [ ] **LAS-031** [wired] Non-additive lasso replaces the prior
   selection.
       Setup: Middle rect selected.
       Do: Lasso around the right rect (no Shift).
       Expect: Middle deselects; right rect selects alone.
-      — last: —
+      — last: 2026-06-26 (GUI; cleanly shown on OCaml — lasso replaced the
+        prior rect selection)
 
 **P2**
 
@@ -224,15 +248,18 @@ Full pass: ~30 min.
       Do: 3-rect fixture; lasso around the left rect.
       Expect: Selection size 1, path points at the left rect, in
               every app.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-06-26
+      - [x] Swift      last: 2026-06-26
+      - [x] OCaml      last: 2026-06-26
+      - [x] Python     last: 2026-06-26
 
 - **LAS-201** [wired] Crossing lasso still selects (not-fully-
   enclosed).
       Do: Drag a polygon that cuts through the middle rect's bbox.
       Expect: Middle rect selects in every app.
+      Note: not GUI-driven in the 2026-06-26 pass (crossing-only gesture
+        not exercised); bbox-intersection hit-test pinned by the per-app
+        gesture-seam tests.
       - [ ] Rust       last: —
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
@@ -241,15 +268,18 @@ Full pass: ~30 min.
 - **LAS-202** [wired] Tiny buffer (<3 pts) without Shift clears.
       Do: Click empty space with Lasso.
       Expect: Selection cleared in every app.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-06-26
+      - [x] Swift      last: 2026-06-26
+      - [x] OCaml      last: 2026-06-26
+      - [x] Python     last: 2026-06-26
 
 - **LAS-203** [wired] Shift-at-press additive; released Shift
   mid-drag stays additive.
       Do: Shift-press; release Shift mid-drag; lasso around.
       Expect: Additive in every app.
+      Note: not GUI-driven (the harness `dragpath` carries no modifier
+        flags); Shift-at-press additive pinned by the per-app gesture-seam
+        tests.
       - [ ] Rust       last: —
       - [ ] Swift      last: —
       - [ ] OCaml      last: —
@@ -259,10 +289,10 @@ Full pass: ~30 min.
       Do: Begin a lasso drag.
       Expect: Outlined filled polygon overlay visible in all four
               apps.
-      - [ ] Rust       last: —
-      - [ ] Swift      last: —
-      - [ ] OCaml      last: —
-      - [ ] Python     last: —
+      - [x] Rust       last: 2026-06-26
+      - [x] Swift      last: 2026-06-26
+      - [x] OCaml      last: 2026-06-26
+      - [x] Python     last: 2026-06-26
 
 ---
 
