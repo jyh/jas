@@ -33,13 +33,13 @@ handlers:
   on_mousedown:
     - "doc.snapshot": {}
     - "doc.path.erase_at_rect":
-        last_x: "event.x"
-        last_y: "event.y"
-        x: "event.x"
-        y: "event.y"
+        last_x: "event.doc_x"
+        last_y: "event.doc_y"
+        x: "event.doc_x"
+        y: "event.doc_y"
     - set: { tool.path_eraser.erasing: true }
-    - set: { tool.path_eraser.last_x: "event.x" }
-    - set: { tool.path_eraser.last_y: "event.y" }
+    - set: { tool.path_eraser.last_x: "event.doc_x" }
+    - set: { tool.path_eraser.last_y: "event.doc_y" }
 
   on_mousemove:
     - if: "tool.path_eraser.erasing"
@@ -47,10 +47,10 @@ handlers:
         - "doc.path.erase_at_rect":
             last_x: "tool.path_eraser.last_x"
             last_y: "tool.path_eraser.last_y"
-            x: "event.x"
-            y: "event.y"
-    - set: { tool.path_eraser.last_x: "event.x" }
-    - set: { tool.path_eraser.last_y: "event.y" }
+            x: "event.doc_x"
+            y: "event.doc_y"
+    - set: { tool.path_eraser.last_x: "event.doc_x" }
+    - set: { tool.path_eraser.last_y: "event.doc_y" }
 
   on_mouseup:
     - set: { tool.path_eraser.erasing: false }
