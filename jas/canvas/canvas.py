@@ -918,21 +918,32 @@ def _counter_scaled_element(elem: Element, element_scale: float):
 
     ``accumulated_scale`` = ``element_scale`` times this element's own transform
     scale (``transform_scale_factor``). The returned element has its STROKE
-    width divided by that scale, so the element transform (applied to the
-    painter) does NOT thicken the stroke — it renders at the nominal
-    (zoom-scaled) width, cancelling the matrix's stroke scaling AND the
-    double-scale when ``scale_strokes`` baked the width at apply time. Only
-    copies when there is an actual scale; otherwise returns ``elem`` unchanged.
-    The accumulated scale is threaded to children so a stroked shape inside a
-    transformed group is counter-scaled by the full chain.
+    width — and a rounded rect's corner radii ``rx``/``ry`` — divided by that
+    scale, so the element transform (applied to the painter) does NOT thicken
+    the stroke or grow the corners: they render at the nominal (zoom-scaled)
+    size, cancelling the matrix's scaling AND the double-scale when
+    ``scale_strokes`` / ``scale_corners`` baked the value at apply time. Since
+    ``scale_corners`` defaults OFF, this keeps the corner radius fixed under a
+    scale by default; when it was ON, the apply baked ``rx,ry *= factor`` so
+    the net rendered radius scales once. Only copies when there is an actual
+    scale; otherwise returns ``elem`` unchanged. The accumulated scale is
+    threaded to children so a shape inside a transformed group is
+    counter-scaled by the full chain.
     """
     elem_scale = element_scale * transform_scale_factor(
         getattr(elem, 'transform', None))
     if elem_scale > 1e-6 and abs(elem_scale - 1.0) > 1e-9:
+        changes = {}
         stroke = getattr(elem, 'stroke', None)
         if stroke is not None:
-            elem = replace(elem, stroke=replace(
-                stroke, width=stroke.width / elem_scale))
+            changes['stroke'] = replace(stroke, width=stroke.width / elem_scale)
+        rx = getattr(elem, 'rx', None)
+        ry = getattr(elem, 'ry', None)
+        if rx is not None and ry is not None and (rx != 0.0 or ry != 0.0):
+            changes['rx'] = rx / elem_scale
+            changes['ry'] = ry / elem_scale
+        if changes:
+            elem = replace(elem, **changes)
     return elem, elem_scale
 
 

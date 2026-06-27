@@ -34742,9 +34742,9 @@
       },
       "init": {
         "uniform": "state.scale_uniform",
-        "uniform_pct": "state.scale_uniform_pct",
-        "horizontal_pct": "state.scale_horizontal_pct",
-        "vertical_pct": "state.scale_vertical_pct",
+        "uniform_pct": "100",
+        "horizontal_pct": "100",
+        "vertical_pct": "100",
         "scale_strokes": "state.scale_strokes",
         "scale_corners": "state.scale_corners",
         "preview": "state.scale_preview"
