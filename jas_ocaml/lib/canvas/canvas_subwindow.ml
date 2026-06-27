@@ -383,14 +383,22 @@ let counter_scaled_element (elem : Element.element) (element_scale : float)
     : Element.element * float =
   let elem_scale =
     element_scale *. transform_scale_factor (Element.get_transform elem) in
-  if elem_scale > 1e-6 && Float.abs (elem_scale -. 1.0) > 1e-9 then
-    match _element_stroke elem with
-    | Some (s : Element.stroke) ->
-      let scaled =
+  if elem_scale > 1e-6 && Float.abs (elem_scale -. 1.0) > 1e-9 then begin
+    (* Counter-scale the stroke width (if any) ... *)
+    let elem = match _element_stroke elem with
+      | Some (s : Element.stroke) ->
         Element.with_stroke elem
-          (Some { s with stroke_width = s.stroke_width /. elem_scale }) in
-      (scaled, elem_scale)
-    | None -> (elem, elem_scale)
+          (Some { s with stroke_width = s.stroke_width /. elem_scale })
+      | None -> elem in
+    (* ... and a rounded rect corner radii, so the corner stays a fixed size
+       under a scale (scale_corners OFF default). When it was ON the apply
+       baked rx,ry *= factor, so the net rendered radius scales once. *)
+    let elem = match elem with
+      | Element.Rect r when r.rx <> 0.0 || r.ry <> 0.0 ->
+        Element.Rect { r with rx = r.rx /. elem_scale; ry = r.ry /. elem_scale }
+      | _ -> elem in
+    (elem, elem_scale)
+  end
   else (elem, elem_scale)
 
 (** Render a document element. When the element carries an active

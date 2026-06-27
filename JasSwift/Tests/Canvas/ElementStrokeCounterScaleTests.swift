@@ -66,3 +66,18 @@ private func strokedRect(width strokeWidth: Double, transform: Transform?) -> El
     #expect(scale == 6.0)            // 3 * 2
     #expect(out.stroke?.width == 2.0)  // 12 / 6
 }
+
+@Test func counterScaledElementCornersDividedByScale() {
+    // A rounded rect's rx/ry are counter-scaled too, so the corner radius
+    // stays fixed under a scale (scale_corners OFF, the default).
+    let elem = Element.rect(Rect(x: 0, y: 0, width: 100, height: 100, rx: 10, ry: 10,
+                                 transform: Transform(a: 2, b: 0, c: 0, d: 2, e: 0, f: 0)))
+    let (out, scale) = counterScaledElement(elem, elementScale: 1.0)
+    #expect(scale == 2.0)
+    if case .rect(let r) = out {
+        #expect(r.rx == 5.0)  // 10 / 2
+        #expect(r.ry == 5.0)
+    } else {
+        Issue.record("expected rect")
+    }
+}
