@@ -67,9 +67,13 @@ scale_options:
       description: "Live-update the canvas with dialog values applied"
   init:
     uniform:        "state.scale_uniform"
-    uniform_pct:    "state.scale_uniform_pct"
-    horizontal_pct: "state.scale_horizontal_pct"
-    vertical_pct:   "state.scale_vertical_pct"
+    # Percentages reset to 100 each open (decision-6): Scale is a RELATIVE
+    # "scale by" operation, so leaving the last value sticky compounds (a
+    # sticky 200% applied twice silently scales 400%). The option toggles
+    # below stay sticky — they are preferences, not a relative amount.
+    uniform_pct:    "100"
+    horizontal_pct: "100"
+    vertical_pct:   "100"
     scale_strokes:  "state.scale_strokes"
     scale_corners:  "state.scale_corners"
     preview:        "state.scale_preview"

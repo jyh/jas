@@ -749,6 +749,24 @@ class ElementStrokeCounterScaleTest(absltest.TestCase):
         self.assertEqual(scale, 6.0)        # 3 * 2
         self.assertEqual(out.stroke.width, 2.0)  # 12 / 6
 
+    def test_corners_divided_by_element_scale(self):
+        # A rounded rect's rx/ry are counter-scaled too, so the corner radius
+        # stays fixed under a scale (scale_corners OFF, the default).
+        from canvas.canvas import _counter_scaled_element
+        rect = Rect(x=0, y=0, width=100, height=100, rx=10.0, ry=10.0,
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        out, scale = _counter_scaled_element(rect, 1.0)
+        self.assertEqual(scale, 2.0)
+        self.assertEqual(out.rx, 5.0)  # 10 / 2
+        self.assertEqual(out.ry, 5.0)
+
+    def test_zero_corners_not_modified(self):
+        from canvas.canvas import _counter_scaled_element
+        rect = Rect(x=0, y=0, width=100, height=100, rx=0.0, ry=0.0,
+                    transform=Transform(2, 0, 0, 2, 0, 0))
+        out, _ = _counter_scaled_element(rect, 1.0)
+        self.assertEqual(out.rx, 0.0)  # square corners: nothing to counter-scale
+
 
 class SelectionOutlineScaleTest(absltest.TestCase):
     """The selection OUTLINE + bezier handles are drawn under the element
