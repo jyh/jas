@@ -1,13 +1,20 @@
-"""Regression: the Path Eraser must hit-test in DOCUMENT coords.
+"""Regression: tools that hit-test / edit DOCUMENT geometry must drive their
+coordinates from event.doc_x / event.doc_y, never the raw canvas event.x /
+event.y.
 
-`doc.path.erase_at_rect` operates on path geometry stored in document
-coordinates (the pencil/pen commit paths from `event.doc_x` / `event.doc_y`,
-i.e. `(canvas_x - view_offset_x) / zoom`). The path_eraser tool therefore
-has to pass `event.doc_x` / `event.doc_y` — NOT the raw `event.x` / `event.y`
-(canvas/screen coords). It originally used `event.x`, so the eraser rect was
-offset by the view pan/zoom and silently MISSED every path unless the view
-happened to sit at zoom=1 with zero offset. GUI-found across all apps
-2026-06-27; the bug lived in the shared bundle so every app was affected.
+event.x / event.y are CANVAS/screen coords; event.doc_x / event.doc_y are
+document coords = (canvas_x - view_offset_x) / zoom (jas/tools/yaml_tool.py).
+A doc.* effect (or hit_test) that compares the incoming x,y against stored
+document geometry expects DOC coords and does NOT convert — so passing the
+raw event.x silently misses, offset by the view pan/zoom (and the default
+view is already offset). path_eraser had this bug; a coord audit
+(2026-06-27) found the same class in five more tools. All fixed here.
+
+Known remaining exception: the `artboard` tool also has this bug, but its
+fix is non-trivial (its canvas tool-state feeds BOTH a marquee_rect overlay
+AND the create/move/resize effects, so it needs the shape-tool preview/commit
+coord split, not a blanket swap) — tracked separately, deliberately NOT
+asserted here.
 """
 import json
 import os
@@ -16,19 +23,36 @@ from absl.testing import absltest
 _WS = os.path.join(os.path.dirname(__file__), "..", "..",
                    "workspace", "workspace.json")
 
+# Tools whose EVERY pointer coordinate is document geometry — must not use raw
+# event.x / event.y anywhere.
+_FULLY_DOC_TOOLS = [
+    "path_eraser",
+    "add_anchor_point",
+    "delete_anchor_point",
+    "anchor_point",
+    "magic_wand",
+]
 
-class PathEraserCoordsTest(absltest.TestCase):
 
-    def test_path_eraser_uses_document_coords(self):
-        ws = json.loads(open(_WS).read())
-        blob = json.dumps(ws["tools"]["path_eraser"])
-        # Must drive erase_at_rect from document coords.
-        self.assertIn("event.doc_x", blob)
-        self.assertIn("event.doc_y", blob)
-        # Must NOT use raw canvas coords (substring-safe: "event.doc_x" does
-        # not contain "event.x").
-        self.assertNotIn("event.x", blob)
-        self.assertNotIn("event.y", blob)
+class ToolDocCoordsTest(absltest.TestCase):
+
+    def setUp(self):
+        self._tools = json.loads(open(_WS).read())["tools"]
+
+    def test_fully_doc_tools_use_only_doc_coords(self):
+        for tool in _FULLY_DOC_TOOLS:
+            blob = json.dumps(self._tools[tool])
+            self.assertIn("event.doc_x", blob, f"{tool} should drive coords from event.doc_x")
+            # Substring-safe: "event.doc_x" does not contain "event.x".
+            self.assertNotIn("event.x", blob, f"{tool} still uses raw canvas event.x")
+            self.assertNotIn("event.y", blob, f"{tool} still uses raw canvas event.y")
+
+    def test_eyedropper_hit_test_uses_doc_coords(self):
+        # Eyedropper hit-tests in doc coords but legitimately keeps event.x/y
+        # for its screen-space cursor-color-chip overlay (hover_x/hover_y).
+        blob = json.dumps(self._tools["eyedropper"])
+        self.assertIn("hit_test(event.doc_x, event.doc_y)", blob)
+        self.assertNotIn("hit_test(event.x", blob)
 
 
 if __name__ == "__main__":
