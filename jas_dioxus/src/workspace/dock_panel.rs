@@ -663,6 +663,9 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         m.insert("prop_opacity".into(), serde_json::json!(r2(op)));
         m.insert("prop_blend".into(), blend);
     }
+    // Properties constrain-proportions lock — a sticky AppState toggle, so the
+    // icon binding (chain_linked / chain_broken) reflects it.
+    m.insert("prop_constrain".into(), J::Bool(st.properties_constrain));
 
     m
 }

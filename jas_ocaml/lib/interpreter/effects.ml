@@ -1003,8 +1003,8 @@ let prop_rotated_transform (mat : Element.transform) local deg
   let ncx = nx +. nw /. 2.0 and ncy = ny +. nh /. 2.0 in
   { rotated with e = rotated.e +. (ocx -. ncx); f = rotated.f +. (ocy -. ncy) }
 
-let apply_properties_field (ctrl : Controller.controller) (field : string)
-    (value : Yojson.Safe.t) : unit =
+let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
+    (field : string) (value : Yojson.Safe.t) : unit =
   let doc = ctrl#document in
   if Document.PathMap.is_empty doc.Document.selection then ()
   else begin
@@ -1048,10 +1048,16 @@ let apply_properties_field (ctrl : Controller.controller) (field : string)
               ({ a = 1.; b = 0.; c = 0.; d = 1.; e = 0.; f = 0. } : Element.transform) in
           let nt = match field with
             | "w" -> (match num () with
-                      | Some v when bw > 0.0 -> Some (prop_scaled_transform mat local (v /. bw) 1.0)
+                      | Some v when bw > 0.0 ->
+                        let r = v /. bw in
+                        Some (prop_scaled_transform mat local r
+                                (if constrain then r else 1.0))
                       | _ -> None)
             | "h" -> (match num () with
-                      | Some v when bh > 0.0 -> Some (prop_scaled_transform mat local 1.0 (v /. bh))
+                      | Some v when bh > 0.0 ->
+                        let r = v /. bh in
+                        Some (prop_scaled_transform mat local
+                                (if constrain then r else 1.0) r)
                       | _ -> None)
             | _ -> (match num () with
                     | Some v -> Some (prop_rotated_transform mat local v)
@@ -1071,8 +1077,14 @@ let subscribe_properties_panel (store : State_store.t)
       let field =
         if String.length key > 5 && String.sub key 0 5 = "prop_"
         then String.sub key 5 (String.length key - 5) else key in
-      if List.mem field ["x"; "y"; "w"; "h"; "rotation"; "opacity"; "blend"] then
-        apply_properties_field (ctrl_getter ()) field value
+      if List.mem field ["x"; "y"; "w"; "h"; "rotation"; "opacity"; "blend"] then begin
+        let constrain =
+          match State_store.get_panel store "properties_panel_content"
+                  "prop_constrain" with
+          | `Bool b -> b
+          | _ -> false in
+        apply_properties_field ~constrain (ctrl_getter ()) field value
+      end
     end)
 
 (** Check if a state key is a rendering-affecting stroke key. *)

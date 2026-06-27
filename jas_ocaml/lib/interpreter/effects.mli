@@ -85,7 +85,7 @@ val sync_properties_panel_from_selection :
     selection); rotation is absolute about the bbox center (single selection);
     opacity/blend set the attribute on every selected element. *)
 val apply_properties_field :
-  Controller.controller -> string -> Yojson.Safe.t -> unit
+  ?constrain:bool -> Controller.controller -> string -> Yojson.Safe.t -> unit
 
 (** Wire {!apply_properties_field} to fire after a genuine USER edit of a
     [prop_*] field. Skips the display sync own pushes (guarded internally). *)

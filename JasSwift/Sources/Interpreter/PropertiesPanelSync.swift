@@ -185,14 +185,19 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         let elem = doc.getElement(es.path)
         let local = elem.geometricBounds
         let mat = elem.transform ?? .identity
+        // Constrain-proportions: when on, W/H scale BOTH axes by the ratio.
+        let constrain = (model.stateStore.getPanel("properties_panel_content",
+                                                   "prop_constrain") as? Bool) ?? false
         let newT: Transform
         switch field {
         case "w":
             guard let v = num(), bbox.width > 0 else { return }
-            newT = propScaledTransform(mat, local, v / bbox.width, 1)
+            let r = v / bbox.width
+            newT = propScaledTransform(mat, local, r, constrain ? r : 1)
         case "h":
             guard let v = num(), bbox.height > 0 else { return }
-            newT = propScaledTransform(mat, local, 1, v / bbox.height)
+            let r = v / bbox.height
+            newT = propScaledTransform(mat, local, constrain ? r : 1, r)
         default:
             guard let v = num() else { return }
             newT = propRotatedTransform(mat, local, v)
