@@ -1003,6 +1003,18 @@ let prop_rotated_transform (mat : Element.transform) local deg
   let ncx = nx +. nw /. 2.0 and ncy = ny +. nh /. 2.0 in
   { rotated with e = rotated.e +. (ocx -. ncx); f = rotated.f +. (ocy -. ncy) }
 
+(* Document-space group transforms about a pivot, for a multi-selection. *)
+let prop_scale_about_pivot sx sy px py : Element.transform =
+  { a = sx; b = 0.; c = 0.; d = sy;
+    e = px *. (1.0 -. sx); f = py *. (1.0 -. sy) }
+
+let prop_rotate_about_pivot deg px py : Element.transform =
+  let rad = deg *. (Float.pi /. 180.0) in
+  let cos_a = cos rad and sin_a = sin rad in
+  { a = cos_a; b = sin_a; c = -. sin_a; d = cos_a;
+    e = px -. cos_a *. px +. sin_a *. py;
+    f = py -. sin_a *. px -. cos_a *. py }
+
 let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
     (field : string) (value : Yojson.Safe.t) : unit =
   let doc = ctrl#document in
@@ -1036,8 +1048,9 @@ let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
           | None -> ())
        | _ -> ())
     | "w" | "h" | "rotation" ->
-      if Document.PathMap.cardinal doc.Document.selection <> 1 then ()
-      else (match Document.PathMap.min_binding_opt doc.Document.selection with
+      if Document.PathMap.cardinal doc.Document.selection = 1 then
+        (* SINGLE: local-axes scale / absolute rotation about its bbox center. *)
+        (match Document.PathMap.min_binding_opt doc.Document.selection with
         | None -> ()
         | Some (path, _) ->
           let e = Document.get_element doc path in
@@ -1067,6 +1080,52 @@ let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
              ctrl#model#edit_document
                (Document.replace_element doc path (Element.set_transform (Some t) e))
            | None -> ()))
+      else begin
+        (* MULTI: transform the whole selection as a group about its bbox
+           (doc-space). W/H scale about the bbox top-left; rotation rotates
+           rigidly about the bbox center by the delta from the first angle. *)
+        let group_opt = match field with
+          | "w" -> (match num () with
+                    | Some v when bw > 0.0 ->
+                      let r = v /. bw in
+                      Some (prop_scale_about_pivot r
+                              (if constrain then r else 1.0) bx by)
+                    | _ -> None)
+          | "h" -> (match num () with
+                    | Some v when bh > 0.0 ->
+                      let r = v /. bh in
+                      Some (prop_scale_about_pivot
+                              (if constrain then r else 1.0) r bx by)
+                    | _ -> None)
+          | _ -> (match num () with
+                  | Some v ->
+                    let cur =
+                      match Document.PathMap.min_binding_opt
+                              doc.Document.selection with
+                      | Some (p, _) ->
+                        (match prop_elem_transform (Document.get_element doc p) with
+                         | Some (t : Element.transform) ->
+                           atan2 t.b t.a *. (180.0 /. Float.pi)
+                         | None -> 0.0)
+                      | None -> 0.0 in
+                    let cx = bx +. bw /. 2.0 and cy = by +. bh /. 2.0 in
+                    Some (prop_rotate_about_pivot (v -. cur) cx cy)
+                  | None -> None) in
+        (match group_opt with
+         | None -> ()
+         | Some group ->
+           let new_doc = Document.PathMap.fold (fun path _ acc ->
+             let e = Document.get_element acc path in
+             let old = match Element.get_transform e with
+               | Some t -> t
+               | None ->
+                 ({ a = 1.; b = 0.; c = 0.; d = 1.; e = 0.; f = 0. }
+                  : Element.transform) in
+             Document.replace_element acc path
+               (Element.set_transform (Some (Element.multiply group old)) e))
+             doc.Document.selection doc in
+           ctrl#model#edit_document new_doc)
+      end
     | _ -> ()
   end
 
