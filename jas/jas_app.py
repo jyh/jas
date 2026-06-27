@@ -424,6 +424,17 @@ class MainWindow(QMainWindow):
         _subscribe_active_color(self._yaml_state,
                                 lambda: _Controller(self.active_model()))
 
+        # Properties panel → selection apply (decision-5 Part B.2). A user
+        # edit of a prop_* field (X/Y move, W/H scale, rotation, opacity,
+        # blend) writes the panel key, which this subscription applies to
+        # the selection. The display sync's own pushes are guarded out
+        # (_PROPS_SYNCING) so they are not mistaken for edits.
+        from workspace_interpreter.effects import (
+            subscribe_properties_panel as _subscribe_properties_panel,
+        )
+        _subscribe_properties_panel(self._yaml_state,
+                                    lambda: self.active_model())
+
         # recent_colors bridge — keep model.recent_colors and the
         # YAML-driven panel.recent_colors of the Color and Swatches
         # panels in sync. Mirrors the Rust strategy of treating

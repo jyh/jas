@@ -1073,10 +1073,16 @@ def _render_length_input(el, store, ctx, dispatch_fn):
         if rest and rest.replace("_", "").isalnum():
             write_key = rest
 
+    # Capture the per-widget panel id so writes always land in the panel
+    # that owns this control (matches the number_input / icon_select path);
+    # store.get_active_panel_id races with whichever panel happens to be
+    # focus-active, which sent edits to the wrong panel scope.
+    widget_pid = ctx.get("_panel_id")
+
     def _commit():
         if write_key is None:
             return
-        panel_id = store.get_active_panel_id()
+        panel_id = widget_pid or store.get_active_panel_id()
         if panel_id is None:
             return
         entered = edit.text()
