@@ -103,7 +103,7 @@ scale_options:
       # ── Scale group ──
       - type: container
         layout: column
-        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        style: { gap: 6, padding: 10, border: "1px solid {{theme.colors.border}}" }
         children:
           - { type: text, content: "Scale", style: { font_size: 12, weight: bold } }
 
@@ -190,7 +190,7 @@ scale_options:
       # ── Options group ──
       - type: container
         layout: column
-        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        style: { gap: 6, padding: 10, border: "1px solid {{theme.colors.border}}" }
         children:
           - { type: text, content: "Options", style: { font_size: 12, weight: bold } }
 

@@ -543,6 +543,46 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderContainer() -> some View {
+        // A container with `style.border` is a group box (the Scale / Shear
+        // option dialogs frame their fields this way). Draw a 1px border with
+        // the resolved color, inset by the container's padding. Borderless
+        // containers render unchanged (the common panel case).
+        let style = element["style"] as? [String: Any] ?? [:]
+        if style["border"] != nil {
+            containerBody()
+                .padding(containerPadding(style))
+                .border(containerBorderColor(style), width: 1)
+        } else {
+            containerBody()
+        }
+    }
+
+    /// Padding (points) declared on a container's style, used to inset content
+    /// from a group-box border. 0 when absent.
+    private func containerPadding(_ style: [String: Any]) -> CGFloat {
+        if let p = style["padding"] as? Int { return CGFloat(p) }
+        if let p = style["padding"] as? Double { return CGFloat(p) }
+        if let p = style["padding"] as? CGFloat { return p }
+        return 0
+    }
+
+    /// Resolve a container's `style.border` ("1px solid {{theme.colors.border}}")
+    /// to a color. Falls back to #555555 (the theme.colors.border value, matching
+    /// the OCaml group-box border) when the template does not resolve to a hex,
+    /// so the box always draws.
+    private func containerBorderColor(_ style: [String: Any]) -> SwiftUI.Color {
+        if let b = style["border"] as? String {
+            let resolved = evaluateText(b, context: context)
+            if let last = resolved.split(separator: " ").last.map(String.init),
+               last.hasPrefix("#") {
+                return cssHexColor(last)
+            }
+        }
+        return cssHexColor("#555555")
+    }
+
+    @ViewBuilder
+    private func containerBody() -> some View {
         let layout = element["layout"] as? String ?? "column"
         let etype = element["type"] as? String ?? "container"
         let isRow = layout == "row" || etype == "row"

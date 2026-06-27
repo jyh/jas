@@ -26839,7 +26839,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -26911,7 +26911,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -30440,7 +30440,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -30512,7 +30512,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -34846,7 +34846,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -35013,7 +35013,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
@@ -35239,7 +35239,7 @@
             "style": {
               "gap": 6,
               "padding": 10,
-              "border": "1px solid panel-border"
+              "border": "1px solid {{theme.colors.border}}"
             },
             "children": [
               {
