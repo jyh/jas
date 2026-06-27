@@ -1479,6 +1479,40 @@ let set_transform t = function
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_transform = t })
   | Live (Generated gen) -> Live (Generated { gen with gen_transform = t })
 
+let with_opacity op = function
+  | Line r -> Line { r with opacity = op }
+  | Rect r -> Rect { r with opacity = op }
+  | Circle r -> Circle { r with opacity = op }
+  | Ellipse r -> Ellipse { r with opacity = op }
+  | Polyline r -> Polyline { r with opacity = op }
+  | Polygon r -> Polygon { r with opacity = op }
+  | Path r -> Path { r with opacity = op }
+  | Text r -> Text { r with opacity = op }
+  | Text_path r -> Text_path { r with opacity = op }
+  | Group r -> Group { r with opacity = op }
+  | Layer r -> Layer { r with opacity = op }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with opacity = op })
+  | Live (Reference r) -> Live (Reference { r with ref_opacity = op })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_opacity = op })
+  | Live (Generated gen) -> Live (Generated { gen with gen_opacity = op })
+
+let with_blend_mode bm = function
+  | Line r -> Line { r with blend_mode = bm }
+  | Rect r -> Rect { r with blend_mode = bm }
+  | Circle r -> Circle { r with blend_mode = bm }
+  | Ellipse r -> Ellipse { r with blend_mode = bm }
+  | Polyline r -> Polyline { r with blend_mode = bm }
+  | Polygon r -> Polygon { r with blend_mode = bm }
+  | Path r -> Path { r with blend_mode = bm }
+  | Text r -> Text { r with blend_mode = bm }
+  | Text_path r -> Text_path { r with blend_mode = bm }
+  | Group r -> Group { r with blend_mode = bm }
+  | Layer r -> Layer { r with blend_mode = bm }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with blend_mode = bm })
+  | Live (Reference r) -> Live (Reference { r with ref_blend_mode = bm })
+  | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_blend_mode = bm })
+  | Live (Generated gen) -> Live (Generated { gen with gen_blend_mode = bm })
+
 (** Pre-pend a world-space [translate(dx, dy)] to an existing
     transform matrix. If the element has no current transform,
     the result is a simple translate. Rotation / scale components

@@ -772,6 +772,12 @@ val set_visibility : visibility -> element -> element
 
 val get_transform : element -> transform option
 val set_transform : transform option -> element -> element
+
+(** Return a copy of the element with its opacity replaced (all variants). *)
+val with_opacity : float -> element -> element
+
+(** Return a copy of the element with its blend mode replaced (all variants). *)
+val with_blend_mode : blend_mode -> element -> element
 val translate_transform : float -> float -> transform option -> transform option
 val with_transform_translated : dx:float -> dy:float -> element -> element
 val with_transform_premultiplied : transform -> element -> element

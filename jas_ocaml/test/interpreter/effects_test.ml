@@ -648,6 +648,61 @@ let properties_sync_tests = [
     assert (get_panel store "properties_panel_content" "prop_blend" = `String "normal"));
 ]
 
+(* ── Part B.2: Properties panel field EDITING (apply to selection) ──────── *)
+
+let props_apply_ctrl rect =
+  let layer = Jas.Element.make_layer [| rect |] in
+  let selection =
+    Jas.Document.PathMap.singleton [0; 0]
+      (Jas.Document.element_selection_all [0; 0]) in
+  let doc = Jas.Document.make_document ~selection [| layer |] in
+  Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) ()
+
+let properties_apply_tests = [
+  Alcotest.test_case "apply_x_moves" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 10.0 20.0 30.0 40.0) in
+    apply_properties_field ctrl "x" (`Float 50.0);
+    let (x, _, _, _) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (x -. 50.0) < 1e-6));
+
+  Alcotest.test_case "apply_w_scales" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
+    apply_properties_field ctrl "w" (`Float 200.0);
+    let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 200.0) < 1e-6 && Float.abs (h -. 50.0) < 1e-6));
+
+  Alcotest.test_case "apply_rotation_swaps" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
+    apply_properties_field ctrl "rotation" (`Float 90.0);
+    let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 50.0) < 1e-4 && Float.abs (h -. 100.0) < 1e-4));
+
+  Alcotest.test_case "apply_opacity_and_blend" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 10.0 10.0) in
+    apply_properties_field ctrl "opacity" (`Float 40.0);
+    apply_properties_field ctrl "blend" (`String "multiply");
+    (match Jas.Document.get_element ctrl#document [0; 0] with
+     | Jas.Element.Rect r ->
+       assert (Float.abs (r.opacity -. 0.4) < 1e-6);
+       assert (r.blend_mode = Jas.Element.Multiply)
+     | _ -> assert false));
+
+  Alcotest.test_case "apply_w_noop_for_multi_selection" `Quick (fun () ->
+    let r0 = Jas.Element.make_rect 0.0 0.0 100.0 50.0 in
+    let r1 = Jas.Element.make_rect 200.0 0.0 100.0 50.0 in
+    let layer = Jas.Element.make_layer [| r0; r1 |] in
+    let selection =
+      Jas.Document.PathMap.empty
+      |> Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+      |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    let (_, _, w_before, _) = selection_evaluated_bounds ctrl#document in
+    apply_properties_field ctrl "w" (`Float 999.0);
+    let (_, _, w_after, _) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w_before -. w_after) < 1e-9));
+]
+
 (* ── Phase 3: Character panel → pending override routing ──────── *)
 
 let _default_text_elem () =
@@ -1797,6 +1852,7 @@ let () =
     "Stroke subscribe", stroke_subscribe_tests;
     "Stroke sync", stroke_sync_tests;
     "Properties sync", properties_sync_tests;
+    "Properties apply", properties_apply_tests;
     "Phase3 pending", phase3_pending_tests;
     "Character auto-leading", character_auto_leading_tests;
     "Paragraph text-kind", paragraph_text_kind_tests;

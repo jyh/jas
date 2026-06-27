@@ -79,6 +79,19 @@ val selection_evaluated_bounds :
 val sync_properties_panel_from_selection :
   State_store.t -> Controller.controller -> unit
 
+(** Apply a Properties-panel field edit to the selection (decision-5 Part B.2).
+    [field] in {x, y, w, h, rotation, opacity, blend}: x/y move (any
+    selection); w/h scale the object local axes by typed/current (single
+    selection); rotation is absolute about the bbox center (single selection);
+    opacity/blend set the attribute on every selected element. *)
+val apply_properties_field :
+  Controller.controller -> string -> Yojson.Safe.t -> unit
+
+(** Wire {!apply_properties_field} to fire after a genuine USER edit of a
+    [prop_*] field. Skips the display sync own pushes (guarded internally). *)
+val subscribe_properties_panel :
+  State_store.t -> (unit -> Controller.controller) -> unit
+
 (** Check whether a state key is a rendering-affecting stroke key. *)
 val is_stroke_render_key : string -> bool
 
