@@ -97,3 +97,108 @@ public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
             "prop_rotation": r2(rotation), "prop_opacity": r2(opacity),
             "prop_blend": blend]
 }
+
+// MARK: - Part B.2: editing (apply a field edit back to the selection)
+
+/// AABB of `local`'s four corners mapped through `m`.
+private func propAABB(_ local: BBox, _ m: Transform) -> BBox {
+    let x0 = local.x, y0 = local.y
+    let x1 = local.x + local.width, y1 = local.y + local.height
+    let pts: [(Double, Double)] = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    var minX = Double.infinity, minY = Double.infinity
+    var maxX = -Double.infinity, maxY = -Double.infinity
+    for (px, py) in pts {
+        let (x, y) = m.applyPoint(px, py)
+        minX = min(minX, x); minY = min(minY, y)
+        maxX = max(maxX, x); maxY = max(maxY, y)
+    }
+    return (minX, minY, maxX - minX, maxY - minY)
+}
+
+/// Scale local axes by (rx, ry) keeping the evaluated bbox top-left fixed.
+private func propScaledTransform(_ mat: Transform, _ local: BBox,
+                                 _ rx: Double, _ ry: Double) -> Transform {
+    // mat.multiply(scale) applies scale first (local), then mat (M·S).
+    let scaled = mat.multiply(Transform(a: rx, b: 0, c: 0, d: ry, e: 0, f: 0))
+    let old = propAABB(local, mat)
+    let new = propAABB(local, scaled)
+    return Transform(a: scaled.a, b: scaled.b, c: scaled.c, d: scaled.d,
+                     e: scaled.e + (old.x - new.x), f: scaled.f + (old.y - new.y))
+}
+
+/// Set rotation to `deg` (keeping decomposed scale; shear-free) about the
+/// evaluated bbox center.
+private func propRotatedTransform(_ mat: Transform, _ local: BBox,
+                                  _ deg: Double) -> Transform {
+    let sx = (mat.a * mat.a + mat.b * mat.b).squareRoot()
+    let sy = (mat.c * mat.c + mat.d * mat.d).squareRoot()
+    let rad = deg * .pi / 180.0
+    let ca = cos(rad), sa = sin(rad)
+    let rotated = Transform(a: sx * ca, b: sx * sa, c: -sy * sa, d: sy * ca,
+                            e: mat.e, f: mat.f)
+    let old = propAABB(local, mat)
+    let new = propAABB(local, rotated)
+    let ocx = old.x + old.width / 2, ocy = old.y + old.height / 2
+    let ncx = new.x + new.width / 2, ncy = new.y + new.height / 2
+    return Transform(a: rotated.a, b: rotated.b, c: rotated.c, d: rotated.d,
+                     e: rotated.e + (ocx - ncx), f: rotated.f + (ocy - ncy))
+}
+
+/// Apply a Properties-panel field edit to the selection (decision-5 Part B.2):
+/// x/y move (any selection); w/h scale local axes (single); rotation absolute
+/// about the bbox center (single); opacity/blend set on every selected element.
+public func applyPropertiesField(controller: Controller, field: String, value: Any?) {
+    let model = controller.model
+    let doc = model.document
+    guard !doc.selection.isEmpty else { return }
+    let bbox = selectionEvaluatedBounds(doc)
+    func num() -> Double? {
+        if let d = value as? Double { return d }
+        if let n = value as? NSNumber { return n.doubleValue }
+        if let s = value as? String { return Double(s) }
+        return nil
+    }
+    switch field {
+    case "x":
+        if let v = num() { controller.moveSelection(dx: v - bbox.x, dy: 0) }
+    case "y":
+        if let v = num() { controller.moveSelection(dx: 0, dy: v - bbox.y) }
+    case "opacity":
+        if let v = num() {
+            let op = max(0, min(100, v)) / 100
+            var d = doc
+            for es in doc.selection {
+                d = d.replaceElement(es.path, with: doc.getElement(es.path).withCommon(opacity: op))
+            }
+            model.editDocument(d)
+        }
+    case "blend":
+        if let s = value as? String, let bm = BlendMode(rawValue: s) {
+            var d = doc
+            for es in doc.selection {
+                d = d.replaceElement(es.path, with: doc.getElement(es.path).withCommon(blendMode: bm))
+            }
+            model.editDocument(d)
+        }
+    case "w", "h", "rotation":
+        guard doc.selection.count == 1, let es = doc.selection.first else { return }
+        let elem = doc.getElement(es.path)
+        let local = elem.geometricBounds
+        let mat = elem.transform ?? .identity
+        let newT: Transform
+        switch field {
+        case "w":
+            guard let v = num(), bbox.width > 0 else { return }
+            newT = propScaledTransform(mat, local, v / bbox.width, 1)
+        case "h":
+            guard let v = num(), bbox.height > 0 else { return }
+            newT = propScaledTransform(mat, local, 1, v / bbox.height)
+        default:
+            guard let v = num() else { return }
+            newT = propRotatedTransform(mat, local, v)
+        }
+        model.editDocument(doc.replaceElement(es.path, with: elem.withCommon(transform: newT)))
+    default:
+        break
+    }
+}

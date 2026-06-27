@@ -1811,6 +1811,117 @@ public enum Element: Equatable {
             return .live(v.withTransform(t))
         }
     }
+
+    /// Return a copy with any of `transform` / `opacity` / `blendMode`
+    /// replaced (nil = keep), preserving every other field. Used by the
+    /// Properties panel edit apply (decision-5 Part B.2). Generalizes
+    /// `withTransformSet` to the two other common-block scalars.
+    func withCommon(transform: Transform? = nil, opacity: Double? = nil,
+                    blendMode: BlendMode? = nil) -> Element {
+        switch self {
+        case .line(let v):
+            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
+                              stroke: v.stroke, widthPoints: v.widthPoints,
+                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                              locked: v.locked, visibility: v.visibility,
+                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                              strokeGradient: v.strokeGradient, name: v.name, id: v.id))
+        case .rect(let v):
+            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
+                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
+                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                              locked: v.locked, visibility: v.visibility,
+                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                              name: v.name, id: v.id))
+        case .circle(let v):
+            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r, fill: v.fill, stroke: v.stroke,
+                                  opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                                  locked: v.locked, visibility: v.visibility,
+                                  blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                  name: v.name, id: v.id))
+        case .ellipse(let v):
+            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
+                                    fill: v.fill, stroke: v.stroke,
+                                    opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                                    locked: v.locked, visibility: v.visibility,
+                                    blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                    name: v.name, id: v.id))
+        case .polyline(let v):
+            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
+                                     opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                                     locked: v.locked, visibility: v.visibility,
+                                     blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                     name: v.name, id: v.id))
+        case .polygon(let v):
+            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
+                                    opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                                    locked: v.locked, visibility: v.visibility,
+                                    blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                                    name: v.name, id: v.id))
+        case .path(let v):
+            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke, widthPoints: v.widthPoints,
+                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                              locked: v.locked, visibility: v.visibility,
+                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                              strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
+                              toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+        case .text(let v):
+            return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
+                              fontFamily: v.fontFamily, fontSize: v.fontSize,
+                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                              textDecoration: v.textDecoration,
+                              textTransform: v.textTransform, fontVariant: v.fontVariant,
+                              baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                              letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                              aaMode: v.aaMode, rotate: v.rotate,
+                              horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                              kerning: v.kerning, width: v.width, height: v.height,
+                              fill: v.fill, stroke: v.stroke,
+                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                              locked: v.locked, visibility: v.visibility,
+                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                              name: v.name, id: v.id))
+        case .textPath(let v):
+            return .textPath(TextPath(d: v.d, tspans: v.tspans, startOffset: v.startOffset,
+                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
+                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
+                                      textDecoration: v.textDecoration,
+                                      textTransform: v.textTransform, fontVariant: v.fontVariant,
+                                      baselineShift: v.baselineShift, lineHeight: v.lineHeight,
+                                      letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
+                                      aaMode: v.aaMode, rotate: v.rotate,
+                                      horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
+                                      kerning: v.kerning, fill: v.fill, stroke: v.stroke,
+                                      opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
+                                      locked: v.locked, visibility: v.visibility,
+                                      blendMode: blendMode ?? v.blendMode, mask: v.mask,
+                                      name: v.name, id: v.id))
+        case .group(let v):
+            return .group(Group(children: v.children, opacity: opacity ?? v.opacity,
+                                transform: transform ?? v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: blendMode ?? v.blendMode,
+                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
+                                mask: v.mask, name: v.name, id: v.id))
+        case .layer(let v):
+            return .layer(Layer(name: v.name, children: v.children, opacity: opacity ?? v.opacity,
+                                transform: transform ?? v.transform, locked: v.locked,
+                                visibility: v.visibility, blendMode: blendMode ?? v.blendMode,
+                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
+                                mask: v.mask, id: v.id))
+        case .live(let v):
+            // Transform is settable on a Live element; opacity / blend have no
+            // LiveElement setter, so leave them unchanged (rare edge case).
+            _ = (opacity, blendMode)
+            if let t = transform { return .live(v.withTransform(t)) }
+            return .live(v)
+        }
+    }
 }
 
 // MARK: - Fill / Stroke replacement helpers
