@@ -32,9 +32,12 @@ CANONICAL_WIDGET_KINDS = frozenset({
     "slider", "number_input", "text_input", "length_input",
     "toggle", "checkbox", "select", "combo_box", "dropdown",
     "color_swatch", "color_gradient", "color_hue_bar", "color_bar",
-    "radio_group", "gradient_tile", "gradient_slider",
+    "radio_group", "radio", "gradient_tile", "gradient_slider",
     "separator", "spacer", "disclosure", "panel",
     "fill_stroke_widget", "tree_view", "element_preview", "tabs",
+    # Dialog-only kinds (rendered by at least one app; reference_point_widget
+    # + icon_button_group are currently Rust-only, a tracked cross-app gap).
+    "icon_button_group", "reference_point_widget",
     "placeholder",
 })
 
@@ -55,6 +58,10 @@ def _widget_types(node):
         if isinstance(kind, str):
             yield kind
         yield from _widget_types(node.get("children"))
+        # Some widgets nest a subtree under "content" (panel / tab pages)
+        # rather than "children" — descend it too so a non-canonical kind
+        # can't hide inside a tab page or panel wrapper.
+        yield from _widget_types(node.get("content"))
 
 
 def test_every_panel_widget_kind_is_canonical():
@@ -72,6 +79,34 @@ def test_every_panel_widget_kind_is_canonical():
 
     assert not offenders, (
         "Panels declare widget kinds outside the canonical vocabulary "
+        "(these render as placeholder boxes in every app):\n"
+        + "\n".join(f"  {name}: {kinds}" for name, kinds in sorted(offenders.items()))
+        + "\nFix the YAML to use a canonical kind, or add the kind to "
+          "CANONICAL_WIDGET_KINDS + every app's renderer if it is genuinely new."
+    )
+
+
+def test_every_dialog_widget_kind_is_canonical():
+    """Same vocabulary gate, applied to modal/non-modal DIALOG content trees.
+
+    Dialogs were previously NOT walked — which is how `radio` (used by the
+    Scale / Shear option dialogs) silently rendered as a placeholder in every
+    app for so long. Walking them here closes that gap as data.
+    """
+    workspace = json.loads(_WORKSPACE_JSON.read_text())
+    dialogs = workspace.get("dialogs", {})
+
+    offenders = {}
+    for name, dialog in dialogs.items():
+        unknown = {
+            kind for kind in _widget_types(dialog.get("content"))
+            if kind not in CANONICAL_WIDGET_KINDS
+        }
+        if unknown:
+            offenders[name] = sorted(unknown)
+
+    assert not offenders, (
+        "Dialogs declare widget kinds outside the canonical vocabulary "
         "(these render as placeholder boxes in every app):\n"
         + "\n".join(f"  {name}: {kinds}" for name, kinds in sorted(offenders.items()))
         + "\nFix the YAML to use a canonical kind, or add the kind to "

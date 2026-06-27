@@ -93,6 +93,7 @@ fn render_el(
         "select" => render_select(el, ctx, rctx),
         "icon_select" => render_icon_select(el, ctx, rctx),
         "toggle" | "checkbox" => render_toggle(el, ctx, rctx),
+        "radio" => render_radio(el, ctx, rctx),
         "radio_group" => render_radio_group(el, ctx, rctx),
         "combo_box" => render_combo_box(el, ctx, rctx),
         "color_swatch" => render_color_swatch(el, ctx, rctx),
@@ -7132,6 +7133,151 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     }
 }
 
+/// Partition a radio's `on_check` effects into live-dialog writes and
+/// residual effects.
+///
+/// `set: { dialog.<field>: <expr> }` pairs are pulled out and returned as
+/// `(field, evaluated_value)` so the caller can route them straight to the
+/// live `DialogState` (the same path every dialog widget uses). The dialog
+/// values are expression STRINGS ("true"/"false") and are evaluated here
+/// against `ctx`. Every other effect (and any non-`dialog.` keys inside a
+/// `set:` map) is returned verbatim in the second vec to run through the
+/// normal AppState effect runner. Mirrors the dialog arm of
+/// `effects.rs::set_by_scoped_target` for the live Dioxus dialog signal.
+fn partition_on_check_effects(
+    on_check: &[serde_json::Value],
+    ctx: &serde_json::Value,
+) -> (Vec<(String, serde_json::Value)>, Vec<serde_json::Value>) {
+    let mut dialog_writes: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut other_effects: Vec<serde_json::Value> = Vec::new();
+    for effect in on_check {
+        if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
+            let mut residual_set = serde_json::Map::new();
+            for (k, v) in set_map {
+                let target = k.strip_prefix('$').unwrap_or(k);
+                if let Some(field) = target.strip_prefix("dialog.") {
+                    let val = if let Some(s) = v.as_str() {
+                        super::effects::value_to_json(&expr::eval(s, ctx))
+                    } else {
+                        v.clone()
+                    };
+                    dialog_writes.push((field.to_string(), val));
+                } else {
+                    residual_set.insert(k.clone(), v.clone());
+                }
+            }
+            if !residual_set.is_empty() {
+                other_effects.push(serde_json::json!({ "set": residual_set }));
+            }
+        } else {
+            other_effects.push(effect.clone());
+        }
+    }
+    (dialog_writes, other_effects)
+}
+
+/// Render a single radio button: a circular indicator filled when
+/// `bind.checked` is truthy, followed by a label. Clicking (when not
+/// disabled) runs the element's `on_check` effects — a standard effects
+/// list, e.g. `[{ set: { dialog.uniform: "true" } }]`. The Scale / Shear
+/// option dialogs use it for the Uniform / Non-Uniform mode selector
+/// (the Python/Swift/OCaml renderers match it).
+///
+/// The circular indicator reuses the native `<input type="radio">` (as
+/// `render_radio_group` does) so the filled / hollow state is the browser's
+/// radio glyph driven by the evaluated `bind.checked` expression. Clicking
+/// the row routes any `set: { dialog.<field> }` directly to the live dialog
+/// state (`DialogState::set_value`) — the same path every dialog widget
+/// uses — and runs any remaining effects through the AppState effect runner.
+/// `bind.disabled` (when truthy) suppresses the click and dims the row.
+fn render_radio(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let label = el.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
+
+    let checked_expr = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()).unwrap_or("");
+    let checked = if checked_expr.is_empty() {
+        false
+    } else {
+        expr::eval(checked_expr, ctx).to_bool()
+    };
+    let checked_attr = if checked { "true" } else { "false" };
+
+    let disabled = el.get("bind")
+        .and_then(|b| b.get("disabled"))
+        .and_then(|v| v.as_str())
+        .map(|e| expr::eval(e, ctx).to_bool())
+        .unwrap_or(false);
+
+    // on_check is a standard effects list. Snapshot it for the click handler.
+    let on_check: Vec<serde_json::Value> = el.get("on_check")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut dialog_signal = rctx.dialog_ctx.0;
+    let app = rctx.app.clone();
+    let mut revision = rctx.revision;
+    let ctx_snapshot = ctx.clone();
+    let extra_style = build_style(el, ctx);
+
+    let dim = if disabled { "opacity:0.4;" } else { "" };
+    let cursor = if disabled { "default" } else { "pointer" };
+
+    let onclick = move |_evt: Event<MouseData>| {
+        if disabled { return; }
+        if on_check.is_empty() { return; }
+        let on_check = on_check.clone();
+        let ctx_snap = ctx_snapshot.clone();
+        let app = app.clone();
+        spawn(async move {
+            // Partition each `set:` map into dialog-scoped writes (routed to
+            // the live DialogState) and everything else (routed through the
+            // AppState effect runner). on_check values are expression STRINGS
+            // ("true"/"false"), evaluated by the helper just like every other
+            // set value.
+            let (dialog_writes, other_effects) =
+                partition_on_check_effects(&on_check, &ctx_snap);
+
+            // Apply dialog-scoped writes to the live dialog state.
+            if !dialog_writes.is_empty() {
+                if let Some(mut ds) = dialog_signal() {
+                    for (field, val) in &dialog_writes {
+                        ds.set_value(field, val.clone());
+                    }
+                    dialog_signal.set(Some(ds));
+                }
+            }
+
+            // Run any remaining (non-dialog) effects through the normal runner.
+            if !other_effects.is_empty() {
+                let mut st = app.borrow_mut();
+                run_effects_with_ctx(&other_effects, Some(&ctx_snap), &mut st);
+            }
+
+            revision += 1;
+        });
+    };
+
+    rsx! {
+        label {
+            id: "{id}",
+            style: "display:inline-flex;align-items:center;gap:6px;margin:0;cursor:{cursor};{dim}{extra_style}",
+            onclick: onclick,
+            input {
+                r#type: "radio",
+                checked: "{checked_attr}",
+                disabled: disabled,
+                // The wrapping label drives the click; keep the native glyph
+                // purely presentational so the row click is the single source.
+                style: "pointer-events:none;margin:0;",
+            }
+            if !label.is_empty() {
+                span { style: "color:var(--jas-text,#ccc);", "{label}" }
+            }
+        }
+    }
+}
+
 /// Render a group of radio buttons sharing a single bound value.
 ///
 /// Each entry in `options` is `{id, label}`; when `option.id` equals the
@@ -10216,6 +10362,55 @@ mod tests {
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         assert_eq!(fill_hex, Some("#0000ff".to_string()));
         assert!(st.app_default_stroke.is_none());
+    }
+
+    // ── radio widget: on_check partitioning ───────────────────
+    //
+    // render_radio returns a Dioxus Element (needs component context), so
+    // the headless test target is the pure partitioning helper that the
+    // click handler delegates to. It mirrors the dialog arm of
+    // effects.rs::set_by_scoped_target for the live dialog signal.
+
+    #[test]
+    fn radio_on_check_routes_dialog_set_to_dialog_writes() {
+        // The Scale dialog's Uniform radio: `on_check: [{ set: { dialog.uniform:
+        // "true" } }]`. The value is an expression STRING and must evaluate to
+        // a bool, and the dialog.<field> target must be pulled out as a live
+        // dialog write (not left as a residual AppState effect).
+        let on_check = vec![serde_json::json!({
+            "set": { "dialog.uniform": "true" }
+        })];
+        let (dialog_writes, other) =
+            partition_on_check_effects(&on_check, &serde_json::json!({}));
+        assert_eq!(dialog_writes.len(), 1);
+        assert_eq!(dialog_writes[0].0, "uniform");
+        assert_eq!(dialog_writes[0].1, serde_json::json!(true));
+        assert!(other.is_empty(), "dialog.* set must not leak into AppState effects");
+
+        // The Non-Uniform sibling flips it back via the "false" expression.
+        let on_check = vec![serde_json::json!({
+            "set": { "dialog.uniform": "false" }
+        })];
+        let (dialog_writes, _) =
+            partition_on_check_effects(&on_check, &serde_json::json!({}));
+        assert_eq!(dialog_writes[0].1, serde_json::json!(false));
+    }
+
+    #[test]
+    fn radio_on_check_keeps_non_dialog_effects_as_residual() {
+        // A non-dialog set key stays in the residual effects list (routed
+        // through the AppState runner), while the dialog.* key is extracted.
+        let on_check = vec![serde_json::json!({
+            "set": { "dialog.uniform": "true", "state.scale_uniform": "true" }
+        })];
+        let (dialog_writes, other) =
+            partition_on_check_effects(&on_check, &serde_json::json!({}));
+        assert_eq!(dialog_writes.len(), 1);
+        assert_eq!(dialog_writes[0].0, "uniform");
+        assert_eq!(other.len(), 1);
+        let residual = other[0].get("set").and_then(|v| v.as_object()).unwrap();
+        assert!(residual.contains_key("state.scale_uniform"));
+        assert!(!residual.contains_key("dialog.uniform"));
     }
 
     // ── Phase 3: Group A toggle actions ───────────────────────

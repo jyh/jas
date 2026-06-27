@@ -34768,7 +34768,7 @@
     },
     "scale_options": {
       "summary": "Scale",
-      "description": "Modal dialog opened by double-clicking the Scale icon in the toolbar OR by Alt-clicking on the canvas (which also sets the reference point at the click coordinate). Edits the per-document options that drive the Scale tool's transformation:\n- Scale mode: Uniform applies a single percentage to both axes;\n  Non-Uniform applies independent Horizontal and Vertical\n  percentages.\n- Scale Strokes: when on, stroke widths multiply by the\n  geometric mean \u221a(|sx \u00b7 sy|). When off, stroke widths are\n  preserved.\n- Scale Corners: when on, rounded_rect rx/ry scale by\n  |sx|/|sy| respectively. No-op on other element types.\n- Preview: when on, the canvas re-renders live with the\n  dialog's current values applied (no document mutation\n  until OK).\n\nReset restores defaults without committing. Cancel discards edits and any preview overlay (the reference point set by an Alt-click is NOT reverted). OK writes all values to state.scale_* and runs doc.scale.apply on the selection. Copy runs doc.scale.apply with copy=true, applying the transformation to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate). See SCALE_TOOL.md.\n",
+      "description": "Modal dialog opened by double-clicking the Scale icon in the toolbar OR by Alt-clicking on the canvas (which also sets the reference point at the click coordinate). Edits the per-document options that drive the Scale tool's transformation:\n- Scale mode: Uniform applies a single percentage to both axes;\n  Non-Uniform applies independent Horizontal and Vertical\n  percentages.\n- Scale Corners: when on, rounded_rect rx/ry scale by\n  |sx|/|sy| respectively. No-op on other element types.\n- Scale Strokes & Effects: when on, stroke widths multiply by\n  the geometric mean \u221a(|sx \u00b7 sy|). When off, stroke widths are\n  preserved.\n- Transform Objects / Transform Patterns: shown disabled to\n  mirror the canonical Scale dialog (objects always transform;\n  pattern fills are not yet supported).\n- Preview: when on, the canvas re-renders live with the\n  dialog's current values applied (no document mutation\n  until OK).\n\nReset restores defaults without committing. Cancel discards edits and any preview overlay (the reference point set by an Alt-click is NOT reverted). OK writes all values to state.scale_* and runs doc.scale.apply on the selection. Copy runs doc.scale.apply with copy=true, applying the transformation to a duplicate of the selection (placed immediately above the original in z-order; selection moves to the duplicate). See SCALE_TOOL.md.\n",
       "modal": true,
       "width": 460,
       "params": {},
@@ -34805,6 +34805,16 @@
           "default": false,
           "description": "Scale rounded_rect rx/ry along with the geometry"
         },
+        "transform_objects": {
+          "type": "bool",
+          "default": true,
+          "description": "Always on (objects in the selection are transformed). Shown disabled to mirror the canonical Scale dialog; not configurable.\n"
+        },
+        "transform_patterns": {
+          "type": "bool",
+          "default": false,
+          "description": "Pattern fills are not yet supported, so this is shown disabled and off. Present to mirror the canonical Scale dialog.\n"
+        },
         "preview": {
           "type": "bool",
           "default": true,
@@ -34818,6 +34828,8 @@
         "vertical_pct": "100",
         "scale_strokes": "state.scale_strokes",
         "scale_corners": "state.scale_corners",
+        "transform_objects": "true",
+        "transform_patterns": "false",
         "preview": "state.scale_preview"
       },
       "content": {
@@ -34862,7 +34874,7 @@
                         "on_check": [
                           {
                             "set": {
-                              "dialog.uniform": true
+                              "dialog.uniform": "true"
                             }
                           }
                         ]
@@ -34906,7 +34918,7 @@
                         "on_check": [
                           {
                             "set": {
-                              "dialog.uniform": false
+                              "dialog.uniform": "false"
                             }
                           }
                         ]
@@ -35013,26 +35025,61 @@
                 }
               },
               {
+                "id": "so_scale_corners",
+                "type": "checkbox",
+                "label": "Scale Corners",
+                "bind": {
+                  "checked": "dialog.scale_corners"
+                }
+              },
+              {
                 "id": "so_scale_strokes",
-                "type": "toggle",
-                "label": "Scale Strokes",
+                "type": "checkbox",
+                "label": "Scale Strokes & Effects",
                 "bind": {
                   "checked": "dialog.scale_strokes"
                 }
               },
               {
-                "id": "so_scale_corners",
-                "type": "toggle",
-                "label": "Scale Corners",
-                "bind": {
-                  "checked": "dialog.scale_corners"
-                }
+                "type": "row",
+                "children": [
+                  {
+                    "type": "col",
+                    "col": 6,
+                    "children": [
+                      {
+                        "id": "so_transform_objects",
+                        "type": "checkbox",
+                        "label": "Transform Objects",
+                        "bind": {
+                          "checked": "dialog.transform_objects",
+                          "disabled": "true"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "col",
+                    "col": 6,
+                    "children": [
+                      {
+                        "id": "so_transform_patterns",
+                        "type": "checkbox",
+                        "label": "Transform Patterns",
+                        "bind": {
+                          "checked": "dialog.transform_patterns",
+                          "disabled": "true"
+                        }
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           },
           {
             "id": "so_preview",
-            "type": "toggle",
+            "type": "checkbox",
             "label": "Preview",
             "bind": {
               "checked": "dialog.preview"

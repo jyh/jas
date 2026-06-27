@@ -766,6 +766,36 @@ def _render_radio_group(el, theme, state):
     return Markup(f'<span{_id_attr(el)}>{html}</span>')
 
 
+def _render_radio(el, theme, state):
+    """Render a single radio button: a circular indicator + a label, used by
+    the Scale & Shear option dialogs for the Uniform / Non-Uniform (and axis)
+    mode selector.
+
+    Flask is reference-only and does not run effects, so this is a STATIC
+    render: ``bind.checked`` / ``bind.disabled`` are evaluated against the
+    current state when they resolve, and ``on_check`` is ignored. The native
+    apps (Rust / Swift / OCaml / Python) wire the click → on_check path."""
+    bind = el.get("bind", {})
+    if isinstance(bind, str):
+        bind = {"checked": bind}
+    elif not isinstance(bind, dict):
+        bind = {}
+
+    label = escape(el.get("label", ""))
+    input_id = el.get("id", "radio")
+
+    checked = " checked" if _eval_bind_expr(bind.get("checked", ""), state) else ""
+    disabled = " disabled" if _eval_bind_expr(bind.get("disabled", ""), state) else ""
+
+    return Markup(
+        f'<div{_id_attr(el)} class="form-check"'
+        f' style="min-height:auto;padding-left:20px;margin:0"{_data_attrs(el)}>'
+        f'<input class="form-check-input" type="radio"'
+        f' id="{escape(input_id)}_input"{checked}{disabled}>'
+        f'<label class="form-check-label" for="{escape(input_id)}_input">{label}</label></div>'
+    )
+
+
 def _render_text(el, theme, state):
     content = el.get("content", "")
     if isinstance(content, str) and "{{" in content:
@@ -1623,6 +1653,7 @@ _RENDERERS = {
     "checkbox": _render_checkbox,
     "combo_box": _render_combo_box,
     "radio_group": _render_radio_group,
+    "radio": _render_radio,
     "text": _render_text,
     "text_input": _render_text_input,
     "number_input": _render_number_input,

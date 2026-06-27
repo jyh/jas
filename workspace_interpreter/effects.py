@@ -18,6 +18,7 @@ def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
     Target shapes (leading ``$`` stripped):
         ``tool.<id>.<key>``   -> ``store.set_tool``
         ``panel.<key>``       -> active panel's scope
+        ``dialog.<key>``      -> open dialog's scope (no-op if none open)
         ``state.<key>``       -> global state (explicit)
         anything else         -> global state (bare, legacy)
 
@@ -38,6 +39,13 @@ def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
         panel_id = store.get_active_panel_id()
         if panel_id is not None:
             store.set_panel(panel_id, rest, value)
+    elif head == "dialog":
+        # Dialog-scope write (e.g. a radio's on_check `set: { dialog.mode }`).
+        # set_dialog no-ops when no dialog is open; these targets only occur
+        # in dialog content so that is the correct guard. Without this arm the
+        # write fell through to a bogus global key "dialog.<key>" that nothing
+        # reads back (eval resolves `dialog.*` from the dialog scope).
+        store.set_dialog(rest, value)
     elif head == "state":
         store.set(rest, value)
     else:
