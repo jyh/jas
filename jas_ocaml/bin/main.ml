@@ -808,6 +808,16 @@ let () =
         end else
           Jas.Fifo_action_routing.dispatch ~params name (get_model ())
       end
+    | "open_dialog" when rest <> "" ->
+      (* [open_dialog <id>] -> open the modal dialog directly through the same
+         production path the paragraph menu / yaml open_dialog hook use. A test
+         affordance: tool-options dialogs (Scale / Rotate / Shear) otherwise
+         only open via a toolbar double-click or an alt-click on the canvas,
+         and the alt modifier rides a synthetic keyboard event that GTK does
+         not receive in this harness. *)
+      (match Jas.Yaml_dialog_view.open_dialog rest [] [] with
+       | Some ds -> Jas.Yaml_dialog_view.show_dialog ds
+       | None -> Printf.printf "test-fifo: open_dialog: unknown dialog %s\n%!" rest)
     | _ ->
       Printf.printf "test-fifo: unknown command %s\n%!" cmd
   in
