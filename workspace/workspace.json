@@ -17723,7 +17723,7 @@
     "properties_panel_content": {
       "id": "properties_panel_content",
       "summary": "Object properties",
-      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nFields are read-only in this increment. Editing (move on X/Y, resize on W/H), the constrain-proportions lock, rotation angle, shear, the opacity slider and the blend-mode dropdown follow in later increments. When nothing is selected every field shows 0.\n",
+      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nAll fields are editable. Editing X/Y moves the selection; W/H scales the object's local axes by the typed/current ratio (preserving rotation, so the displayed AABB may differ from the typed value on a rotated object); rotation sets the absolute angle about the bounding-box center; opacity and blend mode are set on every selected element. W/H and rotation are enabled only for a single selection (their semantics are well-defined for one object); X/Y/opacity/blend apply to any selection. The constrain-proportions lock, shear, and multi-object W/H / rotation editing remain later increments. When nothing is selected every field shows 0.\n",
       "state": {
         "prop_x": {
           "type": "number",
@@ -17828,8 +17828,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection X",
-                "description": "Left edge of the selection bounding box (document X), in points. Read-only this increment.",
-                "disabled": "true",
+                "description": "Left edge of the selection bounding box (document X), in points. Editing moves the selection.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
@@ -17850,8 +17850,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection Y",
-                "description": "Top edge of the selection bounding box (document Y), in points. Read-only this increment.",
-                "disabled": "true",
+                "description": "Top edge of the selection bounding box (document Y), in points. Editing moves the selection.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
@@ -17882,8 +17882,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection width",
-                "description": "Width of the selection bounding box, in points. Read-only this increment.",
-                "disabled": "true",
+                "description": "Width of the selection bounding box, in points. Editing scales the object (single selection only).",
+                "disabled": "active_document.selection_count != 1",
                 "style": {
                   "flex": 1
                 },
@@ -17904,8 +17904,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection height",
-                "description": "Height of the selection bounding box, in points. Read-only this increment.",
-                "disabled": "true",
+                "description": "Height of the selection bounding box, in points. Editing scales the object (single selection only).",
+                "disabled": "active_document.selection_count != 1",
                 "style": {
                   "flex": 1
                 },
@@ -17936,8 +17936,8 @@
                 "type": "number_input",
                 "suffix": "\u00b0",
                 "summary": "Selection rotation",
-                "description": "Rotation angle of the first selected element, in degrees. Read-only this increment.",
-                "disabled": "true",
+                "description": "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center (single selection only).",
+                "disabled": "active_document.selection_count != 1",
                 "style": {
                   "flex": 1
                 },
@@ -17970,8 +17970,8 @@
                 "max": 100,
                 "suffix": "%",
                 "summary": "Selection opacity",
-                "description": "Opacity of the first selected element, 0-100 percent. Read-only this increment.",
-                "disabled": "true",
+                "description": "Opacity of the first selected element, 0-100 percent. Editing sets opacity on every selected element.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
@@ -18001,8 +18001,8 @@
                 "id": "prop_blend_select",
                 "type": "select",
                 "summary": "Selection blend mode",
-                "description": "Blend mode of the first selected element. Read-only this increment.",
-                "disabled": "true",
+                "description": "Blend mode of the first selected element. Editing sets the blend mode on every selected element.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },

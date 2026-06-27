@@ -1275,9 +1275,184 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
             bm = getattr(elem, "blend_mode", None)
             if bm is not None:
                 blend = getattr(bm, "value", "normal")
-    store.set_panel(pid, "prop_rotation", round(float(rotation), 2))
-    store.set_panel(pid, "prop_opacity", round(float(opacity), 2))
-    store.set_panel(pid, "prop_blend", blend)
+    # Guard the panel writes so subscribe_properties_panel does NOT treat
+    # these sync pushes as user edits (Part B.2). Only genuine widget edits
+    # (made while _PROPS_SYNCING is False) apply back to the selection.
+    global _PROPS_SYNCING
+    _PROPS_SYNCING = True
+    try:
+        store.set_panel(pid, "prop_rotation", round(float(rotation), 2))
+        store.set_panel(pid, "prop_opacity", round(float(opacity), 2))
+        store.set_panel(pid, "prop_blend", blend)
+    finally:
+        _PROPS_SYNCING = False
+
+
+# ── Part B.2: Properties panel field EDITING (apply to selection) ──────────
+# Guards: _PROPS_SYNCING is True while the display sync pushes panel keys
+# (so those writes are not mistaken for user edits); _PROPS_APPLYING is True
+# while an apply runs (so the post-apply document-change re-sync cannot loop).
+_PROPS_SYNCING = False
+_PROPS_APPLYING = False
+
+_PROP_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def _mat_mul(a, b):
+    """2x3 affine compose: result applies ``b`` first, then ``a``
+    (``result.apply(p) == a.apply(b.apply(p))``). Tuples are
+    ``(a, b, c, d, e, f)`` for the matrix ``[a c e; b d f]``."""
+    a1, b1, c1, d1, e1, f1 = a
+    a2, b2, c2, d2, e2, f2 = b
+    return (a1 * a2 + c1 * b2,
+            b1 * a2 + d1 * b2,
+            a1 * c2 + c1 * d2,
+            b1 * c2 + d1 * d2,
+            a1 * e2 + c1 * f2 + e1,
+            b1 * e2 + d1 * f2 + f1)
+
+
+def _aabb_through(local_bbox, mat):
+    """Axis-aligned bbox ``(x, y, w, h)`` of ``local_bbox``'s four corners
+    mapped through the 2x3 matrix tuple ``mat``."""
+    bx, by, bw, bh = local_bbox
+    a, b, c, d, e, f = mat
+    pts = [(a * px + c * py + e, b * px + d * py + f)
+           for (px, py) in ((bx, by), (bx + bw, by),
+                            (bx + bw, by + bh), (bx, by + bh))]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+
+def _scaled_transform_tuple(mat, local_bbox, rx, ry):
+    """New transform that scales the element's LOCAL axes by ``(rx, ry)``
+    (post-multiply, preserving rotation — never shears) while keeping the
+    evaluated bbox top-left fixed."""
+    scaled = _mat_mul(mat, (rx, 0.0, 0.0, ry, 0.0, 0.0))
+    old = _aabb_through(local_bbox, mat)
+    new = _aabb_through(local_bbox, scaled)
+    a, b, c, d, e, f = scaled
+    return (a, b, c, d, e + (old[0] - new[0]), f + (old[1] - new[1]))
+
+
+def _rotated_transform_tuple(mat, local_bbox, deg):
+    """New transform with the element's rotation set to ``deg`` (keeping the
+    decomposed scale; shear-free assumption), rotated about the evaluated
+    bbox center so the object stays in place."""
+    import math
+    a, b, c, d, e, f = mat
+    sx = math.hypot(a, b)
+    sy = math.hypot(c, d)
+    rad = math.radians(deg)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    rotated = (sx * cos_a, sx * sin_a, -sy * sin_a, sy * cos_a, e, f)
+    old = _aabb_through(local_bbox, mat)
+    new = _aabb_through(local_bbox, rotated)
+    ocx, ocy = old[0] + old[2] / 2.0, old[1] + old[3] / 2.0
+    ncx, ncy = new[0] + new[2] / 2.0, new[1] + new[3] / 2.0
+    ra, rb, rc, rd, _, _ = rotated
+    return (ra, rb, rc, rd, e + (ocx - ncx), f + (ocy - ncy))
+
+
+def apply_properties_field(controller, field, value) -> None:
+    """Apply a Properties-panel field edit to the selection (Part B.2).
+
+    ``field`` in {x, y, w, h, rotation, opacity, blend}:
+      - x / y: move the selection so its bbox edge reaches the value
+        (translation bakes into geometry, decision-3); any selection.
+      - opacity / blend: set the attribute on every selected element.
+      - w / h: scale the LOCAL axes by value/current-bbox (decision: scale
+        local axes by ratio); SINGLE selection only.
+      - rotation: set the absolute rotation about the bbox center; SINGLE
+        selection only.
+    """
+    import dataclasses
+    from geometry.element import Transform, BlendMode
+    model = controller.model
+    doc = model.document
+    if not doc.selection:
+        return
+    bbox = selection_evaluated_bounds(doc)
+    if field == "x":
+        controller.move_selection(float(value) - bbox[0], 0.0)
+        return
+    if field == "y":
+        controller.move_selection(0.0, float(value) - bbox[1])
+        return
+    if field == "opacity":
+        op = max(0.0, min(100.0, float(value))) / 100.0
+        new_doc = doc
+        for es in doc.selection:
+            elem = doc.get_element(es.path)
+            new_doc = new_doc.replace_element(
+                es.path, dataclasses.replace(elem, opacity=op))
+        model.edit_document(new_doc)
+        return
+    if field == "blend":
+        try:
+            bm = BlendMode(str(value))
+        except ValueError:
+            return
+        new_doc = doc
+        for es in doc.selection:
+            elem = doc.get_element(es.path)
+            new_doc = new_doc.replace_element(
+                es.path, dataclasses.replace(elem, blend_mode=bm))
+        model.edit_document(new_doc)
+        return
+    # w / h / rotation — single selection only (local-axes semantics is
+    # well-defined for one element; the widgets are disabled for multi-select).
+    if len(doc.selection) != 1:
+        return
+    es = next(iter(doc.selection))
+    elem = doc.get_element(es.path)
+    local = elem.geometric_bounds()
+    t = getattr(elem, "transform", None)
+    mat = (t.a, t.b, t.c, t.d, t.e, t.f) if t is not None else _PROP_IDENTITY
+    if field == "w":
+        if bbox[2] <= 0:
+            return
+        mp = _scaled_transform_tuple(mat, local, float(value) / bbox[2], 1.0)
+    elif field == "h":
+        if bbox[3] <= 0:
+            return
+        mp = _scaled_transform_tuple(mat, local, 1.0, float(value) / bbox[3])
+    elif field == "rotation":
+        mp = _rotated_transform_tuple(mat, local, float(value))
+    else:
+        return
+    new_t = Transform(a=mp[0], b=mp[1], c=mp[2], d=mp[3], e=mp[4], f=mp[5])
+    new_doc = doc.replace_element(
+        es.path, dataclasses.replace(elem, transform=new_t))
+    model.edit_document(new_doc)
+
+
+def subscribe_properties_panel(store: StateStore, model_getter) -> None:
+    """Wire :func:`apply_properties_field` to fire after a genuine USER edit
+    of a ``prop_*`` field (Part B.2). Skips the display sync's own pushes
+    (``_PROPS_SYNCING``) and guards against the apply -> document-change ->
+    re-sync loop (``_PROPS_APPLYING``)."""
+    fields = {"x", "y", "w", "h", "rotation", "opacity", "blend"}
+
+    def _on_change(key, value):
+        global _PROPS_APPLYING
+        if _PROPS_SYNCING or _PROPS_APPLYING:
+            return
+        field = key[len("prop_"):] if key.startswith("prop_") else key
+        if field not in fields:
+            return
+        model = model_getter()
+        if model is None:
+            return
+        from document.controller import Controller
+        _PROPS_APPLYING = True
+        try:
+            apply_properties_field(Controller(model), field, value)
+        finally:
+            _PROPS_APPLYING = False
+
+    store.subscribe_panel("properties_panel_content", _on_change)
 
 
 def subscribe_active_color(store: StateStore, controller_getter) -> None:

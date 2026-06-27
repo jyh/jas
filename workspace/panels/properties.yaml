@@ -10,10 +10,15 @@ description: >
   (stroke width excluded) mapped through its full document-space
   transform, then axis-aligned; this matches the selection highlight box.
 
-  Fields are read-only in this increment. Editing (move on X/Y, resize on
-  W/H), the constrain-proportions lock, rotation angle, shear, the
-  opacity slider and the blend-mode dropdown follow in later increments.
-  When nothing is selected every field shows 0.
+  All fields are editable. Editing X/Y moves the selection; W/H scales the
+  object's local axes by the typed/current ratio (preserving rotation, so
+  the displayed AABB may differ from the typed value on a rotated object);
+  rotation sets the absolute angle about the bounding-box center; opacity
+  and blend mode are set on every selected element. W/H and rotation are
+  enabled only for a single selection (their semantics are well-defined for
+  one object); X/Y/opacity/blend apply to any selection. The
+  constrain-proportions lock, shear, and multi-object W/H / rotation editing
+  remain later increments. When nothing is selected every field shows 0.
 
 state:
   # Keys are prefixed prop_ so they never collide with another panel's
@@ -91,11 +96,12 @@ content:
   children:
 
     # ── Position (X, Y) ─────────────────────────────────────
-    # length_input (bound to the panel key) rather than a text label:
-    # a bound widget re-reads its value when the sync writes the panel
-    # key, so the field updates live on selection change. A static text
-    # `content: "{{panel.x}}"` only evaluates once at render. Read-only
-    # this increment (disabled); editing wires the write-back later.
+    # length_input bound to the panel key (NOT a static text label): a
+    # bound widget re-reads its value when the sync writes the panel key,
+    # so the field updates live on selection change AND a user edit writes
+    # the key back, which subscribe_properties_panel applies to the
+    # selection. Editing X/Y moves the selection (translation bakes).
+    # Editable whenever something is selected.
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
@@ -107,8 +113,8 @@ content:
           type: length_input
           unit: pt
           summary: "Selection X"
-          description: "Left edge of the selection bounding box (document X), in points. Read-only this increment."
-          disabled: "true"
+          description: "Left edge of the selection bounding box (document X), in points. Editing moves the selection."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_x"
@@ -119,13 +125,16 @@ content:
           type: length_input
           unit: pt
           summary: "Selection Y"
-          description: "Top edge of the selection bounding box (document Y), in points. Read-only this increment."
-          disabled: "true"
+          description: "Top edge of the selection bounding box (document Y), in points. Editing moves the selection."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_y"
 
     # ── Size (W, H) ─────────────────────────────────────────
+    # Editing W/H scales the object's LOCAL axes by typed/current (preserves
+    # rotation, never shears). Well-defined only for a single element, so the
+    # fields are disabled unless exactly one object is selected.
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
@@ -137,8 +146,8 @@ content:
           type: length_input
           unit: pt
           summary: "Selection width"
-          description: "Width of the selection bounding box, in points. Read-only this increment."
-          disabled: "true"
+          description: "Width of the selection bounding box, in points. Editing scales the object (single selection only)."
+          disabled: "active_document.selection_count != 1"
           style: { flex: 1 }
           bind:
             value: "panel.prop_w"
@@ -149,8 +158,8 @@ content:
           type: length_input
           unit: pt
           summary: "Selection height"
-          description: "Height of the selection bounding box, in points. Read-only this increment."
-          disabled: "true"
+          description: "Height of the selection bounding box, in points. Editing scales the object (single selection only)."
+          disabled: "active_document.selection_count != 1"
           style: { flex: 1 }
           bind:
             value: "panel.prop_h"
@@ -158,7 +167,10 @@ content:
     # ── Rotation ────────────────────────────────────────────
     # Per-element attrs (rotation / opacity / blend) reflect the FIRST
     # selected element, like the Stroke panel weight. Bound widgets so the
-    # value re-reads on the sync's panel write. Read-only this increment.
+    # value re-reads on the sync's panel write AND a user edit applies back.
+    # Editing rotation sets the absolute angle about the bbox center
+    # (single selection only — decompose/recompose is well-defined for one
+    # element).
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
@@ -170,8 +182,8 @@ content:
           type: number_input
           suffix: "°"
           summary: "Selection rotation"
-          description: "Rotation angle of the first selected element, in degrees. Read-only this increment."
-          disabled: "true"
+          description: "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center (single selection only)."
+          disabled: "active_document.selection_count != 1"
           style: { flex: 1 }
           bind:
             value: "panel.prop_rotation"
@@ -190,8 +202,8 @@ content:
           max: 100
           suffix: "%"
           summary: "Selection opacity"
-          description: "Opacity of the first selected element, 0-100 percent. Read-only this increment."
-          disabled: "true"
+          description: "Opacity of the first selected element, 0-100 percent. Editing sets opacity on every selected element."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_opacity"
@@ -207,8 +219,8 @@ content:
         - id: prop_blend_select
           type: select
           summary: "Selection blend mode"
-          description: "Blend mode of the first selected element. Read-only this increment."
-          disabled: "true"
+          description: "Blend mode of the first selected element. Editing sets the blend mode on every selected element."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_blend"
