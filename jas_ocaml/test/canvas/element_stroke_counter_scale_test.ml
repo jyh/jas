@@ -81,6 +81,20 @@ let tests = [
       let (out, scale) = CS.counter_scaled_element rect 3.0 in
       Alcotest.(check (float 1e-9)) "scale 3*2" 6.0 scale;
       Alcotest.(check (float 1e-9)) "width 12/6" 2.0 (stroke_width_of out));
+
+  (* (e) Rounded rect corner radii are counter-scaled too, so the corner
+     stays fixed under a scale (scale_corners OFF, the default). *)
+  Alcotest.test_case "corners divided by element scale" `Quick (fun () ->
+      let t : E.transform =
+        { a = 2.0; b = 0.0; c = 0.0; d = 2.0; e = 0.0; f = 0.0 } in
+      let rect = E.make_rect ~rx:10.0 ~ry:10.0 ~transform:(Some t)
+        0.0 0.0 100.0 100.0 in
+      let (out, _) = CS.counter_scaled_element rect 1.0 in
+      match out with
+      | E.Rect { rx; ry; _ } ->
+        Alcotest.(check (float 1e-9)) "rx 10/2" 5.0 rx;
+        Alcotest.(check (float 1e-9)) "ry 10/2" 5.0 ry
+      | _ -> Alcotest.fail "expected rect");
 ]
 
 let () =

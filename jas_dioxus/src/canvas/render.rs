@@ -378,11 +378,25 @@ fn transform_scale_factor(transform: Option<&Transform>) -> f64 {
 fn counter_scaled_element(elem: &Element, element_scale: f64) -> (Element, f64) {
     let elem_scale = element_scale * transform_scale_factor(elem.transform());
     if elem_scale > 1e-6 && (elem_scale - 1.0).abs() > 1e-9 {
-        if let Some(s) = elem.stroke() {
-            let mut scaled = s.clone();
-            scaled.width = s.width / elem_scale;
-            return (with_stroke(elem, Some(scaled)), elem_scale);
+        // Counter-scale the stroke width (if any) ...
+        let mut out = match elem.stroke() {
+            Some(s) => {
+                let mut scaled = s.clone();
+                scaled.width = s.width / elem_scale;
+                with_stroke(elem, Some(scaled))
+            }
+            None => elem.clone(),
+        };
+        // ... and a rounded rect's corner radii, so the corner stays a fixed
+        // size under a scale (scale_corners defaults OFF). When it was ON the
+        // apply baked rx,ry *= factor, so the net rendered radius scales once.
+        if let Element::Rect(r) = &mut out {
+            if r.rx != 0.0 || r.ry != 0.0 {
+                r.rx /= elem_scale;
+                r.ry /= elem_scale;
+            }
         }
+        return (out, elem_scale);
     }
     (elem.clone(), elem_scale)
 }
@@ -2794,6 +2808,28 @@ mod tests {
         let (copy, scale) = counter_scaled_element(&rect, 3.0);
         assert_eq!(scale, 6.0);
         assert_eq!(copy.stroke().unwrap().width, 2.0);
+    }
+
+    #[test]
+    fn counter_scaled_element_divides_corners() {
+        use crate::geometry::element::{RectElem, CommonProps};
+        // A rounded rect (rx/ry 10) with a 2x transform: corner radii are
+        // counter-scaled to 5, so the rendered corner stays fixed.
+        let mut common = CommonProps::default();
+        common.transform = Some(Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 0.0, f: 0.0 });
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0, rx: 10.0, ry: 10.0,
+            fill: None, stroke: None, common,
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let (copy, scale) = counter_scaled_element(&rect, 1.0);
+        assert_eq!(scale, 2.0);
+        if let Element::Rect(r) = &copy {
+            assert_eq!(r.rx, 5.0);
+            assert_eq!(r.ry, 5.0);
+        } else {
+            panic!("expected rect");
+        }
     }
 
     #[test]

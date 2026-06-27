@@ -164,10 +164,24 @@ func transformScaleFactor(_ t: Transform?) -> Double {
 /// (ref commit 8ac2f4d1) and OCaml's `Element.with_stroke` copy.
 func counterScaledElement(_ elem: Element, elementScale: Double) -> (element: Element, scale: Double) {
     let scale = elementScale * transformScaleFactor(elem.transform)
-    if scale > 1e-6 && abs(scale - 1.0) > 1e-9, let stroke = elem.stroke {
-        return (withStroke(elem, stroke: stroke.withWidth(stroke.width / scale)), scale)
+    guard scale > 1e-6 && abs(scale - 1.0) > 1e-9 else { return (elem, scale) }
+    var out = elem
+    if let stroke = elem.stroke {
+        out = withStroke(out, stroke: stroke.withWidth(stroke.width / scale))
     }
-    return (elem, scale)
+    // Counter-scale a rounded rect's corner radii too, so the corner stays a
+    // fixed size under a scale (scale_corners defaults OFF). When it was ON the
+    // apply baked rx,ry *= factor, so the net rendered radius scales once.
+    if case .rect(let r) = out, r.rx != 0 || r.ry != 0 {
+        out = .rect(Rect(x: r.x, y: r.y, width: r.width, height: r.height,
+                         rx: r.rx / scale, ry: r.ry / scale,
+                         fill: r.fill, stroke: r.stroke, opacity: r.opacity,
+                         transform: r.transform, locked: r.locked,
+                         visibility: r.visibility, blendMode: r.blendMode, mask: r.mask,
+                         fillGradient: r.fillGradient, strokeGradient: r.strokeGradient,
+                         name: r.name, id: r.id))
+    }
+    return (out, scale)
 }
 
 private func setFill(_ ctx: CGContext, _ fill: Fill?) {
