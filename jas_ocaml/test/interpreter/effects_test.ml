@@ -55,6 +55,60 @@ let set_tests = [
     assert (get_tool s "new_tool" "flag" = `Bool true));
 ]
 
+(* SCALE-DIALOG radio routing: a radio button on_check effect runs
+   set: { dialog.<key>: "<expr>" }. The scoped-target dispatcher must
+   route the head [dialog] to the open dialog scope (State_store.set_dialog),
+   NOT to the global state map under the bogus key "dialog.<key>". The
+   on_check value is an EXPRESSION STRING ("true" / "false" / "'horizontal'")
+   evaluated by the expr engine, mirroring every other set value. *)
+let dialog_routing_tests = [
+  Alcotest.test_case "set_routes_dialog_scope_bool_true" `Quick (fun () ->
+    let s = create () in
+    init_dialog s "scale_options" [("uniform", `Bool false)] ();
+    run_effects [`Assoc [("set",
+      `Assoc [("dialog.uniform", `String "true")])]] [] s;
+    (* The radio writes into the live dialog scope. *)
+    assert (get_dialog s "uniform" = Some (`Bool true)));
+
+  Alcotest.test_case "set_routes_dialog_scope_bool_false" `Quick (fun () ->
+    let s = create () in
+    init_dialog s "scale_options" [("uniform", `Bool true)] ();
+    run_effects [`Assoc [("set",
+      `Assoc [("dialog.uniform", `String "false")])]] [] s;
+    assert (get_dialog s "uniform" = Some (`Bool false)));
+
+  Alcotest.test_case "set_routes_dialog_scope_string_expr" `Quick (fun () ->
+    (* The Shear option dialog axis radios write a quoted string expr. *)
+    let s = create () in
+    init_dialog s "shear_options" [("axis", `String "horizontal")] ();
+    run_effects [`Assoc [("set",
+      `Assoc [("dialog.axis", `String "'vertical'")])]] [] s;
+    assert (get_dialog s "axis" = Some (`String "vertical")));
+
+  Alcotest.test_case "set_dialog_does_not_write_bogus_global_key" `Quick (fun () ->
+    (* Before the dialog arm, dialog.<key> fell through to the global map
+       under the literal key "dialog.uniform" — a write nothing reads back.
+       Confirm the global map is untouched and only the dialog scope changes. *)
+    let s = create () in
+    init_dialog s "scale_options" [("uniform", `Bool false)] ();
+    run_effects [`Assoc [("set",
+      `Assoc [("dialog.uniform", `String "true")])]] [] s;
+    assert (get s "dialog.uniform" = `Null);
+    assert (get_dialog s "uniform" = Some (`Bool true)));
+
+  Alcotest.test_case "set_dialog_noop_when_no_dialog_open" `Quick (fun () ->
+    (* set_dialog no-ops when no dialog is open; the radio on_check targets
+       only occur inside dialog content, so this is the safe guard. *)
+    let s = create ~defaults:[("uniform", `Bool false)] () in
+    run_effects [`Assoc [("set",
+      `Assoc [("dialog.uniform", `String "true")])]] [] s;
+    (* No dialog -> no-op; the global "uniform" key is untouched and no
+       bogus "dialog.uniform" global key appears. *)
+    assert (get s "uniform" = `Bool false);
+    assert (get s "dialog.uniform" = `Null);
+    assert (get_dialog_id s = None));
+]
+
 let toggle_tests = [
   Alcotest.test_case "toggle_true_to_false" `Quick (fun () ->
     let s = create ~defaults:[("flag", `Bool true)] () in
@@ -1951,6 +2005,7 @@ let gradient_phase4_tests = [
 let () =
   Alcotest.run "Effects" [
     "Set", set_tests;
+    "Dialog routing", dialog_routing_tests;
     "Toggle", toggle_tests;
     "Swap", swap_tests;
     "Increment/Decrement", inc_dec_tests;

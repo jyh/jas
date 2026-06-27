@@ -235,6 +235,18 @@ private func setByScopedTarget(store: StateStore, rawTarget: String, value: Any?
         if let panelId = store.getActivePanelId() {
             store.setPanel(panelId, segs[1], value)
         }
+    case "dialog":
+        // Dialog-scope write (e.g. a SCALE/SHEAR radio's on_check
+        // `set: { dialog.uniform }`). setDialog no-ops when no dialog
+        // is open; these targets only occur in dialog content so that
+        // is the correct guard. Without this arm the write fell through
+        // to the `default:` branch and landed in the GLOBAL state map
+        // under a bogus key "dialog.<key>" that nothing reads back
+        // (eval resolves `dialog.*` from the dialog scope), so the
+        // radio's mode never switched. Mirrors the Python / Rust /
+        // OCaml set_by_scoped_target dialog arm.
+        guard segs.count == 2 else { return }
+        store.setDialog(segs[1], value)
     case "state":
         guard segs.count == 2 else { return }
         store.set(segs[1], value)

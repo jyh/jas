@@ -376,6 +376,78 @@ class TestRenderText:
         assert "Hello world" in html
 
 
+class TestRenderRadio:
+    """Single radio button (Uniform / Non-Uniform / axis mode selector in the
+    Scale & Shear option dialogs). Flask is reference-only: it renders a static
+    ``<input type="radio">`` + label, with checked/disabled derived from the
+    bind expressions when they statically evaluate. No on_check/effect wiring."""
+
+    def test_radio_registered(self):
+        from renderer import _RENDERERS
+        assert "radio" in _RENDERERS
+
+    def test_radio_renders_input_and_label(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "radio",
+            "id": "so_uniform_radio",
+            "label": "Uniform:",
+            "bind": {"checked": "dialog.uniform"},
+            "on_check": [{"set": {"dialog.uniform": "true"}}],
+        }
+        html = render_element(el, theme, state, mode="normal")
+        assert 'type="radio"' in html
+        assert "Uniform:" in html
+        assert 'id="so_uniform_radio"' in html
+
+    @staticmethod
+    def _input_tag(html):
+        """Extract the <input ...> tag from the rendered HTML so assertions
+        target the radio control itself, not the surrounding data-bind-*
+        metadata attributes on the container."""
+        import re
+        m = re.search(r"<input[^>]*>", str(html))
+        assert m, f"no <input> in {html!r}"
+        return m.group(0)
+
+    def test_radio_checked_when_bind_truthy(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "radio",
+            "label": "Uniform:",
+            "bind": {"checked": "dialog.uniform"},
+        }
+        st = dict(state)
+        st["dialog"] = {"uniform": True}
+        html = render_element(el, theme, st, mode="normal")
+        assert "checked" in self._input_tag(html)
+
+    def test_radio_not_checked_when_bind_falsy(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "radio",
+            "label": "Non-Uniform",
+            "bind": {"checked": "not dialog.uniform"},
+        }
+        st = dict(state)
+        st["dialog"] = {"uniform": True}
+        html = render_element(el, theme, st, mode="normal")
+        # The radio control itself must not carry the checked attribute.
+        assert "checked" not in self._input_tag(html)
+
+    def test_radio_disabled_when_bind_disabled_truthy(self, theme, state):
+        from renderer import render_element
+        el = {
+            "type": "radio",
+            "label": "Uniform:",
+            "bind": {"checked": "dialog.uniform", "disabled": "dialog.locked"},
+        }
+        st = dict(state)
+        st["dialog"] = {"uniform": True, "locked": True}
+        html = render_element(el, theme, st, mode="normal")
+        assert "disabled" in self._input_tag(html)
+
+
 class TestRenderUnknown:
     def test_unknown_type_renders(self, theme, state):
         from renderer import render_element

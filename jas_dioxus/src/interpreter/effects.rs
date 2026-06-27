@@ -581,6 +581,7 @@ fn run_one(
 /// Target shapes (leading `$` stripped):
 ///   `tool.<id>.<key>[.<more>]` → `store.set_tool(id, combined_key, value)`
 ///   `panel.<key>`              → active panel's scope
+///   `dialog.<key>`             → open dialog's scope (no-op if none open)
 ///   `state.<key>`              → global state (explicit scope)
 ///   `<key>`                    → global state (implicit scope, legacy)
 ///
@@ -610,6 +611,14 @@ fn set_by_scoped_target(
                 store.set_panel(&active, key, value);
             }
         }
+        // Dialog-scope write (e.g. a radio's on_check `set: { dialog.mode }`).
+        // set_dialog no-ops when no dialog is open; these targets only occur
+        // in dialog content so that is the correct guard. Without this arm the
+        // write fell through to a bogus global key "dialog.<key>" that nothing
+        // reads back (eval resolves `dialog.*` from the dialog scope), so the
+        // Scale / Shear mode selector never toggled. Matches the
+        // Python/Swift/OCaml set_by_scoped_target dispatchers.
+        ["dialog", key] => store.set_dialog(key, value),
         ["state", key] => store.set(key, value),
         [key] => store.set(key, value),
         _ => {}
@@ -6616,6 +6625,53 @@ mod tests {
             &effects, &serde_json::json!({}), &mut store,
             None, None, None, None);
         assert_eq!(store.get_panel("color", "mode"), &serde_json::json!("rgb"));
+    }
+
+    #[test]
+    fn set_dialog_scoped_target_writes_to_open_dialog() {
+        // A radio's `on_check: [{ set: { dialog.uniform: "true" } }]` must
+        // route through the dialog arm of set_by_scoped_target so the mode
+        // switches. Before the arm existed the write fell through to a bogus
+        // global key "dialog.uniform" that nothing read back, so the Scale /
+        // Shear mode selector never toggled. on_check values are expression
+        // STRINGS ("true"/"false"), evaluated to a bool by the set-path.
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("uniform".to_string(), serde_json::json!(false));
+        store.init_dialog("scale_options", defaults, None);
+        let effects = vec![serde_json::json!({
+            "set": { "dialog.uniform": "true" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None, None);
+        assert_eq!(store.get_dialog("uniform"), &serde_json::json!(true));
+        // And the sibling radio's "false" expression flips it back.
+        let effects = vec![serde_json::json!({
+            "set": { "dialog.uniform": "false" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None, None);
+        assert_eq!(store.get_dialog("uniform"), &serde_json::json!(false));
+    }
+
+    #[test]
+    fn set_dialog_scoped_target_no_dialog_is_noop() {
+        // set_dialog no-ops when no dialog is open, and these targets only
+        // occur in dialog content, so routing them is safe even with no open
+        // dialog. It must NOT leak into the global state map under the old
+        // bogus "dialog.uniform" key.
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "set": { "dialog.uniform": "true" }
+        })];
+        run_effects(
+            &effects, &serde_json::json!({}), &mut store,
+            None, None, None, None);
+        // No dialog open → write dropped, no global key written.
+        assert_eq!(store.get("dialog.uniform"), &serde_json::Value::Null);
+        assert_eq!(store.get("uniform"), &serde_json::Value::Null);
     }
 
     #[test]

@@ -9,11 +9,14 @@ scale_options:
     - Scale mode: Uniform applies a single percentage to both axes;
       Non-Uniform applies independent Horizontal and Vertical
       percentages.
-    - Scale Strokes: when on, stroke widths multiply by the
-      geometric mean √(|sx · sy|). When off, stroke widths are
-      preserved.
     - Scale Corners: when on, rounded_rect rx/ry scale by
       |sx|/|sy| respectively. No-op on other element types.
+    - Scale Strokes & Effects: when on, stroke widths multiply by
+      the geometric mean √(|sx · sy|). When off, stroke widths are
+      preserved.
+    - Transform Objects / Transform Patterns: shown disabled to
+      mirror the canonical Scale dialog (objects always transform;
+      pattern fills are not yet supported).
     - Preview: when on, the canvas re-renders live with the
       dialog's current values applied (no document mutation
       until OK).
@@ -61,6 +64,18 @@ scale_options:
       type: bool
       default: false
       description: "Scale rounded_rect rx/ry along with the geometry"
+    transform_objects:
+      type: bool
+      default: true
+      description: >
+        Always on (objects in the selection are transformed). Shown disabled
+        to mirror the canonical Scale dialog; not configurable.
+    transform_patterns:
+      type: bool
+      default: false
+      description: >
+        Pattern fills are not yet supported, so this is shown disabled and
+        off. Present to mirror the canonical Scale dialog.
     preview:
       type: bool
       default: true
@@ -76,6 +91,8 @@ scale_options:
     vertical_pct:   "100"
     scale_strokes:  "state.scale_strokes"
     scale_corners:  "state.scale_corners"
+    transform_objects:  "true"
+    transform_patterns: "false"
     preview:        "state.scale_preview"
   content:
     type: container
@@ -102,7 +119,7 @@ scale_options:
                     bind:
                       checked: "dialog.uniform"
                     on_check:
-                      - set: { dialog.uniform: true }
+                      - set: { dialog.uniform: "true" }
               - type: col
                 col: 5
                 children:
@@ -128,7 +145,7 @@ scale_options:
                     bind:
                       checked: "not dialog.uniform"
                     on_check:
-                      - set: { dialog.uniform: false }
+                      - set: { dialog.uniform: "false" }
 
           - type: row
             style: { padding: "0 0 0 24" }
@@ -177,21 +194,45 @@ scale_options:
         children:
           - { type: text, content: "Options", style: { font_size: 12, weight: bold } }
 
-          - id: so_scale_strokes
-            type: toggle
-            label: "Scale Strokes"
-            bind:
-              checked: "dialog.scale_strokes"
-
           - id: so_scale_corners
-            type: toggle
+            type: checkbox
             label: "Scale Corners"
             bind:
               checked: "dialog.scale_corners"
 
+          - id: so_scale_strokes
+            type: checkbox
+            label: "Scale Strokes & Effects"
+            bind:
+              checked: "dialog.scale_strokes"
+
+          # Transform Objects / Transform Patterns mirror the canonical Scale
+          # dialog. Both are shown DISABLED: objects always transform; pattern
+          # fills are not yet supported. Display-only (not in confirm params).
+          - type: row
+            children:
+              - type: col
+                col: 6
+                children:
+                  - id: so_transform_objects
+                    type: checkbox
+                    label: "Transform Objects"
+                    bind:
+                      checked: "dialog.transform_objects"
+                      disabled: "true"
+              - type: col
+                col: 6
+                children:
+                  - id: so_transform_patterns
+                    type: checkbox
+                    label: "Transform Patterns"
+                    bind:
+                      checked: "dialog.transform_patterns"
+                      disabled: "true"
+
       # ── Preview ──
       - id: so_preview
-        type: toggle
+        type: checkbox
         label: "Preview"
         bind:
           checked: "dialog.preview"

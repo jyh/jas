@@ -1128,7 +1128,10 @@ def _render_toggle(el, store, ctx, dispatch_fn):
     if icon_btn is not None:
         return icon_btn
     label = el.get("label", "")
-    cb = QCheckBox(label)
+    # Qt treats a literal '&' in a QCheckBox label as a mnemonic marker
+    # (it underlines the next char and is not shown). Dialog option labels
+    # like "Scale Strokes & Effects" want a literal ampersand, so escape it.
+    cb = QCheckBox(label.replace("&", "&&"))
     _apply_checkbox_theme(cb)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
     _wire_dialog_checkbox(cb, el, store, ctx)
@@ -1140,7 +1143,7 @@ def _render_checkbox(el, store, ctx, dispatch_fn):
     if icon_btn is not None:
         return icon_btn
     label = el.get("label", "")
-    cb = QCheckBox(label)
+    cb = QCheckBox(label.replace("&", "&&"))  # literal '&', not a mnemonic
     _apply_checkbox_theme(cb)
     _wire_opacity_mask_checkbox(cb, el, store, ctx)
     _wire_dialog_checkbox(cb, el, store, ctx)
@@ -2277,6 +2280,100 @@ def _render_radio_group(el, store, ctx, dispatch_fn):
         if opt_label:
             lbl = QLabel(opt_label)
             layout.addWidget(lbl)
+    return container
+
+
+class _RadioIndicator(QWidget):
+    """Circular radio indicator, filled when the bound ``checked`` expression
+    is truthy. Subscribes to the store so toggling the bound state (or a
+    sibling radio writing the same key) repaints it live. Mirrors
+    ``_RadioOptionWidget`` but evaluates a boolean ``checked`` expression
+    rather than comparing against an option id."""
+
+    def __init__(self, store, checked_expr, ctx, parent=None):
+        super().__init__(parent)
+        self._store = store
+        self._checked_expr = checked_expr
+        self._ctx = ctx
+        self.setFixedSize(14, 14)
+        store.subscribe(None, lambda *_: self._safe_update())
+
+    def _safe_update(self):
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _is_selected(self):
+        if not self._checked_expr:
+            return False
+        try:
+            r = evaluate(self._checked_expr, self._store.eval_context(self._ctx))
+            return bool(getattr(r, "value", False))
+        except Exception:
+            return False
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+        from PySide6.QtCore import Qt as _Qt
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#999"), 1))
+        painter.setBrush(QBrush(_Qt.BrushStyle.NoBrush))
+        painter.drawEllipse(2, 2, 10, 10)
+        if self._is_selected():
+            painter.setPen(QPen(QColor("#ccc"), 1))
+            painter.setBrush(QBrush(QColor("#ccc")))
+            painter.drawEllipse(4, 4, 6, 6)
+
+
+def _render_radio(el, store, ctx, dispatch_fn):
+    """Single radio button: a circular indicator filled when ``bind.checked``
+    is truthy, followed by a label. Clicking runs the element's ``on_check``
+    effects (e.g. ``set: { dialog.mode: ... }``). Honors ``bind.disabled``.
+    The Scale / Shear option dialogs use it for the Uniform / Non-Uniform /
+    axis mode selector (the Rust/Swift/OCaml/Flask renderers match it)."""
+    from PySide6.QtCore import Qt as _Qt
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    checked_expr = bind.get("checked") if isinstance(bind.get("checked"), str) else None
+    disabled_expr = bind.get("disabled") if isinstance(bind.get("disabled"), str) else None
+    on_check = el.get("on_check", []) or []
+
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(6)
+    indicator = _RadioIndicator(store, checked_expr or "", ctx)
+    indicator.setAttribute(_Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    layout.addWidget(indicator)
+    label = el.get("label", "")
+    if label:
+        lbl = QLabel(label)
+        lbl.setStyleSheet("color: #ccc;")
+        lbl.setAttribute(_Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(lbl)
+    layout.addStretch(1)
+
+    def _disabled_now():
+        if not disabled_expr:
+            return False
+        try:
+            return bool(getattr(
+                evaluate(disabled_expr, store.eval_context(ctx)), "value", False))
+        except Exception:
+            return False
+
+    if _disabled_now():
+        container.setEnabled(False)
+
+    def _on_press(_ev):
+        if _disabled_now():
+            return
+        if on_check:
+            _run_behavior_effects(on_check, _behavior_eval_ctx(store, ctx),
+                                  store, ctx)
+    container.mousePressEvent = _on_press
+    container.setCursor(_Qt.CursorShape.PointingHandCursor)
     return container
 
 
@@ -3475,7 +3572,19 @@ def _apply_style(widget: QWidget, style: dict, store: StateStore, ctx: dict):
     if parts:
         existing = widget.styleSheet()
         new_style = "; ".join(parts)
-        widget.setStyleSheet(f"{existing}; {new_style}" if existing else new_style)
+        # Box-model properties (border / background) set as a bare QSS property
+        # string cascade to EVERY descendant widget — which draws a border
+        # around every row inside a bordered group container (the Scale / Shear
+        # option dialogs boxed each row). Scope them to THIS widget via an
+        # objectName selector so only the container itself is bordered.
+        # Inheriting properties (color / font) keep the bare form so text
+        # styling still flows to child labels as before.
+        if not existing and any(k in style for k in ("border", "background")):
+            name = widget.objectName() or f"styled_{id(widget):x}"
+            widget.setObjectName(name)
+            widget.setStyleSheet(f"#{name} {{ {new_style} }}")
+        else:
+            widget.setStyleSheet(f"{existing}; {new_style}" if existing else new_style)
 
 
 def _parse_padding(val) -> tuple[int, int, int, int]:
@@ -4116,6 +4225,7 @@ _RENDERERS = {
     "color_gradient": _render_color_gradient,
     "color_hue_bar": _render_color_hue_bar,
     "radio_group": _render_radio_group,
+    "radio": _render_radio,
     "gradient_tile": _render_gradient_tile,
     "gradient_slider": _render_gradient_slider,
     "separator": _render_separator,

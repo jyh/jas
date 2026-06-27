@@ -431,6 +431,62 @@ import Testing
     #expect(store.getPanel("color", "mode") as? String == "rgb")
 }
 
+// MARK: - Dialog-scoped set targets (SCALE-DIALOG radio routing)
+
+@Test func setRoutesDialogScopedTarget() {
+    // A radio's on_check `set: { dialog.uniform: "false" }` must route
+    // to the open dialog's scope — not a bogus global "dialog.uniform"
+    // key. The on_check value is an EXPRESSION STRING ("false") that the
+    // set-path evaluates to a bool, mirroring every other set value.
+    let store = StateStore()
+    store.initDialog("scale_options", defaults: ["uniform": true])
+    runEffects(
+        [["set": ["dialog.uniform": "false"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getDialog("uniform") as? Bool == false)
+    // Nothing leaked to the global state map under the scoped key.
+    #expect(store.get("dialog.uniform") == nil)
+}
+
+@Test func setDialogScopedTargetEvaluatesTrueExpr() {
+    // The companion radio writes the string "true"; the set-path
+    // must evaluate it to a real bool, not the literal string "true".
+    let store = StateStore()
+    store.initDialog("scale_options", defaults: ["uniform": false])
+    runEffects(
+        [["set": ["dialog.uniform": "true"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getDialog("uniform") as? Bool == true)
+}
+
+@Test func setDialogScopedTargetNoopWhenNoDialogOpen() {
+    // set_dialog no-ops when no dialog is open, and these targets only
+    // occur in dialog content — so a stray write must not crash or
+    // pollute the global state map.
+    let store = StateStore()
+    runEffects(
+        [["set": ["dialog.uniform": "true"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getDialogId() == nil)
+    #expect(store.get("dialog.uniform") == nil)
+}
+
+@Test func setDialogScopedTargetStringValue() {
+    // The Shear options axis radios write quoted-string exprs
+    // ('horizontal' / 'vertical'); the set-path evaluates the
+    // expression to the bare string and stores it in dialog scope.
+    let store = StateStore()
+    store.initDialog("shear_options", defaults: ["axis": "horizontal"])
+    runEffects(
+        [["set": ["dialog.axis": "'vertical'"]]],
+        ctx: [:], store: store
+    )
+    #expect(store.getDialog("axis") as? String == "vertical")
+}
+
 @Test func evalContextReadsToolScope() {
     // After writing to tool.sel.mode, the evaluator should resolve
     // `tool.sel.mode` through the scope built by evalContext().

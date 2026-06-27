@@ -33,6 +33,7 @@ let value_to_json (v : Expr_eval.value) : Yojson.Safe.t =
     section. Target shapes (leading [$] stripped):
       [tool.<id>.<key>[.<more>]]  -> [State_store.set_tool]
       [panel.<key>]               -> active panel's scope
+      [dialog.<key>]              -> open dialog's scope (no-op if none open)
       [state.<key>]               -> global state (explicit)
       [anything_else]             -> global state (bare) *)
 let set_by_scoped_target (store : State_store.t) (raw_target : string)
@@ -59,6 +60,16 @@ let set_by_scoped_target (store : State_store.t) (raw_target : string)
       (match State_store.get_active_panel_id store with
        | Some pid -> State_store.set_panel store pid rest value
        | None -> ())
+    | "dialog" ->
+      (* Dialog-scope write — e.g. a radio button on_check
+         [set: { dialog.uniform }] in the Scale or Shear option dialog.
+         [State_store.set_dialog] no-ops when no dialog is open, and
+         these targets only occur in dialog content, so that is the
+         correct guard. Without this arm the write fell through to the
+         bare branch and landed in the GLOBAL state map under a bogus
+         literal key, which nothing ever reads back (reads resolve
+         dialog dot keys from the dialog scope). *)
+      State_store.set_dialog store rest value
     | "state" -> State_store.set store rest value
     | _ -> State_store.set store target value
 

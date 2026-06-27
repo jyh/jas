@@ -1528,6 +1528,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "color_gradient" -> render_color_gradient ~packing ~ctx el
   | "color_hue_bar" -> render_color_hue_bar ~packing ~ctx el
   | "radio_group" -> render_radio_group ~packing ~ctx el
+  | "radio" -> render_radio ~packing ~ctx el
   | "gradient_tile" -> render_gradient_tile ~packing ~ctx el
   | "gradient_slider" -> render_gradient_slider ~packing ~ctx el
   | "separator" -> render_separator ~packing el
@@ -3594,6 +3595,106 @@ and render_radio_group ~packing ~ctx el =
         true
       end else false))
   ) options
+
+(** [radio] — a SINGLE radio button: a circular indicator filled when
+    [bind.checked] evaluates truthy, followed by a label. Clicking runs
+    the element [on_check] effects (a standard effects list, e.g.
+    [set: { dialog.uniform }]). Honors [bind.disabled]. The Scale and
+    Shear option dialogs use it for the Uniform / Non-Uniform / axis
+    mode selector. Mirrors [render_radio_group] for the Cairo circle and
+    the dialog reactive redraw, and the [render_select] behavior path for
+    running the [set:] effects through [_write_back_bind] so [dialog.X]
+    routes to the live dialog scope (the State_store-level equivalent is
+    the [dialog] arm in [Effects.set_by_scoped_target], gated by the
+    cross-language corpus). The on_check values are EXPRESSION STRINGS
+    (e.g. [true] / [false] / [single-quoted horizontal]) evaluated to a
+    value by the expr engine, exactly like every other [set:] value. *)
+and render_radio ~packing ~ctx el =
+  let open Yojson.Safe.Util in
+  let label = el |> member "label" |> to_string_option |> Option.value ~default:"" in
+  let bind = el |> member "bind" in
+  let checked_expr = bind |> safe_member "checked" |> to_string_option
+                     |> Option.value ~default:"" in
+  let disabled_expr = bind |> safe_member "disabled" |> to_string_option in
+  let on_check = match el |> member "on_check" with `List l -> l | _ -> [] in
+  let eval_bool_live expr =
+    (* Fresh read against the live dialog state — the captured ctx is a
+       snapshot from render time, so prefer the live build ctx when a
+       dialog is open (matches render_radio_group read_active_live). *)
+    if expr = "" then false
+    else
+      let use_ctx =
+        if !Dialog_global.current_state <> None
+        then !Dialog_global.current_build_ctx ()
+        else ctx in
+      Expr_eval.to_bool (Expr_eval.evaluate expr use_ctx) in
+  let disabled_now () =
+    match disabled_expr with
+    | Some expr -> eval_bool_live expr
+    | None -> false in
+  (* Outer clickable container (event_box). A plain GtkLabel has no input
+     window, so wrap the whole indicator + label in an event_box so a
+     click anywhere on the row toggles the radio. *)
+  let evt = GBin.event_box ~packing () in
+  let row = GPack.hbox ~spacing:6 ~packing:evt#add () in
+  (* Circular indicator: hollow ring always, filled inner dot when
+     bind.checked is truthy. Reuses the radio_group circle geometry. *)
+  let size = 12 in
+  let area = GMisc.drawing_area ~packing:row#pack () in
+  area#misc#set_size_request ~width:size ~height:size ();
+  ignore (area#misc#connect#draw ~callback:(fun cr ->
+    let s = float_of_int size in
+    let cx = s /. 2.0 and cy = s /. 2.0 in
+    let r_outer = (s /. 2.0) -. 1.0 in
+    let muted = disabled_now () in
+    Cairo.set_line_width cr 1.0;
+    if muted then Cairo.set_source_rgb cr 0.5 0.5 0.5
+    else Cairo.set_source_rgb cr 0.35 0.35 0.35;
+    Cairo.arc cr cx cy ~r:r_outer ~a1:0.0 ~a2:(2.0 *. Float.pi);
+    Cairo.stroke cr;
+    if eval_bool_live checked_expr then begin
+      if muted then Cairo.set_source_rgb cr 0.5 0.5 0.5
+      else Cairo.set_source_rgb cr 0.2 0.5 0.95;
+      Cairo.arc cr cx cy ~r:(r_outer -. 2.0) ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.fill cr
+    end;
+    true));
+  (* Re-draw when the bound dialog state changes so BOTH radios update
+     together (radio_group does the same). *)
+  Dialog_global.add_state_change_listener (fun () -> area#misc#queue_draw ());
+  if label <> "" then begin
+    let lbl = GMisc.label ~text:label ~packing:row#pack () in
+    lbl#set_xalign 0.0
+  end;
+  (* On click: run the on_check effects unless disabled. Each effect is a
+     [set: { target: expr }]; evaluate the expr against the live dialog
+     ctx and route the target (already scope-qualified, e.g. dialog.uniform)
+     through _write_back_bind, which sends dialog.* writes to the live
+     dialog scope and fires the state-change listeners (redrawing both
+     radios). Mirrors the render_select behavior dispatch. *)
+  evt#event#add [`BUTTON_PRESS];
+  ignore (evt#event#connect#button_press ~callback:(fun ev ->
+    if GdkEvent.Button.button ev = 1 && not (disabled_now ()) then begin
+      let live_ctx =
+        if !Dialog_global.current_state <> None
+        then !Dialog_global.current_build_ctx ()
+        else ctx in
+      let resolve_value v =
+        match v with
+        | `String expr_str ->
+          (try Effects.value_to_json (Expr_eval.evaluate expr_str live_ctx)
+           with _ -> v)
+        | _ -> v in
+      List.iter (fun e ->
+        match e |> member "set" with
+        | `Assoc pairs ->
+          List.iter (fun (k, v) ->
+            _write_back_bind k (resolve_value v)
+          ) pairs
+        | _ -> ()
+      ) on_check;
+      true
+    end else false))
 
 (** [color_gradient] — square HSB-H 2D gradient. X = saturation, Y =
     brightness (top=100), tinted by the bound [hue]. Click/drag

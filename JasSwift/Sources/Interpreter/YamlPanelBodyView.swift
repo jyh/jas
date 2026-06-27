@@ -221,6 +221,8 @@ struct YamlElementView: View {
                 renderColorBar()
             case "radio_group":
                 renderRadioGroup()
+            case "radio":
+                renderRadio()
             case "color_gradient":
                 renderColorGradient()
             case "color_hue_bar":
@@ -1609,6 +1611,97 @@ struct YamlElementView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// Single radio button: a circular indicator filled when
+    /// ``bind.checked`` is truthy, followed by a label. Clicking runs the
+    /// element's ``on_check`` effects (e.g. ``set: { dialog.uniform }``)
+    /// through the shared ``runEffects`` pipeline — so a
+    /// ``set: { dialog.X }`` routes via ``setByScopedTarget``'s dialog
+    /// arm into the open dialog's scope. Honors ``bind.disabled``. The
+    /// Scale / Shear option dialogs use it for the Uniform / Non-Uniform
+    /// / axis mode selector. Mirrors the Python ``_render_radio`` and the
+    /// reactive circle drawing of ``renderRadioGroup``.
+    @ViewBuilder
+    private func renderRadio() -> some View {
+        let bind = element["bind"] as? [String: Any]
+        let checkedExpr = bind?["checked"] as? String
+        let disabledExpr = bind?["disabled"] as? String
+        let label = (element["label"] as? String) ?? ""
+        let onCheck = (element["on_check"] as? [Any]) ?? []
+
+        let checked: Bool = {
+            guard let e = checkedExpr else { return false }
+            return evaluate(e, context: context).toBool()
+        }()
+        let disabled: Bool = {
+            guard let e = disabledExpr else { return false }
+            return evaluate(e, context: context).toBool()
+        }()
+
+        // Mirror renderRadioGroup's circle glyph + the disabled-muting
+        // used by toggle. The whole row is one tap target; the tap runs
+        // on_check through runEffects (so dialog.* set targets reach the
+        // dialog scope) and then re-syncs the SwiftUI dialog binding so
+        // both radios repaint.
+        Button(action: { runRadioOnCheck(onCheck) }) {
+            HStack(spacing: 6) {
+                SwiftUI.Image(systemName: checked ? "circle.inset.filled" : "circle")
+                    .font(.system(size: 12))
+                if !label.isEmpty {
+                    SwiftUI.Text(label).font(.system(size: 11))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1.0)
+    }
+
+    /// Run a radio's ``on_check`` effects through the shared
+    /// ``runEffects`` pipeline, then re-sync the SwiftUI dialog binding.
+    ///
+    /// The effects (``set: { dialog.X: "<expr>" }``) write the open
+    /// dialog's scope via ``setByScopedTarget``'s dialog arm — values
+    /// are EXPRESSION STRINGS ("true"/"false"/"'horizontal'") that the
+    /// set-path evaluates like every other set value. Because the dialog
+    /// body renders from the ``dialogState`` SwiftUI binding (a snapshot
+    /// of the store's dialog map), the bound circle won't repaint until
+    /// that binding is refreshed — so after running the effects we replay
+    /// the now-committed value of each written ``dialog.X`` key through
+    /// ``onDialogWrite`` (idempotent for ``set``), which re-syncs the
+    /// binding. No-op when there's no model / no open dialog.
+    private func runRadioOnCheck(_ onCheck: [Any]) {
+        guard let model = model else { return }
+        let ws = WorkspaceData.load()
+        let actions = ws?.data["actions"] as? [String: Any]
+        let dialogs = ws?.data["dialogs"] as? [String: Any]
+        runEffects(onCheck, ctx: context, store: model.stateStore,
+                   actions: actions, dialogs: dialogs)
+        // Re-sync the dialog binding for each dialog.<key> the on_check
+        // set: targets, reading back the value the effects just wrote.
+        for key in dialogSetKeys(in: onCheck) {
+            onDialogWrite?(key, model.stateStore.getDialog(key))
+        }
+    }
+
+    /// Collect the dialog-scoped keys written by a radio's ``on_check``
+    /// effect list (the ``dialog.<key>`` targets of any ``set:`` map).
+    /// Used to drive the post-effect dialog-binding re-sync.
+    private func dialogSetKeys(in effects: [Any]) -> [String] {
+        var keys: [String] = []
+        for e in effects {
+            guard let dict = e as? [String: Any],
+                  let setMap = dict["set"] as? [String: Any] else { continue }
+            for rawTarget in setMap.keys {
+                let t = rawTarget.hasPrefix("$")
+                    ? String(rawTarget.dropFirst()) : rawTarget
+                if t.hasPrefix("dialog.") {
+                    keys.append(String(t.dropFirst("dialog.".count)))
+                }
+            }
+        }
+        return keys
     }
 
     /// Square 2D gradient — saturation along x, brightness along y,
