@@ -14,12 +14,27 @@
 
 import Foundation
 
+private func capName(_ c: LineCap) -> String {
+    switch c { case .butt: return "butt"; case .round: return "round"; case .square: return "square" }
+}
+
+private func joinName(_ j: LineJoin) -> String {
+    switch j { case .miter: return "miter"; case .round: return "round"; case .bevel: return "bevel" }
+}
+
 public func strokePanelLiveOverrides(model: Model) -> [String: Any] {
     let doc = model.document
-    var width: Double? = nil
+    var stroke: Stroke? = nil
     if let first = doc.selection.first {
-        width = doc.getElement(first.path).stroke?.width
+        stroke = doc.getElement(first.path).stroke
     }
-    let resolved = width ?? model.defaultStroke?.width ?? 1.0
-    return ["weight": resolved]
+    let s = stroke ?? model.defaultStroke
+    var out: [String: Any] = ["weight": s?.width ?? 1.0]
+    // Also mirror the selection's cap / join (matches the Rust dock), so
+    // those widgets reflect the selection. Display-only.
+    if let s = s {
+        out["cap"] = capName(s.linecap)
+        out["join"] = joinName(s.linejoin)
+    }
+    return out
 }

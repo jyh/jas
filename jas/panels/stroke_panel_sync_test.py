@@ -12,7 +12,7 @@ from workspace_interpreter.effects import sync_stroke_panel_from_selection
 from workspace_interpreter.state_store import StateStore
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import Rect, Stroke, RgbColor, Layer
+from geometry.element import Rect, Stroke, RgbColor, Layer, LineCap, LineJoin
 
 
 class StrokePanelSyncTest(absltest.TestCase):
@@ -62,6 +62,21 @@ class StrokePanelSyncTest(absltest.TestCase):
     def test_none_model_does_not_raise(self):
         store = self._store()
         sync_stroke_panel_from_selection(store, None)  # must not raise
+
+    def test_cap_join_from_selected_element(self):
+        # The panel reflects the selection's cap / join, not just weight.
+        store = StateStore()
+        store.init_panel("stroke_panel_content",
+                         {"weight": 1.0, "cap": "butt", "join": "miter"})
+        stroke = Stroke(color=RgbColor(0, 0, 0), width=1.0,
+                        linecap=LineCap.ROUND, linejoin=LineJoin.BEVEL)
+        rect = Rect(x=0, y=0, width=10, height=10, stroke=stroke)
+        layer = Layer(children=(rect,), name="L0")
+        m = Model(document=Document(
+            layers=(layer,), selection=frozenset({ElementSelection.all((0, 0))})))
+        sync_stroke_panel_from_selection(store, m)
+        self.assertEqual(store.get_panel("stroke_panel_content", "cap"), "round")
+        self.assertEqual(store.get_panel("stroke_panel_content", "join"), "bevel")
 
 
 if __name__ == "__main__":
