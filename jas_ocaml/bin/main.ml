@@ -155,6 +155,7 @@ let () =
      Same hook pattern as theme_text_hook to avoid a renderer ↔ dock
      cycle. *)
   Jas.Yaml_panel_view.dialog_bg_hook := (fun () -> !Jas.Dock_panel.theme_bg_dark);
+  Jas.Yaml_panel_view.dialog_pane_bg_hook := (fun () -> !Jas.Dock_panel.theme_bg);
   (* Map an active_tool string to its native [Toolbar.tool]. Accepts BOTH the
      short ROUTING ids the bundle dispatches (the strings written by
      [set: { active_tool: ... }] in shortcuts.yaml / tool_alternates.yaml,

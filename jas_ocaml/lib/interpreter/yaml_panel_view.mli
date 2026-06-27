@@ -136,6 +136,11 @@ val theme_text_hook : (unit -> string) ref
     dock cycle. *)
 val dialog_bg_hook : (unit -> string) ref
 
+(** Pane background for MODAL dialog windows (lighter than [dialog_bg_hook]'s
+    flyout background, so dialog inputs stand out and it matches the other
+    apps). Wired in main.ml against [Dock_panel.theme_bg]. *)
+val dialog_pane_bg_hook : (unit -> string) ref
+
 (** Override for [render_button]'s ``icon_button`` size default (normally
     20px). Set to [Some n] by [Yaml_dialog_view.show_nonmodal_dialog]
     only while it renders the tool-alternates flyout, so the flyout's

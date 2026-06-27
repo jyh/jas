@@ -522,6 +522,14 @@ let theme_text_hook : (unit -> string) ref = ref (fun () -> "#cccccc")
     [theme_text_hook]. *)
 let dialog_bg_hook : (unit -> string) ref = ref (fun () -> "#2b2b2b")
 
+(** Background color for MODAL dialog windows (Scale / Shear / Rotate options,
+    color picker, print, ...). Returns the pane background (lighter than
+    [dialog_bg_hook]'s flyout #333) so dialog input fields stand out and the
+    window matches the Rust / Swift / Python dialog background. Wired in
+    main.ml against [Dock_panel.theme_bg] (cycle-avoidance, like the hooks
+    above). *)
+let dialog_pane_bg_hook : (unit -> string) ref = ref (fun () -> "#3c3c3c")
+
 (** Override for the icon size used by [render_button]'s ``icon_button``
     default (normally 20px). Set to [Some n] by
     [Yaml_dialog_view.show_nonmodal_dialog] only while it renders the
@@ -3686,7 +3694,22 @@ and render_radio ~packing ~ctx el =
      together (radio_group does the same). *)
   Dialog_global.add_state_change_listener (fun () -> area#misc#queue_draw ());
   if label <> "" then begin
-    let lbl = GMisc.label ~text:label ~packing:row#pack () in
+    (* Color the label with the active appearance text color via Pango markup
+       (the plain ~text path inherits GTK's default dark label color, which is
+       invisible on the dark themed dialog background). Mirrors the text
+       renderer. Escape Pango-significant chars in the label first. *)
+    let esc s =
+      let b = Buffer.create (String.length s) in
+      String.iter (fun c -> match c with
+        | '&' -> Buffer.add_string b "&amp;"
+        | '<' -> Buffer.add_string b "&lt;"
+        | '>' -> Buffer.add_string b "&gt;"
+        | c -> Buffer.add_char b c) s;
+      Buffer.contents b in
+    let markup =
+      Printf.sprintf "<span foreground=\"%s\">%s</span>"
+        (!theme_text_hook ()) (esc label) in
+    let lbl = GMisc.label ~markup ~packing:row#pack () in
     lbl#set_xalign 0.0
   end;
   (* On click: run the on_check effects unless disabled. Each effect is a
