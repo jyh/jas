@@ -1367,6 +1367,25 @@ def _rotated_transform_tuple(mat, local_bbox, deg):
     return (ra, rb, rc, rd, e + (ocx - ncx), f + (ocy - ncy))
 
 
+def _scale_about_pivot(sx, sy, px, py):
+    """Document-space scale by (sx, sy) about the pivot (px, py), as a 2x3
+    tuple. Used to scale a multi-selection as a group about its bbox anchor
+    (pre-multiplied onto each element transform)."""
+    return (sx, 0.0, 0.0, sy, px * (1.0 - sx), py * (1.0 - sy))
+
+
+def _rotate_about_pivot(deg, px, py):
+    """Document-space rotation by ``deg`` about the pivot (px, py), as a 2x3
+    tuple. Used to rotate a multi-selection as a rigid group about its bbox
+    center."""
+    import math
+    rad = math.radians(deg)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    return (cos_a, sin_a, -sin_a, cos_a,
+            px - cos_a * px + sin_a * py,
+            py - sin_a * px - cos_a * py)
+
+
 def apply_properties_field(controller, field, value, constrain=False) -> None:
     """Apply a Properties-panel field edit to the selection (Part B.2).
 
@@ -1381,6 +1400,7 @@ def apply_properties_field(controller, field, value, constrain=False) -> None:
         selection only.
     """
     import dataclasses
+    import math
     from geometry.element import Transform, BlendMode
     model = controller.model
     doc = model.document
@@ -1414,32 +1434,64 @@ def apply_properties_field(controller, field, value, constrain=False) -> None:
                 es.path, dataclasses.replace(elem, blend_mode=bm))
         model.edit_document(new_doc)
         return
-    # w / h / rotation — single selection only (local-axes semantics is
-    # well-defined for one element; the widgets are disabled for multi-select).
-    if len(doc.selection) != 1:
+    # w / h / rotation.
+    if field not in ("w", "h", "rotation"):
         return
-    es = next(iter(doc.selection))
-    elem = doc.get_element(es.path)
-    local = elem.geometric_bounds()
-    t = getattr(elem, "transform", None)
-    mat = (t.a, t.b, t.c, t.d, t.e, t.f) if t is not None else _PROP_IDENTITY
+    if len(doc.selection) == 1:
+        # SINGLE: local-axes scale / absolute rotation about the element bbox
+        # center (the well-defined per-object semantics, decision-5 Part B.2).
+        es = next(iter(doc.selection))
+        elem = doc.get_element(es.path)
+        local = elem.geometric_bounds()
+        t = getattr(elem, "transform", None)
+        mat = (t.a, t.b, t.c, t.d, t.e, t.f) if t is not None else _PROP_IDENTITY
+        if field == "w":
+            if bbox[2] <= 0:
+                return
+            r = float(value) / bbox[2]
+            mp = _scaled_transform_tuple(mat, local, r, r if constrain else 1.0)
+        elif field == "h":
+            if bbox[3] <= 0:
+                return
+            r = float(value) / bbox[3]
+            mp = _scaled_transform_tuple(mat, local, r if constrain else 1.0, r)
+        else:
+            mp = _rotated_transform_tuple(mat, local, float(value))
+        new_t = Transform(a=mp[0], b=mp[1], c=mp[2], d=mp[3], e=mp[4], f=mp[5])
+        model.edit_document(doc.replace_element(
+            es.path, dataclasses.replace(elem, transform=new_t)))
+        return
+    # MULTI: transform the whole selection as a GROUP about its evaluated
+    # bbox (doc-space, not per-element local axes — there is no single local
+    # frame). W/H scale about the bbox top-left; rotation rotates rigidly
+    # about the bbox center by the delta from the first element's angle (the
+    # value the panel shows). Each element transform is pre-multiplied by the
+    # group transform.
     if field == "w":
         if bbox[2] <= 0:
             return
         r = float(value) / bbox[2]
-        mp = _scaled_transform_tuple(mat, local, r, r if constrain else 1.0)
+        group = _scale_about_pivot(r, r if constrain else 1.0, bbox[0], bbox[1])
     elif field == "h":
         if bbox[3] <= 0:
             return
         r = float(value) / bbox[3]
-        mp = _scaled_transform_tuple(mat, local, r if constrain else 1.0, r)
-    elif field == "rotation":
-        mp = _rotated_transform_tuple(mat, local, float(value))
-    else:
-        return
-    new_t = Transform(a=mp[0], b=mp[1], c=mp[2], d=mp[3], e=mp[4], f=mp[5])
-    new_doc = doc.replace_element(
-        es.path, dataclasses.replace(elem, transform=new_t))
+        group = _scale_about_pivot(r if constrain else 1.0, r, bbox[0], bbox[1])
+    else:  # rotation
+        first = next(iter(doc.selection))
+        ft = getattr(doc.get_element(first.path), "transform", None)
+        cur = math.degrees(math.atan2(ft.b, ft.a)) if ft is not None else 0.0
+        cx, cy = bbox[0] + bbox[2] / 2.0, bbox[1] + bbox[3] / 2.0
+        group = _rotate_about_pivot(float(value) - cur, cx, cy)
+    new_doc = doc
+    for es in doc.selection:
+        elem = doc.get_element(es.path)
+        t = getattr(elem, "transform", None)
+        old = (t.a, t.b, t.c, t.d, t.e, t.f) if t is not None else _PROP_IDENTITY
+        nt = _mat_mul(group, old)
+        new_t = Transform(a=nt[0], b=nt[1], c=nt[2], d=nt[3], e=nt[4], f=nt[5])
+        new_doc = new_doc.replace_element(
+            es.path, dataclasses.replace(elem, transform=new_t))
     model.edit_document(new_doc)
 
 
