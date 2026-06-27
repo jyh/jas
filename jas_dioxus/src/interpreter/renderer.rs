@@ -1755,6 +1755,55 @@ pub(crate) fn apply_properties_panel_field(
         }
         "prop_w" | "prop_h" | "prop_rotation" => {
             if doc.selection.len() != 1 {
+                // MULTI: transform the whole selection as a group about its
+                // bbox (doc-space — no single local frame). W/H scale about
+                // the bbox top-left; rotation rotates rigidly about the bbox
+                // center by the delta from the first element's angle. Each
+                // element transform is pre-multiplied by the group transform.
+                if doc.selection.is_empty() {
+                    return;
+                }
+                let group = match key {
+                    "prop_w" => {
+                        let Some(v) = num() else { return };
+                        if bbox.2 <= 0.0 {
+                            return;
+                        }
+                        let r = v / bbox.2;
+                        Transform::scale(r, if constrain { r } else { 1.0 })
+                            .around_point(bbox.0, bbox.1)
+                    }
+                    "prop_h" => {
+                        let Some(v) = num() else { return };
+                        if bbox.3 <= 0.0 {
+                            return;
+                        }
+                        let r = v / bbox.3;
+                        Transform::scale(if constrain { r } else { 1.0 }, r)
+                            .around_point(bbox.0, bbox.1)
+                    }
+                    _ => {
+                        let Some(v) = num() else { return };
+                        let cur = doc.selection.first()
+                            .and_then(|es| doc.get_element(&es.path))
+                            .and_then(|e| e.transform().copied())
+                            .map(|t| t.b.atan2(t.a).to_degrees())
+                            .unwrap_or(0.0);
+                        let cx = bbox.0 + bbox.2 / 2.0;
+                        let cy = bbox.1 + bbox.3 / 2.0;
+                        Transform::rotate(v - cur).around_point(cx, cy)
+                    }
+                };
+                let mut nd = doc.clone();
+                for es in &doc.selection {
+                    if let Some(e) = doc.get_element(&es.path) {
+                        let old = e.transform().copied().unwrap_or(Transform::IDENTITY);
+                        let mut ne = e.clone();
+                        ne.common_mut().transform = Some(group.multiply(&old));
+                        nd = nd.replace_element(&es.path, ne);
+                    }
+                }
+                tab.model.edit_document(nd);
                 return;
             }
             let es = &doc.selection[0];
@@ -11720,11 +11769,11 @@ mod tests {
     }
 
     #[test]
-    fn props_w_noop_for_multi_selection() {
+    fn props_w_multi_selection_scales_group() {
         use crate::document::document::ElementSelection;
         let mut st = AppState::new();
-        select_first_rect(&mut st, None);
-        // Add a second selected rect.
+        select_first_rect(&mut st, None); // rect (0,0,100,50)
+        // Add a second rect at x=200 and select both -> union bbox W = 300.
         {
             let mut nd = st.tabs[st.active_tab].model.document().clone();
             if let Some(Element::Layer(layer)) = nd.layers.get_mut(0) {
@@ -11740,12 +11789,13 @@ mod tests {
                                 ElementSelection::all(vec![0, 1])];
             st.tabs[st.active_tab].model.set_document_unbracketed(nd);
         }
-        let before = crate::canvas::render::selection_evaluated_bounds(
+        // Set W=600 -> group scales 2x about the bbox top-left (x only).
+        apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(600.0));
+        let (x, _, w, h) = crate::canvas::render::selection_evaluated_bounds(
             st.tab().unwrap().model.document());
-        apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(999.0));
-        let after = crate::canvas::render::selection_evaluated_bounds(
-            st.tab().unwrap().model.document());
-        assert_eq!(before, after); // W edit is single-selection only
+        assert!((w - 600.0).abs() < 1e-6, "w={}", w);
+        assert!((x - 0.0).abs() < 1e-6, "x={}", x);   // bbox top-left preserved
+        assert!((h - 50.0).abs() < 1e-6, "h={}", h);  // H unchanged
     }
 
     #[test]

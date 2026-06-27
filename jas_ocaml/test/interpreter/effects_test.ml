@@ -712,7 +712,9 @@ let properties_apply_tests = [
        assert (r.blend_mode = Jas.Element.Multiply)
      | _ -> assert false));
 
-  Alcotest.test_case "apply_w_noop_for_multi_selection" `Quick (fun () ->
+  Alcotest.test_case "apply_w_multi_selection_scales_group" `Quick (fun () ->
+    (* Two 100x50 rects at x=0 and x=200 -> union bbox W = 300. Set W=600 ->
+       group scales 2x about the bbox top-left (x only). *)
     let r0 = Jas.Element.make_rect 0.0 0.0 100.0 50.0 in
     let r1 = Jas.Element.make_rect 200.0 0.0 100.0 50.0 in
     let layer = Jas.Element.make_layer [| r0; r1 |] in
@@ -722,10 +724,28 @@ let properties_apply_tests = [
       |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
     let doc = Jas.Document.make_document ~selection [| layer |] in
     let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
-    let (_, _, w_before, _) = selection_evaluated_bounds ctrl#document in
-    apply_properties_field ctrl "w" (`Float 999.0);
-    let (_, _, w_after, _) = selection_evaluated_bounds ctrl#document in
-    assert (Float.abs (w_before -. w_after) < 1e-9));
+    apply_properties_field ctrl "w" (`Float 600.0);
+    let (x, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 600.0) < 1e-6);
+    assert (Float.abs (x -. 0.0) < 1e-6);
+    assert (Float.abs (h -. 50.0) < 1e-6));
+
+  Alcotest.test_case "apply_rotation_multi_selection_rotates_group" `Quick (fun () ->
+    (* Two 10x10 rects at x=0 and x=100 -> union (0,0,110,10). 90deg group
+       rotation about the bbox center swaps the union to 10 x 110. *)
+    let r0 = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let r1 = Jas.Element.make_rect 100.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| r0; r1 |] in
+    let selection =
+      Jas.Document.PathMap.empty
+      |> Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+      |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    apply_properties_field ctrl "rotation" (`Float 90.0);
+    let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 10.0) < 1e-4);
+    assert (Float.abs (h -. 110.0) < 1e-4));
 ]
 
 (* ── Phase 3: Character panel → pending override routing ──────── *)

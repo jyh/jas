@@ -181,28 +181,61 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
             model.editDocument(d)
         }
     case "w", "h", "rotation":
-        guard doc.selection.count == 1, let es = doc.selection.first else { return }
-        let elem = doc.getElement(es.path)
-        let local = elem.geometricBounds
-        let mat = elem.transform ?? .identity
+        guard !doc.selection.isEmpty else { return }
         // Constrain-proportions: when on, W/H scale BOTH axes by the ratio.
         let constrain = (model.stateStore.getPanel("properties_panel_content",
                                                    "prop_constrain") as? Bool) ?? false
-        let newT: Transform
+        if doc.selection.count == 1, let es = doc.selection.first {
+            // SINGLE: local-axes scale / absolute rotation about its center.
+            let elem = doc.getElement(es.path)
+            let local = elem.geometricBounds
+            let mat = elem.transform ?? .identity
+            let newT: Transform
+            switch field {
+            case "w":
+                guard let v = num(), bbox.width > 0 else { return }
+                let r = v / bbox.width
+                newT = propScaledTransform(mat, local, r, constrain ? r : 1)
+            case "h":
+                guard let v = num(), bbox.height > 0 else { return }
+                let r = v / bbox.height
+                newT = propScaledTransform(mat, local, constrain ? r : 1, r)
+            default:
+                guard let v = num() else { return }
+                newT = propRotatedTransform(mat, local, v)
+            }
+            model.editDocument(doc.replaceElement(es.path, with: elem.withCommon(transform: newT)))
+            return
+        }
+        // MULTI: transform the whole selection as a group about its bbox
+        // (doc-space). W/H scale about the bbox top-left; rotation rotates
+        // rigidly about the bbox center by the delta from the first angle.
+        let group: Transform
         switch field {
         case "w":
             guard let v = num(), bbox.width > 0 else { return }
             let r = v / bbox.width
-            newT = propScaledTransform(mat, local, r, constrain ? r : 1)
+            group = Transform.scale(r, constrain ? r : 1).aroundPoint(bbox.x, bbox.y)
         case "h":
             guard let v = num(), bbox.height > 0 else { return }
             let r = v / bbox.height
-            newT = propScaledTransform(mat, local, constrain ? r : 1, r)
+            group = Transform.scale(constrain ? r : 1, r).aroundPoint(bbox.x, bbox.y)
         default:
             guard let v = num() else { return }
-            newT = propRotatedTransform(mat, local, v)
+            var cur = 0.0
+            if let f = doc.selection.first, let ft = doc.getElement(f.path).transform {
+                cur = atan2(ft.b, ft.a) * 180 / .pi
+            }
+            let cx = bbox.x + bbox.width / 2, cy = bbox.y + bbox.height / 2
+            group = Transform.rotate(v - cur).aroundPoint(cx, cy)
         }
-        model.editDocument(doc.replaceElement(es.path, with: elem.withCommon(transform: newT)))
+        var d = doc
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let old = elem.transform ?? .identity
+            d = d.replaceElement(es.path, with: elem.withCommon(transform: group.multiply(old)))
+        }
+        model.editDocument(d)
     default:
         break
     }

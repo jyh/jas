@@ -55,10 +55,25 @@ private func rectE(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Elemen
     #expect(e.blendMode == .multiply)
 }
 
-@Test func applyWNoopForMultiSelection() {
+@Test func applyWMultiSelectionScalesGroup() {
+    // Two 100x50 rects at x=0 and x=200 -> union bbox W = 300. Setting W=600
+    // scales the GROUP about the bbox top-left by 2 (x only).
     let m = applyModel([rectE(0, 0, 100, 50), rectE(200, 0, 100, 50)],
                        selected: [[0, 0], [0, 1]])
-    let before = selectionEvaluatedBounds(m.document).width
-    applyPropertiesField(controller: Controller(model: m), field: "w", value: 999.0)
-    #expect(selectionEvaluatedBounds(m.document).width == before)
+    applyPropertiesField(controller: Controller(model: m), field: "w", value: 600.0)
+    let b = selectionEvaluatedBounds(m.document)
+    #expect(abs(b.width - 600) < 1e-6)
+    #expect(abs(b.x - 0) < 1e-6)       // bbox top-left preserved
+    #expect(abs(b.height - 50) < 1e-6) // H unchanged
+}
+
+@Test func applyRotationMultiSelectionRotatesGroup() {
+    // Two 10x10 rects at x=0 and x=100 -> union (0,0,110,10). A 90deg group
+    // rotation about the bbox center swaps the union to 10 x 110.
+    let m = applyModel([rectE(0, 0, 10, 10), rectE(100, 0, 10, 10)],
+                       selected: [[0, 0], [0, 1]])
+    applyPropertiesField(controller: Controller(model: m), field: "rotation", value: 90.0)
+    let b = selectionEvaluatedBounds(m.document)
+    #expect(abs(b.width - 10) < 1e-4)
+    #expect(abs(b.height - 110) < 1e-4)
 }
