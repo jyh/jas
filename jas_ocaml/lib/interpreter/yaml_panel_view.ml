@@ -530,6 +530,36 @@ let dialog_bg_hook : (unit -> string) ref = ref (fun () -> "#2b2b2b")
     above). *)
 let dialog_pane_bg_hook : (unit -> string) ref = ref (fun () -> "#3c3c3c")
 
+(* Dark CSS for text inputs (plain entry + spin button) so they follow the
+   active appearance like the Rust/Swift/Python apps, instead of GTK's light
+   default. Built from the theme hooks so a panel/dialog re-render after an
+   appearance change picks up the new colors. Sizing CSS (min-height / padding)
+   stays in a separate provider on the same widget; these set only color
+   properties, so both apply. *)
+let dark_entry_css () =
+  let bg = !dialog_bg_hook () and fg = !theme_text_hook () in
+  Printf.sprintf
+    "entry, spinbutton { background-color: %s; color: %s; \
+       border: 1px solid #555555; caret-color: %s; } \
+     spinbutton text { color: %s; } \
+     spinbutton button { color: %s; background: transparent; border: none; }"
+    bg fg fg fg fg
+
+(* Dark CSS for plain (text-label) buttons — the dialog Reset / Copy / Cancel /
+   OK and panel push buttons. NOT applied to icon buttons (those stay relief
+   none / transparent). *)
+let dark_button_css () =
+  Printf.sprintf
+    "button { background-color: %s; color: %s; border: 1px solid #555555; \
+       border-radius: 3px; padding: 2px 10px; } \
+     button:hover { background-color: %s; }"
+    (!dialog_bg_hook ()) (!theme_text_hook ()) (!dialog_pane_bg_hook ())
+
+let apply_css_provider (w : #GObj.widget) (css : string) (priority : int) =
+  let provider = GObj.css_provider () in
+  provider#load_from_data css;
+  w#misc#style_context#add_provider provider priority
+
 (** Override for the icon size used by [render_button]'s ``icon_button``
     default (normally 20px). Set to [Some n] by
     [Yaml_dialog_view.show_nonmodal_dialog] only while it renders the
@@ -1998,7 +2028,9 @@ and render_button ~packing ~ctx el =
       b#misc#set_tooltip_text label;
       b
     | None ->
-      GButton.button ~label ~packing ()
+      let b = GButton.button ~label ~packing () in
+      apply_css_provider b (dark_button_css ()) 700;
+      b
   in
   (* Icon buttons declare a [style.size] (typically 16–24px). Without
      [set_size_request], the GtkButton inflates to the theme's natural
@@ -2551,6 +2583,7 @@ and render_number_input ~packing ~ctx el =
        clamps to min/max, and commits on focus-out / Enter — same
        semantics as the spin button minus the visible steppers. *)
     let entry = GEdit.entry ~packing ~text:(Printf.sprintf "%g" initial) () in
+    apply_css_provider entry (dark_entry_css ()) 750;
     entry#misc#set_size_request ~width:1 ();
     entry#set_width_chars 4;
     (* Slim down the Adwaita default ~30px-tall entry to match the
@@ -2685,6 +2718,7 @@ and render_number_input ~packing ~ctx el =
   end else begin
     let adj = GData.adjustment ~lower:min_val ~upper:max_val ~step_incr:1.0 ~value:initial () in
     let spin = GEdit.spin_button ~adjustment:adj ~digits:0 ~packing () in
+    apply_css_provider spin (dark_entry_css ()) 750;
     (* Write-back: commit on value change so the StateStore, and any
        subscription on the current panel scope, see the edit.
        ``value_changed`` fires when the adjustment value changes (arrow
@@ -2733,6 +2767,7 @@ and render_text_input ~packing ~ctx el =
        | _ -> "")
     | None -> "" in
   let entry = GEdit.entry ~packing ~text:initial () in
+  apply_css_provider entry (dark_entry_css ()) 750;
   if placeholder <> "" then entry#set_placeholder_text placeholder;
   if !_current_panel_id <> None then begin
     (* Match render_number_input's sizing pattern exactly: shrinkable
@@ -2804,6 +2839,7 @@ and render_length_input ~packing ~ctx el =
     | None -> None in
   let initial = Length.format pt_value ~unit ~precision in
   let entry = GEdit.entry ~packing ~text:initial () in
+  apply_css_provider entry (dark_entry_css ()) 750;
   if placeholder <> "" then entry#set_placeholder_text placeholder;
   (* Same shrinkable rationale as render_number_input — keep panel
      entries from forcing the dock pane wider than its slot. The
