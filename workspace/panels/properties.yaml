@@ -10,15 +10,17 @@ description: >
   (stroke width excluded) mapped through its full document-space
   transform, then axis-aligned; this matches the selection highlight box.
 
-  All fields are editable. Editing X/Y moves the selection; W/H scales the
-  object's local axes by the typed/current ratio (preserving rotation, so
-  the displayed AABB may differ from the typed value on a rotated object);
-  rotation sets the absolute angle about the bounding-box center; opacity
-  and blend mode are set on every selected element. W/H and rotation are
-  enabled only for a single selection (their semantics are well-defined for
-  one object); X/Y/opacity/blend apply to any selection. The
-  constrain-proportions lock, shear, and multi-object W/H / rotation editing
-  remain later increments. When nothing is selected every field shows 0.
+  All fields are editable. Editing X/Y moves the selection; opacity and
+  blend mode are set on every selected element. For a SINGLE object, W/H
+  scales its local axes by the typed/current ratio (preserving rotation, so
+  the displayed AABB may differ from the typed value on a rotated object)
+  and rotation sets the absolute angle about its bounding-box center. For a
+  MULTI selection, W/H scales the whole selection as a group about the bbox
+  top-left and rotation rotates it rigidly about the bbox center (by the
+  delta from the first object's angle) — there is no single local frame for
+  a group. The constrain-proportions lock (chain icon) ties W and H so they
+  scale together. Shear editing remains a later increment. When nothing is
+  selected every field shows 0.
 
 state:
   # Keys are prefixed prop_ so they never collide with another panel's
@@ -154,8 +156,8 @@ content:
           type: length_input
           unit: pt
           summary: "Selection width"
-          description: "Width of the selection bounding box, in points. Editing scales the object (single selection only)."
-          disabled: "active_document.selection_count != 1"
+          description: "Width of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_w"
@@ -166,8 +168,8 @@ content:
           type: length_input
           unit: pt
           summary: "Selection height"
-          description: "Height of the selection bounding box, in points. Editing scales the object (single selection only)."
-          disabled: "active_document.selection_count != 1"
+          description: "Height of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_h"
@@ -176,9 +178,9 @@ content:
         - id: prop_constrain
           type: icon_button
           summary: "Constrain proportions"
-          description: "When on, editing W or H scales the object uniformly to keep the aspect ratio. Single selection only."
+          description: "When on, editing W or H scales the object (or the whole selection) uniformly to keep the aspect ratio."
           style: { size: 18 }
-          disabled: "active_document.selection_count != 1"
+          disabled: "active_document.selection_count == 0"
           bind:
             icon: 'if panel.prop_constrain then "chain_linked" else "chain_broken"'
             checked: "panel.prop_constrain"
@@ -191,9 +193,9 @@ content:
     # Per-element attrs (rotation / opacity / blend) reflect the FIRST
     # selected element, like the Stroke panel weight. Bound widgets so the
     # value re-reads on the sync's panel write AND a user edit applies back.
-    # Editing rotation sets the absolute angle about the bbox center
-    # (single selection only — decompose/recompose is well-defined for one
-    # element).
+    # Editing rotation: a single object is set to the absolute angle about
+    # its bbox center (decompose/recompose); a multi-selection rotates
+    # rigidly about the bbox center by the delta from the first angle.
     - type: container
       layout: row
       style: { gap: 4, alignment: center }
@@ -205,8 +207,8 @@ content:
           type: number_input
           suffix: "°"
           summary: "Selection rotation"
-          description: "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center (single selection only)."
-          disabled: "active_document.selection_count != 1"
+          description: "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center; a multi-selection rotates rigidly as a group by the delta."
+          disabled: "active_document.selection_count == 0"
           style: { flex: 1 }
           bind:
             value: "panel.prop_rotation"

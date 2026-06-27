@@ -17723,7 +17723,7 @@
     "properties_panel_content": {
       "id": "properties_panel_content",
       "summary": "Object properties",
-      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nAll fields are editable. Editing X/Y moves the selection; W/H scales the object's local axes by the typed/current ratio (preserving rotation, so the displayed AABB may differ from the typed value on a rotated object); rotation sets the absolute angle about the bounding-box center; opacity and blend mode are set on every selected element. W/H and rotation are enabled only for a single selection (their semantics are well-defined for one object); X/Y/opacity/blend apply to any selection. The constrain-proportions lock, shear, and multi-object W/H / rotation editing remain later increments. When nothing is selected every field shows 0.\n",
+      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nAll fields are editable. Editing X/Y moves the selection; opacity and blend mode are set on every selected element. For a SINGLE object, W/H scales its local axes by the typed/current ratio (preserving rotation, so the displayed AABB may differ from the typed value on a rotated object) and rotation sets the absolute angle about its bounding-box center. For a MULTI selection, W/H scales the whole selection as a group about the bbox top-left and rotation rotates it rigidly about the bbox center (by the delta from the first object's angle) \u2014 there is no single local frame for a group. The constrain-proportions lock (chain icon) ties W and H so they scale together. Shear editing remains a later increment. When nothing is selected every field shows 0.\n",
       "state": {
         "prop_x": {
           "type": "number",
@@ -17888,8 +17888,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection width",
-                "description": "Width of the selection bounding box, in points. Editing scales the object (single selection only).",
-                "disabled": "active_document.selection_count != 1",
+                "description": "Width of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
@@ -17910,8 +17910,8 @@
                 "type": "length_input",
                 "unit": "pt",
                 "summary": "Selection height",
-                "description": "Height of the selection bounding box, in points. Editing scales the object (single selection only).",
-                "disabled": "active_document.selection_count != 1",
+                "description": "Height of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
@@ -17923,11 +17923,11 @@
                 "id": "prop_constrain",
                 "type": "icon_button",
                 "summary": "Constrain proportions",
-                "description": "When on, editing W or H scales the object uniformly to keep the aspect ratio. Single selection only.",
+                "description": "When on, editing W or H scales the object (or the whole selection) uniformly to keep the aspect ratio.",
                 "style": {
                   "size": 18
                 },
-                "disabled": "active_document.selection_count != 1",
+                "disabled": "active_document.selection_count == 0",
                 "bind": {
                   "icon": "if panel.prop_constrain then \"chain_linked\" else \"chain_broken\"",
                   "checked": "panel.prop_constrain"
@@ -17969,8 +17969,8 @@
                 "type": "number_input",
                 "suffix": "\u00b0",
                 "summary": "Selection rotation",
-                "description": "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center (single selection only).",
-                "disabled": "active_document.selection_count != 1",
+                "description": "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center; a multi-selection rotates rigidly as a group by the delta.",
+                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },

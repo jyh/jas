@@ -109,12 +109,26 @@ class ApplyPropertiesFieldTest(absltest.TestCase):
         self.assertEqual(_elem(ctrl, 0).opacity, 0.25)
         self.assertEqual(_elem(ctrl, 1).opacity, 0.25)
 
-    def test_w_noop_for_multi_selection(self):
+    def test_w_multi_selection_scales_group(self):
+        # Two 100x50 rects at x=0 and x=200 -> union bbox W = 300. Setting
+        # W=600 scales the GROUP about the bbox top-left by 2 (x only).
         ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50),
                       Rect(x=200, y=0, width=100, height=50)], [0, 1])
-        before = ctrl.model.document
-        apply_properties_field(ctrl, "w", 999)
-        self.assertIs(ctrl.model.document, before)  # unchanged
+        apply_properties_field(ctrl, "w", 600)
+        x, _, w, h = selection_evaluated_bounds(ctrl.model.document)
+        self.assertAlmostEqual(w, 600.0, places=6)
+        self.assertAlmostEqual(x, 0.0, places=6)   # bbox top-left preserved
+        self.assertAlmostEqual(h, 50.0, places=6)  # H unchanged (no constrain)
+
+    def test_rotation_multi_selection_rotates_group(self):
+        # Two 10x10 rects at x=0 and x=100 -> union (0,0,110,10). A 90deg
+        # group rotation about the bbox center swaps the union to 10 x 110.
+        ctrl = _ctrl([Rect(x=0, y=0, width=10, height=10),
+                      Rect(x=100, y=0, width=10, height=10)], [0, 1])
+        apply_properties_field(ctrl, "rotation", 90)
+        _, _, w, h = selection_evaluated_bounds(ctrl.model.document)
+        self.assertAlmostEqual(w, 10.0, places=4)
+        self.assertAlmostEqual(h, 110.0, places=4)
 
     def test_no_selection_does_not_raise(self):
         ctrl = _ctrl([Rect(x=0, y=0, width=10, height=10)], [])
