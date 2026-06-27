@@ -80,7 +80,7 @@ shear_options:
       # ── Axis group ──
       - type: container
         layout: column
-        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        style: { gap: 6, padding: 10, border: "1px solid {{theme.colors.border}}" }
         children:
           - { type: text, content: "Axis", style: { font_size: 12, weight: bold } }
 

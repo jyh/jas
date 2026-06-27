@@ -1560,6 +1560,29 @@ and render_container ~packing ~ctx el etype =
   let explicit_height =
     el |> member "style" |> safe_member "height" |> to_number_option
     |> Option.map int_of_float in
+  (* A container with [style.border] is a group box (the Scale / Shear option
+     dialogs frame their fields this way). Wrap it in a frame carrying a 1px
+     border via a CSS provider, inset by the container padding, and rebind the
+     packing so the body builds inside the frame. Mirrors the dialog flyout
+     border in yaml_dialog_view. Borderless containers are untouched. *)
+  let packing =
+    match el |> member "style" |> safe_member "border" |> to_string_option with
+    | None -> packing
+    | Some _ ->
+      let pad =
+        el |> member "style" |> safe_member "padding"
+        |> to_int_option |> Option.value ~default:0 in
+      let frame = GBin.frame ~shadow_type:`NONE ~packing () in
+      let provider = new GObj.css_provider (GtkData.CssProvider.create ()) in
+      (* theme.colors.border is #555555; hardcoded like the dialog flyout
+         border so the box draws regardless of whether the theme token is in
+         the eval ctx. *)
+      provider#load_from_data (Printf.sprintf
+        "frame, frame > border { border: 1px solid #555555; border-radius: 4px; padding: %dpx; }"
+        pad);
+      frame#misc#style_context#add_provider provider 600;
+      frame#add
+  in
   if is_row then begin
     (* Bootstrap-style 12-column grid: when row children declare
        ``col: N`` weights, lay them out in a GtkGrid with

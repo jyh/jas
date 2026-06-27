@@ -84,7 +84,7 @@ blob_brush_tool_options:
       # ── Fidelity section ──
       - type: container
         layout: column
-        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        style: { gap: 6, padding: 10, border: "1px solid {{theme.colors.border}}" }
         children:
           - { type: text, content: "Fidelity", style: { font_size: 12, weight: bold } }
           - type: row
@@ -116,7 +116,7 @@ blob_brush_tool_options:
       # drive Blob Brush instead — see §Runtime tip resolution).
       - type: container
         layout: column
-        style: { gap: 6, padding: 10, border: "1px solid panel-border" }
+        style: { gap: 6, padding: 10, border: "1px solid {{theme.colors.border}}" }
         children:
           - { type: text, content: "Default Brush Options",
               style: { font_size: 12, weight: bold } }
