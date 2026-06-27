@@ -1620,6 +1620,175 @@ fn apply_set_panel_state(
 /// expressions like `param.artboard_id` resolve (ARTBOARDS.md
 /// actions). When `ctx` is None, only ctx-independent expressions
 /// (panel / state rollups) can resolve.
+// ── Properties panel field editing (decision-5 Part B.2) ──────────────────
+// Pure 2x3 transform math mirroring the Python reference (effects.py).
+
+/// AABB (x, y, w, h) of `local_bbox`'s four corners mapped through `m`.
+fn prop_aabb_through(
+    local_bbox: (f64, f64, f64, f64),
+    m: &crate::geometry::element::Transform,
+) -> (f64, f64, f64, f64) {
+    let (bx, by, bw, bh) = local_bbox;
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (px, py) in [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)] {
+        let (x, y) = m.apply_point(px, py);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
+/// Scale the element's LOCAL axes by (rx, ry) (post-multiply, preserving
+/// rotation) keeping the evaluated bbox top-left fixed.
+fn prop_scaled_transform(
+    mat: crate::geometry::element::Transform,
+    local_bbox: (f64, f64, f64, f64),
+    rx: f64,
+    ry: f64,
+) -> crate::geometry::element::Transform {
+    use crate::geometry::element::Transform;
+    // mat.multiply(scale) applies scale first (local), then mat — i.e. M·S.
+    let scaled = mat.multiply(&Transform { a: rx, b: 0.0, c: 0.0, d: ry, e: 0.0, f: 0.0 });
+    let old = prop_aabb_through(local_bbox, &mat);
+    let new = prop_aabb_through(local_bbox, &scaled);
+    Transform { e: scaled.e + (old.0 - new.0), f: scaled.f + (old.1 - new.1), ..scaled }
+}
+
+/// Set the element's rotation to `deg` (keeping the decomposed scale;
+/// shear-free) rotated about the evaluated bbox center.
+fn prop_rotated_transform(
+    mat: crate::geometry::element::Transform,
+    local_bbox: (f64, f64, f64, f64),
+    deg: f64,
+) -> crate::geometry::element::Transform {
+    use crate::geometry::element::Transform;
+    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
+    let sy = (mat.c * mat.c + mat.d * mat.d).sqrt();
+    let rad = deg.to_radians();
+    let (cos_a, sin_a) = (rad.cos(), rad.sin());
+    let rotated = Transform {
+        a: sx * cos_a, b: sx * sin_a, c: -sy * sin_a, d: sy * cos_a, e: mat.e, f: mat.f,
+    };
+    let old = prop_aabb_through(local_bbox, &mat);
+    let new = prop_aabb_through(local_bbox, &rotated);
+    let (ocx, ocy) = (old.0 + old.2 / 2.0, old.1 + old.3 / 2.0);
+    let (ncx, ncy) = (new.0 + new.2 / 2.0, new.1 + new.3 / 2.0);
+    Transform { e: rotated.e + (ocx - ncx), f: rotated.f + (ocy - ncy), ..rotated }
+}
+
+/// Apply a Properties-panel field edit to the selection (decision-5 Part B.2).
+/// x/y move (any selection); w/h scale local axes (single); rotation absolute
+/// about bbox center (single); opacity/blend set on every selected element.
+/// The prop_* keys are display-only (build_live_panel_overrides reads them from
+/// the selection), so an edit mutates the selection here; the next render
+/// re-reads the new value.
+pub(crate) fn apply_properties_panel_field(
+    st: &mut crate::workspace::app_state::AppState,
+    key: &str,
+    val: &serde_json::Value,
+) {
+    use crate::document::controller::Controller;
+    use crate::geometry::element::Transform;
+    let num = || -> Option<f64> {
+        if let Some(n) = val.as_f64() {
+            return Some(n);
+        }
+        if let Some(s) = val.as_str() {
+            return super::effects::value_to_json(&super::expr::eval(s, &serde_json::json!({})))
+                .as_f64();
+        }
+        None
+    };
+    let Some(tab) = st.tabs.get_mut(st.active_tab) else { return };
+    let doc = tab.model.document().clone();
+    if doc.selection.is_empty() {
+        return;
+    }
+    let bbox = crate::canvas::render::selection_evaluated_bounds(&doc);
+    match key {
+        "prop_x" => {
+            if let Some(v) = num() {
+                Controller::move_selection(&mut tab.model, v - bbox.0, 0.0);
+            }
+        }
+        "prop_y" => {
+            if let Some(v) = num() {
+                Controller::move_selection(&mut tab.model, 0.0, v - bbox.1);
+            }
+        }
+        "prop_opacity" => {
+            if let Some(v) = num() {
+                let op = (v / 100.0).clamp(0.0, 1.0);
+                let mut nd = doc.clone();
+                for es in &doc.selection {
+                    if let Some(e) = doc.get_element(&es.path) {
+                        let mut ne = e.clone();
+                        ne.common_mut().opacity = op;
+                        nd = nd.replace_element(&es.path, ne);
+                    }
+                }
+                tab.model.edit_document(nd);
+            }
+        }
+        "prop_blend" => {
+            if let Some(s) = val.as_str() {
+                if let Ok(bm) = serde_json::from_value::<crate::geometry::element::BlendMode>(
+                    serde_json::Value::String(s.to_string()),
+                ) {
+                    let mut nd = doc.clone();
+                    for es in &doc.selection {
+                        if let Some(e) = doc.get_element(&es.path) {
+                            let mut ne = e.clone();
+                            ne.common_mut().mode = bm;
+                            nd = nd.replace_element(&es.path, ne);
+                        }
+                    }
+                    tab.model.edit_document(nd);
+                }
+            }
+        }
+        "prop_w" | "prop_h" | "prop_rotation" => {
+            if doc.selection.len() != 1 {
+                return;
+            }
+            let es = &doc.selection[0];
+            let Some(e) = doc.get_element(&es.path) else { return };
+            let local = e.geometric_bounds();
+            let mat = e.transform().copied().unwrap_or(Transform::IDENTITY);
+            let new_t = match key {
+                "prop_w" => {
+                    let Some(v) = num() else { return };
+                    if bbox.2 <= 0.0 {
+                        return;
+                    }
+                    prop_scaled_transform(mat, local, v / bbox.2, 1.0)
+                }
+                "prop_h" => {
+                    let Some(v) = num() else { return };
+                    if bbox.3 <= 0.0 {
+                        return;
+                    }
+                    prop_scaled_transform(mat, local, 1.0, v / bbox.3)
+                }
+                _ => {
+                    let Some(v) = num() else { return };
+                    prop_rotated_transform(mat, local, v)
+                }
+            };
+            let mut ne = e.clone();
+            ne.common_mut().transform = Some(new_t);
+            let nd = doc.replace_element(&es.path, ne);
+            tab.model.edit_document(nd);
+        }
+        _ => {}
+    }
+}
+
 fn apply_set_panel_state_with_ctx(
     sps: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
@@ -1706,6 +1875,16 @@ fn apply_set_panel_state_with_ctx(
             }
             _ => {}
         }
+        return;
+    }
+    // Properties panel field edits (decision-5 Part B.2) — apply to the
+    // selection. prop_* keys are display-only (fed by
+    // build_live_panel_overrides from the selection), so an edit mutates the
+    // selection here and the next render re-reads the new value.
+    if matches!(key, "prop_x" | "prop_y" | "prop_w" | "prop_h"
+                   | "prop_rotation" | "prop_opacity" | "prop_blend") {
+        let val = sps.get("value").cloned().unwrap_or(serde_json::Value::Null);
+        apply_properties_panel_field(st, key, &val);
         return;
     }
     // Artboards panel keys (ARTBOARDS.md §Selection semantics, §Rename).
@@ -11461,6 +11640,80 @@ mod tests {
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
         st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+    }
+
+    // ── Part B.2: Properties panel field editing ──────────────────────
+    #[test]
+    fn props_apply_x_moves() {
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // rect (0,0,100,50)
+        apply_properties_panel_field(&mut st, "prop_x", &serde_json::json!(40.0));
+        let doc = st.tab().unwrap().model.document();
+        assert!((crate::canvas::render::selection_evaluated_bounds(doc).0 - 40.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn props_apply_w_scales() {
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None);
+        apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(200.0));
+        let doc = st.tab().unwrap().model.document();
+        let (_, _, w, h) = crate::canvas::render::selection_evaluated_bounds(doc);
+        assert!((w - 200.0).abs() < 1e-6, "w={}", w);
+        assert!((h - 50.0).abs() < 1e-6, "h={}", h);
+    }
+
+    #[test]
+    fn props_apply_rotation_swaps_extents() {
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // 100x50
+        apply_properties_panel_field(&mut st, "prop_rotation", &serde_json::json!(90.0));
+        let doc = st.tab().unwrap().model.document();
+        let (_, _, w, h) = crate::canvas::render::selection_evaluated_bounds(doc);
+        assert!((w - 50.0).abs() < 1e-4, "w={}", w);
+        assert!((h - 100.0).abs() < 1e-4, "h={}", h);
+    }
+
+    #[test]
+    fn props_apply_opacity_and_blend() {
+        use crate::geometry::element::BlendMode;
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None);
+        apply_properties_panel_field(&mut st, "prop_opacity", &serde_json::json!(40.0));
+        apply_properties_panel_field(&mut st, "prop_blend", &serde_json::json!("multiply"));
+        let doc = st.tab().unwrap().model.document();
+        let e = doc.get_element(&vec![0, 0]).unwrap();
+        assert!((e.opacity() - 0.4).abs() < 1e-6);
+        assert_eq!(e.mode(), BlendMode::Multiply);
+    }
+
+    #[test]
+    fn props_w_noop_for_multi_selection() {
+        use crate::document::document::ElementSelection;
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None);
+        // Add a second selected rect.
+        {
+            let mut nd = st.tabs[st.active_tab].model.document().clone();
+            if let Some(Element::Layer(layer)) = nd.layers.get_mut(0) {
+                layer.children.push(std::rc::Rc::new(Element::Rect(
+                    crate::geometry::element::RectElem {
+                        x: 200.0, y: 0.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+                        fill: None, stroke: None,
+                        common: crate::geometry::element::CommonProps::default(),
+                        fill_gradient: None, stroke_gradient: None,
+                    })));
+            }
+            nd.selection = vec![ElementSelection::all(vec![0, 0]),
+                                ElementSelection::all(vec![0, 1])];
+            st.tabs[st.active_tab].model.set_document_unbracketed(nd);
+        }
+        let before = crate::canvas::render::selection_evaluated_bounds(
+            st.tab().unwrap().model.document());
+        apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(999.0));
+        let after = crate::canvas::render::selection_evaluated_bounds(
+            st.tab().unwrap().model.document());
+        assert_eq!(before, after); // W edit is single-selection only
     }
 
     #[test]
