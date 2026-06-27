@@ -351,6 +351,15 @@ struct YamlElementView: View {
                 store: model.stateStore, key: key, value: value)
         }
         model.stateStore.setPanel(pid, key, value)
+        // Properties panel field edit → apply to the selection (Part B.2).
+        // Per-field: the key tells us which (prop_x moves, prop_w scales, …).
+        // The display is pull (propertiesPanelLiveOverrides), so the mutated
+        // selection re-renders the new value — no sync↔apply loop.
+        if pid == "properties_panel_content", key.hasPrefix("prop_") {
+            applyPropertiesField(controller: Controller(model: model),
+                                 field: String(key.dropFirst("prop_".count)),
+                                 value: value)
+        }
         model.panelStateVersion &+= 1
         notifyPanelStateChanged(pid, store: model.stateStore, model: model)
     }
