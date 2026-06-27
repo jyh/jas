@@ -690,6 +690,12 @@ let properties_apply_tests = [
     let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
     assert (Float.abs (w -. 200.0) < 1e-6 && Float.abs (h -. 50.0) < 1e-6));
 
+  Alcotest.test_case "apply_w_with_constrain_scales_both" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
+    apply_properties_field ~constrain:true ctrl "w" (`Float 200.0);
+    let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 200.0) < 1e-6 && Float.abs (h -. 100.0) < 1e-6));
+
   Alcotest.test_case "apply_rotation_swaps" `Quick (fun () ->
     let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
     apply_properties_field ctrl "rotation" (`Float 90.0);

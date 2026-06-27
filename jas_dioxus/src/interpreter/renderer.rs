@@ -1704,6 +1704,7 @@ pub(crate) fn apply_properties_panel_field(
         }
         None
     };
+    let constrain = st.properties_constrain;
     let Some(tab) = st.tabs.get_mut(st.active_tab) else { return };
     let doc = tab.model.document().clone();
     if doc.selection.is_empty() {
@@ -1766,14 +1767,16 @@ pub(crate) fn apply_properties_panel_field(
                     if bbox.2 <= 0.0 {
                         return;
                     }
-                    prop_scaled_transform(mat, local, v / bbox.2, 1.0)
+                    let r = v / bbox.2;
+                    prop_scaled_transform(mat, local, r, if constrain { r } else { 1.0 })
                 }
                 "prop_h" => {
                     let Some(v) = num() else { return };
                     if bbox.3 <= 0.0 {
                         return;
                     }
-                    prop_scaled_transform(mat, local, 1.0, v / bbox.3)
+                    let r = v / bbox.3;
+                    prop_scaled_transform(mat, local, if constrain { r } else { 1.0 }, r)
                 }
                 _ => {
                     let Some(v) = num() else { return };
@@ -1874,6 +1877,23 @@ fn apply_set_panel_state_with_ctx(
                 }
             }
             _ => {}
+        }
+        return;
+    }
+    // Properties panel constrain-proportions lock (Part B polish): a sticky
+    // user toggle stored on AppState (the prop_* values are computed, so there
+    // is no panel store to hold it). The set_panel_state value is the
+    // "not panel.prop_constrain" expr, evaluated against the current flag.
+    if key == "prop_constrain" {
+        let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+        let resolved = if let Some(expr) = val.as_str() {
+            let ctx = serde_json::json!({"panel": {"prop_constrain": st.properties_constrain}});
+            super::effects::value_to_json(&super::expr::eval(expr, &ctx))
+        } else {
+            val.clone()
+        };
+        if let Some(b) = resolved.as_bool() {
+            st.properties_constrain = b;
         }
         return;
     }
@@ -11661,6 +11681,18 @@ mod tests {
         let (_, _, w, h) = crate::canvas::render::selection_evaluated_bounds(doc);
         assert!((w - 200.0).abs() < 1e-6, "w={}", w);
         assert!((h - 50.0).abs() < 1e-6, "h={}", h);
+    }
+
+    #[test]
+    fn props_w_with_constrain_scales_both() {
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // 100x50
+        st.properties_constrain = true;
+        apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(200.0));
+        let doc = st.tab().unwrap().model.document();
+        let (_, _, w, h) = crate::canvas::render::selection_evaluated_bounds(doc);
+        assert!((w - 200.0).abs() < 1e-6, "w={}", w);
+        assert!((h - 100.0).abs() < 1e-6, "h={}", h); // H follows (×2)
     }
 
     #[test]

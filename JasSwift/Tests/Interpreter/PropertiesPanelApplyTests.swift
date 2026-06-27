@@ -28,6 +28,15 @@ private func rectE(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Elemen
     #expect(abs(b.height - 50) < 1e-6)
 }
 
+@Test func applyWWithConstrainScalesBoth() {
+    let m = applyModel([rectE(0, 0, 100, 50)], selected: [[0, 0]])
+    m.stateStore.initPanel("properties_panel_content", defaults: ["prop_constrain": true])
+    applyPropertiesField(controller: Controller(model: m), field: "w", value: 200.0)
+    let b = selectionEvaluatedBounds(m.document)
+    #expect(abs(b.width - 200) < 1e-6)
+    #expect(abs(b.height - 100) < 1e-6)  // H follows (×2)
+}
+
 @Test func applyRotationSwapsExtents() {
     let m = applyModel([rectE(0, 0, 100, 50)], selected: [[0, 0]])
     applyPropertiesField(controller: Controller(model: m), field: "rotation", value: 90.0)

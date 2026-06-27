@@ -242,6 +242,11 @@ pub(crate) struct AppState {
     /// deletion. The target of Place Instance and Delete Symbol
     /// (SYMBOLS.md §8).
     pub(crate) symbols_selected: Option<String>,
+    /// Properties panel constrain-proportions lock (decision-5 Part B
+    /// polish). When true, a W/H edit scales the object uniformly. The
+    /// prop_* values are computed from the selection, but this is a sticky
+    /// user toggle, so it lives on AppState rather than a panel store.
+    pub(crate) properties_constrain: bool,
     /// Id of the panel-selected concept in the Concepts panel, or None.
     /// The target of Place Instance (CONCEPTS.md §6).
     pub(crate) concepts_selected: Option<String>,
@@ -748,6 +753,7 @@ impl AppState {
             artboards_reference_point: "center".to_string(),
             artboards_rearrange_dirty: false,
             symbols_selected: None,
+            properties_constrain: false,
             concepts_selected: None,
         }
     }
