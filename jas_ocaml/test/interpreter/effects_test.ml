@@ -635,6 +635,27 @@ let properties_sync_tests = [
      | `Float r -> assert (Float.abs (r -. 90.0) < 1e-6)
      | _ -> assert false));
 
+  (* SHEAR-FIELD display (T1): prop_shear = decomposed shear angle of the
+     FIRST selected element transform. transform (a=1,b=0,c=1,d=1) decomposes
+     to a 45 degree horizontal shear. *)
+  Alcotest.test_case "attrs_shear_from_transform" `Quick (fun () ->
+    let shear_t = Some Jas.Element.{ a = 1.0; b = 0.0; c = 1.0; d = 1.0;
+                                     e = 0.0; f = 0.0 } in
+    let rect = Jas.Element.make_rect ~transform:shear_t 0.0 0.0 100.0 50.0 in
+    let layer = Jas.Element.make_layer [| rect |] in
+    let selection =
+      Jas.Document.PathMap.singleton [0; 0]
+        (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let model = Jas.Model.create ~document:doc () in
+    let ctrl = Jas.Controller.create ~model () in
+    let store = create () in
+    init_panel store "properties_panel_content" [("prop_shear", `Float 0.0)];
+    sync_properties_panel_from_selection store ctrl;
+    (match get_panel store "properties_panel_content" "prop_shear" with
+     | `Float r -> assert (Float.abs (r -. 45.0) < 1e-3)
+     | _ -> assert false));
+
   Alcotest.test_case "attrs_opacity_percent_and_blend" `Quick (fun () ->
     let rect = Jas.Element.make_rect ~opacity:0.5 0.0 0.0 10.0 10.0 in
     let layer = Jas.Element.make_layer [| rect |] in
@@ -746,6 +767,54 @@ let properties_apply_tests = [
     let (_, _, w, h) = selection_evaluated_bounds ctrl#document in
     assert (Float.abs (w -. 10.0) < 1e-4);
     assert (Float.abs (h -. 110.0) < 1e-4));
+
+  (* SHEAR-FIELD single (T2): a 100x50 rect at origin sheared 30 degrees.
+     Reading the shear back from the resulting element transform via the
+     decomposition deg = degrees(atan((a*c + b*d) / (a*d - b*c))) gives 30. *)
+  Alcotest.test_case "apply_shear_sets_angle" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
+    apply_properties_field ctrl "shear" (`Float 30.0);
+    (match Jas.Document.get_element ctrl#document [0; 0] with
+     | Jas.Element.Rect { transform = Some t; _ } ->
+       let deg = atan ((t.a *. t.c +. t.b *. t.d)
+                       /. (t.a *. t.d -. t.b *. t.c)) *. (180.0 /. Float.pi) in
+       assert (Float.abs (deg -. 30.0) < 1e-4)
+     | _ -> assert false));
+
+  (* SHEAR-FIELD rotation-keeps-shear (T3): applying shear 30 THEN rotation 45
+     leaves the decomposed shear at 30 AND the decomposed rotation atan2(b,a)
+     at 45 (the rotation upgrade is shear-preserving). *)
+  Alcotest.test_case "apply_rotation_preserves_shear" `Quick (fun () ->
+    let ctrl = props_apply_ctrl (Jas.Element.make_rect 0.0 0.0 100.0 50.0) in
+    apply_properties_field ctrl "shear" (`Float 30.0);
+    apply_properties_field ctrl "rotation" (`Float 45.0);
+    (match Jas.Document.get_element ctrl#document [0; 0] with
+     | Jas.Element.Rect { transform = Some t; _ } ->
+       let shear_deg = atan ((t.a *. t.c +. t.b *. t.d)
+                             /. (t.a *. t.d -. t.b *. t.c)) *. (180.0 /. Float.pi) in
+       let rot_deg = atan2 t.b t.a *. (180.0 /. Float.pi) in
+       assert (Float.abs (shear_deg -. 30.0) < 1e-4);
+       assert (Float.abs (rot_deg -. 45.0) < 1e-4)
+     | _ -> assert false));
+
+  (* SHEAR-FIELD multi (T4): two 10x10 rects at x=0 and x=100 -> union
+     (0,0,110,10), center (55,5). A 45 degree group shear about the center
+     widens the evaluated bounds to w=120, h=10, x=-5. *)
+  Alcotest.test_case "apply_shear_multi_selection_shears_group" `Quick (fun () ->
+    let r0 = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+    let r1 = Jas.Element.make_rect 100.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| r0; r1 |] in
+    let selection =
+      Jas.Document.PathMap.empty
+      |> Jas.Document.PathMap.add [0; 0] (Jas.Document.element_selection_all [0; 0])
+      |> Jas.Document.PathMap.add [0; 1] (Jas.Document.element_selection_all [0; 1]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let ctrl = Jas.Controller.create ~model:(Jas.Model.create ~document:doc ()) () in
+    apply_properties_field ctrl "shear" (`Float 45.0);
+    let (x, _, w, h) = selection_evaluated_bounds ctrl#document in
+    assert (Float.abs (w -. 120.0) < 1e-4);
+    assert (Float.abs (h -. 10.0) < 1e-4);
+    assert (Float.abs (x -. (-5.0)) < 1e-4));
 ]
 
 (* ── Phase 3: Character panel → pending override routing ──────── *)

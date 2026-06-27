@@ -83,19 +83,20 @@ public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
     func r2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
     // Part B.3: rotation / opacity / blend from the FIRST selected element
     // (like the Stroke weight). Defaults 0deg / 100% / normal.
-    var rotation = 0.0, opacity = 100.0, blend = "normal"
+    var rotation = 0.0, shear = 0.0, opacity = 100.0, blend = "normal"
     if let first = doc.selection.first {
         let elem = doc.getElement(first.path)
         if let t = elem.transform {
             rotation = atan2(t.b, t.a) * 180.0 / .pi
+            shear = propShearAngle(t)
         }
         opacity = elem.opacity * 100.0
         blend = elem.blendMode.rawValue
     }
     return ["prop_x": r2(b.x), "prop_y": r2(b.y),
             "prop_w": r2(b.width), "prop_h": r2(b.height),
-            "prop_rotation": r2(rotation), "prop_opacity": r2(opacity),
-            "prop_blend": blend]
+            "prop_rotation": r2(rotation), "prop_shear": r2(shear),
+            "prop_opacity": r2(opacity), "prop_blend": blend]
 }
 
 // MARK: - Part B.2: editing (apply a field edit back to the selection)
@@ -126,15 +127,32 @@ private func propScaledTransform(_ mat: Transform, _ local: BBox,
                      e: scaled.e + (old.x - new.x), f: scaled.f + (old.y - new.y))
 }
 
-/// Set rotation to `deg` (keeping decomposed scale; shear-free) about the
-/// evaluated bbox center.
+/// Decomposed shear angle of `mat` in DEGREES (M = R·ShearX(k)·Scale).
+/// 0 for any shear-free or degenerate matrix — so this agrees with the
+/// rotation-only path on every existing element.
+private func propShearAngle(_ mat: Transform) -> Double {
+    let sx = (mat.a * mat.a + mat.b * mat.b).squareRoot()
+    let det = mat.a * mat.d - mat.b * mat.c
+    if sx == 0 || det == 0 { return 0 }
+    let k = (mat.a * mat.c + mat.b * mat.d) / det
+    return atan(k) * 180.0 / .pi
+}
+
+/// Set rotation to `deg` (keeping decomposed scale AND shear) about the
+/// evaluated bbox center. Upgraded from the shear-free form: `sy` is now
+/// det-based and the c/d columns carry the shear factor `k`. For `k == 0`
+/// this is byte-identical to the old formula, so rotation-only behaviour
+/// (and its tests) is unchanged.
 private func propRotatedTransform(_ mat: Transform, _ local: BBox,
                                   _ deg: Double) -> Transform {
     let sx = (mat.a * mat.a + mat.b * mat.b).squareRoot()
-    let sy = (mat.c * mat.c + mat.d * mat.d).squareRoot()
+    let det = mat.a * mat.d - mat.b * mat.c
+    let sy = sx != 0 ? det / sx : 0
+    let k = det != 0 ? (mat.a * mat.c + mat.b * mat.d) / det : 0
     let rad = deg * .pi / 180.0
     let ca = cos(rad), sa = sin(rad)
-    let rotated = Transform(a: sx * ca, b: sx * sa, c: -sy * sa, d: sy * ca,
+    let rotated = Transform(a: sx * ca, b: sx * sa,
+                            c: sy * (k * ca - sa), d: sy * (k * sa + ca),
                             e: mat.e, f: mat.f)
     let old = propAABB(local, mat)
     let new = propAABB(local, rotated)
@@ -142,6 +160,29 @@ private func propRotatedTransform(_ mat: Transform, _ local: BBox,
     let ncx = new.x + new.width / 2, ncy = new.y + new.height / 2
     return Transform(a: rotated.a, b: rotated.b, c: rotated.c, d: rotated.d,
                      e: rotated.e + (ocx - ncx), f: rotated.f + (ocy - ncy))
+}
+
+/// Set shear to `deg` (keeping decomposed rotation AND scale) about the
+/// evaluated bbox center — the single-object counterpart of
+/// `shear_about_pivot` for the group path.
+private func propShearedTransform(_ mat: Transform, _ local: BBox,
+                                  _ deg: Double) -> Transform {
+    let sx = (mat.a * mat.a + mat.b * mat.b).squareRoot()
+    if sx == 0 { return mat }
+    let theta = atan2(mat.b, mat.a)
+    let det = mat.a * mat.d - mat.b * mat.c
+    let sy = det / sx
+    let k = tan(deg * .pi / 180.0)
+    let ct = cos(theta), st = sin(theta)
+    let sheared = Transform(a: sx * ct, b: sx * st,
+                            c: sy * (k * ct - st), d: sy * (k * st + ct),
+                            e: mat.e, f: mat.f)
+    let old = propAABB(local, mat)
+    let new = propAABB(local, sheared)
+    let ocx = old.x + old.width / 2, ocy = old.y + old.height / 2
+    let ncx = new.x + new.width / 2, ncy = new.y + new.height / 2
+    return Transform(a: sheared.a, b: sheared.b, c: sheared.c, d: sheared.d,
+                     e: sheared.e + (ocx - ncx), f: sheared.f + (ocy - ncy))
 }
 
 /// Apply a Properties-panel field edit to the selection (decision-5 Part B.2):
@@ -180,7 +221,7 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
             }
             model.editDocument(d)
         }
-    case "w", "h", "rotation":
+    case "w", "h", "rotation", "shear":
         guard !doc.selection.isEmpty else { return }
         // Constrain-proportions: when on, W/H scale BOTH axes by the ratio.
         let constrain = (model.stateStore.getPanel("properties_panel_content",
@@ -200,6 +241,9 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
                 guard let v = num(), bbox.height > 0 else { return }
                 let r = v / bbox.height
                 newT = propScaledTransform(mat, local, constrain ? r : 1, r)
+            case "shear":
+                guard let v = num() else { return }
+                newT = propShearedTransform(mat, local, v)
             default:
                 guard let v = num() else { return }
                 newT = propRotatedTransform(mat, local, v)
@@ -220,6 +264,17 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
             guard let v = num(), bbox.height > 0 else { return }
             let r = v / bbox.height
             group = Transform.scale(constrain ? r : 1, r).aroundPoint(bbox.x, bbox.y)
+        case "shear":
+            guard let v = num() else { return }
+            var cur = 0.0
+            if let f = doc.selection.first, let ft = doc.getElement(f.path).transform {
+                cur = propShearAngle(ft)
+            }
+            let cy = bbox.y + bbox.height / 2
+            // shear_about_pivot(value - cur, ., cy): a doc-space horizontal
+            // shear about the bbox center y — (x,y) -> (x + k*(y - cy), y).
+            let k = tan((v - cur) * .pi / 180.0)
+            group = Transform(a: 1, b: 0, c: k, d: 1, e: -k * cy, f: 0)
         default:
             guard let v = num() else { return }
             var cur = 0.0

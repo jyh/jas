@@ -90,4 +90,22 @@ private func rectT(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
     #expect((o["prop_rotation"] as? Double) == 0)
     #expect((o["prop_opacity"] as? Double) == 100)
     #expect((o["prop_blend"] as? String) == "normal")
+    #expect((o["prop_shear"] as? Double) == 0)
+}
+
+// MARK: - SHEAR-FIELD display (first selected element)
+
+@Test func propertiesShearFromFirstSelected() {
+    // T1: element transform (a=1,b=0,c=1,d=1,e=0,f=0) -> prop_shear ~= 45.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 transform: Transform(a: 1, b: 0, c: 1, d: 1,
+                                                      e: 0, f: 0)))
+    let o = propertiesPanelLiveOverrides(model: propModel([rect], selected: [[0, 0]]))
+    #expect(abs((o["prop_shear"] as? Double ?? 0) - 45) < 0.01)
+}
+
+@Test func propertiesShearDefaultNoTransform() {
+    let o = propertiesPanelLiveOverrides(model: propModel([rectT(0, 0, 10, 10)],
+                                                          selected: [[0, 0]]))
+    #expect((o["prop_shear"] as? Double) == 0)
 }

@@ -104,11 +104,19 @@ class PropertiesPanelAttrsSyncTest(absltest.TestCase):
         store = StateStore()
         store.init_panel("properties_panel_content",
                          {"prop_rotation": 0, "prop_opacity": 100,
-                          "prop_blend": "normal"})
+                          "prop_blend": "normal", "prop_shear": 0})
         return store
 
     def _panel(self, store, key):
         return store.get_panel("properties_panel_content", key)
+
+    def test_shear_from_transform(self):
+        # ShearX(45deg): matrix (a=1,b=0,c=1,d=1) -> shear angle atan(1) = 45.
+        store = self._store()
+        m = _model([Rect(x=0, y=0, width=10, height=10,
+                         transform=Transform(a=1, b=0, c=1, d=1, e=0, f=0))], [0])
+        sync_properties_panel_from_selection(store, m)
+        self.assertAlmostEqual(self._panel(store, "prop_shear"), 45.0, places=3)
 
     def test_rotation_from_transform(self):
         store = self._store()
@@ -138,6 +146,7 @@ class PropertiesPanelAttrsSyncTest(absltest.TestCase):
         self.assertEqual(self._panel(store, "prop_rotation"), 0.0)
         self.assertEqual(self._panel(store, "prop_opacity"), 100.0)
         self.assertEqual(self._panel(store, "prop_blend"), "normal")
+        self.assertEqual(self._panel(store, "prop_shear"), 0.0)
 
 
 if __name__ == "__main__":

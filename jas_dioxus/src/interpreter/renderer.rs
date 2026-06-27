@@ -1659,8 +1659,25 @@ fn prop_scaled_transform(
     Transform { e: scaled.e + (old.0 - new.0), f: scaled.f + (old.1 - new.1), ..scaled }
 }
 
-/// Set the element's rotation to `deg` (keeping the decomposed scale;
-/// shear-free) rotated about the evaluated bbox center.
+/// Shear angle (degrees) of a 2x3 transform, from the
+/// M = R(theta) . ShearX(k) . Scale(sx, sy) decomposition:
+/// k = (a*c + b*d) / det, shear = atan(k). Returns 0 for any shear-free
+/// matrix (agrees with the prior rotation-only behavior) and 0 when the
+/// matrix is degenerate (zero first-column length or zero determinant).
+fn prop_shear_angle_deg(mat: &crate::geometry::element::Transform) -> f64 {
+    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
+    let det = mat.a * mat.d - mat.b * mat.c;
+    if sx == 0.0 || det == 0.0 {
+        return 0.0;
+    }
+    let k = (mat.a * mat.c + mat.b * mat.d) / det;
+    k.atan().to_degrees()
+}
+
+/// Set the element's rotation to `deg`, keeping the decomposed scale AND
+/// shear (M = R . ShearX . Scale), rotated about the evaluated bbox center
+/// so the object stays in place. For a shear-free input (k = 0) this is
+/// byte-identical to the prior rotate-and-scale matrix.
 fn prop_rotated_transform(
     mat: crate::geometry::element::Transform,
     local_bbox: (f64, f64, f64, f64),
@@ -1668,17 +1685,67 @@ fn prop_rotated_transform(
 ) -> crate::geometry::element::Transform {
     use crate::geometry::element::Transform;
     let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
-    let sy = (mat.c * mat.c + mat.d * mat.d).sqrt();
+    let det = mat.a * mat.d - mat.b * mat.c;
+    let sy = if sx != 0.0 { det / sx } else { 0.0 };
+    let k = if det != 0.0 { (mat.a * mat.c + mat.b * mat.d) / det } else { 0.0 };
     let rad = deg.to_radians();
     let (cos_a, sin_a) = (rad.cos(), rad.sin());
     let rotated = Transform {
-        a: sx * cos_a, b: sx * sin_a, c: -sy * sin_a, d: sy * cos_a, e: mat.e, f: mat.f,
+        a: sx * cos_a,
+        b: sx * sin_a,
+        c: sy * (k * cos_a - sin_a),
+        d: sy * (k * sin_a + cos_a),
+        e: mat.e,
+        f: mat.f,
     };
     let old = prop_aabb_through(local_bbox, &mat);
     let new = prop_aabb_through(local_bbox, &rotated);
     let (ocx, ocy) = (old.0 + old.2 / 2.0, old.1 + old.3 / 2.0);
     let (ncx, ncy) = (new.0 + new.2 / 2.0, new.1 + new.3 / 2.0);
     Transform { e: rotated.e + (ocx - ncx), f: rotated.f + (ocy - ncy), ..rotated }
+}
+
+/// Set the element's shear angle to `deg`, keeping the decomposed rotation
+/// and scale (M = R . ShearX . Scale), re-anchored about the evaluated bbox
+/// center so the object stays put.
+fn prop_sheared_transform(
+    mat: crate::geometry::element::Transform,
+    local_bbox: (f64, f64, f64, f64),
+    deg: f64,
+) -> crate::geometry::element::Transform {
+    use crate::geometry::element::Transform;
+    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
+    if sx == 0.0 {
+        return mat;
+    }
+    let theta = mat.b.atan2(mat.a);
+    let det = mat.a * mat.d - mat.b * mat.c;
+    let sy = det / sx;
+    let k = deg.to_radians().tan();
+    let (cos_t, sin_t) = (theta.cos(), theta.sin());
+    let sheared = Transform {
+        a: sx * cos_t,
+        b: sx * sin_t,
+        c: sy * (k * cos_t - sin_t),
+        d: sy * (k * sin_t + cos_t),
+        e: mat.e,
+        f: mat.f,
+    };
+    let old = prop_aabb_through(local_bbox, &mat);
+    let new = prop_aabb_through(local_bbox, &sheared);
+    let (ocx, ocy) = (old.0 + old.2 / 2.0, old.1 + old.3 / 2.0);
+    let (ncx, ncy) = (new.0 + new.2 / 2.0, new.1 + new.3 / 2.0);
+    Transform { e: sheared.e + (ocx - ncx), f: sheared.f + (ocy - ncy), ..sheared }
+}
+
+/// Document-space horizontal shear by `deg` about the pivot (px, py), as a
+/// 2x3 transform. Maps (x, y) -> (x + k*(y - py), y) with k = tan(deg). Used
+/// to shear a multi-selection as a group about its bbox center (pre-multiplied
+/// onto each element transform).
+fn prop_shear_about_pivot(deg: f64, _px: f64, py: f64) -> crate::geometry::element::Transform {
+    use crate::geometry::element::Transform;
+    let k = deg.to_radians().tan();
+    Transform { a: 1.0, b: 0.0, c: k, d: 1.0, e: -k * py, f: 0.0 }
 }
 
 /// Apply a Properties-panel field edit to the selection (decision-5 Part B.2).
@@ -1753,13 +1820,14 @@ pub(crate) fn apply_properties_panel_field(
                 }
             }
         }
-        "prop_w" | "prop_h" | "prop_rotation" => {
+        "prop_w" | "prop_h" | "prop_rotation" | "prop_shear" => {
             if doc.selection.len() != 1 {
                 // MULTI: transform the whole selection as a group about its
                 // bbox (doc-space — no single local frame). W/H scale about
                 // the bbox top-left; rotation rotates rigidly about the bbox
-                // center by the delta from the first element's angle. Each
-                // element transform is pre-multiplied by the group transform.
+                // center by the delta from the first element's angle; shear
+                // shears horizontally about the bbox center by the same delta.
+                // Each element transform is pre-multiplied by the group.
                 if doc.selection.is_empty() {
                     return;
                 }
@@ -1781,6 +1849,17 @@ pub(crate) fn apply_properties_panel_field(
                         let r = v / bbox.3;
                         Transform::scale(if constrain { r } else { 1.0 }, r)
                             .around_point(bbox.0, bbox.1)
+                    }
+                    "prop_shear" => {
+                        let Some(v) = num() else { return };
+                        let cur = doc.selection.first()
+                            .and_then(|es| doc.get_element(&es.path))
+                            .and_then(|e| e.transform().copied())
+                            .map(|t| prop_shear_angle_deg(&t))
+                            .unwrap_or(0.0);
+                        let cx = bbox.0 + bbox.2 / 2.0;
+                        let cy = bbox.1 + bbox.3 / 2.0;
+                        prop_shear_about_pivot(v - cur, cx, cy)
                     }
                     _ => {
                         let Some(v) = num() else { return };
@@ -1826,6 +1905,10 @@ pub(crate) fn apply_properties_panel_field(
                     }
                     let r = v / bbox.3;
                     prop_scaled_transform(mat, local, if constrain { r } else { 1.0 }, r)
+                }
+                "prop_shear" => {
+                    let Some(v) = num() else { return };
+                    prop_sheared_transform(mat, local, v)
                 }
                 _ => {
                     let Some(v) = num() else { return };
@@ -1951,7 +2034,7 @@ fn apply_set_panel_state_with_ctx(
     // build_live_panel_overrides from the selection), so an edit mutates the
     // selection here and the next render re-reads the new value.
     if matches!(key, "prop_x" | "prop_y" | "prop_w" | "prop_h"
-                   | "prop_rotation" | "prop_opacity" | "prop_blend") {
+                   | "prop_rotation" | "prop_shear" | "prop_opacity" | "prop_blend") {
         let val = sps.get("value").cloned().unwrap_or(serde_json::Value::Null);
         apply_properties_panel_field(st, key, &val);
         return;
@@ -11796,6 +11879,86 @@ mod tests {
         assert!((w - 600.0).abs() < 1e-6, "w={}", w);
         assert!((x - 0.0).abs() < 1e-6, "x={}", x);   // bbox top-left preserved
         assert!((h - 50.0).abs() < 1e-6, "h={}", h);  // H unchanged
+    }
+
+    // ── SHEAR-FIELD: shear apply (single / preserves-shear / multi) ────────
+    /// Decompose a transform's shear angle (degrees) directly, mirroring the
+    /// reference read-back: shear = atan((a*c + b*d) / (a*d - b*c)).
+    fn decomposed_shear_deg(t: &crate::geometry::element::Transform) -> f64 {
+        let det = t.a * t.d - t.b * t.c;
+        ((t.a * t.c + t.b * t.d) / det).atan().to_degrees()
+    }
+
+    #[test]
+    fn props_apply_shear() {
+        // T2: rect 100x50 at origin, apply shear 30 -> decomposed shear ~= 30.
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // rect (0,0,100,50)
+        apply_properties_panel_field(&mut st, "prop_shear", &serde_json::json!(30.0));
+        let doc = st.tab().unwrap().model.document();
+        let e = doc.get_element(&vec![0, 0]).unwrap();
+        let t = e.transform().expect("transform set by shear");
+        assert!((decomposed_shear_deg(t) - 30.0).abs() < 1e-4,
+            "shear={}", decomposed_shear_deg(t));
+    }
+
+    #[test]
+    fn props_rotation_preserves_shear() {
+        // T3: apply shear 30 THEN rotation 45 -> decomposed shear ~= 30 AND
+        // rotation atan2(b,a) ~= 45 (the rotation upgrade keeps the shear).
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // rect (0,0,100,50)
+        apply_properties_panel_field(&mut st, "prop_shear", &serde_json::json!(30.0));
+        apply_properties_panel_field(&mut st, "prop_rotation", &serde_json::json!(45.0));
+        let doc = st.tab().unwrap().model.document();
+        let e = doc.get_element(&vec![0, 0]).unwrap();
+        let t = e.transform().expect("transform set");
+        assert!((decomposed_shear_deg(t) - 30.0).abs() < 1e-4,
+            "shear={}", decomposed_shear_deg(t));
+        let rot = t.b.atan2(t.a).to_degrees();
+        assert!((rot - 45.0).abs() < 1e-4, "rot={}", rot);
+    }
+
+    #[test]
+    fn props_shear_multi_selection_shears_group() {
+        // T4: two 10x10 rects at x=0 and x=100 (union (0,0,110,10), center
+        // (55,5)); apply shear 45 -> evaluated bounds w~=120, h~=10, x~=-5.
+        use crate::document::document::ElementSelection;
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // we replace both children below
+        {
+            let mut nd = st.tabs[st.active_tab].model.document().clone();
+            if let Some(Element::Layer(layer)) = nd.layers.get_mut(0) {
+                let mk = |x: f64| std::rc::Rc::new(Element::Rect(
+                    crate::geometry::element::RectElem {
+                        x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                        fill: None, stroke: None,
+                        common: crate::geometry::element::CommonProps::default(),
+                        fill_gradient: None, stroke_gradient: None,
+                    }));
+                layer.children = vec![mk(0.0), mk(100.0)];
+            }
+            nd.selection = vec![ElementSelection::all(vec![0, 0]),
+                                ElementSelection::all(vec![0, 1])];
+            st.tabs[st.active_tab].model.set_document_unbracketed(nd);
+        }
+        apply_properties_panel_field(&mut st, "prop_shear", &serde_json::json!(45.0));
+        let (x, _, w, h) = crate::canvas::render::selection_evaluated_bounds(
+            st.tab().unwrap().model.document());
+        assert!((w - 120.0).abs() < 1e-4, "w={}", w);
+        assert!((h - 10.0).abs() < 1e-4, "h={}", h);
+        assert!((x + 5.0).abs() < 1e-4, "x={}", x);
+    }
+
+    #[test]
+    fn props_shear_no_selection_no_crash() {
+        // Empty selection must be a no-op (mirrors the sibling guards).
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        apply_properties_panel_field(&mut st, "prop_shear", &serde_json::json!(30.0));
     }
 
     #[test]

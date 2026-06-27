@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -76,4 +77,55 @@ private func rectE(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Elemen
     let b = selectionEvaluatedBounds(m.document)
     #expect(abs(b.width - 10) < 1e-4)
     #expect(abs(b.height - 110) < 1e-4)
+}
+
+// MARK: - SHEAR-FIELD (single + multi + rotation-keeps-shear)
+
+/// Decompose a 2x3 affine's shear angle back to degrees:
+/// atan((a*c + b*d) / (a*d - b*c)).
+private func decomposedShearDeg(_ t: Transform) -> Double {
+    let det = t.a * t.d - t.b * t.c
+    return atan((t.a * t.c + t.b * t.d) / det) * 180 / .pi
+}
+
+@Test func applyShearSetsAngle() {
+    // T2: rect 100x50 at origin, apply shear 30 -> the resulting element
+    // transform decomposes back to a shear of 30deg.
+    let m = applyModel([rectE(0, 0, 100, 50)], selected: [[0, 0]])
+    applyPropertiesField(controller: Controller(model: m), field: "shear", value: 30.0)
+    let t = m.document.getElement([0, 0]).transform ?? .identity
+    #expect(abs(decomposedShearDeg(t) - 30) < 1e-4)
+}
+
+@Test func applyRotationPreservesShear() {
+    // T3: apply shear 30 THEN rotation 45 -> the resulting transform still
+    // decomposes to shear 30 AND rotation 45 (the rotation upgrade preserves
+    // shear instead of assuming shear-free).
+    let m = applyModel([rectE(0, 0, 100, 50)], selected: [[0, 0]])
+    let c = Controller(model: m)
+    applyPropertiesField(controller: c, field: "shear", value: 30.0)
+    applyPropertiesField(controller: c, field: "rotation", value: 45.0)
+    let t = m.document.getElement([0, 0]).transform ?? .identity
+    #expect(abs(decomposedShearDeg(t) - 30) < 1e-4)
+    #expect(abs(atan2(t.b, t.a) * 180 / .pi - 45) < 1e-4)
+}
+
+@Test func applyShearMultiSelectionShearsGroup() {
+    // T4: two 10x10 rects at x=0 and x=100 -> union (0,0,110,10), center
+    // (55,5). A 45deg group shear about the bbox center widens the union to
+    // w=120, h=10, x=-5.
+    let m = applyModel([rectE(0, 0, 10, 10), rectE(100, 0, 10, 10)],
+                       selected: [[0, 0], [0, 1]])
+    applyPropertiesField(controller: Controller(model: m), field: "shear", value: 45.0)
+    let b = selectionEvaluatedBounds(m.document)
+    #expect(abs(b.width - 120) < 1e-4)
+    #expect(abs(b.height - 10) < 1e-4)
+    #expect(abs(b.x - (-5)) < 1e-4)
+}
+
+@Test func applyShearNoSelectionNoCrash() {
+    let m = applyModel([rectE(0, 0, 10, 10)], selected: [])
+    applyPropertiesField(controller: Controller(model: m), field: "shear", value: 30.0)
+    // No selection -> no-op, no crash.
+    #expect(m.document.getElement([0, 0]).transform == nil)
 }

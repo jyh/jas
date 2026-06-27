@@ -649,17 +649,26 @@ fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_js
         // element (like the Stroke panel weight). Defaults 0deg / 100% /
         // normal. Blend serializes to its snake_case id via serde.
         let mut rot = 0.0_f64;
+        let mut shear = 0.0_f64;
         let mut op = 100.0_f64;
         let mut blend = J::String("normal".into());
         if let Some(e) = doc.selection.first().and_then(|es| doc.get_element(&es.path)) {
             if let Some(t) = e.transform() {
                 rot = t.b.atan2(t.a).to_degrees();
+                // Decomposed shear (M = R . ShearX . Scale): k = (a*c+b*d)/det,
+                // shear = atan(k). 0 for any shear-free or degenerate matrix.
+                let sx = (t.a * t.a + t.b * t.b).sqrt();
+                let det = t.a * t.d - t.b * t.c;
+                if sx != 0.0 && det != 0.0 {
+                    shear = ((t.a * t.c + t.b * t.d) / det).atan().to_degrees();
+                }
             }
             op = e.opacity() * 100.0;
             blend = serde_json::to_value(e.mode())
                 .unwrap_or_else(|_| J::String("normal".into()));
         }
         m.insert("prop_rotation".into(), serde_json::json!(r2(rot)));
+        m.insert("prop_shear".into(), serde_json::json!(r2(shear)));
         m.insert("prop_opacity".into(), serde_json::json!(r2(op)));
         m.insert("prop_blend".into(), blend);
     }
@@ -1580,6 +1589,27 @@ mod stroke_panel_override_tests {
         assert_eq!(m.get("prop_blend").and_then(|v| v.as_str()), Some("multiply"));
     }
 
+    // SHEAR-FIELD T1: the panel shows the first selected element's decomposed
+    // shear. A transform (a=1,b=0,c=1,d=1,e=0,f=0) decomposes to shear ~= 45.
+    #[test]
+    fn properties_shear_from_first_selected() {
+        use crate::geometry::element::Transform;
+        let mut st = AppState::new();
+        let e = GeoEl::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps {
+                transform: Some(Transform { a: 1.0, b: 0.0, c: 1.0, d: 1.0, e: 0.0, f: 0.0 }),
+                ..Default::default()
+            },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        select_element(&mut st, e);
+        let m = build_live_panel_overrides(&st);
+        assert!((m.get("prop_shear").and_then(|v| v.as_f64()).unwrap() - 45.0).abs() < 0.01,
+            "prop_shear={:?}", m.get("prop_shear"));
+    }
+
     #[test]
     fn properties_attrs_default_no_selection() {
         // A tab with an empty selection (the realistic "nothing selected"
@@ -1591,6 +1621,7 @@ mod stroke_panel_override_tests {
         }
         let m = build_live_panel_overrides(&st);
         assert_eq!(m.get("prop_rotation").and_then(|v| v.as_f64()), Some(0.0));
+        assert_eq!(m.get("prop_shear").and_then(|v| v.as_f64()), Some(0.0));
         assert_eq!(m.get("prop_opacity").and_then(|v| v.as_f64()), Some(100.0));
         assert_eq!(m.get("prop_blend").and_then(|v| v.as_str()), Some("normal"));
     }

@@ -17723,7 +17723,7 @@
     "properties_panel_content": {
       "id": "properties_panel_content",
       "summary": "Object properties",
-      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nAll fields are editable. Editing X/Y moves the selection; opacity and blend mode are set on every selected element. For a SINGLE object, W/H scales its local axes by the typed/current ratio (preserving rotation, so the displayed AABB may differ from the typed value on a rotated object) and rotation sets the absolute angle about its bounding-box center. For a MULTI selection, W/H scales the whole selection as a group about the bbox top-left and rotation rotates it rigidly about the bbox center (by the delta from the first object's angle) \u2014 there is no single local frame for a group. The constrain-proportions lock (chain icon) ties W and H so they scale together. Shear editing remains a later increment. When nothing is selected every field shows 0.\n",
+      "description": "Transform properties for the selected object(s). This increment shows the position (X, Y) and size (W, H) of the selection's EVALUATED bounding box, in document points \u2014 the effective geometry after any live scale / rotate / shear transform is folded in (decision-5: the panel reflects effective values, not the stored local geometry). The bounds are the union of each selected element's geometric bounding box (stroke width excluded) mapped through its full document-space transform, then axis-aligned; this matches the selection highlight box.\nAll fields are editable. Editing X/Y moves the selection; opacity and blend mode are set on every selected element. For a SINGLE object, W/H scales its local axes by the typed/current ratio (preserving rotation, so the displayed AABB may differ from the typed value on a rotated object), rotation sets the absolute angle about its bounding-box center, and shear sets the absolute horizontal shear (skew) angle about that center while keeping the decomposed rotation and scale. For a MULTI selection, W/H scales the whole selection as a group about the bbox top-left and rotation/shear transform it rigidly about the bbox center (by the delta from the first object's angle) \u2014 there is no single local frame for a group. The constrain-proportions lock (chain icon) ties W and H so they scale together. When nothing is selected every field shows 0.\n",
       "state": {
         "prop_x": {
           "type": "number",
@@ -17749,6 +17749,11 @@
           "type": "number",
           "default": 0,
           "description": "Rotation angle of the FIRST selected element's transform, in degrees (atan2 of the linear part). 0 when there is no rotation.\n"
+        },
+        "prop_shear": {
+          "type": "number",
+          "default": 0,
+          "description": "Horizontal shear (skew) angle of the FIRST selected element's transform, in degrees, from the rotation/shear/scale decomposition. 0 when there is no shear.\n"
         },
         "prop_opacity": {
           "type": "number",
@@ -17791,6 +17796,7 @@
         "prop_h": "0",
         "prop_constrain": "false",
         "prop_rotation": "0",
+        "prop_shear": "0",
         "prop_opacity": "100",
         "prop_blend": "'normal'"
       },
@@ -17976,6 +17982,38 @@
                 },
                 "bind": {
                   "value": "panel.prop_rotation"
+                }
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "layout": "row",
+            "style": {
+              "gap": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "content": "Sh",
+                "style": {
+                  "width": 14,
+                  "font_size": 10
+                }
+              },
+              {
+                "id": "prop_shear_input",
+                "type": "number_input",
+                "suffix": "\u00b0",
+                "summary": "Selection shear",
+                "description": "Horizontal shear (skew) angle of the first selected element, in degrees. Editing shears about the bbox center; a multi-selection shears as a group by the delta.",
+                "disabled": "active_document.selection_count == 0",
+                "style": {
+                  "flex": 1
+                },
+                "bind": {
+                  "value": "panel.prop_shear"
                 }
               }
             ]
