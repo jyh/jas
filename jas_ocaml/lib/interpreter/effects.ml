@@ -919,15 +919,15 @@ let selection_evaluated_bounds (doc : Document.document)
 
 let prop_round2 v = Float.round (v *. 100.0) /. 100.0
 
+(* True while the display sync pushes panel keys, so subscribe_properties_panel
+   does not mistake those writes for user edits (Part B.2). *)
+let _props_syncing = ref false
+
 let sync_properties_panel_from_selection (store : State_store.t)
     (ctrl : Controller.controller) =
   let doc = ctrl#document in
   let (x, y, w, h) = selection_evaluated_bounds doc in
   let pid = "properties_panel_content" in
-  State_store.set_panel store pid "prop_x" (`Float (prop_round2 x));
-  State_store.set_panel store pid "prop_y" (`Float (prop_round2 y));
-  State_store.set_panel store pid "prop_w" (`Float (prop_round2 w));
-  State_store.set_panel store pid "prop_h" (`Float (prop_round2 h));
   (* Part B.3: rotation / opacity / blend from the FIRST selected element
      (like the Stroke panel weight). Defaults 0 deg / 100 percent / normal. *)
   let (rotation, opacity, blend) =
@@ -943,9 +943,126 @@ let sync_properties_panel_from_selection (store : State_store.t)
       let bl = Element.blend_mode_to_string (Element.get_blend_mode elem) in
       (rot, op, bl)
   in
-  State_store.set_panel store pid "prop_rotation" (`Float (prop_round2 rotation));
-  State_store.set_panel store pid "prop_opacity" (`Float (prop_round2 opacity));
-  State_store.set_panel store pid "prop_blend" (`String blend)
+  _props_syncing := true;
+  Fun.protect ~finally:(fun () -> _props_syncing := false) (fun () ->
+    State_store.set_panel store pid "prop_x" (`Float (prop_round2 x));
+    State_store.set_panel store pid "prop_y" (`Float (prop_round2 y));
+    State_store.set_panel store pid "prop_w" (`Float (prop_round2 w));
+    State_store.set_panel store pid "prop_h" (`Float (prop_round2 h));
+    State_store.set_panel store pid "prop_rotation" (`Float (prop_round2 rotation));
+    State_store.set_panel store pid "prop_opacity" (`Float (prop_round2 opacity));
+    State_store.set_panel store pid "prop_blend" (`String blend))
+
+(* ── Part B.2: Properties panel field EDITING (apply to selection) ──────── *)
+
+let prop_aabb ((bx, by, bw, bh) : float * float * float * float)
+    (m : Element.transform) : float * float * float * float =
+  let corners = [ (bx, by); (bx +. bw, by); (bx +. bw, by +. bh); (bx, by +. bh) ] in
+  let pts = List.map (fun (px, py) -> Element.apply_point m px py) corners in
+  let xs = List.map fst pts and ys = List.map snd pts in
+  let min_x = List.fold_left Float.min infinity xs in
+  let max_x = List.fold_left Float.max neg_infinity xs in
+  let min_y = List.fold_left Float.min infinity ys in
+  let max_y = List.fold_left Float.max neg_infinity ys in
+  (min_x, min_y, max_x -. min_x, max_y -. min_y)
+
+(* Scale local axes by (rx, ry) keeping the evaluated bbox top-left fixed. *)
+let prop_scaled_transform (mat : Element.transform) local rx ry
+    : Element.transform =
+  let scale : Element.transform = { a = rx; b = 0.; c = 0.; d = ry; e = 0.; f = 0. } in
+  let scaled : Element.transform = Element.multiply mat scale in
+  let (ox, oy, _, _) = prop_aabb local mat in
+  let (nx, ny, _, _) = prop_aabb local scaled in
+  { scaled with e = scaled.e +. (ox -. nx); f = scaled.f +. (oy -. ny) }
+
+(* Set rotation to [deg] (keeping decomposed scale; shear-free) about the
+   evaluated bbox center. *)
+let prop_rotated_transform (mat : Element.transform) local deg
+    : Element.transform =
+  let sx = Float.hypot mat.a mat.b in
+  let sy = Float.hypot mat.c mat.d in
+  let rad = deg *. (Float.pi /. 180.0) in
+  let cos_a = cos rad and sin_a = sin rad in
+  let rotated : Element.transform =
+    { a = sx *. cos_a; b = sx *. sin_a; c = -. (sy *. sin_a); d = sy *. cos_a;
+      e = mat.e; f = mat.f } in
+  let (ox, oy, ow, oh) = prop_aabb local mat in
+  let (nx, ny, nw, nh) = prop_aabb local rotated in
+  let ocx = ox +. ow /. 2.0 and ocy = oy +. oh /. 2.0 in
+  let ncx = nx +. nw /. 2.0 and ncy = ny +. nh /. 2.0 in
+  { rotated with e = rotated.e +. (ocx -. ncx); f = rotated.f +. (ocy -. ncy) }
+
+let apply_properties_field (ctrl : Controller.controller) (field : string)
+    (value : Yojson.Safe.t) : unit =
+  let doc = ctrl#document in
+  if Document.PathMap.is_empty doc.Document.selection then ()
+  else begin
+    let (bx, by, bw, bh) = selection_evaluated_bounds doc in
+    let num () = match value with
+      | `Float f -> Some f
+      | `Int i -> Some (float_of_int i)
+      | `String s -> (try Some (float_of_string s) with _ -> None)
+      | _ -> None in
+    let set_all (f : Element.element -> Element.element) =
+      let new_doc = Document.PathMap.fold (fun path _ acc ->
+        Document.replace_element acc path (f (Document.get_element acc path)))
+        doc.Document.selection doc in
+      ctrl#model#edit_document new_doc in
+    match field with
+    | "x" -> (match num () with Some v -> ctrl#move_selection (v -. bx) 0.0 | None -> ())
+    | "y" -> (match num () with Some v -> ctrl#move_selection 0.0 (v -. by) | None -> ())
+    | "opacity" ->
+      (match num () with
+       | Some v ->
+         let op = Float.max 0.0 (Float.min 100.0 v) /. 100.0 in
+         set_all (fun e -> Element.with_opacity op e)
+       | None -> ())
+    | "blend" ->
+      (match value with
+       | `String s ->
+         (match Element.blend_mode_of_string s with
+          | Some bm -> set_all (fun e -> Element.with_blend_mode bm e)
+          | None -> ())
+       | _ -> ())
+    | "w" | "h" | "rotation" ->
+      if Document.PathMap.cardinal doc.Document.selection <> 1 then ()
+      else (match Document.PathMap.min_binding_opt doc.Document.selection with
+        | None -> ()
+        | Some (path, _) ->
+          let e = Document.get_element doc path in
+          let local = Element.geometric_bounds e in
+          let mat = match Element.get_transform e with
+            | Some t -> t
+            | None ->
+              ({ a = 1.; b = 0.; c = 0.; d = 1.; e = 0.; f = 0. } : Element.transform) in
+          let nt = match field with
+            | "w" -> (match num () with
+                      | Some v when bw > 0.0 -> Some (prop_scaled_transform mat local (v /. bw) 1.0)
+                      | _ -> None)
+            | "h" -> (match num () with
+                      | Some v when bh > 0.0 -> Some (prop_scaled_transform mat local 1.0 (v /. bh))
+                      | _ -> None)
+            | _ -> (match num () with
+                    | Some v -> Some (prop_rotated_transform mat local v)
+                    | None -> None) in
+          (match nt with
+           | Some t ->
+             ctrl#model#edit_document
+               (Document.replace_element doc path (Element.set_transform (Some t) e))
+           | None -> ()))
+    | _ -> ()
+  end
+
+let subscribe_properties_panel (store : State_store.t)
+    (ctrl_getter : unit -> Controller.controller) : unit =
+  State_store.subscribe_panel store "properties_panel_content" (fun key value ->
+    if not !_props_syncing then begin
+      let field =
+        if String.length key > 5 && String.sub key 0 5 = "prop_"
+        then String.sub key 5 (String.length key - 5) else key in
+      if List.mem field ["x"; "y"; "w"; "h"; "rotation"; "opacity"; "blend"] then
+        apply_properties_field (ctrl_getter ()) field value
+    end)
 
 (** Check if a state key is a rendering-affecting stroke key. *)
 let is_stroke_render_key key =

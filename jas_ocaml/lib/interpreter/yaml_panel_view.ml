@@ -5450,6 +5450,11 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          sync ();
          _properties_panel_sync := Some sync
        end);
+      (* Properties panel field EDITING (decision-5 Part B.2): a user edit of
+         a prop_* field applies to the selection. Subscribes to the panel
+         scope; the display sync guards its own pushes. *)
+      (if kind = Properties then
+         Effects.subscribe_properties_panel store (make_ctrl_getter ()));
       (* Active-color writes (set_active_color YAML action et al.)
          must also propagate to the selected element. The Color
          Panel calls Panel_menu.set_active_color directly; the YAML
