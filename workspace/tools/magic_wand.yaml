@@ -32,7 +32,7 @@ handlers:
   on_mousedown:
     - "doc.snapshot": {}
     - let:
-        hit: "hit_test(event.x, event.y)"
+        hit: "hit_test(event.doc_x, event.doc_y)"
       in:
         - if: "hit == null"
           then:

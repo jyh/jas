@@ -49,11 +49,11 @@ handlers:
 
   on_mousedown:
     - "doc.path.probe_anchor_hit":
-        x: "event.x"
-        y: "event.y"
+        x: "event.doc_x"
+        y: "event.doc_y"
         hit_radius: "8"
-    - set: { tool.anchor_point.press_x: "event.x" }
-    - set: { tool.anchor_point.press_y: "event.y" }
+    - set: { tool.anchor_point.press_x: "event.doc_x" }
+    - set: { tool.anchor_point.press_y: "event.doc_y" }
 
   # No on_mousemove: live-preview is a follow-up. The final result
   # lands in on_mouseup using the release position as the target.
@@ -64,6 +64,6 @@ handlers:
         - "doc.path.commit_anchor_edit":
             origin_x: "tool.anchor_point.press_x"
             origin_y: "tool.anchor_point.press_y"
-            target_x: "event.x"
-            target_y: "event.y"
+            target_x: "event.doc_x"
+            target_y: "event.doc_y"
     - set: { tool.anchor_point.mode: "'idle'" }
