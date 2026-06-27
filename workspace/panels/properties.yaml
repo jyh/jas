@@ -72,12 +72,20 @@ state:
       - luminosity
     default: normal
     description: "Blend mode of the FIRST selected element."
+  prop_constrain:
+    type: bool
+    default: false
+    description: >
+      Constrain proportions: when on, editing W or H scales the object
+      uniformly (the other dimension follows) to keep the aspect ratio.
+      A panel preference (sticky), not derived from the selection.
 
 init:
   prop_x: "0"
   prop_y: "0"
   prop_w: "0"
   prop_h: "0"
+  prop_constrain: "false"
   prop_rotation: "0"
   prop_opacity: "100"
   prop_blend: "'normal'"
@@ -163,6 +171,21 @@ content:
           style: { flex: 1 }
           bind:
             value: "panel.prop_h"
+        # Constrain-proportions lock: when on, editing W or H scales the
+        # object uniformly (the other follows). Single-selection only.
+        - id: prop_constrain
+          type: icon_button
+          summary: "Constrain proportions"
+          description: "When on, editing W or H scales the object uniformly to keep the aspect ratio. Single selection only."
+          style: { size: 18 }
+          disabled: "active_document.selection_count != 1"
+          bind:
+            icon: 'if panel.prop_constrain then "chain_linked" else "chain_broken"'
+            checked: "panel.prop_constrain"
+          behavior:
+            - event: click
+              effects:
+                - set_panel_state: { key: prop_constrain, value: "not panel.prop_constrain" }
 
     # ── Rotation ────────────────────────────────────────────
     # Per-element attrs (rotation / opacity / blend) reflect the FIRST

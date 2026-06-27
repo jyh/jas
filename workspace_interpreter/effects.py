@@ -1367,7 +1367,7 @@ def _rotated_transform_tuple(mat, local_bbox, deg):
     return (ra, rb, rc, rd, e + (ocx - ncx), f + (ocy - ncy))
 
 
-def apply_properties_field(controller, field, value) -> None:
+def apply_properties_field(controller, field, value, constrain=False) -> None:
     """Apply a Properties-panel field edit to the selection (Part B.2).
 
     ``field`` in {x, y, w, h, rotation, opacity, blend}:
@@ -1375,7 +1375,8 @@ def apply_properties_field(controller, field, value) -> None:
         (translation bakes into geometry, decision-3); any selection.
       - opacity / blend: set the attribute on every selected element.
       - w / h: scale the LOCAL axes by value/current-bbox (decision: scale
-        local axes by ratio); SINGLE selection only.
+        local axes by ratio); SINGLE selection only. When ``constrain`` is
+        true the OTHER axis scales by the same ratio (proportions locked).
       - rotation: set the absolute rotation about the bbox center; SINGLE
         selection only.
     """
@@ -1425,11 +1426,13 @@ def apply_properties_field(controller, field, value) -> None:
     if field == "w":
         if bbox[2] <= 0:
             return
-        mp = _scaled_transform_tuple(mat, local, float(value) / bbox[2], 1.0)
+        r = float(value) / bbox[2]
+        mp = _scaled_transform_tuple(mat, local, r, r if constrain else 1.0)
     elif field == "h":
         if bbox[3] <= 0:
             return
-        mp = _scaled_transform_tuple(mat, local, 1.0, float(value) / bbox[3])
+        r = float(value) / bbox[3]
+        mp = _scaled_transform_tuple(mat, local, r if constrain else 1.0, r)
     elif field == "rotation":
         mp = _rotated_transform_tuple(mat, local, float(value))
     else:
@@ -1458,9 +1461,11 @@ def subscribe_properties_panel(store: StateStore, model_getter) -> None:
         if model is None:
             return
         from document.controller import Controller
+        constrain = bool(store.get_panel("properties_panel_content",
+                                         "prop_constrain"))
         _PROPS_APPLYING = True
         try:
-            apply_properties_field(Controller(model), field, value)
+            apply_properties_field(Controller(model), field, value, constrain)
         finally:
             _PROPS_APPLYING = False
 
