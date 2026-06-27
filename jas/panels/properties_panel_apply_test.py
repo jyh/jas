@@ -68,6 +68,13 @@ class ApplyPropertiesFieldTest(absltest.TestCase):
         self.assertAlmostEqual(w, 200.0, places=6)
         self.assertAlmostEqual(h, 50.0, places=6)   # H unchanged
 
+    def test_w_with_constrain_scales_both_axes(self):
+        ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
+        apply_properties_field(ctrl, "w", 200, constrain=True)
+        _, _, w, h = selection_evaluated_bounds(ctrl.model.document)
+        self.assertAlmostEqual(w, 200.0, places=6)
+        self.assertAlmostEqual(h, 100.0, places=6)  # H follows (×2)
+
     def test_h_scales_to_value(self):
         ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
         apply_properties_field(ctrl, "h", 150)
@@ -155,6 +162,17 @@ class SubscribeDispatchTest(absltest.TestCase):
         store.set_panel("properties_panel_content", "prop_blend", "screen")
         self.assertEqual(ctrl.model.document.get_element((0, 0)).blend_mode,
                          BlendMode.SCREEN)
+
+    def test_constrain_toggle_then_w_scales_both(self):
+        # Toggling prop_constrain does NOT apply; a later W edit then scales
+        # both axes (the subscribe reads the stored constrain flag).
+        ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
+        store = self._wire(ctrl)
+        store.set_panel("properties_panel_content", "prop_constrain", True)
+        store.set_panel("properties_panel_content", "prop_w", 200)
+        _, _, w, h = selection_evaluated_bounds(ctrl.model.document)
+        self.assertAlmostEqual(w, 200.0, places=6)
+        self.assertAlmostEqual(h, 100.0, places=6)
 
 
 if __name__ == "__main__":
