@@ -126,6 +126,18 @@ let show_dialog ?(parent : GWindow.window option)
         ~destroy_with_parent:true
         () in
       let vbox = dialog#vbox in
+      (* Theme the modal dialog window with the active appearance pane
+         background so it matches the dock / panels (GTK otherwise draws a
+         default LIGHT dialog). GtkBox / GtkLabel / GtkFrame are no-window
+         widgets that show the window background through; inputs / buttons /
+         labels theme their own colors via the render_element theme hooks.
+         Mirrors the flyout background in show_nonmodal_dialog. *)
+      (let dialog_bg = !(Yaml_panel_view.dialog_pane_bg_hook) () in
+       let dialog_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
+       dialog_css#load_from_data (Printf.sprintf
+         "window, dialog, box, grid { background-color: %s; }" dialog_bg);
+       dialog#misc#style_context#add_provider dialog_css 600;
+       vbox#misc#style_context#add_provider dialog_css 600);
       let state_defaults = Workspace_loader.state_defaults ws in
       let icons = Workspace_loader.icons ws in
       let live_state = ref ds.state in

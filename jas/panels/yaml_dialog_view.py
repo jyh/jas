@@ -71,6 +71,17 @@ class YamlDialogView(QDialog):
         # Set dialog properties
         summary = self._dialog_def.get("summary", dialog_id)
         self.setWindowTitle(summary)
+
+        # Apply the active appearance theme to the dialog window so it
+        # matches the dock/panels (otherwise the dialog renders on Qt's
+        # default LIGHT palette — light-grey #ccc labels on white). The
+        # QDialog / QLabel selectors are scoped so the background does not
+        # cascade onto child rows (inputs keep their own darker style).
+        from workspace import dock_panel
+        self.setStyleSheet(
+            f"QDialog {{ background-color: {dock_panel.THEME_BG}; }} "
+            f"QLabel {{ color: {dock_panel.THEME_TEXT}; }}"
+        )
         self._is_modal = bool(self._dialog_def.get("modal", True))
         if self._is_modal:
             self.setWindowModality(Qt.WindowModality.ApplicationModal)
