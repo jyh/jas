@@ -42,3 +42,14 @@ private func stroked(_ width: Double) -> Element {
     let o = strokePanelLiveOverrides(model: model)
     #expect((o["weight"] as? Double) == (model.defaultStroke?.width ?? 1.0))
 }
+
+@Test func strokeCapJoinFromSelectedElement() {
+    // The panel reflects the selection's cap / join, not just weight.
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 stroke: Stroke(color: Color(r: 0, g: 0, b: 0),
+                                                width: 1, linecap: .round,
+                                                linejoin: .bevel)))
+    let o = strokePanelLiveOverrides(model: strokeModel([rect], selected: [[0, 0]]))
+    #expect((o["cap"] as? String) == "round")
+    #expect((o["join"] as? String) == "bevel")
+}

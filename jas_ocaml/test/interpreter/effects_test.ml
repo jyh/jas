@@ -511,6 +511,25 @@ let stroke_sync_tests = [
     sync_stroke_panel_from_selection store ctrl;
     assert (get_panel store "stroke_panel_content" "weight" = `Float 2.0));
 
+  Alcotest.test_case "cap_join_from_selected_element" `Quick (fun () ->
+    let stroke = Jas.Element.make_stroke ~width:1.0
+      ~linecap:Jas.Element.Round_cap ~linejoin:Jas.Element.Bevel
+      Jas.Element.black in
+    let rect = Jas.Element.make_rect ~stroke:(Some stroke) 0.0 0.0 10.0 10.0 in
+    let layer = Jas.Element.make_layer [| rect |] in
+    let selection =
+      Jas.Document.PathMap.singleton [0; 0]
+        (Jas.Document.element_selection_all [0; 0]) in
+    let doc = Jas.Document.make_document ~selection [| layer |] in
+    let ctrl = Jas.Controller.create
+      ~model:(Jas.Model.create ~document:doc ()) () in
+    let store = create () in
+    init_panel store "stroke_panel_content"
+      [("weight", `Float 1.0); ("cap", `String "butt"); ("join", `String "miter")];
+    sync_stroke_panel_from_selection store ctrl;
+    assert (get_panel store "stroke_panel_content" "cap" = `String "round");
+    assert (get_panel store "stroke_panel_content" "join" = `String "bevel"));
+
   Alcotest.test_case "no_selection_uses_default" `Quick (fun () ->
     let model = Jas.Model.create () in
     let ctrl = Jas.Controller.create ~model () in

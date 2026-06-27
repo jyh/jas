@@ -1161,6 +1161,18 @@ def sync_stroke_panel_from_selection(store: StateStore, model) -> None:
         stroke = getattr(model, "default_stroke", None)
     width = stroke.width if stroke is not None else 1.0
     store.set_panel("stroke_panel_content", "weight", float(width))
+    # Also mirror the selection's cap / join so those widgets reflect it
+    # (matches the Rust dock build_live_panel_overrides). Display-only,
+    # like weight. snake_case enum value matches the stroke.yaml ids.
+    if stroke is not None:
+        cap = getattr(stroke, "linecap", None)
+        join = getattr(stroke, "linejoin", None)
+        if cap is not None:
+            store.set_panel("stroke_panel_content", "cap",
+                            getattr(cap, "value", "butt"))
+        if join is not None:
+            store.set_panel("stroke_panel_content", "join",
+                            getattr(join, "value", "miter"))
 
 
 def _element_evaluated_bbox(doc, path):

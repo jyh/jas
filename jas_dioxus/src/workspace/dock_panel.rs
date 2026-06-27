@@ -1602,6 +1602,19 @@ mod stroke_panel_override_tests {
     }
 
     #[test]
+    fn cap_join_from_selected_element() {
+        use crate::geometry::element::{LineCap, LineJoin};
+        let mut st = AppState::new();
+        let mut s = Stroke::new(Color::BLACK, 1.0);
+        s.linecap = LineCap::Round;
+        s.linejoin = LineJoin::Bevel;
+        select_rect_with_stroke(&mut st, Some(s));
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("cap").and_then(|v| v.as_str()), Some("round"));
+        assert_eq!(m.get("join").and_then(|v| v.as_str()), Some("bevel"));
+    }
+
+    #[test]
     fn no_selection_uses_app_default() {
         let mut st = AppState::new();  // app_default_stroke width 1.0
         // Selection empty -> fall back to the app default stroke width.

@@ -795,7 +795,18 @@ let sync_stroke_panel_from_selection (store : State_store.t)
     | Some s -> s.stroke_width
     | None -> 1.0
   in
-  State_store.set_panel store "stroke_panel_content" "weight" (`Float width)
+  State_store.set_panel store "stroke_panel_content" "weight" (`Float width);
+  (* Also mirror the selection cap / join (matches the Rust dock
+     build_live_panel_overrides), so those widgets reflect it. Display-only. *)
+  (match stroke_opt with
+   | Some s ->
+     let cap = match s.stroke_linecap with
+       | Butt -> "butt" | Round_cap -> "round" | Square -> "square" in
+     let join = match s.stroke_linejoin with
+       | Miter -> "miter" | Round_join -> "round" | Bevel -> "bevel" in
+     State_store.set_panel store "stroke_panel_content" "cap" (`String cap);
+     State_store.set_panel store "stroke_panel_content" "join" (`String join)
+   | None -> ())
 
 (* ── Properties panel: selection evaluated bounds (decision-5 Part B.1) ── *)
 
