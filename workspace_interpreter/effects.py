@@ -1272,7 +1272,7 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
     # Per-element attrs (rotation / opacity / blend) reflect the FIRST
     # selected element, like the Stroke panel weight (Part B.3). Defaults
     # when nothing is selected: 0 degrees, 100%, normal.
-    rotation, opacity, blend = 0.0, 100.0, "normal"
+    rotation, opacity, blend, shear = 0.0, 100.0, "normal", 0.0
     if doc.selection:
         first = next(iter(doc.selection))
         try:
@@ -1283,6 +1283,7 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
             t = getattr(elem, "transform", None)
             if t is not None:
                 rotation = math.degrees(math.atan2(t.b, t.a))
+                shear = _shear_angle_deg((t.a, t.b, t.c, t.d, t.e, t.f))
             opacity = float(getattr(elem, "opacity", 1.0)) * 100.0
             bm = getattr(elem, "blend_mode", None)
             if bm is not None:
@@ -1296,6 +1297,7 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
         store.set_panel(pid, "prop_rotation", round(float(rotation), 2))
         store.set_panel(pid, "prop_opacity", round(float(opacity), 2))
         store.set_panel(pid, "prop_blend", blend)
+        store.set_panel(pid, "prop_shear", round(float(shear), 2))
     finally:
         _PROPS_SYNCING = False
 
@@ -1348,23 +1350,67 @@ def _scaled_transform_tuple(mat, local_bbox, rx, ry):
     return (a, b, c, d, e + (old[0] - new[0]), f + (old[1] - new[1]))
 
 
+def _shear_angle_deg(mat):
+    """Shear angle (degrees) of a 2x3 matrix tuple, from the
+    M = R(theta) . ShearX(k) . Scale(sx, sy) decomposition: k = (a*c + b*d)
+    / det, shear = atan(k). 0 for any shear-free matrix (so this agrees with
+    the prior rotation-only behavior). 0 too when the matrix is degenerate
+    (zero first-column length or zero determinant)."""
+    import math
+    a, b, c, d, _, _ = mat
+    sx = math.hypot(a, b)
+    det = a * d - b * c
+    if sx == 0.0 or det == 0.0:
+        return 0.0
+    k = (a * c + b * d) / det
+    return math.degrees(math.atan(k))
+
+
 def _rotated_transform_tuple(mat, local_bbox, deg):
-    """New transform with the element's rotation set to ``deg`` (keeping the
-    decomposed scale; shear-free assumption), rotated about the evaluated
-    bbox center so the object stays in place."""
+    """New transform with the element's rotation set to ``deg``, keeping the
+    decomposed scale AND shear (M = R . ShearX . Scale), rotated about the
+    evaluated bbox center so the object stays in place. For a shear-free input
+    (k = 0) this reproduces the plain rotate-and-scale matrix."""
     import math
     a, b, c, d, e, f = mat
     sx = math.hypot(a, b)
-    sy = math.hypot(c, d)
+    det = a * d - b * c
+    sy = det / sx if sx != 0.0 else 0.0
+    k = (a * c + b * d) / det if det != 0.0 else 0.0
     rad = math.radians(deg)
     cos_a, sin_a = math.cos(rad), math.sin(rad)
-    rotated = (sx * cos_a, sx * sin_a, -sy * sin_a, sy * cos_a, e, f)
+    rotated = (sx * cos_a, sx * sin_a,
+               sy * (k * cos_a - sin_a), sy * (k * sin_a + cos_a), e, f)
     old = _aabb_through(local_bbox, mat)
     new = _aabb_through(local_bbox, rotated)
     ocx, ocy = old[0] + old[2] / 2.0, old[1] + old[3] / 2.0
     ncx, ncy = new[0] + new[2] / 2.0, new[1] + new[3] / 2.0
     ra, rb, rc, rd, _, _ = rotated
     return (ra, rb, rc, rd, e + (ocx - ncx), f + (ocy - ncy))
+
+
+def _sheared_transform_tuple(mat, local_bbox, deg):
+    """New transform with the element's shear angle set to ``deg``, keeping the
+    decomposed rotation and scale (M = R . ShearX . Scale), re-anchored about
+    the evaluated bbox center so the object stays put."""
+    import math
+    a, b, c, d, e, f = mat
+    sx = math.hypot(a, b)
+    if sx == 0.0:
+        return mat
+    theta = math.atan2(b, a)
+    det = a * d - b * c
+    sy = det / sx
+    k = math.tan(math.radians(deg))
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    sheared = (sx * cos_t, sx * sin_t,
+               sy * (k * cos_t - sin_t), sy * (k * sin_t + cos_t), e, f)
+    old = _aabb_through(local_bbox, mat)
+    new = _aabb_through(local_bbox, sheared)
+    ocx, ocy = old[0] + old[2] / 2.0, old[1] + old[3] / 2.0
+    ncx, ncy = new[0] + new[2] / 2.0, new[1] + new[3] / 2.0
+    sa, sb, sc, sd, _, _ = sheared
+    return (sa, sb, sc, sd, e + (ocx - ncx), f + (ocy - ncy))
 
 
 def _scale_about_pivot(sx, sy, px, py):
@@ -1386,18 +1432,33 @@ def _rotate_about_pivot(deg, px, py):
             py - sin_a * px - cos_a * py)
 
 
+def _shear_about_pivot(deg, px, py):
+    """Document-space horizontal shear by ``deg`` about the pivot (px, py), as
+    a 2x3 tuple. Maps (x, y) -> (x + k*(y - py), y) with k = tan(deg). Used to
+    shear a multi-selection as a group about its bbox center (pre-multiplied
+    onto each element transform)."""
+    import math
+    k = math.tan(math.radians(deg))
+    return (1.0, 0.0, k, 1.0, -k * py, 0.0)
+
+
 def apply_properties_field(controller, field, value, constrain=False) -> None:
     """Apply a Properties-panel field edit to the selection (Part B.2).
 
-    ``field`` in {x, y, w, h, rotation, opacity, blend}:
+    ``field`` in {x, y, w, h, rotation, shear, opacity, blend}:
       - x / y: move the selection so its bbox edge reaches the value
         (translation bakes into geometry, decision-3); any selection.
       - opacity / blend: set the attribute on every selected element.
       - w / h: scale the LOCAL axes by value/current-bbox (decision: scale
-        local axes by ratio); SINGLE selection only. When ``constrain`` is
-        true the OTHER axis scales by the same ratio (proportions locked).
-      - rotation: set the absolute rotation about the bbox center; SINGLE
-        selection only.
+        local axes by ratio). When ``constrain`` is true the OTHER axis scales
+        by the same ratio (proportions locked).
+      - rotation: set the absolute rotation about the bbox center.
+      - shear: set the absolute horizontal shear angle about the bbox center
+        (keeping the decomposed rotation and scale).
+      For w / h / rotation / shear a SINGLE selection transforms its own local
+      frame; a MULTI selection transforms as a group about its evaluated bbox
+      (W/H scale about the top-left, rotation/shear about the center by the
+      delta from the first element's angle).
     """
     import dataclasses
     import math
@@ -1434,12 +1495,13 @@ def apply_properties_field(controller, field, value, constrain=False) -> None:
                 es.path, dataclasses.replace(elem, blend_mode=bm))
         model.edit_document(new_doc)
         return
-    # w / h / rotation.
-    if field not in ("w", "h", "rotation"):
+    # w / h / rotation / shear.
+    if field not in ("w", "h", "rotation", "shear"):
         return
     if len(doc.selection) == 1:
-        # SINGLE: local-axes scale / absolute rotation about the element bbox
-        # center (the well-defined per-object semantics, decision-5 Part B.2).
+        # SINGLE: local-axes scale / absolute rotation / absolute shear about
+        # the element bbox center (the well-defined per-object semantics,
+        # decision-5 Part B.2).
         es = next(iter(doc.selection))
         elem = doc.get_element(es.path)
         local = elem.geometric_bounds()
@@ -1455,8 +1517,10 @@ def apply_properties_field(controller, field, value, constrain=False) -> None:
                 return
             r = float(value) / bbox[3]
             mp = _scaled_transform_tuple(mat, local, r if constrain else 1.0, r)
-        else:
+        elif field == "rotation":
             mp = _rotated_transform_tuple(mat, local, float(value))
+        else:  # shear
+            mp = _sheared_transform_tuple(mat, local, float(value))
         new_t = Transform(a=mp[0], b=mp[1], c=mp[2], d=mp[3], e=mp[4], f=mp[5])
         model.edit_document(doc.replace_element(
             es.path, dataclasses.replace(elem, transform=new_t)))
@@ -1477,12 +1541,19 @@ def apply_properties_field(controller, field, value, constrain=False) -> None:
             return
         r = float(value) / bbox[3]
         group = _scale_about_pivot(r if constrain else 1.0, r, bbox[0], bbox[1])
-    else:  # rotation
+    elif field == "rotation":
         first = next(iter(doc.selection))
         ft = getattr(doc.get_element(first.path), "transform", None)
         cur = math.degrees(math.atan2(ft.b, ft.a)) if ft is not None else 0.0
         cx, cy = bbox[0] + bbox[2] / 2.0, bbox[1] + bbox[3] / 2.0
         group = _rotate_about_pivot(float(value) - cur, cx, cy)
+    else:  # shear
+        first = next(iter(doc.selection))
+        ft = getattr(doc.get_element(first.path), "transform", None)
+        cur = (_shear_angle_deg((ft.a, ft.b, ft.c, ft.d, ft.e, ft.f))
+               if ft is not None else 0.0)
+        cx, cy = bbox[0] + bbox[2] / 2.0, bbox[1] + bbox[3] / 2.0
+        group = _shear_about_pivot(float(value) - cur, cx, cy)
     new_doc = doc
     for es in doc.selection:
         elem = doc.get_element(es.path)
@@ -1500,7 +1571,7 @@ def subscribe_properties_panel(store: StateStore, model_getter) -> None:
     of a ``prop_*`` field (Part B.2). Skips the display sync's own pushes
     (``_PROPS_SYNCING``) and guards against the apply -> document-change ->
     re-sync loop (``_PROPS_APPLYING``)."""
-    fields = {"x", "y", "w", "h", "rotation", "opacity", "blend"}
+    fields = {"x", "y", "w", "h", "rotation", "shear", "opacity", "blend"}
 
     def _on_change(key, value):
         global _PROPS_APPLYING

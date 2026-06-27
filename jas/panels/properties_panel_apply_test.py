@@ -48,6 +48,15 @@ class TransformMathTest(absltest.TestCase):
         self.assertAlmostEqual(x + w / 2, 50.0, places=6)
         self.assertAlmostEqual(y + h / 2, 25.0, places=6)
 
+    def test_shear_sets_angle_keeps_rotation(self):
+        from workspace_interpreter.effects import (
+            _sheared_transform_tuple, _shear_angle_deg)
+        mp = _sheared_transform_tuple(_PROP_IDENTITY, (0, 0, 100, 50), 30.0)
+        self.assertAlmostEqual(_shear_angle_deg(mp), 30.0, places=4)
+        # rotation stays 0
+        self.assertAlmostEqual(math.degrees(math.atan2(mp[1], mp[0])),
+                               0.0, places=4)
+
 
 class ApplyPropertiesFieldTest(absltest.TestCase):
 
@@ -130,6 +139,39 @@ class ApplyPropertiesFieldTest(absltest.TestCase):
         self.assertAlmostEqual(w, 10.0, places=4)
         self.assertAlmostEqual(h, 110.0, places=4)
 
+    def test_shear_sets_angle(self):
+        from workspace_interpreter.effects import _shear_angle_deg
+        ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
+        apply_properties_field(ctrl, "shear", 30)
+        t = _elem(ctrl).transform
+        self.assertAlmostEqual(
+            _shear_angle_deg((t.a, t.b, t.c, t.d, t.e, t.f)), 30.0, places=4)
+
+    def test_rotation_preserves_shear(self):
+        # Shear then rotate: rotation must keep the shear angle (the upgraded
+        # decompose-preserve-recompose, not the old shear-free rebuild).
+        from workspace_interpreter.effects import _shear_angle_deg
+        ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
+        apply_properties_field(ctrl, "shear", 30)
+        apply_properties_field(ctrl, "rotation", 45)
+        t = _elem(ctrl).transform
+        self.assertAlmostEqual(
+            _shear_angle_deg((t.a, t.b, t.c, t.d, t.e, t.f)), 30.0, places=4)
+        self.assertAlmostEqual(math.degrees(math.atan2(t.b, t.a)),
+                               45.0, places=4)
+
+    def test_shear_multi_selection_shears_group(self):
+        # Two 10x10 rects at x=0 and x=100 -> union (0,0,110,10), center (55,5).
+        # A 45deg group x-shear about the center widens the union to 120 (each
+        # corner's x shifts by tan(45)*(y-5) = +/-5 -> [-5,115]).
+        ctrl = _ctrl([Rect(x=0, y=0, width=10, height=10),
+                      Rect(x=100, y=0, width=10, height=10)], [0, 1])
+        apply_properties_field(ctrl, "shear", 45)
+        x, _, w, h = selection_evaluated_bounds(ctrl.model.document)
+        self.assertAlmostEqual(w, 120.0, places=4)
+        self.assertAlmostEqual(h, 10.0, places=4)
+        self.assertAlmostEqual(x, -5.0, places=4)
+
     def test_no_selection_does_not_raise(self):
         ctrl = _ctrl([Rect(x=0, y=0, width=10, height=10)], [])
         apply_properties_field(ctrl, "w", 200)  # must not raise
@@ -147,7 +189,7 @@ class SubscribeDispatchTest(absltest.TestCase):
         store.init_panel("properties_panel_content",
                          {"prop_x": 0, "prop_y": 0, "prop_w": 0, "prop_h": 0,
                           "prop_rotation": 0, "prop_opacity": 100,
-                          "prop_blend": "normal"})
+                          "prop_blend": "normal", "prop_shear": 0})
         subscribe_properties_panel(store, lambda: ctrl.model)
         return store
 
@@ -176,6 +218,15 @@ class SubscribeDispatchTest(absltest.TestCase):
         store.set_panel("properties_panel_content", "prop_blend", "screen")
         self.assertEqual(ctrl.model.document.get_element((0, 0)).blend_mode,
                          BlendMode.SCREEN)
+
+    def test_panel_write_shear_applies(self):
+        from workspace_interpreter.effects import _shear_angle_deg
+        ctrl = _ctrl([Rect(x=0, y=0, width=100, height=50)], [0])
+        store = self._wire(ctrl)
+        store.set_panel("properties_panel_content", "prop_shear", 30)
+        t = ctrl.model.document.get_element((0, 0)).transform
+        self.assertAlmostEqual(
+            _shear_angle_deg((t.a, t.b, t.c, t.d, t.e, t.f)), 30.0, places=4)
 
     def test_constrain_toggle_then_w_scales_both(self):
         # Toggling prop_constrain does NOT apply; a later W edit then scales

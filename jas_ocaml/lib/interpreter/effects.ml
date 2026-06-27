@@ -930,6 +930,19 @@ let selection_evaluated_bounds (doc : Document.document)
 
 let prop_round2 v = Float.round (v *. 100.0) /. 100.0
 
+(* Shear angle in DEGREES of a transform, from the
+   M = R(theta) . ShearX(k) . Scale(sx, sy) decomposition: k = (a*c + b*d)/det,
+   shear = atan(k). Returns 0 for any shear-free matrix (so this agrees with the
+   prior rotation-only behavior) and 0 too when the matrix is degenerate (zero
+   first-column length or zero determinant). *)
+let prop_shear_angle (m : Element.transform) : float =
+  let sx = Float.hypot m.a m.b in
+  let det = m.a *. m.d -. m.b *. m.c in
+  if sx = 0.0 || det = 0.0 then 0.0
+  else
+    let k = (m.a *. m.c +. m.b *. m.d) /. det in
+    atan k *. (180.0 /. Float.pi)
+
 (* True while the display sync pushes panel keys, so subscribe_properties_panel
    does not mistake those writes for user edits (Part B.2). *)
 let _props_syncing = ref false
@@ -941,18 +954,18 @@ let sync_properties_panel_from_selection (store : State_store.t)
   let pid = "properties_panel_content" in
   (* Part B.3: rotation / opacity / blend from the FIRST selected element
      (like the Stroke panel weight). Defaults 0 deg / 100 percent / normal. *)
-  let (rotation, opacity, blend) =
+  let (rotation, opacity, blend, shear) =
     match Document.PathMap.min_binding_opt doc.Document.selection with
-    | None -> (0.0, 100.0, "normal")
+    | None -> (0.0, 100.0, "normal", 0.0)
     | Some (path, _) ->
       let elem = Document.get_element doc path in
-      let rot = match prop_elem_transform elem with
+      let (rot, sh) = match prop_elem_transform elem with
         | Some (t : Element.transform) ->
-          atan2 t.b t.a *. (180.0 /. Float.pi)
-        | None -> 0.0 in
+          (atan2 t.b t.a *. (180.0 /. Float.pi), prop_shear_angle t)
+        | None -> (0.0, 0.0) in
       let op = prop_elem_opacity elem *. 100.0 in
       let bl = Element.blend_mode_to_string (Element.get_blend_mode elem) in
-      (rot, op, bl)
+      (rot, op, bl, sh)
   in
   _props_syncing := true;
   Fun.protect ~finally:(fun () -> _props_syncing := false) (fun () ->
@@ -962,7 +975,8 @@ let sync_properties_panel_from_selection (store : State_store.t)
     State_store.set_panel store pid "prop_h" (`Float (prop_round2 h));
     State_store.set_panel store pid "prop_rotation" (`Float (prop_round2 rotation));
     State_store.set_panel store pid "prop_opacity" (`Float (prop_round2 opacity));
-    State_store.set_panel store pid "prop_blend" (`String blend))
+    State_store.set_panel store pid "prop_blend" (`String blend);
+    State_store.set_panel store pid "prop_shear" (`Float (prop_round2 shear)))
 
 (* ── Part B.2: Properties panel field EDITING (apply to selection) ──────── *)
 
@@ -986,22 +1000,52 @@ let prop_scaled_transform (mat : Element.transform) local rx ry
   let (nx, ny, _, _) = prop_aabb local scaled in
   { scaled with e = scaled.e +. (ox -. nx); f = scaled.f +. (oy -. ny) }
 
-(* Set rotation to [deg] (keeping decomposed scale; shear-free) about the
-   evaluated bbox center. *)
+(* Set rotation to [deg] keeping the decomposed scale AND shear
+   (M = R . ShearX . Scale), rotated about the evaluated bbox center so the
+   object stays in place. For a shear-free input (k = 0) this reproduces the
+   prior plain rotate-and-scale matrix; the only change from the old
+   shear-free version is the det-based sy and the k terms in c, d. *)
 let prop_rotated_transform (mat : Element.transform) local deg
     : Element.transform =
   let sx = Float.hypot mat.a mat.b in
-  let sy = Float.hypot mat.c mat.d in
+  let det = mat.a *. mat.d -. mat.b *. mat.c in
+  let sy = if sx <> 0.0 then det /. sx else 0.0 in
+  let k = if det <> 0.0 then (mat.a *. mat.c +. mat.b *. mat.d) /. det else 0.0 in
   let rad = deg *. (Float.pi /. 180.0) in
   let cos_a = cos rad and sin_a = sin rad in
   let rotated : Element.transform =
-    { a = sx *. cos_a; b = sx *. sin_a; c = -. (sy *. sin_a); d = sy *. cos_a;
+    { a = sx *. cos_a; b = sx *. sin_a;
+      c = sy *. (k *. cos_a -. sin_a); d = sy *. (k *. sin_a +. cos_a);
       e = mat.e; f = mat.f } in
   let (ox, oy, ow, oh) = prop_aabb local mat in
   let (nx, ny, nw, nh) = prop_aabb local rotated in
   let ocx = ox +. ow /. 2.0 and ocy = oy +. oh /. 2.0 in
   let ncx = nx +. nw /. 2.0 and ncy = ny +. nh /. 2.0 in
   { rotated with e = rotated.e +. (ocx -. ncx); f = rotated.f +. (ocy -. ncy) }
+
+(* Set the horizontal shear angle to [deg] keeping the decomposed rotation and
+   scale (M = R . ShearX . Scale), re-anchored about the evaluated bbox center
+   so the object stays put. *)
+let prop_sheared_transform (mat : Element.transform) local deg
+    : Element.transform =
+  let sx = Float.hypot mat.a mat.b in
+  if sx = 0.0 then mat
+  else begin
+    let theta = atan2 mat.b mat.a in
+    let det = mat.a *. mat.d -. mat.b *. mat.c in
+    let sy = det /. sx in
+    let k = tan (deg *. (Float.pi /. 180.0)) in
+    let ct = cos theta and st = sin theta in
+    let sheared : Element.transform =
+      { a = sx *. ct; b = sx *. st;
+        c = sy *. (k *. ct -. st); d = sy *. (k *. st +. ct);
+        e = mat.e; f = mat.f } in
+    let (ox, oy, ow, oh) = prop_aabb local mat in
+    let (nx, ny, nw, nh) = prop_aabb local sheared in
+    let ocx = ox +. ow /. 2.0 and ocy = oy +. oh /. 2.0 in
+    let ncx = nx +. nw /. 2.0 and ncy = ny +. nh /. 2.0 in
+    { sheared with e = sheared.e +. (ocx -. ncx); f = sheared.f +. (ocy -. ncy) }
+  end
 
 (* Document-space group transforms about a pivot, for a multi-selection. *)
 let prop_scale_about_pivot sx sy px py : Element.transform =
@@ -1014,6 +1058,14 @@ let prop_rotate_about_pivot deg px py : Element.transform =
   { a = cos_a; b = sin_a; c = -. sin_a; d = cos_a;
     e = px -. cos_a *. px +. sin_a *. py;
     f = py -. sin_a *. px -. cos_a *. py }
+
+(* Document-space horizontal shear by [deg] about the pivot (px, py): maps
+   (x, y) -> (x + k*(y - py), y) with k = tan(deg). Used to shear a
+   multi-selection as a group about its bbox center, pre-multiplied onto each
+   element transform. *)
+let prop_shear_about_pivot deg _px py : Element.transform =
+  let k = tan (deg *. (Float.pi /. 180.0)) in
+  { a = 1.0; b = 0.0; c = k; d = 1.0; e = -. k *. py; f = 0.0 }
 
 let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
     (field : string) (value : Yojson.Safe.t) : unit =
@@ -1047,7 +1099,7 @@ let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
           | Some bm -> set_all (fun e -> Element.with_blend_mode bm e)
           | None -> ())
        | _ -> ())
-    | "w" | "h" | "rotation" ->
+    | "w" | "h" | "rotation" | "shear" ->
       if Document.PathMap.cardinal doc.Document.selection = 1 then
         (* SINGLE: local-axes scale / absolute rotation about its bbox center. *)
         (match Document.PathMap.min_binding_opt doc.Document.selection with
@@ -1072,6 +1124,9 @@ let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
                         Some (prop_scaled_transform mat local
                                 (if constrain then r else 1.0) r)
                       | _ -> None)
+            | "shear" -> (match num () with
+                    | Some v -> Some (prop_sheared_transform mat local v)
+                    | None -> None)
             | _ -> (match num () with
                     | Some v -> Some (prop_rotated_transform mat local v)
                     | None -> None) in
@@ -1097,6 +1152,19 @@ let apply_properties_field ?(constrain = false) (ctrl : Controller.controller)
                       Some (prop_scale_about_pivot
                               (if constrain then r else 1.0) r bx by)
                     | _ -> None)
+          | "shear" -> (match num () with
+                  | Some v ->
+                    let cur =
+                      match Document.PathMap.min_binding_opt
+                              doc.Document.selection with
+                      | Some (p, _) ->
+                        (match prop_elem_transform (Document.get_element doc p) with
+                         | Some (t : Element.transform) -> prop_shear_angle t
+                         | None -> 0.0)
+                      | None -> 0.0 in
+                    let cx = bx +. bw /. 2.0 and cy = by +. bh /. 2.0 in
+                    Some (prop_shear_about_pivot (v -. cur) cx cy)
+                  | None -> None)
           | _ -> (match num () with
                   | Some v ->
                     let cur =
@@ -1136,7 +1204,7 @@ let subscribe_properties_panel (store : State_store.t)
       let field =
         if String.length key > 5 && String.sub key 0 5 = "prop_"
         then String.sub key 5 (String.length key - 5) else key in
-      if List.mem field ["x"; "y"; "w"; "h"; "rotation"; "opacity"; "blend"] then begin
+      if List.mem field ["x"; "y"; "w"; "h"; "rotation"; "shear"; "opacity"; "blend"] then begin
         let constrain =
           match State_store.get_panel store "properties_panel_content"
                   "prop_constrain" with

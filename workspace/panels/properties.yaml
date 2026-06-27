@@ -13,14 +13,15 @@ description: >
   All fields are editable. Editing X/Y moves the selection; opacity and
   blend mode are set on every selected element. For a SINGLE object, W/H
   scales its local axes by the typed/current ratio (preserving rotation, so
-  the displayed AABB may differ from the typed value on a rotated object)
-  and rotation sets the absolute angle about its bounding-box center. For a
-  MULTI selection, W/H scales the whole selection as a group about the bbox
-  top-left and rotation rotates it rigidly about the bbox center (by the
-  delta from the first object's angle) — there is no single local frame for
-  a group. The constrain-proportions lock (chain icon) ties W and H so they
-  scale together. Shear editing remains a later increment. When nothing is
-  selected every field shows 0.
+  the displayed AABB may differ from the typed value on a rotated object),
+  rotation sets the absolute angle about its bounding-box center, and shear
+  sets the absolute horizontal shear (skew) angle about that center while
+  keeping the decomposed rotation and scale. For a MULTI selection, W/H
+  scales the whole selection as a group about the bbox top-left and
+  rotation/shear transform it rigidly about the bbox center (by the delta
+  from the first object's angle) — there is no single local frame for a
+  group. The constrain-proportions lock (chain icon) ties W and H so they
+  scale together. When nothing is selected every field shows 0.
 
 state:
   # Keys are prefixed prop_ so they never collide with another panel's
@@ -49,6 +50,13 @@ state:
     description: >
       Rotation angle of the FIRST selected element's transform, in degrees
       (atan2 of the linear part). 0 when there is no rotation.
+  prop_shear:
+    type: number
+    default: 0
+    description: >
+      Horizontal shear (skew) angle of the FIRST selected element's
+      transform, in degrees, from the rotation/shear/scale decomposition.
+      0 when there is no shear.
   prop_opacity:
     type: number
     default: 100
@@ -89,6 +97,7 @@ init:
   prop_h: "0"
   prop_constrain: "false"
   prop_rotation: "0"
+  prop_shear: "0"
   prop_opacity: "100"
   prop_blend: "'normal'"
 
@@ -212,6 +221,28 @@ content:
           style: { flex: 1 }
           bind:
             value: "panel.prop_rotation"
+
+    # ── Shear ───────────────────────────────────────────────
+    # Horizontal shear (skew) angle of the FIRST selected element, decomposed
+    # from its transform. Editing sets the absolute shear about the bbox
+    # center (keeping rotation/scale); a multi-selection shears rigidly as a
+    # group by the delta from the first element's shear angle.
+    - type: container
+      layout: row
+      style: { gap: 4, alignment: center }
+      children:
+        - type: text
+          content: "Sh"
+          style: { width: 14, font_size: 10 }
+        - id: prop_shear_input
+          type: number_input
+          suffix: "°"
+          summary: "Selection shear"
+          description: "Horizontal shear (skew) angle of the first selected element, in degrees. Editing shears about the bbox center; a multi-selection shears as a group by the delta."
+          disabled: "active_document.selection_count == 0"
+          style: { flex: 1 }
+          bind:
+            value: "panel.prop_shear"
 
     # ── Opacity ─────────────────────────────────────────────
     - type: container
