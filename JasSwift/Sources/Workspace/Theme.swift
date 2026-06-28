@@ -24,6 +24,17 @@ public struct Theme {
     public let snapPreview: NSColor
     public let handleHover: NSColor
     public let paneShadow: NSColor
+
+    /// Whether this is a dark appearance (window background is dark). Drives
+    /// the SwiftUI color scheme so AppKit-backed controls (Picker pop-up
+    /// buttons, steppers) render light-on-dark instead of system-default
+    /// dark text, which is dark-on-dark over a dark panel. Computed from the
+    /// window background luminance so it tracks any custom appearance.
+    public var isDark: Bool {
+        let c = windowBg.usingColorSpace(.sRGB) ?? windowBg
+        let lum = 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent
+        return lum < 0.5
+    }
 }
 
 // MARK: - Predefined Appearances
