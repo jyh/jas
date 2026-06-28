@@ -4145,28 +4145,13 @@ struct YamlPanelBodyView: View {
         "color_panel_content", "gradient_panel_content", "layers_panel_content",
     ]
 
-    /// Container node types laid out as layout-only (no box of their own).
-    private static let pathBContainerTypes: Set<String> = [
-        "container", "row", "col", "grid", "panel",
-    ]
-
-    /// Resolve a node by its panel-relative tree path (root = `[]`) by
-    /// walking `children` arrays by index. Mirrors Rust `node_at_path` /
-    /// Flask `_node_at_path`.
-    private func nodeAtPath(_ content: Any?, _ path: [Int]) -> [String: Any]? {
-        var node = content as? [String: Any]
-        for i in path {
-            guard let kids = node?["children"] as? [[String: Any]],
-                  i >= 0, i < kids.count else { return nil }
-            node = kids[i]
-        }
-        return node
-    }
-
-    /// A leaf widget placed at its absolute rect by the Path B pass.
+    /// A leaf widget placed at its absolute rect by the Path B pass, carrying
+    /// the per-leaf eval scope (`foreach`-expanded rows carry their per-row
+    /// child scope) so it renders with the right data.
     private struct PathBLeaf: Identifiable {
         let id: Int
         let node: [String: Any]
+        let ctx: [String: Any]
         let x: Int
         let y: Int
         let w: Int
@@ -4180,27 +4165,21 @@ struct YamlPanelBodyView: View {
         let panelH: Int
     }
 
-    /// Run the shared layout pass and project it into placeable leaves.
+    /// Run the shared layout pass and project it into placeable leaves via
+    /// ``PanelLayout/renderPlan``. The plan returns, for each renderable widget,
+    /// the node + the (child) scope to render it with, so `foreach`-expanded
+    /// rows — whose nodes come from the `do` template, not `children` — resolve
+    /// correctly (the old `node_at_path` over `children` could not reach them).
     /// Mirrors Rust `render_panel_absolute` / Flask `_render_panel_absolute`.
     private func pathBLayout() -> PathBLayout {
         // Preview: pass the live eval scope `context` so foreach lists + text
         // bindings resolve to real data. availH=0 keeps the panel content-height.
-        let rects = PanelLayout.layoutPanel(contentSpec, availW: 228, availH: 0, ctx: context)
-        let panelH = (rects.first?["rect"] as? [String: Int])?["h"] ?? 0
-        let content = contentSpec["content"]
-        var leaves: [PathBLeaf] = []
-        for (idx, item) in rects.enumerated() {
-            guard let path = item["path"] as? [Int],
-                  let node = nodeAtPath(content, path) else { continue }
-            let t = node["type"] as? String ?? ""
-            if Self.pathBContainerTypes.contains(t) { continue } // layout-only
-            guard let r = item["rect"] as? [String: Int] else { continue }
-            leaves.append(PathBLeaf(
-                id: idx, node: node,
-                x: r["x"] ?? 0, y: r["y"] ?? 0, w: r["w"] ?? 0, h: r["h"] ?? 0
-            ))
+        let plan = PanelLayout.renderPlan(contentSpec, availW: 228, availH: 0, ctx: context)
+        let leaves = plan.leaves.enumerated().map { (idx, leaf) in
+            PathBLeaf(id: idx, node: leaf.node, ctx: leaf.ctx,
+                      x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h)
         }
-        return PathBLayout(leaves: leaves, panelH: panelH)
+        return PathBLayout(leaves: leaves, panelH: plan.height)
     }
 
     var body: some View {
@@ -4209,7 +4188,7 @@ struct YamlPanelBodyView: View {
             ZStack(alignment: .topLeading) {
                 ForEach(layout.leaves) { leaf in
                     YamlElementView(
-                        element: leaf.node, context: context, model: model,
+                        element: leaf.node, context: leaf.ctx, model: model,
                         panelId: panelId, theme: theme,
                         flyoutIconDefault: flyoutIconDefault,
                         onDialogWrite: onDialogWrite,

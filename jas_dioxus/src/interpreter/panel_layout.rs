@@ -27,12 +27,48 @@ pub const CHAR_WIDTH: i64 = 10;
 const CONTAINER_TYPES: [&str; 4] = ["container", "row", "col", "panel"];
 
 struct MItem {
+    // Read only by `layout_panel` (the byte-gate projection); the web render
+    // swap uses `render_plan`, which projects node+ctx+rect, not path.
+    #[allow(dead_code)]
     path: Vec<i64>,
     x: i64,
     y: i64,
     w: i64,
     h: i64,
+    // Path B render projection: the node this item renders and the (child)
+    // data scope to render it with (a foreach expansion carries its per-row
+    // scope). Owned clones — panels are small, so the cost is fine.
+    // `layout_panel` ignores these (it projects rects only, keeping the
+    // cross-app byte-gate unchanged); `render_plan` consumes them.
+    node: Value,
+    ctx: Value,
 }
+
+/// A renderable leaf from `render_plan`: where to draw (`rect` as `(x,y,w,h)`),
+/// what to draw (`node`), and the scope to evaluate it with (`ctx` — the child
+/// scope, so a foreach-expanded leaf carries its per-row data).
+pub struct RenderLeaf {
+    pub x: i64,
+    pub y: i64,
+    pub w: i64,
+    pub h: i64,
+    pub node: Value,
+    pub ctx: Value,
+}
+
+/// Render-side projection of the layout pass: the canonical panel content
+/// `height` plus one `leaves` entry per renderable widget (layout-only nodes
+/// omitted). The cross-app byte-gate consumes `layout_panel` (rects only); the
+/// render swaps consume this. One traversal, two projections.
+pub struct RenderPlan {
+    pub height: i64,
+    pub leaves: Vec<RenderLeaf>,
+}
+
+/// Layout-only node types: they position their children but draw no widget of
+/// their own in the absolute render (their children are the rendered leaves).
+const LAYOUT_CONTAINER_TYPES: [&str; 6] =
+    ["container", "row", "col", "grid", "panel", "disclosure"];
 
 /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into a
 /// JSON array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
@@ -40,6 +76,11 @@ struct MItem {
 /// `ctx` is the data scope used to evaluate `foreach` sources and text
 /// bindings (defaults to empty/literals-only at call sites that pass `{}`).
 /// `avail_h` drives vertical flex; 0 means content-height (no vertical flex).
+//
+// The cross-app byte-gate (`cross_language_test::algorithm_panel_layout_vectors`)
+// is the sole caller in the web build — the render swap consumes `render_plan`
+// instead — so it reads as dead under `--features web` without the test cfg.
+#[allow(dead_code)]
 pub fn layout_panel(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> Value {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,
@@ -55,6 +96,40 @@ pub fn layout_panel(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value)
             }))
             .collect(),
     )
+}
+
+/// Render-side projection of the same layout pass (see [`RenderPlan`]). Returns
+/// the canonical panel content `height` (the root item's height, incl. padding)
+/// plus one leaf per renderable widget, each carrying the rect, the node to
+/// render, and the (child) scope to render it with — so a foreach-expanded leaf
+/// carries its per-row scope, which a `node_at_path` lookup over `children`
+/// cannot resolve. Layout-only nodes (container / row / col / grid / panel /
+/// disclosure) are omitted from the leaves.
+pub fn render_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> RenderPlan {
+    let root = match panel_node.get("content") {
+        Some(r) if r.is_object() => r,
+        _ => return RenderPlan { height: 0, leaves: vec![] },
+    };
+    let (_w, _h, items) = measure(root, &[], avail_w, avail_h, ctx);
+    let height = items.first().map_or(0, |it| it.h);
+    let mut leaves = vec![];
+    for it in items {
+        if !it.node.is_object() {
+            continue;
+        }
+        if LAYOUT_CONTAINER_TYPES.contains(&node_type(&it.node)) {
+            continue;
+        }
+        leaves.push(RenderLeaf {
+            x: it.x,
+            y: it.y,
+            w: it.w,
+            h: it.h,
+            node: it.node,
+            ctx: it.ctx,
+        });
+    }
+    RenderPlan { height, leaves }
 }
 
 // ── internals ─────────────────────────────────────────────────────────
@@ -331,7 +406,15 @@ fn measure(
         let exp_h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0);
         let w = avail_w;
         let h = exp_h.unwrap_or(content_h + pt + pb);
-        let mut items = vec![MItem { path: path.to_vec(), x: 0, y: 0, w, h }];
+        let mut items = vec![MItem {
+            path: path.to_vec(),
+            x: 0,
+            y: 0,
+            w,
+            h,
+            node: n.clone(),
+            ctx: ctx.clone(),
+        }];
         for mut it in ch_items {
             it.x += pl;
             it.y += pt;
@@ -340,7 +423,19 @@ fn measure(
         (w, h, items)
     } else {
         let (w, h) = leaf_size(n, avail_w, ctx);
-        (w, h, vec![MItem { path: path.to_vec(), x: 0, y: 0, w, h }])
+        (
+            w,
+            h,
+            vec![MItem {
+                path: path.to_vec(),
+                x: 0,
+                y: 0,
+                w,
+                h,
+                node: n.clone(),
+                ctx: ctx.clone(),
+            }],
+        )
     }
 }
 

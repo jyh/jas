@@ -17,13 +17,21 @@ let disclosure_header_h = 24 (* canonical disclosure header bar height *)
 
 let container_types = [ "container"; "row"; "col"; "panel" ]
 
-(* A measured item with coordinates relative to its node origin. *)
+(* A measured item with coordinates relative to its node origin. Each item also
+   carries the source [node] it was produced from and the data scope [ctx] that
+   node must be rendered with. For a container the root item carries the
+   container node + the incoming scope; for a leaf the single item carries the
+   leaf node + scope; foreach expansions carry their per-row child scope. The
+   byte-gated [layout_panel] projection ignores [node] / [ctx] (rects only); the
+   render-side [render_plan] projection reads them. *)
 type mitem = {
   path : int list;
   mutable x : int;
   mutable y : int;
   mutable w : int;
   mutable h : int;
+  node : Yojson.Safe.t;
+  ctx : Yojson.Safe.t;
 }
 
 (* Field access over a Yojson object, returning Null for a missing key or a
@@ -264,12 +272,12 @@ let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
       | Some v -> v
       | None -> content_h + pt + pb
     in
-    let root = { path; x = 0; y = 0; w; h } in
+    let root = { path; x = 0; y = 0; w; h; node = n; ctx } in
     List.iter (fun it -> it.x <- it.x + pl; it.y <- it.y + pt) ch_items;
     (w, h, root :: ch_items)
   end else begin
     let w, h, _fill = leaf_size n avail_w ctx in
-    (w, h, [ { path; x = 0; y = 0; w; h } ])
+    (w, h, [ { path; x = 0; y = 0; w; h; node = n; ctx } ])
   end
 
 and column children path inner_w gap avail_h ctx : mitem list * int =
@@ -537,3 +545,42 @@ let layout_panel (panel_node : Yojson.Safe.t) (avail_w : int) (avail_h : int)
                   ("w", `Int it.w); ("h", `Int it.h) ]) ])
         items)
   | _ -> `List []
+
+(* Node types that are layout-only: they position their children but draw no
+   widget of their own in the absolute render (their children are the rendered
+   leaves), so they are omitted from the render plan leaves. Mirrors the Python
+   _LAYOUT_CONTAINER_TYPES; note it includes grid and disclosure. *)
+let layout_only_types =
+  [ "container"; "row"; "col"; "grid"; "panel"; "disclosure" ]
+
+(* Render-side projection of the same layout pass. Returns the JSON object
+   {"height": <panel content height>, "leaves": [{"rect","node","ctx"}, ...]},
+   one leaf per renderable widget, where [ctx] is the (child) scope to render
+   that node with (so a foreach-expanded leaf carries its per-row scope) and
+   [height] is the canonical panel content height (root item height). Layout-only
+   nodes (containers / disclosure / foreach wrappers) are omitted. The cross-app
+   byte-gate consumes [layout_panel] (rects only); the render swaps consume this.
+   One traversal, two projections. *)
+let render_plan (panel_node : Yojson.Safe.t) (avail_w : int) (avail_h : int)
+  (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  match mem "content" panel_node with
+  | `Assoc _ as root ->
+    let _w, _h, items = measure root [] avail_w avail_h ctx in
+    let height = match items with it :: _ -> it.h | [] -> 0 in
+    let leaves =
+      List.filter_map (fun it ->
+        match it.node with
+        | `Assoc _ when not (List.mem (node_type it.node) layout_only_types) ->
+          Some
+            (`Assoc
+              [ ("rect",
+                 `Assoc
+                   [ ("x", `Int it.x); ("y", `Int it.y);
+                     ("w", `Int it.w); ("h", `Int it.h) ]);
+                ("node", it.node);
+                ("ctx", it.ctx) ])
+        | _ -> None)
+        items
+    in
+    `Assoc [ ("height", `Int height); ("leaves", `List leaves) ]
+  | _ -> `Assoc [ ("height", `Int 0); ("leaves", `List []) ]
