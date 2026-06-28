@@ -311,9 +311,11 @@ fn measure(
     let inner_w = avail_w - pl - pr;
     let inner_h = if avail_h > 0 { avail_h - pt - pb } else { 0 };
 
-    if is_container(n) {
+    if is_container(n) || node_type(n) == "disclosure" {
         let has_foreach = st_foreach(n).is_some() && n.get("do").map_or(false, |v| !v.is_null());
-        let (ch_items, content_h) = if has_foreach {
+        let (ch_items, content_h) = if node_type(n) == "disclosure" {
+            disclosure(n, path, inner_w, gap, ctx)
+        } else if has_foreach {
             foreach(n, path, inner_w, gap, ctx)
         } else {
             let children = visible_children(n);
@@ -511,6 +513,29 @@ fn grid(
         line_y += line_h + gap;
     }
     (items, if !lines.is_empty() { line_y - gap } else { 0 })
+}
+
+/// Canonical disclosure header bar height (the widget draws the header; we emit
+/// no separate rect for it).
+const DISCLOSURE_HEADER_H: i64 = 24;
+
+/// A disclosure is a header bar (the bound label) + a body. v1 lays out the body
+/// (children, column) below a fixed-height header (assumed expanded); the header
+/// is drawn by the widget itself (no separate rect). The body's inner foreach
+/// (swatch / brush grids) expands through the normal recursion.
+fn disclosure(
+    n: &Value,
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
+    let children = visible_children(n);
+    let (mut ch_items, body_h) = column(&children, path, inner_w, gap, 0, ctx);
+    for it in ch_items.iter_mut() {
+        it.y += DISCLOSURE_HEADER_H;
+    }
+    (ch_items, DISCLOSURE_HEADER_H + body_h)
 }
 
 /// Expand a foreach container's `do` template once per item of

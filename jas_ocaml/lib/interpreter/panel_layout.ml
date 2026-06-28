@@ -13,6 +13,8 @@
 
 let char_width = 10
 
+let disclosure_header_h = 24 (* canonical disclosure header bar height *)
+
 let container_types = [ "container"; "row"; "col"; "panel" ]
 
 (* A measured item with coordinates relative to its node origin. *)
@@ -239,8 +241,10 @@ let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
   let gap = match style_i n "gap" with Some g -> g | None -> 0 in
   let inner_w = avail_w - pl - pr in
   let inner_h = if avail_h > 0 then avail_h - pt - pb else 0 in
-  if is_container n then begin
+  if is_container n || node_type n = "disclosure" then begin
     let ch_items, content_h =
+      if node_type n = "disclosure" then disclosure n path inner_w gap ctx
+      else
       match (mem "foreach" n, mem "do" n) with
       | (`Assoc _, `Assoc _) -> foreach n path inner_w gap ctx
       | _ ->
@@ -407,6 +411,17 @@ and grid children path inner_w gap ctx : mitem list * int =
     !lines;
   (!items, if !lines <> [] then !line_y - gap else 0)
 
+(* A disclosure is a header bar (the bound label) plus a body. The body is its
+   children laid out as a column below a fixed-height header (assumed expanded);
+   the header is drawn by the widget itself, so no separate rect is emitted. The
+   body inner foreach (swatch / brush grids) expands through the normal
+   recursion. content_h = header_h + body_column_height. *)
+and disclosure n path inner_w gap ctx : mitem list * int =
+  let children = visible_children n in
+  let ch_items, body_h = column children path inner_w gap 0 ctx in
+  List.iter (fun it -> it.y <- it.y + disclosure_header_h) ch_items;
+  (ch_items, disclosure_header_h + body_h)
+
 (* Expand a foreach container's [do] template once per item of
    evaluate(foreach.source, ctx), laid out per the container [layout] field:
    [column] (vertical stack, default), [row] (horizontal single line), or
@@ -446,7 +461,16 @@ and foreach n path inner_w gap ctx : mitem list * int =
     let w, h, cit = measure template (path @ [ i ]) avail 0 child_ctx in
     let w =
       if lay <> "column" then begin
-        let iw = List.fold_left (fun acc it -> max acc (it.x + it.w)) 0 cit in
+        (* Mirror Python max((it.x + it.w for it in cit), default=0): the 0 is
+           only the empty-list default, NOT a floor, so a container tile that
+           returns the -1 intrinsic sentinel keeps its negative extent. *)
+        let iw =
+          match cit with
+          | [] -> 0
+          | first :: rest ->
+            List.fold_left (fun acc it -> max acc (it.x + it.w))
+              (first.x + first.w) rest
+        in
         (match cit with first :: _ -> first.w <- iw | [] -> ());
         iw
       end else w
