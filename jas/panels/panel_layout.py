@@ -37,6 +37,11 @@ _FILL_KINDS = frozenset({
     "select", "number_input", "text_input", "length_input",
     "slider", "placeholder", "separator",
     "combo_box", "icon_select", "spacer",
+    # Composite / data-driven widgets: the layout pass places the widget BOX at
+    # a canonical fixed height (fill width); the widget renders its own internals
+    # and any data-driven rows (a separate concern needing a data fixture).
+    "color_bar", "fill_stroke_widget", "gradient_slider", "gradient_tile",
+    "dropdown", "tree_view",
 })
 
 # Canonical intrinsic heights per widget kind (px).
@@ -46,6 +51,9 @@ _KIND_HEIGHT = {
     "slider": 12, "placeholder": 40, "separator": 1,
     "combo_box": 20, "icon_select": 20, "spacer": 0, "color_swatch": 16,
     "toggle": 20,
+    # composite box heights (provisional — ratified as the corpus broadens)
+    "color_bar": 24, "fill_stroke_widget": 44, "gradient_slider": 24,
+    "gradient_tile": 24, "dropdown": 20, "tree_view": 200,
 }
 
 # Fallback widths for fill kinds when no available width is supplied
@@ -54,6 +62,8 @@ _KIND_FALLBACK_W = {
     "select": 80, "number_input": 45, "text_input": 80, "length_input": 80,
     "slider": 100, "placeholder": 60, "separator": 0,
     "combo_box": 80, "icon_select": 80, "spacer": 0,
+    "color_bar": 0, "fill_stroke_widget": 50, "gradient_slider": 0,
+    "gradient_tile": 32, "dropdown": 80, "tree_view": 0,
 }
 
 

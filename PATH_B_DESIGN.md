@@ -6,10 +6,13 @@ byte-exact in all four native apps (Python `jas/panels/panel_layout.py`, Rust
 `jas_ocaml/lib/interpreter/panel_layout.{ml,mli}`, Swift
 `JasSwift/Sources/Interpreter/PanelLayout.swift`), each gated in-suite against the
 pinned golden `test_fixtures/algorithms/panel_layout.json` (seed panels: `symbols`,
-`opacity`; regen via `scripts/gen_panel_layout_fixture.py`). The Rust app renders
-panels from the pass behind `JAS_PATH_B=1` (the two seed panels only). Still open:
-the §6 five-app box-model review, broadening the corpus, and the non-Rust render
-migrations. Design draft below; decisions locked 2026-06-27 (Template A; /12;
+`opacity`; regen via `scripts/gen_panel_layout_fixture.py`). The §6 five-app box-model
+review is RATIFIED (`PATH_B_BOXMODEL_REVIEW.md`; `char_width=10`); the corpus now covers
+**16/16 panels** (composite widgets placed as fixed boxes — see A.5 v1.1/v1.2). The Rust
+app renders panels from the pass behind `JAS_PATH_B=1` (13 panels; composite ones excluded
+from the preview). Still open: the non-Rust render migrations (Flask → Swift → OCaml →
+Python) and the deferred algorithm bits (foreach/tree data, 2-D grid, max clamps,
+visible_when). Design draft below; decisions locked 2026-06-27 (Template A; /12;
 integer-px; Phase 0 + Rust render swap). Implements `TESTING_STRATEGY.md` §3
 (Decision B) + §7 items #8 (panel computed-geometry byte-gate) and #9 (the
 canonical box-model choice, gated behind a five-app golden-diff review). This is
@@ -349,11 +352,31 @@ numeric string is that int; anything else (`"auto"`, junk) is ignored (falls bac
 kind default / intrinsic). `width`/`min_width` resolve against the leaf's avail width;
 `height` resolves with `avail = 0` so `"%"` heights are ignored.
 
-Kinds still outside the table (composite / data-driven: `tree_view`, `fill_stroke_widget`,
-`tabs`, `disclosure` body, `color_bar` / `color_gradient` / `color_hue_bar`,
-`gradient_tile` / `gradient_slider`, `element_preview`, `dropdown`, `icon_button_group`,
-`reference_point_widget`) are deferred with their panels (color / gradient / layers), each
-to be added with a ratified size as the corpus broadens.
+**v1.2 broadening (2026-06-28) — composite/data-driven widgets, to reach 16/16 panels.**
+The remaining three panels (color / gradient / layers) are added by placing each composite
+widget as a **canonical fixed box** (fill width); the widget renders its own internals, and
+its **data-driven rows are a separate concern** (a `foreach` expansion or a `tree_view`'s
+document rows need a data fixture, not the static panel YAML). Added as fill kinds:
+
+| kind | height | fallback width |
+|---|---|---|
+| `color_bar` | 24 | 0 (fill) |
+| `fill_stroke_widget` | 44 | 50 |
+| `gradient_slider` | 24 | 0 (fill) |
+| `gradient_tile` | 24 | 32 |
+| `dropdown` | 20 | 80 |
+| `tree_view` | 200 | 0 (fill) |
+
+A `foreach` node is a container with a `do` template and no static `children`, so it lays
+out **empty** (the no-data state) — deterministic, no special handling. These three panels
+have **no `visible_when`** (conditional visibility is in app code, not the YAML), so laying
+out every row is faithful.
+
+**Coverage note:** the cross-app byte-**gate** now covers **16/16 panels**; the Rust
+`JAS_PATH_B=1` **preview** still excludes color/gradient/layers because the absolute
+renderer does not draw `foreach` expansions yet. Still genuinely deferred: 2-D `type:grid`,
+`max_width`/`max_height` clamps, `visible_when` eval, vertical flex-grow, and `foreach`/tree
+data expansion (composite box heights above are provisional pending a later ratification).
 
 ### A.6 Deferred in v1 (documented, not silently dropped)
 

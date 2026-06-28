@@ -75,7 +75,10 @@ let text_w (s : string) : int = utf8_length s * char_width
 let is_fill (kind : string) : bool =
   match kind with
   | "select" | "number_input" | "text_input" | "length_input" | "slider"
-  | "placeholder" | "separator" | "combo_box" | "icon_select" | "spacer" -> true
+  | "placeholder" | "separator" | "combo_box" | "icon_select" | "spacer"
+  (* composite / data-driven widgets: placed as a fixed box (fill width) *)
+  | "color_bar" | "fill_stroke_widget" | "gradient_slider" | "gradient_tile"
+  | "dropdown" | "tree_view" -> true
   | _ -> false
 
 let kind_height (kind : string) : int =
@@ -97,6 +100,13 @@ let kind_height (kind : string) : int =
   | "spacer" -> 0
   | "color_swatch" -> 16
   | "toggle" -> 20
+  (* composite box heights (provisional) *)
+  | "color_bar" -> 24
+  | "fill_stroke_widget" -> 44
+  | "gradient_slider" -> 24
+  | "gradient_tile" -> 24
+  | "dropdown" -> 20
+  | "tree_view" -> 200
   | _ -> 20
 
 let kind_fallback_w (kind : string) : int =
@@ -110,6 +120,9 @@ let kind_fallback_w (kind : string) : int =
   | "combo_box" -> 80
   | "icon_select" -> 80
   | "spacer" -> 0
+  | "fill_stroke_widget" -> 50
+  | "gradient_tile" -> 32
+  | "dropdown" -> 80
   | _ -> 0
 
 (* Resolve a style dimension to integer px, or None to ignore. Numbers truncate

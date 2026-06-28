@@ -23,6 +23,9 @@ public enum PanelLayout {
         "select", "number_input", "text_input", "length_input",
         "slider", "placeholder", "separator",
         "combo_box", "icon_select", "spacer",
+        // composite / data-driven widgets: placed as a fixed box (fill width)
+        "color_bar", "fill_stroke_widget", "gradient_slider", "gradient_tile",
+        "dropdown", "tree_view",
     ]
 
     /// An intermediate item with coords RELATIVE to its node's origin.
@@ -142,6 +145,13 @@ public enum PanelLayout {
         case "spacer": return 0
         case "color_swatch": return 16
         case "toggle": return 20
+        // composite box heights (provisional)
+        case "color_bar": return 24
+        case "fill_stroke_widget": return 44
+        case "gradient_slider": return 24
+        case "gradient_tile": return 24
+        case "dropdown": return 20
+        case "tree_view": return 200
         default: return 20
         }
     }
@@ -157,6 +167,9 @@ public enum PanelLayout {
         case "combo_box": return 80
         case "icon_select": return 80
         case "spacer": return 0
+        case "fill_stroke_widget": return 50
+        case "gradient_tile": return 32
+        case "dropdown": return 80
         default: return 0
         }
     }
