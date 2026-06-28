@@ -9,6 +9,55 @@ cross-panel regressions, and keyboard-only paths.
 For the catalog of existing test files (tier-ordered + alphabetical),
 see [`MANUAL_TEST_INDEX.md`](MANUAL_TEST_INDEX.md).
 
+## The injection floor — what manual testing is *for*
+
+Manual testing is the **instrument of last resort**, used only for what no
+shared, byte-comparable artifact can encode. Most behavior is now gated *below*
+the manual layer by cross-language corpora that compare canonical data across all
+apps — see [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) §5 for the full model.
+Before writing a manual test, check whether the behavior is already gated, and if
+so do **not** re-verify it manually across apps:
+
+| Behavior | Gated by (don't re-test manually cross-app) |
+|---|---|
+| Document-model shape / serialization | `document_to_test_json` |
+| Operations / undo replay | `op_apply` + `checkpoint_equivalence` |
+| Expression evaluation | expression conformance corpus |
+| Tool gestures (press / move / release → document) | gesture corpus @ the `CanvasTool` seam (`test_fixtures/gestures/`) |
+| Panel / menu / dialog **action → document effect** | action corpus @ `dispatch_action` / `run_effects` (`test_fixtures/actions/`) |
+| Key-chord → action **resolution** | key-resolution corpus (`test_fixtures/keys/`) |
+| Menu / toolbar **structure** | `menu_structure.json` / `toolbar_structure.json` goldens |
+
+**The irreducible floor** — what injection and shared artifacts fundamentally
+cannot verify, and therefore what manual tests exist to cover:
+
+- raw framework event + coordinate conversion (screen → document);
+- real hit-testing against *rendered* geometry (does the click land on the glyph);
+- **binding** — that a key chord / menu id is actually wired to its action (see below);
+- focus / tab order / responder chain;
+- native value-commit semantics (when typing into a field actually takes effect);
+- IME / text editing;
+- visual output — overlays, cursors, theming, glyph rendering, layout *pixels*.
+
+### Key-binding vs. action-effect — a distinction manual tests must keep
+
+Two different seams hide behind "the shortcut works", and they live at different
+layers:
+
+- **Key-binding** (`key chord → action`): that <kbd>Cmd</kbd>+<kbd>G</kbd> is
+  bound to the *group* action, that a menu item dispatches the command id it
+  claims to. The chord/menu-id → action *resolution* is gated by the
+  key-resolution corpus, but **binding** that resolver into the live framework
+  event loop is framework-fused and **belongs on the manual floor**.
+- **Action-effect** (`action → document`): that the *group* action, once
+  dispatched, produces the correct document mutation. This is gated cross-app by
+  the **action corpus** and must **not** be re-verified manually per app.
+
+So a manual shortcut test asserts only *"this chord reaches that action"* — it
+never re-checks what the action does to the document. The moment a behavior is
+byte-gated by a shared corpus, retire its manual cross-app parity test (see
+[Maintenance rituals](#maintenance-rituals)).
+
 ## Core approach
 
 - One file per component: `<NAME>_TESTS.md` in the transcripts/ directory.
@@ -171,8 +220,17 @@ user-visible bugs. Always `[wired]`. Format:
 No tier subheaders in parity section (all effectively P1). Batch by app when
 running — one full pass per app, not one pass per test.
 
-Not every component has 5 apps. Omit Flask if generic-only (Flask is generic);
-include only apps that expose the component.
+Not every component has 5 apps; include only apps that expose the component.
+
+**Flask inclusion (canonical rule).** Flask is **not an interactive-parity
+target** (`TESTING_STRATEGY.md` §6): it is a thin reference renderer, not a
+source of truth. Give a parity block a Flask column **only** for the legacy
+tools whose canvas runtime was already wired through
+`jas_flask/static/js/canvas_bootstrap.mjs` + the engine's effect dispatcher —
+today **Selection / Partial Selection, Rect, Pen, Pencil**. For every other
+component omit the Flask checkbox and let the automation-coverage paragraph say
+`Flask — no coverage`; do **not** wire new tools into Flask just to earn a parity
+column. This rule is single-sourced here; `MANUAL_TEST_INDEX.md` points back to it.
 
 ### 9. Known-broken and graveyard
 
@@ -255,6 +313,12 @@ across an external tracker or memory system.
   `[known-broken]` tag and summary entry.
 - **When a test is superseded:** move to graveyard with appropriate category
   tag; keep the ID.
+- **When a behavior becomes byte-gated by a shared corpus:** retire its manual
+  *cross-app parity* test — move the parity row to the graveyard with
+  `[retired: gated by <corpus>]`, keep the ID. The per-app manual test may stay
+  for the irreducible floor (binding, focus, native commit, visual), but the
+  cross-app parity row is now redundant: the corpus is the parity oracle. See
+  [The injection floor](#the-injection-floor--what-manual-testing-is-for).
 - **When testing surfaces an enhancement idea:** append an `ENH-NNN` entry
   to the Enhancements section with the test ID and date it was raised.
 - **Periodic (every 30–60 days):** scan known-broken summary, sweep stale
