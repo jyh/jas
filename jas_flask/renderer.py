@@ -592,21 +592,15 @@ def _render_panel_absolute(el, theme, state) -> str:
     """Render a panel from the shared layout_panel rects: each leaf widget in
     an absolutely-positioned box at its computed rect, inside a relative panel
     of the computed height. Mirrors the Rust render_panel_absolute."""
-    from workspace_interpreter.panel_layout import layout_panel
-    content = el.get("content")
-    # Pass the live scope (state) so foreach lists + text bindings resolve to
-    # real data in the preview (avail_h=0 keeps the panel content-height).
-    rects = layout_panel(el, 228, 0, state)
-    panel_h = rects[0]["rect"]["h"] if rects else 0
+    from workspace_interpreter.panel_layout import render_plan
+    # render_plan yields one entry per renderable leaf with the (child) scope to
+    # render it with, so foreach-expanded rows resolve their per-row data.
+    plan = render_plan(el, 228, 0, state)
+    panel_h = plan["height"]
     parts = []
-    for item in rects:
-        node = _node_at_path(content, item["path"])
-        if not isinstance(node, dict):
-            continue
-        if node.get("type") in ("container", "row", "col", "grid", "panel"):
-            continue  # containers are layout-only
+    for item in plan["leaves"]:
         r = item["rect"]
-        inner = render_element(node, theme, state, mode="normal")
+        inner = render_element(item["node"], theme, item["ctx"], mode="normal")
         parts.append(
             f'<div style="position:absolute;left:{r["x"]}px;top:{r["y"]}px;'
             f'width:{r["w"]}px;height:{r["h"]}px;overflow:hidden">{inner}</div>'

@@ -86,6 +86,44 @@ def layout_panel(panel_node: dict, avail_w: int, avail_h: int = 0,
     ]
 
 
+# Layout-only node types: they position their children but draw no widget of
+# their own in the absolute render (their children are the rendered leaves).
+_LAYOUT_CONTAINER_TYPES = frozenset({
+    "container", "row", "col", "grid", "panel", "disclosure",
+})
+
+
+def render_plan(panel_node: dict, avail_w: int, avail_h: int = 0,
+                ctx: dict | None = None) -> dict:
+    """Render-side projection of the same layout pass. Returns
+    ``{"height": <panel height>, "leaves": [{"rect", "node", "ctx"}, ...]}``,
+    one leaf entry per renderable widget, where ``ctx`` is the (child) scope to
+    render that node with (so a foreach-expanded leaf carries its per-row scope)
+    and ``height`` is the canonical panel content height (incl. padding). Layout-
+    only nodes (containers / disclosure / foreach wrappers) are omitted from the
+    leaves. The cross-app byte-gate consumes ``layout_panel`` (rects only); the
+    render swaps consume this. One traversal, two projections.
+    """
+    root = panel_node.get("content")
+    if not isinstance(root, dict):
+        return {"height": 0, "leaves": []}
+    _w, _h, items = _measure(root, [], int(avail_w), int(avail_h), ctx or {})
+    height = items[0]["h"] if items else 0
+    out = []
+    for it in items:
+        node = it.get("node")
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") in _LAYOUT_CONTAINER_TYPES:
+            continue
+        out.append({
+            "rect": {"x": it["x"], "y": it["y"], "w": it["w"], "h": it["h"]},
+            "node": node,
+            "ctx": it.get("ctx") or {},
+        })
+    return {"height": height, "leaves": out}
+
+
 # ── internals ────────────────────────────────────────────────────────
 
 def _style(node: dict) -> dict:
@@ -251,7 +289,7 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
         exp_h = _resolve_dim(st.get("height"), 0)
         w = avail_w
         h = exp_h if exp_h is not None else content_h + pt + pb
-        items = [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h}]
+        items = [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}]
         for it in ch_items:
             it["x"] += pl
             it["y"] += pt
@@ -260,7 +298,7 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
 
     w = _leaf_size(node, avail_w, ctx)
     h = _leaf_h(node)
-    return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h}])
+    return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}])
 
 
 def _column(children, path, inner_w, gap, avail_h, ctx) -> tuple[list[dict], int]:
