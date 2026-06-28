@@ -14,11 +14,14 @@ val layout_panel :
 
 (* Render-side projection of the same layout pass.
    [render_plan panel_node avail_w avail_h ctx] returns the JSON object
-   {"height": <int panel content height>, "leaves": [{"rect","node","ctx"}, ..]},
-   one leaf per renderable widget. [rect] is {x,y,w,h}; [node] is the compiled
-   node to render; [ctx] is the (child) data scope to render it with, so a
-   foreach-expanded leaf carries its per-row scope. Layout-only nodes
-   (container / row / col / grid / panel / disclosure) are omitted. The
-   byte-gated [layout_panel] consumes rects only; the render swap consumes this. *)
+   {"height": <int panel content height>, "chrome": [..], "leaves": [..]} where
+   each entry is {"rect","node","ctx"}: [leaves] are renderable widgets and
+   [chrome] are layout-only containers carrying a border / background to draw
+   BEHIND the leaves (for example a selected-row highlight). [rect] is {x,y,w,h};
+   [node] is the compiled node to render; [ctx] is the (child) data scope to
+   render it with, so a foreach-expanded leaf carries its per-row scope.
+   Layout-only nodes (container / row / col / grid / panel / disclosure) without
+   chrome are omitted. The byte-gated [layout_panel] consumes rects only; the
+   render swap consumes this. *)
 val render_plan :
   Yojson.Safe.t -> int -> int -> Yojson.Safe.t -> Yojson.Safe.t
