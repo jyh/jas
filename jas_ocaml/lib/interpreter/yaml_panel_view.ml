@@ -5424,86 +5424,55 @@ let path_b_enabled () = Sys.getenv_opt "JAS_PATH_B" = Some "1"
 let path_b_excluded =
   [ "color_panel_content"; "gradient_panel_content"; "layers_panel_content" ]
 
-(* Node types that are layout-only (no box of their own). Mirrors the
-   Rust / Flask / Swift container-type set; note it includes [grid]. *)
-let path_b_container_types =
-  [ "container"; "row"; "col"; "grid"; "panel" ]
-
 (* Canonical content width handed to the layout pass — the 228 used by
    the Rust / Swift previews (dock width 240 minus the 12px scrollbar
    reserve). *)
 let path_b_avail_w = 228
 
-(* Resolve a node by its panel-relative tree path (root content node is
-   path []), walking [children] arrays by index. None when any index is
-   out of range. Mirrors Rust [node_at_path] / Flask [_node_at_path]. *)
-let path_b_node_at_path (content : Yojson.Safe.t) (node_path : int list)
-  : Yojson.Safe.t option =
-  let open Yojson.Safe.Util in
-  let rec walk node = function
-    | [] -> Some node
-    | i :: rest ->
-      (match node |> member "children" with
-       | `List kids when i >= 0 && i < List.length kids ->
-         walk (List.nth kids i) rest
-       | _ -> None)
-  in
-  walk content node_path
-
 (* Render a panel from the canonical Path B layout pass: each leaf widget
    is placed at its computed rect inside a single [GPack.fixed] of the
    computed panel height. [content] is the already-extracted panel content
-   root; [layout_panel] reads only the [content] field of the node it is
-   handed, so it is wrapped back into a panel node before the call. *)
+   root; [render_plan] reads only the [content] field of the node it is
+   handed, so it is wrapped back into a panel node before the call.
+
+   The plan supplies, per leaf, the rect, the node to render, and the
+   (child) scope [ctx] to render it with — so a foreach-expanded row is
+   rendered against its own per-row scope. This replaces the older
+   layout_panel + node_at_path walk, which could not resolve foreach
+   paths (those rows come from the [do] template, not [children]). *)
 let render_panel_absolute ~packing ~ctx (content : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   let panel_node = `Assoc [ ("content", content) ] in
   (* Pass the live eval scope [ctx] so foreach lists + text bindings resolve to
      real data in the preview (avail_h 0 keeps the panel content-height). *)
-  let rects =
-    match Panel_layout.layout_panel panel_node path_b_avail_w 0 ctx with
-    | `List items -> items
-    | _ -> []
-  in
+  let plan = Panel_layout.render_plan panel_node path_b_avail_w 0 ctx in
   let panel_h =
-    match rects with
-    | first :: _ ->
-      first |> member "rect" |> member "h" |> to_int_option
-      |> Option.value ~default:0
-    | [] -> 0
+    plan |> member "height" |> to_int_option |> Option.value ~default:0
+  in
+  let leaves =
+    match plan |> member "leaves" with `List l -> l | _ -> []
   in
   let fixed = GPack.fixed ~packing () in
   fixed#misc#set_size_request ~width:path_b_avail_w ~height:panel_h ();
-  List.iter (fun item ->
-    let path =
-      match item |> member "path" with
-      | `List ps -> List.filter_map to_int_option ps
-      | _ -> []
-    in
-    match path_b_node_at_path content path with
-    | None -> ()
-    | Some node ->
-      let t =
-        node |> member "type" |> to_string_option |> Option.value ~default:""
-      in
-      if List.mem t path_b_container_types then ()  (* layout-only *)
-      else begin
-        let rect = item |> member "rect" in
-        let x = rect |> member "x" |> to_int_option |> Option.value ~default:0 in
-        let y = rect |> member "y" |> to_int_option |> Option.value ~default:0 in
-        let w = rect |> member "w" |> to_int_option |> Option.value ~default:0 in
-        let h = rect |> member "h" |> to_int_option |> Option.value ~default:0 in
-        (* Capture the placed leaf widget so its size can be pinned to the
-           computed rect — the same mechanism render_fill_stroke_widget
-           uses to place children into a GPack.fixed. *)
-        let placed = ref None in
-        render_element ~ctx node
-          ~packing:(fun widget -> placed := Some widget; fixed#put ~x ~y widget);
-        (match !placed with
-         | Some widget -> widget#misc#set_size_request ~width:w ~height:h ()
-         | None -> ())
-      end)
-    rects
+  List.iter (fun leaf ->
+    let node = leaf |> member "node" in
+    (* The per-row child scope to render this leaf with. *)
+    let leaf_ctx = leaf |> member "ctx" in
+    let rect = leaf |> member "rect" in
+    let x = rect |> member "x" |> to_int_option |> Option.value ~default:0 in
+    let y = rect |> member "y" |> to_int_option |> Option.value ~default:0 in
+    let w = rect |> member "w" |> to_int_option |> Option.value ~default:0 in
+    let h = rect |> member "h" |> to_int_option |> Option.value ~default:0 in
+    (* Capture the placed leaf widget so its size can be pinned to the
+       computed rect — the same mechanism render_fill_stroke_widget
+       uses to place children into a GPack.fixed. *)
+    let placed = ref None in
+    render_element ~ctx:leaf_ctx node
+      ~packing:(fun widget -> placed := Some widget; fixed#put ~x ~y widget);
+    (match !placed with
+     | Some widget -> widget#misc#set_size_request ~width:w ~height:h ()
+     | None -> ()))
+    leaves
 
 (** Create a YAML-interpreted panel body in a GTK container.
     Returns unit. The panel content is rendered from the compiled

@@ -8172,55 +8172,31 @@ fn path_b_enabled() -> bool {
     }
 }
 
-/// Resolve a node by its panel-relative tree path (root = `[]`).
-fn node_at_path<'a>(content: &'a serde_json::Value, path: &[usize]) -> Option<&'a serde_json::Value> {
-    let mut node = content;
-    for &i in path {
-        node = node.get("children")?.as_array()?.get(i)?;
-    }
-    Some(node)
-}
-
 /// Render a panel from the canonical Path B layout pass: each leaf widget is
 /// placed in an absolutely-positioned box at its computed rect, inside a
 /// position:relative panel of the computed height. Containers contribute
 /// layout only (no box). Width is the canonical content width (dock 240 - 12).
 fn render_panel_absolute(
     panel_el: &serde_json::Value,
-    content: &serde_json::Value,
+    _content: &serde_json::Value,
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
 ) -> Element {
     const AVAIL_W: i64 = 228;
     // Path B preview: render from the shared pass with the live eval scope `ctx`
     // so foreach lists + text bindings resolve to real data. avail_h=0 keeps the
-    // panel content-height in the preview.
-    let rects =
-        crate::interpreter::panel_layout::layout_panel(panel_el, AVAIL_W, 0, ctx);
-    let arr = rects.as_array().cloned().unwrap_or_default();
-    let panel_h = arr
-        .first()
-        .and_then(|it| it.get("rect").and_then(|r| r.get("h")).and_then(|v| v.as_i64()))
-        .unwrap_or(0);
+    // panel content-height in the preview. `render_plan` carries each leaf's node
+    // AND its (child) scope, so foreach-expanded rows render with their per-row
+    // scope — a flat `node_at_path` over `children` cannot resolve a foreach row,
+    // whose node comes from the `do` template, not from `children[i]`.
+    let plan = crate::interpreter::panel_layout::render_plan(panel_el, AVAIL_W, 0, ctx);
+    let panel_h = plan.height;
 
     let mut leaves: Vec<Element> = Vec::new();
-    for item in &arr {
-        let path: Vec<usize> = item
-            .get("path")
-            .and_then(|p| p.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_i64()).map(|n| n as usize).collect())
-            .unwrap_or_default();
-        let Some(node) = node_at_path(content, &path) else { continue };
-        let t = node.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if matches!(t, "container" | "row" | "col" | "grid" | "panel") {
-            continue; // containers are layout-only
-        }
-        let r = item.get("rect").unwrap();
-        let x = r.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
-        let y = r.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-        let w = r.get("w").and_then(|v| v.as_i64()).unwrap_or(0);
-        let h = r.get("h").and_then(|v| v.as_i64()).unwrap_or(0);
-        let inner = render_el(node, ctx, rctx);
+    for leaf in &plan.leaves {
+        let (x, y, w, h) = (leaf.x, leaf.y, leaf.w, leaf.h);
+        // Render the leaf node with ITS scope (the child/per-row ctx).
+        let inner = render_el(&leaf.node, &leaf.ctx, rctx);
         let st = format!(
             "position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;overflow:hidden;"
         );

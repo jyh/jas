@@ -34,13 +34,50 @@ public enum PanelLayout {
     ]
 
     /// An intermediate item with coords RELATIVE to its node's origin.
+    ///
+    /// `node` is the YAML node that produced this item (the container root
+    /// item carries its container node; a leaf item carries the leaf node;
+    /// `foreach` expansions carry their per-row template node). `ctx` is the
+    /// data scope the node should be rendered with — for a `foreach`-expanded
+    /// row this is the per-row child scope (the loop var bound), which is why
+    /// the render swap can render rows that `node_at_path` over `children`
+    /// could never resolve. `layoutPanel` ignores both fields (it projects
+    /// rects only, so its output stays byte-identical); `renderPlan` consumes
+    /// them. One traversal, two projections.
     private struct MItem {
         var path: [Int]
         var x: Int
         var y: Int
         var w: Int
         var h: Int
+        var node: [String: Any]
+        var ctx: [String: Any]
     }
+
+    /// One renderable leaf produced by ``renderPlan``: the node to render, the
+    /// (child) scope to render it with, and its absolute rect.
+    public struct RenderLeaf {
+        public let x: Int
+        public let y: Int
+        public let w: Int
+        public let h: Int
+        public let node: [String: Any]
+        public let ctx: [String: Any]
+    }
+
+    /// The render-side projection of the layout pass: the canonical panel
+    /// content height plus one leaf per renderable widget.
+    public struct RenderPlanResult {
+        public let height: Int
+        public let leaves: [RenderLeaf]
+    }
+
+    /// Layout-only node types: they position their children but draw no widget
+    /// of their own in the absolute render (their children are the rendered
+    /// leaves). Omitted from ``renderPlan``'s leaves.
+    private static let layoutContainerTypes: Set<String> = [
+        "container", "row", "col", "grid", "panel", "disclosure",
+    ]
 
     /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into
     /// an array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
@@ -61,6 +98,32 @@ public enum PanelLayout {
                 "rect": ["x": it.x, "y": it.y, "w": it.w, "h": it.h],
             ]
         }
+    }
+
+    /// Render-side projection of the same layout pass. Returns the canonical
+    /// panel content height (the root item's height, incl. padding) plus one
+    /// leaf per renderable widget — each carrying the rect, the node to render,
+    /// and the (child) scope `ctx` to render it with (so a `foreach`-expanded
+    /// leaf carries its per-row scope). Layout-only nodes
+    /// (container / row / col / grid / panel / disclosure) are omitted.
+    ///
+    /// The cross-app byte-gate consumes ``layoutPanel`` (rects only); the
+    /// render swaps consume this. One traversal, two projections. Mirrors
+    /// `panel_layout.py`'s `render_plan` (PATH_B_DESIGN.md Appendix B).
+    public static func renderPlan(_ panelNode: [String: Any], availW: Int,
+                                  availH: Int = 0, ctx: [String: Any] = [:]) -> RenderPlanResult {
+        guard let root = panelNode["content"] as? [String: Any] else {
+            return RenderPlanResult(height: 0, leaves: [])
+        }
+        let (_, _, items) = measure(root, path: [], availW: availW, availH: availH, ctx: ctx)
+        let height = items.first?.h ?? 0
+        var out: [RenderLeaf] = []
+        for it in items {
+            if layoutContainerTypes.contains(nodeType(it.node)) { continue }
+            out.append(RenderLeaf(x: it.x, y: it.y, w: it.w, h: it.h,
+                                  node: it.node, ctx: it.ctx))
+        }
+        return RenderPlanResult(height: height, leaves: out)
     }
 
     // MARK: - value readers
@@ -304,7 +367,7 @@ public enum PanelLayout {
             let expH = resolveDim(st["height"], 0)
             let w = availW
             let h = expH ?? (contentH + pt + pb)
-            var items = [MItem(path: path, x: 0, y: 0, w: w, h: h)]
+            var items = [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)]
             for var it in chItems {
                 it.x += pl
                 it.y += pt
@@ -313,7 +376,7 @@ public enum PanelLayout {
             return (w, h, items)
         } else {
             let (w, h, _) = leafSize(n, availW: availW, ctx: ctx)
-            return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h)])
+            return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)])
         }
     }
 
