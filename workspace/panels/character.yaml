@@ -532,7 +532,7 @@ content:
           children:
             - type: text
               content: "Snap to Glyph"
-              style: { font_size: 10 }
+              style: { font_size: 10, color: "{{theme.colors.text}}" }
         - type: container
           col: 2
           style: { alignment: center }

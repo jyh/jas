@@ -289,7 +289,7 @@ content:
       children:
         - type: text
           content: "Weight"
-          style: { width: 40, font_size: 10 }
+          style: { width: 40, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_weight
           type: length_input
           unit: pt
@@ -312,7 +312,7 @@ content:
       children:
         - type: text
           content: "Cap"
-          style: { width: 40, font_size: 10 }
+          style: { width: 40, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_cap_butt
           type: icon_button
           icon: cap_butt
@@ -360,7 +360,7 @@ content:
       children:
         - type: text
           content: "Corner"
-          style: { width: 40, font_size: 10 }
+          style: { width: 40, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_join_miter
           type: icon_button
           icon: join_miter
@@ -402,7 +402,7 @@ content:
                 - set: { stroke_join: '"bevel"' }
         - type: text
           content: "Limit"
-          style: { font_size: 10 }
+          style: { font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_miter_limit
           type: number_input
           summary: "Miter limit"
@@ -424,7 +424,7 @@ content:
       children:
         - type: text
           content: "Align Stroke"
-          style: { width: 64, font_size: 10 }
+          style: { width: 64, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_align_stroke_center
           type: icon_button
           icon: align_stroke_center
@@ -546,7 +546,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
         # Pair 1: gap
         - type: container
           layout: column
@@ -564,7 +564,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
         # Pair 2: dash
         - type: container
           layout: column
@@ -583,7 +583,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
         # Pair 2: gap
         - type: container
           layout: column
@@ -602,7 +602,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
         # Pair 3: dash
         - type: container
           layout: column
@@ -621,7 +621,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "dash"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
         # Pair 3: gap
         - type: container
           layout: column
@@ -640,7 +640,7 @@ content:
                 disabled: "not panel.dashed or state.stroke_brush != null"
             - type: text
               content: "gap"
-              style: { font_size: 9, text_align: center }
+              style: { font_size: 9, text_align: center, color: "{{theme.colors.text}}" }
 
     # ── Arrowheads ─────────────────────────────────────────
     - type: container
@@ -649,7 +649,7 @@ content:
       children:
         - type: text
           content: "Arrowheads"
-          style: { width: 64, font_size: 10 }
+          style: { width: 64, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_start_arrowhead
           type: select
           summary: "Start arrowhead"
@@ -723,7 +723,7 @@ content:
       children:
         - type: text
           content: "Scale"
-          style: { width: 64, font_size: 10 }
+          style: { width: 64, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_start_arrowhead_scale
           type: combo_box
           summary: "Start arrowhead scale"
@@ -787,7 +787,7 @@ content:
       children:
         - type: text
           content: "Align"
-          style: { width: 64, font_size: 10 }
+          style: { width: 64, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_arrow_tip_at_end
           type: icon_button
           icon: arrow_tip_at_end
@@ -826,7 +826,7 @@ content:
       children:
         - type: text
           content: "Profile"
-          style: { width: 64, font_size: 10 }
+          style: { width: 64, font_size: 10, color: "{{theme.colors.text}}" }
         - id: stk_profile
           type: select
           summary: "Stroke profile"

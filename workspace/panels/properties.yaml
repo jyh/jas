@@ -127,7 +127,7 @@ content:
       children:
         - type: text
           content: "X"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_x
           type: length_input
           unit: pt
@@ -139,7 +139,7 @@ content:
             value: "panel.prop_x"
         - type: text
           content: "Y"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_y
           type: length_input
           unit: pt
@@ -160,7 +160,7 @@ content:
       children:
         - type: text
           content: "W"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_w
           type: length_input
           unit: pt
@@ -172,7 +172,7 @@ content:
             value: "panel.prop_w"
         - type: text
           content: "H"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_h
           type: length_input
           unit: pt
@@ -211,7 +211,7 @@ content:
       children:
         - type: text
           content: "R"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_rotation_input
           type: number_input
           suffix: "°"
@@ -233,7 +233,7 @@ content:
       children:
         - type: text
           content: "Sh"
-          style: { width: 14, font_size: 10 }
+          style: { width: 14, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_shear_input
           type: number_input
           suffix: "°"
@@ -251,7 +251,7 @@ content:
       children:
         - type: text
           content: "Opacity"
-          style: { width: 44, font_size: 10 }
+          style: { width: 44, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_opacity_input
           type: number_input
           min: 0
@@ -271,7 +271,7 @@ content:
       children:
         - type: text
           content: "Blend"
-          style: { width: 44, font_size: 10 }
+          style: { width: 44, font_size: 10, color: "{{theme.colors.text}}" }
         - id: prop_blend_select
           type: select
           summary: "Selection blend mode"

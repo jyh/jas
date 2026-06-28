@@ -12948,7 +12948,8 @@
                     "type": "text",
                     "content": "Snap to Glyph",
                     "style": {
-                      "font_size": 10
+                      "font_size": 10,
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -17832,7 +17833,8 @@
                 "content": "X",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -17854,7 +17856,8 @@
                 "content": "Y",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -17886,7 +17889,8 @@
                 "content": "W",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -17908,7 +17912,8 @@
                 "content": "H",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -17967,7 +17972,8 @@
                 "content": "R",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -17999,7 +18005,8 @@
                 "content": "Sh",
                 "style": {
                   "width": 14,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18031,7 +18038,8 @@
                 "content": "Opacity",
                 "style": {
                   "width": 44,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18065,7 +18073,8 @@
                 "content": "Blend",
                 "style": {
                   "width": 44,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18430,7 +18439,8 @@
                 "content": "Weight",
                 "style": {
                   "width": 40,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18463,7 +18473,8 @@
                 "content": "Cap",
                 "style": {
                   "width": 40,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18574,7 +18585,8 @@
                 "content": "Corner",
                 "style": {
                   "width": 40,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18674,7 +18686,8 @@
                 "type": "text",
                 "content": "Limit",
                 "style": {
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18707,7 +18720,8 @@
                 "content": "Align Stroke",
                 "style": {
                   "width": 64,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -18942,7 +18956,8 @@
                     "content": "dash",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -18976,7 +18991,8 @@
                     "content": "gap",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -19011,7 +19027,8 @@
                     "content": "dash",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -19046,7 +19063,8 @@
                     "content": "gap",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -19081,7 +19099,8 @@
                     "content": "dash",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -19116,7 +19135,8 @@
                     "content": "gap",
                     "style": {
                       "font_size": 9,
-                      "text_align": "center"
+                      "text_align": "center",
+                      "color": "{{theme.colors.text}}"
                     }
                   }
                 ]
@@ -19136,7 +19156,8 @@
                 "content": "Arrowheads",
                 "style": {
                   "width": 64,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -19343,7 +19364,8 @@
                 "content": "Scale",
                 "style": {
                   "width": 64,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -19478,7 +19500,8 @@
                 "content": "Align",
                 "style": {
                   "width": 64,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
@@ -19558,7 +19581,8 @@
                 "content": "Profile",
                 "style": {
                   "width": 64,
-                  "font_size": 10
+                  "font_size": 10,
+                  "color": "{{theme.colors.text}}"
                 }
               },
               {
