@@ -5406,6 +5406,103 @@ and render_repeat ~packing ~ctx el =
    each render function) and also parses numeric strings — the former
    local definition here was shadowed everywhere and is gone. *)
 
+(* ── Path B: render a panel from the shared canonical layout pass ──
+   Opt-in via JAS_PATH_B=1. Mirrors the Rust render_panel_absolute,
+   Flask _render_panel_absolute, and Swift pathBLayout. Purely additive
+   and flag-gated (default OFF), so it is zero-risk to the shipped flex
+   render path. The layout itself is the byte-gated
+   [Panel_layout.layout_panel]; this code only projects its rects onto a
+   [GPack.fixed], placing each leaf widget (rendered by the same
+   single-node [render_element] the flex path uses) at its computed rect.
+   Container nodes contribute layout only and get no widget of their own.
+   The panels whose composite / data-driven widgets the v1 pass cannot
+   size yet (color / gradient / layers) stay on the flex path. *)
+let path_b_enabled () = Sys.getenv_opt "JAS_PATH_B" = Some "1"
+
+(* Panel content ids excluded from the Path B preview — matches the
+   Rust / Flask / Swift unsupported set. *)
+let path_b_excluded =
+  [ "color_panel_content"; "gradient_panel_content"; "layers_panel_content" ]
+
+(* Node types that are layout-only (no box of their own). Mirrors the
+   Rust / Flask / Swift container-type set; note it includes [grid]. *)
+let path_b_container_types =
+  [ "container"; "row"; "col"; "grid"; "panel" ]
+
+(* Canonical content width handed to the layout pass — the 228 used by
+   the Rust / Swift previews (dock width 240 minus the 12px scrollbar
+   reserve). *)
+let path_b_avail_w = 228
+
+(* Resolve a node by its panel-relative tree path (root content node is
+   path []), walking [children] arrays by index. None when any index is
+   out of range. Mirrors Rust [node_at_path] / Flask [_node_at_path]. *)
+let path_b_node_at_path (content : Yojson.Safe.t) (node_path : int list)
+  : Yojson.Safe.t option =
+  let open Yojson.Safe.Util in
+  let rec walk node = function
+    | [] -> Some node
+    | i :: rest ->
+      (match node |> member "children" with
+       | `List kids when i >= 0 && i < List.length kids ->
+         walk (List.nth kids i) rest
+       | _ -> None)
+  in
+  walk content node_path
+
+(* Render a panel from the canonical Path B layout pass: each leaf widget
+   is placed at its computed rect inside a single [GPack.fixed] of the
+   computed panel height. [content] is the already-extracted panel content
+   root; [layout_panel] reads only the [content] field of the node it is
+   handed, so it is wrapped back into a panel node before the call. *)
+let render_panel_absolute ~packing ~ctx (content : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let panel_node = `Assoc [ ("content", content) ] in
+  let rects =
+    match Panel_layout.layout_panel panel_node path_b_avail_w with
+    | `List items -> items
+    | _ -> []
+  in
+  let panel_h =
+    match rects with
+    | first :: _ ->
+      first |> member "rect" |> member "h" |> to_int_option
+      |> Option.value ~default:0
+    | [] -> 0
+  in
+  let fixed = GPack.fixed ~packing () in
+  fixed#misc#set_size_request ~width:path_b_avail_w ~height:panel_h ();
+  List.iter (fun item ->
+    let path =
+      match item |> member "path" with
+      | `List ps -> List.filter_map to_int_option ps
+      | _ -> []
+    in
+    match path_b_node_at_path content path with
+    | None -> ()
+    | Some node ->
+      let t =
+        node |> member "type" |> to_string_option |> Option.value ~default:""
+      in
+      if List.mem t path_b_container_types then ()  (* layout-only *)
+      else begin
+        let rect = item |> member "rect" in
+        let x = rect |> member "x" |> to_int_option |> Option.value ~default:0 in
+        let y = rect |> member "y" |> to_int_option |> Option.value ~default:0 in
+        let w = rect |> member "w" |> to_int_option |> Option.value ~default:0 in
+        let h = rect |> member "h" |> to_int_option |> Option.value ~default:0 in
+        (* Capture the placed leaf widget so its size can be pinned to the
+           computed rect — the same mechanism render_fill_stroke_widget
+           uses to place children into a GPack.fixed. *)
+        let placed = ref None in
+        render_element ~ctx node
+          ~packing:(fun widget -> placed := Some widget; fixed#put ~x ~y widget);
+        (match !placed with
+         | Some widget -> widget#misc#set_size_request ~width:w ~height:h ()
+         | None -> ())
+      end)
+    rects
+
 (** Create a YAML-interpreted panel body in a GTK container.
     Returns unit. The panel content is rendered from the compiled
     workspace JSON. *)
@@ -5671,7 +5768,15 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
          sync ();
          _paragraph_panel_sync := Some sync
        end);
-      render_element ~packing ~ctx content
+      (* Path B preview (JAS_PATH_B=1): render this panel from the shared
+         canonical layout pass (absolute rects) instead of the framework
+         flex path, restricted to the panels the cross-app byte-gate
+         covers. Additive and flag-gated, so it is zero-risk to the
+         shipped panels. Mirrors the Rust / Flask / Swift branch. *)
+      if path_b_enabled () && not (List.mem content_id path_b_excluded) then
+        render_panel_absolute ~packing ~ctx content
+      else
+        render_element ~packing ~ctx content
 
 (** Toolbar STEP A: render the bundle's [layout → toolbar_pane → content]
     (the tool_grid + fill/stroke widget) through the generic element
