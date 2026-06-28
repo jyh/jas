@@ -455,15 +455,20 @@ public enum PanelLayout {
         return (items, !lines.isEmpty ? lineY - gap : 0)
     }
 
-    /// Expand a foreach container's `do` template once per item.
+    /// Expand a foreach container's `do` template once per item, laid out per
+    /// the container's `layout`: `column` (vertical stack), `row` (horizontal,
+    /// single line), or `wrap` (horizontal, wrapping at `innerW`).
     ///
-    /// v1: column stacking (the layout every foreach panel uses for its list).
     /// Each item is bound as `foreach.as` (plus `_index`) in a child scope.
+    /// Row/wrap items are measured at intrinsic width; `itemW` is the subtree's
+    /// actual extent (so a container item gets its content width, not the
+    /// unbounded sentinel), and the item's own rect width is corrected to that.
     private static func foreach(_ node: [String: Any], foreachSpec spec: [String: Any],
                                path: [Int], innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
         let src = (spec["source"] as? String) ?? ""
         let varName = (spec["as"] as? String) ?? "item"
         let template = (node["do"] as? [String: Any]) ?? [:]
+        let lay = (node["layout"] as? String) ?? "column"
 
         var rawItems: [Any] = []
         if !src.isEmpty {
@@ -473,9 +478,9 @@ public enum PanelLayout {
             }
         }
 
-        var out: [MItem] = []
-        var cy = 0
-        var n = 0
+        // Measure every expansion (column fills innerW; row/wrap are intrinsic).
+        let avail = lay == "column" ? innerW : -1
+        var measured: [(w: Int, h: Int, items: [MItem])] = []
         for (i, item) in rawItems.enumerated() {
             var itemData: [String: Any]
             if let d = item as? [String: Any] {
@@ -486,16 +491,65 @@ public enum PanelLayout {
             itemData["_index"] = i
             var childCtx = ctx
             childCtx[varName] = itemData
-            let (_, ch, cit) = measure(template, path: path + [i], availW: innerW,
-                                       availH: 0, ctx: childCtx)
-            var shifted = cit
-            for j in shifted.indices {
-                shifted[j].y += cy
+            var (w, h, cit) = measure(template, path: path + [i], availW: avail,
+                                      availH: 0, ctx: childCtx)
+            if lay != "column" {
+                let iw = cit.map { $0.x + $0.w }.max() ?? 0
+                if !cit.isEmpty {
+                    cit[0].w = iw
+                }
+                w = iw
             }
-            out.append(contentsOf: shifted)
-            cy += ch + gap
-            n += 1
+            measured.append((w, h, cit))
         }
-        return (out, n > 0 ? cy - gap : 0)
+
+        var out: [MItem] = []
+        if lay == "row" {
+            let rowH = measured.map { $0.h }.max() ?? 0
+            var cx = 0
+            for m in measured {
+                let dy = (rowH - m.h) / 2
+                var cit = m.items
+                for j in cit.indices {
+                    cit[j].x += cx
+                    cit[j].y += dy
+                }
+                out.append(contentsOf: cit)
+                cx += m.w + gap
+            }
+            return (out, rowH)
+        }
+        if lay == "wrap" {
+            var cx = 0
+            var lineY = 0
+            var lineH = 0
+            for m in measured {
+                if cx > 0 && cx + m.w > innerW {
+                    lineY += lineH + gap
+                    cx = 0
+                    lineH = 0
+                }
+                var cit = m.items
+                for j in cit.indices {
+                    cit[j].x += cx
+                    cit[j].y += lineY
+                }
+                out.append(contentsOf: cit)
+                cx += m.w + gap
+                lineH = max(lineH, m.h)
+            }
+            return (out, measured.isEmpty ? 0 : lineY + lineH)
+        }
+        // column
+        var cy = 0
+        for m in measured {
+            var cit = m.items
+            for j in cit.indices {
+                cit[j].y += cy
+            }
+            out.append(contentsOf: cit)
+            cy += m.h + gap
+        }
+        return (out, measured.isEmpty ? 0 : cy - gap)
     }
 }
