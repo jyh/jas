@@ -3026,5 +3026,52 @@ let () =
             assert false
           end
         ) tests);
+      (* Panel widget-layout (Path B) algorithm test vectors. Mirrors the Rust
+         algorithm_panel_layout_vectors / Python consumer: load the bundle, look
+         up each panel node by id, run [layout_panel] and structurally compare
+         the rect array to the golden (normalized so key order is irrelevant). *)
+      Alcotest.test_case "algorithm_panel_layout" `Quick (fun () ->
+        (* Recursively sort object keys so equality is order-independent. *)
+        let rec normalize (v : Yojson.Safe.t) : Yojson.Safe.t =
+          match v with
+          | `Assoc fields ->
+            `Assoc
+              (List.sort (fun (a, _) (b, _) -> compare a b)
+                 (List.map (fun (k, x) -> (k, normalize x)) fields))
+          | `List xs -> `List (List.map normalize xs)
+          | other -> other
+        in
+        let json_str = read_fixture "algorithms/panel_layout.json" in
+        let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+        let bundle_path =
+          Filename.concat fixtures_dir "../workspace/workspace.json" in
+        let bundle =
+          Yojson.Safe.from_string
+            (let ic = open_in bundle_path in
+             let n = in_channel_length ic in
+             let s = Bytes.create n in
+             really_input ic s 0 n;
+             close_in ic;
+             Bytes.to_string s) in
+        let panels = Yojson.Safe.Util.member "panels" bundle in
+        List.iter (fun tc ->
+          let open Yojson.Safe.Util in
+          let name = tc |> member "name" |> to_string in
+          let func = tc |> member "function" |> to_string in
+          if func <> "layout_panel" then
+            failwith (Printf.sprintf "Unknown function: %s" func);
+          let panel_id = tc |> member "args" |> member "panel" |> to_string in
+          let avail_w = tc |> member "args" |> member "avail_w" |> to_int in
+          let expected = tc |> member "expected" in
+          let panel_node = member panel_id panels in
+          let actual = Jas.Panel_layout.layout_panel panel_node avail_w in
+          if normalize actual <> normalize expected then begin
+            Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize expected));
+            Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize actual));
+            assert false
+          end
+        ) tests);
     ];
   ]

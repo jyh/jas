@@ -1630,6 +1630,51 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel widget-layout (Path B) algorithm vectors
+
+@Test func testAlgorithmPanelLayout() throws {
+    let json = readFixture("algorithms/panel_layout.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    // Source of truth is the compiled bundle (workspace/workspace.json), which
+    // sits beside test_fixtures at the repo root. Mirror the pane test's
+    // fixture-dir resolution.
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "layout_panel", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let panelId = args["panel"] as! String
+        let availW = (args["avail_w"] as! NSNumber).intValue
+        let expected = tc["expected"] as! [[String: Any]]
+
+        let panel = panels[panelId] as! [String: Any]
+        let actual = PanelLayout.layoutPanel(panel, availW: availW)
+
+        // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
+        // with sorted keys and compare bytes. All values are integers.
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Panel layout '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+    }
+}
+
 // MARK: - Hit test algorithm vectors
 
 @Test func algorithmHitTestVectors() throws {

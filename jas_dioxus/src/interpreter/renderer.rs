@@ -8131,9 +8131,86 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         });
         let mut child = rctx.clone();
         child.panel_kind = panel_kind;
+        // Path B preview: render this panel from the shared canonical layout
+        // pass (absolute rects) instead of framework flex. Opt-in via the
+        // JAS_PATH_B=1 env var and restricted to the panels the cross-app
+        // byte-gate covers, so it is zero-risk to shipped panels. This is the
+        // Phase-1 "render each app from the pass behind a flag" mechanism from
+        // PATH_B_DESIGN.md; broadens as the corpus broadens.
+        let pid = el.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if path_b_enabled() && matches!(pid, "symbols_panel_content" | "opacity_panel_content") {
+            return render_panel_absolute(el, content, ctx, &child);
+        }
         render_el(content, ctx, &child)
     } else {
         render_placeholder(el, ctx, rctx)
+    }
+}
+
+/// Whether to render panels from the shared Path B layout pass (preview).
+fn path_b_enabled() -> bool {
+    std::env::var("JAS_PATH_B").map(|v| v == "1").unwrap_or(false)
+}
+
+/// Resolve a node by its panel-relative tree path (root = `[]`).
+fn node_at_path<'a>(content: &'a serde_json::Value, path: &[usize]) -> Option<&'a serde_json::Value> {
+    let mut node = content;
+    for &i in path {
+        node = node.get("children")?.as_array()?.get(i)?;
+    }
+    Some(node)
+}
+
+/// Render a panel from the canonical Path B layout pass: each leaf widget is
+/// placed in an absolutely-positioned box at its computed rect, inside a
+/// position:relative panel of the computed height. Containers contribute
+/// layout only (no box). Width is the canonical content width (dock 240 - 12).
+fn render_panel_absolute(
+    panel_el: &serde_json::Value,
+    content: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Element {
+    const AVAIL_W: i64 = 228;
+    let rects = crate::interpreter::panel_layout::layout_panel(panel_el, AVAIL_W);
+    let arr = rects.as_array().cloned().unwrap_or_default();
+    let panel_h = arr
+        .first()
+        .and_then(|it| it.get("rect").and_then(|r| r.get("h")).and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+
+    let mut leaves: Vec<Element> = Vec::new();
+    for item in &arr {
+        let path: Vec<usize> = item
+            .get("path")
+            .and_then(|p| p.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_i64()).map(|n| n as usize).collect())
+            .unwrap_or_default();
+        let Some(node) = node_at_path(content, &path) else { continue };
+        let t = node.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if matches!(t, "container" | "row" | "col" | "grid" | "panel") {
+            continue; // containers are layout-only
+        }
+        let r = item.get("rect").unwrap();
+        let x = r.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
+        let y = r.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
+        let w = r.get("w").and_then(|v| v.as_i64()).unwrap_or(0);
+        let h = r.get("h").and_then(|v| v.as_i64()).unwrap_or(0);
+        let inner = render_el(node, ctx, rctx);
+        let st = format!(
+            "position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;overflow:hidden;"
+        );
+        leaves.push(rsx! { div { style: "{st}", {inner} } });
+    }
+
+    let outer = format!("position:relative;width:{AVAIL_W}px;height:{panel_h}px;color:var(--jas-text,#ccc);");
+    rsx! {
+        div {
+            style: "{outer}",
+            for leaf in leaves {
+                {leaf}
+            }
+        }
     }
 }
 

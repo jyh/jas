@@ -4085,6 +4085,35 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // Panel widget-layout (Path B) algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_panel_layout_vectors() {
+        use crate::interpreter::panel_layout::layout_panel;
+
+        let json_str = read_fixture("algorithms/panel_layout.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panels = &bundle["panels"];
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "layout_panel", "Unknown function: {}", func);
+            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            let avail_w = tc["args"]["avail_w"].as_i64().unwrap();
+            let expected = &tc["expected"];
+
+            let actual = layout_panel(&panels[panel_id], avail_w);
+            assert_eq!(&actual, expected, "Panel layout '{}' mismatch", name);
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------
 
