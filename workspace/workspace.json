@@ -20756,6 +20756,18 @@
         "cursor_y": {
           "default": 0.0
         },
+        "doc_press_x": {
+          "default": 0.0
+        },
+        "doc_press_y": {
+          "default": 0.0
+        },
+        "doc_cursor_x": {
+          "default": 0.0
+        },
+        "doc_cursor_y": {
+          "default": 0.0
+        },
         "alt_at_press": {
           "default": false
         },
@@ -20812,8 +20824,8 @@
         "on_mousedown": [
           {
             "doc.artboard.probe_hit": {
-              "x": "event.x",
-              "y": "event.y",
+              "x": "event.doc_x",
+              "y": "event.doc_y",
               "shift": "event.modifiers.shift",
               "cmd": "event.modifiers.cmd",
               "alt": "event.modifiers.alt"
@@ -20837,6 +20849,26 @@
           {
             "set": {
               "tool.artboard.cursor_y": "event.y"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.doc_press_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.doc_press_y": "event.doc_y"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.doc_cursor_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.doc_cursor_y": "event.doc_y"
             }
           },
           {
@@ -20883,6 +20915,16 @@
           },
           {
             "set": {
+              "tool.artboard.doc_cursor_x": "event.doc_x"
+            }
+          },
+          {
+            "set": {
+              "tool.artboard.doc_cursor_y": "event.doc_y"
+            }
+          },
+          {
+            "set": {
               "tool.artboard.alt_held": "event.modifiers.alt"
             }
           },
@@ -20893,8 +20935,8 @@
           },
           {
             "doc.artboard.probe_hover": {
-              "x": "event.x",
-              "y": "event.y"
+              "x": "event.doc_x",
+              "y": "event.doc_y"
             }
           },
           {
@@ -20951,10 +20993,10 @@
             "then": [
               {
                 "doc.artboard.move_apply": {
-                  "press_x": "tool.artboard.press_x",
-                  "press_y": "tool.artboard.press_y",
-                  "cursor_x": "event.x",
-                  "cursor_y": "event.y",
+                  "press_x": "tool.artboard.doc_press_x",
+                  "press_y": "tool.artboard.doc_press_y",
+                  "cursor_x": "event.doc_x",
+                  "cursor_y": "event.doc_y",
                   "shift_held": "event.modifiers.shift"
                 }
               }
@@ -20966,10 +21008,10 @@
               {
                 "doc.artboard.resize_apply": {
                   "handle_pos": "tool.artboard.hit_handle_pos",
-                  "press_x": "tool.artboard.press_x",
-                  "press_y": "tool.artboard.press_y",
-                  "cursor_x": "event.x",
-                  "cursor_y": "event.y",
+                  "press_x": "tool.artboard.doc_press_x",
+                  "press_y": "tool.artboard.doc_press_y",
+                  "cursor_x": "event.doc_x",
+                  "cursor_y": "event.doc_y",
                   "shift_held": "event.modifiers.shift",
                   "alt_held": "event.modifiers.alt"
                 }
@@ -20981,10 +21023,10 @@
             "then": [
               {
                 "doc.artboard.duplicate_apply": {
-                  "press_x": "tool.artboard.press_x",
-                  "press_y": "tool.artboard.press_y",
-                  "cursor_x": "event.x",
-                  "cursor_y": "event.y"
+                  "press_x": "tool.artboard.doc_press_x",
+                  "press_y": "tool.artboard.doc_press_y",
+                  "cursor_x": "event.doc_x",
+                  "cursor_y": "event.doc_y"
                 }
               }
             ]
@@ -20996,10 +21038,10 @@
             "then": [
               {
                 "doc.artboard.create_commit": {
-                  "x1": "tool.artboard.press_x",
-                  "y1": "tool.artboard.press_y",
-                  "x2": "event.x",
-                  "y2": "event.y"
+                  "x1": "tool.artboard.doc_press_x",
+                  "y1": "tool.artboard.doc_press_y",
+                  "x2": "event.doc_x",
+                  "y2": "event.doc_y"
                 }
               }
             ]
@@ -21031,10 +21073,10 @@
             "then": [
               {
                 "doc.artboard.duplicate_commit": {
-                  "press_x": "tool.artboard.press_x",
-                  "press_y": "tool.artboard.press_y",
-                  "cursor_x": "event.x",
-                  "cursor_y": "event.y"
+                  "press_x": "tool.artboard.doc_press_x",
+                  "press_y": "tool.artboard.doc_press_y",
+                  "cursor_x": "event.doc_x",
+                  "cursor_y": "event.doc_y"
                 }
               },
               {
@@ -21056,8 +21098,8 @@
         "on_dblclick": [
           {
             "doc.artboard.probe_hit": {
-              "x": "event.x",
-              "y": "event.y",
+              "x": "event.doc_x",
+              "y": "event.doc_y",
               "shift": "false",
               "cmd": "false",
               "alt": "false"

@@ -83,7 +83,16 @@ def _model_with_one_artboard() -> Model:
     a = Artboard(id="A", name="Artboard A", x=0.0, y=0.0,
                  width=200.0, height=200.0)
     layer = Layer(name="L", children=())
-    return Model(document=Document(layers=(layer,), artboards=(a,)))
+    m = Model(document=Document(layers=(layer,), artboards=(a,)))
+    # Force the identity view (offset 0, zoom 1) the docstring assumes, so
+    # gesture canvas coords == doc coords. The Model constructor auto-centers
+    # the current artboard (non-zero view_offset); now that the artboard tool
+    # correctly converts canvas->doc via event.doc_x, that centering offset
+    # would otherwise shift every created/moved/duplicated artboard.
+    m.view_offset_x = 0.0
+    m.view_offset_y = 0.0
+    m.zoom_level = 1.0
+    return m
 
 
 def _artboards(model: Model):
