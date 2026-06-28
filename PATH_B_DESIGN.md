@@ -380,6 +380,52 @@ renderer does not draw `foreach` expansions yet. Still genuinely deferred: 2-D `
 `max_width`/`max_height` clamps, `visible_when` eval, vertical flex-grow, and `foreach`/tree
 data expansion (composite box heights above are provisional pending a later ratification).
 
+---
+
+## Appendix B — `foreach` data-expansion + vertical flex (v2 contract)
+
+The path to **default-on**: lay out the data-driven lists (7 panels use `foreach`)
+and let them fill the dock. This couples the layout pass to the **expression
+evaluator + a data scope** — each language uses *its own* expr evaluator, whose
+agreement is already guaranteed by the expression conformance corpus, so the
+byte-gate holds.
+
+### B.1 Signature
+
+```
+layout_panel(panel_node, avail_w, avail_h=0, ctx={}) -> [...]
+```
+
+- `ctx` is the data scope (`state` / `panel` / `data` / `active_document`
+  namespaces) — a plain dict, the same shape the expr evaluator consumes. The
+  corpus carries `ctx` per case (a deterministic data fixture).
+- `avail_h` drives vertical flex; `0` = content-height (no vertical flex).
+
+### B.2 Text bindings
+
+A `text` `content` (and `button`/`checkbox`/`toggle` `label`) is resolved with
+`evaluate_text(value, ctx)` before measuring: `width = len(resolved) * 10`. A
+literal (no `{{}}`) passes through unchanged, so non-bound panels are
+byte-identical; a bound `"{{sym.name}}"` is measured at its resolved value.
+
+### B.3 `foreach`
+
+A container with `foreach: {source, as}` + a `do` template expands:
+`items = evaluate(source, ctx)` (take `.value` if the result wraps one; non-list
+→ empty). For each item `i`: child scope `= ctx + { as: {…item, _index: i} }`;
+lay out `do` at path `[…foreach_path, i]`. **v1 stacks column-wise** (the layout
+every foreach list uses); row/wrap foreach is deferred. An empty/absent source →
+zero rows (the no-data state) — deterministic.
+
+### B.4 Container height + vertical flex
+
+A container's explicit `style.height` (via `resolve_dim`) overrides the
+content-derived height (so a `height: 24` row is exactly 24). A **column**
+distributes `avail_h − natural_height` to children by `flex` weight (integer
+floor + earliest-child remainder), bumping the flex child's rect height; a
+`spacer` gets an implicit `flex` weight of 1. This makes a `foreach` list
+(`flex: 1`) grow to fill and pins a trailing footer to the bottom.
+
 ### A.6 Deferred in v1 (documented, not silently dropped)
 
 Vertical `flex` grow (panels are content-height; a column's `flex:1` child takes
