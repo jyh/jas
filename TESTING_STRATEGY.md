@@ -213,8 +213,8 @@ options-destination not yet captured ·
 5 ◐ gesture corpus shipped; action corpus thin (1 action); modifier note re-scoped
 (see item) ·
 6 ✓ done ·
-7 ◐ Flask flex→absolute swap DONE behind `JAS_PATH_B=1` (13 panels; composite 3 stay flex);
-Swift/OCaml/Python render migrations pending ·
+7 ✓ Path B render: **all 5 apps** render panels from the shared pass behind `JAS_PATH_B=1`
+(13 panels; composite 3 stay flex) — Rust/Flask/Swift/OCaml/Python ·
 8 ✓ panel computed-geometry byte-gate **landed in all 4 native apps, all 16/16 panels**
 (Path B: `layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact, 534
 rects; composite widgets as fixed boxes; see PATH_B_DESIGN.md + PATH_B_BOXMODEL_REVIEW.md) —
