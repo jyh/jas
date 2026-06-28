@@ -553,34 +553,60 @@ let layout_panel (panel_node : Yojson.Safe.t) (avail_w : int) (avail_h : int)
 let layout_only_types =
   [ "container"; "row"; "col"; "grid"; "panel"; "disclosure" ]
 
+(* Key presence test over a Yojson object, mirroring Python [key in dict]: true
+   when the assoc carries [key] (regardless of its value), false for a missing
+   key or a non-object node. *)
+let has_key (key : string) (n : Yojson.Safe.t) : bool =
+  match n with `Assoc fields -> List.mem_assoc key fields | _ -> false
+
+(* A layout-only container still worth drawing in the absolute render because it
+   carries chrome: a static [style.border] / [style.background] / [style.bg], or
+   a [bind.background] (for example a selected-row highlight). Mirrors the Python
+   _has_chrome. Such containers are emitted into the render plan [chrome] list so
+   the swap can draw the container border / background BEHIND its leaves. *)
+let has_chrome (n : Yojson.Safe.t) : bool =
+  let st = style n in
+  has_key "border" st || has_key "background" st || has_key "bg" st
+  || has_key "background" (mem "bind" n)
+
 (* Render-side projection of the same layout pass. Returns the JSON object
-   {"height": <panel content height>, "leaves": [{"rect","node","ctx"}, ...]},
-   one leaf per renderable widget, where [ctx] is the (child) scope to render
-   that node with (so a foreach-expanded leaf carries its per-row scope) and
-   [height] is the canonical panel content height (root item height). Layout-only
-   nodes (containers / disclosure / foreach wrappers) are omitted. The cross-app
-   byte-gate consumes [layout_panel] (rects only); the render swaps consume this.
-   One traversal, two projections. *)
+   {"height": <panel content height>, "chrome": [...], "leaves": [...]} where each
+   entry is {"rect","node","ctx"}: [leaves] are renderable widgets (each carrying
+   the per-row child scope, so a foreach-expanded leaf resolves against its own
+   scope) and [chrome] are layout-only containers that carry a border / background
+   to draw BEHIND the leaves (for example a selected-row highlight). [height] is
+   the canonical panel content height (root item height). Layout-only containers
+   without chrome are omitted entirely. The cross-app byte-gate consumes
+   [layout_panel] (rects only) so it stays byte-exact; the render swaps consume
+   this. One traversal, two projections. *)
 let render_plan (panel_node : Yojson.Safe.t) (avail_w : int) (avail_h : int)
   (ctx : Yojson.Safe.t) : Yojson.Safe.t =
   match mem "content" panel_node with
   | `Assoc _ as root ->
     let _w, _h, items = measure root [] avail_w avail_h ctx in
     let height = match items with it :: _ -> it.h | [] -> 0 in
-    let leaves =
-      List.filter_map (fun it ->
-        match it.node with
-        | `Assoc _ when not (List.mem (node_type it.node) layout_only_types) ->
-          Some
-            (`Assoc
-              [ ("rect",
-                 `Assoc
-                   [ ("x", `Int it.x); ("y", `Int it.y);
-                     ("w", `Int it.w); ("h", `Int it.h) ]);
-                ("node", it.node);
-                ("ctx", it.ctx) ])
-        | _ -> None)
-        items
+    let entry it =
+      `Assoc
+        [ ("rect",
+           `Assoc
+             [ ("x", `Int it.x); ("y", `Int it.y);
+               ("w", `Int it.w); ("h", `Int it.h) ]);
+          ("node", it.node);
+          ("ctx", it.ctx) ]
     in
-    `Assoc [ ("height", `Int height); ("leaves", `List leaves) ]
-  | _ -> `Assoc [ ("height", `Int 0); ("leaves", `List []) ]
+    let chrome = ref [] in
+    let leaves = ref [] in
+    List.iter (fun it ->
+      match it.node with
+      | `Assoc _ ->
+        if List.mem (node_type it.node) layout_only_types then begin
+          if has_chrome it.node then chrome := entry it :: !chrome
+        end else
+          leaves := entry it :: !leaves
+      | _ -> ())
+      items;
+    `Assoc
+      [ ("height", `Int height);
+        ("chrome", `List (List.rev !chrome));
+        ("leaves", `List (List.rev !leaves)) ]
+  | _ -> `Assoc [ ("height", `Int 0); ("chrome", `List []); ("leaves", `List []) ]

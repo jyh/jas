@@ -8192,6 +8192,32 @@ fn render_panel_absolute(
     let plan = crate::interpreter::panel_layout::render_plan(panel_el, AVAIL_W, 0, ctx);
     let panel_h = plan.height;
 
+    // Draw chrome FIRST so it sits BEHIND the leaves (z-order). Each chrome entry
+    // is a layout-only container carrying a border/background (e.g. a selected-row
+    // highlight). Render it with its children stripped — drop the `children` / `do`
+    // / `foreach` keys so only the container's own border/background is produced
+    // (not its content) — reusing the existing single-node renderer (its own
+    // border/background/bind resolution) at the entry's rect.
+    let mut chrome: Vec<Element> = Vec::new();
+    for entry in &plan.chrome {
+        let (x, y, w, h) = (entry.x, entry.y, entry.w, entry.h);
+        let stripped = match entry.node.as_object() {
+            Some(obj) => {
+                let mut m = obj.clone();
+                m.remove("children");
+                m.remove("do");
+                m.remove("foreach");
+                serde_json::Value::Object(m)
+            }
+            None => entry.node.clone(),
+        };
+        let inner = render_el(&stripped, &entry.ctx, rctx);
+        let st = format!(
+            "position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;overflow:hidden;"
+        );
+        chrome.push(rsx! { div { style: "{st}", {inner} } });
+    }
+
     let mut leaves: Vec<Element> = Vec::new();
     for leaf in &plan.leaves {
         let (x, y, w, h) = (leaf.x, leaf.y, leaf.w, leaf.h);
@@ -8207,6 +8233,9 @@ fn render_panel_absolute(
     rsx! {
         div {
             style: "{outer}",
+            for entry in chrome {
+                {entry}
+            }
             for leaf in leaves {
                 {leaf}
             }

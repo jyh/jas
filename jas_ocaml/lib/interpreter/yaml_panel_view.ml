@@ -5449,11 +5449,45 @@ let render_panel_absolute ~packing ~ctx (content : Yojson.Safe.t) =
   let panel_h =
     plan |> member "height" |> to_int_option |> Option.value ~default:0
   in
+  let chrome =
+    match plan |> member "chrome" with `List l -> l | _ -> []
+  in
   let leaves =
     match plan |> member "leaves" with `List l -> l | _ -> []
   in
   let fixed = GPack.fixed ~packing () in
   fixed#misc#set_size_request ~width:path_b_avail_w ~height:panel_h ();
+  (* Chrome first (BEHIND the leaves): each chrome entry is a layout-only
+     container carrying a border / background. Render the container with its
+     content stripped — drop children / do / foreach so only the container own
+     border / background is produced, not its content — via the same single-node
+     [render_element], placed at the entry rect. This reuses the existing
+     border / background / bind resolution; no new primitive. *)
+  List.iter (fun ch ->
+    let node = ch |> member "node" in
+    let ch_ctx = ch |> member "ctx" in
+    let rect = ch |> member "rect" in
+    let x = rect |> member "x" |> to_int_option |> Option.value ~default:0 in
+    let y = rect |> member "y" |> to_int_option |> Option.value ~default:0 in
+    let w = rect |> member "w" |> to_int_option |> Option.value ~default:0 in
+    let h = rect |> member "h" |> to_int_option |> Option.value ~default:0 in
+    (* Strip the content keys so only the container chrome is drawn. *)
+    let stripped =
+      match node with
+      | `Assoc fields ->
+        `Assoc
+          (List.filter
+             (fun (k, _) -> k <> "children" && k <> "do" && k <> "foreach")
+             fields)
+      | other -> other
+    in
+    let placed = ref None in
+    render_element ~ctx:ch_ctx stripped
+      ~packing:(fun widget -> placed := Some widget; fixed#put ~x ~y widget);
+    (match !placed with
+     | Some widget -> widget#misc#set_size_request ~width:w ~height:h ()
+     | None -> ()))
+    chrome;
   List.iter (fun leaf ->
     let node = leaf |> member "node" in
     (* The per-row child scope to render this leaf with. *)

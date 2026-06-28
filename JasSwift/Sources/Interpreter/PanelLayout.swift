@@ -66,9 +66,12 @@ public enum PanelLayout {
     }
 
     /// The render-side projection of the layout pass: the canonical panel
-    /// content height plus one leaf per renderable widget.
+    /// content height, the layout-only containers that carry chrome (a
+    /// border / background to draw BEHIND the leaves, e.g. a selected-row
+    /// highlight), and one leaf per renderable widget.
     public struct RenderPlanResult {
         public let height: Int
+        public let chrome: [RenderLeaf]
         public let leaves: [RenderLeaf]
     }
 
@@ -78,6 +81,21 @@ public enum PanelLayout {
     private static let layoutContainerTypes: Set<String> = [
         "container", "row", "col", "grid", "panel", "disclosure",
     ]
+
+    /// A layout-only container still worth drawing — it carries a border /
+    /// background (static `style.border` / `style.background` / `style.bg`, or a
+    /// `bind.background`, e.g. a selected-row highlight). Mirrors
+    /// `panel_layout.py`'s `_has_chrome`.
+    private static func hasChrome(_ n: [String: Any]) -> Bool {
+        let st = style(n)
+        if st["border"] != nil || st["background"] != nil || st["bg"] != nil {
+            return true
+        }
+        if let b = n["bind"] as? [String: Any], b["background"] != nil {
+            return true
+        }
+        return false
+    }
 
     /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into
     /// an array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
@@ -101,11 +119,13 @@ public enum PanelLayout {
     }
 
     /// Render-side projection of the same layout pass. Returns the canonical
-    /// panel content height (the root item's height, incl. padding) plus one
-    /// leaf per renderable widget — each carrying the rect, the node to render,
-    /// and the (child) scope `ctx` to render it with (so a `foreach`-expanded
-    /// leaf carries its per-row scope). Layout-only nodes
-    /// (container / row / col / grid / panel / disclosure) are omitted.
+    /// panel content height (the root item's height, incl. padding), the
+    /// `chrome` entries (layout-only containers carrying a border/background to
+    /// draw BEHIND the leaves), and one leaf per renderable widget — each
+    /// carrying the rect, the node to render, and the (child) scope `ctx` to
+    /// render it with (so a `foreach`-expanded leaf carries its per-row scope).
+    /// Layout-only nodes (container / row / col / grid / panel / disclosure)
+    /// without chrome are omitted entirely.
     ///
     /// The cross-app byte-gate consumes ``layoutPanel`` (rects only); the
     /// render swaps consume this. One traversal, two projections. Mirrors
@@ -113,17 +133,24 @@ public enum PanelLayout {
     public static func renderPlan(_ panelNode: [String: Any], availW: Int,
                                   availH: Int = 0, ctx: [String: Any] = [:]) -> RenderPlanResult {
         guard let root = panelNode["content"] as? [String: Any] else {
-            return RenderPlanResult(height: 0, leaves: [])
+            return RenderPlanResult(height: 0, chrome: [], leaves: [])
         }
         let (_, _, items) = measure(root, path: [], availW: availW, availH: availH, ctx: ctx)
         let height = items.first?.h ?? 0
+        var chrome: [RenderLeaf] = []
         var out: [RenderLeaf] = []
         for it in items {
-            if layoutContainerTypes.contains(nodeType(it.node)) { continue }
-            out.append(RenderLeaf(x: it.x, y: it.y, w: it.w, h: it.h,
-                                  node: it.node, ctx: it.ctx))
+            let entry = RenderLeaf(x: it.x, y: it.y, w: it.w, h: it.h,
+                                   node: it.node, ctx: it.ctx)
+            if layoutContainerTypes.contains(nodeType(it.node)) {
+                // Layout-only container: omitted unless it carries chrome
+                // (a border / background) worth drawing behind the leaves.
+                if hasChrome(it.node) { chrome.append(entry) }
+            } else {
+                out.append(entry)
+            }
         }
-        return RenderPlanResult(height: height, leaves: out)
+        return RenderPlanResult(height: height, chrome: chrome, leaves: out)
     }
 
     // MARK: - value readers

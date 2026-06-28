@@ -57,11 +57,14 @@ pub struct RenderLeaf {
 }
 
 /// Render-side projection of the layout pass: the canonical panel content
-/// `height` plus one `leaves` entry per renderable widget (layout-only nodes
-/// omitted). The cross-app byte-gate consumes `layout_panel` (rects only); the
-/// render swaps consume this. One traversal, two projections.
+/// `height`, the `chrome` entries (layout-only containers that carry a
+/// border/background to draw BEHIND the leaves, e.g. a selected-row highlight),
+/// and one `leaves` entry per renderable widget. Layout-only containers without
+/// chrome are omitted. The cross-app byte-gate consumes `layout_panel` (rects
+/// only); the render swaps consume this. One traversal, two projections.
 pub struct RenderPlan {
     pub height: i64,
+    pub chrome: Vec<RenderLeaf>,
     pub leaves: Vec<RenderLeaf>,
 }
 
@@ -99,37 +102,62 @@ pub fn layout_panel(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value)
 }
 
 /// Render-side projection of the same layout pass (see [`RenderPlan`]). Returns
-/// the canonical panel content `height` (the root item's height, incl. padding)
-/// plus one leaf per renderable widget, each carrying the rect, the node to
-/// render, and the (child) scope to render it with — so a foreach-expanded leaf
-/// carries its per-row scope, which a `node_at_path` lookup over `children`
-/// cannot resolve. Layout-only nodes (container / row / col / grid / panel /
-/// disclosure) are omitted from the leaves.
+/// the canonical panel content `height` (the root item's height, incl. padding),
+/// the `chrome` entries (layout-only containers carrying a border/background to
+/// draw behind the leaves), and one leaf per renderable widget — each carrying
+/// the rect, the node to render, and the (child) scope to render it with, so a
+/// foreach-expanded leaf carries its per-row scope, which a `node_at_path`
+/// lookup over `children` cannot resolve. Layout-only nodes (container / row /
+/// col / grid / panel / disclosure) go to `chrome` if they have chrome, else are
+/// omitted; everything else goes to `leaves`.
 pub fn render_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> RenderPlan {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,
-        _ => return RenderPlan { height: 0, leaves: vec![] },
+        _ => return RenderPlan { height: 0, chrome: vec![], leaves: vec![] },
     };
     let (_w, _h, items) = measure(root, &[], avail_w, avail_h, ctx);
     let height = items.first().map_or(0, |it| it.h);
+    let mut chrome = vec![];
     let mut leaves = vec![];
     for it in items {
         if !it.node.is_object() {
             continue;
         }
-        if LAYOUT_CONTAINER_TYPES.contains(&node_type(&it.node)) {
-            continue;
-        }
-        leaves.push(RenderLeaf {
+        let leaf = RenderLeaf {
             x: it.x,
             y: it.y,
             w: it.w,
             h: it.h,
             node: it.node,
             ctx: it.ctx,
-        });
+        };
+        if LAYOUT_CONTAINER_TYPES.contains(&node_type(&leaf.node)) {
+            // Layout-only container: draw it (behind the leaves) only if it
+            // carries a border/background; otherwise it produces no widget.
+            if has_chrome(&leaf.node) {
+                chrome.push(leaf);
+            }
+        } else {
+            leaves.push(leaf);
+        }
     }
-    RenderPlan { height, leaves }
+    RenderPlan { height, chrome, leaves }
+}
+
+/// A layout-only container still worth drawing — it carries a border /
+/// background (static `style.border` / `style.background` / `style.bg`, or a
+/// dynamic `bind.background`, e.g. a selected-row highlight).
+fn has_chrome(node: &Value) -> bool {
+    let st = style(node);
+    if st.is_object()
+        && (st.get("border").is_some()
+            || st.get("background").is_some()
+            || st.get("bg").is_some())
+    {
+        return true;
+    }
+    node.get("bind")
+        .map_or(false, |b| b.is_object() && b.get("background").is_some())
 }
 
 // ── internals ─────────────────────────────────────────────────────────

@@ -4158,9 +4158,12 @@ struct YamlPanelBodyView: View {
         let h: Int
     }
 
-    /// The full Path B layout for this panel: the placed leaves and the
-    /// computed panel height. Containers contribute layout only.
+    /// The full Path B layout for this panel: the chrome boxes (layout-only
+    /// containers carrying a border/background, drawn behind), the placed
+    /// leaves, and the computed panel height. Containers without chrome
+    /// contribute layout only.
     private struct PathBLayout {
+        let chrome: [PathBLeaf]
         let leaves: [PathBLeaf]
         let panelH: Int
     }
@@ -4175,17 +4178,49 @@ struct YamlPanelBodyView: View {
         // Preview: pass the live eval scope `context` so foreach lists + text
         // bindings resolve to real data. availH=0 keeps the panel content-height.
         let plan = PanelLayout.renderPlan(contentSpec, availW: 228, availH: 0, ctx: context)
+        let chrome = plan.chrome.enumerated().map { (idx, leaf) in
+            PathBLeaf(id: idx, node: leaf.node, ctx: leaf.ctx,
+                      x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h)
+        }
         let leaves = plan.leaves.enumerated().map { (idx, leaf) in
             PathBLeaf(id: idx, node: leaf.node, ctx: leaf.ctx,
                       x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h)
         }
-        return PathBLayout(leaves: leaves, panelH: plan.height)
+        return PathBLayout(chrome: chrome, leaves: leaves, panelH: plan.height)
+    }
+
+    /// Strip a chrome node's content keys (`children` / `do` / `foreach`) so the
+    /// existing single-node renderer produces just the container's own
+    /// border/background, not its content. Mirrors Python
+    /// `_render_panel_absolute`'s chrome-node dict comprehension.
+    private func strippedChromeNode(_ node: [String: Any]) -> [String: Any] {
+        var cn = node
+        cn.removeValue(forKey: "children")
+        cn.removeValue(forKey: "do")
+        cn.removeValue(forKey: "foreach")
+        return cn
     }
 
     var body: some View {
         if pathBEnabled(), let pid = panelId, !Self.pathBExcluded.contains(pid) {
             let layout = pathBLayout()
             ZStack(alignment: .topLeading) {
+                // Chrome boxes first (behind): a layout container's
+                // border/background (incl. bind.background selection
+                // highlights). The node is rendered with its content keys
+                // stripped so the existing renderer resolves just its chrome.
+                ForEach(layout.chrome) { box in
+                    YamlElementView(
+                        element: strippedChromeNode(box.node), context: box.ctx,
+                        model: model, panelId: panelId, theme: theme,
+                        flyoutIconDefault: flyoutIconDefault,
+                        onDialogWrite: onDialogWrite,
+                        onStoreDialogOpened: onStoreDialogOpened,
+                        onStoreDialogClosed: onStoreDialogClosed
+                    )
+                    .frame(width: CGFloat(box.w), height: CGFloat(box.h), alignment: .topLeading)
+                    .offset(x: CGFloat(box.x), y: CGFloat(box.y))
+                }
                 ForEach(layout.leaves) { leaf in
                     YamlElementView(
                         element: leaf.node, context: leaf.ctx, model: model,
