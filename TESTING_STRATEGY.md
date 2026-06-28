@@ -214,10 +214,11 @@ options-destination not yet captured ·
 (see item) ·
 6 ✓ done ·
 7 ○ unblocked (Path B pass now exists) but Flask swap not yet done ·
-8 ◐ panel computed-geometry byte-gate **landed in all 4 native apps** (Path B Phase 0:
-`layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact; see
-PATH_B_DESIGN.md) — broadening beyond the 2 seed panels (symbols, opacity) pending ·
-9 ◐ canonical box model **drafted** (PATH_B_DESIGN.md §2) pending the five-app review ·
+8 ✓ panel computed-geometry byte-gate **landed in all 4 native apps, all 16/16 panels**
+(Path B: `layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact, 534
+rects; composite widgets as fixed boxes; see PATH_B_DESIGN.md + PATH_B_BOXMODEL_REVIEW.md) —
+render migrations (Flask → Swift → OCaml → Python) still to do ·
+9 ✓ canonical box model **ratified** (PATH_B_DESIGN.md §2; `char_width=10`) ·
 10 ✓ done.
 
 **Ships now (no dependencies):**
