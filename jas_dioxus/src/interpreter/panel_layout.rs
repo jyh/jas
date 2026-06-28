@@ -91,6 +91,9 @@ fn is_fill(kind: &str) -> bool {
         kind,
         "select" | "number_input" | "text_input" | "length_input" | "slider"
             | "placeholder" | "separator" | "combo_box" | "icon_select" | "spacer"
+            // composite / data-driven widgets: placed as a fixed box (fill width)
+            | "color_bar" | "fill_stroke_widget" | "gradient_slider" | "gradient_tile"
+            | "dropdown" | "tree_view"
     )
 }
 
@@ -113,6 +116,13 @@ fn kind_height(kind: &str) -> i64 {
         "spacer" => 0,
         "color_swatch" => 16,
         "toggle" => 20,
+        // composite box heights (provisional)
+        "color_bar" => 24,
+        "fill_stroke_widget" => 44,
+        "gradient_slider" => 24,
+        "gradient_tile" => 24,
+        "dropdown" => 20,
+        "tree_view" => 200,
         _ => 20,
     }
 }
@@ -127,6 +137,9 @@ fn kind_fallback_w(kind: &str) -> i64 {
         "placeholder" => 60,
         "combo_box" => 80,
         "icon_select" => 80,
+        "fill_stroke_widget" => 50,
+        "gradient_tile" => 32,
+        "dropdown" => 80,
         _ => 0,
     }
 }
