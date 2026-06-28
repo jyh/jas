@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the Path B panel-layout golden corpus.
 
-Runs the canonical ``layout_panel`` (jas/panels/panel_layout.py) over a set
+Runs the canonical ``layout_panel`` (workspace_interpreter/panel_layout.py) over a set
 of seed panels from the compiled workspace bundle and writes the pinned
 golden to test_fixtures/algorithms/panel_layout.json.  Every app's
 cross_language_test asserts its own layout_panel against this file (Template
@@ -19,9 +19,9 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "jas"))
+sys.path.insert(0, ROOT)
 
-from panels.panel_layout import layout_panel  # noqa: E402
+from workspace_interpreter.panel_layout import layout_panel  # noqa: E402
 
 # (case name, compiled panel id, available content width).
 # avail_w = 228 is the canonical dock content width (dock 240 - 12 scrollbar).

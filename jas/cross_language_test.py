@@ -32,7 +32,7 @@ from workspace.workspace_test_json import (
     state_defaults_json, shortcut_structure_json,
 )
 from workspace.layout_apply import layout_apply
-from panels.panel_layout import layout_panel
+from workspace_interpreter.panel_layout import layout_panel
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore
 

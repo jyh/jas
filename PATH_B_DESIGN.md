@@ -10,9 +10,10 @@ pinned golden `test_fixtures/algorithms/panel_layout.json` (seed panels: `symbol
 review is RATIFIED (`PATH_B_BOXMODEL_REVIEW.md`; `char_width=10`); the corpus now covers
 **16/16 panels** (composite widgets placed as fixed boxes — see A.5 v1.1/v1.2). The Rust
 app renders panels from the pass behind `JAS_PATH_B=1` (13 panels; composite ones excluded
-from the preview). Still open: the non-Rust render migrations (Flask → Swift → OCaml →
-Python) and the deferred algorithm bits (foreach/tree data, 2-D grid, max clamps,
-visible_when). Design draft below; decisions locked 2026-06-27 (Template A; /12;
+from the preview); **Flask** now does the same (`renderer.py` absolute mode behind
+`JAS_PATH_B=1`) — the Python `layout_panel` is shared via `workspace_interpreter/panel_layout.py`.
+Still open: the **Swift / OCaml / Python** render migrations and the deferred algorithm bits
+(foreach/tree data, 2-D grid, max clamps, visible_when). Design draft below; decisions locked 2026-06-27 (Template A; /12;
 integer-px; Phase 0 + Rust render swap). Implements `TESTING_STRATEGY.md` §3
 (Decision B) + §7 items #8 (panel computed-geometry byte-gate) and #9 (the
 canonical box-model choice, gated behind a five-app golden-diff review). This is
