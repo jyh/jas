@@ -4177,7 +4177,15 @@ struct YamlPanelBodyView: View {
     private func pathBLayout() -> PathBLayout {
         // Preview: pass the live eval scope `context` so foreach lists + text
         // bindings resolve to real data. availH=0 keeps the panel content-height.
-        let plan = PanelLayout.renderPlan(contentSpec, availW: 228, availH: 0, ctx: context)
+        //
+        // renderPlan expects a PANEL node and reads its `content`. In the dock,
+        // `contentSpec` is already the content root (no `content` key), so wrap
+        // it — otherwise renderPlan sees nil content and returns nothing (the
+        // panel renders empty / looks collapsed). The cross-language gate feeds a
+        // full panel node, which is why it stayed green and missed this.
+        let panelNode: [String: Any] = contentSpec["content"] != nil
+            ? contentSpec : ["content": contentSpec]
+        let plan = PanelLayout.renderPlan(panelNode, availW: 228, availH: 0, ctx: context)
         let chrome = plan.chrome.enumerated().map { (idx, leaf) in
             PathBLeaf(id: idx, node: leaf.node, ctx: leaf.ctx,
                       x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h)
