@@ -25,10 +25,15 @@ from panels.panel_layout import layout_panel  # noqa: E402
 
 # (case name, compiled panel id, available content width).
 # avail_w = 228 is the canonical dock content width (dock 240 - 12 scrollbar).
-SEED = [
-    ("symbols@228", "symbols_panel_content", 228),
-    ("opacity@228", "opacity_panel_content", 228),
+# The 13 panels that use only widget kinds the v1 pass sizes (everything except
+# color/gradient/layers, which need color_bar / fill_stroke_widget /
+# gradient_slider / tree_view + visible_when, deferred).
+_SIMPLE_PANELS = [
+    "symbols", "opacity", "align", "artboards", "boolean", "brushes",
+    "character", "concepts", "magic_wand", "paragraph", "properties",
+    "stroke", "swatches",
 ]
+SEED = [(f"{name}@228", f"{name}_panel_content", 228) for name in _SIMPLE_PANELS]
 
 
 def main() -> int:

@@ -22,6 +22,7 @@ public enum PanelLayout {
     private static let fillKinds: Set<String> = [
         "select", "number_input", "text_input", "length_input",
         "slider", "placeholder", "separator",
+        "combo_box", "icon_select", "spacer",
     ]
 
     /// An intermediate item with coords RELATIVE to its node's origin.
@@ -69,6 +70,34 @@ public enum PanelLayout {
         asInt(style(n)[key])
     }
 
+    /// Resolve a style dimension to integer px, or nil to ignore. Numbers
+    /// truncate toward zero; `"N%"` is `(avail*N)/100` (ignored when avail <= 0,
+    /// e.g. heights); a bare numeric string is that int; anything else
+    /// (`"auto"`, junk) is ignored.
+    private static func resolveDim(_ v: Any?, _ avail: Int) -> Int? {
+        guard let v = v, !(v is NSNull) else { return nil }
+        if let n = v as? NSNumber { return n.intValue }
+        if let s = v as? String {
+            let s = s.trimmingCharacters(in: .whitespaces)
+            if s.hasSuffix("%") {
+                let num = String(s.dropLast()).trimmingCharacters(in: .whitespaces)
+                let p: Int
+                if let i = Int(num) {
+                    p = i
+                } else if let f = Double(num) {
+                    p = Int(f)
+                } else {
+                    return nil
+                }
+                return avail > 0 ? (avail * p) / 100 : nil
+            }
+            if let i = Int(s) { return i }
+            if let f = Double(s) { return Int(f) }
+            return nil
+        }
+        return nil
+    }
+
     private static func isContainer(_ n: [String: Any]) -> Bool {
         containerTypes.contains(nodeType(n))
     }
@@ -108,6 +137,11 @@ public enum PanelLayout {
         case "slider": return 12
         case "placeholder": return 40
         case "separator": return 1
+        case "combo_box": return 20
+        case "icon_select": return 20
+        case "spacer": return 0
+        case "color_swatch": return 16
+        case "toggle": return 20
         default: return 20
         }
     }
@@ -120,6 +154,9 @@ public enum PanelLayout {
         case "length_input": return 80
         case "slider": return 100
         case "placeholder": return 60
+        case "combo_box": return 80
+        case "icon_select": return 80
+        case "spacer": return 0
         default: return 0
         }
     }
@@ -172,7 +209,8 @@ public enum PanelLayout {
 
     private static func leafSize(_ n: [String: Any], availW: Int) -> (Int, Int, Bool) {
         let t = nodeType(n)
-        let h = styleI(n, "height") ?? kindHeight(t)
+        let st = style(n)
+        let h = resolveDim(st["height"], 0) ?? kindHeight(t)
         let fill = isFill(t)
         var w: Int
         if fill {
@@ -183,8 +221,10 @@ public enum PanelLayout {
                 w = textW((n["content"] as? String) ?? "")
             case "button":
                 w = textW((n["label"] as? String) ?? "") + 16
-            case "checkbox":
+            case "checkbox", "toggle":
                 w = 16 + 4 + textW((n["label"] as? String) ?? "")
+            case "color_swatch":
+                w = 16
             case "icon_button":
                 w = 24
             case "icon":
@@ -193,8 +233,8 @@ public enum PanelLayout {
                 w = 0
             }
         }
-        if let x = styleI(n, "width") { w = x }
-        if let m = styleI(n, "min_width") { w = max(w, m) }
+        if let x = resolveDim(st["width"], availW) { w = x }
+        if let m = resolveDim(st["min_width"], availW) { w = max(w, m) }
         return (w, h, fill)
     }
 
@@ -226,9 +266,8 @@ public enum PanelLayout {
             }
             return (w, h, items)
         } else {
-            let (w, h, fill) = leafSize(n, availW: availW)
-            let rectW = (fill && availW > 0) ? availW : w
-            return (rectW, h, [MItem(path: path, x: 0, y: 0, w: rectW, h: h)])
+            let (w, h, _) = leafSize(n, availW: availW)
+            return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h)])
         }
     }
 
@@ -258,7 +297,11 @@ public enum PanelLayout {
         let n = measured.count
         let fixed = measured.reduce(0) { $0 + $1.w } + (n > 0 ? gap * (n - 1) : 0)
         let leftover = max(0, innerW - fixed)
-        let weights = measured.map { styleI($0.c, "flex") ?? 0 }
+        let weights = measured.map { m -> Int in
+            let wt = styleI(m.c, "flex") ?? 0
+            // A spacer with no explicit flex consumes leftover.
+            return (wt == 0 && nodeType(m.c) == "spacer") ? 1 : wt
+        }
         let sumw = weights.reduce(0, +)
         var extra = [Int](repeating: 0, count: n)
         if sumw > 0 && leftover > 0 {

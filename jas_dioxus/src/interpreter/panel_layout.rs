@@ -90,7 +90,7 @@ fn is_fill(kind: &str) -> bool {
     matches!(
         kind,
         "select" | "number_input" | "text_input" | "length_input" | "slider"
-            | "placeholder" | "separator"
+            | "placeholder" | "separator" | "combo_box" | "icon_select" | "spacer"
     )
 }
 
@@ -108,6 +108,11 @@ fn kind_height(kind: &str) -> i64 {
         "slider" => 12,
         "placeholder" => 40,
         "separator" => 1,
+        "combo_box" => 20,
+        "icon_select" => 20,
+        "spacer" => 0,
+        "color_swatch" => 16,
+        "toggle" => 20,
         _ => 20,
     }
 }
@@ -120,8 +125,41 @@ fn kind_fallback_w(kind: &str) -> i64 {
         "length_input" => 80,
         "slider" => 100,
         "placeholder" => 60,
+        "combo_box" => 80,
+        "icon_select" => 80,
         _ => 0,
     }
+}
+
+/// Resolve a style dimension to integer px, or None to ignore. Numbers truncate
+/// toward zero; `"N%"` is `(avail*N)/100` (ignored when avail <= 0); a bare numeric
+/// string is that int; anything else (`"auto"`, junk) is ignored.
+fn resolve_dim(v: &Value, avail: i64) -> Option<i64> {
+    if v.is_null() {
+        return None;
+    }
+    if let Some(n) = v.as_i64() {
+        return Some(n);
+    }
+    if let Some(f) = v.as_f64() {
+        return Some(f as i64);
+    }
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if let Some(num) = s.strip_suffix('%') {
+            let num = num.trim();
+            let p = num
+                .parse::<i64>()
+                .ok()
+                .or_else(|| num.parse::<f64>().ok().map(|f| f as i64))?;
+            return if avail > 0 { Some((avail * p) / 100) } else { None };
+        }
+        return s
+            .parse::<i64>()
+            .ok()
+            .or_else(|| s.parse::<f64>().ok().map(|f| f as i64));
+    }
+    None
 }
 
 /// CSS 1/2/4-value shorthand -> (top, right, bottom, left), ints.
@@ -187,7 +225,9 @@ fn col_span(n: &Value) -> i64 {
 
 fn leaf_size(n: &Value, avail_w: i64) -> (i64, i64, bool) {
     let t = node_type(n);
-    let h = style_i(n, "height").unwrap_or_else(|| kind_height(t));
+    let st = style(n);
+    let h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0)
+        .unwrap_or_else(|| kind_height(t));
     let fill = is_fill(t);
     let mut w = if fill {
         if avail_w > 0 {
@@ -199,16 +239,19 @@ fn leaf_size(n: &Value, avail_w: i64) -> (i64, i64, bool) {
         match t {
             "text" => text_w(n.get("content").and_then(|v| v.as_str()).unwrap_or("")),
             "button" => text_w(n.get("label").and_then(|v| v.as_str()).unwrap_or("")) + 16,
-            "checkbox" => 16 + 4 + text_w(n.get("label").and_then(|v| v.as_str()).unwrap_or("")),
+            "checkbox" | "toggle" => {
+                16 + 4 + text_w(n.get("label").and_then(|v| v.as_str()).unwrap_or(""))
+            }
+            "color_swatch" => 16,
             "icon_button" => 24,
             "icon" => 20,
             _ => 0,
         }
     };
-    if let Some(x) = style_i(n, "width") {
+    if let Some(x) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
         w = x;
     }
-    if let Some(m) = style_i(n, "min_width") {
+    if let Some(m) = resolve_dim(st.get("min_width").unwrap_or(&Value::Null), avail_w) {
         w = w.max(m);
     }
     (w, h, fill)
@@ -240,9 +283,8 @@ fn measure(n: &Value, path: &[i64], avail_w: i64) -> (i64, i64, Vec<MItem>) {
         }
         (w, h, items)
     } else {
-        let (w, h, fill) = leaf_size(n, avail_w);
-        let rect_w = if fill && avail_w > 0 { avail_w } else { w };
-        (rect_w, h, vec![MItem { path: path.to_vec(), x: 0, y: 0, w: rect_w, h }])
+        let (w, h, _fill) = leaf_size(n, avail_w);
+        (w, h, vec![MItem { path: path.to_vec(), x: 0, y: 0, w, h }])
     }
 }
 
@@ -276,7 +318,17 @@ fn flow(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Ve
     let fixed: i64 =
         measured.iter().map(|m| m.1).sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
     let leftover = (inner_w - fixed).max(0);
-    let weights: Vec<i64> = measured.iter().map(|m| style_i(m.0, "flex").unwrap_or(0)).collect();
+    let weights: Vec<i64> = measured
+        .iter()
+        .map(|m| {
+            let wt = style_i(m.0, "flex").unwrap_or(0);
+            if wt == 0 && node_type(m.0) == "spacer" {
+                1
+            } else {
+                wt
+            }
+        })
+        .collect();
     let sumw: i64 = weights.iter().sum();
     let mut extra = vec![0i64; n];
     if sumw > 0 && leftover > 0 {

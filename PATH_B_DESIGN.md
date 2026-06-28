@@ -51,8 +51,12 @@ Bootstrap-12 semantics) but the apps diverge from it and from each other.
 Path B introduces a **single, language-neutral layout algorithm** that computes
 widget rects `(x, y, w, h)` from the compiled panel tree. Because re-pinning to
 one box model shifts already-shipped panels in **all five** apps, every choice
-below is a candidate for the §7 #9 golden-diff review. Proposed canonical values
-(chosen to match the majority and the existing `LAYOUT.md` spec, minimizing churn):
+below went through the §7 #9 golden-diff review (`PATH_B_BOXMODEL_REVIEW.md`).
+
+**RATIFIED 2026-06-28:** decisions 1, 2, 4, 6, 7, 8 LOCKED as written; **decision 5
+LOCKED at `char_width = 10`** (one stub shared with `text_layout.json`; text overflow
+is treated as authoring signal). Decision 3 (per-kind min-col floor) is deferred to a
+v2 (not in the algorithm yet). Canonical values:
 
 1. **Columns = Bootstrap-12 (`N/12`), not proportional weights.** 4 of 5 apps and
    `LAYOUT.md` already use /12; only Python uses raw Qt weights. Canonicalize on
@@ -321,10 +325,35 @@ the same. Heights and fixed widths are canonical px:
 | `separator` | given avail (fill) | 1 | yes |
 
 `fill` leaves take the avail width handed to them (so in a grid cell they = cell_w,
-in a column they = inner_w). Inline leaves take intrinsic width, left-aligned.
-`style.width`/`style.height` (int) override the table; `style.min_width` clamps up.
-Kinds outside this table are deferred (the corpus seed avoids them); they get added
-as the corpus broadens, each with a ratified size.
+in a column they = inner_w). Inline leaves take intrinsic width, left-aligned. The
+leaf's resolved width is used directly (so `style.width` applies even to fill kinds).
+
+**v1.1 broadening (2026-06-28)** — added kinds so the corpus covers all 13 panels that
+use no composite/data-driven widget (everything except color / gradient / layers):
+
+| kind | width | height | fill? |
+|---|---|---|---|
+| `toggle` | `16 + 4 + text_w(label)` | 20 | no (inline) |
+| `color_swatch` | 16 | 16 | no (inline) |
+| `combo_box` | given avail (fill), else 80 | 20 | yes |
+| `icon_select` | given avail (fill), else 80 | 20 | yes |
+| `spacer` | given avail (fill), else 0 | 0 | yes |
+
+`spacer` additionally gets an **implicit `flex` weight of 1** in a flow row when it has
+no explicit `style.flex`, so it consumes leftover space.
+
+**Dimension resolution** — `style.width` / `style.height` / `style.min_width` resolve via
+`resolve_dim(value, avail)`: a number truncates toward zero; `"N%"` is `(avail*N)//100`
+(integer; ignored when `avail <= 0`, e.g. heights, which have no reference); a bare
+numeric string is that int; anything else (`"auto"`, junk) is ignored (falls back to the
+kind default / intrinsic). `width`/`min_width` resolve against the leaf's avail width;
+`height` resolves with `avail = 0` so `"%"` heights are ignored.
+
+Kinds still outside the table (composite / data-driven: `tree_view`, `fill_stroke_widget`,
+`tabs`, `disclosure` body, `color_bar` / `color_gradient` / `color_hue_bar`,
+`gradient_tile` / `gradient_slider`, `element_preview`, `dropdown`, `icon_button_group`,
+`reference_point_widget`) are deferred with their panels (color / gradient / layers), each
+to be added with a ratified size as the corpus broadens.
 
 ### A.6 Deferred in v1 (documented, not silently dropped)
 

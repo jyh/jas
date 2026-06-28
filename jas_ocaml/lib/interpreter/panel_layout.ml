@@ -75,7 +75,7 @@ let text_w (s : string) : int = utf8_length s * char_width
 let is_fill (kind : string) : bool =
   match kind with
   | "select" | "number_input" | "text_input" | "length_input" | "slider"
-  | "placeholder" | "separator" -> true
+  | "placeholder" | "separator" | "combo_box" | "icon_select" | "spacer" -> true
   | _ -> false
 
 let kind_height (kind : string) : int =
@@ -92,6 +92,11 @@ let kind_height (kind : string) : int =
   | "slider" -> 12
   | "placeholder" -> 40
   | "separator" -> 1
+  | "combo_box" -> 20
+  | "icon_select" -> 20
+  | "spacer" -> 0
+  | "color_swatch" -> 16
+  | "toggle" -> 20
   | _ -> 20
 
 let kind_fallback_w (kind : string) : int =
@@ -102,7 +107,38 @@ let kind_fallback_w (kind : string) : int =
   | "length_input" -> 80
   | "slider" -> 100
   | "placeholder" -> 60
+  | "combo_box" -> 80
+  | "icon_select" -> 80
+  | "spacer" -> 0
   | _ -> 0
+
+(* Resolve a style dimension to integer px, or None to ignore. Numbers truncate
+   toward zero; "N%" is (avail*N)/100 (ignored when avail <= 0, e.g. heights,
+   which have no reference); a bare numeric string is that int; anything else
+   (auto, junk) is ignored. *)
+let resolve_dim (v : Yojson.Safe.t) (avail : int) : int option =
+  match v with
+  | `Null -> None
+  | `Int i -> Some i
+  | `Float f -> Some (int_of_float f)
+  | `Intlit s -> (try Some (int_of_string s) with _ -> None)
+  | `String raw ->
+    let s = String.trim raw in
+    let len = String.length s in
+    if len > 0 && s.[len - 1] = '%' then begin
+      let num = String.trim (String.sub s 0 (len - 1)) in
+      let p_opt =
+        try Some (int_of_string num)
+        with _ -> (try Some (int_of_float (float_of_string num)) with _ -> None)
+      in
+      match p_opt with
+      | Some p -> if avail > 0 then Some (avail * p / 100) else None
+      | None -> None
+    end else begin
+      try Some (int_of_string s)
+      with _ -> (try Some (int_of_float (float_of_string s)) with _ -> None)
+    end
+  | _ -> None
 
 (* CSS 1/2/4-value shorthand to (top, right, bottom, left), ints. *)
 let parse_padding (v : Yojson.Safe.t) : int * int * int * int =
@@ -146,7 +182,10 @@ let col_span (n : Yojson.Safe.t) : int =
 (* Return (w, h, fill) for a leaf widget. *)
 let leaf_size (n : Yojson.Safe.t) (avail_w : int) : int * int * bool =
   let t = node_type n in
-  let h = match style_i n "height" with Some v -> v | None -> kind_height t in
+  let st = style n in
+  let h =
+    match resolve_dim (mem "height" st) 0 with Some v -> v | None -> kind_height t
+  in
   let fill = is_fill t in
   let w =
     if fill then (if avail_w > 0 then avail_w else kind_fallback_w t)
@@ -154,13 +193,14 @@ let leaf_size (n : Yojson.Safe.t) (avail_w : int) : int * int * bool =
       match t with
       | "text" -> text_w (match to_str_opt (mem "content" n) with Some s -> s | None -> "")
       | "button" -> text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "") + 16
-      | "checkbox" -> 16 + 4 + text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "")
+      | "checkbox" | "toggle" -> 16 + 4 + text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "")
+      | "color_swatch" -> 16
       | "icon_button" -> 24
       | "icon" -> 20
       | _ -> 0
   in
-  let w = match style_i n "width" with Some x -> x | None -> w in
-  let w = match style_i n "min_width" with Some m -> max w m | None -> w in
+  let w = match resolve_dim (mem "width" st) avail_w with Some x -> x | None -> w in
+  let w = match resolve_dim (mem "min_width" st) avail_w with Some m -> max w m | None -> w in
   (w, h, fill)
 
 (* Returns (w, h, items) with item coords RELATIVE to this node origin. *)
@@ -186,9 +226,8 @@ let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
     List.iter (fun it -> it.x <- it.x + pl; it.y <- it.y + pt) ch_items;
     (w, h, root :: ch_items)
   end else begin
-    let w, h, fill = leaf_size n avail_w in
-    let rect_w = if fill && avail_w > 0 then avail_w else w in
-    (rect_w, h, [ { path; x = 0; y = 0; w = rect_w; h } ])
+    let w, h, _fill = leaf_size n avail_w in
+    (w, h, [ { path; x = 0; y = 0; w; h } ])
   end
 
 and column children path inner_w gap : mitem list * int =
@@ -219,7 +258,10 @@ and flow children path inner_w gap : mitem list * int =
   in
   let leftover = max 0 (inner_w - fixed) in
   let weights =
-    List.map (fun (c, _, _, _) -> match style_i c "flex" with Some f -> f | None -> 0) measured
+    List.map (fun (c, _, _, _) ->
+      let wt = match style_i c "flex" with Some f -> f | None -> 0 in
+      if wt = 0 && node_type c = "spacer" then 1 else wt)
+      measured
   in
   let sumw = List.fold_left ( + ) 0 weights in
   let extra = Array.make n 0 in
