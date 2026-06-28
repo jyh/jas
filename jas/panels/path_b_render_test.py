@@ -117,6 +117,23 @@ class PathBOpacityGeometryTest(absltest.TestCase):
         g = combos[0].geometry()
         self.assertEqual((g.x(), g.y(), g.width(), g.height()), (4, 6, 73, 20))
 
+    def test_foreach_rows_render_with_real_data(self):
+        """The render plan expands foreach with per-row child scopes, so the
+        symbols list renders its master rows (each {{sym.name}} resolved)."""
+        from PySide6.QtWidgets import QLabel
+        with open(_BUNDLE) as f:
+            sym = json.load(f)["panels"]["symbols_panel_content"]
+        store = StateStore()
+        store.init_panel("symbols_panel_content", {})
+        store.set_active_panel("symbols_panel_content")
+        ctx = {"active_document": {"symbols": [
+            {"id": "a", "name": "Star", "usage_count": 1},
+            {"id": "b", "name": "Gear", "usage_count": 2}]}}
+        container = render_panel_absolute(sym, store, ctx)
+        texts = " ".join(c.text() for c in container.findChildren(QLabel))
+        self.assertIn("Star", texts)
+        self.assertIn("Gear", texts)
+
 
 if __name__ == "__main__":
     absltest.main()

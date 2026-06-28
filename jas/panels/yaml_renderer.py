@@ -178,25 +178,19 @@ def render_panel_absolute(panel_node, store, ctx, dispatch_fn=None) -> QWidget:
     Mirrors the Rust `render_panel_absolute` / Flask `_render_panel_absolute`
     / Swift `pathBLayout`."""
     from PySide6.QtCore import QRect
-    from workspace_interpreter.panel_layout import layout_panel
+    from workspace_interpreter.panel_layout import render_plan
 
-    content = panel_node.get("content")
-    # Pass the live eval scope so foreach lists + text bindings resolve to real
-    # data in the preview (avail_h=0 keeps the panel content-height).
-    rects = layout_panel(panel_node, 228, 0, ctx)
-    panel_h = rects[0]["rect"]["h"] if rects else 0
+    # render_plan yields one entry per renderable leaf with the (child) scope to
+    # render it with, so foreach-expanded rows resolve their per-row data. avail_h
+    # = 0 keeps the panel content-height in the preview.
+    plan = render_plan(panel_node, 228, 0, ctx)
 
     container = QWidget()
     # No layout manager: leaves are positioned absolutely via setGeometry.
-    container.setFixedSize(228, panel_h)
+    container.setFixedSize(228, plan["height"])
 
-    for item in rects:
-        node = _node_at_path(content, item["path"])
-        if not isinstance(node, dict):
-            continue
-        if node.get("type") in ("container", "row", "col", "grid", "panel"):
-            continue  # containers are layout-only
-        widget = render_element(node, store, ctx, dispatch_fn)
+    for item in plan["leaves"]:
+        widget = render_element(item["node"], store, item["ctx"], dispatch_fn)
         if widget is None:
             continue
         r = item["rect"]
