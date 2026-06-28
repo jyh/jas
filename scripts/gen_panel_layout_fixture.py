@@ -91,12 +91,32 @@ _GRADIENT_CTX = {
     "data": {"gradient_libraries": {"lib1": {"gradients": [{}, {}, {}, {}, {}, {}, {}, {}]}}},
 }
 
+# brushes + swatches: outer column foreach over open libraries -> a disclosure
+# section per library -> inner WRAP foreach of brush/swatch tiles.
+_BRUSHES_CTX = {
+    "panel": {"open_libraries": [{"id": "lib1"}], "thumbnail_size": 24},
+    "data": {"brush_libraries": {"lib1": {"name": "Calligraphic", "brushes": [
+        {"name": "5 pt Round", "slug": "r5"},
+        {"name": "3 pt Flat", "slug": "f3"},
+        {"name": "Tapered", "slug": "tp"},
+    ]}}},
+}
+
+_SWATCHES_CTX = {
+    "panel": {"open_libraries": [{"id": "lib1"}], "thumbnail_size": 16},
+    "data": {"swatch_libraries": {"lib1": {"name": "Default", "swatches": [
+        {} for _ in range(10)
+    ]}}},
+}
+
 _CTX = {
     "symbols": _SYMBOLS_CTX,
     "artboards": _ARTBOARDS_CTX,
     "concepts": _CONCEPTS_CTX,
     "layers": _LAYERS_CTX,
     "gradient": _GRADIENT_CTX,
+    "brushes": _BRUSHES_CTX,
+    "swatches": _SWATCHES_CTX,
 }
 _AVAIL_H = 600
 
