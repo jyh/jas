@@ -4106,9 +4106,15 @@ mod tests {
             assert_eq!(func, "layout_panel", "Unknown function: {}", func);
             let panel_id = tc["args"]["panel"].as_str().unwrap();
             let avail_w = tc["args"]["avail_w"].as_i64().unwrap();
+            let avail_h = tc["args"]["avail_h"].as_i64().unwrap_or(0);
+            // ctx is a JSON object data scope (foreach sources + text bindings);
+            // serde_json::Value IS what the expr evaluator consumes, so the
+            // fixture ctx passes straight through. Default to empty (literals).
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
             let expected = &tc["expected"];
 
-            let actual = layout_panel(&panels[panel_id], avail_w);
+            let actual = layout_panel(&panels[panel_id], avail_w, avail_h, ctx);
             assert_eq!(&actual, expected, "Panel layout '{}' mismatch", name);
         }
     }

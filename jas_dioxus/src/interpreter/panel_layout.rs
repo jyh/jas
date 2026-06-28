@@ -1,17 +1,26 @@
 //! Shared canonical panel widget-layout pass (Path B).
 //!
-//! Rust port of `jas/panels/panel_layout.py`.  A pure, integer-arithmetic
-//! layout of a compiled panel node into widget rects, byte-identical across
-//! all five apps.  The full contract is PATH_B_DESIGN.md Appendix A.
+//! Rust port of `workspace_interpreter/panel_layout.py`.  A pure,
+//! integer-arithmetic layout of a compiled panel node into widget rects,
+//! byte-identical across all five apps.  The full contract is
+//! PATH_B_DESIGN.md (Appendix A + Appendix B for foreach).
 //!
 //! All arithmetic is integer (no float anywhere), so the four native
 //! implementations are byte-identical and the corpus
 //! (`test_fixtures/algorithms/panel_layout.json`) needs no tolerance.  Text
-//! widths use the deterministic stub measure `len(text) * CHAR_WIDTH`
-//! (CHAR_WIDTH = 10) and columns use the Bootstrap-12 rule
-//! `cell_w = (2*inner_w*N + 12) / 24` (round-half-up, exact).
+//! `content` / `label` is first resolved through `eval_text` against the data
+//! scope `ctx` (a bound `"{{sym.name}}"` is measured at its resolved value; a
+//! literal passes through unchanged), then measured with the deterministic
+//! stub `codepoint_count(text) * CHAR_WIDTH` (CHAR_WIDTH = 10).  Columns use
+//! the Bootstrap-12 rule `cell_w = (2*inner_w*N + 12) / 24` (round-half-up,
+//! exact).  `foreach` containers expand their `do` template once per item of
+//! `eval(foreach.source, ctx)`; a column distributes `avail_h` leftover to
+//! `flex`-weighted children (vertical flex).
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+
+use super::expr::{eval, eval_text};
+use super::expr_types::Value as EVal;
 
 pub const CHAR_WIDTH: i64 = 10;
 
@@ -27,12 +36,16 @@ struct MItem {
 
 /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into a
 /// JSON array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
-pub fn layout_panel(panel_node: &Value, avail_w: i64) -> Value {
+///
+/// `ctx` is the data scope used to evaluate `foreach` sources and text
+/// bindings (defaults to empty/literals-only at call sites that pass `{}`).
+/// `avail_h` drives vertical flex; 0 means content-height (no vertical flex).
+pub fn layout_panel(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> Value {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,
         _ => return json!([]),
     };
-    let (_w, _h, items) = measure(root, &[], avail_w);
+    let (_w, _h, items) = measure(root, &[], avail_w, avail_h, ctx);
     Value::Array(
         items
             .into_iter()
@@ -82,8 +95,14 @@ fn resolved_layout(n: &Value) -> &'static str {
     }
 }
 
-fn text_w(s: &str) -> i64 {
-    s.chars().count() as i64 * CHAR_WIDTH
+/// Resolved text width: `eval_text(node[key], ctx)` codepoint count * CHAR_WIDTH.
+/// A non-string (or missing) value measures as 0; a literal (no `{{`) passes
+/// through `eval_text` unchanged, so non-bound panels stay byte-identical.
+fn text_w(n: &Value, key: &str, ctx: &Value) -> i64 {
+    match n.get(key).and_then(|v| v.as_str()) {
+        Some(raw) => eval_text(raw, ctx).chars().count() as i64 * CHAR_WIDTH,
+        None => 0,
+    }
 }
 
 fn is_fill(kind: &str) -> bool {
@@ -236,13 +255,23 @@ fn col_span(n: &Value) -> i64 {
     }
 }
 
-fn leaf_size(n: &Value, avail_w: i64) -> (i64, i64, bool) {
+/// Vertical/horizontal flex weight: `style.flex` (int), with an implicit
+/// weight of 1 for a `spacer` that declares no explicit flex.
+fn flex(n: &Value) -> i64 {
+    let w = style_i(n, "flex").unwrap_or(0);
+    if w == 0 && node_type(n) == "spacer" {
+        1
+    } else {
+        w
+    }
+}
+
+fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
     let t = node_type(n);
     let st = style(n);
     let h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0)
         .unwrap_or_else(|| kind_height(t));
-    let fill = is_fill(t);
-    let mut w = if fill {
+    let mut w = if is_fill(t) {
         if avail_w > 0 {
             avail_w
         } else {
@@ -250,11 +279,9 @@ fn leaf_size(n: &Value, avail_w: i64) -> (i64, i64, bool) {
         }
     } else {
         match t {
-            "text" => text_w(n.get("content").and_then(|v| v.as_str()).unwrap_or("")),
-            "button" => text_w(n.get("label").and_then(|v| v.as_str()).unwrap_or("")) + 16,
-            "checkbox" | "toggle" => {
-                16 + 4 + text_w(n.get("label").and_then(|v| v.as_str()).unwrap_or(""))
-            }
+            "text" => text_w(n, "content", ctx),
+            "button" => text_w(n, "label", ctx) + 16,
+            "checkbox" | "toggle" => 16 + 4 + text_w(n, "label", ctx),
             "color_swatch" => 16,
             "icon_button" => 24,
             "icon" => 20,
@@ -267,27 +294,41 @@ fn leaf_size(n: &Value, avail_w: i64) -> (i64, i64, bool) {
     if let Some(m) = resolve_dim(st.get("min_width").unwrap_or(&Value::Null), avail_w) {
         w = w.max(m);
     }
-    (w, h, fill)
+    (w, h)
 }
 
 /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
-fn measure(n: &Value, path: &[i64], avail_w: i64) -> (i64, i64, Vec<MItem>) {
-    let (pt, pr, pb, pl) = parse_padding(style(n).get("padding").unwrap_or(&Value::Null));
+fn measure(
+    n: &Value,
+    path: &[i64],
+    avail_w: i64,
+    avail_h: i64,
+    ctx: &Value,
+) -> (i64, i64, Vec<MItem>) {
+    let st = style(n);
+    let (pt, pr, pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
     let gap = style_i(n, "gap").unwrap_or(0);
     let inner_w = avail_w - pl - pr;
+    let inner_h = if avail_h > 0 { avail_h - pt - pb } else { 0 };
 
     if is_container(n) {
-        let children = visible_children(n);
-        let lay = resolved_layout(n);
-        let (ch_items, content_h) = if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
-            grid(&children, path, inner_w, gap)
-        } else if lay == "row" {
-            flow(&children, path, inner_w, gap)
+        let has_foreach = st_foreach(n).is_some() && n.get("do").map_or(false, |v| !v.is_null());
+        let (ch_items, content_h) = if has_foreach {
+            foreach(n, path, inner_w, gap, ctx)
         } else {
-            column(&children, path, inner_w, gap)
+            let children = visible_children(n);
+            let lay = resolved_layout(n);
+            if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
+                grid(&children, path, inner_w, gap, ctx)
+            } else if lay == "row" {
+                flow(&children, path, inner_w, gap, ctx)
+            } else {
+                column(&children, path, inner_w, gap, inner_h, ctx)
+            }
         };
+        let exp_h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0);
         let w = avail_w;
-        let h = content_h + pt + pb;
+        let h = exp_h.unwrap_or(content_h + pt + pb);
         let mut items = vec![MItem { path: path.to_vec(), x: 0, y: 0, w, h }];
         for mut it in ch_items {
             it.x += pl;
@@ -296,52 +337,93 @@ fn measure(n: &Value, path: &[i64], avail_w: i64) -> (i64, i64, Vec<MItem>) {
         }
         (w, h, items)
     } else {
-        let (w, h, _fill) = leaf_size(n, avail_w);
+        let (w, h) = leaf_size(n, avail_w, ctx);
         (w, h, vec![MItem { path: path.to_vec(), x: 0, y: 0, w, h }])
     }
 }
 
-fn column(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Vec<MItem>, i64) {
-    let mut items = vec![];
-    let mut cy = 0;
-    let mut n = 0;
+/// The `foreach` spec object on a container, if present.
+fn st_foreach(n: &Value) -> Option<&Value> {
+    n.get("foreach").filter(|v| v.is_object())
+}
+
+fn column(
+    children: &[(i64, &Value)],
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    avail_h: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
+    // Measure each child at its natural height (avail_h = 0).
+    let mut measured: Vec<(&Value, i64, Vec<MItem>)> = vec![];
     for &(i, c) in children {
         let mut cp = path.to_vec();
         cp.push(i);
-        let (_cw, ch, mut cit) = measure(c, &cp, inner_w);
+        let (_cw, ch, cit) = measure(c, &cp, inner_w, 0, ctx);
+        measured.push((c, ch, cit));
+    }
+    let n = measured.len();
+    let natural: i64 =
+        measured.iter().map(|m| m.1).sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
+    let mut extra = vec![0i64; n];
+    if avail_h > 0 {
+        let leftover = avail_h - natural;
+        if leftover > 0 {
+            let weights: Vec<i64> = measured.iter().map(|m| flex(m.0)).collect();
+            let sumw: i64 = weights.iter().sum();
+            if sumw > 0 {
+                let mut base: Vec<i64> =
+                    (0..n).map(|k| leftover * weights[k] / sumw).collect();
+                let mut rem = leftover - base.iter().sum::<i64>();
+                for k in 0..n {
+                    if rem <= 0 {
+                        break;
+                    }
+                    if weights[k] > 0 {
+                        base[k] += 1;
+                        rem -= 1;
+                    }
+                }
+                extra = base;
+            }
+        }
+    }
+    let mut items = vec![];
+    let mut cy = 0;
+    for (k, (_c, ch, mut cit)) in measured.into_iter().enumerate() {
+        let hk = ch + extra[k];
         for it in cit.iter_mut() {
             it.y += cy;
         }
+        if extra[k] != 0 && !cit.is_empty() {
+            cit[0].h = hk;
+        }
         items.append(&mut cit);
-        cy += ch + gap;
-        n += 1;
+        cy += hk + gap;
     }
     (items, if n > 0 { cy - gap } else { 0 })
 }
 
-fn flow(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Vec<MItem>, i64) {
+fn flow(
+    children: &[(i64, &Value)],
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
     let mut measured: Vec<(&Value, i64, i64, Vec<MItem>)> = vec![];
     for &(i, c) in children {
         let mut cp = path.to_vec();
         cp.push(i);
-        let (cw, ch, cit) = measure(c, &cp, -1);
+        let (cw, ch, cit) = measure(c, &cp, -1, 0, ctx);
         measured.push((c, cw, ch, cit));
     }
     let n = measured.len();
     let fixed: i64 =
         measured.iter().map(|m| m.1).sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
     let leftover = (inner_w - fixed).max(0);
-    let weights: Vec<i64> = measured
-        .iter()
-        .map(|m| {
-            let wt = style_i(m.0, "flex").unwrap_or(0);
-            if wt == 0 && node_type(m.0) == "spacer" {
-                1
-            } else {
-                wt
-            }
-        })
-        .collect();
+    let weights: Vec<i64> = measured.iter().map(|m| flex(m.0)).collect();
     let sumw: i64 = weights.iter().sum();
     let mut extra = vec![0i64; n];
     if sumw > 0 && leftover > 0 {
@@ -377,7 +459,13 @@ fn flow(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Ve
     (items, row_h)
 }
 
-fn grid(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Vec<MItem>, i64) {
+fn grid(
+    children: &[(i64, &Value)],
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
     // Wrap into lines so each line's column span sums to <= 12.
     let mut lines: Vec<Vec<(i64, &Value, i64)>> = vec![];
     let mut cur: Vec<(i64, &Value, i64)> = vec![];
@@ -405,7 +493,7 @@ fn grid(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Ve
             let cell_w = (2 * inner_w * span + 12) / 24; // round-half-up, exact
             let mut cp = path.to_vec();
             cp.push(i);
-            let (_cw, ch, cit) = measure(c, &cp, cell_w);
+            let (_cw, ch, cit) = measure(c, &cp, cell_w, 0, ctx);
             cells.push((cit, ch, cx));
             if ch > line_h {
                 line_h = ch;
@@ -423,4 +511,55 @@ fn grid(children: &[(i64, &Value)], path: &[i64], inner_w: i64, gap: i64) -> (Ve
         line_y += line_h + gap;
     }
     (items, if !lines.is_empty() { line_y - gap } else { 0 })
+}
+
+/// Expand a foreach container's `do` template once per item of
+/// `eval(foreach.source, ctx)`. v1: column stacking. Each item is bound as
+/// `foreach.as` (plus `_index`) in a child scope.
+fn foreach(
+    n: &Value,
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
+    let spec = st_foreach(n).cloned().unwrap_or(Value::Null);
+    let src = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
+    let var = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
+    let template = n.get("do").cloned().unwrap_or(Value::Null);
+
+    let items: Vec<Value> = match eval(src, ctx) {
+        EVal::List(v) => v,
+        _ => vec![],
+    };
+
+    let base_obj: Map<String, Value> = ctx.as_object().cloned().unwrap_or_default();
+
+    let mut out: Vec<MItem> = vec![];
+    let mut cy = 0;
+    let n_items = items.len();
+    for (i, item) in items.into_iter().enumerate() {
+        let mut item_data: Map<String, Value> = match item {
+            Value::Object(m) => m,
+            other => {
+                let mut m = Map::new();
+                m.insert("_value".to_string(), other);
+                m
+            }
+        };
+        item_data.insert("_index".to_string(), json!(i));
+        let mut child = base_obj.clone();
+        child.insert(var.to_string(), Value::Object(item_data));
+        let child_ctx = Value::Object(child);
+
+        let mut cp = path.to_vec();
+        cp.push(i as i64);
+        let (_w, ch, mut cit) = measure(&template, &cp, inner_w, 0, &child_ctx);
+        for it in cit.iter_mut() {
+            it.y += cy;
+        }
+        out.append(&mut cit);
+        cy += ch + gap;
+    }
+    (out, if n_items > 0 { cy - gap } else { 0 })
 }

@@ -1657,10 +1657,12 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let args = tc["args"] as! [String: Any]
         let panelId = args["panel"] as! String
         let availW = (args["avail_w"] as! NSNumber).intValue
+        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
         let expected = tc["expected"] as! [[String: Any]]
 
         let panel = panels[panelId] as! [String: Any]
-        let actual = PanelLayout.layoutPanel(panel, availW: availW)
+        let actual = PanelLayout.layoutPanel(panel, availW: availW, availH: availH, ctx: ctx)
 
         // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
         // with sorted keys and compare bytes. All values are integers.
