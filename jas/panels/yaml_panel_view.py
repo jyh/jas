@@ -11,7 +11,12 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 from workspace_interpreter.loader import panel_state_defaults
 from workspace_interpreter.state_store import StateStore
 from workspace_interpreter.expr import evaluate
-from panels.yaml_renderer import render_element
+from panels.yaml_renderer import (
+    render_element,
+    render_panel_absolute,
+    _path_b_enabled,
+    _PATH_B_UNSUPPORTED,
+)
 
 
 class YamlPanelView(QWidget):
@@ -93,7 +98,18 @@ class YamlPanelView(QWidget):
 
         content = panel_spec.get("content")
         if isinstance(content, dict):
-            widget = render_element(content, store, self._ctx, dispatch_fn)
+            # Path B preview: render this panel from the shared canonical
+            # layout pass (absolute rects) instead of Qt layouts. Opt-in via
+            # JAS_PATH_B=1 and restricted to the panels the cross-app
+            # byte-gate covers (everything except color / gradient / layers,
+            # whose composite widgets the v1 pass cannot size yet), so it is
+            # zero-risk to shipped panels. Mirrors the Rust / Flask / Swift
+            # flag (PATH_B_DESIGN.md §5 Phase 2).
+            if _path_b_enabled() and self._panel_id not in _PATH_B_UNSUPPORTED:
+                widget = render_panel_absolute(
+                    panel_spec, store, self._ctx, dispatch_fn)
+            else:
+                widget = render_element(content, store, self._ctx, dispatch_fn)
             if widget:
                 layout.addWidget(widget)
                 # Propagate the rendered content's minimumHeight up

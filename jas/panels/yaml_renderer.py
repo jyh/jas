@@ -129,6 +129,81 @@ def render_element(el: dict, store: StateStore, ctx: dict,
     return widget
 
 
+# ── Path B (shared canonical layout) preview ─────────────────
+#
+# Render a panel from the shared `layout_panel` rects (one absolute box per
+# leaf) instead of Qt's own layout managers. Opt-in via JAS_PATH_B=1; the
+# human-viewable Qt reference of the cross-app byte-gated layout pass
+# (PATH_B_DESIGN.md §5 Phase 2). Mirrors the Rust `render_panel_absolute`,
+# Flask `_render_panel_absolute`, and Swift `pathBLayout` exactly.
+
+# Panels whose composite / data-driven widgets (foreach expansions, tree
+# rows) the v1 absolute pass cannot size yet, so they stay on the normal
+# flex path. Matches the Rust / Flask / Swift unsupported set.
+_PATH_B_UNSUPPORTED = {
+    "color_panel_content", "gradient_panel_content", "layers_panel_content",
+}
+
+
+def _path_b_enabled() -> bool:
+    """Whether to render panels from the shared Path B layout pass (absolute
+    rects) instead of Qt layouts. Opt-in via JAS_PATH_B=1. Mirrors the
+    Rust / Flask / Swift flag."""
+    import os
+    return os.environ.get("JAS_PATH_B") == "1"
+
+
+def _node_at_path(content, path):
+    """Resolve a node by its panel-relative tree path (root = []), walking
+    `children` arrays by index. Returns None if any segment is out of range
+    or not a dict. Mirrors Flask `_node_at_path` / Rust `node_at_path` /
+    Swift `nodeAtPath`."""
+    node = content
+    for i in path:
+        if not isinstance(node, dict):
+            return None
+        kids = node.get("children")
+        if not isinstance(kids, list) or i < 0 or i >= len(kids):
+            return None
+        node = kids[i]
+    return node if isinstance(node, dict) else None
+
+
+def render_panel_absolute(panel_node, store, ctx, dispatch_fn=None) -> QWidget:
+    """Render a panel from the shared `layout_panel` rects: each leaf widget
+    is placed (via setGeometry) at its computed rect inside a layout-less
+    container of the computed width/height. Container nodes contribute layout
+    only (no box). Width is the canonical content width (dock 240 - 12 = 228).
+
+    Mirrors the Rust `render_panel_absolute` / Flask `_render_panel_absolute`
+    / Swift `pathBLayout`."""
+    from PySide6.QtCore import QRect
+    from workspace_interpreter.panel_layout import layout_panel
+
+    content = panel_node.get("content")
+    rects = layout_panel(panel_node, 228)
+    panel_h = rects[0]["rect"]["h"] if rects else 0
+
+    container = QWidget()
+    # No layout manager: leaves are positioned absolutely via setGeometry.
+    container.setFixedSize(228, panel_h)
+
+    for item in rects:
+        node = _node_at_path(content, item["path"])
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") in ("container", "row", "col", "grid", "panel"):
+            continue  # containers are layout-only
+        widget = render_element(node, store, ctx, dispatch_fn)
+        if widget is None:
+            continue
+        r = item["rect"]
+        widget.setParent(container)
+        widget.setGeometry(QRect(r["x"], r["y"], r["w"], r["h"]))
+
+    return container
+
+
 # ── Renderers ────────────────────────────────────────────────
 
 
