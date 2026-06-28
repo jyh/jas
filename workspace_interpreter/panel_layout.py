@@ -234,8 +234,10 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
     inner_w = avail_w - pl - pr
     inner_h = (avail_h - pt - pb) if avail_h > 0 else 0
 
-    if _is_container(node):
-        if isinstance(node.get("foreach"), dict) and node.get("do"):
+    if _is_container(node) or node.get("type") == "disclosure":
+        if node.get("type") == "disclosure":
+            ch_items, content_h = _disclosure(node, path, inner_w, gap, ctx)
+        elif isinstance(node.get("foreach"), dict) and node.get("do"):
             ch_items, content_h = _foreach(node, path, inner_w, gap, ctx)
         else:
             children = _visible_children(node)
@@ -369,6 +371,22 @@ def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
             items.extend(cit)
         line_y += line_h + gap
     return items, (line_y - gap if lines else 0)
+
+
+_DISCLOSURE_HEADER_H = 24  # canonical disclosure header bar height
+
+
+def _disclosure(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
+    """A disclosure is a header bar (the bound label) + a body. v1 lays out the
+    body (children, column) below a fixed-height header (assumed expanded); the
+    header is drawn by the widget itself (no separate rect). The body's inner
+    foreach (swatch / brush grids) expands through the normal recursion.
+    """
+    children = _visible_children(node)
+    ch_items, body_h = _column(children, path, inner_w, gap, 0, ctx)
+    for it in ch_items:
+        it["y"] += _DISCLOSURE_HEADER_H
+    return ch_items, _DISCLOSURE_HEADER_H + body_h
 
 
 def _foreach(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
