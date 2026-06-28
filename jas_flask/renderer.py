@@ -598,6 +598,17 @@ def _render_panel_absolute(el, theme, state) -> str:
     plan = render_plan(el, 228, 0, state)
     panel_h = plan["height"]
     parts = []
+    # Chrome boxes first (behind): a layout container's border/background (incl.
+    # bind.background highlights), rendered with children stripped so the existing
+    # renderer resolves just its chrome.
+    for item in plan["chrome"]:
+        cn = {k: v for k, v in item["node"].items() if k not in ("children", "do", "foreach")}
+        r = item["rect"]
+        box = render_element(cn, theme, item["ctx"], mode="normal")
+        parts.append(
+            f'<div style="position:absolute;left:{r["x"]}px;top:{r["y"]}px;'
+            f'width:{r["w"]}px;height:{r["h"]}px">{box}</div>'
+        )
     for item in plan["leaves"]:
         r = item["rect"]
         inner = render_element(item["node"], theme, item["ctx"], mode="normal")
