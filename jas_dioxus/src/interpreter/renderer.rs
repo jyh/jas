@@ -8192,12 +8192,11 @@ fn render_panel_absolute(
     rctx: &RenderCtx,
 ) -> Element {
     const AVAIL_W: i64 = 228;
-    // Path B preview path: no vertical flex (avail_h = 0) and an EMPTY data
-    // scope for now (foreach expands empty; text bindings resolve to literals).
-    // Real data-in-preview is a later step.
-    let empty_ctx = serde_json::json!({});
+    // Path B preview: render from the shared pass with the live eval scope `ctx`
+    // so foreach lists + text bindings resolve to real data. avail_h=0 keeps the
+    // panel content-height in the preview.
     let rects =
-        crate::interpreter::panel_layout::layout_panel(panel_el, AVAIL_W, 0, &empty_ctx);
+        crate::interpreter::panel_layout::layout_panel(panel_el, AVAIL_W, 0, ctx);
     let arr = rects.as_array().cloned().unwrap_or_default();
     let panel_h = arr
         .first()

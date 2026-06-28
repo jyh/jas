@@ -5458,8 +5458,10 @@ let path_b_node_at_path (content : Yojson.Safe.t) (node_path : int list)
 let render_panel_absolute ~packing ~ctx (content : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   let panel_node = `Assoc [ ("content", content) ] in
+  (* Pass the live eval scope [ctx] so foreach lists + text bindings resolve to
+     real data in the preview (avail_h 0 keeps the panel content-height). *)
   let rects =
-    match Panel_layout.layout_panel panel_node path_b_avail_w 0 (`Assoc []) with
+    match Panel_layout.layout_panel panel_node path_b_avail_w 0 ctx with
     | `List items -> items
     | _ -> []
   in
