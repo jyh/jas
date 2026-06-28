@@ -4235,6 +4235,14 @@ struct YamlPanelBodyView: View {
                 }
             }
             .frame(width: 228, height: CGFloat(layout.panelH), alignment: .topLeading)
+            // Default foreground = theme.text, cascaded to all leaves. The flat
+            // Path B ZStack has no ancestor container to inherit it from (unlike
+            // the normal nested render), so widgets that rely on the inherited
+            // color — selects / inputs / labels in Character & Paragraph — would
+            // otherwise fall back to SwiftUI's dark default (dark-on-dark).
+            // Mirrors the Rust render swap's color:var(--jas-text) on its
+            // container. Widgets that set their own color still override this.
+            .foregroundColor(theme.map { SwiftUI.Color(nsColor: $0.text) })
         } else {
             YamlElementView(
                 element: contentSpec, context: context, model: model,
