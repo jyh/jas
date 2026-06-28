@@ -36,6 +36,7 @@ _CONTAINER_TYPES = ("container", "row", "col", "panel")
 _FILL_KINDS = frozenset({
     "select", "number_input", "text_input", "length_input",
     "slider", "placeholder", "separator",
+    "combo_box", "icon_select", "spacer",
 })
 
 # Canonical intrinsic heights per widget kind (px).
@@ -43,6 +44,8 @@ _KIND_HEIGHT = {
     "text": 20, "button": 24, "checkbox": 20, "icon_button": 24, "icon": 20,
     "select": 20, "number_input": 20, "text_input": 20, "length_input": 20,
     "slider": 12, "placeholder": 40, "separator": 1,
+    "combo_box": 20, "icon_select": 20, "spacer": 0, "color_swatch": 16,
+    "toggle": 20,
 }
 
 # Fallback widths for fill kinds when no available width is supplied
@@ -50,6 +53,7 @@ _KIND_HEIGHT = {
 _KIND_FALLBACK_W = {
     "select": 80, "number_input": 45, "text_input": 80, "length_input": 80,
     "slider": 100, "placeholder": 60, "separator": 0,
+    "combo_box": 80, "icon_select": 80, "spacer": 0,
 }
 
 
@@ -129,11 +133,43 @@ def _visible_children(node: dict) -> list[tuple[int, dict]]:
     return out
 
 
+def _resolve_dim(v: Any, avail: int) -> int | None:
+    """Resolve a style dimension to integer px, or None to ignore.
+
+    Numbers truncate toward zero; ``"N%"`` is N percent of ``avail`` (integer,
+    ignored when ``avail <= 0``, e.g. heights, which have no reference); a bare
+    numeric string is that int; anything else (``"auto"``, junk) is ignored.
+    """
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.endswith("%"):
+            num = s[:-1]
+            try:
+                p = int(num)
+            except ValueError:
+                try:
+                    p = int(float(num))
+                except ValueError:
+                    return None
+            return (avail * p) // 100 if avail > 0 else None
+        try:
+            return int(float(s))
+        except ValueError:
+            return None
+    return None
+
+
 def _leaf_size(node: dict, avail_w: int) -> tuple[int, int, bool]:
     """Return (width, height, fill) for a leaf widget."""
     t = node.get("type")
     st = _style(node)
-    h = int(st["height"]) if "height" in st else _KIND_HEIGHT.get(t, 20)
+    h = _resolve_dim(st.get("height"), 0)
+    if h is None:
+        h = _KIND_HEIGHT.get(t, 20)
     fill = t in _FILL_KINDS
     if fill:
         w = avail_w if avail_w > 0 else _KIND_FALLBACK_W.get(t, 0)
@@ -143,19 +179,23 @@ def _leaf_size(node: dict, avail_w: int) -> tuple[int, int, bool]:
     elif t == "button":
         label = node.get("label")
         w = _text_w(label if isinstance(label, str) else "") + 16
-    elif t == "checkbox":
+    elif t == "checkbox" or t == "toggle":
         label = node.get("label")
         w = 16 + 4 + _text_w(label if isinstance(label, str) else "")
+    elif t == "color_swatch":
+        w = 16
     elif t == "icon_button":
         w = 24
     elif t == "icon":
         w = 20
     else:
         w = 0
-    if "width" in st:
-        w = int(st["width"])
-    if "min_width" in st:
-        w = max(w, int(st["min_width"]))
+    rw = _resolve_dim(st.get("width"), avail_w)
+    if rw is not None:
+        w = rw
+    rmw = _resolve_dim(st.get("min_width"), avail_w)
+    if rmw is not None:
+        w = max(w, rmw)
     return (w, h, fill)
 
 
@@ -189,9 +229,8 @@ def _measure(node: dict, path: list[int], avail_w: int) -> tuple[int, int, list[
             items.append(it)
         return (w, h, items)
 
-    w, h, fill = _leaf_size(node, avail_w)
-    rect_w = avail_w if (fill and avail_w > 0) else w
-    return (rect_w, h, [{"path": list(path), "x": 0, "y": 0, "w": rect_w, "h": h}])
+    w, h, _fill = _leaf_size(node, avail_w)
+    return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h}])
 
 
 def _column(children, path, inner_w, gap) -> tuple[list[dict], int]:
@@ -218,7 +257,12 @@ def _flow(children, path, inner_w, gap) -> tuple[list[dict], int]:
     n = len(measured)
     fixed = sum(m[2] for m in measured) + (gap * (n - 1) if n else 0)
     leftover = max(0, inner_w - fixed)
-    weights = [int(_style(m[1]).get("flex") or 0) for m in measured]
+    weights = []
+    for m in measured:
+        wt = int(_style(m[1]).get("flex") or 0)
+        if wt == 0 and m[1].get("type") == "spacer":
+            wt = 1  # a spacer with no explicit flex consumes leftover
+        weights.append(wt)
     sumw = sum(weights)
     extra = [0] * n
     if sumw > 0 and leftover > 0:

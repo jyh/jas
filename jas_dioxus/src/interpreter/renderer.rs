@@ -8134,11 +8134,16 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         // Path B preview: render this panel from the shared canonical layout
         // pass (absolute rects) instead of framework flex. Opt-in via the
         // JAS_PATH_B=1 env var and restricted to the panels the cross-app
-        // byte-gate covers, so it is zero-risk to shipped panels. This is the
-        // Phase-1 "render each app from the pass behind a flag" mechanism from
-        // PATH_B_DESIGN.md; broadens as the corpus broadens.
+        // byte-gate covers (everything except color / gradient / layers, whose
+        // composite widgets the v1 pass cannot size yet), so it is zero-risk to
+        // shipped panels. This is the Phase-1 "render each app from the pass
+        // behind a flag" mechanism from PATH_B_DESIGN.md; broadens with the corpus.
         let pid = el.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        if path_b_enabled() && matches!(pid, "symbols_panel_content" | "opacity_panel_content") {
+        let path_b_unsupported = matches!(
+            pid,
+            "color_panel_content" | "gradient_panel_content" | "layers_panel_content"
+        );
+        if path_b_enabled() && !pid.is_empty() && !path_b_unsupported {
             return render_panel_absolute(el, content, ctx, &child);
         }
         render_el(content, ctx, &child)
