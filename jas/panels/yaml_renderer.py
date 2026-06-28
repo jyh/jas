@@ -189,6 +189,17 @@ def render_panel_absolute(panel_node, store, ctx, dispatch_fn=None) -> QWidget:
     # No layout manager: leaves are positioned absolutely via setGeometry.
     container.setFixedSize(228, plan["height"])
 
+    # Chrome boxes first (behind): a layout container's border/background (incl.
+    # bind.background selection highlights). Render the node with its children
+    # stripped so the existing renderer resolves just its chrome, no content.
+    for item in plan["chrome"]:
+        cn = {k: v for k, v in item["node"].items() if k not in ("children", "do", "foreach")}
+        box = render_element(cn, store, item["ctx"], dispatch_fn)
+        if box is not None:
+            r = item["rect"]
+            box.setParent(container)
+            box.setGeometry(QRect(r["x"], r["y"], r["w"], r["h"]))
+
     for item in plan["leaves"]:
         widget = render_element(item["node"], store, item["ctx"], dispatch_fn)
         if widget is None:

@@ -93,35 +93,50 @@ _LAYOUT_CONTAINER_TYPES = frozenset({
 })
 
 
+def _has_chrome(node: dict) -> bool:
+    """A layout-only container still worth drawing — it carries a border /
+    background (static or a `bind.background`, e.g. a selected-row highlight)."""
+    st = _style(node)
+    if isinstance(st, dict) and ("border" in st or "background" in st or "bg" in st):
+        return True
+    b = node.get("bind")
+    return isinstance(b, dict) and "background" in b
+
+
 def render_plan(panel_node: dict, avail_w: int, avail_h: int = 0,
                 ctx: dict | None = None) -> dict:
     """Render-side projection of the same layout pass. Returns
-    ``{"height": <panel height>, "leaves": [{"rect", "node", "ctx"}, ...]}``,
-    one leaf entry per renderable widget, where ``ctx`` is the (child) scope to
-    render that node with (so a foreach-expanded leaf carries its per-row scope)
-    and ``height`` is the canonical panel content height (incl. padding). Layout-
-    only nodes (containers / disclosure / foreach wrappers) are omitted from the
-    leaves. The cross-app byte-gate consumes ``layout_panel`` (rects only); the
-    render swaps consume this. One traversal, two projections.
+    ``{"height", "chrome": [...], "leaves": [...]}`` where each entry is
+    ``{"rect", "node", "ctx"}``: ``leaves`` are renderable widgets (each with the
+    per-row child scope, so foreach rows resolve) and ``chrome`` are layout-only
+    containers that carry a border/background to draw BEHIND the leaves (e.g. a
+    selected-row highlight). ``height`` is the canonical panel content height.
+    Layout-only containers without chrome are omitted. ``layout_panel`` is
+    unchanged (rects only) so the cross-app byte-gate stays byte-exact — one
+    traversal, two projections.
     """
     root = panel_node.get("content")
     if not isinstance(root, dict):
-        return {"height": 0, "leaves": []}
+        return {"height": 0, "chrome": [], "leaves": []}
     _w, _h, items = _measure(root, [], int(avail_w), int(avail_h), ctx or {})
     height = items[0]["h"] if items else 0
-    out = []
+    chrome = []
+    leaves = []
     for it in items:
         node = it.get("node")
         if not isinstance(node, dict):
             continue
-        if node.get("type") in _LAYOUT_CONTAINER_TYPES:
-            continue
-        out.append({
+        entry = {
             "rect": {"x": it["x"], "y": it["y"], "w": it["w"], "h": it["h"]},
             "node": node,
             "ctx": it.get("ctx") or {},
-        })
-    return {"height": height, "leaves": out}
+        }
+        if node.get("type") in _LAYOUT_CONTAINER_TYPES:
+            if _has_chrome(node):
+                chrome.append(entry)
+        else:
+            leaves.append(entry)
+    return {"height": height, "chrome": chrome, "leaves": leaves}
 
 
 # ── internals ────────────────────────────────────────────────────────
