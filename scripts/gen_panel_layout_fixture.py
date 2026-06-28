@@ -25,29 +25,49 @@ from workspace_interpreter.panel_layout import layout_panel  # noqa: E402
 
 # (case name, compiled panel id, available content width).
 # avail_w = 228 is the canonical dock content width (dock 240 - 12 scrollbar).
-# All 16 panels. The composite/data-driven widgets in color/gradient/layers
-# (color_bar / fill_stroke_widget / gradient_slider / gradient_tile / dropdown /
-# tree_view) lay out as canonical fixed boxes; their data-driven rows (foreach
-# expansions, tree rows) need a data fixture and are deferred (no-data state).
+# All 16 panels. avail_h=600 drives vertical flex (foreach lists grow to fill).
+# Per-panel `ctx` is the data scope used to evaluate foreach sources and text
+# bindings; symbols carries a deterministic master list so its foreach expands
+# (the first foreach data slice). Panels left at {} expand foreach to empty
+# (no-data state) and resolve bound text to null.
 _PANELS = [
     "symbols", "opacity", "align", "artboards", "boolean", "brushes",
     "character", "concepts", "magic_wand", "paragraph", "properties",
     "stroke", "swatches", "color", "gradient", "layers",
 ]
-SEED = [(f"{name}@228", f"{name}_panel_content", 228) for name in _PANELS]
+
+_SYMBOLS_CTX = {
+    "active_document": {
+        "symbols": [
+            {"id": "m1", "name": "Star", "usage_count": 3},
+            {"id": "m2", "name": "Gear", "usage_count": 0},
+            {"id": "m3", "name": "Logo Mark", "usage_count": 12},
+        ],
+        "selection_count": 1,
+    },
+    "panel": {"selected_symbol": "m1"},
+}
+
+_CTX = {"symbols": _SYMBOLS_CTX}
+_AVAIL_H = 600
+
+SEED = [
+    (f"{name}@228", f"{name}_panel_content", 228, _AVAIL_H, _CTX.get(name, {}))
+    for name in _PANELS
+]
 
 
 def main() -> int:
     bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json")))
     panels = bundle["panels"]
     cases = []
-    for name, panel_id, avail_w in SEED:
+    for name, panel_id, avail_w, avail_h, ctx in SEED:
         node = panels[panel_id]
-        rects = layout_panel(node, avail_w)
+        rects = layout_panel(node, avail_w, avail_h, ctx)
         cases.append({
             "name": name,
             "function": "layout_panel",
-            "args": {"panel": panel_id, "avail_w": avail_w},
+            "args": {"panel": panel_id, "avail_w": avail_w, "avail_h": avail_h, "ctx": ctx},
             "expected": rects,
         })
     out_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_layout.json")

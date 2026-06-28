@@ -2038,7 +2038,9 @@ class CrossLanguageTest(absltest.TestCase):
             expected = tc["expected"]
             if func != "layout_panel":
                 self.fail(f"Unknown function: {func}")
-            actual = layout_panel(panels[args["panel"]], args["avail_w"])
+            actual = layout_panel(
+                panels[args["panel"]], args["avail_w"],
+                args.get("avail_h", 0), args.get("ctx", {}))
             self.assertEqual(actual, expected,
                 msg=f"Panel layout '{name}' mismatch")
 

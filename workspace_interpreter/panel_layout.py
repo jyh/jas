@@ -6,58 +6,58 @@ rects, byte-identical across all five apps.  This is the language-neutral
 intra-panel layout to its own GUI framework (Qt / GTK / AppKit / Dioxus /
 CSS), which is the cross-app drift surface Path B exists to kill.
 
-The full contract is PATH_B_DESIGN.md Appendix A.  Key invariants:
+The full contract is PATH_B_DESIGN.md (Appendix A + Appendix B for foreach).
+Key invariants:
 
   - ALL arithmetic is integer; there is no float anywhere, so the four
     native implementations are byte-identical and the corpus
     (test_fixtures/algorithms/panel_layout.json) needs no tolerance.
   - text / intrinsic widths use the deterministic stub measure
     ``len(text) * CHAR_WIDTH`` (CHAR_WIDTH = 10) instead of real font
-    metrics, so rects are portable.
+    metrics, so rects are portable.  Text ``content`` / ``label`` is first
+    resolved through ``evaluate_text`` against the data scope ``ctx`` so a
+    bound ``"{{sym.name}}"`` is measured at its resolved value (a literal
+    passes through unchanged).
   - columns use the Bootstrap-12 rule ``cell_w = round_half_up(inner_w *
     N / 12)`` implemented as the exact integer ``(2*inner_w*N + 12) // 24``.
+  - ``foreach`` containers expand their ``do`` template once per item of
+    ``evaluate(foreach.source, ctx)`` (each item bound as ``foreach.as``).
+  - a column distributes ``avail_h`` leftover to ``flex``-weighted children
+    (vertical flex), so a ``foreach`` list grows to fill the dock height.
 
 Output is a pre-order (parent before children) list of
 ``{"path": [int, ...], "rect": {"x","y","w","h": int}}`` where ``path`` is
 the element's tree path relative to the panel content root (root = ``[]``,
-its i-th child = ``[i]``) and rects are panel-relative.
+its i-th child = ``[i]``, a foreach's i-th expansion = ``[..., i]``).
 """
 from __future__ import annotations
 
 from typing import Any
 
+from .expr import evaluate, evaluate_text
+
 CHAR_WIDTH = 10  # stub glyph advance; integer so text widths are exact
 
 _CONTAINER_TYPES = ("container", "row", "col", "panel")
 
-# Leaf kinds that take the available width handed to them (fill their cell
-# in a grid, or the inner width in a column).  Everything else is an inline
-# leaf taking its intrinsic width, left-aligned.
 _FILL_KINDS = frozenset({
     "select", "number_input", "text_input", "length_input",
     "slider", "placeholder", "separator",
     "combo_box", "icon_select", "spacer",
-    # Composite / data-driven widgets: the layout pass places the widget BOX at
-    # a canonical fixed height (fill width); the widget renders its own internals
-    # and any data-driven rows (a separate concern needing a data fixture).
     "color_bar", "fill_stroke_widget", "gradient_slider", "gradient_tile",
     "dropdown", "tree_view",
 })
 
-# Canonical intrinsic heights per widget kind (px).
 _KIND_HEIGHT = {
     "text": 20, "button": 24, "checkbox": 20, "icon_button": 24, "icon": 20,
     "select": 20, "number_input": 20, "text_input": 20, "length_input": 20,
     "slider": 12, "placeholder": 40, "separator": 1,
     "combo_box": 20, "icon_select": 20, "spacer": 0, "color_swatch": 16,
     "toggle": 20,
-    # composite box heights (provisional — ratified as the corpus broadens)
     "color_bar": 24, "fill_stroke_widget": 44, "gradient_slider": 24,
     "gradient_tile": 24, "dropdown": 20, "tree_view": 200,
 }
 
-# Fallback widths for fill kinds when no available width is supplied
-# (e.g. a fill leaf inside a flow row, which has no single fill target).
 _KIND_FALLBACK_W = {
     "select": 80, "number_input": 45, "text_input": 80, "length_input": 80,
     "slider": 100, "placeholder": 60, "separator": 0,
@@ -67,16 +67,19 @@ _KIND_FALLBACK_W = {
 }
 
 
-def layout_panel(panel_node: dict, avail_w: int) -> list[dict]:
+def layout_panel(panel_node: dict, avail_w: int, avail_h: int = 0,
+                 ctx: dict | None = None) -> list[dict]:
     """Lay out a compiled panel node into widget rects.
 
-    ``panel_node`` is a ``{"type": "panel", "content": <root>}`` object
-    from workspace.json; layout starts at ``content`` (path ``[]``).
+    ``ctx`` is the data scope (``state`` / ``panel`` / ``data`` /
+    ``active_document`` namespaces) used to evaluate ``foreach`` sources and
+    text bindings; defaults to empty (literals only). ``avail_h`` drives
+    vertical flex; 0 means content-height (no vertical flex).
     """
     root = panel_node.get("content")
     if not isinstance(root, dict):
         return []
-    _w, _h, items = _measure(root, [], int(avail_w))
+    _w, _h, items = _measure(root, [], int(avail_w), int(avail_h), ctx or {})
     return [
         {"path": it["path"], "rect": {"x": it["x"], "y": it["y"], "w": it["w"], "h": it["h"]}}
         for it in items
@@ -105,12 +108,43 @@ def _has_col(node: dict) -> bool:
     return node.get("col") is not None
 
 
-def _text_w(s: str) -> int:
-    return len(s) * CHAR_WIDTH
+def _text_w(node: dict, key: str, ctx: dict) -> int:
+    """Resolved text width: evaluate_text(node[key], ctx) length * CHAR_WIDTH."""
+    raw = node.get(key)
+    if not isinstance(raw, str):
+        return 0
+    try:
+        resolved = evaluate_text(raw, ctx)
+    except Exception:
+        resolved = raw
+    return len(resolved) * CHAR_WIDTH
+
+
+def _resolve_dim(v: Any, avail: int) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.endswith("%"):
+            num = s[:-1]
+            try:
+                p = int(num)
+            except ValueError:
+                try:
+                    p = int(float(num))
+                except ValueError:
+                    return None
+            return (avail * p) // 100 if avail > 0 else None
+        try:
+            return int(float(s))
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_padding(v: Any) -> tuple[int, int, int, int]:
-    """CSS 1/2/4-value shorthand -> (top, right, bottom, left), ints."""
     if v is None:
         return (0, 0, 0, 0)
     if isinstance(v, (int, float)):
@@ -143,55 +177,31 @@ def _visible_children(node: dict) -> list[tuple[int, dict]]:
     return out
 
 
-def _resolve_dim(v: Any, avail: int) -> int | None:
-    """Resolve a style dimension to integer px, or None to ignore.
-
-    Numbers truncate toward zero; ``"N%"`` is N percent of ``avail`` (integer,
-    ignored when ``avail <= 0``, e.g. heights, which have no reference); a bare
-    numeric string is that int; anything else (``"auto"``, junk) is ignored.
-    """
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return int(v)
-    if isinstance(v, str):
-        s = v.strip()
-        if s.endswith("%"):
-            num = s[:-1]
-            try:
-                p = int(num)
-            except ValueError:
-                try:
-                    p = int(float(num))
-                except ValueError:
-                    return None
-            return (avail * p) // 100 if avail > 0 else None
-        try:
-            return int(float(s))
-        except ValueError:
-            return None
-    return None
+def _gap(node: dict) -> int:
+    g = _style(node).get("gap")
+    return int(g) if isinstance(g, (int, float)) else 0
 
 
-def _leaf_size(node: dict, avail_w: int) -> tuple[int, int, bool]:
-    """Return (width, height, fill) for a leaf widget."""
+def _flex(node: dict) -> int:
+    f = _style(node).get("flex")
+    w = int(f) if isinstance(f, (int, float)) else 0
+    if w == 0 and node.get("type") == "spacer":
+        w = 1
+    return w
+
+
+def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
+    """Return width for a leaf widget (height handled by the caller)."""
     t = node.get("type")
     st = _style(node)
-    h = _resolve_dim(st.get("height"), 0)
-    if h is None:
-        h = _KIND_HEIGHT.get(t, 20)
-    fill = t in _FILL_KINDS
-    if fill:
+    if t in _FILL_KINDS:
         w = avail_w if avail_w > 0 else _KIND_FALLBACK_W.get(t, 0)
     elif t == "text":
-        content = node.get("content")
-        w = _text_w(content if isinstance(content, str) else "")
+        w = _text_w(node, "content", ctx)
     elif t == "button":
-        label = node.get("label")
-        w = _text_w(label if isinstance(label, str) else "") + 16
-    elif t == "checkbox" or t == "toggle":
-        label = node.get("label")
-        w = 16 + 4 + _text_w(label if isinstance(label, str) else "")
+        w = _text_w(node, "label", ctx) + 16
+    elif t in ("checkbox", "toggle"):
+        w = 16 + 4 + _text_w(node, "label", ctx)
     elif t == "color_swatch":
         w = 16
     elif t == "icon_button":
@@ -206,32 +216,39 @@ def _leaf_size(node: dict, avail_w: int) -> tuple[int, int, bool]:
     rmw = _resolve_dim(st.get("min_width"), avail_w)
     if rmw is not None:
         w = max(w, rmw)
-    return (w, h, fill)
+    return w
 
 
-def _measure(node: dict, path: list[int], avail_w: int) -> tuple[int, int, list[dict]]:
-    """Measure a node at the given available width.
+def _leaf_h(node: dict) -> int:
+    t = node.get("type")
+    h = _resolve_dim(_style(node).get("height"), 0)
+    return h if h is not None else _KIND_HEIGHT.get(t, 20)
 
-    Returns ``(w, h, items)`` where each item is
-    ``{"path", "x", "y", "w", "h"}`` with x/y RELATIVE to this node's
-    origin (0, 0); the caller offsets them.  Items are pre-order.
-    """
+
+def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
+             ctx: dict) -> tuple[int, int, list[dict]]:
+    """Measure a node; return (w, h, items) with item coords relative to it."""
     st = _style(node)
     pt, pr, pb, pl = _parse_padding(st.get("padding"))
-    gap = int(st.get("gap") or 0)
+    gap = _gap(node)
     inner_w = avail_w - pl - pr
+    inner_h = (avail_h - pt - pb) if avail_h > 0 else 0
 
     if _is_container(node):
-        children = _visible_children(node)
-        lay = _resolved_layout(node)
-        if lay == "row" and any(_has_col(c) for _, c in children):
-            ch_items, content_h = _grid(children, path, inner_w, gap)
-        elif lay == "row":
-            ch_items, content_h = _flow(children, path, inner_w, gap)
+        if isinstance(node.get("foreach"), dict) and node.get("do"):
+            ch_items, content_h = _foreach(node, path, inner_w, gap, ctx)
         else:
-            ch_items, content_h = _column(children, path, inner_w, gap)
+            children = _visible_children(node)
+            lay = _resolved_layout(node)
+            if lay == "row" and any(_has_col(c) for _, c in children):
+                ch_items, content_h = _grid(children, path, inner_w, gap, ctx)
+            elif lay == "row":
+                ch_items, content_h = _flow(children, path, inner_w, gap, ctx)
+            else:
+                ch_items, content_h = _column(children, path, inner_w, gap, inner_h, ctx)
+        exp_h = _resolve_dim(st.get("height"), 0)
         w = avail_w
-        h = content_h + pt + pb
+        h = exp_h if exp_h is not None else content_h + pt + pb
         items = [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h}]
         for it in ch_items:
             it["x"] += pl
@@ -239,40 +256,56 @@ def _measure(node: dict, path: list[int], avail_w: int) -> tuple[int, int, list[
             items.append(it)
         return (w, h, items)
 
-    w, h, _fill = _leaf_size(node, avail_w)
+    w = _leaf_size(node, avail_w, ctx)
+    h = _leaf_h(node)
     return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h}])
 
 
-def _column(children, path, inner_w, gap) -> tuple[list[dict], int]:
+def _column(children, path, inner_w, gap, avail_h, ctx) -> tuple[list[dict], int]:
+    measured = []  # (node, height, items)
+    for i, c in children:
+        _cw, ch, cit = _measure(c, path + [i], inner_w, 0, ctx)
+        measured.append((c, ch, cit))
+    n = len(measured)
+    natural = sum(m[1] for m in measured) + (gap * (n - 1) if n else 0)
+    extra = [0] * n
+    if avail_h > 0:
+        leftover = avail_h - natural
+        if leftover > 0:
+            weights = [_flex(m[0]) for m in measured]
+            sumw = sum(weights)
+            if sumw > 0:
+                base = [leftover * weights[k] // sumw for k in range(n)]
+                rem = leftover - sum(base)
+                for k in range(n):
+                    if rem <= 0:
+                        break
+                    if weights[k] > 0:
+                        base[k] += 1
+                        rem -= 1
+                extra = base
     items: list[dict] = []
     cy = 0
-    n = 0
-    for i, c in children:
-        _cw, ch, cit = _measure(c, path + [i], inner_w)
+    for k, (_c, ch, cit) in enumerate(measured):
+        hk = ch + extra[k]
         for it in cit:
             it["y"] += cy
+        if extra[k] and cit:
+            cit[0]["h"] = hk
         items.extend(cit)
-        cy += ch + gap
-        n += 1
+        cy += hk + gap
     return items, (cy - gap if n else 0)
 
 
-def _flow(children, path, inner_w, gap) -> tuple[list[dict], int]:
-    # Measure each child at intrinsic width (fill leaves use fallbacks; a
-    # flow row has no single fill target).
-    measured = []  # (i, c, w, h, items)
+def _flow(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
+    measured = []
     for i, c in children:
-        cw, ch, cit = _measure(c, path + [i], -1)
-        measured.append((i, c, cw, ch, cit))
+        cw, ch, cit = _measure(c, path + [i], -1, 0, ctx)
+        measured.append((c, cw, ch, cit))
     n = len(measured)
-    fixed = sum(m[2] for m in measured) + (gap * (n - 1) if n else 0)
+    fixed = sum(m[1] for m in measured) + (gap * (n - 1) if n else 0)
     leftover = max(0, inner_w - fixed)
-    weights = []
-    for m in measured:
-        wt = int(_style(m[1]).get("flex") or 0)
-        if wt == 0 and m[1].get("type") == "spacer":
-            wt = 1  # a spacer with no explicit flex consumes leftover
-        weights.append(wt)
+    weights = [_flex(m[0]) for m in measured]
     sumw = sum(weights)
     extra = [0] * n
     if sumw > 0 and leftover > 0:
@@ -285,17 +318,15 @@ def _flow(children, path, inner_w, gap) -> tuple[list[dict], int]:
                 base[k] += 1
                 rem -= 1
         extra = base
-    row_h = max((m[3] for m in measured), default=0)
+    row_h = max((m[2] for m in measured), default=0)
     items: list[dict] = []
     cx = 0
-    for k, (i, c, cw, ch, cit) in enumerate(measured):
+    for k, (_c, cw, ch, cit) in enumerate(measured):
         fw = cw + extra[k]
         dy = (row_h - ch) // 2
         for it in cit:
             it["x"] += cx
             it["y"] += dy
-        # Widen the child's own root rect by any flex extra (subtree not
-        # re-laid-out in v1; flow-flex is unused by the seed corpus).
         if extra[k] and cit:
             cit[0]["w"] = fw
         items.extend(cit)
@@ -303,8 +334,7 @@ def _flow(children, path, inner_w, gap) -> tuple[list[dict], int]:
     return items, row_h
 
 
-def _grid(children, path, inner_w, gap) -> tuple[list[dict], int]:
-    # Wrap into lines so each line's column span sums to <= 12.
+def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
     lines: list[list[tuple[int, dict, int]]] = []
     cur: list[tuple[int, dict, int]] = []
     cur_span = 0
@@ -321,13 +351,13 @@ def _grid(children, path, inner_w, gap) -> tuple[list[dict], int]:
 
     items: list[dict] = []
     line_y = 0
-    for li, line in enumerate(lines):
+    for line in lines:
         cx = 0
         line_h = 0
-        cells = []  # (items, h, cell_x)
+        cells = []
         for i, c, span in line:
-            cell_w = (2 * inner_w * span + 12) // 24  # round-half-up, exact
-            _cw, ch, cit = _measure(c, path + [i], cell_w)
+            cell_w = (2 * inner_w * span + 12) // 24
+            _cw, ch, cit = _measure(c, path + [i], cell_w, 0, ctx)
             cells.append((cit, ch, cx))
             line_h = max(line_h, ch)
             cx += cell_w + gap
@@ -339,3 +369,38 @@ def _grid(children, path, inner_w, gap) -> tuple[list[dict], int]:
             items.extend(cit)
         line_y += line_h + gap
     return items, (line_y - gap if lines else 0)
+
+
+def _foreach(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
+    """Expand a foreach container's `do` template once per item.
+
+    v1: column stacking (the layout every foreach panel uses for its list).
+    Each item is bound as `foreach.as` (plus `_index`) in a child scope.
+    """
+    spec = node.get("foreach") or {}
+    src = spec.get("source", "")
+    var = spec.get("as", "item")
+    template = node.get("do") or {}
+    try:
+        res = evaluate(src, ctx)
+        items = res.value if hasattr(res, "value") else res
+    except Exception:
+        items = []
+    if not isinstance(items, list):
+        items = []
+
+    out: list[dict] = []
+    cy = 0
+    n = 0
+    for i, item in enumerate(items):
+        item_data = dict(item) if isinstance(item, dict) else {"_value": item}
+        item_data["_index"] = i
+        child_ctx = dict(ctx)
+        child_ctx[var] = item_data
+        _w, ch, cit = _measure(template, path + [i], inner_w, 0, child_ctx)
+        for it in cit:
+            it["y"] += cy
+        out.extend(cit)
+        cy += ch + gap
+        n += 1
+    return out, (cy - gap if n else 0)
