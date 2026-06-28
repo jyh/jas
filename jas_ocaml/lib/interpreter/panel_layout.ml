@@ -408,21 +408,30 @@ and grid children path inner_w gap ctx : mitem list * int =
   (!items, if !lines <> [] then !line_y - gap else 0)
 
 (* Expand a foreach container's [do] template once per item of
-   evaluate(foreach.source, ctx). Each item is bound as [foreach.as] (plus
-   [_index]) in a child scope; v1 stacks the expansions column-wise. *)
+   evaluate(foreach.source, ctx), laid out per the container [layout] field:
+   [column] (vertical stack, default), [row] (horizontal single line), or
+   [wrap] (horizontal, wrapping at inner_w). Each item is bound as [foreach.as]
+   (plus [_index]) in a child scope.
+
+   Column measures each expansion at avail = inner_w (fills, as for a normal
+   column). Row and wrap measure at avail = -1 (intrinsic): for those the item
+   width is the subtree extent (max over produced rects of rect.x + rect.w),
+   and the item own root rect width is corrected to that extent so a container
+   item carries its content width rather than the unbounded sentinel. *)
 and foreach n path inner_w gap ctx : mitem list * int =
   let spec = mem "foreach" n in
   let src = match to_str_opt (mem "source" spec) with Some s -> s | None -> "" in
   let var = match to_str_opt (mem "as" spec) with Some s -> s | None -> "item" in
   let template = mem "do" n in
+  let lay = match to_str_opt (mem "layout" n) with Some s -> s | None -> "column" in
   let items =
     match Expr_eval.evaluate src ctx with
     | Expr_eval.List l -> l
     | _ -> []
   in
-  let out = ref [] in
-  let cy = ref 0 in
-  let count = ref 0 in
+  (* Measure every expansion (column fills inner_w; row/wrap are intrinsic). *)
+  let avail = if lay = "column" then inner_w else -1 in
+  let measured = ref [] in
   List.iteri (fun i item ->
     let item_data =
       match item with
@@ -434,13 +443,56 @@ and foreach n path inner_w gap ctx : mitem list * int =
       | `Assoc fields -> `Assoc (List.remove_assoc var fields @ [ (var, item_data) ])
       | _ -> `Assoc [ (var, item_data) ]
     in
-    let _w, ch, cit = measure template (path @ [ i ]) inner_w 0 child_ctx in
-    List.iter (fun it -> it.y <- it.y + !cy) cit;
-    out := !out @ cit;
-    cy := !cy + ch + gap;
-    incr count)
+    let w, h, cit = measure template (path @ [ i ]) avail 0 child_ctx in
+    let w =
+      if lay <> "column" then begin
+        let iw = List.fold_left (fun acc it -> max acc (it.x + it.w)) 0 cit in
+        (match cit with first :: _ -> first.w <- iw | [] -> ());
+        iw
+      end else w
+    in
+    measured := (w, h, cit) :: !measured)
     items;
-  (!out, if !count > 0 then !cy - gap else 0)
+  let measured = List.rev !measured in
+  let out = ref [] in
+  if lay = "row" then begin
+    let row_h = List.fold_left (fun acc (_, h, _) -> max acc h) 0 measured in
+    let cx = ref 0 in
+    List.iter (fun (w, h, cit) ->
+      let dy = (row_h - h) / 2 in
+      List.iter (fun it -> it.x <- it.x + !cx; it.y <- it.y + dy) cit;
+      out := !out @ cit;
+      cx := !cx + w + gap)
+      measured;
+    (!out, row_h)
+  end
+  else if lay = "wrap" then begin
+    let cx = ref 0 in
+    let line_y = ref 0 in
+    let line_h = ref 0 in
+    List.iter (fun (w, h, cit) ->
+      if !cx > 0 && !cx + w > inner_w then begin
+        line_y := !line_y + !line_h + gap;
+        cx := 0;
+        line_h := 0
+      end;
+      List.iter (fun it -> it.x <- it.x + !cx; it.y <- it.y + !line_y) cit;
+      out := !out @ cit;
+      cx := !cx + w + gap;
+      line_h := max !line_h h)
+      measured;
+    (!out, if measured <> [] then !line_y + !line_h else 0)
+  end
+  else begin
+    (* column *)
+    let cy = ref 0 in
+    List.iter (fun (_w, h, cit) ->
+      List.iter (fun it -> it.y <- it.y + !cy) cit;
+      out := !out @ cit;
+      cy := !cy + h + gap)
+      measured;
+    (!out, if measured <> [] then !cy - gap else 0)
+  end
 
 (* Lay out a compiled panel node ({"type":"panel","content":<root>}) into a
    JSON array of {"path":[..],"rect":{x,y,w,h}}, pre-order, panel-relative.

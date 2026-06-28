@@ -514,8 +514,15 @@ fn grid(
 }
 
 /// Expand a foreach container's `do` template once per item of
-/// `eval(foreach.source, ctx)`. v1: column stacking. Each item is bound as
+/// `eval(foreach.source, ctx)`, laid out per the container's `layout`:
+/// `column` (vertical stack, default), `row` (horizontal, single line), or
+/// `wrap` (horizontal, wrapping at `inner_w`). Each item is bound as
 /// `foreach.as` (plus `_index`) in a child scope.
+///
+/// Row/wrap items are measured at intrinsic width (avail = -1); `item_w` is the
+/// subtree's actual extent (max of rect.x + rect.w over the item's produced
+/// rects), and the item's own (root) rect width is corrected to that extent so
+/// a container item carries its content width, not the unbounded sentinel.
 fn foreach(
     n: &Value,
     path: &[i64],
@@ -527,6 +534,8 @@ fn foreach(
     let src = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
     let var = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
     let template = n.get("do").cloned().unwrap_or(Value::Null);
+    // Dispatch on the raw `layout` field (not resolved_layout): default column.
+    let lay = n.get("layout").and_then(|v| v.as_str()).unwrap_or("column");
 
     let items: Vec<Value> = match eval(src, ctx) {
         EVal::List(v) => v,
@@ -535,9 +544,9 @@ fn foreach(
 
     let base_obj: Map<String, Value> = ctx.as_object().cloned().unwrap_or_default();
 
-    let mut out: Vec<MItem> = vec![];
-    let mut cy = 0;
-    let n_items = items.len();
+    // Measure every expansion (column fills inner_w; row/wrap are intrinsic).
+    let avail = if lay == "column" { inner_w } else { -1 };
+    let mut measured: Vec<(i64, i64, Vec<MItem>)> = vec![]; // (item_w, item_h, items)
     for (i, item) in items.into_iter().enumerate() {
         let mut item_data: Map<String, Value> = match item {
             Value::Object(m) => m,
@@ -554,12 +563,62 @@ fn foreach(
 
         let mut cp = path.to_vec();
         cp.push(i as i64);
-        let (_w, ch, mut cit) = measure(&template, &cp, inner_w, 0, &child_ctx);
+        let (mut w, h, mut cit) = measure(&template, &cp, avail, 0, &child_ctx);
+        if lay != "column" {
+            let iw = cit.iter().map(|it| it.x + it.w).max().unwrap_or(0);
+            if !cit.is_empty() {
+                cit[0].w = iw;
+            }
+            w = iw;
+        }
+        measured.push((w, h, cit));
+    }
+
+    let mut out: Vec<MItem> = vec![];
+    if lay == "row" {
+        let row_h = measured.iter().map(|m| m.1).max().unwrap_or(0);
+        let mut cx = 0;
+        for (w, h, mut cit) in measured {
+            let dy = (row_h - h) / 2;
+            for it in cit.iter_mut() {
+                it.x += cx;
+                it.y += dy;
+            }
+            out.append(&mut cit);
+            cx += w + gap;
+        }
+        return (out, row_h);
+    }
+    if lay == "wrap" {
+        let mut cx = 0;
+        let mut line_y = 0;
+        let mut line_h = 0;
+        let empty = measured.is_empty();
+        for (w, h, mut cit) in measured {
+            if cx > 0 && cx + w > inner_w {
+                line_y += line_h + gap;
+                cx = 0;
+                line_h = 0;
+            }
+            for it in cit.iter_mut() {
+                it.x += cx;
+                it.y += line_y;
+            }
+            out.append(&mut cit);
+            cx += w + gap;
+            line_h = line_h.max(h);
+        }
+        return (out, if empty { 0 } else { line_y + line_h });
+    }
+    // column
+    let mut cy = 0;
+    let empty = measured.is_empty();
+    for (_w, h, mut cit) in measured {
         for it in cit.iter_mut() {
             it.y += cy;
         }
         out.append(&mut cit);
-        cy += ch + gap;
+        cy += h + gap;
     }
-    (out, if n_items > 0 { cy - gap } else { 0 })
+    (out, if empty { 0 } else { cy - gap })
 }
