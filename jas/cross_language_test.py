@@ -32,6 +32,7 @@ from workspace.workspace_test_json import (
     state_defaults_json, shortcut_structure_json,
 )
 from workspace.layout_apply import layout_apply
+from panels.panel_layout import layout_panel
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore
 
@@ -2017,6 +2018,29 @@ class CrossLanguageTest(absltest.TestCase):
 
             self.assertAlmostEqual(actual, expected, places=4,
                 msg=f"Pane geometry '{name}' failed: expected {expected}, got {actual}")
+
+    # ---------------------------------------------------------------
+    # Panel widget-layout (Path B) algorithm test vectors
+    # ---------------------------------------------------------------
+
+    def test_algorithm_panel_layout(self):
+        json_str = _read_fixture("algorithms/panel_layout.json")
+        tests = json.loads(json_str)
+        bundle_path = os.path.join(
+            os.path.dirname(__file__), "..", "workspace", "workspace.json")
+        with open(bundle_path) as f:
+            panels = json.load(f)["panels"]
+
+        for tc in tests:
+            name = tc["name"]
+            func = tc["function"]
+            args = tc["args"]
+            expected = tc["expected"]
+            if func != "layout_panel":
+                self.fail(f"Unknown function: {func}")
+            actual = layout_panel(panels[args["panel"]], args["avail_w"])
+            self.assertEqual(actual, expected,
+                msg=f"Panel layout '{name}' mismatch")
 
 
 if __name__ == "__main__":
