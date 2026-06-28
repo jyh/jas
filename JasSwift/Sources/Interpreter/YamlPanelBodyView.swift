@@ -4128,16 +4128,108 @@ struct YamlPanelBodyView: View {
     /// closes the store's dialog (e.g. color picker OK / Cancel).
     var onStoreDialogClosed: (() -> Void)? = nil
 
+    // MARK: - Path B (shared canonical layout) preview
+
+    /// Whether to render panels from the shared Path B layout pass
+    /// (absolute rects) instead of SwiftUI flex. Opt-in via JAS_PATH_B=1 —
+    /// the human-viewable reference of the cross-app byte-gated layout pass
+    /// (PATH_B_DESIGN.md §5 Phase 2). Mirrors the Rust / Flask flag.
+    private func pathBEnabled() -> Bool {
+        ProcessInfo.processInfo.environment["JAS_PATH_B"] == "1"
+    }
+
+    /// Panels whose composite / data-driven widgets (foreach expansions,
+    /// tree rows) the v1 absolute pass cannot size yet, so they stay on the
+    /// normal flex path. Matches the Rust / Flask unsupported set.
+    private static let pathBExcluded: Set<String> = [
+        "color_panel_content", "gradient_panel_content", "layers_panel_content",
+    ]
+
+    /// Container node types laid out as layout-only (no box of their own).
+    private static let pathBContainerTypes: Set<String> = [
+        "container", "row", "col", "grid", "panel",
+    ]
+
+    /// Resolve a node by its panel-relative tree path (root = `[]`) by
+    /// walking `children` arrays by index. Mirrors Rust `node_at_path` /
+    /// Flask `_node_at_path`.
+    private func nodeAtPath(_ content: Any?, _ path: [Int]) -> [String: Any]? {
+        var node = content as? [String: Any]
+        for i in path {
+            guard let kids = node?["children"] as? [[String: Any]],
+                  i >= 0, i < kids.count else { return nil }
+            node = kids[i]
+        }
+        return node
+    }
+
+    /// A leaf widget placed at its absolute rect by the Path B pass.
+    private struct PathBLeaf: Identifiable {
+        let id: Int
+        let node: [String: Any]
+        let x: Int
+        let y: Int
+        let w: Int
+        let h: Int
+    }
+
+    /// The full Path B layout for this panel: the placed leaves and the
+    /// computed panel height. Containers contribute layout only.
+    private struct PathBLayout {
+        let leaves: [PathBLeaf]
+        let panelH: Int
+    }
+
+    /// Run the shared layout pass and project it into placeable leaves.
+    /// Mirrors Rust `render_panel_absolute` / Flask `_render_panel_absolute`.
+    private func pathBLayout() -> PathBLayout {
+        let rects = PanelLayout.layoutPanel(contentSpec, availW: 228)
+        let panelH = (rects.first?["rect"] as? [String: Int])?["h"] ?? 0
+        let content = contentSpec["content"]
+        var leaves: [PathBLeaf] = []
+        for (idx, item) in rects.enumerated() {
+            guard let path = item["path"] as? [Int],
+                  let node = nodeAtPath(content, path) else { continue }
+            let t = node["type"] as? String ?? ""
+            if Self.pathBContainerTypes.contains(t) { continue } // layout-only
+            guard let r = item["rect"] as? [String: Int] else { continue }
+            leaves.append(PathBLeaf(
+                id: idx, node: node,
+                x: r["x"] ?? 0, y: r["y"] ?? 0, w: r["w"] ?? 0, h: r["h"] ?? 0
+            ))
+        }
+        return PathBLayout(leaves: leaves, panelH: panelH)
+    }
+
     var body: some View {
-        YamlElementView(
-            element: contentSpec, context: context, model: model,
-            panelId: panelId, theme: theme,
-            flyoutIconDefault: flyoutIconDefault,
-            onDialogWrite: onDialogWrite,
-            onStoreDialogOpened: onStoreDialogOpened,
-            onStoreDialogClosed: onStoreDialogClosed
-        )
+        if pathBEnabled(), let pid = panelId, !Self.pathBExcluded.contains(pid) {
+            let layout = pathBLayout()
+            ZStack(alignment: .topLeading) {
+                ForEach(layout.leaves) { leaf in
+                    YamlElementView(
+                        element: leaf.node, context: context, model: model,
+                        panelId: panelId, theme: theme,
+                        flyoutIconDefault: flyoutIconDefault,
+                        onDialogWrite: onDialogWrite,
+                        onStoreDialogOpened: onStoreDialogOpened,
+                        onStoreDialogClosed: onStoreDialogClosed
+                    )
+                    .frame(width: CGFloat(leaf.w), height: CGFloat(leaf.h), alignment: .topLeading)
+                    .offset(x: CGFloat(leaf.x), y: CGFloat(leaf.y))
+                }
+            }
+            .frame(width: 228, height: CGFloat(layout.panelH), alignment: .topLeading)
+        } else {
+            YamlElementView(
+                element: contentSpec, context: context, model: model,
+                panelId: panelId, theme: theme,
+                flyoutIconDefault: flyoutIconDefault,
+                onDialogWrite: onDialogWrite,
+                onStoreDialogOpened: onStoreDialogOpened,
+                onStoreDialogClosed: onStoreDialogClosed
+            )
             .padding(4)
+        }
     }
 }
 
