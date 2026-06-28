@@ -181,7 +181,9 @@ def render_panel_absolute(panel_node, store, ctx, dispatch_fn=None) -> QWidget:
     from workspace_interpreter.panel_layout import layout_panel
 
     content = panel_node.get("content")
-    rects = layout_panel(panel_node, 228)
+    # Pass the live eval scope so foreach lists + text bindings resolve to real
+    # data in the preview (avail_h=0 keeps the panel content-height).
+    rects = layout_panel(panel_node, 228, 0, ctx)
     panel_h = rects[0]["rect"]["h"] if rects else 0
 
     container = QWidget()

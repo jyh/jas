@@ -594,7 +594,9 @@ def _render_panel_absolute(el, theme, state) -> str:
     of the computed height. Mirrors the Rust render_panel_absolute."""
     from workspace_interpreter.panel_layout import layout_panel
     content = el.get("content")
-    rects = layout_panel(el, 228)
+    # Pass the live scope (state) so foreach lists + text bindings resolve to
+    # real data in the preview (avail_h=0 keeps the panel content-height).
+    rects = layout_panel(el, 228, 0, state)
     panel_h = rects[0]["rect"]["h"] if rects else 0
     parts = []
     for item in rects:
