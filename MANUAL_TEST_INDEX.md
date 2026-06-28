@@ -165,12 +165,11 @@ Every `_TESTS.md` ends with a per-platform parity section
 platform, not per test, to amortize app launch + fixture setup.
 
 The platform set is consistently **Rust / Swift / OCaml / Python /
-Flask**. Flask only carries a parity column for tools whose canvas
-runtime has been wired through `jas_flask/static/js/canvas_bootstrap.mjs`
-+ the engine's effect dispatcher (today: Selection / Partial Selection,
-Rect, Pen, Pencil). For every other tool the parity block omits the
-Flask checkbox; the file's automation-coverage paragraph should say
-`Flask — no coverage` until the runtime catches up. OCaml sometimes
+Flask**. For *when* to include a Flask parity column, follow the canonical
+**Flask inclusion** rule in [`MANUAL_TESTING.md`](MANUAL_TESTING.md)
+§ Cross-app parity (short version: Flask is not an interactive-parity
+target — only the legacy canvas-wired tools Selection / Partial Selection,
+Rect, Pen, Pencil carry a Flask column; don't add new ones). OCaml sometimes
 has icon / dblclick deferrals (see each file's Known broken).
 
 ---

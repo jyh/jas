@@ -203,6 +203,23 @@ Python. (Reflected in `CLAUDE.md`.)
 
 Surfaced during this analysis; with sequencing.
 
+**Status — verified 2026-06-27 (where each item stands):**
+1 ◐ live bug fixed + widget-kind vocabulary gate on `main`; compile-time validator
++ per-app dispatch-coverage assert still open ·
+2 ◐ toolbar golden re-sourced + live-gated (13 slots / 29 tools); dblclick
+options-destination not yet captured ·
+3 ✓ menu golden re-sourced (now includes View) ·
+4 ○ not started ·
+5 ◐ gesture corpus shipped; action corpus thin (1 action); modifier note re-scoped
+(see item) ·
+6 ✓ done ·
+7 ○ unblocked (Path B pass now exists) but Flask swap not yet done ·
+8 ◐ panel computed-geometry byte-gate **landed in all 4 native apps** (Path B Phase 0:
+`layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact; see
+PATH_B_DESIGN.md) — broadening beyond the 2 seed panels (symbols, opacity) pending ·
+9 ◐ canonical box model **drafted** (PATH_B_DESIGN.md §2) pending the five-app review ·
+10 ✓ done.
+
 **Ships now (no dependencies):**
 1. **Widget-kind vocabulary + coverage gate** — fixes the live bug where `magic_wand.yaml`
    declares tolerance inputs as bare `type: number`, handled by **no app**, so all five
@@ -218,8 +235,18 @@ Surfaced during this analysis; with sequencing.
    Re-point to compiled `menubar.yaml`.
 4. **Resolved-widget-tree snapshot** + **Flask render-all-panels CI gate** (render every
    panel/dialog from `workspace.json`, fail on error/missing-kind).
-5. **Input-injection gesture + action corpora** (§5 recs 1–2); fix Python pointer payload
-   hardcoding `ctrl=meta=False` on mouse events (`yaml_tool.py`).
+5. **Input-injection gesture + action corpora** (§5 recs 1–2) — **gesture corpus shipped**
+   (10 gestures, gated in all 4 native apps); **action corpus is a thin foundation** (1 of
+   ~13 production actions). The `ctrl=meta=False` pointer-payload note was **mis-scoped**:
+   **all four** native apps hardcode `ctrl`/`meta` to `false` on pointer events
+   (`yaml_tool.py:304`, `yaml_tool.rs:245`, `YamlTool.swift:275`, `yaml_tool.ml:1344`), and
+   all four carry the real flags on the *keyboard* path — so it is a consistent 4-app state,
+   not a Python divergence, and no canvas-tool YAML reads pointer `ctrl`/`meta` yet (the only
+   `event.meta` consumers are in `artboards.yaml`, a panel-list click at seam B, not the
+   pointer seam). Completing the modifiers is therefore a forward-looking **4-app** increment
+   (thread the real flags at each framework boundary + a per-app payload test), to do when a
+   canvas tool first needs Cmd/Ctrl-click — not a Python-only one-liner. Half-fixing Python
+   alone would *create* the cross-app divergence the prime directive exists to prevent.
 6. **`MANUAL_TESTING.md` cleanup** — injection-floor section; distinguish key-binding from
    action-effect; single-source the Flask-inclusion rule; retire-manual-parity-when-gated
    ritual.
