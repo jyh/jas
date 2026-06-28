@@ -278,6 +278,61 @@ def _leaf_h(node: dict) -> int:
     return h if h is not None else _KIND_HEIGHT.get(t, 20)
 
 
+def _grid_lines(children: list) -> list[list]:
+    """Group ``(i, node)`` children into Bootstrap-12 rows by their ``col`` span."""
+    lines: list[list] = []
+    cur: list = []
+    cur_span = 0
+    for i, c in children:
+        span = int(c.get("col") or 1)
+        if cur and cur_span + span > 12:
+            lines.append(cur)
+            cur = []
+            cur_span = 0
+        cur.append((i, c, span))
+        cur_span += span
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _natural_w(node: dict, ctx: dict) -> int:
+    """Min-content width a node wants, ignoring the width available to it.
+
+    A leaf reports its own intrinsic width; a container reports the width its
+    content needs (row = sum of children + gaps, column = widest child, grid =
+    widest 12-col line). Used so a row can grow cells / columns to fit nested
+    content and shrink-to-fit deterministically when over-subscribed, instead
+    of letting a wide label or input overrun its neighbour.
+    """
+    if not (_is_container(node) or node.get("type") == "disclosure"):
+        return _leaf_size(node, -1, ctx)
+    st = _style(node)
+    _pt, pr, _pb, pl = _parse_padding(st.get("padding"))
+    gap = _gap(node)
+    if node.get("type") == "disclosure":
+        kids = _visible_children(node)
+        inner = max((_natural_w(c, ctx) for _, c in kids), default=0)
+        return inner + pl + pr
+    if isinstance(node.get("foreach"), dict) and node.get("do"):
+        return _natural_w(node["do"], ctx) + pl + pr
+    kids = _visible_children(node)
+    lay = _resolved_layout(node)
+    if lay == "row" and any(_has_col(c) for _, c in kids):
+        best = 0
+        for line in _grid_lines(kids):
+            m = len(line)
+            line_w = sum(_natural_w(c, ctx) for _, c, _span in line) + gap * (m - 1 if m else 0)
+            best = max(best, line_w)
+        return best + pl + pr
+    if lay == "row":
+        n = len(kids)
+        tot = sum(_natural_w(c, ctx) for _, c in kids) + (gap * (n - 1) if n else 0)
+        return tot + pl + pr
+    inner = max((_natural_w(c, ctx) for _, c in kids), default=0)
+    return inner + pl + pr
+
+
 def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
              ctx: dict) -> tuple[int, int, list[dict]]:
     """Measure a node; return (w, h, items) with item coords relative to it."""
@@ -302,7 +357,9 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
             else:
                 ch_items, content_h = _column(children, path, inner_w, gap, inner_h, ctx)
         exp_h = _resolve_dim(st.get("height"), 0)
-        w = avail_w
+        # Fill the width given; with no constraint (avail_w <= 0) report the
+        # container's natural content width so a parent row can size it.
+        w = avail_w if avail_w > 0 else _natural_w(node, ctx)
         h = exp_h if exp_h is not None else content_h + pt + pb
         items = [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}]
         for it in ch_items:
@@ -312,6 +369,10 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
         return (w, h, items)
 
     w = _leaf_size(node, avail_w, ctx)
+    # A leaf renders at its own width regardless of its slot; clamp it to the
+    # width available so it cannot overrun a neighbour (text/labels may clip).
+    if avail_w > 0 and w > avail_w:
+        w = avail_w
     h = _leaf_h(node)
     return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}])
 
@@ -353,39 +414,57 @@ def _column(children, path, inner_w, gap, avail_h, ctx) -> tuple[list[dict], int
 
 
 def _flow(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
-    measured = []
-    for i, c in children:
-        cw, ch, cit = _measure(c, path + [i], -1, 0, ctx)
-        measured.append((c, cw, ch, cit))
-    n = len(measured)
-    fixed = sum(m[1] for m in measured) + (gap * (n - 1) if n else 0)
-    leftover = max(0, inner_w - fixed)
-    weights = [_flex(m[0]) for m in measured]
+    n = len(children)
+    nat = [_natural_w(c, ctx) for _i, c in children]
+    weights = [_flex(c) for _i, c in children]
     sumw = sum(weights)
-    extra = [0] * n
-    if sumw > 0 and leftover > 0:
-        base = [leftover * weights[k] // sumw for k in range(n)]
-        rem = leftover - sum(base)
-        for k in range(n):
-            if rem <= 0:
-                break
-            if weights[k] > 0:
-                base[k] += 1
+    fixed = sum(nat) + (gap * (n - 1) if n else 0)
+    widths = list(nat)
+    if inner_w > 0 and fixed > inner_w:
+        # Over-subscribed: shrink every cell proportionally to fit the row, then
+        # hand out the rounding remainder one pixel at a time (deterministic).
+        avail = inner_w - gap * (n - 1 if n else 0)
+        total = sum(nat)
+        if total > 0 and avail > 0:
+            widths = [w * avail // total for w in nat]
+            rem = avail - sum(widths)
+            k = 0
+            while rem > 0 and n:
+                widths[k] += 1
                 rem -= 1
-        extra = base
-    row_h = max((m[2] for m in measured), default=0)
+                k = (k + 1) % n
+    elif inner_w > 0 and sumw > 0:
+        # Fits: distribute the leftover width to flex-weighted children.
+        leftover = inner_w - fixed
+        if leftover > 0:
+            base = [leftover * weights[k] // sumw for k in range(n)]
+            rem = leftover - sum(base)
+            for k in range(n):
+                if rem <= 0:
+                    break
+                if weights[k] > 0:
+                    base[k] += 1
+                    rem -= 1
+            widths = [nat[k] + base[k] for k in range(n)]
+    # Lay each child out at its final width; a leaf already clamps itself to the
+    # width it is given (see _measure), so nothing overruns the next cell.
+    placed = []
+    row_h = 0
+    for k, (i, c) in enumerate(children):
+        _cw, ch, cit = _measure(c, path + [i], widths[k], 0, ctx)
+        if cit and cit[0]["w"] > widths[k]:
+            cit[0]["w"] = widths[k]
+        placed.append((cit, ch))
+        row_h = max(row_h, ch)
     items: list[dict] = []
     cx = 0
-    for k, (_c, cw, ch, cit) in enumerate(measured):
-        fw = cw + extra[k]
+    for k, (cit, ch) in enumerate(placed):
         dy = (row_h - ch) // 2
         for it in cit:
             it["x"] += cx
             it["y"] += dy
-        if extra[k] and cit:
-            cit[0]["w"] = fw
         items.extend(cit)
-        cx += fw + gap
+        cx += widths[k] + gap
     return items, row_h
 
 
@@ -407,12 +486,39 @@ def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
     items: list[dict] = []
     line_y = 0
     for line in lines:
+        n = len(line)
+        # Each cell wants at least its Bootstrap-12 share, grown to fit its
+        # content's intrinsic width: a leaf renders at its own width regardless
+        # of how narrow its column is, so a wide label / icon must not overrun
+        # its neighbour. Layout containers fill their cell, so they contribute
+        # no intrinsic minimum (they shrink/grow with the cell).
+        desired = []
+        for i, c, span in line:
+            bw = (2 * inner_w * span + 12) // 24
+            desired.append(max(bw, _natural_w(c, ctx)))
+        avail = inner_w - gap * (n - 1)
+        total = sum(desired)
+        if total <= avail or total <= 0:
+            widths = desired
+        else:
+            # Over-subscribed row: shrink cells proportionally to fit, then
+            # hand the rounding remainder out one pixel at a time (deterministic
+            # so every app produces byte-identical rects).
+            widths = [d * avail // total for d in desired]
+            rem = avail - sum(widths)
+            k = 0
+            while rem > 0:
+                widths[k] += 1
+                rem -= 1
+                k = (k + 1) % n
         cx = 0
         line_h = 0
         cells = []
-        for i, c, span in line:
-            cell_w = (2 * inner_w * span + 12) // 24
+        for (i, c, span), cell_w in zip(line, widths):
             _cw, ch, cit = _measure(c, path + [i], cell_w, 0, ctx)
+            # Clamp the child to its cell so it cannot overrun the next column.
+            if cit and cit[0]["w"] > cell_w:
+                cit[0]["w"] = cell_w
             cells.append((cit, ch, cx))
             line_h = max(line_h, ch)
             cx += cell_w + gap

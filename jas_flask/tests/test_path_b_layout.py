@@ -44,8 +44,8 @@ def test_opacity_panel_absolute_mode(theme, panels, monkeypatch):
     html = render_element(panels["opacity_panel_content"], theme, {}, mode="normal")
     assert "position:relative;width:228px" in html
     # golden rects: op_mode select [0,0] and op_disclosure icon_button [0,3]
-    assert "position:absolute;left:4px;top:6px;width:73px;height:20px" in html
-    assert "position:absolute;left:205px;top:4px;width:24px;height:24px" in html
+    assert "position:absolute;left:4px;top:6px;width:69px;height:20px" in html
+    assert "position:absolute;left:204px;top:4px;width:20px;height:24px" in html
 
 
 def test_composite_panel_stays_flex(theme, panels, monkeypatch):

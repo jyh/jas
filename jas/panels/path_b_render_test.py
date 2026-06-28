@@ -69,7 +69,7 @@ class PathBHelpersTest(absltest.TestCase):
         self.assertEqual(
             _PATH_B_UNSUPPORTED,
             {"color_panel_content", "gradient_panel_content",
-             "layers_panel_content"})
+             "layers_panel_content", "swatches_panel_content"})
 
     def test_node_at_path_walks_children(self):
         content = _opacity_panel()["content"]
@@ -88,7 +88,7 @@ class PathBOpacityGeometryTest(absltest.TestCase):
 
     Golden (test_fixtures/algorithms/panel_layout.json, opacity@228):
       root [] -> {x:0, y:0, w:228, h:106}
-      op_mode [0,0] -> {x:4, y:6, w:73, h:20}
+      op_mode [0,0] -> {x:4, y:6, w:69, h:20}
     """
 
     @classmethod
@@ -115,7 +115,7 @@ class PathBOpacityGeometryTest(absltest.TestCase):
         combos = [c for c in container.children() if isinstance(c, QComboBox)]
         self.assertEqual(len(combos), 1, "expected exactly one select (op_mode)")
         g = combos[0].geometry()
-        self.assertEqual((g.x(), g.y(), g.width(), g.height()), (4, 6, 73, 20))
+        self.assertEqual((g.x(), g.y(), g.width(), g.height()), (4, 6, 69, 20))
 
     def test_foreach_rows_render_with_real_data(self):
         """The render plan expands foreach with per-row child scopes, so the

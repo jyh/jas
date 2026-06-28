@@ -362,6 +362,71 @@ public enum PanelLayout {
         return (w, h, fill)
     }
 
+    /// Group `(i, node)` children into Bootstrap-12 rows by their `col` span.
+    /// Mirrors `panel_layout.py`'s `_grid_lines`. Used by `naturalW` to find a
+    /// grid container's widest 12-col line.
+    private static func gridLines(_ children: [(Int, [String: Any])]) -> [[(Int, [String: Any], Int)]] {
+        var lines: [[(Int, [String: Any], Int)]] = []
+        var cur: [(Int, [String: Any], Int)] = []
+        var curSpan = 0
+        for (i, c) in children {
+            let span = colSpan(c)
+            if !cur.isEmpty && curSpan + span > 12 {
+                lines.append(cur)
+                cur = []
+                curSpan = 0
+            }
+            cur.append((i, c, span))
+            curSpan += span
+        }
+        if !cur.isEmpty { lines.append(cur) }
+        return lines
+    }
+
+    /// Min-content width a node wants, ignoring the width available to it.
+    ///
+    /// A leaf reports its own intrinsic width; a container reports the width its
+    /// content needs (row = sum of children + gaps, column = widest child, grid
+    /// = widest 12-col line). Used so a row can grow cells / columns to fit
+    /// nested content and shrink-to-fit deterministically when over-subscribed,
+    /// instead of letting a wide label or input overrun its neighbour. Mirrors
+    /// `panel_layout.py`'s `_natural_w`.
+    private static func naturalW(_ node: [String: Any], _ ctx: [String: Any]) -> Int {
+        if !(isContainer(node) || nodeType(node) == "disclosure") {
+            return leafSize(node, availW: -1, ctx: ctx).0
+        }
+        let st = style(node)
+        let (_, pr, _, pl) = parsePadding(st["padding"])
+        let gap = styleI(node, "gap") ?? 0
+        if nodeType(node) == "disclosure" {
+            let kids = visibleChildren(node)
+            let inner = kids.map { naturalW($0.1, ctx) }.max() ?? 0
+            return inner + pl + pr
+        }
+        if node["foreach"] as? [String: Any] != nil, node["do"] != nil {
+            let template = (node["do"] as? [String: Any]) ?? [:]
+            return naturalW(template, ctx) + pl + pr
+        }
+        let kids = visibleChildren(node)
+        let lay = resolvedLayout(node)
+        if lay == "row" && kids.contains(where: { hasCol($0.1) }) {
+            var best = 0
+            for line in gridLines(kids) {
+                let m = line.count
+                let lineW = line.reduce(0) { $0 + naturalW($1.1, ctx) } + gap * (m > 0 ? m - 1 : 0)
+                best = max(best, lineW)
+            }
+            return best + pl + pr
+        }
+        if lay == "row" {
+            let n = kids.count
+            let tot = kids.reduce(0) { $0 + naturalW($1.1, ctx) } + (n > 0 ? gap * (n - 1) : 0)
+            return tot + pl + pr
+        }
+        let inner = kids.map { naturalW($0.1, ctx) }.max() ?? 0
+        return inner + pl + pr
+    }
+
     /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
     private static func measure(_ n: [String: Any], path: [Int], availW: Int,
                                availH: Int, ctx: [String: Any]) -> (Int, Int, [MItem]) {
@@ -392,7 +457,9 @@ public enum PanelLayout {
                 }
             }
             let expH = resolveDim(st["height"], 0)
-            let w = availW
+            // Fill the width given; with no constraint (availW <= 0) report the
+            // container's natural content width so a parent row can size it.
+            let w = availW > 0 ? availW : naturalW(n, ctx)
             let h = expH ?? (contentH + pt + pb)
             var items = [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)]
             for var it in chItems {
@@ -402,7 +469,10 @@ public enum PanelLayout {
             }
             return (w, h, items)
         } else {
-            let (w, h, _) = leafSize(n, availW: availW, ctx: ctx)
+            let (lw, h, _) = leafSize(n, availW: availW, ctx: ctx)
+            // A leaf renders at its own width regardless of its slot; clamp it
+            // to the width available so it cannot overrun a neighbour.
+            let w = (availW > 0 && lw > availW) ? availW : lw
             return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)])
         }
     }
@@ -456,48 +526,68 @@ public enum PanelLayout {
 
     private static func flow(_ children: [(Int, [String: Any])], path: [Int],
                             innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
-        // Measure each child at intrinsic width (avail = -1).
-        var measured: [(c: [String: Any], w: Int, h: Int, items: [MItem])] = []
-        for (i, c) in children {
-            let (cw, ch, cit) = measure(c, path: path + [i], availW: -1, availH: 0, ctx: ctx)
-            measured.append((c, cw, ch, cit))
-        }
-        let n = measured.count
-        let fixed = measured.reduce(0) { $0 + $1.w } + (n > 0 ? gap * (n - 1) : 0)
-        let leftover = max(0, innerW - fixed)
-        let weights = measured.map { flexWeight($0.c) }
+        let n = children.count
+        let nat = children.map { naturalW($0.1, ctx) }
+        let weights = children.map { flexWeight($0.1) }
         let sumw = weights.reduce(0, +)
-        var extra = [Int](repeating: 0, count: n)
-        if sumw > 0 && leftover > 0 {
-            var base = (0..<n).map { leftover * weights[$0] / sumw }
-            var rem = leftover - base.reduce(0, +)
-            for k in 0..<n {
-                if rem <= 0 { break }
-                if weights[k] > 0 {
-                    base[k] += 1
+        let fixed = nat.reduce(0, +) + (n > 0 ? gap * (n - 1) : 0)
+        var widths = nat
+        if innerW > 0 && fixed > innerW {
+            // Over-subscribed: shrink every cell proportionally to fit the row,
+            // then hand out the rounding remainder one pixel at a time.
+            let avail = innerW - gap * (n > 0 ? n - 1 : 0)
+            let total = nat.reduce(0, +)
+            if total > 0 && avail > 0 {
+                widths = nat.map { $0 * avail / total }
+                var rem = avail - widths.reduce(0, +)
+                var k = 0
+                while rem > 0 && n > 0 {
+                    widths[k] += 1
                     rem -= 1
+                    k = (k + 1) % n
                 }
             }
-            extra = base
+        } else if innerW > 0 && sumw > 0 {
+            // Fits: distribute the leftover width to flex-weighted children.
+            let leftover = innerW - fixed
+            if leftover > 0 {
+                var base = (0..<n).map { leftover * weights[$0] / sumw }
+                var rem = leftover - base.reduce(0, +)
+                for k in 0..<n {
+                    if rem <= 0 { break }
+                    if weights[k] > 0 {
+                        base[k] += 1
+                        rem -= 1
+                    }
+                }
+                widths = (0..<n).map { nat[$0] + base[$0] }
+            }
         }
-        let rowH = measured.map { $0.h }.max() ?? 0
+        // Lay each child out at its final width; a leaf already clamps itself to
+        // the width it is given (see measure), so nothing overruns the next cell.
+        var placed: [(items: [MItem], h: Int)] = []
+        var rowH = 0
+        for (k, (i, c)) in children.enumerated() {
+            let (_, ch, cit0) = measure(c, path: path + [i], availW: widths[k], availH: 0, ctx: ctx)
+            var cit = cit0
+            if !cit.isEmpty && cit[0].w > widths[k] {
+                cit[0].w = widths[k]
+            }
+            placed.append((cit, ch))
+            rowH = max(rowH, ch)
+        }
         var items: [MItem] = []
         var cx = 0
-        for k in 0..<n {
-            let cw = measured[k].w
-            let ch = measured[k].h
-            var cit = measured[k].items
-            let fw = cw + extra[k]
+        for k in 0..<placed.count {
+            let ch = placed[k].h
+            var cit = placed[k].items
             let dy = (rowH - ch) / 2
             for j in cit.indices {
                 cit[j].x += cx
                 cit[j].y += dy
             }
-            if extra[k] != 0 && !cit.isEmpty {
-                cit[0].w = fw
-            }
             items.append(contentsOf: cit)
-            cx += fw + gap
+            cx += widths[k] + gap
         }
         return (items, rowH)
     }
@@ -523,12 +613,45 @@ public enum PanelLayout {
         var items: [MItem] = []
         var lineY = 0
         for line in lines {
+            let n = line.count
+            // Each cell wants at least its Bootstrap-12 share, grown to fit its
+            // content's intrinsic width: a leaf renders at its own width
+            // regardless of how narrow its column is, so a wide label / icon must
+            // not overrun its neighbour. Layout containers fill their cell, so
+            // they contribute no intrinsic minimum (they shrink/grow with it).
+            var desired: [Int] = []
+            for (_, c, span) in line {
+                let bw = (2 * innerW * span + 12) / 24 // round-half-up, exact
+                desired.append(max(bw, naturalW(c, ctx)))
+            }
+            let avail = innerW - gap * (n - 1)
+            let total = desired.reduce(0, +)
+            var widths: [Int]
+            if total <= avail || total <= 0 {
+                widths = desired
+            } else {
+                // Over-subscribed row: shrink cells proportionally to fit, then
+                // hand the rounding remainder out one pixel at a time.
+                widths = desired.map { $0 * avail / total }
+                var rem = avail - widths.reduce(0, +)
+                var k = 0
+                while rem > 0 {
+                    widths[k] += 1
+                    rem -= 1
+                    k = (k + 1) % n
+                }
+            }
             var cx = 0
             var lineH = 0
             var cells: [(items: [MItem], h: Int, cellX: Int)] = []
-            for (i, c, span) in line {
-                let cellW = (2 * innerW * span + 12) / 24 // round-half-up, exact
-                let (_, ch, cit) = measure(c, path: path + [i], availW: cellW, availH: 0, ctx: ctx)
+            for (idx, (i, c, _)) in line.enumerated() {
+                let cellW = widths[idx]
+                let (_, ch, cit0) = measure(c, path: path + [i], availW: cellW, availH: 0, ctx: ctx)
+                var cit = cit0
+                // Clamp the child to its cell so it cannot overrun the next column.
+                if !cit.isEmpty && cit[0].w > cellW {
+                    cit[0].w = cellW
+                }
                 cells.append((cit, ch, cx))
                 if ch > lineH { lineH = ch }
                 cx += cellW + gap

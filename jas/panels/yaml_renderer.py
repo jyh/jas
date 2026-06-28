@@ -142,6 +142,11 @@ def render_element(el: dict, store: StateStore, ctx: dict,
 # flex path. Matches the Rust / Flask / Swift unsupported set.
 _PATH_B_UNSUPPORTED = {
     "color_panel_content", "gradient_panel_content", "layers_panel_content",
+    # swatches embeds the fill/stroke control: a 2D widget (overlapping
+    # fill+stroke chips, swap arrow, default colors, fill-type buttons) modelled
+    # as a fixed-height column the generic layout cannot fit. Stays native until
+    # it uses the dedicated fill_stroke_widget leaf.
+    "swatches_panel_content",
 }
 
 
