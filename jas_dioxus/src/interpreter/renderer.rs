@@ -8142,6 +8142,7 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
         let path_b_unsupported = matches!(
             pid,
             "color_panel_content" | "gradient_panel_content" | "layers_panel_content"
+                | "swatches_panel_content"
         );
         if path_b_enabled() && !pid.is_empty() && !path_b_unsupported {
             return render_panel_absolute(el, content, ctx, &child);

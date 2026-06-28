@@ -5422,7 +5422,8 @@ let path_b_enabled () = Sys.getenv_opt "JAS_PATH_B" = Some "1"
 (* Panel content ids excluded from the Path B preview — matches the
    Rust / Flask / Swift unsupported set. *)
 let path_b_excluded =
-  [ "color_panel_content"; "gradient_panel_content"; "layers_panel_content" ]
+  [ "color_panel_content"; "gradient_panel_content"; "layers_panel_content";
+    "swatches_panel_content" ]
 
 (* Canonical content width handed to the layout pass — the 228 used by
    the Rust / Swift previews (dock width 240 minus the 12px scrollbar

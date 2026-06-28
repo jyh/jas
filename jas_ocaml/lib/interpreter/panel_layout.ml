@@ -239,6 +239,86 @@ let leaf_size (n : Yojson.Safe.t) (avail_w : int) (ctx : Yojson.Safe.t)
   let w = match resolve_dim (mem "min_width" st) avail_w with Some m -> max w m | None -> w in
   (w, h, fill)
 
+(* Group (index, node) children into Bootstrap-12 lines by their col span. Each
+   line is a list of (index, node, span) whose spans sum to at most 12. Mirrors
+   the Python _grid_lines (the same wrapping the grid layout itself performs). *)
+let grid_lines (children : (int * Yojson.Safe.t) list)
+  : (int * Yojson.Safe.t * int) list list =
+  let lines = ref [] in
+  let cur = ref [] in
+  let cur_span = ref 0 in
+  List.iter (fun (i, c) ->
+    let span = col_span c in
+    if !cur <> [] && !cur_span + span > 12 then begin
+      lines := !lines @ [ List.rev !cur ];
+      cur := [];
+      cur_span := 0
+    end;
+    cur := (i, c, span) :: !cur;
+    cur_span := !cur_span + span)
+    children;
+  if !cur <> [] then lines := !lines @ [ List.rev !cur ];
+  !lines
+
+(* Min-content width a node wants, ignoring the width available to it. A leaf
+   reports its own intrinsic width (measured with the unbounded sentinel so fill
+   widgets fall back to their default width); a container reports the width its
+   content needs: a row sums children plus gaps, a column takes the widest child,
+   a grid takes the widest 12-col line, a foreach reports its do template, and a
+   disclosure takes the widest child. Used so a row can grow cells / columns to
+   fit nested content and shrink-to-fit deterministically when over-subscribed,
+   instead of letting a wide label or input overrun its neighbour. Mirrors the
+   Python _natural_w. *)
+let rec natural_w (n : Yojson.Safe.t) (ctx : Yojson.Safe.t) : int =
+  if not (is_container n || node_type n = "disclosure") then
+    let w, _h, _fill = leaf_size n (-1) ctx in
+    w
+  else begin
+    let st = style n in
+    let _pt, pr, _pb, pl = parse_padding (mem "padding" st) in
+    let gap = match style_i n "gap" with Some g -> g | None -> 0 in
+    if node_type n = "disclosure" then begin
+      let kids = visible_children n in
+      let inner =
+        List.fold_left (fun acc (_, c) -> max acc (natural_w c ctx)) 0 kids
+      in
+      inner + pl + pr
+    end
+    else
+      match (mem "foreach" n, mem "do" n) with
+      | (`Assoc _, (`Assoc _ as template)) -> natural_w template ctx + pl + pr
+      | _ ->
+        let kids = visible_children n in
+        let lay = resolved_layout n in
+        if lay = "row" && List.exists (fun (_, c) -> has_col c) kids then begin
+          let best = ref 0 in
+          List.iter (fun line ->
+            let m = List.length line in
+            let line_w =
+              List.fold_left
+                (fun acc (_, c, _span) -> acc + natural_w c ctx) 0 line
+              + (if m > 0 then gap * (m - 1) else 0)
+            in
+            if line_w > !best then best := line_w)
+            (grid_lines kids);
+          !best + pl + pr
+        end
+        else if lay = "row" then begin
+          let n_kids = List.length kids in
+          let tot =
+            List.fold_left (fun acc (_, c) -> acc + natural_w c ctx) 0 kids
+            + (if n_kids > 0 then gap * (n_kids - 1) else 0)
+          in
+          tot + pl + pr
+        end
+        else begin
+          let inner =
+            List.fold_left (fun acc (_, c) -> max acc (natural_w c ctx)) 0 kids
+          in
+          inner + pl + pr
+        end
+  end
+
 (* Returns (w, h, items) with item coords RELATIVE to this node origin.
    [avail_h] drives vertical flex for columns (0 = content height, no flex).
    [ctx] is the data scope used to evaluate foreach sources + text bindings. *)
@@ -265,7 +345,9 @@ let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
         else
           column children path inner_w gap inner_h ctx
     in
-    let w = avail_w in
+    (* Fill the width given; with no constraint (avail_w <= 0) report the
+       container natural content width so a parent row can size it. *)
+    let w = if avail_w > 0 then avail_w else natural_w n ctx in
     (* An explicit style.height overrides the content-derived height. *)
     let h =
       match resolve_dim (mem "height" st) 0 with
@@ -277,6 +359,9 @@ let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
     (w, h, root :: ch_items)
   end else begin
     let w, h, _fill = leaf_size n avail_w ctx in
+    (* A leaf renders at its own width regardless of its slot; clamp it to the
+       width available so it cannot overrun a neighbour (text labels may clip). *)
+    let w = if avail_w > 0 && w > avail_w then avail_w else w in
     (w, h, [ { path; x = 0; y = 0; w; h; node = n; ctx } ])
   end
 
@@ -332,92 +417,145 @@ and column children path inner_w gap avail_h ctx : mitem list * int =
   (!items, if n > 0 then !cy - gap else 0)
 
 and flow children path inner_w gap ctx : mitem list * int =
-  (* Measure each child at intrinsic width (fill leaves use fallbacks). *)
-  let measured =
-    List.map (fun (i, c) ->
-      let cw, ch, cit = measure c (path @ [ i ]) (-1) 0 ctx in
-      (c, cw, ch, cit))
-      children
-  in
-  let n = List.length measured in
+  let children_arr = Array.of_list children in
+  let n = Array.length children_arr in
+  (* Each child wants its min-content (natural) width. *)
+  let nat = Array.map (fun (_i, c) -> natural_w c ctx) children_arr in
+  let weights = Array.map (fun (_i, c) -> flex c) children_arr in
+  let sumw = Array.fold_left ( + ) 0 weights in
   let fixed =
-    List.fold_left (fun acc (_, cw, _, _) -> acc + cw) 0 measured
-    + (if n > 0 then gap * (n - 1) else 0)
+    Array.fold_left ( + ) 0 nat + (if n > 0 then gap * (n - 1) else 0)
   in
-  let leftover = max 0 (inner_w - fixed) in
-  let weights = List.map (fun (c, _, _, _) -> flex c) measured in
-  let sumw = List.fold_left ( + ) 0 weights in
-  let extra = Array.make n 0 in
-  if sumw > 0 && leftover > 0 then begin
-    let wts = Array.of_list weights in
-    for k = 0 to n - 1 do
-      extra.(k) <- leftover * wts.(k) / sumw
-    done;
-    let used = Array.fold_left ( + ) 0 extra in
-    let rem = ref (leftover - used) in
-    (try
-       for k = 0 to n - 1 do
-         if !rem <= 0 then raise Exit;
-         if wts.(k) > 0 then begin
-           extra.(k) <- extra.(k) + 1;
-           decr rem
-         end
-       done
-     with Exit -> ())
+  let widths = Array.copy nat in
+  if inner_w > 0 && fixed > inner_w then begin
+    (* Over-subscribed: shrink every cell proportionally to fit the row, then
+       hand out the rounding remainder one pixel at a time (deterministic). *)
+    let avail = inner_w - (if n > 0 then gap * (n - 1) else 0) in
+    let total = Array.fold_left ( + ) 0 nat in
+    if total > 0 && avail > 0 then begin
+      for k = 0 to n - 1 do
+        widths.(k) <- nat.(k) * avail / total
+      done;
+      let used = Array.fold_left ( + ) 0 widths in
+      let rem = ref (avail - used) in
+      let k = ref 0 in
+      while !rem > 0 && n > 0 do
+        widths.(!k) <- widths.(!k) + 1;
+        decr rem;
+        k := (!k + 1) mod n
+      done
+    end
+  end
+  else if inner_w > 0 && sumw > 0 then begin
+    (* Fits: distribute the leftover width to flex-weighted children. *)
+    let leftover = inner_w - fixed in
+    if leftover > 0 then begin
+      let base = Array.make n 0 in
+      for k = 0 to n - 1 do
+        base.(k) <- leftover * weights.(k) / sumw
+      done;
+      let used = Array.fold_left ( + ) 0 base in
+      let rem = ref (leftover - used) in
+      (try
+         for k = 0 to n - 1 do
+           if !rem <= 0 then raise Exit;
+           if weights.(k) > 0 then begin
+             base.(k) <- base.(k) + 1;
+             decr rem
+           end
+         done
+       with Exit -> ());
+      for k = 0 to n - 1 do
+        widths.(k) <- nat.(k) + base.(k)
+      done
+    end
   end;
-  let row_h =
-    List.fold_left (fun acc (_, _, ch, _) -> max acc ch) 0 measured
-  in
+  (* Lay each child out at its final width; a leaf already clamps itself to the
+     width it is given (see measure), so nothing overruns the next cell. *)
+  let placed = Array.make n ([], 0) in
+  let row_h = ref 0 in
+  Array.iteri (fun k (i, c) ->
+    let _cw, ch, cit = measure c (path @ [ i ]) widths.(k) 0 ctx in
+    (match cit with
+     | first :: _ -> if first.w > widths.(k) then first.w <- widths.(k)
+     | [] -> ());
+    placed.(k) <- (cit, ch);
+    if ch > !row_h then row_h := ch)
+    children_arr;
   let items = ref [] in
   let cx = ref 0 in
-  List.iteri (fun k (_c, cw, ch, cit) ->
-    let fw = cw + extra.(k) in
-    let dy = (row_h - ch) / 2 in
+  Array.iteri (fun k (cit, ch) ->
+    let dy = (!row_h - ch) / 2 in
     List.iter (fun it -> it.x <- it.x + !cx; it.y <- it.y + dy) cit;
-    (if extra.(k) <> 0 then
-       match cit with first :: _ -> first.w <- fw | [] -> ());
     items := !items @ cit;
-    cx := !cx + fw + gap)
-    measured;
-  (!items, row_h)
+    cx := !cx + widths.(k) + gap)
+    placed;
+  (!items, !row_h)
 
 and grid children path inner_w gap ctx : mitem list * int =
   (* Wrap into lines so each line column span sums to at most 12. *)
-  let lines = ref [] in
-  let cur = ref [] in
-  let cur_span = ref 0 in
-  List.iter (fun (i, c) ->
-    let span = col_span c in
-    if !cur <> [] && !cur_span + span > 12 then begin
-      lines := !lines @ [ List.rev !cur ];
-      cur := [];
-      cur_span := 0
-    end;
-    cur := (i, c, span) :: !cur;
-    cur_span := !cur_span + span)
-    children;
-  if !cur <> [] then lines := !lines @ [ List.rev !cur ];
+  let lines = grid_lines children in
   let items = ref [] in
   let line_y = ref 0 in
   List.iter (fun line ->
+    let line_arr = Array.of_list line in
+    let n = Array.length line_arr in
+    (* Each cell wants at least its Bootstrap-12 share, grown to fit its content
+       intrinsic width: a leaf renders at its own width regardless of how narrow
+       its column is, so a wide label / icon must not overrun its neighbour.
+       Layout containers fill their cell, so they contribute no intrinsic minimum
+       (they shrink / grow with the cell). *)
+    let desired =
+      Array.map (fun (_i, c, span) ->
+        let bw = (2 * inner_w * span + 12) / 24 in
+        max bw (natural_w c ctx))
+        line_arr
+    in
+    let avail = inner_w - gap * (n - 1) in
+    let total = Array.fold_left ( + ) 0 desired in
+    let widths =
+      if total <= avail || total <= 0 then desired
+      else begin
+        (* Over-subscribed row: shrink cells proportionally to fit, then hand the
+           rounding remainder out one pixel at a time (deterministic so every app
+           produces byte-identical rects). *)
+        let w = Array.make n 0 in
+        for k = 0 to n - 1 do
+          w.(k) <- desired.(k) * avail / total
+        done;
+        let used = Array.fold_left ( + ) 0 w in
+        let rem = ref (avail - used) in
+        let k = ref 0 in
+        while !rem > 0 do
+          w.(!k) <- w.(!k) + 1;
+          decr rem;
+          k := (!k + 1) mod n
+        done;
+        w
+      end
+    in
     let cx = ref 0 in
     let line_h = ref 0 in
     let cells = ref [] in
-    List.iter (fun (i, c, span) ->
-      let cell_w = (2 * inner_w * span + 12) / 24 in
+    Array.iteri (fun idx (i, c, _span) ->
+      let cell_w = widths.(idx) in
       let _cw, ch, cit = measure c (path @ [ i ]) cell_w 0 ctx in
+      (* Clamp the child to its cell so it cannot overrun the next column. *)
+      (match cit with
+       | first :: _ -> if first.w > cell_w then first.w <- cell_w
+       | [] -> ());
       cells := !cells @ [ (cit, ch, !cx) ];
       if ch > !line_h then line_h := ch;
       cx := !cx + cell_w + gap)
-      line;
+      line_arr;
     List.iter (fun (cit, ch, cell_x) ->
       let dy = (!line_h - ch) / 2 in
       List.iter (fun it -> it.x <- it.x + cell_x; it.y <- it.y + !line_y + dy) cit;
       items := !items @ cit)
       !cells;
     line_y := !line_y + !line_h + gap)
-    !lines;
-  (!items, if !lines <> [] then !line_y - gap else 0)
+    lines;
+  (!items, if lines <> [] then !line_y - gap else 0)
 
 (* A disclosure is a header bar (the bound label) plus a body. The body is its
    children laid out as a column below a fixed-height header (assumed expanded);

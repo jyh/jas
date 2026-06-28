@@ -4143,6 +4143,7 @@ struct YamlPanelBodyView: View {
     /// normal flex path. Matches the Rust / Flask unsupported set.
     private static let pathBExcluded: Set<String> = [
         "color_panel_content", "gradient_panel_content", "layers_panel_content",
+        "swatches_panel_content",
     ]
 
     /// A leaf widget placed at its absolute rect by the Path B pass, carrying

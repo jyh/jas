@@ -566,6 +566,9 @@ def _render_tabs(el, theme, state):
 # cannot draw yet (foreach expansions / tree rows), so they stay on flex.
 _PATH_B_UNSUPPORTED = {
     "color_panel_content", "gradient_panel_content", "layers_panel_content",
+    # swatches embeds the fill/stroke control (a 2D widget modelled as a
+    # fixed-height column the generic layout cannot fit); stays on the flex path.
+    "swatches_panel_content",
 }
 
 

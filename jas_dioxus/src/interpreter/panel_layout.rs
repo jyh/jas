@@ -400,6 +400,72 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
     (w, h)
 }
 
+/// Group `(i, node)` children into Bootstrap-12 rows by their `col` span.
+fn grid_lines<'a>(children: &[(i64, &'a Value)]) -> Vec<Vec<(i64, &'a Value, i64)>> {
+    let mut lines: Vec<Vec<(i64, &Value, i64)>> = vec![];
+    let mut cur: Vec<(i64, &Value, i64)> = vec![];
+    let mut cur_span = 0i64;
+    for &(i, c) in children {
+        let span = col_span(c);
+        if !cur.is_empty() && cur_span + span > 12 {
+            lines.push(std::mem::take(&mut cur));
+            cur_span = 0;
+        }
+        cur.push((i, c, span));
+        cur_span += span;
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// Min-content width a node wants, ignoring the width available to it.
+///
+/// A leaf reports its own intrinsic width; a container reports the width its
+/// content needs (row = sum of children + gaps, column = widest child, grid =
+/// widest 12-col line). Used so a row can grow cells / columns to fit nested
+/// content and shrink-to-fit deterministically when over-subscribed, instead of
+/// letting a wide label or input overrun its neighbour.
+fn natural_w(n: &Value, ctx: &Value) -> i64 {
+    if !(is_container(n) || node_type(n) == "disclosure") {
+        return leaf_size(n, -1, ctx).0;
+    }
+    let st = style(n);
+    let (_pt, pr, _pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
+    let gap = style_i(n, "gap").unwrap_or(0);
+    if node_type(n) == "disclosure" {
+        let kids = visible_children(n);
+        let inner = kids.iter().map(|&(_, c)| natural_w(c, ctx)).max().unwrap_or(0);
+        return inner + pl + pr;
+    }
+    let has_foreach = st_foreach(n).is_some() && n.get("do").map_or(false, |v| !v.is_null());
+    if has_foreach {
+        let template = n.get("do").unwrap_or(&Value::Null);
+        return natural_w(template, ctx) + pl + pr;
+    }
+    let kids = visible_children(n);
+    let lay = resolved_layout(n);
+    if lay == "row" && kids.iter().any(|&(_, c)| has_col(c)) {
+        let mut best = 0i64;
+        for line in grid_lines(&kids) {
+            let m = line.len() as i64;
+            let line_w: i64 = line.iter().map(|&(_, c, _span)| natural_w(c, ctx)).sum::<i64>()
+                + if m > 0 { gap * (m - 1) } else { 0 };
+            best = best.max(line_w);
+        }
+        return best + pl + pr;
+    }
+    if lay == "row" {
+        let nk = kids.len() as i64;
+        let tot: i64 = kids.iter().map(|&(_, c)| natural_w(c, ctx)).sum::<i64>()
+            + if nk > 0 { gap * (nk - 1) } else { 0 };
+        return tot + pl + pr;
+    }
+    let inner = kids.iter().map(|&(_, c)| natural_w(c, ctx)).max().unwrap_or(0);
+    inner + pl + pr
+}
+
 /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
 fn measure(
     n: &Value,
@@ -432,7 +498,9 @@ fn measure(
             }
         };
         let exp_h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0);
-        let w = avail_w;
+        // Fill the width given; with no constraint (avail_w <= 0) report the
+        // container's natural content width so a parent row can size it.
+        let w = if avail_w > 0 { avail_w } else { natural_w(n, ctx) };
         let h = exp_h.unwrap_or(content_h + pt + pb);
         let mut items = vec![MItem {
             path: path.to_vec(),
@@ -450,7 +518,12 @@ fn measure(
         }
         (w, h, items)
     } else {
-        let (w, h) = leaf_size(n, avail_w, ctx);
+        let (mut w, h) = leaf_size(n, avail_w, ctx);
+        // A leaf renders at its own width regardless of its slot; clamp it to
+        // the width available so it cannot overrun a neighbour (text may clip).
+        if avail_w > 0 && w > avail_w {
+            w = avail_w;
+        }
         (
             w,
             h,
@@ -537,49 +610,70 @@ fn flow(
     gap: i64,
     ctx: &Value,
 ) -> (Vec<MItem>, i64) {
-    let mut measured: Vec<(&Value, i64, i64, Vec<MItem>)> = vec![];
-    for &(i, c) in children {
-        let mut cp = path.to_vec();
-        cp.push(i);
-        let (cw, ch, cit) = measure(c, &cp, -1, 0, ctx);
-        measured.push((c, cw, ch, cit));
-    }
-    let n = measured.len();
-    let fixed: i64 =
-        measured.iter().map(|m| m.1).sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
-    let leftover = (inner_w - fixed).max(0);
-    let weights: Vec<i64> = measured.iter().map(|m| flex(m.0)).collect();
+    let n = children.len();
+    let nat: Vec<i64> = children.iter().map(|&(_, c)| natural_w(c, ctx)).collect();
+    let weights: Vec<i64> = children.iter().map(|&(_, c)| flex(c)).collect();
     let sumw: i64 = weights.iter().sum();
-    let mut extra = vec![0i64; n];
-    if sumw > 0 && leftover > 0 {
-        let mut base: Vec<i64> = (0..n).map(|k| leftover * weights[k] / sumw).collect();
-        let mut rem = leftover - base.iter().sum::<i64>();
-        for k in 0..n {
-            if rem <= 0 {
-                break;
-            }
-            if weights[k] > 0 {
-                base[k] += 1;
+    let fixed: i64 =
+        nat.iter().sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
+    let mut widths: Vec<i64> = nat.clone();
+    if inner_w > 0 && fixed > inner_w {
+        // Over-subscribed: shrink every cell proportionally to fit the row, then
+        // hand out the rounding remainder one pixel at a time (deterministic).
+        let avail = inner_w - gap * (if n > 0 { n as i64 - 1 } else { 0 });
+        let total: i64 = nat.iter().sum();
+        if total > 0 && avail > 0 {
+            widths = nat.iter().map(|&w| w * avail / total).collect();
+            let mut rem = avail - widths.iter().sum::<i64>();
+            let mut k = 0usize;
+            while rem > 0 && n > 0 {
+                widths[k] += 1;
                 rem -= 1;
+                k = (k + 1) % n;
             }
         }
-        extra = base;
+    } else if inner_w > 0 && sumw > 0 {
+        // Fits: distribute the leftover width to flex-weighted children.
+        let leftover = inner_w - fixed;
+        if leftover > 0 {
+            let mut base: Vec<i64> = (0..n).map(|k| leftover * weights[k] / sumw).collect();
+            let mut rem = leftover - base.iter().sum::<i64>();
+            for k in 0..n {
+                if rem <= 0 {
+                    break;
+                }
+                if weights[k] > 0 {
+                    base[k] += 1;
+                    rem -= 1;
+                }
+            }
+            widths = (0..n).map(|k| nat[k] + base[k]).collect();
+        }
     }
-    let row_h = measured.iter().map(|m| m.2).max().unwrap_or(0);
+    // Lay each child out at its final width; a leaf already clamps itself to the
+    // width it is given (see `measure`), so nothing overruns the next cell.
+    let mut placed: Vec<(Vec<MItem>, i64)> = vec![];
+    let mut row_h = 0i64;
+    for (k, &(i, c)) in children.iter().enumerate() {
+        let mut cp = path.to_vec();
+        cp.push(i);
+        let (_cw, ch, mut cit) = measure(c, &cp, widths[k], 0, ctx);
+        if !cit.is_empty() && cit[0].w > widths[k] {
+            cit[0].w = widths[k];
+        }
+        placed.push((cit, ch));
+        row_h = row_h.max(ch);
+    }
     let mut items = vec![];
     let mut cx = 0;
-    for (k, (_c, cw, ch, mut cit)) in measured.into_iter().enumerate() {
-        let fw = cw + extra[k];
+    for (k, (mut cit, ch)) in placed.into_iter().enumerate() {
         let dy = (row_h - ch) / 2;
         for it in cit.iter_mut() {
             it.x += cx;
             it.y += dy;
         }
-        if extra[k] != 0 && !cit.is_empty() {
-            cit[0].w = fw;
-        }
         items.append(&mut cit);
-        cx += fw + gap;
+        cx += widths[k] + gap;
     }
     (items, row_h)
 }
@@ -592,33 +686,54 @@ fn grid(
     ctx: &Value,
 ) -> (Vec<MItem>, i64) {
     // Wrap into lines so each line's column span sums to <= 12.
-    let mut lines: Vec<Vec<(i64, &Value, i64)>> = vec![];
-    let mut cur: Vec<(i64, &Value, i64)> = vec![];
-    let mut cur_span = 0i64;
-    for &(i, c) in children {
-        let span = col_span(c);
-        if !cur.is_empty() && cur_span + span > 12 {
-            lines.push(std::mem::take(&mut cur));
-            cur_span = 0;
-        }
-        cur.push((i, c, span));
-        cur_span += span;
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
+    let lines = grid_lines(children);
 
     let mut items = vec![];
     let mut line_y = 0;
     for line in &lines {
+        let n = line.len();
+        // Each cell wants at least its Bootstrap-12 share, grown to fit its
+        // content's intrinsic width: a leaf renders at its own width regardless
+        // of how narrow its column is, so a wide label / icon must not overrun
+        // its neighbour. Layout containers fill their cell, contributing no
+        // intrinsic minimum (they shrink/grow with the cell).
+        let desired: Vec<i64> = line
+            .iter()
+            .map(|&(_, c, span)| {
+                let bw = (2 * inner_w * span + 12) / 24; // round-half-up, exact
+                bw.max(natural_w(c, ctx))
+            })
+            .collect();
+        let avail = inner_w - gap * (n as i64 - 1);
+        let total: i64 = desired.iter().sum();
+        let widths: Vec<i64> = if total <= avail || total <= 0 {
+            desired
+        } else {
+            // Over-subscribed row: shrink cells proportionally to fit, then hand
+            // the rounding remainder out one pixel at a time (deterministic so
+            // every app produces byte-identical rects).
+            let mut widths: Vec<i64> = desired.iter().map(|&d| d * avail / total).collect();
+            let mut rem = avail - widths.iter().sum::<i64>();
+            let mut k = 0usize;
+            while rem > 0 {
+                widths[k] += 1;
+                rem -= 1;
+                k = (k + 1) % n;
+            }
+            widths
+        };
         let mut cx = 0;
         let mut line_h = 0;
         let mut cells: Vec<(Vec<MItem>, i64, i64)> = vec![];
-        for &(i, c, span) in line {
-            let cell_w = (2 * inner_w * span + 12) / 24; // round-half-up, exact
+        for (idx, &(i, c, _span)) in line.iter().enumerate() {
+            let cell_w = widths[idx];
             let mut cp = path.to_vec();
             cp.push(i);
-            let (_cw, ch, cit) = measure(c, &cp, cell_w, 0, ctx);
+            let (_cw, ch, mut cit) = measure(c, &cp, cell_w, 0, ctx);
+            // Clamp the child to its cell so it cannot overrun the next column.
+            if !cit.is_empty() && cit[0].w > cell_w {
+                cit[0].w = cell_w;
+            }
             cells.push((cit, ch, cx));
             if ch > line_h {
                 line_h = ch;
