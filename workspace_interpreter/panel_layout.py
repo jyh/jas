@@ -372,15 +372,20 @@ def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
 
 
 def _foreach(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
-    """Expand a foreach container's `do` template once per item.
+    """Expand a foreach container's `do` template once per item, laid out per
+    the container's `layout`: ``column`` (vertical stack), ``row`` (horizontal,
+    single line), or ``wrap`` (horizontal, wrapping at ``inner_w``).
 
-    v1: column stacking (the layout every foreach panel uses for its list).
-    Each item is bound as `foreach.as` (plus `_index`) in a child scope.
+    Each item is bound as ``foreach.as`` (plus ``_index``) in a child scope.
+    Row/wrap items are measured at intrinsic width; ``item_w`` is the subtree's
+    actual extent (so a container item gets its content width, not the unbounded
+    sentinel), and the item's own rect width is corrected to that extent.
     """
     spec = node.get("foreach") or {}
     src = spec.get("source", "")
     var = spec.get("as", "item")
     template = node.get("do") or {}
+    lay = node.get("layout") or "column"
     try:
         res = evaluate(src, ctx)
         items = res.value if hasattr(res, "value") else res
@@ -389,18 +394,55 @@ def _foreach(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
     if not isinstance(items, list):
         items = []
 
-    out: list[dict] = []
-    cy = 0
-    n = 0
+    # Measure every expansion (column fills inner_w; row/wrap are intrinsic).
+    avail = inner_w if lay == "column" else -1
+    measured = []  # (item_w, item_h, items)
     for i, item in enumerate(items):
         item_data = dict(item) if isinstance(item, dict) else {"_value": item}
         item_data["_index"] = i
         child_ctx = dict(ctx)
         child_ctx[var] = item_data
-        _w, ch, cit = _measure(template, path + [i], inner_w, 0, child_ctx)
+        w, h, cit = _measure(template, path + [i], avail, 0, child_ctx)
+        if lay != "column":
+            iw = max((it["x"] + it["w"] for it in cit), default=0)
+            if cit:
+                cit[0]["w"] = iw
+            w = iw
+        measured.append((w, h, cit))
+
+    out: list[dict] = []
+    if lay == "row":
+        row_h = max((m[1] for m in measured), default=0)
+        cx = 0
+        for w, h, cit in measured:
+            dy = (row_h - h) // 2
+            for it in cit:
+                it["x"] += cx
+                it["y"] += dy
+            out.extend(cit)
+            cx += w + gap
+        return out, row_h
+    if lay == "wrap":
+        cx = 0
+        line_y = 0
+        line_h = 0
+        for w, h, cit in measured:
+            if cx > 0 and cx + w > inner_w:
+                line_y += line_h + gap
+                cx = 0
+                line_h = 0
+            for it in cit:
+                it["x"] += cx
+                it["y"] += line_y
+            out.extend(cit)
+            cx += w + gap
+            line_h = max(line_h, h)
+        return out, (line_y + line_h if measured else 0)
+    # column
+    cy = 0
+    for w, h, cit in measured:
         for it in cit:
             it["y"] += cy
         out.extend(cit)
-        cy += ch + gap
-        n += 1
-    return out, (cy - gap if n else 0)
+        cy += h + gap
+    return out, (cy - gap if measured else 0)
