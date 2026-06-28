@@ -562,11 +562,68 @@ def _render_tabs(el, theme, state):
     return Markup(f'<div{_id_attr(el)}>{nav_html}{content_html}</div>')
 
 
+# Path B: panels whose composite/data-driven widgets the absolute renderer
+# cannot draw yet (foreach expansions / tree rows), so they stay on flex.
+_PATH_B_UNSUPPORTED = {
+    "color_panel_content", "gradient_panel_content", "layers_panel_content",
+}
+
+
+def _path_b_enabled() -> bool:
+    """Render panels from the shared canonical layout pass (absolute rects)
+    instead of Bootstrap flex. Opt-in via JAS_PATH_B=1 — the human-viewable
+    reference of the cross-app byte-gated layout (TESTING_STRATEGY.md §6/§7.7)."""
+    import os
+    return os.environ.get("JAS_PATH_B") == "1"
+
+
+def _node_at_path(content, path):
+    """Resolve a node by its panel-relative tree path (root = [])."""
+    n = content
+    for i in path:
+        kids = n.get("children") if isinstance(n, dict) else None
+        if not isinstance(kids, list) or i >= len(kids):
+            return None
+        n = kids[i]
+    return n
+
+
+def _render_panel_absolute(el, theme, state) -> str:
+    """Render a panel from the shared layout_panel rects: each leaf widget in
+    an absolutely-positioned box at its computed rect, inside a relative panel
+    of the computed height. Mirrors the Rust render_panel_absolute."""
+    from workspace_interpreter.panel_layout import layout_panel
+    content = el.get("content")
+    rects = layout_panel(el, 228)
+    panel_h = rects[0]["rect"]["h"] if rects else 0
+    parts = []
+    for item in rects:
+        node = _node_at_path(content, item["path"])
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") in ("container", "row", "col", "grid", "panel"):
+            continue  # containers are layout-only
+        r = item["rect"]
+        inner = render_element(node, theme, state, mode="normal")
+        parts.append(
+            f'<div style="position:absolute;left:{r["x"]}px;top:{r["y"]}px;'
+            f'width:{r["w"]}px;height:{r["h"]}px;overflow:hidden">{inner}</div>'
+        )
+    return (
+        f'<div style="position:relative;width:228px;height:{panel_h}px;'
+        f'color:var(--app-text,#ccc)">{"".join(parts)}</div>'
+    )
+
+
 def _render_panel(el, theme, state):
     summary = escape(el.get("summary", "Panel"))
     menu = el.get("menu", [])
     content = el.get("content")
-    content_html = render_element(content, theme, state, mode="normal") if isinstance(content, dict) else ""
+    pid = el.get("id", "")
+    if _path_b_enabled() and pid not in _PATH_B_UNSUPPORTED and isinstance(content, dict):
+        content_html = _render_panel_absolute(el, theme, state)
+    else:
+        content_html = render_element(content, theme, state, mode="normal") if isinstance(content, dict) else ""
     # Embed panel-local state/init as data attributes for client-side initialization.
     # data-panel-state emits only default values (not full specs) so JS can use directly.
     panel_data = ""
