@@ -168,6 +168,12 @@ struct JasApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(workspace: workspace)
+                // Match the window color scheme to the active appearance so
+                // AppKit-backed controls (Picker pop-up buttons in the
+                // Character/Stroke/etc. panels) render light-on-dark under a
+                // dark theme instead of system-default dark text, which was
+                // dark-on-dark over the dark panels.
+                .preferredColorScheme(workspace.theme.isDark ? .dark : .light)
                 .onAppear {
                     // Activation policy + foreground promotion live in
                     // JasAppDelegate.applicationDidFinishLaunching so
