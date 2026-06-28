@@ -74,10 +74,29 @@ _CONCEPTS_CTX = {
     "data": {"concepts": [{"name": "Gear"}, {"name": "Star"}, {"name": "Spiral"}]},
 }
 
+# layers uses a ROW foreach (isolation-stack breadcrumb); gradient a WRAP foreach
+# (gradient tile grid — the tiles have no bindings, so only the count matters).
+_LAYERS_CTX = {
+    "panel": {
+        "isolation_stack": [
+            {"container_name": "Layer 1"},
+            {"container_name": "Group A"},
+            {"container_name": "Path 3"},
+        ],
+    },
+}
+
+_GRADIENT_CTX = {
+    "panel": {"active_library_id": "lib1", "thumbnail_size": 32},
+    "data": {"gradient_libraries": {"lib1": {"gradients": [{}, {}, {}, {}, {}, {}, {}, {}]}}},
+}
+
 _CTX = {
     "symbols": _SYMBOLS_CTX,
     "artboards": _ARTBOARDS_CTX,
     "concepts": _CONCEPTS_CTX,
+    "layers": _LAYERS_CTX,
+    "gradient": _GRADIENT_CTX,
 }
 _AVAIL_H = 600
 
