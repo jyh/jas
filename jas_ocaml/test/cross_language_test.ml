@@ -3062,9 +3062,20 @@ let () =
             failwith (Printf.sprintf "Unknown function: %s" func);
           let panel_id = tc |> member "args" |> member "panel" |> to_string in
           let avail_w = tc |> member "args" |> member "avail_w" |> to_int in
+          let avail_h =
+            match tc |> member "args" |> member "avail_h" with
+            | `Null -> 0
+            | v -> to_int v
+          in
+          let ctx =
+            match tc |> member "args" |> member "ctx" with
+            | `Null -> `Assoc []
+            | v -> v
+          in
           let expected = tc |> member "expected" in
           let panel_node = member panel_id panels in
-          let actual = Jas.Panel_layout.layout_panel panel_node avail_w in
+          let actual =
+            Jas.Panel_layout.layout_panel panel_node avail_w avail_h ctx in
           if normalize actual <> normalize expected then begin
             Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name
               (Yojson.Safe.pretty_to_string (normalize expected));

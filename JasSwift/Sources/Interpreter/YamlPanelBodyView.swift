@@ -4183,7 +4183,9 @@ struct YamlPanelBodyView: View {
     /// Run the shared layout pass and project it into placeable leaves.
     /// Mirrors Rust `render_panel_absolute` / Flask `_render_panel_absolute`.
     private func pathBLayout() -> PathBLayout {
-        let rects = PanelLayout.layoutPanel(contentSpec, availW: 228)
+        // Preview path: pass availH=0 and an empty data scope for now (real
+        // data-in-preview is a later step), keeping current preview behavior.
+        let rects = PanelLayout.layoutPanel(contentSpec, availW: 228, availH: 0, ctx: [:])
         let panelH = (rects.first?["rect"] as? [String: Int])?["h"] ?? 0
         let content = contentSpec["content"]
         var leaves: [PathBLeaf] = []

@@ -70,7 +70,12 @@ let utf8_length (s : string) : int =
   String.iter (fun c -> if Char.code c land 0xC0 <> 0x80 then incr n) s;
   !n
 
-let text_w (s : string) : int = utf8_length s * char_width
+(* Resolved text width: evaluate the text binding against the data scope [ctx]
+   (a literal with no {{...}} passes through unchanged) then measure its length
+   in Unicode code points times CHAR_WIDTH. Mirrors the Python _text_w. *)
+let text_w (raw : string) (ctx : Yojson.Safe.t) : int =
+  let resolved = Expr_eval.evaluate_text raw ctx in
+  utf8_length resolved * char_width
 
 let is_fill (kind : string) : bool =
   match kind with
@@ -192,8 +197,16 @@ let col_span (n : Yojson.Safe.t) : int =
   let raw = match to_int_opt (mem "col" n) with Some i -> i | None -> 0 in
   if raw <> 0 then raw else 1
 
-(* Return (w, h, fill) for a leaf widget. *)
-let leaf_size (n : Yojson.Safe.t) (avail_w : int) : int * int * bool =
+(* Flex weight: style.flex (int), with a spacer with no explicit flex getting
+   an implicit weight of 1. Mirrors the Python _flex. *)
+let flex (n : Yojson.Safe.t) : int =
+  let w = match style_i n "flex" with Some f -> f | None -> 0 in
+  if w = 0 && node_type n = "spacer" then 1 else w
+
+(* Return (w, h, fill) for a leaf widget. Text bindings (content / label) are
+   resolved against the data scope [ctx] before measuring. *)
+let leaf_size (n : Yojson.Safe.t) (avail_w : int) (ctx : Yojson.Safe.t)
+  : int * int * bool =
   let t = node_type n in
   let st = style n in
   let h =
@@ -204,9 +217,9 @@ let leaf_size (n : Yojson.Safe.t) (avail_w : int) : int * int * bool =
     if fill then (if avail_w > 0 then avail_w else kind_fallback_w t)
     else
       match t with
-      | "text" -> text_w (match to_str_opt (mem "content" n) with Some s -> s | None -> "")
-      | "button" -> text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "") + 16
-      | "checkbox" | "toggle" -> 16 + 4 + text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "")
+      | "text" -> text_w (match to_str_opt (mem "content" n) with Some s -> s | None -> "") ctx
+      | "button" -> text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "") ctx + 16
+      | "checkbox" | "toggle" -> 16 + 4 + text_w (match to_str_opt (mem "label" n) with Some s -> s | None -> "") ctx
       | "color_swatch" -> 16
       | "icon_button" -> 24
       | "icon" -> 20
@@ -216,51 +229,101 @@ let leaf_size (n : Yojson.Safe.t) (avail_w : int) : int * int * bool =
   let w = match resolve_dim (mem "min_width" st) avail_w with Some m -> max w m | None -> w in
   (w, h, fill)
 
-(* Returns (w, h, items) with item coords RELATIVE to this node origin. *)
+(* Returns (w, h, items) with item coords RELATIVE to this node origin.
+   [avail_h] drives vertical flex for columns (0 = content height, no flex).
+   [ctx] is the data scope used to evaluate foreach sources + text bindings. *)
 let rec measure (n : Yojson.Safe.t) (path : int list) (avail_w : int)
-  : int * int * mitem list =
-  let pt, pr, pb, pl = parse_padding (mem "padding" (style n)) in
+  (avail_h : int) (ctx : Yojson.Safe.t) : int * int * mitem list =
+  let st = style n in
+  let pt, pr, pb, pl = parse_padding (mem "padding" st) in
   let gap = match style_i n "gap" with Some g -> g | None -> 0 in
   let inner_w = avail_w - pl - pr in
+  let inner_h = if avail_h > 0 then avail_h - pt - pb else 0 in
   if is_container n then begin
-    let children = visible_children n in
-    let lay = resolved_layout n in
     let ch_items, content_h =
-      if lay = "row" && List.exists (fun (_, c) -> has_col c) children then
-        grid children path inner_w gap
-      else if lay = "row" then
-        flow children path inner_w gap
-      else
-        column children path inner_w gap
+      match (mem "foreach" n, mem "do" n) with
+      | (`Assoc _, `Assoc _) -> foreach n path inner_w gap ctx
+      | _ ->
+        let children = visible_children n in
+        let lay = resolved_layout n in
+        if lay = "row" && List.exists (fun (_, c) -> has_col c) children then
+          grid children path inner_w gap ctx
+        else if lay = "row" then
+          flow children path inner_w gap ctx
+        else
+          column children path inner_w gap inner_h ctx
     in
     let w = avail_w in
-    let h = content_h + pt + pb in
+    (* An explicit style.height overrides the content-derived height. *)
+    let h =
+      match resolve_dim (mem "height" st) 0 with
+      | Some v -> v
+      | None -> content_h + pt + pb
+    in
     let root = { path; x = 0; y = 0; w; h } in
     List.iter (fun it -> it.x <- it.x + pl; it.y <- it.y + pt) ch_items;
     (w, h, root :: ch_items)
   end else begin
-    let w, h, _fill = leaf_size n avail_w in
+    let w, h, _fill = leaf_size n avail_w ctx in
     (w, h, [ { path; x = 0; y = 0; w; h } ])
   end
 
-and column children path inner_w gap : mitem list * int =
+and column children path inner_w gap avail_h ctx : mitem list * int =
+  let measured =
+    Array.of_list
+      (List.map (fun (i, c) ->
+         let _cw, ch, cit = measure c (path @ [ i ]) inner_w 0 ctx in
+         (c, ch, cit))
+         children)
+  in
+  let n = Array.length measured in
+  let natural =
+    Array.fold_left (fun acc (_, ch, _) -> acc + ch) 0 measured
+    + (if n > 0 then gap * (n - 1) else 0)
+  in
+  let extra = Array.make n 0 in
+  (* Vertical flex: distribute the leftover dock height to flex-weighted
+     children (integer floor, remainder to the earliest flex children). *)
+  if avail_h > 0 then begin
+    let leftover = avail_h - natural in
+    if leftover > 0 then begin
+      let weights = Array.map (fun (c, _, _) -> flex c) measured in
+      let sumw = Array.fold_left ( + ) 0 weights in
+      if sumw > 0 then begin
+        for k = 0 to n - 1 do
+          extra.(k) <- leftover * weights.(k) / sumw
+        done;
+        let used = Array.fold_left ( + ) 0 extra in
+        let rem = ref (leftover - used) in
+        (try
+           for k = 0 to n - 1 do
+             if !rem <= 0 then raise Exit;
+             if weights.(k) > 0 then begin
+               extra.(k) <- extra.(k) + 1;
+               decr rem
+             end
+           done
+         with Exit -> ())
+      end
+    end
+  end;
   let items = ref [] in
   let cy = ref 0 in
-  let n = ref 0 in
-  List.iter (fun (i, c) ->
-    let _cw, ch, cit = measure c (path @ [ i ]) inner_w in
+  Array.iteri (fun k (_c, ch, cit) ->
+    let hk = ch + extra.(k) in
     List.iter (fun it -> it.y <- it.y + !cy) cit;
+    (if extra.(k) <> 0 then
+       match cit with first :: _ -> first.h <- hk | [] -> ());
     items := !items @ cit;
-    cy := !cy + ch + gap;
-    incr n)
-    children;
-  (!items, if !n > 0 then !cy - gap else 0)
+    cy := !cy + hk + gap)
+    measured;
+  (!items, if n > 0 then !cy - gap else 0)
 
-and flow children path inner_w gap : mitem list * int =
+and flow children path inner_w gap ctx : mitem list * int =
   (* Measure each child at intrinsic width (fill leaves use fallbacks). *)
   let measured =
     List.map (fun (i, c) ->
-      let cw, ch, cit = measure c (path @ [ i ]) (-1) in
+      let cw, ch, cit = measure c (path @ [ i ]) (-1) 0 ctx in
       (c, cw, ch, cit))
       children
   in
@@ -270,12 +333,7 @@ and flow children path inner_w gap : mitem list * int =
     + (if n > 0 then gap * (n - 1) else 0)
   in
   let leftover = max 0 (inner_w - fixed) in
-  let weights =
-    List.map (fun (c, _, _, _) ->
-      let wt = match style_i c "flex" with Some f -> f | None -> 0 in
-      if wt = 0 && node_type c = "spacer" then 1 else wt)
-      measured
-  in
+  let weights = List.map (fun (c, _, _, _) -> flex c) measured in
   let sumw = List.fold_left ( + ) 0 weights in
   let extra = Array.make n 0 in
   if sumw > 0 && leftover > 0 then begin
@@ -311,7 +369,7 @@ and flow children path inner_w gap : mitem list * int =
     measured;
   (!items, row_h)
 
-and grid children path inner_w gap : mitem list * int =
+and grid children path inner_w gap ctx : mitem list * int =
   (* Wrap into lines so each line column span sums to at most 12. *)
   let lines = ref [] in
   let cur = ref [] in
@@ -335,7 +393,7 @@ and grid children path inner_w gap : mitem list * int =
     let cells = ref [] in
     List.iter (fun (i, c, span) ->
       let cell_w = (2 * inner_w * span + 12) / 24 in
-      let _cw, ch, cit = measure c (path @ [ i ]) cell_w in
+      let _cw, ch, cit = measure c (path @ [ i ]) cell_w 0 ctx in
       cells := !cells @ [ (cit, ch, !cx) ];
       if ch > !line_h then line_h := ch;
       cx := !cx + cell_w + gap)
@@ -349,12 +407,50 @@ and grid children path inner_w gap : mitem list * int =
     !lines;
   (!items, if !lines <> [] then !line_y - gap else 0)
 
+(* Expand a foreach container's [do] template once per item of
+   evaluate(foreach.source, ctx). Each item is bound as [foreach.as] (plus
+   [_index]) in a child scope; v1 stacks the expansions column-wise. *)
+and foreach n path inner_w gap ctx : mitem list * int =
+  let spec = mem "foreach" n in
+  let src = match to_str_opt (mem "source" spec) with Some s -> s | None -> "" in
+  let var = match to_str_opt (mem "as" spec) with Some s -> s | None -> "item" in
+  let template = mem "do" n in
+  let items =
+    match Expr_eval.evaluate src ctx with
+    | Expr_eval.List l -> l
+    | _ -> []
+  in
+  let out = ref [] in
+  let cy = ref 0 in
+  let count = ref 0 in
+  List.iteri (fun i item ->
+    let item_data =
+      match item with
+      | `Assoc fs -> `Assoc (List.remove_assoc "_index" fs @ [ ("_index", `Int i) ])
+      | other -> `Assoc [ ("_value", other); ("_index", `Int i) ]
+    in
+    let child_ctx =
+      match ctx with
+      | `Assoc fields -> `Assoc (List.remove_assoc var fields @ [ (var, item_data) ])
+      | _ -> `Assoc [ (var, item_data) ]
+    in
+    let _w, ch, cit = measure template (path @ [ i ]) inner_w 0 child_ctx in
+    List.iter (fun it -> it.y <- it.y + !cy) cit;
+    out := !out @ cit;
+    cy := !cy + ch + gap;
+    incr count)
+    items;
+  (!out, if !count > 0 then !cy - gap else 0)
+
 (* Lay out a compiled panel node ({"type":"panel","content":<root>}) into a
-   JSON array of {"path":[..],"rect":{x,y,w,h}}, pre-order, panel-relative. *)
-let layout_panel (panel_node : Yojson.Safe.t) (avail_w : int) : Yojson.Safe.t =
+   JSON array of {"path":[..],"rect":{x,y,w,h}}, pre-order, panel-relative.
+   [avail_h] drives vertical flex (0 = none); [ctx] is the data scope used to
+   evaluate foreach sources and text bindings. *)
+let layout_panel (panel_node : Yojson.Safe.t) (avail_w : int) (avail_h : int)
+  (ctx : Yojson.Safe.t) : Yojson.Safe.t =
   match mem "content" panel_node with
   | `Assoc _ as root ->
-    let _w, _h, items = measure root [] avail_w in
+    let _w, _h, items = measure root [] avail_w avail_h ctx in
     `List
       (List.map (fun it ->
          `Assoc

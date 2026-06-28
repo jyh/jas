@@ -5459,7 +5459,7 @@ let render_panel_absolute ~packing ~ctx (content : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   let panel_node = `Assoc [ ("content", content) ] in
   let rects =
-    match Panel_layout.layout_panel panel_node path_b_avail_w with
+    match Panel_layout.layout_panel panel_node path_b_avail_w 0 (`Assoc []) with
     | `List items -> items
     | _ -> []
   in

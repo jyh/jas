@@ -1,16 +1,21 @@
 // Shared canonical panel widget-layout pass (Path B).
 //
-// Swift port of `jas/panels/panel_layout.py` / `panel_layout.rs`.  A pure,
-// integer-arithmetic layout of a compiled panel node into widget rects,
-// byte-identical across all five apps.  The full contract is
-// PATH_B_DESIGN.md Appendix A.
+// Swift port of `workspace_interpreter/panel_layout.py` / `panel_layout.rs`.
+// A pure, integer-arithmetic layout of a compiled panel node into widget
+// rects, byte-identical across all five apps.  The full contract is
+// PATH_B_DESIGN.md (Appendix A + Appendix B for foreach / vertical flex).
 //
 // All arithmetic is integer (no float anywhere), so the native
 // implementations are byte-identical and the corpus
 // (`test_fixtures/algorithms/panel_layout.json`) needs no tolerance.  Text
-// widths use the deterministic stub measure `codepoints(text) * CHAR_WIDTH`
-// (CHAR_WIDTH = 10) and columns use the Bootstrap-12 rule
-// `cell_w = (2*inner_w*N + 12) / 24` (round-half-up, exact, truncating div).
+// `content` / `label` is first resolved through `evaluateText` against the
+// data scope `ctx` so a bound `"{{sym.name}}"` is measured at its resolved
+// value (a literal passes through unchanged); width is then
+// `codepoints(resolved) * CHAR_WIDTH` (CHAR_WIDTH = 10).  Columns use the
+// Bootstrap-12 rule `cell_w = (2*inner_w*N + 12) / 24` (round-half-up, exact,
+// truncating div).  `foreach` containers expand their `do` template once per
+// item of `evaluate(source, ctx)`; a column distributes `avail_h` leftover to
+// `flex`-weighted children (vertical flex).
 
 import Foundation
 
@@ -39,11 +44,17 @@ public enum PanelLayout {
 
     /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into
     /// an array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
-    public static func layoutPanel(_ panelNode: [String: Any], availW: Int) -> [[String: Any]] {
+    ///
+    /// `ctx` is the data scope (`state` / `panel` / `data` / `active_document`
+    /// namespaces) used to evaluate `foreach` sources and text bindings;
+    /// defaults to empty (literals only). `availH` drives vertical flex; 0 means
+    /// content-height (no vertical flex).
+    public static func layoutPanel(_ panelNode: [String: Any], availW: Int,
+                                   availH: Int = 0, ctx: [String: Any] = [:]) -> [[String: Any]] {
         guard let root = panelNode["content"] as? [String: Any] else {
             return []
         }
-        let (_, _, items) = measure(root, path: [], availW: availW)
+        let (_, _, items) = measure(root, path: [], availW: availW, availH: availH, ctx: ctx)
         return items.map { it in
             [
                 "path": it.path,
@@ -117,13 +128,23 @@ public enum PanelLayout {
         return !(v is NSNull)
     }
 
-    private static func textW(_ s: String) -> Int {
-        // UNICODE CODE POINTS, not bytes / UTF-16 units.
-        s.unicodeScalars.count * charWidth
+    /// Resolved text width: `evaluateText(node[key], ctx)` codepoints * CHAR_WIDTH.
+    /// A literal (no `{{}}`) passes through `evaluateText` unchanged so non-bound
+    /// panels stay byte-identical. UNICODE CODE POINTS, not bytes / UTF-16 units.
+    private static func textW(_ n: [String: Any], _ key: String, _ ctx: [String: Any]) -> Int {
+        guard let raw = n[key] as? String else { return 0 }
+        let resolved = evaluateText(raw, context: ctx)
+        return resolved.unicodeScalars.count * charWidth
     }
 
     private static func isFill(_ kind: String) -> Bool {
         fillKinds.contains(kind)
+    }
+
+    /// Flex weight: explicit `style.flex`, or implicit 1 for a `spacer`.
+    private static func flexWeight(_ n: [String: Any]) -> Int {
+        let w = styleI(n, "flex") ?? 0
+        return (w == 0 && nodeType(n) == "spacer") ? 1 : w
     }
 
     private static func kindHeight(_ kind: String) -> Int {
@@ -220,7 +241,7 @@ public enum PanelLayout {
         return raw != 0 ? raw : 1
     }
 
-    private static func leafSize(_ n: [String: Any], availW: Int) -> (Int, Int, Bool) {
+    private static func leafSize(_ n: [String: Any], availW: Int, ctx: [String: Any]) -> (Int, Int, Bool) {
         let t = nodeType(n)
         let st = style(n)
         let h = resolveDim(st["height"], 0) ?? kindHeight(t)
@@ -231,11 +252,11 @@ public enum PanelLayout {
         } else {
             switch t {
             case "text":
-                w = textW((n["content"] as? String) ?? "")
+                w = textW(n, "content", ctx)
             case "button":
-                w = textW((n["label"] as? String) ?? "") + 16
+                w = textW(n, "label", ctx) + 16
             case "checkbox", "toggle":
-                w = 16 + 4 + textW((n["label"] as? String) ?? "")
+                w = 16 + 4 + textW(n, "label", ctx)
             case "color_swatch":
                 w = 16
             case "icon_button":
@@ -252,25 +273,35 @@ public enum PanelLayout {
     }
 
     /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
-    private static func measure(_ n: [String: Any], path: [Int], availW: Int) -> (Int, Int, [MItem]) {
-        let (pt, pr, pb, pl) = parsePadding(style(n)["padding"])
+    private static func measure(_ n: [String: Any], path: [Int], availW: Int,
+                               availH: Int, ctx: [String: Any]) -> (Int, Int, [MItem]) {
+        let st = style(n)
+        let (pt, pr, pb, pl) = parsePadding(st["padding"])
         let gap = styleI(n, "gap") ?? 0
         let innerW = availW - pl - pr
+        let innerH = availH > 0 ? (availH - pt - pb) : 0
 
         if isContainer(n) {
-            let children = visibleChildren(n)
-            let lay = resolvedLayout(n)
             let chItems: [MItem]
             let contentH: Int
-            if lay == "row" && children.contains(where: { hasCol($0.1) }) {
-                (chItems, contentH) = grid(children, path: path, innerW: innerW, gap: gap)
-            } else if lay == "row" {
-                (chItems, contentH) = flow(children, path: path, innerW: innerW, gap: gap)
+            if let fe = n["foreach"] as? [String: Any], n["do"] != nil {
+                (chItems, contentH) = foreach(n, foreachSpec: fe, path: path,
+                                              innerW: innerW, gap: gap, ctx: ctx)
             } else {
-                (chItems, contentH) = column(children, path: path, innerW: innerW, gap: gap)
+                let children = visibleChildren(n)
+                let lay = resolvedLayout(n)
+                if lay == "row" && children.contains(where: { hasCol($0.1) }) {
+                    (chItems, contentH) = grid(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
+                } else if lay == "row" {
+                    (chItems, contentH) = flow(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
+                } else {
+                    (chItems, contentH) = column(children, path: path, innerW: innerW,
+                                                 gap: gap, availH: innerH, ctx: ctx)
+                }
             }
+            let expH = resolveDim(st["height"], 0)
             let w = availW
-            let h = contentH + pt + pb
+            let h = expH ?? (contentH + pt + pb)
             var items = [MItem(path: path, x: 0, y: 0, w: w, h: h)]
             for var it in chItems {
                 it.x += pl
@@ -279,42 +310,70 @@ public enum PanelLayout {
             }
             return (w, h, items)
         } else {
-            let (w, h, _) = leafSize(n, availW: availW)
+            let (w, h, _) = leafSize(n, availW: availW, ctx: ctx)
             return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h)])
         }
     }
 
-    private static func column(_ children: [(Int, [String: Any])], path: [Int], innerW: Int, gap: Int) -> ([MItem], Int) {
+    private static func column(_ children: [(Int, [String: Any])], path: [Int],
+                              innerW: Int, gap: Int, availH: Int, ctx: [String: Any]) -> ([MItem], Int) {
+        var measured: [(node: [String: Any], h: Int, items: [MItem])] = []
+        for (i, c) in children {
+            let (_, ch, cit) = measure(c, path: path + [i], availW: innerW, availH: 0, ctx: ctx)
+            measured.append((c, ch, cit))
+        }
+        let n = measured.count
+        let natural = measured.reduce(0) { $0 + $1.h } + (n > 0 ? gap * (n - 1) : 0)
+        var extra = [Int](repeating: 0, count: n)
+        if availH > 0 {
+            let leftover = availH - natural
+            if leftover > 0 {
+                let weights = measured.map { flexWeight($0.node) }
+                let sumw = weights.reduce(0, +)
+                if sumw > 0 {
+                    var base = (0..<n).map { leftover * weights[$0] / sumw }
+                    var rem = leftover - base.reduce(0, +)
+                    for k in 0..<n {
+                        if rem <= 0 { break }
+                        if weights[k] > 0 {
+                            base[k] += 1
+                            rem -= 1
+                        }
+                    }
+                    extra = base
+                }
+            }
+        }
         var items: [MItem] = []
         var cy = 0
-        var n = 0
-        for (i, c) in children {
-            let (_, ch, cit) = measure(c, path: path + [i], availW: innerW)
-            for var it in cit {
-                it.y += cy
-                items.append(it)
+        for k in 0..<n {
+            let ch = measured[k].h
+            let hk = ch + extra[k]
+            var cit = measured[k].items
+            for j in cit.indices {
+                cit[j].y += cy
             }
-            cy += ch + gap
-            n += 1
+            if extra[k] != 0 && !cit.isEmpty {
+                cit[0].h = hk
+            }
+            items.append(contentsOf: cit)
+            cy += hk + gap
         }
         return (items, n > 0 ? cy - gap : 0)
     }
 
-    private static func flow(_ children: [(Int, [String: Any])], path: [Int], innerW: Int, gap: Int) -> ([MItem], Int) {
+    private static func flow(_ children: [(Int, [String: Any])], path: [Int],
+                            innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
         // Measure each child at intrinsic width (avail = -1).
         var measured: [(c: [String: Any], w: Int, h: Int, items: [MItem])] = []
         for (i, c) in children {
-            let (cw, ch, cit) = measure(c, path: path + [i], availW: -1)
+            let (cw, ch, cit) = measure(c, path: path + [i], availW: -1, availH: 0, ctx: ctx)
             measured.append((c, cw, ch, cit))
         }
         let n = measured.count
         let fixed = measured.reduce(0) { $0 + $1.w } + (n > 0 ? gap * (n - 1) : 0)
         let leftover = max(0, innerW - fixed)
-        let weights = measured.map { m -> Int in
-            let wt = styleI(m.c, "flex") ?? 0
-            // A spacer with no explicit flex consumes leftover.
-            return (wt == 0 && nodeType(m.c) == "spacer") ? 1 : wt
-        }
+        let weights = measured.map { flexWeight($0.c) }
         let sumw = weights.reduce(0, +)
         var extra = [Int](repeating: 0, count: n)
         if sumw > 0 && leftover > 0 {
@@ -351,7 +410,8 @@ public enum PanelLayout {
         return (items, rowH)
     }
 
-    private static func grid(_ children: [(Int, [String: Any])], path: [Int], innerW: Int, gap: Int) -> ([MItem], Int) {
+    private static func grid(_ children: [(Int, [String: Any])], path: [Int],
+                            innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
         // Wrap into lines so each line's column span sums to <= 12.
         var lines: [[(Int, [String: Any], Int)]] = []
         var cur: [(Int, [String: Any], Int)] = []
@@ -376,7 +436,7 @@ public enum PanelLayout {
             var cells: [(items: [MItem], h: Int, cellX: Int)] = []
             for (i, c, span) in line {
                 let cellW = (2 * innerW * span + 12) / 24 // round-half-up, exact
-                let (_, ch, cit) = measure(c, path: path + [i], availW: cellW)
+                let (_, ch, cit) = measure(c, path: path + [i], availW: cellW, availH: 0, ctx: ctx)
                 cells.append((cit, ch, cx))
                 if ch > lineH { lineH = ch }
                 cx += cellW + gap
@@ -393,5 +453,49 @@ public enum PanelLayout {
             lineY += lineH + gap
         }
         return (items, !lines.isEmpty ? lineY - gap : 0)
+    }
+
+    /// Expand a foreach container's `do` template once per item.
+    ///
+    /// v1: column stacking (the layout every foreach panel uses for its list).
+    /// Each item is bound as `foreach.as` (plus `_index`) in a child scope.
+    private static func foreach(_ node: [String: Any], foreachSpec spec: [String: Any],
+                               path: [Int], innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
+        let src = (spec["source"] as? String) ?? ""
+        let varName = (spec["as"] as? String) ?? "item"
+        let template = (node["do"] as? [String: Any]) ?? [:]
+
+        var rawItems: [Any] = []
+        if !src.isEmpty {
+            let res = evaluate(src, context: ctx)
+            if case .list(let arr) = res {
+                rawItems = arr.map { $0.value }
+            }
+        }
+
+        var out: [MItem] = []
+        var cy = 0
+        var n = 0
+        for (i, item) in rawItems.enumerated() {
+            var itemData: [String: Any]
+            if let d = item as? [String: Any] {
+                itemData = d
+            } else {
+                itemData = ["_value": item]
+            }
+            itemData["_index"] = i
+            var childCtx = ctx
+            childCtx[varName] = itemData
+            let (_, ch, cit) = measure(template, path: path + [i], availW: innerW,
+                                       availH: 0, ctx: childCtx)
+            var shifted = cit
+            for j in shifted.indices {
+                shifted[j].y += cy
+            }
+            out.append(contentsOf: shifted)
+            cy += ch + gap
+            n += 1
+        }
+        return (out, n > 0 ? cy - gap : 0)
     }
 }
