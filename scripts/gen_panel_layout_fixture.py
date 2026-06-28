@@ -48,7 +48,37 @@ _SYMBOLS_CTX = {
     "panel": {"selected_symbol": "m1"},
 }
 
-_CTX = {"symbols": _SYMBOLS_CTX}
+# artboards + concepts use column-only foreach, which the v1 engine handles, so
+# a data fixture is all that's needed (no engine change). brushes/gradient/layers/
+# swatches use row/wrap (and nested) foreach — deferred until the engine grows
+# row/wrap expansion — so they stay at {} (empty lists) for now.
+_ARTBOARDS_CTX = {
+    "active_document": {
+        "artboards": [
+            {"name": "Artboard 1", "number": 1},
+            {"name": "Mobile", "number": 2},
+            {"name": "Desktop Hero", "number": 3},
+        ],
+    },
+}
+
+_CONCEPTS_CTX = {
+    "active_document": {
+        "selected_concept": {
+            "name": "Gear",
+            "params": [{"name": "radius"}, {"name": "teeth"}, {"name": "angle"}],
+            "operations": [{"label": "Rotate 45"}, {"label": "Mirror"}],
+            "violations": [{"message": "teeth must be >= 3"}],
+        },
+    },
+    "data": {"concepts": [{"name": "Gear"}, {"name": "Star"}, {"name": "Spiral"}]},
+}
+
+_CTX = {
+    "symbols": _SYMBOLS_CTX,
+    "artboards": _ARTBOARDS_CTX,
+    "concepts": _CONCEPTS_CTX,
+}
 _AVAIL_H = 600
 
 SEED = [
