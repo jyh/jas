@@ -8153,8 +8153,23 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
 }
 
 /// Whether to render panels from the shared Path B layout pass (preview).
+///
+/// The app runs as wasm in the browser, where there is no process env, so the
+/// toggle is the `?path_b=1` URL query param (no rebuild needed to flip it). A
+/// native build (if ever) falls back to the `JAS_PATH_B=1` env var used by the
+/// other apps.
 fn path_b_enabled() -> bool {
-    std::env::var("JAS_PATH_B").map(|v| v == "1").unwrap_or(false)
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .map(|s| s.contains("path_b=1"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("JAS_PATH_B").map(|v| v == "1").unwrap_or(false)
+    }
 }
 
 /// Resolve a node by its panel-relative tree path (root = `[]`).
