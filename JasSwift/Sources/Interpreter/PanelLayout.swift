@@ -281,10 +281,12 @@ public enum PanelLayout {
         let innerW = availW - pl - pr
         let innerH = availH > 0 ? (availH - pt - pb) : 0
 
-        if isContainer(n) {
+        if isContainer(n) || nodeType(n) == "disclosure" {
             let chItems: [MItem]
             let contentH: Int
-            if let fe = n["foreach"] as? [String: Any], n["do"] != nil {
+            if nodeType(n) == "disclosure" {
+                (chItems, contentH) = disclosure(n, path: path, innerW: innerW, gap: gap, ctx: ctx)
+            } else if let fe = n["foreach"] as? [String: Any], n["do"] != nil {
                 (chItems, contentH) = foreach(n, foreachSpec: fe, path: path,
                                               innerW: innerW, gap: gap, ctx: ctx)
             } else {
@@ -453,6 +455,24 @@ public enum PanelLayout {
             lineY += lineH + gap
         }
         return (items, !lines.isEmpty ? lineY - gap : 0)
+    }
+
+    /// Canonical disclosure header bar height.
+    private static let disclosureHeaderH = 24
+
+    /// A disclosure is a header bar (the bound label) + a body. v1 lays out the
+    /// body (children, column) below a fixed-height header (assumed expanded);
+    /// the header is drawn by the widget itself (no separate rect). The body's
+    /// inner foreach (swatch / brush grids) expands through the normal recursion.
+    private static func disclosure(_ node: [String: Any], path: [Int],
+                                  innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
+        let children = visibleChildren(node)
+        var (chItems, bodyH) = column(children, path: path, innerW: innerW,
+                                      gap: gap, availH: 0, ctx: ctx)
+        for j in chItems.indices {
+            chItems[j].y += disclosureHeaderH
+        }
+        return (chItems, disclosureHeaderH + bodyH)
     }
 
     /// Expand a foreach container's `do` template once per item, laid out per
