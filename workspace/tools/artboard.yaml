@@ -46,6 +46,14 @@ state:
   press_y:        { default: 0.0 }
   cursor_x:       { default: 0.0 }
   cursor_y:       { default: 0.0 }
+  # Document-space mirror of press_/cursor_. The probe / create / move /
+  # resize / duplicate effects operate on document geometry, so they read
+  # these doc_* values; the canvas-space press_/cursor_ above stay for the
+  # marquee + outline overlays (drawn in screen space) and the drag threshold.
+  doc_press_x:    { default: 0.0 }
+  doc_press_y:    { default: 0.0 }
+  doc_cursor_x:   { default: 0.0 }
+  doc_cursor_y:   { default: 0.0 }
   alt_at_press:   { default: false }
   alt_held:       { default: false }
   shift_held:     { default: false }
@@ -93,8 +101,8 @@ handlers:
     #   tool.artboard.hit_artboard_id
     #   tool.artboard.hit_handle_pos
     - "doc.artboard.probe_hit":
-        x:     "event.x"
-        y:     "event.y"
+        x:     "event.doc_x"
+        y:     "event.doc_y"
         shift: "event.modifiers.shift"
         cmd:   "event.modifiers.cmd"
         alt:   "event.modifiers.alt"
@@ -102,6 +110,10 @@ handlers:
     - set: { tool.artboard.press_y:      "event.y" }
     - set: { tool.artboard.cursor_x:     "event.x" }
     - set: { tool.artboard.cursor_y:     "event.y" }
+    - set: { tool.artboard.doc_press_x:  "event.doc_x" }
+    - set: { tool.artboard.doc_press_y:  "event.doc_y" }
+    - set: { tool.artboard.doc_cursor_x: "event.doc_x" }
+    - set: { tool.artboard.doc_cursor_y: "event.doc_y" }
     - set: { tool.artboard.alt_at_press: "event.modifiers.alt" }
     - set: { tool.artboard.alt_held:     "event.modifiers.alt" }
     - set: { tool.artboard.shift_held:   "event.modifiers.shift" }
@@ -110,16 +122,18 @@ handlers:
     - set: { tool.artboard.duplicated_paths: "[]" }
 
   on_mousemove:
-    - set: { tool.artboard.cursor_x:   "event.x" }
-    - set: { tool.artboard.cursor_y:   "event.y" }
+    - set: { tool.artboard.cursor_x:     "event.x" }
+    - set: { tool.artboard.cursor_y:     "event.y" }
+    - set: { tool.artboard.doc_cursor_x: "event.doc_x" }
+    - set: { tool.artboard.doc_cursor_y: "event.doc_y" }
     - set: { tool.artboard.alt_held:   "event.modifiers.alt" }
     - set: { tool.artboard.shift_held: "event.modifiers.shift" }
     # Update hover classification on every mousemove so the dynamic
     # cursor in cursor_css_override reflects what's under the cursor
     # (idle-mode hover) or the gesture in flight (drag-mode).
     - "doc.artboard.probe_hover":
-        x: "event.x"
-        y: "event.y"
+        x: "event.doc_x"
+        y: "event.doc_y"
 
     # Threshold latch — once exceeded, snapshot for undo, promote
     # *_pending → active modes (which for 'duplicating_pending' also
@@ -153,19 +167,19 @@ handlers:
     - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
       then:
         - "doc.artboard.move_apply":
-            press_x:    "tool.artboard.press_x"
-            press_y:    "tool.artboard.press_y"
-            cursor_x:   "event.x"
-            cursor_y:   "event.y"
+            press_x:    "tool.artboard.doc_press_x"
+            press_y:    "tool.artboard.doc_press_y"
+            cursor_x:   "event.doc_x"
+            cursor_y:   "event.doc_y"
             shift_held: "event.modifiers.shift"
     - if: "tool.artboard.mode == 'resizing' && tool.artboard.moved"
       then:
         - "doc.artboard.resize_apply":
             handle_pos: "tool.artboard.hit_handle_pos"
-            press_x:    "tool.artboard.press_x"
-            press_y:    "tool.artboard.press_y"
-            cursor_x:   "event.x"
-            cursor_y:   "event.y"
+            press_x:    "tool.artboard.doc_press_x"
+            press_y:    "tool.artboard.doc_press_y"
+            cursor_x:   "event.doc_x"
+            cursor_y:   "event.doc_y"
             shift_held: "event.modifiers.shift"
             alt_held:   "event.modifiers.alt"
     - if: "tool.artboard.mode == 'duplicating' && tool.artboard.moved"
@@ -174,10 +188,10 @@ handlers:
         # drag does not convert duplicate back to move per
         # ARTBOARD_TOOL.md §Alt-drag duplicate.
         - "doc.artboard.duplicate_apply":
-            press_x:  "tool.artboard.press_x"
-            press_y:  "tool.artboard.press_y"
-            cursor_x: "event.x"
-            cursor_y: "event.y"
+            press_x:  "tool.artboard.doc_press_x"
+            press_y:  "tool.artboard.doc_press_y"
+            cursor_x: "event.doc_x"
+            cursor_y: "event.doc_y"
 
   on_mouseup:
     # Drag-to-create commits a new artboard from the rubber-band rect.
@@ -186,10 +200,10 @@ handlers:
     - if: "tool.artboard.mode == 'creating' && tool.artboard.moved"
       then:
         - "doc.artboard.create_commit":
-            x1: "tool.artboard.press_x"
-            y1: "tool.artboard.press_y"
-            x2: "event.x"
-            y2: "event.y"
+            x1: "tool.artboard.doc_press_x"
+            y1: "tool.artboard.doc_press_y"
+            x2: "event.doc_x"
+            y2: "event.doc_y"
     # Move/resize/duplicate commits — apply integer-pt rounding and
     # finalize the undoable op.
     - if: "tool.artboard.mode == 'moving' && tool.artboard.moved"
@@ -203,10 +217,10 @@ handlers:
     - if: "tool.artboard.mode == 'duplicating' && tool.artboard.moved"
       then:
         - "doc.artboard.duplicate_commit":
-            press_x:  "tool.artboard.press_x"
-            press_y:  "tool.artboard.press_y"
-            cursor_x: "event.x"
-            cursor_y: "event.y"
+            press_x:  "tool.artboard.doc_press_x"
+            press_y:  "tool.artboard.doc_press_y"
+            cursor_x: "event.doc_x"
+            cursor_y: "event.doc_y"
         - "doc.preview.clear": {}
     - set: { tool.artboard.mode:  "'idle'" }
     - set: { tool.artboard.moved: "false" }
@@ -218,8 +232,8 @@ handlers:
     # Dialogue for that artboard. Per ARTBOARD_TOOL.md §Canvas
     # double-click: handles no-op, empty canvas no-op.
     - "doc.artboard.probe_hit":
-        x:     "event.x"
-        y:     "event.y"
+        x:     "event.doc_x"
+        y:     "event.doc_y"
         shift: "false"
         cmd:   "false"
         alt:   "false"

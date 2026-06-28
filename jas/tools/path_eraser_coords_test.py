@@ -54,6 +54,16 @@ class ToolDocCoordsTest(absltest.TestCase):
         self.assertIn("hit_test(event.doc_x, event.doc_y)", blob)
         self.assertNotIn("hit_test(event.x", blob)
 
+    def test_artboard_effects_use_doc_coords_overlay_keeps_canvas(self):
+        # The artboard tool is a SPLIT case: its probe / create / move /
+        # resize / duplicate effects drive doc geometry (must use doc coords),
+        # while the marquee + outline overlays draw in screen space (keep the
+        # canvas press_/cursor_ tool-state). So both must be present.
+        blob = json.dumps(self._tools["artboard"])
+        self.assertIn("tool.artboard.doc_press_x", blob)  # effects read doc state
+        self.assertIn("event.doc_x", blob)                # probe/create cursor in doc
+        self.assertIn("tool.artboard.press_x", blob)      # overlays keep canvas state
+
 
 if __name__ == "__main__":
     absltest.main()
