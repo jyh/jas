@@ -778,16 +778,40 @@ class CrossLanguageTest(absltest.TestCase):
         "boolean.json",
         "new_artboard.json",
         "new_symbol.json",
+        "place_instance.json",
     ]
 
     @staticmethod
-    def _dispatch_action(action_name: str, params: dict, model):
+    def _dispatch_action(action_name: str, params: dict, model,
+                         selected_master=None):
         # Drive ONE action through THIS app's production dispatcher (the
         # Python analog of Rust's generic dispatch_action). The live
         # layers panel routes its menu verbs through
         # _dispatch_yaml_layers_action, which owns + names + commits the
         # undo transaction the action's `snapshot` effect opens. Mirrors
         # the per-step body of the Rust run_action_model loop.
+        #
+        # SYMBOLS.md §7 — the symbol-mutating verbs (new_symbol /
+        # place_instance) are pure-native intercepts whose YAML action is a
+        # `log` stub, so the generic layers dispatcher never reaches them.
+        # The live app carries the panel-selected master across actions on
+        # AppState.symbols_selected; this harness has no app-state, so a
+        # mutable holder (`selected_master`, a one-element list threaded
+        # from _run_action_model) plays that role: new_symbol resolves +
+        # stores the new master id, place_instance reads it back as the
+        # apply_place_instance master PARAM. Mirrors the Rust dispatch_action
+        # symbols intercept threading st.symbols_selected across the steps.
+        if action_name == "new_symbol":
+            from jas.panels.symbols_apply import apply_new_symbol
+            mid = apply_new_symbol(model)
+            if selected_master is not None and mid:
+                selected_master[0] = mid
+            return
+        if action_name == "place_instance":
+            from jas.panels.symbols_apply import apply_place_instance
+            apply_place_instance(
+                model, selected_master[0] if selected_master else None)
+            return
         from panels.panel_menu import _dispatch_yaml_layers_action
         _dispatch_yaml_layers_action(action_name, model, params=params)
 
@@ -827,11 +851,18 @@ class CrossLanguageTest(absltest.TestCase):
             _ctr[0] += 1
             return v
         set_test_id_rng(_counter)
+        # Mutable holder mirroring the live app's AppState.symbols_selected:
+        # carries the panel-selected symbol master across the action sequence
+        # so a later place_instance targets the master an earlier new_symbol
+        # promoted (the harness has no app-state otherwise). See
+        # _dispatch_action for the per-verb symbol intercept.
+        selected_master = [None]
         try:
             for step in tc["actions"]:
                 action = step["action"]
                 params = step.get("params", {}) or {}
-                self._dispatch_action(action, params, model)
+                self._dispatch_action(action, params, model,
+                                      selected_master=selected_master)
         finally:
             set_test_id_rng(None)
         return model

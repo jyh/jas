@@ -664,21 +664,6 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             from jas.panels.boolean_apply import apply_make_compound_shape
             apply_make_compound_shape(model)
 
-    def log_handler(value, _call_ctx, _store):
-        # SYMBOLS.md §7: the `new_symbol` action's only effect is a
-        # `log: "new_symbol"` stub (the real work is a native intercept, as
-        # in Rust dispatch_action and this app's dock_panel
-        # ._dispatch_symbols_action). On the action-corpus dispatch path the
-        # native panel arm is not reachable, so route the stub here: when the
-        # log value names a symbol-mutating verb, promote the single selected
-        # canvas element to a master. apply_new_symbol mints master then ref
-        # via the seeded id source and calls Controller.make_symbol, which
-        # self-brackets (one undo step). All other `log` values stay no-ops,
-        # matching the interpreter's built-in log effect.
-        if value == "new_symbol":
-            from jas.panels.symbols_apply import apply_new_symbol
-            apply_new_symbol(model)
-
     # ── Artboard doc effects (ARTBOARDS.md) ────────────────────────
     from jas.panels.artboard_effects import build_artboard_handlers
 
@@ -694,7 +679,6 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "doc.wrap_in_layer": doc_wrap_in_layer_handler,
         "doc.wrap_in_group": doc_wrap_in_group_handler,
         "make_compound_shape": make_compound_shape_handler,
-        "log": log_handler,
         "list_push": list_push_handler,
         "pop": pop_handler,
         **build_artboard_handlers(model),

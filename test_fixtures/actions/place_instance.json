@@ -1,0 +1,12 @@
+[
+  {
+    "name": "place_instance",
+    "setup_svg": "rect_basic.svg",
+    "selection": [[0, 0]],
+    "actions": [
+      {"action": "new_symbol", "params": {}},
+      {"action": "place_instance", "params": {}}
+    ],
+    "expected_json": "place_instance_expected.json"
+  }
+]

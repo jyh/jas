@@ -104,6 +104,20 @@ val dispatch_yaml_action :
   ?on_close_dialog:(unit -> unit) option ->
   string -> Model.model -> unit
 
+(** Like [dispatch_yaml_action] but threads a caller-owned [State_store.t]
+    instead of minting a fresh one. The store carries the Symbols-panel
+    selection ([selected_symbol]) across a multi-action sequence — mirroring the
+    persistent [AppState.symbols_selected] Rust holds — so a [new_symbol]
+    followed by [place_instance] shares the master the first verb selected. The
+    action corpus passes ONE store for the whole sequence; production uses the
+    [dispatch_yaml_action] wrapper, which mints a fresh store per dispatch. *)
+val dispatch_yaml_action_with_store :
+  ?panel_selection:int list list ->
+  ?on_selection_changed:(int list list -> unit) option ->
+  ?params:(string * Yojson.Safe.t) list ->
+  ?on_close_dialog:(unit -> unit) option ->
+  string -> Model.model -> State_store.t -> unit
+
 (** TEST SEAM (OP_LOG.md section 9 production-route proofs). Run an arbitrary
     [effects] list through the SAME Layers-panel platform-effect registry +
     owner-bracket the production [dispatch_yaml_action] uses, so a production-
