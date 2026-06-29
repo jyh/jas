@@ -555,10 +555,48 @@ let dark_button_css () =
      button:hover { background-color: %s; }"
     (!dialog_bg_hook ()) (!theme_text_hook ()) (!dialog_pane_bg_hook ())
 
+(* Dark CSS for combo boxes (selects). The panel-wide background rule does not
+   reach a GtkComboBox: its nested CSS nodes (button.combo, cellview, arrow)
+   carry the GTK theme default, which is light, so the font / weight / language
+   dropdowns rendered as white boxes on the dark panel. Target those nodes so
+   the collapsed combo matches the dark entries beside it. *)
+let dark_combo_css () =
+  let bg = !dialog_bg_hook () and fg = !theme_text_hook () in
+  (* Use the `background` shorthand (resets background-image): GTK button nodes
+     paint a light gradient via background-image that sits over background-color,
+     so background-color alone left the combo looking white. *)
+  Printf.sprintf
+    "combobox button { background: %s; background-image: none; color: %s; \
+       border: 1px solid #555555; } \
+     combobox button:hover { background: %s; background-image: none; } \
+     combobox cellview { color: %s; } \
+     combobox arrow { color: %s; } \
+     combobox entry { background: %s; background-image: none; color: %s; }"
+    bg fg (!dialog_pane_bg_hook ()) fg fg bg fg
+
 let apply_css_provider (w : #GObj.widget) (css : string) (priority : int) =
   let provider = GObj.css_provider () in
   provider#load_from_data css;
   w#misc#style_context#add_provider provider priority
+
+(* Combo boxes need a SCREEN-level provider, not a widget-level one: a provider
+   added to a GtkComboBox style context does not cascade into its internal
+   button / cellview / arrow nodes (lablgtk gObj.ml notes add_provider does not
+   cascade but add_provider_for_screen does), so the font / weight / language
+   dropdowns kept GTK light defaults on the dark panel. Install one global
+   provider (idempotent); refresh its colors on every call so an appearance
+   switch re-themes the combos. *)
+let _dark_combo_provider : GObj.css_provider option ref = ref None
+let install_dark_combo_css () =
+  let css = dark_combo_css () in
+  match !_dark_combo_provider with
+  | Some p -> p#load_from_data css
+  | None ->
+    let p = GObj.css_provider () in
+    p#load_from_data css;
+    GtkData.StyleContext.add_provider_for_screen
+      (Gdk.Screen.default ()) p#as_css_provider 800;
+    _dark_combo_provider := Some p
 
 (** Override for the icon size used by [render_button]'s ``icon_button``
     default (normally 20px). Set to [Some n] by
@@ -2919,6 +2957,8 @@ and render_select ~packing ~ctx el =
      as a separate widget). *)
   if !_current_panel_id <> None then
     combo#misc#set_size_request ~width:1 ();
+  (* Dark-theme the collapsed combo so it matches the entries beside it. *)
+  install_dark_combo_css ();
   List.iter (fun opt ->
     let label = match opt with
       | `Assoc _ ->
@@ -3125,6 +3165,8 @@ and render_combo_box ~packing ~ctx:_ el =
      forces the homogeneous Bootstrap-12 grid open. *)
   if !_current_panel_id <> None then
     combo#misc#set_size_request ~width:1 ();
+  (* Dark-theme the collapsed combo so it matches the entries beside it. *)
+  install_dark_combo_css ();
   List.iter (fun opt ->
     let label = match opt with
       | `Assoc _ ->
