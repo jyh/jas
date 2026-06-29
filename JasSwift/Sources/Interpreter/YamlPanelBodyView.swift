@@ -1443,12 +1443,12 @@ struct YamlElementView: View {
         )
             .frame(maxWidth: fillsParent ? .infinity : 45)
             .textFieldStyle(.roundedBorder)
-            // Override the inherited foregroundColor — dialogs cascade
-            // theme.text (light) over the body so labels read on the
-            // dark backdrop, but TextFields keep a white system
-            // background and inherit that light text, leaving the
-            // typed digits low-contrast and barely legible.
-            .foregroundColor(.black)
+            // Let the typed text follow the window color scheme, which now
+            // tracks the active appearance (JasApp .preferredColorScheme): the
+            // rounded-border field background is light under a light theme and
+            // dark under a dark theme, so the inherited theme.text stays
+            // legible in both. (Previously this forced .black, which became
+            // dark-on-dark once the field background turned dark.)
             // When filling the parent column, leave a trailing gap so
             // the input doesn't crowd the next col-2 icon to its right.
             .padding(.trailing, fillsParent ? 24 : 0)
@@ -1485,9 +1485,9 @@ struct YamlElementView: View {
             }
         )
             .textFieldStyle(.roundedBorder)
-            // Same rationale as renderNumberInput: keep the typed text
-            // dark against the system white text-field background.
-            .foregroundColor(.black)
+            // Text follows the window color scheme (see renderNumberInput):
+            // legible on the light field under a light theme and the dark field
+            // under a dark theme.
     }
 
     // MARK: - Length Input
@@ -1577,9 +1577,9 @@ struct YamlElementView: View {
         ))
             .id(stableId)
             .textFieldStyle(.roundedBorder)
-            // Match number/text inputs — dark text on the system
-            // white field background.
-            .foregroundColor(.black)
+            // Text follows the window color scheme (see renderNumberInput):
+            // legible on the light field under a light theme and the dark field
+            // under a dark theme.
     }
 
     // MARK: - Color Bar
