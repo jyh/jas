@@ -461,6 +461,15 @@ public enum LayersPanel {
             return nil
         }
 
+        // make_compound_shape — replace the >=2 selected siblings with a single
+        // live compound shape (UNION). A self-bracketing edit: makeCompoundShape
+        // joins the txn the `snapshot` effect already opened and the runEffects
+        // owner commits it. Mirrors the other apps' compound-shape verb.
+        let makeCompoundShapeHandler: PlatformEffect = { _, _, _ in
+            controller.makeCompoundShape()
+            return nil
+        }
+
         // doc.copy_selection_to_clipboard — non-document side effect (no op /
         // no journal): write the current selection's SVG to the system
         // pasteboard, mirroring the menu Cut copy-half. Paired with
@@ -735,6 +744,7 @@ public enum LayersPanel {
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "doc.delete_selection": docDeleteSelectionHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
+            "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,
             "list_push": listPushHandler,
             "pop": popHandler,

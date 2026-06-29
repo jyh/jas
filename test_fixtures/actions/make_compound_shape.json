@@ -1,0 +1,11 @@
+[
+  {
+    "name": "make_compound_shape_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "make_compound_shape", "params": {}}
+    ],
+    "expected_json": "make_compound_shape_two_rects_expected.json"
+  }
+]

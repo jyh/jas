@@ -223,14 +223,20 @@ dblclick options-destination not yet captured ·
 `test_fixtures/algorithms/panel_widget_tree.json` (16 panels, 610 records), byte-gated in
 all 4 native apps + Python reference (sibling of `panel_layout`; §4); Flask render-all-panels
 CI gate + compile-time `type:` validator + per-app dispatch-coverage assert still open ·
-5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 3 actions / 4 apps**
-(`toggle_all_layers_visibility`, `toggle_all_layers_outline`, `new_layer` — Rust authors the
-goldens via `generate_action_expected`); the extension surfaced two real cross-app issues:
-`toggle_all_layers_lock` DIVERGES (Rust mutates child `locked`, Python does not — a found
-bug, held out of the corpus) and `new_artboard` mints a NON-DETERMINISTIC id (not byte-
-gateable without id seeding); selection-dependent verbs (align / boolean / brushes) need
-canvas-selection seeding + Python effect handlers — a separate increment, since `select_all`
-is a native intercept (`log:` only) not reachable through the shared YAML dispatch.
+5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 5 actions / 4 apps**
+(`toggle_all_layers_visibility` / `_lock` / `_outline`, `new_layer`, and the first
+selection-dependent verb `make_compound_shape` — Rust authors the goldens via
+`generate_action_expected`). A **selection-seeding harness** now lets a fixture declare
+`"selection": [[path],…]`, seeded into `document.selection` via each app's non-undoable
+writer before dispatch (since `select_all` is a native `log:` intercept, unreachable through
+the shared YAML dispatch). The `toggle_all_layers_lock` DIVERGENCE was FIXED — Rust dropped
+its `cascade_lock` (LYR-247) so lock is a per-element flag with effective-lock-by-inheritance
+at the read sites, matching the other 3 apps — and is now gated. STILL OPEN: `new_artboard`
+(non-deterministic id); **align verbs** need a 5-app apply-mechanism reconciliation (Rust/Swift
+BAKE the translate into coords, OCaml/Python prepend a `transform` — bake is the correct
+convergence per the project's bake-translation design law, but OCaml align is also UNWIRED);
+**boolean verbs** need a shared vertex-normalization gate (4 independent sweep-line ports are
+only property-gated, not exact-vertex, so byte-parity is not yet achievable).
 **key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
 in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
 `false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
@@ -267,13 +273,17 @@ sign-off ratified the model + byte-gated rects, not a separate pixel-diff artifa
    render-all-panels CI gate** (render every panel/dialog from `workspace.json`, fail on
    error/missing-kind) and the **compile-time `type:` validator**.
 5. **Input-injection gesture + action corpora** (§5 recs 1–2) — **gesture corpus shipped**
-   (10 gestures, gated in all 4 native apps); **action corpus now 3 actions** (layers:
-   visibility / outline / new_layer), up from 1, gated in all 4 apps. Extending it surfaced
-   that (a) `toggle_all_layers_lock` diverges cross-app (Rust mutates child `locked`; a found
-   bug), (b) `new_artboard` mints a non-deterministic id, and (c) canvas-selection-dependent
-   verbs (align / boolean / brushes) can't seed selection through the shared YAML dispatch
-   (`select_all` is a native `log:` intercept) — so the next increment is per-app selection
-   seeding + Python align/boolean handlers. The `ctrl=meta=False` pointer-payload note was
+   (10 gestures, gated in all 4 native apps); **action corpus now 5 actions** (layers:
+   visibility / lock / outline / new_layer; boolean: `make_compound_shape`), up from 1, gated
+   in all 4 apps, with a **selection-seeding harness** (`"selection": [[path],…]` in a fixture,
+   seeded via each app's non-undoable writer). Extending it (a) FIXED the
+   `toggle_all_layers_lock` divergence (Rust dropped `cascade_lock`; lock is per-element +
+   effective-by-inheritance at the read sites) and gated it, and surfaced still-open items:
+   (b) `new_artboard` mints a non-deterministic id; (c) **align** needs a 5-app
+   apply-mechanism reconciliation (Rust/Swift bake the translate, OCaml/Python prepend a
+   transform — bake is correct per the bake-translation design law; OCaml align is also
+   unwired); (d) **boolean** needs a shared vertex-normalization gate (the sweep-line ports
+   are only property-gated, not exact-vertex). The `ctrl=meta=False` pointer-payload note was
    **mis-scoped**:
    **all four** native apps hardcode `ctrl`/`meta` to `false` on pointer events
    (`yaml_tool.py:304`, `yaml_tool.rs:245`, `YamlTool.swift:275`, `yaml_tool.ml:1344`), and

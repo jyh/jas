@@ -795,6 +795,19 @@ class CrossLanguageTest(absltest.TestCase):
         # run_action_model, which returns the whole AppState.
         setup_svg = _read_fixture(f"svg/{tc['setup_svg']}")
         model = Model(document=svg_to_document(setup_svg))
+        # Seed a canvas selection if the case declares one (a list of element
+        # paths, e.g. [[0,0],[0,1]]). Selection-dependent verbs (compound shape,
+        # align, boolean) consume model.document.selection, which `select_all`
+        # cannot set through the shared YAML dispatch (it is a native `log:`
+        # intercept). Use the non-undoable writer so the seed is not part of the
+        # action's undo step. Mirrors run_action_model in the other three apps.
+        if tc.get("selection"):
+            import dataclasses
+            from document.document import ElementSelection
+            sel = frozenset(
+                ElementSelection.all(tuple(p)) for p in tc["selection"])
+            model.set_document_unbracketed(
+                dataclasses.replace(model.document, selection=sel))
         for step in tc["actions"]:
             action = step["action"]
             params = step.get("params", {}) or {}

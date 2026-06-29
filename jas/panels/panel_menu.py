@@ -653,6 +653,17 @@ def _dispatch_yaml_layers_action(action_name: str, model,
             on_close_dialog()
         return None
 
+    def make_compound_shape_handler(value, _call_ctx, _store):
+        # BOOLEAN.md: build a compound shape from the current selection. The
+        # `snapshot` effect already opened the undo txn; apply_make_compound_shape
+        # joins it via the self-bracketing model.edit_document and replaces the
+        # selected siblings in place. Mirrors the Rust make_compound_shape native
+        # intercept on the action-corpus path. Needs >=2 sibling-selected
+        # elements (a no-op otherwise), so callers seed the selection first.
+        if value is True:
+            from jas.panels.boolean_apply import apply_make_compound_shape
+            apply_make_compound_shape(model)
+
     # ── Artboard doc effects (ARTBOARDS.md) ────────────────────────
     from jas.panels.artboard_effects import build_artboard_handlers
 
@@ -667,6 +678,7 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "doc.unpack_group_at": doc_unpack_group_at_handler,
         "doc.wrap_in_layer": doc_wrap_in_layer_handler,
         "doc.wrap_in_group": doc_wrap_in_group_handler,
+        "make_compound_shape": make_compound_shape_handler,
         "list_push": list_push_handler,
         "pop": pop_handler,
         **build_artboard_handlers(model),
