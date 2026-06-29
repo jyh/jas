@@ -223,24 +223,32 @@ dblclick options-destination not yet captured ·
 `test_fixtures/algorithms/panel_widget_tree.json` (16 panels, 610 records), byte-gated in
 all 4 native apps + Python reference (sibling of `panel_layout`; §4); Flask render-all-panels
 CI gate + compile-time `type:` validator + per-app dispatch-coverage assert still open ·
-5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 13 actions / 4 apps**
-(layers: visibility / lock / outline / new_layer; boolean: `make_compound_shape` +
-`boolean_union` / `subtract_front` / `intersection` / `exclude`; align: `align_left` / `right`
-/ `horizontal_center` — Rust authors the goldens via `generate_action_expected`). A
-**selection-seeding harness** lets a fixture declare `"selection": [[path],…]`, seeded into
-`document.selection` via each app's non-undoable writer before dispatch (since `select_all` is
-a native `log:` intercept, unreachable through the shared YAML dispatch). Three divergences
-the corpus surfaced were all FIXED + gated: (i) `toggle_all_layers_lock` — Rust dropped its
-`cascade_lock` (LYR-247); lock is now a per-element flag with effective-lock-by-inheritance at
-the read sites, matching the other 3 apps; (ii) **align apply** — converged OCaml/Python from
-prepend-transform onto BAKE-into-coords (matching Rust/Swift + the bake-translation design
-law), and WIRED OCaml's previously-unwired geometric align; (iii) boolean snap-rounding —
-Python switched from banker's to half-away-from-zero to match the other 3. Boolean verbs gate
-byte-identically because the 4 sweep-line ports are bit-for-bit identical (proven at the
-IEEE-754 level); `document_to_test_json` pins the result polygon vertices, so the action gate
-is exact-vertex. STILL OPEN: `new_artboard` (non-deterministic id); align CompoundShape /
-Generated kinds (Swift transform-bakes CompoundShape, Python lacks a Generated bake arm) +
-vertical/distribute verbs (no-op on the current setup SVG).
+5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now ~25 actions / 4 apps
+across 5 panels** — layers (visibility / lock / outline / new_layer), boolean
+(make_compound_shape + union / subtract_front / intersection / exclude), align (all 6 align +
+all 8 distribute verbs over two_rects / three_rects), artboards (new_artboard), symbols
+(new_symbol). Rust authors the goldens via `generate_action_expected`. Two reusable harness
+seams underpin it: (a) **selection-seeding** — a fixture declares `"selection": [[path],…]`,
+seeded into `document.selection` via each app's non-undoable writer before dispatch (since
+`select_all` is a native `log:` intercept, unreachable through the shared YAML dispatch); (b)
+**deterministic id-seeding** — a per-char COUNTER installed into each app's id-mint override so
+creation verbs mint a fixed id ("01234567", then "89abcdef", …) byte-identical cross-app, with
+production minting unchanged. The corpus surfaced + FIXED five real cross-app divergences:
+(i) `toggle_all_layers_lock` — Rust dropped its `cascade_lock` (LYR-247); lock is now a
+per-element flag with effective-lock-by-inheritance at the read sites; (ii) **align apply** —
+converged OCaml/Python from prepend-transform onto BAKE-into-coords (matching Rust/Swift + the
+bake-translation design law) and WIRED OCaml's previously-unwired geometric align; (iii)
+boolean snap-rounding — Python banker's → half-away-from-zero; (iv) Swift `isRingSimple`
+reversed-range crash that had disabled the entire boolean_normalize gate for Swift; (v) OCaml
+`Active_document_view.build` exposed no artboard fields, so new_artboard fell back to the
+letter default instead of inheriting the current artboard size (a real OCaml production bug).
+Boolean is exact-vertex at BOTH the action level (`document_to_test_json` pins the polygon
+vertices) and the algorithm level (`boolean.json` / `boolean_normalize` upgraded
+property→exact, 4 ports bit-identical at IEEE-754). STILL OPEN: `place_instance` (needs
+`symbols_selected` app-state threading) + `place_concept_instance` (needs concept-pack state);
+align over CompoundShape / Generated kinds (Swift transform-bakes CompoundShape, Python lacks a
+Generated bake arm); and a separate pre-existing Swift `YamlToolArtboardTests.artboardParity`
+drag-coordinate divergence (fails on a clean tree; unrelated to this work).
 **key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
 in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
 `false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
