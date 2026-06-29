@@ -243,12 +243,16 @@ let run_boolean vectors =
       let inside = point_in_polygon_set res pt in
       `Assoc [("point", json_of_point pt); ("inside", json_of_bool inside)]
     ) sample_pts in
+    let rings = `List (List.map (fun ring ->
+      `List (Array.to_list (Array.map json_of_point ring))
+    ) res) in
     `Assoc [
       ("name", json_of_string name);
       ("result", `Assoc [
         ("area", json_of_float (polygon_set_area res));
         ("ring_count", json_of_int (List.length res));
-        ("sample_points", `List samples)
+        ("sample_points", `List samples);
+        ("rings", rings)
       ])
     ]
   ) vectors
@@ -258,12 +262,16 @@ let run_boolean_normalize vectors =
     let name = member "name" tc |> to_string in
     let input = parse_polygon_set (member "input" tc) in
     let res = Jas.Boolean_normalize.normalize input in
+    let rings = `List (List.map (fun ring ->
+      `List (Array.to_list (Array.map json_of_point ring))
+    ) res) in
     `Assoc [
       ("name", json_of_string name);
       ("result", `Assoc [
         ("area", json_of_float (polygon_set_area res));
         ("ring_count", json_of_int (List.length res));
-        ("all_rings_simple", json_of_bool (all_rings_simple res))
+        ("all_rings_simple", json_of_bool (all_rings_simple res));
+        ("rings", rings)
       ])
     ]
   ) vectors

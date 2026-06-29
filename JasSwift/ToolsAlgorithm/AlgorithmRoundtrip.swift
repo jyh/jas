@@ -157,10 +157,12 @@ func runBoolean(_ vectors: [[String: Any]]) -> [[String: Any]] {
             let inside = pointInPolygonSetHelper(res, pt)
             return ["point": [pt.0, pt.1], "inside": inside] as [String: Any]
         }
+        let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
             "area": polygonSetAreaHelper(res),
             "ring_count": res.count,
-            "sample_points": samples
+            "sample_points": samples,
+            "rings": rings
         ] as [String: Any]] as [String: Any]
     }
 }
@@ -172,10 +174,12 @@ func runBooleanNormalize(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let name = tc["name"] as! String
         let input = parsePolygonSet(tc["input"]!)
         let res = normalize(input)
+        let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
             "area": polygonSetAreaHelper(res),
             "ring_count": res.count,
-            "all_rings_simple": allRingsSimple(res)
+            "all_rings_simple": allRingsSimple(res),
+            "rings": rings
         ] as [String: Any]] as [String: Any]
     }
 }
@@ -492,6 +496,7 @@ func isRingSimple(_ ring: BoolRing) -> Bool {
     for i in 0..<n {
         let (ax1, ay1) = ring[i]
         let (ax2, ay2) = ring[(i + 1) % n]
+        if i + 2 >= n { continue }
         for j in (i + 2)..<n {
             if i == 0 && j == n - 1 { continue }
             let (bx1, by1) = ring[j]

@@ -175,10 +175,12 @@ def run_boolean(vectors):
             pt = (sp["point"][0], sp["point"][1])
             inside = point_in_polygon_set(res, pt)
             samples.append({"point": [pt[0], pt[1]], "inside": inside})
+        rings = [[[x, y] for (x, y) in ring] for ring in res]
         results.append({"name": name, "result": {
             "area": polygon_set_area(res),
             "ring_count": len(res),
             "sample_points": samples,
+            "rings": rings,
         }})
     return results
 
@@ -193,10 +195,12 @@ def run_boolean_normalize(vectors):
         name = tc["name"]
         inp = parse_polygon_set(tc["input"])
         res = normalize(inp)
+        rings = [[[x, y] for (x, y) in ring] for ring in res]
         results.append({"name": name, "result": {
             "area": polygon_set_area(res),
             "ring_count": len(res),
             "all_rings_simple": all_rings_simple(res),
+            "rings": rings,
         }})
     return results
 

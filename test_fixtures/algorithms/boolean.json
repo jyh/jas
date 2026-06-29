@@ -1,6 +1,6 @@
 {
   "algorithm": "boolean",
-  "comparison": "property",
+  "comparison": "exact",
   "tolerance": 0.01,
   "vectors": [
     {

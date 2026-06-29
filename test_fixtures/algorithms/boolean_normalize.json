@@ -1,6 +1,6 @@
 {
   "algorithm": "boolean_normalize",
-  "comparison": "property",
+  "comparison": "exact",
   "tolerance": 0.01,
   "vectors": [
     {
@@ -50,8 +50,6 @@
     },
     {
       "name": "consecutive_duplicates_deduped",
-      "_comment": "SKIP: crashes Swift normalize() — Range requires lowerBound <= upperBound. Known bug, fix separately.",
-      "_skip": true,
       "input": [[[0,0],[0,0],[10,0],[10,10],[10,10],[0,10]]],
       "expected": {
         "area": 100.0,

@@ -223,20 +223,24 @@ dblclick options-destination not yet captured ·
 `test_fixtures/algorithms/panel_widget_tree.json` (16 panels, 610 records), byte-gated in
 all 4 native apps + Python reference (sibling of `panel_layout`; §4); Flask render-all-panels
 CI gate + compile-time `type:` validator + per-app dispatch-coverage assert still open ·
-5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 5 actions / 4 apps**
-(`toggle_all_layers_visibility` / `_lock` / `_outline`, `new_layer`, and the first
-selection-dependent verb `make_compound_shape` — Rust authors the goldens via
-`generate_action_expected`). A **selection-seeding harness** now lets a fixture declare
-`"selection": [[path],…]`, seeded into `document.selection` via each app's non-undoable
-writer before dispatch (since `select_all` is a native `log:` intercept, unreachable through
-the shared YAML dispatch). The `toggle_all_layers_lock` DIVERGENCE was FIXED — Rust dropped
-its `cascade_lock` (LYR-247) so lock is a per-element flag with effective-lock-by-inheritance
-at the read sites, matching the other 3 apps — and is now gated. STILL OPEN: `new_artboard`
-(non-deterministic id); **align verbs** need a 5-app apply-mechanism reconciliation (Rust/Swift
-BAKE the translate into coords, OCaml/Python prepend a `transform` — bake is the correct
-convergence per the project's bake-translation design law, but OCaml align is also UNWIRED);
-**boolean verbs** need a shared vertex-normalization gate (4 independent sweep-line ports are
-only property-gated, not exact-vertex, so byte-parity is not yet achievable).
+5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 13 actions / 4 apps**
+(layers: visibility / lock / outline / new_layer; boolean: `make_compound_shape` +
+`boolean_union` / `subtract_front` / `intersection` / `exclude`; align: `align_left` / `right`
+/ `horizontal_center` — Rust authors the goldens via `generate_action_expected`). A
+**selection-seeding harness** lets a fixture declare `"selection": [[path],…]`, seeded into
+`document.selection` via each app's non-undoable writer before dispatch (since `select_all` is
+a native `log:` intercept, unreachable through the shared YAML dispatch). Three divergences
+the corpus surfaced were all FIXED + gated: (i) `toggle_all_layers_lock` — Rust dropped its
+`cascade_lock` (LYR-247); lock is now a per-element flag with effective-lock-by-inheritance at
+the read sites, matching the other 3 apps; (ii) **align apply** — converged OCaml/Python from
+prepend-transform onto BAKE-into-coords (matching Rust/Swift + the bake-translation design
+law), and WIRED OCaml's previously-unwired geometric align; (iii) boolean snap-rounding —
+Python switched from banker's to half-away-from-zero to match the other 3. Boolean verbs gate
+byte-identically because the 4 sweep-line ports are bit-for-bit identical (proven at the
+IEEE-754 level); `document_to_test_json` pins the result polygon vertices, so the action gate
+is exact-vertex. STILL OPEN: `new_artboard` (non-deterministic id); align CompoundShape /
+Generated kinds (Swift transform-bakes CompoundShape, Python lacks a Generated bake arm) +
+vertical/distribute verbs (no-op on the current setup SVG).
 **key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
 in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
 `false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
