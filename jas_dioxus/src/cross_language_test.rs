@@ -1075,6 +1075,8 @@ mod tests {
     /// path (the "eye-demo" template §5 calls out).
     const ACTION_FIXTURES: &[&str] = &[
         "toggle_all_layers_visibility.json",
+        "toggle_all_layers_outline.json",
+        "new_layer.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed
@@ -4116,6 +4118,38 @@ mod tests {
 
             let actual = layout_panel(&panels[panel_id], avail_w, avail_h, ctx);
             assert_eq!(&actual, expected, "Panel layout '{}' mismatch", name);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Panel widget-TREE (structural snapshot) algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_widget_tree_vectors() {
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let json_str = read_fixture("algorithms/panel_widget_tree.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panels = &bundle["panels"];
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "widget_tree", "Unknown function: {}", func);
+            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            // ctx is a JSON object data scope (foreach sources only); it passes
+            // straight to the expr evaluator. Default to empty (literals-only).
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let expected = &tc["expected"];
+
+            let actual = widget_tree(&panels[panel_id], ctx);
+            assert_eq!(&actual, expected, "Panel widget tree '{}' mismatch", name);
         }
     }
 

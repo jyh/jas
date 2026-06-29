@@ -1,0 +1,10 @@
+[
+  {
+    "name": "new_layer",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {"action": "new_layer", "params": {}}
+    ],
+    "expected_json": "new_layer_expected.json"
+  }
+]

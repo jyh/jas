@@ -21,25 +21,10 @@ valid *data type* there and an invalid *widget kind* in content.
 import json
 from pathlib import Path
 
-# Canonical widget-kind vocabulary: the union of kinds rendered by at least one
-# app. Mirrors the Python `_RENDERERS` dispatch (jas/panels/yaml_renderer.py)
-# plus `color_bar`, which Python registers dynamically at startup
-# (color_bar_widget.register_color_bar) and Flask/Rust render generically.
-# Keep in sync until a schema-declared vocabulary supersedes it (Rec 1).
-CANONICAL_WIDGET_KINDS = frozenset({
-    "container", "row", "col", "grid",
-    "text", "button", "icon", "icon_button", "icon_select",
-    "slider", "number_input", "text_input", "length_input",
-    "toggle", "checkbox", "select", "combo_box", "dropdown",
-    "color_swatch", "color_gradient", "color_hue_bar", "color_bar",
-    "radio_group", "radio", "gradient_tile", "gradient_slider",
-    "separator", "spacer", "disclosure", "panel",
-    "fill_stroke_widget", "tree_view", "element_preview", "tabs",
-    # Dialog-only kinds (rendered by at least one app; reference_point_widget
-    # + icon_button_group are currently Rust-only, a tracked cross-app gap).
-    "icon_button_group", "reference_point_widget",
-    "placeholder",
-})
+# Canonical widget-kind vocabulary: single-sourced in the shared interpreter lib
+# (workspace_interpreter.widget_tree), which the widget-tree snapshot pass also
+# uses for its `kind` field, so the vocabulary and the snapshot can never drift.
+from workspace_interpreter.widget_tree import CANONICAL_WIDGET_KINDS
 
 _WORKSPACE_JSON = Path(__file__).resolve().parents[2] / "workspace" / "workspace.json"
 

@@ -20,6 +20,7 @@ pub mod scope;
 pub mod length;
 pub mod workspace;
 pub mod panel_layout;
+pub mod widget_tree;
 
 #[cfg(feature = "web")]
 pub mod renderer;
