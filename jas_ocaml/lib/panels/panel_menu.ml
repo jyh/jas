@@ -1091,6 +1091,20 @@ let dispatch_yaml_action
     ?(params : (string * Yojson.Safe.t) list = [])
     ?(on_close_dialog : (unit -> unit) option = None)
     (action_name : string) (m : Model.model) : unit =
+  (* Symbols panel native intercept (SYMBOLS.md section 7 Make Symbol). The
+     [new_symbol] action carries only a [log] stub in the bundle because its
+     real work is value-in-op (mint a master id then an instance id, promote
+     the single whole-selected element into the off-canvas master store, leave
+     an instance in its place) and lives in each app native arm, never in the
+     shared core. Mirror the Rust [dispatch_action] intercept: run the native
+     [Symbols_panel.new_symbol] arm here and skip the log stub, so the generic
+     action dispatcher — and the action corpus that drives it — reaches the
+     real promotion (the ids are minted master-first then ref via the seeded
+     [Element.generate_id] default path). The fresh store only records the
+     resulting panel selection, which the document golden does not observe. *)
+  if action_name = "new_symbol" then
+    Symbols_panel.new_symbol (State_store.create ()) m
+  else
   match Workspace_loader.load () with
   | None -> ()
   | Some ws ->

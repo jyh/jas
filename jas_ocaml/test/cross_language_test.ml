@@ -431,6 +431,7 @@ let action_fixtures = [
   "align.json";
   "boolean.json";
   "new_artboard.json";
+  "new_symbol.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a

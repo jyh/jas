@@ -777,6 +777,7 @@ class CrossLanguageTest(absltest.TestCase):
         "align.json",
         "boolean.json",
         "new_artboard.json",
+        "new_symbol.json",
     ]
 
     @staticmethod

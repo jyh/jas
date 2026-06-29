@@ -83,6 +83,23 @@ public enum LayersPanel {
                                            artboardsPanelSelection: [String] = [],
                                            params: [String: Any] = [:],
                                            onCloseDialog: (() -> Void)? = nil) {
+        // Native intercept for the Symbols-panel mutating verbs (SYMBOLS.md §7).
+        // Their YAML actions are `log` stubs — the real work lives in each app's
+        // native arm so every app mints identical value-in-op ids — so route
+        // them to ``SymbolsPanel/dispatchSymbolAction`` here, BEFORE the generic
+        // effect runner, exactly as the panel-body footer dispatcher
+        // (``YamlPanelBodyView/dispatchYamlAction``) and Rust's
+        // `renderer::dispatch_action` symbol arms do. dispatchSymbolAction mints
+        // master-then-ref via the no-arg `generateElementId()` (the seeded test
+        // minter) and self-brackets one undo step via the Controller mutator.
+        switch actionName {
+        case "new_symbol", "place_instance", "delete_symbol_action":
+            SymbolsPanel.dispatchSymbolAction(actionName, model: model)
+            return
+        default:
+            break
+        }
+
         guard let ws = WorkspaceData.load(),
               let actions = ws.data["actions"] as? [String: Any],
               let actionDef = actions[actionName] as? [String: Any],
