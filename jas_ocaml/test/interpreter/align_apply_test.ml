@@ -21,11 +21,18 @@ let transform_at model path =
   | Some t -> t
   | None -> Element.identity_transform
 
+(* Raw x coordinate of the rect at [path] — Align now BAKES the offset
+   into coordinates rather than into the transform matrix. *)
+let rect_x model path =
+  match Document.get_element model#document path with
+  | Element.Rect r -> r.x
+  | _ -> nan
+
 let eps = 1e-6
 let close a b = abs_float (a -. b) < eps
 
 let tests = [
-  Alcotest.test_case "apply_align_left_translates_non_extremal_rects" `Quick (fun () ->
+  Alcotest.test_case "apply_align_left_bakes_non_extremal_rects" `Quick (fun () ->
     let rects = [
       make_rect_elem 10.0 0.0 10.0 10.0;
       make_rect_elem 30.0 0.0 10.0 10.0;
@@ -35,15 +42,14 @@ let tests = [
     let store = State_store.create () in
     let ctrl = new Controller.controller ~model () in
     Effects.apply_align_operation store ctrl "align_left";
-    (* First rect at x=10 — no translation. *)
-    let t0 = transform_at model [0; 0] in
-    assert (t0 = Element.identity_transform);
-    (* Second rect translated by -20. *)
-    let t1 = transform_at model [0; 1] in
-    assert (close t1.e (-20.0) && close t1.f 0.0);
-    (* Third rect translated by -50. *)
-    let t2 = transform_at model [0; 2] in
-    assert (close t2.e (-50.0) && close t2.f 0.0));
+    (* Offsets are BAKED into raw x; every rect keeps an identity transform.
+       Reference left edge is the selection min x = 10. *)
+    assert (close (rect_x model [0; 0]) 10.0);
+    assert (transform_at model [0; 0] = Element.identity_transform);
+    assert (close (rect_x model [0; 1]) 10.0);
+    assert (transform_at model [0; 1] = Element.identity_transform);
+    assert (close (rect_x model [0; 2]) 10.0);
+    assert (transform_at model [0; 2] = Element.identity_transform));
 
   Alcotest.test_case "apply_align_operation_noop_when_fewer_than_two" `Quick (fun () ->
     let rects = [make_rect_elem 0.0 0.0 10.0 10.0;
@@ -86,14 +92,14 @@ let tests = [
       (`Assoc [("__path__", `List [`Int 0; `Int 1])]);
     let ctrl = new Controller.controller ~model () in
     Effects.apply_align_operation store ctrl "align_left";
-    (* Key never moves. *)
-    let t1 = transform_at model [0; 1] in
-    assert (t1 = Element.identity_transform);
-    (* Others align to key left edge (x=30). *)
-    let t0 = transform_at model [0; 0] in
-    assert (close t0.e 20.0);
-    let t2 = transform_at model [0; 2] in
-    assert (close t2.e (-30.0)));
+    (* Key never moves; its raw x stays 30, transform identity. *)
+    assert (close (rect_x model [0; 1]) 30.0);
+    assert (transform_at model [0; 1] = Element.identity_transform);
+    (* Others bake to the key left edge (x=30) with identity transforms. *)
+    assert (close (rect_x model [0; 0]) 30.0);
+    assert (transform_at model [0; 0] = Element.identity_transform);
+    assert (close (rect_x model [0; 2]) 30.0);
+    assert (transform_at model [0; 2] = Element.identity_transform));
 
   (* Canvas click intercept *)
 

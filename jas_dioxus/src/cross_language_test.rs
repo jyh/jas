@@ -1079,6 +1079,7 @@ mod tests {
         "toggle_all_layers_outline.json",
         "new_layer.json",
         "make_compound_shape.json",
+        "align.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed

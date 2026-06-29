@@ -749,6 +749,20 @@ public enum LayersPanel {
             "list_push": listPushHandler,
             "pop": popHandler,
         ]
+        // Align panel operations (ALIGN.md). Each fires a same-named platform
+        // effect (actions.yaml: effects [snapshot, {align_left: true}]); the
+        // handler bakes the translations into raw coords via applyAlignOperation
+        // (elem.translated), mirroring Rust and the live alignPlatformEffects.
+        for op in ["align_left", "align_horizontal_center", "align_right",
+                   "align_top", "align_vertical_center", "align_bottom",
+                   "distribute_left", "distribute_horizontal_center", "distribute_right",
+                   "distribute_top", "distribute_vertical_center", "distribute_bottom",
+                   "distribute_vertical_spacing", "distribute_horizontal_spacing"] {
+            platformEffects[op] = { _, _, store in
+                applyAlignOperation(model: model, store: store, op: op)
+                return nil
+            }
+        }
         if onCloseDialog != nil {
             platformEffects["close_dialog"] = closeDialogHandler
         }

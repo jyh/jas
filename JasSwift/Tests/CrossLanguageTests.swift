@@ -2550,6 +2550,7 @@ private let actionFixtures = [
     "toggle_all_layers_outline.json",
     "new_layer.json",
     "make_compound_shape.json",
+    "align.json",
 ]
 
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust

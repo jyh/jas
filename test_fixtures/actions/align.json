@@ -1,0 +1,29 @@
+[
+  {
+    "name": "align_left_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "align_left", "params": {}}
+    ],
+    "expected_json": "align_left_two_rects_expected.json"
+  },
+  {
+    "name": "align_right_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "align_right", "params": {}}
+    ],
+    "expected_json": "align_right_two_rects_expected.json"
+  },
+  {
+    "name": "align_horizontal_center_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "align_horizontal_center", "params": {}}
+    ],
+    "expected_json": "align_horizontal_center_two_rects_expected.json"
+  }
+]
