@@ -763,6 +763,21 @@ public enum LayersPanel {
                 return nil
             }
         }
+        // Boolean panel operations (BOOLEAN.md). Each destructive verb fires a
+        // same-named platform effect (actions.yaml: effects [snapshot,
+        // {boolean_union: true}, {set: {last_boolean_op: "union"}}]); the handler
+        // routes to applyDestructiveBoolean, a self-bracketing edit that joins
+        // the txn the `snapshot` effect opened (mirrors makeCompoundShape and the
+        // align ops). The trailing `set: last_boolean_op` is handled by runEffects.
+        for (key, op) in [("boolean_union", "union"),
+                          ("boolean_subtract_front", "subtract_front"),
+                          ("boolean_intersection", "intersection"),
+                          ("boolean_exclude", "exclude")] {
+            platformEffects[key] = { _, _, _ in
+                controller.applyDestructiveBoolean(op)
+                return nil
+            }
+        }
         if onCloseDialog != nil {
             platformEffects["close_dialog"] = closeDialogHandler
         }

@@ -697,6 +697,25 @@ def _dispatch_yaml_layers_action(action_name: str, model,
                 "distribute_top","distribute_vertical_center","distribute_bottom",
                 "distribute_vertical_spacing","distribute_horizontal_spacing"):
         platform_effects[_op] = _make_align_handler(_op)
+    # ── Boolean panel operations (BOOLEAN.md) ──
+    # Each destructive boolean verb fires a same-named platform effect
+    # (actions.yaml: effects [snapshot, {boolean_union: true}, {set:...}]).
+    # apply_destructive_boolean runs the sweep-line op on the selection and
+    # replaces the operands in place, joining the snapshot-opened txn via the
+    # self-bracketing edit. Mirrors the Rust apply_boolean_operation native
+    # intercept; the four sweep-line ports are bit-identical, so the result
+    # document is byte-identical cross-app.
+    from jas.panels.boolean_apply import apply_destructive_boolean
+    def _make_boolean_handler(op):
+        def handler(value, _call_ctx, _store):
+            if value is True:
+                apply_destructive_boolean(model, op)
+        return handler
+    for _bkey, _bop in (("boolean_union", "union"),
+                        ("boolean_subtract_front", "subtract_front"),
+                        ("boolean_intersection", "intersection"),
+                        ("boolean_exclude", "exclude")):
+        platform_effects[_bkey] = _make_boolean_handler(_bop)
     if on_close_dialog is not None:
         platform_effects["close_dialog"] = close_dialog_handler
 
