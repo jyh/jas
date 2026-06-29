@@ -245,6 +245,15 @@ def _snap_grid(a: PolygonSet, b: PolygonSet) -> float | None:
     return math.ldexp(1.0, exponent)
 
 
+def _round_half_away_from_zero(v: float) -> float:
+    """Round to the nearest integer, ties AWAY from zero. Matches Rust
+    ``f64::round`` / Swift ``Double.rounded()`` / OCaml ``Float.round`` — NOT
+    Python's built-in ``round`` (banker's, ties-to-even), which would diverge
+    from the other three boolean ports on an exact odd-half-integer
+    ``x / grid`` and break the cross-app exact-vertex byte gate."""
+    return math.floor(v + 0.5) if v >= 0.0 else math.ceil(v - 0.5)
+
+
 def _snap_round(ps: PolygonSet, grid: float) -> PolygonSet:
     """Snap each vertex to the nearest power-of-2 grid point, dedup, drop
     rings of fewer than 3 distinct vertices."""
@@ -252,7 +261,8 @@ def _snap_round(ps: PolygonSet, grid: float) -> PolygonSet:
     for ring in ps:
         new_ring: Ring = []
         for x, y in ring:
-            p: Point = (round(x / grid) * grid, round(y / grid) * grid)
+            p: Point = (_round_half_away_from_zero(x / grid) * grid,
+                        _round_half_away_from_zero(y / grid) * grid)
             if not new_ring or new_ring[-1] != p:
                 new_ring.append(p)
         # Drop wrap-around duplicate

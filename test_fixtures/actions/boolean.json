@@ -1,0 +1,38 @@
+[
+  {
+    "name": "boolean_union_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_union", "params": {}}
+    ],
+    "expected_json": "boolean_union_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_subtract_front_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_subtract_front", "params": {}}
+    ],
+    "expected_json": "boolean_subtract_front_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_intersection_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_intersection", "params": {}}
+    ],
+    "expected_json": "boolean_intersection_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_exclude_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_exclude", "params": {}}
+    ],
+    "expected_json": "boolean_exclude_overlapping_rects_expected.json"
+  }
+]

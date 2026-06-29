@@ -775,6 +775,7 @@ class CrossLanguageTest(absltest.TestCase):
         "new_layer.json",
         "make_compound_shape.json",
         "align.json",
+        "boolean.json",
     ]
 
     @staticmethod
