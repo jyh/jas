@@ -2554,6 +2554,7 @@ private let actionFixtures = [
     "boolean.json",
     "new_artboard.json",
     "new_symbol.json",
+    "place_instance.json",
 ]
 
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust

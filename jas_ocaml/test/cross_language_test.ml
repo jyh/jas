@@ -432,6 +432,7 @@ let action_fixtures = [
   "boolean.json";
   "new_artboard.json";
   "new_symbol.json";
+  "place_instance.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -483,6 +484,17 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
   let counter () = let v = !ctr in incr ctr; v in
   Jas.Artboard.set_test_id_rng (Some counter);
   Jas.Element.set_test_id_rng (Some counter);
+  (* ONE persistent State_store threaded across every dispatch in this case,
+     mirroring the persistent [AppState.symbols_selected] the Rust app holds. The
+     Symbols [new_symbol] verb writes the new master into this store and a
+     following [place_instance] reads it back to know its target; a fresh store
+     per dispatch (the production default) would lose that selection between the
+     two action steps. The Symbols panel scope is initialized up front so the
+     [set_panel] write inside [new_symbol] lands — production mounts the panel
+     (which calls [init_panel]); [set_panel] is a silent no-op on an
+     uninitialized scope. *)
+  let store = Jas.State_store.create () in
+  Jas.State_store.init_panel store Jas.Symbols_panel.content_id [];
   Fun.protect
     ~finally:(fun () ->
       Jas.Artboard.set_test_id_rng None;
@@ -496,7 +508,7 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
           | `Assoc pairs -> pairs
           | _ -> []
         in
-        Jas.Panel_menu.dispatch_yaml_action ~params action model
+        Jas.Panel_menu.dispatch_yaml_action_with_store ~params action model store
       ) (tc |> member "actions" |> to_list));
   model
 

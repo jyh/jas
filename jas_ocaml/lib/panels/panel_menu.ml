@@ -1085,25 +1085,37 @@ let run_action_effects
     to operate on the active Model. Injects active_document rollups and
     (optionally) panel.layers_panel_selection from the caller — needed by
     Group B actions (delete_layer_selection, duplicate_layer_selection). *)
-let dispatch_yaml_action
+let dispatch_yaml_action_with_store
     ?(panel_selection : int list list = [])
     ?(on_selection_changed : (int list list -> unit) option = None)
     ?(params : (string * Yojson.Safe.t) list = [])
     ?(on_close_dialog : (unit -> unit) option = None)
-    (action_name : string) (m : Model.model) : unit =
-  (* Symbols panel native intercept (SYMBOLS.md section 7 Make Symbol). The
-     [new_symbol] action carries only a [log] stub in the bundle because its
+    (action_name : string) (m : Model.model) (store : State_store.t) : unit =
+  (* Symbols panel native intercepts (SYMBOLS.md section 7 Make Symbol / Place
+     Instance). Both verbs carry only a [log] stub in the bundle because their
      real work is value-in-op (mint a master id then an instance id, promote
      the single whole-selected element into the off-canvas master store, leave
-     an instance in its place) and lives in each app native arm, never in the
-     shared core. Mirror the Rust [dispatch_action] intercept: run the native
-     [Symbols_panel.new_symbol] arm here and skip the log stub, so the generic
-     action dispatcher — and the action corpus that drives it — reaches the
-     real promotion (the ids are minted master-first then ref via the seeded
-     [Element.generate_id] default path). The fresh store only records the
-     resulting panel selection, which the document golden does not observe. *)
+     an instance in its place; or append a fresh instance of the panel-selected
+     master) and lives in each app native arm, never in the shared core. Mirror
+     the Rust [dispatch_action] intercept: run the native [Symbols_panel] arm
+     here and skip the log stub, so the generic action dispatcher — and the
+     action corpus that drives it — reaches the real promotion (the ids are
+     minted master-first then ref via the seeded [Element.generate_id] default
+     path).
+
+     [store] carries the panel selection ([selected_symbol]) ACROSS the
+     dispatches in one action sequence — exactly the persistent
+     [AppState.symbols_selected] the Rust app holds. [new_symbol] writes the new
+     master into [store]; a following [place_instance] reads it back to know the
+     target. Production passes a fresh store per dispatch (see the
+     [dispatch_yaml_action] wrapper) because production holds the panel selection
+     elsewhere; the action corpus passes ONE store across the whole sequence so
+     [place_instance] sees the master [new_symbol] just selected. The document
+     golden observes the resulting references either way. *)
   if action_name = "new_symbol" then
-    Symbols_panel.new_symbol (State_store.create ()) m
+    Symbols_panel.new_symbol store m
+  else if action_name = "place_instance" then
+    Symbols_panel.place_instance store m
   else
   match Workspace_loader.load () with
   | None -> ()
@@ -1119,6 +1131,20 @@ let dispatch_yaml_action
            ~on_close_dialog ~action_name effects m
        | _ -> ())
     | _ -> ()
+
+(** Thin production wrapper over [dispatch_yaml_action_with_store]: each
+    production dispatch gets its OWN fresh State_store, so production behavior is
+    unchanged (production holds panel selection elsewhere). The action corpus
+    calls [dispatch_yaml_action_with_store] directly with one persistent store so
+    the Symbols [new_symbol] -> [place_instance] sequence shares its selection. *)
+let dispatch_yaml_action
+    ?(panel_selection : int list list = [])
+    ?(on_selection_changed : (int list list -> unit) option = None)
+    ?(params : (string * Yojson.Safe.t) list = [])
+    ?(on_close_dialog : (unit -> unit) option = None)
+    (action_name : string) (m : Model.model) : unit =
+  dispatch_yaml_action_with_store ~panel_selection ~on_selection_changed
+    ~params ~on_close_dialog action_name m (State_store.create ())
 
 (** TEST SEAM (OP_LOG.md section 9 production-route proofs). Run an arbitrary
     [effects] list through the SAME Layers-panel platform-effect registry +
