@@ -124,5 +124,14 @@
       {"action": "distribute_vertical_spacing", "params": {}}
     ],
     "expected_json": "distribute_vertical_spacing_three_rects_expected.json"
+  },
+  {
+    "name": "align_left_compound_and_rect",
+    "setup_svg": "compound_and_rect.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "align_left", "params": {}}
+    ],
+    "expected_json": "align_left_compound_and_rect_expected.json"
   }
 ]

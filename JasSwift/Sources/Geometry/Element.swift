@@ -1685,12 +1685,21 @@ public enum Element: Equatable {
             var updated = r
             updated.transform = (r.transform ?? .identity).translated(dx, dy)
             return .live(.reference(updated))
+        case .live(.compoundShape(let cs)):
+            // A compound shape bakes a translation by recursing into its
+            // operands (raw-coord bake), NOT by setting its transform — so the
+            // saved document keeps no residual transform and the re-evaluated
+            // boolean result moves with its operands. Mirrors Rust / Python /
+            // OCaml `translate_element`. (Align DOES reach this branch when a
+            // compound shape is in the selection — the earlier "unreachable"
+            // note was wrong and diverged from the other three apps.)
+            var updated = cs
+            updated.operands = cs.operands.map { $0.translated(dx: dx, dy: dy) }
+            return .live(.compoundShape(updated))
         case .live:
-            // Other live elements (compound shapes) don't support
-            // raw-coord translation; fall back to the transform-bake
-            // path. Align operates on resolved selections so this branch
-            // is unreachable in practice (compound shapes resolve to
-            // their boolean result before alignment math runs).
+            // Recorded / Generated live elements have no raw coordinates to
+            // bake into, so their move rides on the transform (like the
+            // Reference arm above). Mirrors Rust's Recorded / Generated arms.
             return self.withTransformTranslated(dx: dx, dy: dy)
         }
     }
