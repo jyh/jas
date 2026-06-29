@@ -2546,6 +2546,7 @@ private func beforeDragOracle() -> String {
 /// affecting action), driven through this app's production action dispatcher.
 private let actionFixtures = [
     "toggle_all_layers_visibility.json",
+    "toggle_all_layers_lock.json",
     "toggle_all_layers_outline.json",
     "new_layer.json",
 ]

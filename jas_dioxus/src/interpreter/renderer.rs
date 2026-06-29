@@ -4285,26 +4285,16 @@ fn apply_doc_set_field(
         "common.locked" => {
             if let Value::Bool(b) = value {
                 elem.common_mut().locked = *b;
-                // Cascade: a container's lock state propagates
-                // recursively to ALL descendants, not just direct
-                // children — locking a Layer that contains a Group
-                // should lock the Group AND the elements inside the
-                // Group. Mirror semantics (no save+restore bookkeeping;
-                // the row-level lock-icon click handler does that for
-                // the panel UI). LYR-247.
-                fn cascade_lock(
-                    el: &mut crate::geometry::element::Element,
-                    locked: bool,
-                ) {
-                    if let Some(children) = el.children_mut() {
-                        for c in children.iter_mut() {
-                            let inner = std::rc::Rc::make_mut(c);
-                            inner.common_mut().locked = locked;
-                            cascade_lock(inner, locked);
-                        }
-                    }
-                }
-                cascade_lock(elem, *b);
+                // Lock is a per-element flag set ONLY on the named element.
+                // A locked container makes its contents non-interactable by
+                // INHERITANCE at read time — hit_test / hit_test_deep /
+                // select_flat skip a locked layer's whole subtree — never by
+                // materializing the flag onto descendants. This matches the
+                // common.visibility arm above and the Swift/OCaml/Python
+                // doc.set handlers, and keeps the saved document / SVG
+                // round-trip clean. (Was a recursive cascade, LYR-247;
+                // removed for cross-app parity after the action corpus
+                // surfaced the divergence.)
                 true
             } else { false }
         }
