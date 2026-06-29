@@ -780,6 +780,12 @@ val with_opacity : float -> element -> element
 val with_blend_mode : blend_mode -> element -> element
 val translate_transform : float -> float -> transform option -> transform option
 val with_transform_translated : dx:float -> dy:float -> element -> element
+
+(** Translate a whole element by dx dy, baking the offset into raw coords
+    (recursing Group/Layer/CompoundShape; reference/recorded/generated ride
+    on common transform). Mirrors Rust/Python translate_element. *)
+val translate_element : element -> float -> float -> element
+
 val with_transform_premultiplied : transform -> element -> element
 
 (** {2 Fill and stroke} *)

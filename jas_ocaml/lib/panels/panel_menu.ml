@@ -786,6 +786,18 @@ let run_action_effects
            Boolean_apply.apply_expand_compound_shape m;
            `Null
          in
+         (* ── Align / Distribute handlers (ALIGN.md) ──────────────
+            Each align/distribute action fires a platform effect of the
+            same name; this factory routes that verb to the shared
+            geometry engine [Effects.apply_align_operation], which reads
+            align state from the store, runs the algorithm, and bakes the
+            resulting per-element offset into raw coordinates via
+            [Element.translate_element]. Mirrors the Python / Swift wiring. *)
+         let make_align_op_h op : Effects.platform_effect = fun _ _ store ->
+           let ctrl = new Controller.controller ~model:m () in
+           Effects.apply_align_operation store ctrl op;
+           `Null
+         in
          (* ── Artboard handlers (ARTBOARDS.md) ────────────────────
             Mirror jas_dioxus / JasSwift artboard doc.* effects:
             create, delete-by-id, duplicate, set-field, set-options-
@@ -1028,6 +1040,20 @@ let run_action_effects
            ("make_compound_shape", make_cs_h);
            ("release_compound_shape", release_cs_h);
            ("expand_compound_shape", expand_cs_h);
+           ("align_left", make_align_op_h "align_left");
+           ("align_horizontal_center", make_align_op_h "align_horizontal_center");
+           ("align_right", make_align_op_h "align_right");
+           ("align_top", make_align_op_h "align_top");
+           ("align_vertical_center", make_align_op_h "align_vertical_center");
+           ("align_bottom", make_align_op_h "align_bottom");
+           ("distribute_left", make_align_op_h "distribute_left");
+           ("distribute_horizontal_center", make_align_op_h "distribute_horizontal_center");
+           ("distribute_right", make_align_op_h "distribute_right");
+           ("distribute_top", make_align_op_h "distribute_top");
+           ("distribute_vertical_center", make_align_op_h "distribute_vertical_center");
+           ("distribute_bottom", make_align_op_h "distribute_bottom");
+           ("distribute_vertical_spacing", make_align_op_h "distribute_vertical_spacing");
+           ("distribute_horizontal_spacing", make_align_op_h "distribute_horizontal_spacing");
            ("doc.create_artboard", doc_create_artboard_h);
            ("doc.delete_artboard_by_id", doc_delete_artboard_by_id_h);
            ("doc.duplicate_artboard", doc_duplicate_artboard_h);

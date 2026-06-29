@@ -2817,7 +2817,8 @@ let align_panel_explicit_gap (store : State_store.t) : float option =
     align state, gathers the current selection, builds an
     [align_reference], calls the algorithm, and applies the
     resulting translations by rebuilding the document through
-    [Document.replace_element] + [Element.with_transform_translated].
+    [Document.replace_element] + [Element.translate_element], baking
+    the offset into raw coordinates (transform left untouched).
     Artboard falls back to selection bounds until the document
     model grows artboards (see transcripts/ALIGN.md). *)
 let apply_align_operation (store : State_store.t) (ctrl : Controller.controller)
@@ -2896,8 +2897,7 @@ let apply_align_operation (store : State_store.t) (ctrl : Controller.controller)
     if translations <> [] then begin
       let new_doc = List.fold_left (fun doc (t : Align.align_translation) ->
         let elem = Document.get_element doc t.path in
-        let moved = Element.with_transform_translated
-          ~dx:t.dx ~dy:t.dy elem in
+        let moved = Element.translate_element elem t.dx t.dy in
         Document.replace_element doc t.path moved
       ) doc translations in
       (* Self-bracketing (OP_LOG.md Increment 1): a direct call (tests) opens

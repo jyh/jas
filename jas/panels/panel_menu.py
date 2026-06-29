@@ -683,6 +683,20 @@ def _dispatch_yaml_layers_action(action_name: str, model,
         "pop": pop_handler,
         **build_artboard_handlers(model),
     }
+    # ── Align panel operations (ALIGN.md) ──
+    from jas.panels.align_apply import apply_align_operation
+    from document.controller import Controller as _AlignController
+    def _make_align_handler(op):
+        def handler(value, _call_ctx, store):
+            if value is True:
+                apply_align_operation(store, _AlignController(model), op)
+        return handler
+    for _op in ("align_left","align_horizontal_center","align_right",
+                "align_top","align_vertical_center","align_bottom",
+                "distribute_left","distribute_horizontal_center","distribute_right",
+                "distribute_top","distribute_vertical_center","distribute_bottom",
+                "distribute_vertical_spacing","distribute_horizontal_spacing"):
+        platform_effects[_op] = _make_align_handler(_op)
     if on_close_dialog is not None:
         platform_effects["close_dialog"] = close_dialog_handler
 

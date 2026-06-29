@@ -428,6 +428,7 @@ let action_fixtures = [
   "toggle_all_layers_outline.json";
   "new_layer.json";
   "make_compound_shape.json";
+  "align.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a

@@ -1527,6 +1527,40 @@ let translate_transform dx dy t_opt =
 let with_transform_translated ~dx ~dy elem =
   set_transform (translate_transform dx dy (get_transform elem)) elem
 
+(* Translate a path-command list by dx dy: every coordinate moves; ArcTo radii/rotation/flags unchanged, ClosePath unchanged. *)
+let translate_path_commands d dx dy =
+  List.map (fun cmd -> match cmd with
+    | MoveTo (x, y) -> MoveTo (x +. dx, y +. dy)
+    | LineTo (x, y) -> LineTo (x +. dx, y +. dy)
+    | CurveTo (x1, y1, x2, y2, x, y) -> CurveTo (x1+.dx, y1+.dy, x2+.dx, y2+.dy, x+.dx, y+.dy)
+    | SmoothCurveTo (x2, y2, x, y) -> SmoothCurveTo (x2+.dx, y2+.dy, x+.dx, y+.dy)
+    | QuadTo (x1, y1, x, y) -> QuadTo (x1+.dx, y1+.dy, x+.dx, y+.dy)
+    | SmoothQuadTo (x, y) -> SmoothQuadTo (x +. dx, y +. dy)
+    | ArcTo (rx, ry, rot, large, sweep, x, y) -> ArcTo (rx, ry, rot, large, sweep, x+.dx, y+.dy)
+    | ClosePath -> ClosePath) d
+
+(** Translate a whole element by dx dy, baking the offset into raw
+    coordinates (recursing Group / Layer / CompoundShape operands;
+    reference / recorded / generated ride on their common transform).
+    Mirrors the Rust / Python translate_element used by Align apply. *)
+let rec translate_element elem dx dy =
+  match elem with
+  | Line r -> Line { r with x1 = r.x1+.dx; y1 = r.y1+.dy; x2 = r.x2+.dx; y2 = r.y2+.dy }
+  | Rect r -> Rect { r with x = r.x+.dx; y = r.y+.dy }
+  | Circle r -> Circle { r with cx = r.cx+.dx; cy = r.cy+.dy }
+  | Ellipse r -> Ellipse { r with cx = r.cx+.dx; cy = r.cy+.dy }
+  | Polyline r -> Polyline { r with points = List.map (fun (x,y) -> (x+.dx, y+.dy)) r.points }
+  | Polygon r -> Polygon { r with points = List.map (fun (x,y) -> (x+.dx, y+.dy)) r.points }
+  | Path r -> Path { r with d = translate_path_commands r.d dx dy }
+  | Text r -> Text { r with x = r.x+.dx; y = r.y+.dy }
+  | Text_path r -> Text_path { r with d = translate_path_commands r.d dx dy }
+  | Group r -> Group { r with children = Array.map (fun c -> translate_element c dx dy) r.children }
+  | Layer r -> Layer { r with children = Array.map (fun c -> translate_element c dx dy) r.children }
+  | Live (Compound_shape cs) -> Live (Compound_shape { cs with operands = Array.map (fun c -> translate_element c dx dy) cs.operands })
+  | Live (Reference r) -> let cur = match r.ref_transform with Some t -> t | None -> identity_transform in Live (Reference { r with ref_transform = Some { cur with e = cur.e+.dx; f = cur.f+.dy } })
+  | Live (Recorded rec_) -> let cur = match rec_.rec_transform with Some t -> t | None -> identity_transform in Live (Recorded { rec_ with rec_transform = Some { cur with e = cur.e+.dx; f = cur.f+.dy } })
+  | Live (Generated gen) -> let cur = match gen.gen_transform with Some t -> t | None -> identity_transform in Live (Generated { gen with gen_transform = Some { cur with e = cur.e+.dx; f = cur.f+.dy } })
+
 (** Return a copy of [elem] with [matrix] pre-multiplied onto its
     existing transform. Used by the transform-tool family
     (Scale / Rotate / Shear) to compose a per-frame matrix on top

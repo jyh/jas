@@ -773,6 +773,8 @@ class CrossLanguageTest(absltest.TestCase):
         "toggle_all_layers_lock.json",
         "toggle_all_layers_outline.json",
         "new_layer.json",
+        "make_compound_shape.json",
+        "align.json",
     ]
 
     @staticmethod

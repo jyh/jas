@@ -7,7 +7,7 @@ from absl.testing import absltest
 from document.controller import Controller
 from document.document import Document, ElementSelection
 from document.model import Model
-from geometry.element import Layer, Rect, Transform
+from geometry.element import Layer, Rect
 from panels.align_apply import (
     apply_align_operation, reset_align_panel,
     sync_align_key_object_from_selection, try_designate_align_key_object,
@@ -33,29 +33,26 @@ def _model_with_rects(rects, selected_paths):
     return Model(document=doc)
 
 
-def _transform_at(model, path):
-    elem = model.document.get_element(tuple(path))
-    return elem.transform or Transform()
+def _elem_at(model, path):
+    return model.document.get_element(tuple(path))
 
 
 class ApplyAlignTest(absltest.TestCase):
 
-    def test_apply_align_left_translates_non_extremal_rects(self):
+    def test_apply_align_left_bakes_non_extremal_rects(self):
         rects = [_rect(10, 0, 10, 10), _rect(30, 0, 10, 10), _rect(60, 0, 10, 10)]
         model = _model_with_rects(rects, [(0, 0), (0, 1), (0, 2)])
         ctrl = Controller(model)
         store = StateStore()
         apply_align_operation(store, ctrl, "align_left")
-        # First rect at x=10 — no translation applied (identity).
-        self.assertEqual(_transform_at(model, (0, 0)), Transform())
-        # Second rect translated by -20.
-        t1 = _transform_at(model, (0, 1))
-        self.assertAlmostEqual(t1.e, -20.0)
-        self.assertAlmostEqual(t1.f, 0.0)
-        # Third rect translated by -50.
-        t2 = _transform_at(model, (0, 2))
-        self.assertAlmostEqual(t2.e, -50.0)
-        self.assertAlmostEqual(t2.f, 0.0)
+        # Left reference = min(10, 30, 60) = 10. Every rect's x is baked to
+        # 10 (dx = 0, -20, -50); the move folds into raw coords so the
+        # transform stays identity (None) on all three.
+        for p in [(0, 0), (0, 1), (0, 2)]:
+            elem = _elem_at(model, p)
+            self.assertAlmostEqual(elem.x, 10.0)
+            self.assertAlmostEqual(elem.y, 0.0)
+            self.assertIsNone(elem.transform)
 
     def test_apply_align_operation_noop_when_fewer_than_two(self):
         rects = [_rect(0, 0, 10, 10), _rect(100, 0, 10, 10)]
@@ -63,8 +60,11 @@ class ApplyAlignTest(absltest.TestCase):
         ctrl = Controller(model)
         store = StateStore()
         apply_align_operation(store, ctrl, "align_left")
-        self.assertEqual(_transform_at(model, (0, 0)), Transform())
-        self.assertEqual(_transform_at(model, (0, 1)), Transform())
+        # Fewer than two selected — no-op; raw coords unchanged.
+        self.assertAlmostEqual(_elem_at(model, (0, 0)).x, 0.0)
+        self.assertAlmostEqual(_elem_at(model, (0, 1)).x, 100.0)
+        self.assertIsNone(_elem_at(model, (0, 0)).transform)
+        self.assertIsNone(_elem_at(model, (0, 1)).transform)
 
     def test_apply_align_operation_unknown_op_is_noop(self):
         rects = [_rect(10, 0, 10, 10), _rect(30, 0, 10, 10), _rect(60, 0, 10, 10)]
@@ -72,8 +72,10 @@ class ApplyAlignTest(absltest.TestCase):
         ctrl = Controller(model)
         store = StateStore()
         apply_align_operation(store, ctrl, "bogus_op")
-        for p in [(0, 0), (0, 1), (0, 2)]:
-            self.assertEqual(_transform_at(model, p), Transform())
+        # Unknown op — no-op; raw coords unchanged.
+        for p, x in [((0, 0), 10.0), ((0, 1), 30.0), ((0, 2), 60.0)]:
+            self.assertAlmostEqual(_elem_at(model, p).x, x)
+            self.assertIsNone(_elem_at(model, p).transform)
 
     def test_align_key_object_holds_while_others_move(self):
         rects = [_rect(10, 0, 10, 10), _rect(30, 0, 10, 10), _rect(60, 0, 10, 10)]
@@ -83,11 +85,12 @@ class ApplyAlignTest(absltest.TestCase):
         store.set("align_to", "key_object")
         store.set("align_key_object_path", _path_marker((0, 1)))
         apply_align_operation(store, ctrl, "align_left")
-        # Key never moves.
-        self.assertEqual(_transform_at(model, (0, 1)), Transform())
-        # Others align to key's left edge (x=30): rs[0] +20; rs[2] -30.
-        self.assertAlmostEqual(_transform_at(model, (0, 0)).e, 20.0)
-        self.assertAlmostEqual(_transform_at(model, (0, 2)).e, -30.0)
+        # Align to the key's left edge (x=30): rs[0] +20, key unchanged,
+        # rs[2] -30. Every x is baked to 30; transforms stay identity.
+        for p in [(0, 0), (0, 1), (0, 2)]:
+            elem = _elem_at(model, p)
+            self.assertAlmostEqual(elem.x, 30.0)
+            self.assertIsNone(elem.transform)
 
 
 class AlignToArtboardTest(absltest.TestCase):
@@ -122,11 +125,12 @@ class AlignToArtboardTest(absltest.TestCase):
         store = StateStore()
         store.set("align_to", "artboard")
         apply_align_operation(store, ctrl, "align_left")
-        # Both should translate right so their left edges hit x=100.
-        t0 = _transform_at(model, (0, 0))
-        self.assertAlmostEqual(t0.e, 90.0)  # 100 - 10
-        t1 = _transform_at(model, (0, 1))
-        self.assertAlmostEqual(t1.e, 40.0)  # 100 - 60
+        # Both left edges baked to the artboard left edge x=100
+        # (dx = 90, 40); transforms stay identity.
+        self.assertAlmostEqual(_elem_at(model, (0, 0)).x, 100.0)
+        self.assertAlmostEqual(_elem_at(model, (0, 1)).x, 100.0)
+        self.assertIsNone(_elem_at(model, (0, 0)).transform)
+        self.assertIsNone(_elem_at(model, (0, 1)).transform)
 
     def test_align_to_artboard_uses_panel_selected(self):
         import dataclasses
@@ -149,11 +153,9 @@ class AlignToArtboardTest(absltest.TestCase):
         store.init_panel("artboards", {"artboards_panel_selection": ["bbbb0002"]})
         store.set("align_to", "artboard")
         apply_align_operation(store, ctrl, "align_left")
-        # Align to ab2's left edge (x=500).
-        t0 = _transform_at(model, (0, 0))
-        self.assertAlmostEqual(t0.e, 490.0)  # 500 - 10
-        t1 = _transform_at(model, (0, 1))
-        self.assertAlmostEqual(t1.e, 440.0)  # 500 - 60
+        # Align to ab2's left edge (x=500): both x baked to 500.
+        self.assertAlmostEqual(_elem_at(model, (0, 0)).x, 500.0)
+        self.assertAlmostEqual(_elem_at(model, (0, 1)).x, 500.0)
 
     def test_align_to_artboard_fallback_when_no_artboards(self):
         """When the document has no artboards, fall back to selection
@@ -164,10 +166,12 @@ class AlignToArtboardTest(absltest.TestCase):
         store = StateStore()
         store.set("align_to", "artboard")
         apply_align_operation(store, ctrl, "align_left")
-        # Selection-bounds fallback: left edge = min(10, 30) = 10.
-        self.assertEqual(_transform_at(model, (0, 0)), Transform())
-        t1 = _transform_at(model, (0, 1))
-        self.assertAlmostEqual(t1.e, -20.0)
+        # Selection-bounds fallback: left edge = min(10, 30) = 10. Both x
+        # baked to 10; transforms stay identity.
+        self.assertAlmostEqual(_elem_at(model, (0, 0)).x, 10.0)
+        self.assertAlmostEqual(_elem_at(model, (0, 1)).x, 10.0)
+        self.assertIsNone(_elem_at(model, (0, 0)).transform)
+        self.assertIsNone(_elem_at(model, (0, 1)).transform)
 
 
 class ResetAlignPanelTest(absltest.TestCase):

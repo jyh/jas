@@ -7,8 +7,8 @@ points the host app wires in:
 - reset_align_panel: zero the four align state keys.
 - apply_align_operation: read align state + selection, build an
   AlignReference, dispatch to the algorithm, and apply the resulting
-  translations by pre-pending a translate(dx, dy) to each moved
-  element's transform.
+  translations by baking (dx, dy) into each moved element's raw
+  coordinates via translate_element.
 - try_designate_align_key_object: canvas-click hook that runs before
   the active tool. Consumes the click when Align To is key_object.
 - sync_align_key_object_from_selection: clears a dangling key path
@@ -23,7 +23,6 @@ transcripts/ALIGN.md §Align To target.
 
 from __future__ import annotations
 
-import dataclasses
 from typing import Optional
 
 from algorithms import align as align_algo
@@ -33,7 +32,7 @@ from algorithms.align import (
 )
 from document.controller import Controller
 from document.document import ElementPath
-from geometry.element import Element, Transform
+from geometry.element import Element, translate_element
 from workspace_interpreter.state_store import StateStore
 
 
@@ -54,17 +53,6 @@ def _decode_path_marker(v) -> Optional[ElementPath]:
 
 def _encode_path_marker(path: ElementPath) -> dict:
     return {"__path__": list(path)}
-
-
-# ── Element transform helper ─────────────────────────────────
-
-def _with_transform_translated(elem: Element, dx: float, dy: float) -> Element:
-    """Return a copy of elem with (dx, dy) added to the translation
-    slot (e, f) of its transform. Preserves rotation / scale; falls
-    back to a simple translate when the element had no transform."""
-    current = getattr(elem, "transform", None) or Transform()
-    new = dataclasses.replace(current, e=current.e + dx, f=current.f + dy)
-    return dataclasses.replace(elem, transform=new)
 
 
 # ── Reset ────────────────────────────────────────────────────
@@ -123,7 +111,8 @@ def apply_align_operation(store: StateStore, controller: Controller, op: str) ->
     align state, gathers the current selection, builds an
     AlignReference, calls the algorithm, and applies the resulting
     translations by rebuilding the document through
-    Document.replace_element with a per-element transform update.
+    Document.replace_element, baking (dx, dy) into each moved element's
+    raw coordinates via translate_element.
 
     No-op when fewer than 2 elements are selected (per ALIGN.md
     §Enable and disable rules)."""
@@ -186,7 +175,7 @@ def apply_align_operation(store: StateStore, controller: Controller, op: str) ->
     new_doc = doc
     for t in translations:
         elem = new_doc.get_element(t.path)
-        moved = _with_transform_translated(elem, t.dx, t.dy)
+        moved = translate_element(elem, t.dx, t.dy)
         new_doc = new_doc.replace_element(t.path, moved)
     controller.set_document(new_doc)
 
