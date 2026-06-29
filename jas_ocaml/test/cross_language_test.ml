@@ -427,6 +427,7 @@ let action_fixtures = [
   "toggle_all_layers_lock.json";
   "toggle_all_layers_outline.json";
   "new_layer.json";
+  "make_compound_shape.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -441,6 +442,27 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
   let setup_svg_file = tc |> member "setup_svg" |> to_string in
   let svg = read_fixture (Printf.sprintf "svg/%s" setup_svg_file) in
   let doc = Jas.Svg.svg_to_document svg in
+  (* Optional [selection]: a JSON list of int-list element paths
+     (e.g. [[0,0],[0,1]]). Seed it into the document BEFORE dispatching so
+     selection-dependent actions, such as make_compound_shape, observe it.
+     Absent or empty leaves the default empty selection, so the existing
+     no-selection fixtures keep passing. *)
+  let doc =
+    match tc |> member "selection" with
+    | `List ((_ :: _) as path_jsons) ->
+      let paths =
+        List.map (fun pj -> List.map to_int (to_list pj)) path_jsons
+      in
+      let sel =
+        List.fold_left
+          (fun acc p ->
+            Jas.Document.PathMap.add p
+              (Jas.Document.element_selection_all p) acc)
+          Jas.Document.PathMap.empty paths
+      in
+      { doc with Jas.Document.selection = sel }
+    | _ -> doc
+  in
   let model = Jas.Model.create ~document:doc () in
   List.iter (fun step ->
     let action = step |> member "action" |> to_string in

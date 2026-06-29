@@ -2549,6 +2549,7 @@ private let actionFixtures = [
     "toggle_all_layers_lock.json",
     "toggle_all_layers_outline.json",
     "new_layer.json",
+    "make_compound_shape.json",
 ]
 
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust
@@ -2567,6 +2568,19 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
 private func runActionModel(_ tc: [String: Any]) -> Model {
     let setupSvg = tc["setup_svg"] as! String
     let model = actionModelFromSvg(setupSvg)
+
+    // Seed the canvas selection from the fixture (when present): a list of
+    // element paths ([[Int]]) written through the sanctioned NON-undoable
+    // selection writer, so document-affecting verbs that read doc.selection
+    // (e.g. make_compound_shape) see the intended operands. Skipped for the
+    // no-selection fixtures. Mirrors Rust's run_action_model.
+    if let selPaths = tc["selection"] as? [[Any]], !selPaths.isEmpty {
+        let paths: [ElementPath] = selPaths.map { path in
+            path.map { ($0 as! NSNumber).intValue }
+        }
+        let controller = Controller(model: model)
+        controller.setSelection(Set(paths.map { ElementSelection.all($0) }))
+    }
 
     for step in tc["actions"] as! [[String: Any]] {
         let action = step["action"] as! String

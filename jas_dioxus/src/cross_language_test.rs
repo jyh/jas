@@ -1078,6 +1078,7 @@ mod tests {
         "toggle_all_layers_lock.json",
         "toggle_all_layers_outline.json",
         "new_layer.json",
+        "make_compound_shape.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed
@@ -1107,6 +1108,28 @@ mod tests {
     fn run_action_model(tc: &serde_json::Value) -> crate::workspace::app_state::AppState {
         let setup_svg = tc["setup_svg"].as_str().unwrap();
         let mut st = action_state_from_svg(setup_svg);
+
+        // Seed a canvas selection if the case declares one (a list of element
+        // paths, e.g. [[0,0],[0,1]]). Selection-dependent verbs (compound shape,
+        // align, boolean) consume document.selection, which `select_all` cannot
+        // set through the shared dispatch (it is a native intercept). Mirrors
+        // run_action_model in the other three apps.
+        if let Some(sel) = tc.get("selection").and_then(|v| v.as_array()) {
+            use crate::document::controller::Controller;
+            use crate::document::document::ElementSelection;
+            let entries: Vec<ElementSelection> = sel
+                .iter()
+                .filter_map(|p| p.as_array())
+                .map(|p| {
+                    ElementSelection::all(
+                        p.iter()
+                            .filter_map(|n| n.as_u64().map(|u| u as usize))
+                            .collect(),
+                    )
+                })
+                .collect();
+            Controller::set_selection(&mut st.tabs[st.active_tab].model, entries);
+        }
 
         for step in tc["actions"].as_array().unwrap() {
             let action = step["action"].as_str().unwrap();
