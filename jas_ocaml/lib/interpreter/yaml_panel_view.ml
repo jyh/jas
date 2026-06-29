@@ -564,15 +564,26 @@ let dark_combo_css () =
   let bg = !dialog_bg_hook () and fg = !theme_text_hook () in
   (* Use the `background` shorthand (resets background-image): GTK button nodes
      paint a light gradient via background-image that sits over background-color,
-     so background-color alone left the combo looking white. *)
+     so background-color alone left the combo looking white. min-height:0 +
+     tight padding let the Path B slot height (~20px) take effect; GTK's default
+     combo min-height (~34px) otherwise overflowed into the next row. The popup
+     window + its list rows are a separate toplevel, themed here too. *)
   Printf.sprintf
-    "combobox button { background: %s; background-image: none; color: %s; \
-       border: 1px solid #555555; } \
+    "combobox, combobox button, combobox cellview { min-height: 0; } \
+     combobox button { background: %s; background-image: none; color: %s; \
+       border: 1px solid #555555; padding-top: 0; padding-bottom: 0; } \
      combobox button:hover { background: %s; background-image: none; } \
      combobox cellview { color: %s; } \
      combobox arrow { color: %s; } \
-     combobox entry { background: %s; background-image: none; color: %s; }"
+     combobox entry { background: %s; background-image: none; color: %s; } \
+     combobox window.popup, combobox window.popup decoration { background-color: %s; } \
+     combobox window.popup menuitem, combobox window.popup cellview, \
+       combobox window.popup treeview, combobox window.popup treeview.view { \
+       background-color: %s; color: %s; } \
+     combobox window.popup menuitem:hover, \
+       combobox window.popup treeview.view:selected { background-color: %s; color: %s; }"
     bg fg (!dialog_pane_bg_hook ()) fg fg bg fg
+    bg bg fg (!dialog_pane_bg_hook ()) fg
 
 let apply_css_provider (w : #GObj.widget) (css : string) (priority : int) =
   let provider = GObj.css_provider () in
