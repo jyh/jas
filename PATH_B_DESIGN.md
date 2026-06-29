@@ -1,20 +1,42 @@
 # Path B — Shared Widget-Layout Pass + Canonical Box Model (design)
 
-**Status:** Phase 0 LANDED 2026-06-27 — `layout_panel` (Appendix A) is implemented
-byte-exact in all four native apps (Python `jas/panels/panel_layout.py`, Rust
-`jas_dioxus/src/interpreter/panel_layout.rs`, OCaml
-`jas_ocaml/lib/interpreter/panel_layout.{ml,mli}`, Swift
-`JasSwift/Sources/Interpreter/PanelLayout.swift`), each gated in-suite against the
-pinned golden `test_fixtures/algorithms/panel_layout.json` (seed panels: `symbols`,
-`opacity`; regen via `scripts/gen_panel_layout_fixture.py`). The §6 five-app box-model
-review is RATIFIED (`PATH_B_BOXMODEL_REVIEW.md`; `char_width=10`); the corpus now covers
-**16/16 panels** (composite widgets placed as fixed boxes — see A.5 v1.1/v1.2). The Rust
-**all five apps** render panels from the pass behind `JAS_PATH_B=1` (13 panels; the 3
-composite panels stay flex) — Rust, Flask, Swift, OCaml, Python. The Python `layout_panel`
-is shared via `workspace_interpreter/panel_layout.py`. Still open before Path B can become the
-**default** (flag removed): ratify the provisional composite box sizes, and the deferred
-algorithm bits (foreach/tree data expansion, 2-D grid, max clamps, visible_when, vertical
-flex-grow) — each needed by the 3 composite panels' real content. Design draft below; decisions locked 2026-06-27 (Template A; /12;
+**Status:** SHIPPED — DEFAULT-ON in all five apps (2026-06-29). The shared `layout_panel`
+(Appendix A) is implemented byte-exact in all four native apps (Python
+`workspace_interpreter/panel_layout.py` — shared, both Python apps import it; Rust
+`jas_dioxus/src/interpreter/panel_layout.rs`; OCaml
+`jas_ocaml/lib/interpreter/panel_layout.{ml,mli}`; Swift
+`JasSwift/Sources/Interpreter/PanelLayout.swift`), each gated in-suite against the pinned
+golden `test_fixtures/algorithms/panel_layout.json` (16 panel cases; seed panels `symbols` +
+`opacity`; regen via `scripts/gen_panel_layout_fixture.py`). Flask renders from the pass but
+does **not** gate the golden — it runs behavioral HTML tests only and is a non-gating
+reference renderer (`TESTING_STRATEGY.md` §6), so the **byte-gate is the four native apps**.
+The §6 five-app box-model review is RATIFIED (`PATH_B_BOXMODEL_REVIEW.md`; `char_width=10`).
+
+Path B is **default-ON in all five apps** (commit `ffbe3e1a` dropped the `JAS_PATH_B` opt-in
+flag; opt OUT with `JAS_PATH_B=0`, or `?path_b=0` in the Rust wasm build). It renders the **12
+declarative panels** (align, artboards, boolean, brushes, character, concepts, magic_wand,
+opacity, paragraph, properties, stroke, symbols). The **4 composite panels — color, gradient,
+layers, swatches — are DECIDED permanently native** (2026-06-29): their interactivity is
+panel-level wiring that the generic absolute renderer bypasses, and they depend on
+`visible_when` conditional visibility the pass does not evaluate (an all-in attempt to put
+color/gradient on Path B broke both — "interactivity dead, all sliders shown at once" — and
+was reverted). The byte-gate still covers all **16** panels (the pass sizes the composites
+identically as fixed boxes — A.5 v1.2); those 4 are *gated-but-rendered-native by choice*, not
+a coverage gap. Behavior parity for the native composites is better served by a panel-behavior
+seam corpus (resolved state + visibility), which is independent of Path B.
+
+**Remaining in-scope capability gap:** `visible_when` / `bind.visible` (and `enabled_when`)
+expression evaluation is not wired into the layout pass or render swap — `_visible_children`
+honors only a literal `visible: false`, never an expression. So the three *rendered* panels
+that use it (opacity, artboards, concepts) lay out and render their conditional widgets
+unconditionally. This is **latent**: the default panel state mostly matches what gets shown,
+which is why it passed the five-app visual sign-off; it surfaces only in non-default states
+(toggled opacity thumbnails, artboard rename-in-place, a selected concept). The other
+once-deferred algorithm bits are either DONE (foreach row/wrap + vertical flex-grow ship in
+`_foreach`/`_column`) or composites-only and thus out of scope (2-D `type:grid` → swatches;
+`max_width`/`max_height` clamps).
+
+Design draft below; decisions locked 2026-06-27 (Template A; /12;
 integer-px; Phase 0 + Rust render swap). Implements `TESTING_STRATEGY.md` §3
 (Decision B) + §7 items #8 (panel computed-geometry byte-gate) and #9 (the
 canonical box-model choice, gated behind a five-app golden-diff review). This is
@@ -369,16 +391,23 @@ document rows need a data fixture, not the static panel YAML). Added as fill kin
 | `dropdown` | 20 | 80 |
 | `tree_view` | 200 | 0 (fill) |
 
-A `foreach` node is a container with a `do` template and no static `children`, so it lays
-out **empty** (the no-data state) — deterministic, no special handling. These three panels
-have **no `visible_when`** (conditional visibility is in app code, not the YAML), so laying
-out every row is faithful.
+A `foreach` node is a container with a `do` template and no static `children`. The pass now
+expands it with a data scope (Appendix B) — an empty/absent source lays out empty (the no-data
+state), deterministic.
 
-**Coverage note:** the cross-app byte-**gate** now covers **16/16 panels**; the Rust
-`JAS_PATH_B=1` **preview** still excludes color/gradient/layers because the absolute
-renderer does not draw `foreach` expansions yet. Still genuinely deferred: 2-D `type:grid`,
-`max_width`/`max_height` clamps, `visible_when` eval, vertical flex-grow, and `foreach`/tree
-data expansion (composite box heights above are provisional pending a later ratification).
+**Correction (2026-06-29):** an earlier draft claimed these composite panels have "no
+`visible_when`". That is wrong — color and layers use `bind: { visible: <expr> }`, and the
+in-scope opacity/artboards/concepts panels do too. The pass does **not** evaluate those
+expressions (it lays out every child), so conditional visibility is a real deferred capability,
+not an absent one (see A.6 and the Status block).
+
+**Coverage note (updated 2026-06-29):** the cross-app byte-**gate** covers **16/16 panels**
+(four native apps; Flask non-gating). Path B *rendering* is default-on and covers the **12
+declarative panels**; the 4 composite panels (color/gradient/layers/swatches) are permanently
+native by decision (Status), so they are gated-but-rendered-native. `foreach` row/wrap +
+column data expansion now render live in all apps. Genuinely deferred: `visible_when` eval
+(in-scope — opacity/artboards/concepts), and the composites-only 2-D `type:grid` and `max_*`
+clamps.
 
 ---
 
@@ -426,10 +455,16 @@ floor + earliest-child remainder), bumping the flex child's rect height; a
 `spacer` gets an implicit `flex` weight of 1. This makes a `foreach` list
 (`flex: 1`) grow to fill and pins a trailing footer to the bottom.
 
-### A.6 Deferred in v1 (documented, not silently dropped)
+### A.6 Deferred in v1 — status updated 2026-06-29
 
-Vertical `flex` grow (panels are content-height; a column's `flex:1` child takes
-content height, no grow); `visible_when`/`enabled_when` expression evaluation;
-`max_width`/`max_height` clamps; `grid` (2-D `type:"grid"` with `cols`) — seed
-corpus uses only container/row/col. Each is a tracked broadening step, not a gap in
-the gate.
+**Now implemented** (were deferred when this section was written): `foreach` row/wrap layout
+(`_foreach`) and vertical `flex` grow (`_column` distributes `avail_h − natural` to
+flex-weighted children when `avail_h > 0`).
+
+**Still deferred:** `visible_when`/`bind.visible`/`enabled_when` expression evaluation
+(`_visible_children` honors only a literal `visible: false`); `max_width`/`max_height` clamps;
+2-D `grid` (`type:"grid"` with `cols`, distinct from the Bootstrap col-span the row grid
+already handles). Of these, only `visible_when` is **in-scope** — it is used by the rendered
+opacity/artboards/concepts panels (see Status); `max_*` and 2-D grid are needed only by the
+now-permanently-native composite panels, so they are out of scope unless that decision is
+revisited.
