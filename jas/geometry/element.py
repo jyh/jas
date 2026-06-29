@@ -1763,7 +1763,13 @@ def translate_element(elem: Element, dx: float, dy: float) -> Element:
         return replace(elem,
                        operands=tuple(translate_element(c, dx, dy)
                                       for c in elem.operands))
-    if isinstance(elem, (ReferenceElem, RecordedElem)):
+    if isinstance(elem, (ReferenceElem, RecordedElem, GeneratedElem)):
+        # Reference / recorded / generated elements have no raw coordinates to
+        # bake into, so their move rides on the transform (matching Rust /
+        # Swift / OCaml). Previously GeneratedElem fell through to the no-op
+        # `return elem` below, so a generated element would not move under
+        # align — a cross-app divergence (not yet action-gated because the
+        # generated-element SVG round-trip is deferred, CONCEPTS.md).
         existing = elem.transform if elem.transform is not None else Transform()
         return replace(elem, transform=replace(
             existing, e=existing.e + dx, f=existing.f + dy))
