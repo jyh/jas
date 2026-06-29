@@ -3510,14 +3510,34 @@ def _render_repeat(el, store, ctx, dispatch_fn):
     # Build a container for the repeated elements
     container = QWidget()
     layout_dir = el.get("layout", "column")
+    style = el.get("style", {})
+    gap = int(style["gap"]) if "gap" in style else 0
+    is_wrap = layout_dir == "wrap"
+    cols = 1
     if layout_dir == "row":
         layout = QHBoxLayout(container)
+    elif is_wrap:
+        # Qt has no wrapping box layout; lay items into a grid of `cols`
+        # columns so a long foreach (e.g. the Swatches Web-Colors grid) wraps
+        # into a block instead of forming one vertical line (the default
+        # column). `cols` derives from the dock content width and the item's
+        # natural width; a trailing stretch column absorbs slack so the items
+        # pack to the left.
+        layout = QGridLayout(container)
+        tstyle = template.get("style", {}) if isinstance(template, dict) else {}
+        item_w = tstyle.get("width")
+        if item_w is None:
+            item_w = {"color_swatch": 16, "gradient_tile": 32}.get(
+                template.get("type"), 24)
+        item_w = int(item_w)
+        avail = 210
+        cols = max(1, (avail + gap) // (item_w + gap))
+        layout.setColumnStretch(cols, 1)
     else:
         layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
-    style = el.get("style", {})
     if "gap" in style:
-        layout.setSpacing(int(style["gap"]))
+        layout.setSpacing(gap)
 
     from workspace_interpreter.scope import Scope
     scope = Scope(ctx)
@@ -3534,7 +3554,10 @@ def _render_repeat(el, store, ctx, dispatch_fn):
 
         child_widget = render_element(template, store, child_scope.to_dict(), dispatch_fn)
         if child_widget:
-            layout.addWidget(child_widget)
+            if is_wrap:
+                layout.addWidget(child_widget, i // cols, i % cols)
+            else:
+                layout.addWidget(child_widget)
 
     return container
 
