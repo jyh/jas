@@ -1,0 +1,10 @@
+[
+  {
+    "name": "toggle_all_layers_outline",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {"action": "toggle_all_layers_outline", "params": {}}
+    ],
+    "expected_json": "toggle_all_layers_outline_expected.json"
+  }
+]

@@ -30,10 +30,10 @@ GUI framework (Qt / GTK / AppKit / Dioxus / browser) is treated as an untrusted
 | Document model | `document_to_test_json` | yes | exists |
 | Operations | `op_apply` + `checkpoint_equivalence` | yes | exists |
 | Expression evaluation | conformance corpus | yes | exists |
-| Tool gestures / input | gesture fixture corpus @ the `CanvasTool` seam | yes | **new — §5** |
-| Panel / menu / dialog actions | action corpus @ `dispatch_action` / `run_effects` | yes | **new/generalize — §5** |
-| Canvas drawing | canonical **display list** | yes | **new — §2** |
-| Panel widget layout | **Path B** shared layout pass | yes | **new — §3** |
+| Tool gestures / input | gesture fixture corpus @ the `CanvasTool` seam | yes | shipped — §5 (10 gestures, 4 apps) |
+| Panel / menu / dialog actions | action corpus @ `dispatch_action` / `run_effects` | yes | partial — §5 (1 action; key→action shipped) |
+| Canvas drawing | canonical **display list** | yes | decided, unbuilt — §2 |
+| Panel widget layout | **Path B** shared layout pass | yes | shipped default-ON — §3 |
 | Chrome structure | workspace / menu / toolbar / widget-tree JSON | yes | mostly exists — §4 |
 | Per-app pixel residue | per-app raster goldens / geometry introspection | no (intra-app only) | new, gated behind a real bug |
 | Irreducible | manual (focus, IME, OS chrome, key binding, visual) | — | the manual floor — §5 |
@@ -116,12 +116,19 @@ is snapshot-able as data even where its *pixels* are framework-rendered.
 - **Panel layout model** — `workspace_to_test_json` already gates resolved pane geometry
   cross-app (`default_layouts.yaml` declares pane rects + dock groups as data). Widen
   fixtures: load each named preset; assert snap targets.
-- **Widget presence / kind** — add a **canonical widget-kind vocabulary** (today there is
-  none — no panel/widget schema, the compiler never validates `type:`, and each app
-  hardcodes its own dispatch table), a compile-time validator, and a **resolved-widget-tree
-  snapshot** (`{type, id, binding, visible, dispatched_kind_or_placeholder, col,
-  declared_style}` per panel) diffed cross-app. This closes the *widget-missing* class as
-  data — the missing widget surfaces as a recorded `placeholder`, no pixels needed.
+- **Widget presence / kind** — the **canonical widget-kind vocabulary** now exists,
+  single-sourced in `workspace_interpreter/widget_tree.py` (`CANONICAL_WIDGET_KINDS`, 37
+  kinds) and gated by `widget_kind_coverage_test.py`. The **resolved-widget-tree snapshot**
+  is **landed** (`widget_tree(panel, ctx)` → per-widget `{path, type, id, kind, col,
+  visible, dyn_visible, bind-keys, style-keys}`), pinned in
+  `test_fixtures/algorithms/panel_widget_tree.json` (16 panels, 610 records) and byte-gated
+  cross-app in all 4 native apps (sibling of the `panel_layout` corpus; reuses its panels +
+  pinned ctx). It closes the *widget-missing* / *wrong-kind* / *wrongly-hidden* classes as
+  data — an unknown kind surfaces as a recorded `kind: "placeholder"` (≠ its `type`), and a
+  statically-hidden widget as `visible: false`, no pixels needed. Still open: a
+  **compile-time** `type:` validator in the compiler, and a per-app *dispatch*-coverage
+  assert (the snapshot pins the SHARED resolved tree + vocab; it does not yet record each
+  app's own dispatch-table result).
 - **Menus / toolbar** — `menu_structure_json` and `toolbar_structure_json` gates exist but
   currently gate **stale mirrors** (see §7). Re-source them from the real menu/toolbar and
   from compiled `menubar.yaml`.
@@ -203,23 +210,43 @@ Python. (Reflected in `CLAUDE.md`.)
 
 Surfaced during this analysis; with sequencing.
 
-**Status — verified 2026-06-27 (where each item stands):**
-1 ◐ live bug fixed + widget-kind vocabulary gate on `main`; compile-time validator
+**Status — verified 2026-06-29 (where each item stands):**
+1 ◐ live bug fixed + widget-kind vocabulary gate on `main`
+(`jas/panels/widget_kind_coverage_test.py`, 37 canonical kinds, now single-sourced in
+`workspace_interpreter/widget_tree.py`; `magic_wand.yaml` tolerance inputs now
+`type: number_input`); compile-time validator (`workspace_interpreter/validator.py`)
 + per-app dispatch-coverage assert still open ·
-2 ◐ toolbar golden re-sourced + live-gated (13 slots / 29 tools); dblclick
-options-destination not yet captured ·
-3 ✓ menu golden re-sourced (now includes View) ·
-4 ○ not started ·
-5 ◐ gesture corpus shipped; action corpus thin (1 action); modifier note re-scoped
-(see item) ·
-6 ✓ done ·
-7 ✓ Path B render: **all 5 apps** render panels from the shared pass behind `JAS_PATH_B=1`
-(13 panels; composite 3 stay flex) — Rust/Flask/Swift/OCaml/Python ·
+2 ◐ toolbar golden re-sourced + live-gated (13 slots / 29 tools, `has_alternates` + icon);
+dblclick options-destination not yet captured ·
+3 ✓ menu golden re-sourced (now includes View; 5 menus) ·
+4 ◐ **resolved-widget-tree snapshot LANDED** — `widget_tree(panel, ctx)` +
+`test_fixtures/algorithms/panel_widget_tree.json` (16 panels, 610 records), byte-gated in
+all 4 native apps + Python reference (sibling of `panel_layout`; §4); Flask render-all-panels
+CI gate + compile-time `type:` validator + per-app dispatch-coverage assert still open ·
+5 ◐ gesture corpus shipped (10 gestures, 4 apps); **action corpus now 3 actions / 4 apps**
+(`toggle_all_layers_visibility`, `toggle_all_layers_outline`, `new_layer` — Rust authors the
+goldens via `generate_action_expected`); the extension surfaced two real cross-app issues:
+`toggle_all_layers_lock` DIVERGES (Rust mutates child `locked`, Python does not — a found
+bug, held out of the corpus) and `new_artboard` mints a NON-DETERMINISTIC id (not byte-
+gateable without id seeding); selection-dependent verbs (align / boolean / brushes) need
+canvas-selection seeding + Python effect handlers — a separate increment, since `select_all`
+is a native intercept (`log:` only) not reachable through the shared YAML dispatch.
+**key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
+in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
+`false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
+no dedicated layer; raw-event smoke tests (rec 5) not started ·
+6 ✓ done (MANUAL_TESTING.md: injection-floor section, key-binding/action-effect split,
+single-sourced Flask rule, retire-when-gated ritual) ·
+7 ✓ Path B render: **default-ON in all 5 apps** (opt OUT with `JAS_PATH_B=0`; opt-in gate
+dropped, commit ffbe3e1a) — 12 declarative panels render from the shared pass; the 4
+composite panels are **decided permanently native** (sized by the pass, rendered native),
+not "stay flex" ·
 8 ✓ panel computed-geometry byte-gate **landed in all 4 native apps, all 16/16 panels**
-(Path B: `layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact, 534
-rects; composite widgets as fixed boxes; see PATH_B_DESIGN.md + PATH_B_BOXMODEL_REVIEW.md) —
-render migrations (Flask → Swift → OCaml → Python) still to do ·
-9 ✓ canonical box model **ratified** (PATH_B_DESIGN.md §2; `char_width=10`) ·
+(Path B: `layout_panel` + `test_fixtures/algorithms/panel_layout.json`, byte-exact, **610
+rects**; composites as fixed boxes); **render migrations COMPLETE** (Flask → Swift → OCaml →
+Python, merged); see PATH_B_DESIGN.md + PATH_B_BOXMODEL_REVIEW.md ·
+9 ✓ canonical box model **ratified** (PATH_B_DESIGN.md §2; `char_width=10`); the five-app
+sign-off ratified the model + byte-gated rects, not a separate pixel-diff artifact ·
 10 ✓ done.
 
 **Ships now (no dependencies):**
@@ -235,11 +262,19 @@ render migrations (Flask → Swift → OCaml → Python) still to do ·
 3. **Re-source the drifted `menu_structure.json` golden** — currently `[File, Edit, Object,
    Window]`, missing View, while `menubar.yaml` declares View and all apps build it.
    Re-point to compiled `menubar.yaml`.
-4. **Resolved-widget-tree snapshot** + **Flask render-all-panels CI gate** (render every
-   panel/dialog from `workspace.json`, fail on error/missing-kind).
+4. ~~**Resolved-widget-tree snapshot**~~ **DONE** (`widget_tree` pass + `panel_widget_tree.json`,
+   16 panels / 610 records, byte-gated in all 4 native apps + Python). Remaining: the **Flask
+   render-all-panels CI gate** (render every panel/dialog from `workspace.json`, fail on
+   error/missing-kind) and the **compile-time `type:` validator**.
 5. **Input-injection gesture + action corpora** (§5 recs 1–2) — **gesture corpus shipped**
-   (10 gestures, gated in all 4 native apps); **action corpus is a thin foundation** (1 of
-   ~13 production actions). The `ctrl=meta=False` pointer-payload note was **mis-scoped**:
+   (10 gestures, gated in all 4 native apps); **action corpus now 3 actions** (layers:
+   visibility / outline / new_layer), up from 1, gated in all 4 apps. Extending it surfaced
+   that (a) `toggle_all_layers_lock` diverges cross-app (Rust mutates child `locked`; a found
+   bug), (b) `new_artboard` mints a non-deterministic id, and (c) canvas-selection-dependent
+   verbs (align / boolean / brushes) can't seed selection through the shared YAML dispatch
+   (`select_all` is a native `log:` intercept) — so the next increment is per-app selection
+   seeding + Python align/boolean handlers. The `ctrl=meta=False` pointer-payload note was
+   **mis-scoped**:
    **all four** native apps hardcode `ctrl`/`meta` to `false` on pointer events
    (`yaml_tool.py:304`, `yaml_tool.rs:245`, `YamlTool.swift:275`, `yaml_tool.ml:1344`), and
    all four carry the real flags on the *keyboard* path — so it is a consistent 4-app state,
@@ -269,17 +304,26 @@ render migrations (Flask → Swift → OCaml → Python) still to do ·
 
 ## 8. Open questions
 
-- **Box model** — which padding / margin / gap / flex-grow / min-max resolution does Path
-  B canonicalize, and how much do shipped panels shift when re-pinned?
-- **Flask in CI** — formally drop the JS engine's interactive-parity claim (and correct
-  `engine/README.md`), or wire Flask's canvas to the same SVG golden the natives gate on?
-- **Per-widget rects** — the shared geometry pass pins only pane edges today; the
-  widget-level pass + its corpus is unbuilt.
-- **Gesture corpus determinism** — supply pre-resolved `doc_x`/`doc_y`, or quantize and
-  rely on the 4-decimal `_fmt` rounding?
-- **Hit-test fixtures** — a fixture-declared `(x,y)→path` table (portable, a model of
-  hit-testing) vs. each app's real bounds-based `hit_test` (more faithful, must agree
-  exactly).
-- **Text overlay handles** — text selection-bbox / handle coords derive from
-  framework-specific glyph metrics, so they are not cleanly portable; gate cross-app with
-  tolerance, or fall to per-app?
+Status updated 2026-06-29 — three of the original six are now resolved by the Path B /
+input-injection work.
+
+- ~~**Box model**~~ — **RESOLVED.** Path B canonicalizes Bootstrap/12 columns, wrap
+  overflow, weighted `flex:N`, `text = len × char_width` with `char_width = 10`, integer
+  round-half-up, and gap / pad / inset from each root's `style.padding`; ratified in
+  PATH_B_DESIGN.md §2 and byte-gated (16 panels, 610 rects). Shipped default-ON in all 5 apps.
+- **Flask in CI** — *partly decided, not finished.* §6 drops the interactive-parity claim,
+  but `engine/README.md` still calls Flask "the fifth implementation" (uncorrected), there is
+  no Flask job in `.github/workflows/test.yml`, and the canvas is not wired to an SVG golden.
+- ~~**Per-widget rects**~~ — **RESOLVED.** The widget-level pass + corpus
+  (`test_fixtures/algorithms/panel_layout.json`, 16 panels) is built and gated in all 4
+  native apps. (The earlier "pins only pane edges" statement is superseded.)
+- ~~**Gesture corpus determinism**~~ — **RESOLVED** as pre-resolved coords: fixtures store
+  `doc_x` / `doc_y` directly as `x` / `y` under the identity-view convention (Model defaults
+  are identity → `doc_x == x`), hit-test-free and float-stable by construction.
+- **Hit-test fixtures** — *answered differently.* No dedicated `(x,y)→path` fixture layer was
+  built; selection-family hit-testing is exercised through the gesture corpus
+  (`select_click` / `select_marquee`) driving each app's real bounds-based `hit_test`. A
+  standalone portable hit-test table remains an option if a non-gesture case needs it.
+- **Text overlay handles** — *still open.* Text selection-bbox / handle coords derive from
+  framework-specific glyph metrics; no cross-app fixture or tolerance gate exists yet, so
+  they remain per-app residue.

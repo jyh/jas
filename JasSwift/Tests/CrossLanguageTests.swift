@@ -1677,6 +1677,50 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel widget-TREE (Path B structural snapshot) algorithm vectors
+
+@Test func testAlgorithmWidgetTree() throws {
+    let json = readFixture("algorithms/panel_widget_tree.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    // Source of truth is the compiled bundle (workspace/workspace.json), which
+    // sits beside test_fixtures at the repo root. Mirror the panel-layout gate.
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "widget_tree", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let panelId = args["panel"] as! String
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let expected = tc["expected"] as! [[String: Any]]
+
+        let panel = panels[panelId] as! [String: Any]
+        let actual = WidgetTree.widgetTree(panel, ctx: ctx)
+
+        // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
+        // with sorted keys and compare bytes.
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Widget tree '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+    }
+}
+
 // MARK: - Hit test algorithm vectors
 
 @Test func algorithmHitTestVectors() throws {
@@ -2502,6 +2546,8 @@ private func beforeDragOracle() -> String {
 /// affecting action), driven through this app's production action dispatcher.
 private let actionFixtures = [
     "toggle_all_layers_visibility.json",
+    "toggle_all_layers_outline.json",
+    "new_layer.json",
 ]
 
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust

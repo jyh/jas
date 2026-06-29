@@ -33,6 +33,7 @@ from workspace.workspace_test_json import (
 )
 from workspace.layout_apply import layout_apply
 from workspace_interpreter.panel_layout import layout_panel
+from workspace_interpreter.widget_tree import widget_tree
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore
 
@@ -769,6 +770,8 @@ class CrossLanguageTest(absltest.TestCase):
     # the Rust ACTION_FIXTURES list so the corpus stays comparable.
     _ACTION_FIXTURES = [
         "toggle_all_layers_visibility.json",
+        "toggle_all_layers_outline.json",
+        "new_layer.json",
     ]
 
     @staticmethod
@@ -2043,6 +2046,36 @@ class CrossLanguageTest(absltest.TestCase):
                 args.get("avail_h", 0), args.get("ctx", {}))
             self.assertEqual(actual, expected,
                 msg=f"Panel layout '{name}' mismatch")
+
+    # ---------------------------------------------------------------
+    # Panel widget-TREE snapshot (TESTING_STRATEGY.md §4) test vectors
+    # ---------------------------------------------------------------
+    # Structural sibling of the panel-layout corpus above: where that pins
+    # per-widget RECTS, this pins per-widget STRUCTURAL records (type / id /
+    # kind / col / visible / dyn_visible / bind-keys / style-keys), so the
+    # panel widget tree itself is a cross-app byte-gate. Closes the
+    # widget-missing / wrong-kind-or-placeholder / wrongly-hidden classes as
+    # data. Reuses the exact panels + pinned ctx from panel_layout.json so a
+    # foreach source resolves to the same expansion count in both corpora.
+
+    def test_algorithm_widget_tree(self):
+        json_str = _read_fixture("algorithms/panel_widget_tree.json")
+        tests = json.loads(json_str)
+        bundle_path = os.path.join(
+            os.path.dirname(__file__), "..", "workspace", "workspace.json")
+        with open(bundle_path) as f:
+            panels = json.load(f)["panels"]
+
+        for tc in tests:
+            name = tc["name"]
+            func = tc["function"]
+            args = tc["args"]
+            expected = tc["expected"]
+            if func != "widget_tree":
+                self.fail(f"Unknown function: {func}")
+            actual = widget_tree(panels[args["panel"]], args.get("ctx", {}))
+            self.assertEqual(actual, expected,
+                msg=f"Panel widget tree '{name}' mismatch")
 
 
 if __name__ == "__main__":

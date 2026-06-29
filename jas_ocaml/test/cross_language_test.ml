@@ -424,6 +424,8 @@ let run_gesture_fixture (fixture_name : string) =
    Mirrors the Rust [ACTION_FIXTURES]. *)
 let action_fixtures = [
   "toggle_all_layers_visibility.json";
+  "toggle_all_layers_outline.json";
+  "new_layer.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -3076,6 +3078,58 @@ let () =
           let panel_node = member panel_id panels in
           let actual =
             Jas.Panel_layout.layout_panel panel_node avail_w avail_h ctx in
+          if normalize actual <> normalize expected then begin
+            Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize expected));
+            Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize actual));
+            assert false
+          end
+        ) tests);
+      (* Panel widget-TREE snapshot (Path B) algorithm test vectors, the
+         structural sibling of algorithm_panel_layout. Mirrors the Python
+         consumer: load the bundle, look up each panel node by id, run
+         [widget_tree] and structurally compare the record array to the golden
+         (normalized so key order is irrelevant). *)
+      Alcotest.test_case "algorithm_widget_tree" `Quick (fun () ->
+        (* Recursively sort object keys so equality is order-independent. *)
+        let rec normalize (v : Yojson.Safe.t) : Yojson.Safe.t =
+          match v with
+          | `Assoc fields ->
+            `Assoc
+              (List.sort (fun (a, _) (b, _) -> compare a b)
+                 (List.map (fun (k, x) -> (k, normalize x)) fields))
+          | `List xs -> `List (List.map normalize xs)
+          | other -> other
+        in
+        let json_str = read_fixture "algorithms/panel_widget_tree.json" in
+        let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+        let bundle_path =
+          Filename.concat fixtures_dir "../workspace/workspace.json" in
+        let bundle =
+          Yojson.Safe.from_string
+            (let ic = open_in bundle_path in
+             let n = in_channel_length ic in
+             let s = Bytes.create n in
+             really_input ic s 0 n;
+             close_in ic;
+             Bytes.to_string s) in
+        let panels = Yojson.Safe.Util.member "panels" bundle in
+        List.iter (fun tc ->
+          let open Yojson.Safe.Util in
+          let name = tc |> member "name" |> to_string in
+          let func = tc |> member "function" |> to_string in
+          if func <> "widget_tree" then
+            failwith (Printf.sprintf "Unknown function: %s" func);
+          let panel_id = tc |> member "args" |> member "panel" |> to_string in
+          let ctx =
+            match tc |> member "args" |> member "ctx" with
+            | `Null -> `Assoc []
+            | v -> v
+          in
+          let expected = tc |> member "expected" in
+          let panel_node = member panel_id panels in
+          let actual = Jas.Widget_tree.widget_tree panel_node ctx in
           if normalize actual <> normalize expected then begin
             Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name
               (Yojson.Safe.pretty_to_string (normalize expected));
