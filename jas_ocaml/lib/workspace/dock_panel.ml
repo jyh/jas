@@ -71,6 +71,13 @@ let apply_dark_css w css_str =
 let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GPack.box) (layout : workspace_layout) =
   let drag_ref = ref No_drag in
   let _color_panel_refresh = ref (fun () -> ()) in
+  (* Each rebuild records the current anchored groups as
+     (group_addr, panel_count, event_box) so the drop handler can hit-test the
+     release point against group screen bounds. The drop must be resolved here
+     (not in each group_eb's button_release) because the drag source tab/grip
+     holds an implicit pointer grab, so the release is delivered to the SOURCE
+     widget, never to the group_eb under the cursor. *)
+  let current_groups = ref [] in
 
   (* Drag preview popup — a small undecorated window with the panel's
      name, repositioned on every motion event so the user has visual
@@ -117,6 +124,7 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
     Yaml_panel_view.clear_panel_body_renderers ();
     (* Clear existing children *)
     List.iter (fun w -> w#destroy ()) dock_box#children;
+    current_groups := [];
 
     match anchored_dock layout Right with
     | None -> ()
@@ -157,6 +165,9 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
         Array.iteri (fun gi group ->
           let group_eb = GBin.event_box ~packing:(dock_box#pack ~expand:false) () in
           let group_box = GPack.vbox ~packing:group_eb#add () in
+          current_groups :=
+            ({ dock_id = dock.id; group_idx = gi }, Array.length group.panels, group_eb)
+            :: !current_groups;
 
           (* Tab bar *)
           let tab_bar = GPack.hbox ~packing:(group_box#pack ~expand:false) () in
@@ -422,36 +433,69 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
         xr < dox || xr > dox + alloc.Gtk.width
         || yr < doy || yr > doy + alloc.Gtk.height
       in
+      (* Which anchored group is under the release point? The drag source
+         (tab / grip) holds the pointer grab, so the release never reaches the
+         target group_eb's own handler — hit-test the groups recorded by the
+         last rebuild against the event-box screen bounds here instead. *)
+      let target =
+        List.fold_left (fun acc (addr, pcount, eb) ->
+          match acc with
+          | Some _ -> acc
+          | None ->
+            let a = eb#misc#allocation in
+            let (gx, gy) =
+              try Gdk.Window.get_origin eb#misc#window
+              with _ -> (max_int, max_int) in
+            if xr >= gx && xr <= gx + a.Gtk.width
+               && yr >= gy && yr <= gy + a.Gtk.height
+            then Some (addr, pcount) else None
+        ) None !current_groups
+      in
       let consumed =
-        match !drag_ref, outside with
-        | Dragging_panel from, true ->
-          ignore (Workspace_layout.detach_panel layout ~from
-                    ~x:x_root ~y:y_root);
-          true
-        | Dragging_panel from, false ->
-          (* Inside the dock area but missed every group_eb — happens
-             when the user drags a panel from a floating window back
-             into the anchored dock (the floating tab's implicit
-             pointer grab swallows the release before any anchored
-             group_eb can fire). Insert as a new group at the end of
-             the anchored dock. *)
-          let from_floating =
-            match Workspace_layout.find_dock layout from.group.dock_id with
-            | Some d ->
-              List.exists (fun (fd : Workspace_layout.floating_dock) ->
-                fd.dock.id = d.id) layout.floating
-            | None -> false in
-          if from_floating then
-            (match Workspace_layout.anchored_dock layout
-                     Workspace_layout.Right with
-             | Some d ->
-               Workspace_layout.insert_panel_as_new_group layout
-                 ~from ~to_dock:d.id
-                 ~at_idx:(Array.length d.groups);
+        match !drag_ref with
+        | Dragging_panel from ->
+          (match target with
+           | Some (tgt, pcount) when tgt = from.group ->
+             (* Released back on its own group: nudge to the end. *)
+             Layout_apply.layout_apply layout
+               (Layout_apply.op_reorder_panel tgt ~from:from.panel_idx ~to_:pcount);
+             true
+           | Some (tgt, _) ->
+             (* Add the panel to a different group. *)
+             Layout_apply.layout_apply layout
+               (Layout_apply.op_move_panel_to_group ~from ~to_:tgt);
+             true
+           | None ->
+             if outside then begin
+               (* Released outside the dock: detach into a floating dock. *)
+               ignore (Workspace_layout.detach_panel layout ~from
+                         ~x:x_root ~y:y_root);
                true
-             | None -> false)
-          else false
-        | _ -> false
+             end else
+               (* Inside the dock but over no group (the empty area below the
+                  groups, or a panel dragged back from a floating window): make
+                  a new group at the end of the anchored dock. *)
+               (match Workspace_layout.anchored_dock layout
+                        Workspace_layout.Right with
+                | Some d ->
+                  Workspace_layout.insert_panel_as_new_group layout
+                    ~from ~to_dock:d.id ~at_idx:(Array.length d.groups);
+                  true
+                | None -> false))
+        | Dragging_group from ->
+          (match target with
+           | Some (tgt, _) ->
+             (* DEFERRED (OP_LOG 3d-2): group-move verbs are not in the
+                Layout_apply vocabulary, so they stay direct (mirrors Rust). *)
+             if from.dock_id = tgt.dock_id then
+               move_group_within_dock layout tgt.dock_id
+                 ~from:from.group_idx ~to_:tgt.group_idx
+             else
+               move_group_to_dock layout ~from
+                 ~to_dock:tgt.dock_id ~to_idx:tgt.group_idx;
+             true
+           | None -> false)
+        | No_drag -> false
       in
       drag_ref := No_drag;
       if consumed then !rebuild_all_ref ();
