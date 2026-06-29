@@ -46,19 +46,21 @@ def _opacity_panel() -> dict:
 class PathBHelpersTest(absltest.TestCase):
     """The flag, the excluded set, and the path walker."""
 
-    def test_flag_off_by_default(self):
+    def test_flag_on_by_default(self):
+        # Path B is default-ON after the five-app sign-off.
         prior = os.environ.pop("JAS_PATH_B", None)
         try:
-            self.assertFalse(_path_b_enabled())
+            self.assertTrue(_path_b_enabled())
         finally:
             if prior is not None:
                 os.environ["JAS_PATH_B"] = prior
 
-    def test_flag_on_with_env(self):
+    def test_flag_opt_out_with_zero(self):
+        # JAS_PATH_B=0 opts out (falls back to the native flex path).
         prior = os.environ.get("JAS_PATH_B")
-        os.environ["JAS_PATH_B"] = "1"
+        os.environ["JAS_PATH_B"] = "0"
         try:
-            self.assertTrue(_path_b_enabled())
+            self.assertFalse(_path_b_enabled())
         finally:
             if prior is None:
                 os.environ.pop("JAS_PATH_B", None)

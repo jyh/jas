@@ -8160,16 +8160,18 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
 /// native build (if ever) falls back to the `JAS_PATH_B=1` env var used by the
 /// other apps.
 fn path_b_enabled() -> bool {
+    // Default-ON after the five-app sign-off; opt OUT with `?path_b=0`
+    // (wasm) or JAS_PATH_B=0 (native).
     #[cfg(target_arch = "wasm32")]
     {
         web_sys::window()
             .and_then(|w| w.location().search().ok())
-            .map(|s| s.contains("path_b=1"))
-            .unwrap_or(false)
+            .map(|s| !s.contains("path_b=0"))
+            .unwrap_or(true)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::env::var("JAS_PATH_B").map(|v| v == "1").unwrap_or(false)
+        std::env::var("JAS_PATH_B").map(|v| v != "0").unwrap_or(true)
     }
 }
 

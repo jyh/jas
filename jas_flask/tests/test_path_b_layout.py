@@ -57,8 +57,18 @@ def test_composite_panel_stays_flex(theme, panels, monkeypatch):
     assert "position:relative;width:228px" not in html
 
 
-def test_default_mode_is_flex(theme, panels):
-    """Without the flag, panels render via Bootstrap flex (no absolute wrapper)."""
+def test_default_mode_is_path_b(theme, panels, monkeypatch):
+    """Path B is default-ON after the five-app sign-off: panels render from the
+    absolute layout pass without any flag set."""
+    monkeypatch.delenv("JAS_PATH_B", raising=False)
+    from renderer import render_element
+    html = render_element(panels["opacity_panel_content"], theme, {}, mode="normal")
+    assert "position:relative;width:228px" in html
+
+
+def test_opt_out_with_zero_is_flex(theme, panels, monkeypatch):
+    """JAS_PATH_B=0 opts back out to Bootstrap flex (no absolute wrapper)."""
+    monkeypatch.setenv("JAS_PATH_B", "0")
     from renderer import render_element
     html = render_element(panels["opacity_panel_content"], theme, {}, mode="normal")
     assert "position:relative;width:228px" not in html

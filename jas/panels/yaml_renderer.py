@@ -152,10 +152,10 @@ _PATH_B_UNSUPPORTED = {
 
 def _path_b_enabled() -> bool:
     """Whether to render panels from the shared Path B layout pass (absolute
-    rects) instead of Qt layouts. Opt-in via JAS_PATH_B=1. Mirrors the
-    Rust / Flask / Swift flag."""
+    rects) instead of Qt layouts. Default-ON after the five-app sign-off; opt
+    OUT with JAS_PATH_B=0. Mirrors the Rust / Flask / Swift / OCaml flag."""
     import os
-    return os.environ.get("JAS_PATH_B") == "1"
+    return os.environ.get("JAS_PATH_B") != "0"
 
 
 def _node_at_path(content, path):

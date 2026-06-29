@@ -5499,7 +5499,8 @@ and render_repeat ~packing ~ctx el =
    Container nodes contribute layout only and get no widget of their own.
    The panels whose composite / data-driven widgets the v1 pass cannot
    size yet (color / gradient / layers) stay on the flex path. *)
-let path_b_enabled () = Sys.getenv_opt "JAS_PATH_B" = Some "1"
+(* Default-ON after the five-app sign-off; opt OUT with JAS_PATH_B=0. *)
+let path_b_enabled () = Sys.getenv_opt "JAS_PATH_B" <> Some "0"
 
 (* Panel content ids excluded from the Path B preview — matches the
    Rust / Flask / Swift unsupported set. *)

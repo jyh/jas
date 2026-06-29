@@ -574,10 +574,11 @@ _PATH_B_UNSUPPORTED = {
 
 def _path_b_enabled() -> bool:
     """Render panels from the shared canonical layout pass (absolute rects)
-    instead of Bootstrap flex. Opt-in via JAS_PATH_B=1 — the human-viewable
-    reference of the cross-app byte-gated layout (TESTING_STRATEGY.md §6/§7.7)."""
+    instead of Bootstrap flex. Default-ON after the five-app sign-off; opt OUT
+    with JAS_PATH_B=0 — the human-viewable reference of the cross-app byte-gated
+    layout (TESTING_STRATEGY.md §6/§7.7)."""
     import os
-    return os.environ.get("JAS_PATH_B") == "1"
+    return os.environ.get("JAS_PATH_B") != "0"
 
 
 def _node_at_path(content, path):
