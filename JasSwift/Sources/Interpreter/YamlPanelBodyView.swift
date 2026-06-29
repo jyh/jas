@@ -4135,7 +4135,8 @@ struct YamlPanelBodyView: View {
     /// the human-viewable reference of the cross-app byte-gated layout pass
     /// (PATH_B_DESIGN.md §5 Phase 2). Mirrors the Rust / Flask flag.
     private func pathBEnabled() -> Bool {
-        ProcessInfo.processInfo.environment["JAS_PATH_B"] == "1"
+        // Default-ON after the five-app sign-off; opt OUT with JAS_PATH_B=0.
+        ProcessInfo.processInfo.environment["JAS_PATH_B"] != "0"
     }
 
     /// Panels whose composite / data-driven widgets (foreach expansions,
