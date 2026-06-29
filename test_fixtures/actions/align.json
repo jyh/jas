@@ -25,5 +25,104 @@
       {"action": "align_horizontal_center", "params": {}}
     ],
     "expected_json": "align_horizontal_center_two_rects_expected.json"
+  },
+  {
+    "name": "align_top_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "align_top", "params": {}}
+    ],
+    "expected_json": "align_top_three_rects_expected.json"
+  },
+  {
+    "name": "align_bottom_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "align_bottom", "params": {}}
+    ],
+    "expected_json": "align_bottom_three_rects_expected.json"
+  },
+  {
+    "name": "align_vertical_center_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "align_vertical_center", "params": {}}
+    ],
+    "expected_json": "align_vertical_center_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_left_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_left", "params": {}}
+    ],
+    "expected_json": "distribute_left_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_right_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_right", "params": {}}
+    ],
+    "expected_json": "distribute_right_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_horizontal_center_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_horizontal_center", "params": {}}
+    ],
+    "expected_json": "distribute_horizontal_center_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_top_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_top", "params": {}}
+    ],
+    "expected_json": "distribute_top_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_bottom_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_bottom", "params": {}}
+    ],
+    "expected_json": "distribute_bottom_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_vertical_center_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_vertical_center", "params": {}}
+    ],
+    "expected_json": "distribute_vertical_center_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_horizontal_spacing_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_horizontal_spacing", "params": {}}
+    ],
+    "expected_json": "distribute_horizontal_spacing_three_rects_expected.json"
+  },
+  {
+    "name": "distribute_vertical_spacing_three_rects",
+    "setup_svg": "three_rects.svg",
+    "selection": [[0, 0], [0, 1], [0, 2]],
+    "actions": [
+      {"action": "distribute_vertical_spacing", "params": {}}
+    ],
+    "expected_json": "distribute_vertical_spacing_three_rects_expected.json"
   }
 ]
