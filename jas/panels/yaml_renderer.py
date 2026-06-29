@@ -968,6 +968,26 @@ _INPUT_DARK_CSS = _input_css()
 _INPUT_MIN_HEIGHT = 26
 
 
+def _combo_css() -> str:
+    """Dark-theme CSS for QComboBox selects/combos. Like _input_css for
+    QSpinBox/QLineEdit, the combo value text otherwise inherits the system Qt
+    palette and renders dark — illegible on the dark dock (the Character font /
+    weight / language dropdowns and the Stroke selects). Style the closed combo
+    AND its popup list view so both stay readable."""
+    try:
+        from workspace.dock_panel import (
+            THEME_TEXT, THEME_BG_DARK, THEME_BORDER,
+        )
+    except Exception:
+        THEME_TEXT, THEME_BG_DARK, THEME_BORDER = "#ccc", "#2a2a2a", "#555"
+    return (
+        f"QComboBox {{ color: {THEME_TEXT}; background: {THEME_BG_DARK}; "
+        f"border: 1px solid {THEME_BORDER}; border-radius: 2px; padding: 2px 4px; }} "
+        f"QComboBox QAbstractItemView {{ color: {THEME_TEXT}; "
+        f"background: {THEME_BG_DARK}; selection-background-color: {THEME_BORDER}; }}"
+    )
+
+
 def _render_number_input(el, store, ctx, dispatch_fn):
     spin = QSpinBox()
     spin.setStyleSheet(_input_css())
@@ -1410,6 +1430,7 @@ def _wire_opacity_mask_checkbox(cb: QCheckBox, el: dict, store: StateStore, ctx:
 
 def _render_select(el, store, ctx, dispatch_fn):
     combo = QComboBox()
+    combo.setStyleSheet(_combo_css())
     for opt in el.get("options", []):
         if isinstance(opt, dict):
             combo.addItem(opt.get("label", ""), opt.get("value", ""))
@@ -1440,6 +1461,7 @@ def _render_select(el, store, ctx, dispatch_fn):
 
 def _render_combo_box(el, store, ctx, dispatch_fn):
     combo = QComboBox()
+    combo.setStyleSheet(_combo_css())
     combo.setEditable(True)
     for opt in el.get("options", []):
         if isinstance(opt, dict):
