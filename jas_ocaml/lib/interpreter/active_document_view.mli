@@ -4,6 +4,7 @@
 
 val build
   : ?panel_selection:int list list
+  -> ?artboards_panel_selection:string list
   -> Model.model option
   -> Yojson.Safe.t
 

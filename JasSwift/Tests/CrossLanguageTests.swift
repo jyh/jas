@@ -2552,6 +2552,7 @@ private let actionFixtures = [
     "make_compound_shape.json",
     "align.json",
     "boolean.json",
+    "new_artboard.json",
 ]
 
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust
@@ -2570,6 +2571,15 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
 private func runActionModel(_ tc: [String: Any]) -> Model {
     let setupSvg = tc["setup_svg"] as! String
     let model = actionModelFromSvg(setupSvg)
+
+    // Install the deterministic id source for the dispatch below: a per-char
+    // counter (0,1,2,…) so the FIRST minted id is "01234567" (each char =
+    // alphabet[counter % 36]), byte-identical to the Rust-authored golden.
+    // Cleared after dispatch so production minting (override = nil) is
+    // unaffected. Mirrors Rust's run_action_model set_test_id_rng(Some(..)).
+    var ctr = 0
+    setTestIdRng({ defer { ctr += 1 }; return ctr })
+    defer { setTestIdRng(nil) }
 
     // Seed the canvas selection from the fixture (when present): a list of
     // element paths ([[Int]]) written through the sanctioned NON-undoable

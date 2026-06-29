@@ -69,9 +69,28 @@ let default_options = {
 let id_alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 let id_length = 8
 
+(* Test-only override for the id source. When installed via [set_test_id_rng]
+   it takes the place of the platform default inside [generate_id] UNLESS the
+   caller passed an explicit [rng]. Production paths pass no [rng] and leave
+   this [None], so they keep tapping platform entropy unchanged. *)
+let test_id_rng : (unit -> int) option ref = ref None
+
+(* Install or clear the test-only id source. Pass [None] to restore the
+   platform default. Never called on production paths. *)
+let set_test_id_rng f = test_id_rng := f
+
 (** Platform-sourced 8-char base36 id. [rng] should return a
-    non-negative integer per call; default uses [Random.int]. *)
-let generate_id ?(rng = fun () -> Random.int 1_000_000_007) () =
+    non-negative integer per call. With no explicit [rng], a test override
+    (when installed) wins, otherwise the platform default via [Random.int]. *)
+let generate_id ?rng () =
+  let rng =
+    match rng with
+    | Some f -> f
+    | None ->
+      (match !test_id_rng with
+       | Some f -> f
+       | None -> fun () -> Random.int 1_000_000_007)
+  in
   let buf = Bytes.create id_length in
   for i = 0 to id_length - 1 do
     let n = rng () in

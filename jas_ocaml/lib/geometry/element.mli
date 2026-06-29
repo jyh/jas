@@ -838,6 +838,11 @@ val with_id : element -> string option -> element
     children. See the stable-identity initiative. *)
 val clear_ids : element -> element
 
+(** Install or clear a test-only id source for [generate_id]. When set, it
+    replaces the platform default unless a call passes an explicit [rng].
+    Pass [None] to restore the default. Test seam only. *)
+val set_test_id_rng : (unit -> int) option -> unit
+
 (** Mint a fresh 8-char base36 stable-element id. Identical in shape to
     [Artboard.generate_id] (same alphabet, same length, same rng seam).
     Pass an [rng] returning a non-negative int per call for deterministic

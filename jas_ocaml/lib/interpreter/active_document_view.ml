@@ -265,8 +265,98 @@ let selected_concept_view (doc : Document.document) : Yojson.Safe.t =
      | _ -> `Null)
   | _ -> `Null
 
+(** Build the artboard context fields (ARTBOARDS.md), mirroring the Rust
+    [build_active_document_view] artboard block. [artboards_panel_selection]
+    is the artboards-panel row selection (artboard ids); the
+    [current_artboard] is the topmost panel-selected artboard, else the first
+    one. These fields drive the new_artboard / duplicate / delete action
+    predicates and the size-inheritance of a freshly created artboard
+    ([active_document.current_artboard.width] / [.height]). *)
+let artboards_view
+    (doc : Document.document)
+    (artboards_panel_selection : string list) : (string * Yojson.Safe.t) list =
+  let artboards = doc.Document.artboards in
+  let full_json (a : Artboard.artboard) : Yojson.Safe.t =
+    `Assoc [
+      ("id", `String a.Artboard.id);
+      ("name", `String a.Artboard.name);
+      ("x", `Float a.Artboard.x);
+      ("y", `Float a.Artboard.y);
+      ("width", `Float a.Artboard.width);
+      ("height", `Float a.Artboard.height);
+      ("fill", `String (Artboard.fill_as_canonical a.Artboard.fill));
+      ("show_center_mark", `Bool a.Artboard.show_center_mark);
+      ("show_cross_hairs", `Bool a.Artboard.show_cross_hairs);
+      ("show_video_safe_areas", `Bool a.Artboard.show_video_safe_areas);
+      ("video_ruler_pixel_aspect_ratio",
+       `Float a.Artboard.video_ruler_pixel_aspect_ratio);
+    ]
+  in
+  let current =
+    match
+      List.find_opt
+        (fun (a : Artboard.artboard) ->
+          List.mem a.Artboard.id artboards_panel_selection)
+        artboards
+    with
+    | Some a -> Some a
+    | None -> (match artboards with a :: _ -> Some a | [] -> None)
+  in
+  let current_artboard_json = match current with
+    | Some a ->
+      `Assoc [
+        ("id", `String a.Artboard.id);
+        ("name", `String a.Artboard.name);
+        ("x", `Float a.Artboard.x);
+        ("y", `Float a.Artboard.y);
+        ("width", `Float a.Artboard.width);
+        ("height", `Float a.Artboard.height);
+      ]
+    | None -> `Assoc []
+  in
+  let current_id = match current with
+    | Some a -> `String a.Artboard.id
+    | None -> `Null
+  in
+  let opts = doc.Document.artboard_options in
+  [
+    ("artboards", `List (List.map full_json artboards));
+    ("artboards_count", `Int (List.length artboards));
+    ("next_artboard_name", `String (Artboard.next_name artboards));
+    ("current_artboard_id", current_id);
+    ("current_artboard", current_artboard_json);
+    ("artboards_panel_selection_ids",
+     `List (List.map (fun s -> `String s) artboards_panel_selection));
+    ("artboard_options", `Assoc [
+       ("fade_region_outside_artboard",
+        `Bool opts.Artboard.fade_region_outside_artboard);
+       ("update_while_dragging",
+        `Bool opts.Artboard.update_while_dragging);
+     ]);
+  ]
+
+(* The artboard context fields for the no-document case: empty list, no
+   current artboard, default options. Mirrors the Rust empty active_document
+   artboard block. *)
+let empty_artboards_view : (string * Yojson.Safe.t) list =
+  let opts = Artboard.default_options in
+  [
+    ("artboards", `List []);
+    ("artboards_count", `Int 0);
+    ("next_artboard_name", `String (Artboard.next_name []));
+    ("current_artboard_id", `Null);
+    ("current_artboard", `Assoc []);
+    ("artboards_panel_selection_ids", `List []);
+    ("artboard_options", `Assoc [
+       ("fade_region_outside_artboard",
+        `Bool opts.Artboard.fade_region_outside_artboard);
+       ("update_while_dragging",
+        `Bool opts.Artboard.update_while_dragging);
+     ]);
+  ]
+
 let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
-  `Assoc [
+  `Assoc ([
     ("top_level_layers", `List []);
     ("top_level_layer_paths", `List []);
     ("next_layer_name", `String "Layer 1");
@@ -279,10 +369,11 @@ let empty_no_model ?(panel_selection : int list list = []) () : Yojson.Safe.t =
     ("selected_concept", `Null);
     ("document_setup", document_setup_view Document_setup.default);
     ("print_preferences", print_preferences_view Print_preferences.default);
-  ]
+  ] @ empty_artboards_view)
 
 let build
     ?(panel_selection : int list list = [])
+    ?(artboards_panel_selection : string list = [])
     (model : Model.model option) : Yojson.Safe.t =
   match model with
   | None -> empty_no_model ~panel_selection ()
@@ -348,7 +439,7 @@ let build
       `Assoc [("__path__", `List (List.map (fun i -> `Int i) path))]
     ) sorted_paths) in
     let selection_count = List.length sorted_paths in
-    `Assoc [
+    `Assoc ([
       ("top_level_layers", `List top_level_layers);
       ("top_level_layer_paths", `List top_level_layer_paths);
       ("next_layer_name", `String next_layer_name);
@@ -361,7 +452,7 @@ let build
       ("selected_concept", selected_concept_view m#document);
       ("document_setup", document_setup_view m#document.Document.document_setup);
       ("print_preferences", print_preferences_view m#document.Document.print_preferences);
-    ]
+    ] @ artboards_view m#document artboards_panel_selection)
 
 (** Build the selection-level predicates referenced by yaml
     expressions (``selection_has_mask``, ``selection_mask_clip``,

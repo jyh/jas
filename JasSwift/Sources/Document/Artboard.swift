@@ -150,6 +150,58 @@ public struct ArtboardOptions: Equatable, Hashable {
 private let artboardIdAlphabet: [Character] = Array("0123456789abcdefghijklmnopqrstuvwxyz")
 private let artboardIdLength = 8
 
+// MARK: Test-only deterministic id source
+//
+// Mirrors jas_dioxus `artboard.rs` `TEST_ID_RNG`. When installed, BOTH
+// NO-ARG minters (the ones the create paths call) draw each character index
+// from this counter instead of platform entropy, so creation verbs mint a
+// fixed id that is byte-identical across all four apps. The cross-language
+// action corpus installs a simple per-char counter (0,1,2,… → first id
+// "01234567"). Production is UNCHANGED: the override path indexes the
+// alphabet with `counter() % alphabet.count` (NOT the production
+// `Int.random` rejection-sampling, which would not match `value % 36` in the
+// other apps even with the same counter); the generic `using: &rng` minters
+// and the `SystemRandomNumberGenerator` fall-through below are never touched.
+// Stored thread-local (like `DocPrimitives._currentDocument`) so the parallel
+// test runner keeps each thread's registration isolated. Never set in
+// production.
+private let _testIdRngTLSKey = "JasLib._testIdRng"
+
+/// Box so a `() -> Int` closure can live in the thread dictionary (which
+/// stores reference types only).
+private final class TestIdRngBox {
+    let fn: () -> Int
+    init(_ fn: @escaping () -> Int) { self.fn = fn }
+}
+
+private var _testIdRng: (() -> Int)? {
+    get { (Thread.current.threadDictionary[_testIdRngTLSKey] as? TestIdRngBox)?.fn }
+    set {
+        if let fn = newValue {
+            Thread.current.threadDictionary[_testIdRngTLSKey] = TestIdRngBox(fn)
+        } else {
+            Thread.current.threadDictionary.removeObject(forKey: _testIdRngTLSKey)
+        }
+    }
+}
+
+/// Install (or clear) the test-only deterministic id source — see the note
+/// above. The action-corpus harness sets a counter before dispatch and clears
+/// it after (via `defer`). Never call in production.
+public func setTestIdRng(_ fn: (() -> Int)?) {
+    _testIdRng = fn
+}
+
+/// Build an 8-char id from the installed test counter, indexing the alphabet
+/// with `counter() % alphabet.count` (plain modulo, matching the other apps —
+/// NOT `Int.random` rejection-sampling). Returns nil when no override is set.
+private func mintIdFromTestRng() -> String? {
+    guard let testRng = _testIdRng else { return nil }
+    return String((0..<artboardIdLength).map { _ in
+        artboardIdAlphabet[testRng() % artboardIdAlphabet.count]
+    })
+}
+
 /// Mint a fresh 8-char base36 id. Pass a seeded RNG for deterministic
 /// tests; default uses `SystemRandomNumberGenerator`.
 public func generateArtboardId<RNG: RandomNumberGenerator>(
@@ -163,8 +215,11 @@ public func generateArtboardId<RNG: RandomNumberGenerator>(
     return chars
 }
 
-/// Non-generic wrapper that taps a system RNG each call.
+/// Non-generic wrapper that taps a system RNG each call. In tests, a thread-
+/// local override (see `setTestIdRng`) takes precedence so creation verbs mint
+/// deterministic ids; production always falls through to the system RNG.
 public func generateArtboardId() -> String {
+    if let id = mintIdFromTestRng() { return id }
     var rng = SystemRandomNumberGenerator()
     return generateArtboardId(using: &rng)
 }
@@ -186,8 +241,11 @@ public func generateElementId<RNG: RandomNumberGenerator>(
     return chars
 }
 
-/// Non-generic wrapper that taps a system RNG each call.
+/// Non-generic wrapper that taps a system RNG each call. In tests, a thread-
+/// local override (see `setTestIdRng`) takes precedence so creation verbs mint
+/// deterministic ids; production always falls through to the system RNG.
 public func generateElementId() -> String {
+    if let id = mintIdFromTestRng() { return id }
     var rng = SystemRandomNumberGenerator()
     return generateElementId(using: &rng)
 }
