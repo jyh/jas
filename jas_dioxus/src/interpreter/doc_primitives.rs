@@ -76,7 +76,10 @@ pub fn hit_test(x: f64, y: f64) -> Value {
     with_doc(Value::Null, |doc| {
         use crate::geometry::element::Visibility;
         for (li, layer) in doc.layers.iter().enumerate() {
-            if layer.visibility() == Visibility::Invisible {
+            // A locked layer makes its whole subtree non-interactable by
+            // inheritance (the lock is NOT materialized onto children); skip
+            // it like the invisible case. Mirrors Swift/OCaml/Python.
+            if layer.locked() || layer.visibility() == Visibility::Invisible {
                 continue;
             }
             if let Some(children) = layer.children() {
@@ -145,7 +148,9 @@ pub fn hit_test_deep(x: f64, y: f64) -> Value {
     with_doc(Value::Null, |doc| {
         for (li, layer) in doc.layers.iter().enumerate() {
             let layer_vis = layer.visibility();
-            if layer_vis == Visibility::Invisible {
+            // A locked layer's subtree is non-interactable by inheritance
+            // (lock is not materialized onto children); skip the whole layer.
+            if layer.locked() || layer_vis == Visibility::Invisible {
                 continue;
             }
             if let Some(children) = layer.children() {

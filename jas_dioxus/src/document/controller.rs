@@ -2250,7 +2250,10 @@ fn select_flat(
     let mut entries: Selection = Vec::new();
     for (li, layer) in doc.layers.iter().enumerate() {
         let layer_vis = layer.visibility();
-        if layer_vis == Visibility::Invisible {
+        // A locked layer's subtree is non-selectable by inheritance (lock is
+        // not materialized onto children); skip the whole layer. Mirrors the
+        // hit_test path and Swift/OCaml/Python.
+        if layer.locked() || layer_vis == Visibility::Invisible {
             continue;
         }
         if let Some(children) = layer.children() {

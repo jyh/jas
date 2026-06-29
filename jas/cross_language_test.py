@@ -770,6 +770,7 @@ class CrossLanguageTest(absltest.TestCase):
     # the Rust ACTION_FIXTURES list so the corpus stays comparable.
     _ACTION_FIXTURES = [
         "toggle_all_layers_visibility.json",
+        "toggle_all_layers_lock.json",
         "toggle_all_layers_outline.json",
         "new_layer.json",
     ]
