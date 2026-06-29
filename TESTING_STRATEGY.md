@@ -233,7 +233,7 @@ seeded into `document.selection` via each app's non-undoable writer before dispa
 `select_all` is a native `log:` intercept, unreachable through the shared YAML dispatch); (b)
 **deterministic id-seeding** — a per-char COUNTER installed into each app's id-mint override so
 creation verbs mint a fixed id ("01234567", then "89abcdef", …) byte-identical cross-app, with
-production minting unchanged. The corpus surfaced + FIXED five real cross-app divergences:
+production minting unchanged. The corpus surfaced + FIXED SIX real cross-app divergences:
 (i) `toggle_all_layers_lock` — Rust dropped its `cascade_lock` (LYR-247); lock is now a
 per-element flag with effective-lock-by-inheritance at the read sites; (ii) **align apply** —
 converged OCaml/Python from prepend-transform onto BAKE-into-coords (matching Rust/Swift + the
@@ -241,14 +241,17 @@ bake-translation design law) and WIRED OCaml's previously-unwired geometric alig
 boolean snap-rounding — Python banker's → half-away-from-zero; (iv) Swift `isRingSimple`
 reversed-range crash that had disabled the entire boolean_normalize gate for Swift; (v) OCaml
 `Active_document_view.build` exposed no artboard fields, so new_artboard fell back to the
-letter default instead of inheriting the current artboard size (a real OCaml production bug).
-Boolean is exact-vertex at BOTH the action level (`document_to_test_json` pins the polygon
-vertices) and the algorithm level (`boolean.json` / `boolean_normalize` upgraded
+letter default instead of inheriting the current artboard size (a real OCaml production bug);
+(vi) Swift's `translated` transform-baked a CompoundShape under align (others recurse operands)
+→ fixed to recurse operands + gated (`compound_and_rect.svg`). Python's `translate_element`
+also gained the missing Generated arm (it was a no-op → a generated element didn't move under
+align; correctness fix, not action-gated since the generated-element SVG round-trip is
+deferred). Boolean is exact-vertex at BOTH the action level (`document_to_test_json` pins the
+polygon vertices) and the algorithm level (`boolean.json` / `boolean_normalize` upgraded
 property→exact, 4 ports bit-identical at IEEE-754). STILL OPEN: `place_instance` (needs
 `symbols_selected` app-state threading) + `place_concept_instance` (needs concept-pack state);
-align over CompoundShape / Generated kinds (Swift transform-bakes CompoundShape, Python lacks a
-Generated bake arm); and a separate pre-existing Swift `YamlToolArtboardTests.artboardParity`
-drag-coordinate divergence (fails on a clean tree; unrelated to this work).
+and a separate pre-existing Swift `YamlToolArtboardTests.artboardParity` drag-coordinate
+divergence (fails on a clean tree; unrelated to this work).
 **key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
 in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
 `false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
