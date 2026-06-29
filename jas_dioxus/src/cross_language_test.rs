@@ -1082,6 +1082,7 @@ mod tests {
         "align.json",
         "boolean.json",
         "new_artboard.json",
+        "new_symbol.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed

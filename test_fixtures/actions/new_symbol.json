@@ -1,0 +1,11 @@
+[
+  {
+    "name": "new_symbol",
+    "setup_svg": "rect_basic.svg",
+    "selection": [[0, 0]],
+    "actions": [
+      {"action": "new_symbol", "params": {}}
+    ],
+    "expected_json": "new_symbol_expected.json"
+  }
+]
