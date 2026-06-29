@@ -1081,6 +1081,7 @@ mod tests {
         "make_compound_shape.json",
         "align.json",
         "boolean.json",
+        "new_artboard.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed
@@ -1110,6 +1111,20 @@ mod tests {
     fn run_action_model(tc: &serde_json::Value) -> crate::workspace::app_state::AppState {
         let setup_svg = tc["setup_svg"].as_str().unwrap();
         let mut st = action_state_from_svg(setup_svg);
+
+        // Install a deterministic id source so creation verbs (new_artboard,
+        // new_symbol, …) mint a FIXED id ("01234567" for the first 8 draws),
+        // byte-identical across all four apps. A simple per-char counter avoids
+        // any cross-language LCG-arithmetic mismatch; cleared after the run.
+        {
+            use crate::document::artboard::set_test_id_rng;
+            let mut counter: u32 = 0;
+            set_test_id_rng(Some(Box::new(move || {
+                let v = counter;
+                counter = counter.wrapping_add(1);
+                v
+            })));
+        }
 
         // Seed a canvas selection if the case declares one (a list of element
         // paths, e.g. [[0,0],[0,1]]). Selection-dependent verbs (compound shape,
@@ -1144,6 +1159,7 @@ mod tests {
                 .unwrap_or_default();
             crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
         }
+        crate::document::artboard::set_test_id_rng(None);
         st
     }
 

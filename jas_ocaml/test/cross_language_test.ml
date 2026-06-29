@@ -430,6 +430,7 @@ let action_fixtures = [
   "make_compound_shape.json";
   "align.json";
   "boolean.json";
+  "new_artboard.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -466,16 +467,36 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
     | _ -> doc
   in
   let model = Jas.Model.create ~document:doc () in
-  List.iter (fun step ->
-    let action = step |> member "action" |> to_string in
-    (* Params are an object of resolved literals; default to empty. The
-       dispatcher takes them as a [(string * Yojson.Safe.t) list]. *)
-    let params = match step |> member "params" with
-      | `Assoc pairs -> pairs
-      | _ -> []
-    in
-    Jas.Panel_menu.dispatch_yaml_action ~params action model
-  ) (tc |> member "actions" |> to_list);
+  (* DETERMINISTIC ID SEEDING (action corpus). Install a per-char COUNTER as
+     the id source so creation verbs (new_artboard, ...) mint a FIXED id: the
+     counter returns 0, 1, 2, ... and each id char becomes
+     id_alphabet[counter mod 36], so the first 8 draws spell the fixed id
+     zero-one-two-three-four-five-six-seven (the digits 0 through 7),
+     byte-identical across all four apps. A simple counter sidesteps any
+     cross-language LCG-arithmetic mismatch. ONE shared counter feeds BOTH
+     minters (Artboard and Element keep their own override ref because geometry
+     cannot see document), matching the Rust single-counter convention. A fresh
+     counter per case resets to 0; cleared after the run via [Fun.protect].
+     Production paths are unaffected — the override stays [None] outside tests. *)
+  let ctr = ref 0 in
+  let counter () = let v = !ctr in incr ctr; v in
+  Jas.Artboard.set_test_id_rng (Some counter);
+  Jas.Element.set_test_id_rng (Some counter);
+  Fun.protect
+    ~finally:(fun () ->
+      Jas.Artboard.set_test_id_rng None;
+      Jas.Element.set_test_id_rng None)
+    (fun () ->
+      List.iter (fun step ->
+        let action = step |> member "action" |> to_string in
+        (* Params are an object of resolved literals; default to empty. The
+           dispatcher takes them as a [(string * Yojson.Safe.t) list]. *)
+        let params = match step |> member "params" with
+          | `Assoc pairs -> pairs
+          | _ -> []
+        in
+        Jas.Panel_menu.dispatch_yaml_action ~params action model
+      ) (tc |> member "actions" |> to_list));
   model
 
 (* Load an action fixture, replay each case through the ACTION seam, and

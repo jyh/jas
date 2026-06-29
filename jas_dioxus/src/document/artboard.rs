@@ -134,53 +134,61 @@ fn platform_entropy() -> u32 {
     }
 }
 
-/// Mint a fresh 8-char base36 id. Optionally seeded via ``rng`` for
-/// deterministic tests; otherwise the platform entropy source is
-/// tapped fresh per character.
-pub fn generate_artboard_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
+thread_local! {
+    /// Test-only deterministic id source. When set, BOTH id minters draw from
+    /// it instead of platform entropy (for a `None` rng arg). The cross-language
+    /// action corpus installs a simple per-char counter (0,1,2,… → first id
+    /// "01234567") so creation verbs (new_artboard / new_symbol / …) mint a
+    /// fixed id, byte-identical across all four apps. Never set in production.
+    static TEST_ID_RNG: std::cell::RefCell<Option<Box<dyn FnMut() -> u32>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Install (or clear) the test-only deterministic id source — see `TEST_ID_RNG`.
+/// The action-corpus harness sets a counter before dispatch and clears it after.
+pub fn set_test_id_rng(f: Option<Box<dyn FnMut() -> u32>>) {
+    TEST_ID_RNG.with(|c| *c.borrow_mut() = f);
+}
+
+/// Resolve the next 32-bit id source value: an explicit `rng` arg wins, then the
+/// thread-local test override, then platform entropy. Keeps the two public
+/// minters byte-identical and routes the deterministic test seam through `None`.
+fn next_id_value(rng: &mut Option<&mut dyn FnMut() -> u32>) -> u32 {
+    if let Some(source) = rng.as_mut() {
+        return source();
+    }
+    if let Some(v) = TEST_ID_RNG.with(|c| c.borrow_mut().as_mut().map(|f| f())) {
+        return v;
+    }
+    platform_entropy()
+}
+
+fn mint_id(mut rng: Option<&mut dyn FnMut() -> u32>) -> String {
     let mut bytes = [0u8; ARTBOARD_ID_LENGTH];
-    match rng {
-        Some(source) => {
-            for slot in bytes.iter_mut() {
-                let idx = (source() as usize) % ARTBOARD_ID_ALPHABET.len();
-                *slot = ARTBOARD_ID_ALPHABET[idx];
-            }
-        }
-        None => {
-            for slot in bytes.iter_mut() {
-                let idx = (platform_entropy() as usize) % ARTBOARD_ID_ALPHABET.len();
-                *slot = ARTBOARD_ID_ALPHABET[idx];
-            }
-        }
+    for slot in bytes.iter_mut() {
+        let idx = (next_id_value(&mut rng) as usize) % ARTBOARD_ID_ALPHABET.len();
+        *slot = ARTBOARD_ID_ALPHABET[idx];
     }
     // Safe: the alphabet contains only ASCII characters.
     String::from_utf8(bytes.to_vec()).expect("base36 alphabet is ASCII")
 }
 
+/// Mint a fresh 8-char base36 id. Optionally seeded via ``rng`` for
+/// deterministic tests; otherwise the thread-local test override (if any),
+/// then the platform entropy source, is tapped fresh per character.
+pub fn generate_artboard_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
+    mint_id(rng)
+}
+
 /// Mint a fresh 8-char base36 stable-element id. Identical in shape to
 /// [`generate_artboard_id`] (same alphabet, same length, same rng seam:
-/// `None` taps platform entropy, `Some` is deterministic for tests) but
-/// minted for element identity rather than artboard identity. This is a
-/// UI-layer minter and must never be called inside a Controller method
-/// (controllers take ids as parameters so they stay deterministic).
+/// `None` taps the test override then platform entropy, `Some` is
+/// deterministic) but minted for element identity rather than artboard
+/// identity. This is a UI-layer minter and must never be called inside a
+/// Controller method (controllers take ids as parameters so they stay
+/// deterministic).
 pub fn generate_element_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
-    let mut bytes = [0u8; ARTBOARD_ID_LENGTH];
-    match rng {
-        Some(source) => {
-            for slot in bytes.iter_mut() {
-                let idx = (source() as usize) % ARTBOARD_ID_ALPHABET.len();
-                *slot = ARTBOARD_ID_ALPHABET[idx];
-            }
-        }
-        None => {
-            for slot in bytes.iter_mut() {
-                let idx = (platform_entropy() as usize) % ARTBOARD_ID_ALPHABET.len();
-                *slot = ARTBOARD_ID_ALPHABET[idx];
-            }
-        }
-    }
-    // Safe: the alphabet contains only ASCII characters.
-    String::from_utf8(bytes.to_vec()).expect("base36 alphabet is ASCII")
+    mint_id(rng)
 }
 
 /// Match a name against the default `Artboard N` pattern and return

@@ -76,13 +76,29 @@ DEFAULT_ARTBOARD_OPTIONS = ArtboardOptions()
 _ARTBOARD_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ARTBOARD_ID_LENGTH = 8
 
+# Test-only deterministic id source. Cross-language harnesses install a
+# per-char counter here so id minting is byte-reproducible against the
+# Rust-authored goldens (action corpus). It takes precedence over the
+# ``secrets`` default but NEVER over an explicit ``rng`` argument, so
+# production paths (which pass no override and never install this) are
+# unaffected. Mirrors the Rust test-harness id-source convention.
+_TEST_ID_RNG: Optional[Callable[[], int]] = None
+
+
+def set_test_id_rng(fn: Optional[Callable[[], int]]) -> None:
+    """Install (or clear, with ``None``) the module-level deterministic id
+    source used by cross-language test harnesses. Test-only — production
+    code never calls this."""
+    global _TEST_ID_RNG
+    _TEST_ID_RNG = fn
+
 
 def generate_artboard_id(rng: Optional[Callable[[], int]] = None) -> str:
     """Mint a fresh 8-char base36 id. Pass a zero-arg callable returning
-    a non-negative integer for deterministic tests; default uses
-    ``secrets.randbelow``."""
+    a non-negative integer for deterministic tests; default uses the
+    test override if installed, else ``secrets.randbelow``."""
     if rng is None:
-        rng = lambda: secrets.randbelow(1 << 30)
+        rng = _TEST_ID_RNG if _TEST_ID_RNG is not None else (lambda: secrets.randbelow(1 << 30))
     alphabet_len = len(_ARTBOARD_ID_ALPHABET)
     return "".join(
         _ARTBOARD_ID_ALPHABET[rng() % alphabet_len]
@@ -99,7 +115,7 @@ def generate_element_id(rng: Optional[Callable[[], int]] = None) -> str:
     inside a Controller method (controllers take ids as parameters so
     they stay deterministic). Mirrors the Rust ``generate_element_id``."""
     if rng is None:
-        rng = lambda: secrets.randbelow(1 << 30)
+        rng = _TEST_ID_RNG if _TEST_ID_RNG is not None else (lambda: secrets.randbelow(1 << 30))
     alphabet_len = len(_ARTBOARD_ID_ALPHABET)
     return "".join(
         _ARTBOARD_ID_ALPHABET[rng() % alphabet_len]

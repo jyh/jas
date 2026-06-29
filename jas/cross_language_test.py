@@ -776,6 +776,7 @@ class CrossLanguageTest(absltest.TestCase):
         "make_compound_shape.json",
         "align.json",
         "boolean.json",
+        "new_artboard.json",
     ]
 
     @staticmethod
@@ -811,10 +812,27 @@ class CrossLanguageTest(absltest.TestCase):
                 ElementSelection.all(tuple(p)) for p in tc["selection"])
             model.set_document_unbracketed(
                 dataclasses.replace(model.document, selection=sel))
-        for step in tc["actions"]:
-            action = step["action"]
-            params = step.get("params", {}) or {}
-            self._dispatch_action(action, params, model)
+        # Install a fresh deterministic id source (a per-char counter
+        # returning 0,1,2,... on successive calls) so verbs that mint ids
+        # (e.g. new_artboard) produce reproducible, golden-pinned ids:
+        # the first 8 draws give chars [0..7] = "01234567". A fresh
+        # counter per call resets to 0; cleared in finally so production
+        # entropy is restored and other tests are unaffected. Mirrors the
+        # Rust harness id-source convention.
+        from document.artboard import set_test_id_rng
+        _ctr = [0]
+        def _counter():
+            v = _ctr[0]
+            _ctr[0] += 1
+            return v
+        set_test_id_rng(_counter)
+        try:
+            for step in tc["actions"]:
+                action = step["action"]
+                params = step.get("params", {}) or {}
+                self._dispatch_action(action, params, model)
+        finally:
+            set_test_id_rng(None)
         return model
 
     def _assert_action_test(self, tc):

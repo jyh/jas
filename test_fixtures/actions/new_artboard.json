@@ -1,0 +1,10 @@
+[
+  {
+    "name": "new_artboard",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {"action": "new_artboard", "params": {}}
+    ],
+    "expected_json": "new_artboard_expected.json"
+  }
+]
