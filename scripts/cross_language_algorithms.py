@@ -27,8 +27,8 @@ ALGORITHMS = {
     "measure":           ("tolerance", 1e-4),
     "element_bounds":    ("tolerance", 1e-4),
     "hit_test":          ("exact", None),
-    "boolean":           ("property_boolean", 0.01),
-    "boolean_normalize": ("property_normalize", 0.01),
+    "boolean":           ("exact_boolean", None),
+    "boolean_normalize": ("exact_boolean", None),
     "fit_curve":         ("tolerance", 0.5),
     "shape_recognize":   ("shape", 0.5),
     "planar":            ("property_planar", 0.01),
@@ -39,9 +39,7 @@ ALGORITHMS = {
 }
 
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
-SKIP_LANG_ALGO = {
-    ("swift", "boolean_normalize"),  # Range crash in Swift normalize()
-}
+SKIP_LANG_ALGO = set()
 
 
 # ---------------------------------------------------------------
@@ -136,6 +134,28 @@ def compare_tolerance(ref_result, other_result, tol):
     return values_close(ref_result, other_result, tol)
 
 
+def _round4(v):
+    """Round to 4 decimals, round-half-away-from-zero, matching the
+    cross-language _fmt convention (math.floor(x*10000 + 0.5)/10000 for
+    non-negatives, mirrored for negatives) used by every app serializer."""
+    if v < 0:
+        return -(math.floor(-v * 10000 + 0.5) / 10000)
+    return math.floor(v * 10000 + 0.5) / 10000
+
+
+def _round_rings(rings):
+    return [[[_round4(c) for c in pt] for pt in ring] for ring in rings]
+
+
+def compare_exact_boolean(ref_result, other_result):
+    """Exact-vertex boolean comparison: the result polygon rings must be
+    bit-equal (to 4-decimal _fmt precision) elementwise — same ring order,
+    same vertex order, same coords. The coarse property fields (area /
+    ring_count / sample_points or all_rings_simple) remain in the payload
+    as a backstop but the gate is the rings."""
+    return _round_rings(ref_result["rings"]) == _round_rings(other_result["rings"])
+
+
 def compare_property_boolean(ref_result, other_result, tol):
     """Boolean op: ring_count exact, area within tol, sample_points exact."""
     if ref_result["ring_count"] != other_result["ring_count"]:
@@ -195,6 +215,8 @@ def compare(strategy, ref_vec, other_vec, tol):
     other_r = other_vec["result"]
     if strategy == "exact":
         return compare_exact(ref_r, other_r)
+    elif strategy == "exact_boolean":
+        return compare_exact_boolean(ref_r, other_r)
     elif strategy == "tolerance":
         return compare_tolerance(ref_r, other_r, tol)
     elif strategy == "property_boolean":

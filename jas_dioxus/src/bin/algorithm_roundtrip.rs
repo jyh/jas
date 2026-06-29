@@ -219,12 +219,20 @@ fn run_boolean(vectors: &[Value]) -> Vec<Value> {
                 })
                 .unwrap_or_default();
 
+            let rings: Vec<Value> = result
+                .iter()
+                .map(|ring| {
+                    Value::Array(ring.iter().map(|&(x, y)| json!([x, y])).collect())
+                })
+                .collect();
+
             json!({
                 "name": name,
                 "result": {
                     "area": polygon_set_area(&result),
                     "ring_count": result.len(),
-                    "sample_points": sample_points
+                    "sample_points": sample_points,
+                    "rings": rings
                 }
             })
         })
@@ -243,12 +251,20 @@ fn run_boolean_normalize(vectors: &[Value]) -> Vec<Value> {
             let input = parse_polygon_set(&tc["input"]);
             let result = normalize(&input);
 
+            let rings: Vec<Value> = result
+                .iter()
+                .map(|ring| {
+                    Value::Array(ring.iter().map(|&(x, y)| json!([x, y])).collect())
+                })
+                .collect();
+
             json!({
                 "name": name,
                 "result": {
                     "area": polygon_set_area(&result),
                     "ring_count": result.len(),
-                    "all_rings_simple": all_rings_simple(&result)
+                    "all_rings_simple": all_rings_simple(&result),
+                    "rings": rings
                 }
             })
         })
