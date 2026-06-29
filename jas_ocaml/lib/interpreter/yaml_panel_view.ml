@@ -5432,28 +5432,57 @@ and render_repeat ~packing ~ctx el =
   (* Determine layout direction from the element *)
   let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
   let gap = el |> member "style" |> safe_member "gap" |> to_int_option |> Option.value ~default:0 in
-  let is_row = layout_dir = "row" || layout_dir = "wrap" in
-  let container = if is_row
-    then (GPack.hbox ~spacing:gap ~packing () :> GPack.box)
-    else (GPack.vbox ~spacing:gap ~packing () :> GPack.box) in
-  if layout_dir = "wrap" then
-    container#misc#set_size_request ~width:0 ();
-  (* Build scope from context and iterate with child scopes *)
+  (* Build scope + per-item child context (loop var + _index). *)
   let scope = Scope.from_json ctx in
-  (match items_json with
-   | `List items ->
-     List.iteri (fun i item ->
-       (* Build item data with _index *)
-       let item_obj = match item with
-         | `Assoc pairs -> `Assoc (("_index", `Int i) :: pairs)
-         | other -> `Assoc [("_index", `Int i); ("value", other)]
-       in
-       (* Push a child scope with the loop variable — parent unchanged *)
-       let child_scope = Scope.extend scope [(var_name, item_obj)] in
-       let child_ctx = Scope.to_json child_scope in
-       render_element ~packing:(container#pack ~expand:false) ~ctx:child_ctx template
-     ) items
-   | _ -> ())
+  let child_ctx_of i item =
+    let item_obj = match item with
+      | `Assoc pairs -> `Assoc (("_index", `Int i) :: pairs)
+      | other -> `Assoc [("_index", `Int i); ("value", other)] in
+    Scope.to_json (Scope.extend scope [(var_name, item_obj)])
+  in
+  if layout_dir = "wrap" then begin
+    (* Manual wrap: lablgtk exposes no GtkFlowBox and a plain hbox never wraps,
+       so a long list (e.g. the Swatches Web-Colors grid) would lay out as one
+       enormous row and force the whole dock super-wide. Lay the items into a
+       vbox of hbox rows, breaking to a new row every [cols] items. [cols] is
+       derived from the dock content width and the item's natural width so a row
+       never exceeds the dock and the panel keeps a sane width. *)
+    let vbox = GPack.vbox ~spacing:gap ~packing () in
+    let item_w =
+      match template |> safe_member "style" |> safe_member "width"
+            |> to_int_option with
+      | Some w -> w
+      | None ->
+        (match template |> member "type" |> to_string_option with
+         | Some "color_swatch" -> 16
+         | Some "gradient_tile" -> 32
+         | _ -> 24) in
+    let avail = 210 in
+    let cols = max 1 ((avail + gap) / (item_w + gap)) in
+    let row = ref None in
+    (match items_json with
+     | `List items ->
+       List.iteri (fun i item ->
+         if i mod cols = 0 then
+           row := Some (GPack.hbox ~spacing:gap ~packing:(vbox#pack ~expand:false) ());
+         let r = match !row with
+           | Some r -> r
+           | None -> GPack.hbox ~spacing:gap ~packing:(vbox#pack ~expand:false) () in
+         render_element ~packing:(r#pack ~expand:false) ~ctx:(child_ctx_of i item) template
+       ) items
+     | _ -> ())
+  end else begin
+    let container = if layout_dir = "row"
+      then (GPack.hbox ~spacing:gap ~packing () :> GPack.box)
+      else (GPack.vbox ~spacing:gap ~packing () :> GPack.box) in
+    (match items_json with
+     | `List items ->
+       List.iteri (fun i item ->
+         render_element ~packing:(container#pack ~expand:false)
+           ~ctx:(child_ctx_of i item) template
+       ) items
+     | _ -> ())
+  end
 
 (* [to_number_option] is provided by [Yojson.Safe.Util] (opened inside
    each render function) and also parses numeric strings — the former
