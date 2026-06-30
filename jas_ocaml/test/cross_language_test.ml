@@ -3204,5 +3204,56 @@ let () =
             assert false
           end
         ) tests);
+
+      (* Menu enabled/checked algorithm test vectors (TESTING_STRATEGY.md chrome
+         seam), the structural sibling of algorithm_widget_tree. Mirrors the
+         Python consumer: load the bundle [menubar], evaluate each case's [ctx]
+         through [menu_state], and structurally compare the per-item record array
+         to the golden (normalized so key order is irrelevant). *)
+      Alcotest.test_case "algorithm_menu_state" `Quick (fun () ->
+        (* Recursively sort object keys so equality is order-independent. *)
+        let rec normalize (v : Yojson.Safe.t) : Yojson.Safe.t =
+          match v with
+          | `Assoc fields ->
+            `Assoc
+              (List.sort (fun (a, _) (b, _) -> compare a b)
+                 (List.map (fun (k, x) -> (k, normalize x)) fields))
+          | `List xs -> `List (List.map normalize xs)
+          | other -> other
+        in
+        let json_str = read_fixture "algorithms/menu_state.json" in
+        let tests = Yojson.Safe.Util.to_list (Yojson.Safe.from_string json_str) in
+        let bundle_path =
+          Filename.concat fixtures_dir "../workspace/workspace.json" in
+        let bundle =
+          Yojson.Safe.from_string
+            (let ic = open_in bundle_path in
+             let n = in_channel_length ic in
+             let s = Bytes.create n in
+             really_input ic s 0 n;
+             close_in ic;
+             Bytes.to_string s) in
+        let menubar = Yojson.Safe.Util.member "menubar" bundle in
+        List.iter (fun tc ->
+          let open Yojson.Safe.Util in
+          let name = tc |> member "name" |> to_string in
+          let func = tc |> member "function" |> to_string in
+          if func <> "menu_state" then
+            failwith (Printf.sprintf "Unknown function: %s" func);
+          let ctx =
+            match tc |> member "args" |> member "ctx" with
+            | `Null -> `Assoc []
+            | v -> v
+          in
+          let expected = tc |> member "expected" in
+          let actual = Jas.Menu_state.menu_state menubar ctx in
+          if normalize actual <> normalize expected then begin
+            Printf.eprintf "=== EXPECTED (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize expected));
+            Printf.eprintf "=== ACTUAL (%s) ===\n%s\n" name
+              (Yojson.Safe.pretty_to_string (normalize actual));
+            assert false
+          end
+        ) tests);
     ];
   ]
