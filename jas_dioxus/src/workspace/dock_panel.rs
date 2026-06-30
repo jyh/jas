@@ -1244,9 +1244,24 @@ pub(crate) fn build_dock_groups(
                             let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
                             // Apply live overrides only for relevant panels
                             let panel_name = content_id.strip_suffix("_panel_content").unwrap_or("");
+                            // SwatchesPanelState mirror keys (build_live_panel_overrides)
+                            // use bare names that collide with the Brushes panel's own
+                            // state (selected_library / open_libraries / thumbnail_size).
+                            // They reflect the live SWATCHES state, so applying them to
+                            // any other panel clobbers its defaults — e.g. Brushes'
+                            // open_libraries becomes the swatches' web_colors library,
+                            // which is absent from data.brush_libraries and blanks the
+                            // panel. Scope them to the swatches panel.
+                            const SWATCHES_OWNED: &[&str] = &[
+                                "selected_swatches", "selected_library",
+                                "open_libraries", "thumbnail_size",
+                            ];
                             for (k, v) in live_panel_overrides {
                                 // Color overrides: mode, h, s, b, r, g, bl, c, m, y, k, hex
                                 // Stroke overrides: weight, cap, join, miter_limit, etc.
+                                if panel_name != "swatches" && SWATCHES_OWNED.contains(&k.as_str()) {
+                                    continue;
+                                }
                                 // Only apply if key exists in this panel's state defaults
                                 if panel_map.contains_key(k) {
                                     panel_map.insert(k.clone(), v.clone());
@@ -1599,8 +1614,34 @@ mod stroke_panel_override_tests {
         let panel_name = "brushes";
         let live_state_map = build_live_state_map(&st);
 
-        let panel_map: serde_json::Map<String, serde_json::Value> =
+        let mut panel_map: serde_json::Map<String, serde_json::Value> =
             ws.panel_state_defaults(content_id).into_iter().collect();
+        // Replicate the dock's override application (incl. the swatches-owned
+        // scoping): the live SWATCHES open_libraries (web_colors) must NOT
+        // clobber the Brushes panel's own open_libraries default.
+        let overrides = build_live_panel_overrides(&st);
+        // Confirm the collision exists: the override map carries the swatches
+        // open_libraries (web_colors), which without scoping would clobber
+        // the brushes default below.
+        assert_eq!(
+            overrides.get("open_libraries")
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.first())
+                .and_then(|o| o.get("id"))
+                .and_then(|v| v.as_str()),
+            Some("web_colors"),
+            "swatches override open_libraries present (the collision source)");
+        const SWATCHES_OWNED: &[&str] = &[
+            "selected_swatches", "selected_library", "open_libraries", "thumbnail_size",
+        ];
+        for (k, v) in &overrides {
+            if panel_name != "swatches" && SWATCHES_OWNED.contains(&k.as_str()) {
+                continue;
+            }
+            if panel_map.contains_key(k) {
+                panel_map.insert(k.clone(), v.clone());
+            }
+        }
         let panel_state = build_panel_state_subset(panel_name, &live_state_map);
         let mut eval_map = serde_json::Map::new();
         eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
