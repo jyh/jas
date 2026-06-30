@@ -1022,18 +1022,11 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
               | `Assoc spec ->
                 (match !_current_store, ctx with
                  | Some store, `Assoc ctx_pairs ->
-                   (* [apply_select_effect] writes to the store's active
-                      panel, but OCaml never calls [set_active_panel]
-                      anywhere, so it is always None and the effect
-                      no-ops. Point it at the panel this click dispatcher
-                      is operating on (the same id [click_ctx] uses) for
-                      the duration of the call, then restore — keeping the
-                      blast radius to this one effect rather than flipping
-                      a global other effects key off [get_active_panel_id]. *)
-                   let prev = State_store.get_active_panel_id store in
-                   State_store.set_active_panel store !_current_panel_id;
+                   (* The store's active panel is now set at render time
+                      (create_panel_body), so [apply_select_effect] resolves
+                      the right panel via [get_active_panel_id]. Schedule a
+                      body rebuild so the [selected_in] outline repaints. *)
                    Effects.apply_select_effect spec ctx_pairs store;
-                   State_store.set_active_panel store prev;
                    schedule_panel_rerender ();
                    wrote_state := true
                  | _ -> ())
@@ -1661,6 +1654,29 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "icon_select" -> render_icon_select ~packing ~ctx el
   | _ -> render_placeholder ~packing el
 
+(* Build the live click context for a panel widget: the captured render
+   [ctx] with [panel]/[state] refreshed from the live store and an [event]
+   entry carrying the click modifiers (so a [select] effect resolves
+   extend (Shift) / toggle (Ctrl/Cmd) / single mode). Shared by
+   [render_color_swatch] and behavior-bearing containers (brush tiles). *)
+and build_widget_click_ctx ev (ctx : Yojson.Safe.t) : Yojson.Safe.t =
+  let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state ev) in
+  let event_json = `Assoc [
+    ("shift", `Bool (List.mem `SHIFT modifiers));
+    ("ctrl", `Bool (List.mem `CONTROL modifiers));
+    ("meta", `Bool (List.mem `META modifiers));
+  ] in
+  match !_current_store, !_current_panel_id, ctx with
+  | Some store, Some pid, `Assoc pairs ->
+    let live_panel = State_store.get_panel_state store pid in
+    let live_state = State_store.get_all store in
+    let pairs' = List.filter
+      (fun (k, _) -> k <> "panel" && k <> "state" && k <> "event") pairs in
+    `Assoc (("panel", `Assoc live_panel)
+            :: ("state", `Assoc live_state)
+            :: ("event", event_json) :: pairs')
+  | _ -> ctx
+
 and render_container ~packing ~ctx el etype =
   let open Yojson.Safe.Util in
   let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
@@ -1683,6 +1699,42 @@ and render_container ~packing ~ctx el etype =
      border via a CSS provider, inset by the container padding, and rebind the
      packing so the body builds inside the frame. Mirrors the dialog flyout
      border in yaml_dialog_view. Borderless containers are untouched. *)
+  (* A container that declares click / double-click behaviors (e.g. the
+     Brushes panel brush tile, a bordered container) gets no handler from
+     the layout code below — so without this wrap its select /
+     apply_brush_to_selection / double-click options never fire. Wrap it in
+     an event box and route through the same shared dispatchers
+     [render_color_swatch] uses; outermost so clicks on the frame/children
+     bubble up to it. *)
+  let has_click_behavior =
+    match el |> member "behavior" with
+    | `List bs ->
+      List.exists (fun b ->
+        match b |> member "event" |> to_string_option with
+        | Some ("click" | "double_click") -> true | _ -> false) bs
+    | _ -> false in
+  let packing =
+    if not has_click_behavior then packing
+    else begin
+      let evt = GBin.event_box ~packing () in
+      evt#event#add [`BUTTON_PRESS];
+      ignore (evt#event#connect#button_press ~callback:(fun ev ->
+        if GdkEvent.Button.button ev <> 1 then false
+        else begin
+          let click_ctx = build_widget_click_ctx ev ctx in
+          if GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
+            dispatch_double_click_behaviors el click_ctx; true
+          end else begin
+            let wrote_state = dispatch_click_behaviors el click_ctx in
+            if wrote_state then schedule_panel_rerender ();
+            true
+          end
+        end));
+      evt#add
+    end in
+  (* When the container is a selectable tile (binds [selected_in], like a
+     brush tile) draw the selection feedback as a 2px accent border, matching
+     the color_swatch outline; otherwise the declared 1px border. *)
   let packing =
     match el |> member "style" |> safe_member "border" |> to_string_option with
     | None -> packing
@@ -1690,14 +1742,19 @@ and render_container ~packing ~ctx el etype =
       let pad =
         el |> member "style" |> safe_member "padding"
         |> to_int_option |> Option.value ~default:0 in
+      let selected =
+        (el |> member "bind" |> safe_member "selected_in") <> `Null
+        && is_selected_in_list el ctx in
+      let border_w, border_c =
+        if selected then 2, "#4a8fd9" else 1, "#555555" in
       let frame = GBin.frame ~shadow_type:`NONE ~packing () in
       let provider = new GObj.css_provider (GtkData.CssProvider.create ()) in
       (* theme.colors.border is #555555; hardcoded like the dialog flyout
          border so the box draws regardless of whether the theme token is in
          the eval ctx. *)
       provider#load_from_data (Printf.sprintf
-        "frame, frame > border { border: 1px solid #555555; border-radius: 4px; padding: %dpx; }"
-        pad);
+        "frame, frame > border { border: %dpx solid %s; border-radius: 4px; padding: %dpx; }"
+        border_w border_c pad);
       frame#misc#style_context#add_provider provider 600;
       frame#add
   in
@@ -3281,27 +3338,9 @@ and render_color_swatch ~packing ~ctx el =
          captured Yojson; a recent-swatch click using stale ctx
          resolves [panel.recent_colors.0] to null and the condition
          gate ([panel.recent_colors.0 != null]) fails silently. *)
-      (* Carry the click modifiers so a [select] effect can resolve
-         extend (Shift) / toggle (Ctrl or Cmd) / single mode the same way
-         the other ports do. apply_select_effect reads these from
-         [ctx.event]; with no event entry it falls back to single. *)
-      let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state ev) in
-      let event_json = `Assoc [
-        ("shift", `Bool (List.mem `SHIFT modifiers));
-        ("ctrl", `Bool (List.mem `CONTROL modifiers));
-        ("meta", `Bool (List.mem `META modifiers));
-      ] in
-      let click_ctx =
-        match !_current_store, !_current_panel_id, ctx with
-        | Some store, Some pid, `Assoc pairs ->
-          let live_panel = State_store.get_panel_state store pid in
-          let live_state = State_store.get_all store in
-          let pairs' = List.filter
-            (fun (k, _) -> k <> "panel" && k <> "state" && k <> "event") pairs in
-          `Assoc (("panel", `Assoc live_panel)
-                  :: ("state", `Assoc live_state)
-                  :: ("event", event_json) :: pairs')
-        | _ -> ctx in
+      (* Live panel/state ctx + click modifiers, via the shared helper so
+         color_swatch and behavior-bearing containers dispatch identically. *)
+      let click_ctx = build_widget_click_ctx ev ctx in
       (* TWO_BUTTON_PRESS fires GTK's double-click after the second
          BUTTON_PRESS. Dispatch double_click behaviors (e.g. the
          fill_stroke_widget's open_color_picker action) and skip
@@ -5775,6 +5814,14 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
       ] @ selection_preds) in
       _current_store := Some store;
       _current_panel_id := Some content_id;
+      (* Keep the store's active panel in sync with the panel being
+         rendered. OCaml otherwise never calls [set_active_panel], so
+         [get_active_panel_id] stayed None and every effect that resolves
+         its target panel through it (set_panel_state without an explicit
+         [panel], pop: panel.X, set: panel.X, and the select effect's
+         apply_select_effect) silently no-oped. Per-panel stores make this
+         correct: each store records its own content id, never another's. *)
+      State_store.set_active_panel store (Some content_id);
       (* Register the panel store for cross-panel bridges
          (recent_colors etc.) AND for menu-command dispatchers that
          reach back into panel state (paragraph / opacity menus). The
@@ -5990,5 +6037,13 @@ let mount_toolbar ~packing ?(get_model = fun () -> None) () =
       ] @ selection_preds) in
       _current_store := Some store;
       _current_panel_id := Some content_id;
+      (* Keep the store's active panel in sync with the panel being
+         rendered. OCaml otherwise never calls [set_active_panel], so
+         [get_active_panel_id] stayed None and every effect that resolves
+         its target panel through it (set_panel_state without an explicit
+         [panel], pop: panel.X, set: panel.X, and the select effect's
+         apply_select_effect) silently no-oped. Per-panel stores make this
+         correct: each store records its own content id, never another's. *)
+      State_store.set_active_panel store (Some content_id);
       _get_model_ref := get_model;
       render_element ~packing ~ctx content
