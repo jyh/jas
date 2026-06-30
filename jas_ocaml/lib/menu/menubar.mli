@@ -36,10 +36,16 @@ val delete_orphan_warning_body : verb:string -> int -> string
     when the user confirms with [Delete]. *)
 val confirm_delete_orphans : int -> GWindow.window -> bool
 
-val create : (unit -> Model.model) -> GWindow.window -> on_open:(Model.model -> unit) -> ?workspace_layout:Workspace_layout.workspace_layout -> ?app_config:Workspace_layout.app_config -> ?refresh_dock:(unit -> unit) -> GPack.box -> unit
+(** [get_tab_count] supplies the number of open document tabs, driving the
+    menu evaluation context's [state.tab_count] (the analog of Python's
+    [window.tab_widget.count()]); omitted, it defaults to 0 and every
+    document-dependent menu item evaluates as disabled. *)
+val create : (unit -> Model.model) -> GWindow.window -> on_open:(Model.model -> unit) -> ?workspace_layout:Workspace_layout.workspace_layout -> ?app_config:Workspace_layout.app_config -> ?refresh_dock:(unit -> unit) -> ?get_tab_count:(unit -> int) -> GPack.box -> unit
 
-(** Resync the Window-menu panel check items against the live
-    workspace_layout. Call this after any external change to panel
-    visibility (right-click Close, layout restore, etc.) so the
-    checkmarks stay truthful. No-op until [create] has been invoked. *)
+(** Re-evaluate the menu's bundle [enabled_when] / [checked_when] predicates
+    against live document + layout state and re-apply each item's sensitivity
+    + check mark (through the shared expression evaluator). Call this after any
+    external change to panel/pane visibility (right-click Close, layout
+    restore, etc.) so the menu stays truthful. No-op until [create] has been
+    invoked. *)
 val sync_panel_checks : unit -> unit

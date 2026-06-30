@@ -198,7 +198,7 @@ let brand_icon_path size =
   ] in
   List.find_opt Sys.file_exists candidates
 
-let create_main_window ~get_model ~get_fill_on_top ~on_open () =
+let create_main_window ~get_model ~get_fill_on_top ~on_open ?get_tab_count () =
   let window = GWindow.window
     ~title:"Jas"
     ~width:1200 ~height:900
@@ -244,6 +244,7 @@ let create_main_window ~get_model ~get_fill_on_top ~on_open () =
    | None -> ());
   Menubar.create get_model window ~on_open
     ~workspace_layout ~app_config ~refresh_dock:(fun () -> !dock_refresh ())
+    ?get_tab_count
     (menubar_row :> GPack.box);
 
   (* Wire the toolbar double-click -> show-panel path: a tool whose bundle

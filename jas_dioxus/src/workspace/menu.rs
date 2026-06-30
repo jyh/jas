@@ -31,6 +31,7 @@ pub enum MenuEntry {
         params: serde_json::Map<String, serde_json::Value>,
         shortcut: String,
         enabled_when: Option<String>,
+        checked_when: Option<String>,
     },
 }
 
@@ -112,6 +113,10 @@ fn project_entry(item: &serde_json::Value) -> MenuEntry {
             .to_string(),
         enabled_when: item
             .get("enabled_when")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        checked_when: item
+            .get("checked_when")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
     }

@@ -27,6 +27,7 @@ type entry =
       params : (string * Yojson.Safe.t) list;
       shortcut : string;
       enabled_when : string option;
+      checked_when : string option;
     }
 
 (** One top-level menu (e.g. "&File") and its entries. *)
@@ -71,9 +72,13 @@ let project_entry (item : Yojson.Safe.t) : entry =
          | Some (`Assoc pairs) -> pairs
          | _ -> []
        in
-       let enabled_when =
-         match Workspace_loader.json_member "enabled_when" item with
-         | Some (`String s) -> Some s
+       (* A present, non-empty string predicate else [None] — mirrors the
+          [Menu_state.opt_expr] truthiness so the live menu and the
+          cross-app [menu_state] gate treat an empty predicate identically
+          (both default rather than evaluate). *)
+       let opt_str_member key =
+         match Workspace_loader.json_member key item with
+         | Some (`String s) when s <> "" -> Some s
          | _ -> None
        in
        Action {
@@ -81,7 +86,8 @@ let project_entry (item : Yojson.Safe.t) : entry =
          action = str_member "action" item;
          params;
          shortcut = str_member "shortcut" item;
-         enabled_when;
+         enabled_when = opt_str_member "enabled_when";
+         checked_when = opt_str_member "checked_when";
        })
 
 let project_menu (menu : Yojson.Safe.t) : menu =

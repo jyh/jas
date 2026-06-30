@@ -126,7 +126,11 @@ let () =
 
   let get_model () = !active_model in
   let get_fill_on_top () = match !toolbar_ref with Some t -> t#fill_on_top | None -> true in
-  let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas () in
+  (* Open-tab count for the menu evaluation context's [state.tab_count]:
+     [all_canvases] is the live tab list (pruned on close below), the analog
+     of Python's [window.tab_widget.count()]. *)
+  let get_tab_count () = List.length !all_canvases in
+  let main_window, toolbar_fixed, notebook, dock_box = Jas.Canvas.create_main_window ~get_model ~get_fill_on_top ~on_open:add_canvas ~get_tab_count () in
   main_window_ref := Some main_window;
   (* Optional window-title override from [--title <name>] on the command line.
      The window is otherwise titled Jas; a unique title lets a screen-capture

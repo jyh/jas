@@ -672,8 +672,56 @@ let panel_kind_of_string (s : string) : Workspace_layout.panel_kind option =
   | "symbols" -> Some Workspace_layout.Symbols
   | _ -> None
 
-let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) (vbox : GPack.box) =
+let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open ?(workspace_layout : Workspace_layout.workspace_layout option) ?(app_config : Workspace_layout.app_config option) ?(refresh_dock : (unit -> unit) option) ?(get_tab_count : (unit -> int) option) (vbox : GPack.box) =
   let m () = get_model () in
+  (* Number of open document tabs — drives [state.tab_count] in the menu
+     evaluation context (the analog of Python's [window.tab_widget.count()]).
+     Defaults to 0 (no tabs) when the caller wires no provider. *)
+  let tab_count () = match get_tab_count with Some f -> f () | None -> 0 in
+
+  (* --- Live menu enabled/checked evaluation (TESTING_STRATEGY.md chrome
+     seam). Every action / toggle item registers a setter pair plus its
+     bundle [enabled_when] / [checked_when] predicate; [sync_menu] rebuilds
+     the evaluation context from live state and re-applies sensitivity +
+     check marks through the SAME shared expression evaluator the cross-app
+     [Menu_state] gate pins, so the live menu and the gate agree by
+     construction. This REPLACES the former compute-once native checkmark /
+     Revert-gate logic. Each tuple is
+     [(set_sensitive, set_checked option, enabled_when, checked_when)]. *)
+  let sync_items :
+    ((bool -> unit) * (bool -> unit) option * string option * string option)
+    list ref = ref [] in
+  let register_item ~set_sensitive ?set_checked ~enabled_when ~checked_when () =
+    sync_items :=
+      (set_sensitive, set_checked, enabled_when, checked_when) :: !sync_items
+  in
+  (* Build the menu evaluation context from live state: no active document
+     (all-false [active_document]) when there are no tabs, else the current
+     model. Shape pinned by Menu_ctx / the menu_state fixtures. *)
+  let menu_ctx () : Yojson.Safe.t =
+    let n = tab_count () in
+    let model = if n > 0 then Some (get_model ()) else None in
+    Menu_ctx.build ~tab_count:n ~model ~workspace_layout ~app_config
+  in
+  (* Re-evaluate every registered item against the live context and apply
+     it. Wrapped in the suppress guard because [set_active] on a check item
+     fires its toggle callback (which would mutate the layout and recurse). *)
+  let sync_menu () : unit =
+    let ctx = menu_ctx () in
+    let eval expr = Expr_eval.to_bool (Expr_eval.evaluate expr ctx) in
+    _suppress_check_callback := true;
+    Fun.protect ~finally:(fun () -> _suppress_check_callback := false)
+    @@ fun () ->
+    List.iter
+      (fun (set_sensitive, set_checked, enabled_when, checked_when) ->
+        (match enabled_when with
+         | Some e -> set_sensitive (eval e)
+         | None -> ());
+        match (checked_when, set_checked) with
+        | Some c, Some sc -> sc (eval c)
+        | _ -> ())
+      !sync_items
+  in
   (* Menubar *)
   let menubar = GMenu.menu_bar ~packing:(fun w -> vbox#pack w) () in
   let menubar_css = new GObj.css_provider (GtkData.CssProvider.create ()) in
@@ -947,13 +995,14 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
   (* Pane toggle (native) — check-menu item. The bundle [toggle_pane]
      effect is a placeholder, so this stays on the native Layout_apply
      path and keeps the [_suppress_check_callback] re-entrancy guard. *)
-  let build_toggle_pane (window_factory : GMenu.menu GMenu.factory) kind label =
+  let build_toggle_pane (window_factory : GMenu.menu GMenu.factory) kind label
+      ~checked_when =
     match workspace_layout, refresh_dock with
     | Some layout, Some refresh ->
       let active = match Workspace_layout.panes layout with
         | Some pl -> Pane.is_pane_visible pl kind
         | None -> false in
-      ignore (window_factory#add_check_item label ~active ~callback:(fun _ ->
+      let item = window_factory#add_check_item label ~active ~callback:(fun _ ->
         if !_suppress_check_callback then () else begin
           (* OP_LOG 3d-2: route the pane visibility toggle through the shared
              runtime dispatcher; [panes_mut] preserves the dirty signal. *)
@@ -965,21 +1014,26 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
             in
             Layout_apply.layout_apply layout op);
           refresh ()
-        end))
+        end) in
+      (* The check mark now follows the bundle [checked_when] predicate
+         (re-evaluated by [sync_menu]) rather than the compute-once native
+         [~active]. No [enabled_when], so sensitivity is left at the default. *)
+      register_item ~set_sensitive:(fun b -> item#misc#set_sensitive b)
+        ~set_checked:(fun b -> item#set_active b)
+        ~enabled_when:None ~checked_when ()
     | _ -> ()
   in
 
   (* Panel toggles — check-menu items so the Window menu shows a
-     checkmark next to each visible panel. The menu is built once at
-     startup; check states are kept truthful by [sync_panel_checks]
-     (assigned below), which canvas.ml's dock_refresh fires after any
-     panel/dock state change. The bundle [toggle_panel] effect is a
-     placeholder, so this stays on the native Layout_apply path and
-     keeps the [panel_checks] Hashtbl + [_suppress_check_callback]
-     re-entrancy machinery. *)
-  let panel_checks : (Workspace_layout.panel_kind, GMenu.check_menu_item) Hashtbl.t =
-    Hashtbl.create 16 in
-  let build_toggle_panel (window_factory : GMenu.menu GMenu.factory) kind label =
+     checkmark next to each visible panel. The check mark now follows the
+     bundle [checked_when] predicate, re-evaluated by [sync_menu] (which
+     [sync_panel_checks] fires from canvas.ml's dock_refresh after any
+     panel/dock state change, and which each top menu's map signal fires on
+     open). The bundle [toggle_panel] effect is a placeholder, so the TOGGLE
+     itself stays on the native Layout_apply path and keeps the
+     [_suppress_check_callback] re-entrancy guard. *)
+  let build_toggle_panel (window_factory : GMenu.menu GMenu.factory) kind label
+      ~checked_when =
     let active = match workspace_layout with
       | Some layout -> Workspace_layout.is_panel_visible layout kind
       | None -> false in
@@ -1022,7 +1076,12 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
         refresh ()
       | _ -> ()
     ) in
-    Hashtbl.replace panel_checks kind item
+    (* The check mark now follows the bundle [checked_when] predicate
+       (re-evaluated by [sync_menu]), replacing the former [panel_checks]
+       Hashtbl + native [is_panel_visible] compute-once-then-resync logic. *)
+    register_item ~set_sensitive:(fun b -> item#misc#set_sensitive b)
+      ~set_checked:(fun b -> item#set_active b)
+      ~enabled_when:None ~checked_when ()
   in
 
   (* --- Build the menu bar by projecting the compiled bundle [menubar]
@@ -1031,16 +1090,28 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
      A [Window]-scoped factory is captured per Window menu so the native
      dynamic submenus / pane / panel toggles attach to it. This replaced
      five hand-maintained native menus that had drifted from the spec. *)
-  let add_action_item (mf : GMenu.menu GMenu.factory) ~label ~action ~params ~shortcut =
+  let add_action_item (mf : GMenu.menu GMenu.factory) ~label ~action ~params
+      ~shortcut ~enabled_when =
     let item = mf#add_item (Menu_model.strip_mnemonic label)
       ~callback:(fun () -> on_menu_action action params) in
     (match parse_shortcut shortcut with
      | Some (key, modi) -> item#add_accelerator ~group:accel_group ~modi key
-     | None -> ())
+     | None -> ());
+    (* Sensitivity now follows the bundle [enabled_when] predicate
+       (re-evaluated by [sync_menu]), replacing the former always-sensitive
+       items + bespoke Revert aboutToShow gate. No [checked_when] on plain
+       action items, so they carry no check mark. *)
+    register_item ~set_sensitive:(fun b -> item#misc#set_sensitive b)
+      ~enabled_when ~checked_when:None ()
   in
   List.iter (fun (menu : Menu_model.menu) ->
     let menu_widget = factory#add_submenu (Menu_model.strip_mnemonic menu.label) in
     let mf = new GMenu.factory ~accel_group menu_widget in
+    (* Re-evaluate enabled/checked each time this top menu is popped up — the
+       GTK analog of Qt's [aboutToShow]: the submenu (a GtkMenu) is mapped on
+       every open, so sensitivity + check marks reflect the live document /
+       layout / tab state at open time. *)
+    ignore (menu_widget#misc#connect#map ~callback:(fun () -> sync_menu ()));
     List.iter (fun (entry : Menu_model.entry) ->
       match entry with
       | Menu_model.Separator -> ignore (mf#add_separator ())
@@ -1048,7 +1119,7 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
         build_workspace_submenu mf
       | Menu_model.Dynamic_submenu { kind = Menu_model.Appearance; _ } ->
         build_appearance_submenu mf
-      | Menu_model.Action { label; action; params; shortcut; _ } ->
+      | Menu_model.Action { label; action; params; shortcut; enabled_when; checked_when } ->
         (match action with
          | "tile_panes" -> build_tile mf
          | "toggle_pane" ->
@@ -1057,8 +1128,10 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
            (match pane with
             | "toolbar" ->
               build_toggle_pane mf Pane.Toolbar (Menu_model.strip_mnemonic label)
+                ~checked_when
             | "dock" ->
               build_toggle_pane mf Pane.Dock (Menu_model.strip_mnemonic label)
+                ~checked_when
             | _ -> ())
          | "toggle_panel" ->
            let panel = match List.assoc_opt "panel" params with
@@ -1066,33 +1139,30 @@ let create (get_model : unit -> Model.model) (parent : GWindow.window) ~on_open 
            (match panel_kind_of_string panel with
             | Some kind ->
               build_toggle_panel mf kind (Menu_model.strip_mnemonic label)
+                ~checked_when
             | None ->
               (* No matching dockable [panel_kind] (e.g. "concepts" — the
                  Concepts panel is a widget, not yet a layout panel_kind
                  in this app). Add an inert item so the menu still shows
-                 the entry; wiring a real toggle needs a new panel_kind,
-                 a separate feature. *)
+                 the entry; its [panels.concepts] predicate is always false
+                 (no kind), so the plain item reads as unchecked, consistent
+                 with the menu_state gate. Wiring a real toggle needs a new
+                 panel_kind, a separate feature. *)
               ignore (mf#add_item (Menu_model.strip_mnemonic label)))
-         | _ -> add_action_item mf ~label ~action ~params ~shortcut)
+         | _ -> add_action_item mf ~label ~action ~params ~shortcut ~enabled_when)
     ) menu.entries
   ) (Menu_model.menu_bar_model ());
 
-  (* Wire the sync closure: canvas.ml's dock_refresh calls this after
-     any panel state change to keep the Window menu checkmarks
-     truthful even when the change originated outside the menubar
-     (right-click Close, layout restore, panel drag-out, etc.). *)
-  _sync_panel_checks_ref := (fun () ->
-    match workspace_layout with
-    | Some layout ->
-      _suppress_check_callback := true;
-      Fun.protect
-        ~finally:(fun () -> _suppress_check_callback := false)
-      @@ fun () ->
-      Hashtbl.iter (fun kind item ->
-        let visible = Workspace_layout.is_panel_visible layout kind in
-        if item#active <> visible then item#set_active visible
-      ) panel_checks
-    | None -> ());
+  (* Wire the sync closure to the generic [sync_menu]: canvas.ml's
+     dock_refresh calls this after any panel/dock state change to keep the
+     Window menu enabled/checked state truthful even when the change
+     originated outside the menubar (right-click Close, layout restore,
+     panel drag-out, etc.). Re-evaluates every item's bundle predicate
+     against live state, replacing the former panel-only Hashtbl resync. *)
+  _sync_panel_checks_ref := sync_menu;
+  (* Evaluate once now so the initial enabled/checked state is correct
+     before the first menu is ever opened. *)
+  sync_menu ();
   (* Also expose via the Yaml_panel_view hook so dock_panel (which
      can't depend on Menubar without a module cycle) can fire the
      sync after panel-menu Close. *)

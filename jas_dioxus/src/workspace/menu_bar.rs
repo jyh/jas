@@ -695,7 +695,12 @@ pub(crate) fn MenuBarView(
     // the single source of truth. Translate each item to the (label, cmd,
     // shortcut) shape the renderer + dispatch below consume; the dynamic
     // Workspace / Appearance submenus map to their sentinel cmds.
-    let menus_owned: Vec<(String, Vec<(String, String, String)>)> =
+    // Each item carries its bundle `enabled_when` / `checked_when` predicate
+    // (None for separators / dynamic submenus) so the renderer can evaluate
+    // them live against the menu ctx below — the SAME evaluation the cross-app
+    // `menu_state` gate pins.
+    type MenuItem = (String, String, String, Option<String>, Option<String>);
+    let menus_owned: Vec<(String, Vec<MenuItem>)> =
         super::menu::menu_bar_model()
             .iter()
             .map(|m| {
@@ -704,28 +709,41 @@ pub(crate) fn MenuBarView(
                     .iter()
                     .map(|e| match e {
                         super::menu::MenuEntry::Separator => {
-                            ("---".to_string(), String::new(), String::new())
+                            ("---".to_string(), String::new(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::DynamicSubmenu { label, kind } => {
                             let cmd = match kind {
                                 super::menu::SubmenuKind::Workspace => "workspace_submenu",
                                 super::menu::SubmenuKind::Appearance => "appearance_submenu",
                             };
-                            (strip_mnemonic(label), cmd.to_string(), String::new())
+                            (strip_mnemonic(label), cmd.to_string(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::Action {
                             label,
                             action,
                             params,
                             shortcut,
-                            ..
-                        } => (strip_mnemonic(label), cmd_for(action, params), shortcut.clone()),
+                            enabled_when,
+                            checked_when,
+                        } => (
+                            strip_mnemonic(label),
+                            cmd_for(action, params),
+                            shortcut.clone(),
+                            enabled_when.clone(),
+                            checked_when.clone(),
+                        ),
                     })
                     .collect();
                 (strip_mnemonic(&m.label), items)
             })
             .collect();
     let menus = &menus_owned;
+
+    // Live menu evaluation context — the exact namespace shape the bundle's
+    // enabled_when / checked_when predicates read (and the menu_state gate
+    // pins). Built once per render from AppState; Dioxus re-renders reactively,
+    // so each item's enable / check reflects the live document + layout.
+    let menu_ctx = build_menu_ctx(&app.borrow());
 
     // Workspace data for dynamic submenu
     let config_snapshot = app.borrow().app_config.clone();
@@ -742,7 +760,7 @@ pub(crate) fn MenuBarView(
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().flat_map(|(label, cmd, shortcut)| {
+            items.iter().flat_map(|(label, cmd, shortcut, enabled_when, checked_when)| {
                 if label.as_str() == "---" {
                     vec![rsx! {
                         div {
@@ -974,41 +992,44 @@ pub(crate) fn MenuBarView(
                     let dispatch = dispatch.clone();
                     let cmd = cmd.to_string();
                     let mut open_menu_sig2 = open_menu_sig;
-                    // Add checkmark prefix for toggle items
-                    let display_label = {
-                        let st = app.borrow();
-                        let checked = match cmd.as_str() {
-                            "toggle_pane_toolbar" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar)),
-                            "toggle_pane_dock" => st.workspace_layout.pane_layout.as_ref().is_some_and(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock)),
-                            "toggle_panel_layers" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers),
-                            "toggle_panel_color" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color),
-                            "toggle_panel_swatches" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Swatches),
-                            "toggle_panel_stroke" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke),
-                            "toggle_panel_properties" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties),
-                            "toggle_panel_character" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Character),
-                            "toggle_panel_paragraph" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Paragraph),
-                            "toggle_panel_artboards" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Artboards),
-                            "toggle_panel_align" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Align),
-                            "toggle_panel_boolean" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Boolean),
-                            "toggle_panel_opacity" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Opacity),
-                            "toggle_panel_magic_wand" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::MagicWand),
-                            "toggle_panel_symbols" => st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Symbols),
-                            _ => false,
-                        };
-                        if cmd.starts_with("toggle_") {
-                            if checked { format!("\u{2713} {}", label) } else { format!("    {}", label) }
-                        } else {
-                            format!("    {}", label)
+                    // Evaluate the bundle predicates against the live menu ctx
+                    // (replacing the prior hardcoded per-PanelKind checkmark
+                    // match + always-enabled items). A non-empty enabled_when
+                    // gates the item; an empty/absent one stays enabled. A
+                    // checked_when makes the item show a check glyph when true
+                    // and a blank-aligned indent when false; items without one
+                    // keep the plain indent. Same eval the menu_state gate pins.
+                    let enabled = match enabled_when {
+                        Some(e) if !e.is_empty() => {
+                            crate::interpreter::expr::eval(e, &menu_ctx).to_bool()
                         }
+                        _ => true,
                     };
+                    let checked: Option<bool> = match checked_when {
+                        Some(c) if !c.is_empty() => {
+                            Some(crate::interpreter::expr::eval(c, &menu_ctx).to_bool())
+                        }
+                        _ => None,
+                    };
+                    let display_label = match checked {
+                        Some(true) => format!("\u{2713} {}", label),
+                        _ => format!("    {}", label),
+                    };
+                    let item_class = if enabled { "jas-menu-item" } else { "" };
+                    let cursor = if enabled { "pointer" } else { "default" };
+                    let text_color = if enabled { THEME_TEXT } else { THEME_TEXT_DIM };
                     vec![rsx! {
                         div {
-                            class: "jas-menu-item",
-                            style: "padding:4px 24px 4px 8px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            class: "{item_class}",
+                            style: "padding:4px 24px 4px 8px; cursor:{cursor}; font-size:13px; color:{text_color}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
-                                dispatch(&cmd);
-                                open_menu_sig2.set(None);
+                                // Disabled items are inert (mirrors the Revert-to-Saved
+                                // gate above): no dispatch, menu stays open.
+                                if enabled {
+                                    dispatch(&cmd);
+                                    open_menu_sig2.set(None);
+                                }
                             },
                             span { "{display_label}" }
                             span {
@@ -1070,6 +1091,92 @@ pub(crate) fn MenuBarView(
             }
         }
     }
+}
+
+/// Build the menu evaluation context (TESTING_STRATEGY.md chrome seam): the
+/// exact namespaces the bundle's `enabled_when` / `checked_when` predicates
+/// read. Its shape matches the seeded contexts in
+/// `test_fixtures/algorithms/menu_state.json` so the live menu evaluates
+/// precisely what the cross-app `menu_state` gate pins. Mirrors the per-app
+/// menu ctx built in the other apps (Python `menu.menu._build_menu_ctx`).
+///
+/// - `state.tab_count`: open tab count.
+/// - `active_document.*`: the 6 document predicates (selection, undo/redo,
+///   modified, has_filename = filename does NOT start with "Untitled-").
+/// - `workspace.has_saved_layout`: active layout != the system "Workspace".
+/// - `panels.<id>`: is_panel_visible for the 14 Window-menu panel ids;
+///   `concepts` has no `PanelKind` in this app, so it resolves to not-visible.
+/// - `panes.<id>`: is_pane_visible for toolbar / dock.
+fn build_menu_ctx(st: &AppState) -> serde_json::Value {
+    use super::workspace::{PaneKind, PanelKind, WORKSPACE_LAYOUT_NAME};
+    use serde_json::Value as J;
+
+    let active_document = match st.tab() {
+        Some(tab) => {
+            let m = &tab.model;
+            let doc = m.document();
+            serde_json::json!({
+                "has_selection": !doc.selection.is_empty(),
+                "selection_count": doc.selection.len(),
+                "can_undo": m.can_undo(),
+                "can_redo": m.can_redo(),
+                "is_modified": m.is_modified(),
+                "has_filename": !m.filename.starts_with("Untitled-"),
+            })
+        }
+        None => serde_json::json!({
+            "has_selection": false,
+            "selection_count": 0,
+            "can_undo": false,
+            "can_redo": false,
+            "is_modified": false,
+            "has_filename": false,
+        }),
+    };
+
+    // Window-menu panel id -> PanelKind (the `panels.*` namespace). `concepts`
+    // has no PanelKind in this app, so it resolves to not-visible defensively
+    // (mirrors Python's `_menu_panel_kinds` getattr fallback).
+    let panel_kinds: [(&str, PanelKind); 13] = [
+        ("artboards", PanelKind::Artboards),
+        ("layers", PanelKind::Layers),
+        ("color", PanelKind::Color),
+        ("swatches", PanelKind::Swatches),
+        ("stroke", PanelKind::Stroke),
+        ("properties", PanelKind::Properties),
+        ("character", PanelKind::Character),
+        ("paragraph", PanelKind::Paragraph),
+        ("align", PanelKind::Align),
+        ("boolean", PanelKind::Boolean),
+        ("magic_wand", PanelKind::MagicWand),
+        ("opacity", PanelKind::Opacity),
+        ("symbols", PanelKind::Symbols),
+    ];
+    let mut panels = serde_json::Map::new();
+    for (id, kind) in panel_kinds {
+        panels.insert(id.to_string(), J::Bool(st.workspace_layout.is_panel_visible(kind)));
+    }
+    panels.insert("concepts".to_string(), J::Bool(false));
+
+    let mut panes = serde_json::Map::new();
+    for (id, kind) in [("toolbar", PaneKind::Toolbar), ("dock", PaneKind::Dock)] {
+        let visible = st
+            .workspace_layout
+            .pane_layout
+            .as_ref()
+            .is_some_and(|pl| pl.is_pane_visible(kind));
+        panes.insert(id.to_string(), J::Bool(visible));
+    }
+
+    serde_json::json!({
+        "state": { "tab_count": st.tabs.len() },
+        "active_document": active_document,
+        "workspace": {
+            "has_saved_layout": st.app_config.active_layout != WORKSPACE_LAYOUT_NAME,
+        },
+        "panels": J::Object(panels),
+        "panes": J::Object(panes),
+    })
 }
 
 /// Strip Windows/GTK-style `&` mnemonic markers from a label for display.
@@ -1154,6 +1261,59 @@ mod tests {
     fn filename_stem_empty_yields_untitled() {
         assert_eq!(filename_stem(""), "Untitled");
         assert_eq!(filename_stem("   "), "Untitled");
+    }
+
+    #[test]
+    fn live_menu_ctx_drives_enabled_and_checked() {
+        // Mirror of the Python LiveMenuStateWiringTest idea: seed a live
+        // AppState, build the menu ctx, and assert the bundle predicates the
+        // renderer now evaluates yield the right enable / check state — the
+        // SAME evaluation the cross-app menu_state gate pins.
+        use crate::document::document::{Document, ElementSelection};
+        use crate::workspace::workspace::PanelKind;
+
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Seed a 2-element selection (selection_count == 2). build_menu_ctx
+        // reads only doc.selection.len(), so placeholder paths suffice.
+        let doc = Document {
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+
+        let ctx = build_menu_ctx(&st);
+        let eval = |e: &str| crate::interpreter::expr::eval(e, &ctx).to_bool();
+
+        // enabled_when wiring with 2 selected: group (>= 2) enabled,
+        // make_instance (== 1) disabled, copy (has_selection) enabled,
+        // tab-gated items (tab_count > 0) enabled.
+        assert!(eval("active_document.selection_count >= 2"), "group enabled @ 2 selected");
+        assert!(!eval("active_document.selection_count == 1"), "make_instance disabled @ 2 selected");
+        assert!(eval("active_document.has_selection"), "copy enabled with a selection");
+        assert!(eval("state.tab_count > 0"), "tab-gated items enabled with an open tab");
+
+        // checked_when wiring: panels.<id> must equal live is_panel_visible.
+        crate::workspace::layout_apply::layout_apply(
+            &mut st.workspace_layout,
+            &crate::workspace::layout_apply::op_show_panel(PanelKind::Layers),
+        );
+        let ctx2 = build_menu_ctx(&st);
+        let eval2 = |e: &str| crate::interpreter::expr::eval(e, &ctx2).to_bool();
+        assert_eq!(
+            eval2("panels.layers"),
+            st.workspace_layout.is_panel_visible(PanelKind::Layers),
+            "panels.layers checked_when must equal is_panel_visible",
+        );
+        assert!(eval2("panels.layers"), "Layers checked after op_show_panel");
+        // concepts has no PanelKind -> resolves to not-visible.
+        assert!(!eval2("panels.concepts"), "concepts checked is false (no PanelKind)");
     }
 
     #[test]
