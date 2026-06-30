@@ -779,11 +779,12 @@ class CrossLanguageTest(absltest.TestCase):
         "new_artboard.json",
         "new_symbol.json",
         "place_instance.json",
+        "place_concept_instance.json",
     ]
 
     @staticmethod
     def _dispatch_action(action_name: str, params: dict, model,
-                         selected_master=None):
+                         selected_master=None, selected_concept=None):
         # Drive ONE action through THIS app's production dispatcher (the
         # Python analog of Rust's generic dispatch_action). The live
         # layers panel routes its menu verbs through
@@ -811,6 +812,24 @@ class CrossLanguageTest(absltest.TestCase):
             from jas.panels.symbols_apply import apply_place_instance
             apply_place_instance(
                 model, selected_master[0] if selected_master else None)
+            return
+        # CONCEPTS.md §6 — the concept-mutating verb (place_concept_instance)
+        # is a pure-native intercept whose YAML action is a `log` stub, exactly
+        # like the symbol verbs above. The live app carries the panel-selected
+        # concept across actions on AppState.concepts_selected; this harness has
+        # no app-state, so the mutable `selected_concept` holder plays that role:
+        # concepts_panel_select stores the selected concept id, and
+        # place_concept_instance reads it back as the apply_place_concept_instance
+        # concept_id PARAM. Mirrors the Rust dispatch_action concepts intercept.
+        if action_name == "concepts_panel_select":
+            cid = params.get("concept_id") if params else None
+            if selected_concept is not None and cid:
+                selected_concept[0] = cid
+            return
+        if action_name == "place_concept_instance":
+            from jas.panels.concepts_apply import apply_place_concept_instance
+            apply_place_concept_instance(
+                model, selected_concept[0] if selected_concept else None)
             return
         from panels.panel_menu import _dispatch_yaml_layers_action
         _dispatch_yaml_layers_action(action_name, model, params=params)
@@ -857,12 +876,19 @@ class CrossLanguageTest(absltest.TestCase):
         # promoted (the harness has no app-state otherwise). See
         # _dispatch_action for the per-verb symbol intercept.
         selected_master = [None]
+        # Parallel holder for the panel-selected concept (CONCEPTS.md §6),
+        # mirroring the live app's AppState.concepts_selected: carries the
+        # selected concept across the action sequence so a later
+        # place_concept_instance targets the concept an earlier
+        # concepts_panel_select picked. See _dispatch_action.
+        selected_concept = [None]
         try:
             for step in tc["actions"]:
                 action = step["action"]
                 params = step.get("params", {}) or {}
                 self._dispatch_action(action, params, model,
-                                      selected_master=selected_master)
+                                      selected_master=selected_master,
+                                      selected_concept=selected_concept)
         finally:
             set_test_id_rng(None)
         return model

@@ -1116,6 +1116,31 @@ let dispatch_yaml_action_with_store
     Symbols_panel.new_symbol store m
   else if action_name = "place_instance" then
     Symbols_panel.place_instance store m
+  (* Concepts panel native intercepts (CONCEPTS.md section 6-7). Mirror the
+     Symbols arms above. In production [concepts_panel_select] is the generic
+     set_panel_state run by the panel view, but the action corpus drives this
+     dispatcher directly, so the selection is landed here — writing
+     [selected_concept] into the SAME persistent [store] the following
+     [place_concept_instance] reads back (the panel scope is init_panel-ed by
+     the harness up front, since set_panel silently no-ops on an un-init scope).
+     [place_concept_instance] is value-in-op native (mint id + resolve default
+     params + build a Generated); route the op through [Op_apply.op_apply] so it
+     both mutates AND journals, [with_txn]-bracketed as one undo step, exactly
+     like the production [yaml_panel_view] place arm. *)
+  else if action_name = "concepts_panel_select" then
+    (match List.assoc_opt "concept_id" params with
+     | Some (`String cid) when cid <> "" ->
+       State_store.set_panel store Concepts_panel.content_id
+         "selected_concept" (`String cid)
+     | _ -> ())
+  else if action_name = "place_concept_instance" then
+    (match Concepts_panel.place_concept_op store m with
+     | Some op ->
+       let ctrl = new Controller.controller ~model:m () in
+       m#with_txn (fun () ->
+         m#name_txn "place_concept_instance";
+         Op_apply.op_apply m ctrl op)
+     | None -> ())
   else
   match Workspace_loader.load () with
   | None -> ()

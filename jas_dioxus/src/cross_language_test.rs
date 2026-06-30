@@ -1084,6 +1084,7 @@ mod tests {
         "new_artboard.json",
         "new_symbol.json",
         "place_instance.json",
+        "place_concept_instance.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed

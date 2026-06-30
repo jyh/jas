@@ -18,6 +18,24 @@ public enum ConceptsPanel {
         model.stateStore.getPanel(scopeId, "selected_concept") as? String
     }
 
+    /// Write the panel-selected concept id (or clear it) into the shared store,
+    /// initializing the panel scope first when it does not yet exist. The
+    /// generic `concepts_panel_select` action normally writes `selected_concept`
+    /// via `set_panel_state`, but `setPanel` is a no-op on an absent scope (it is
+    /// an optional-chaining write) and the native intercept can fire before the
+    /// panel has rendered (e.g. the action corpus drives a fresh Model), so seed
+    /// the scope from its YAML defaults first. Bumps the panel state version so
+    /// the row highlight / footer-button binds refresh. Mirrors
+    /// SymbolsPanel.setSelectedSymbol.
+    static func setSelectedConcept(_ model: Model, _ id: String?) {
+        if !model.stateStore.hasPanel(scopeId) {
+            let defaults = WorkspaceData.load()?.panelStateDefaults(scopeId) ?? [:]
+            model.stateStore.initPanel(scopeId, defaults: defaults)
+        }
+        model.stateStore.setPanel(scopeId, "selected_concept", id ?? NSNull())
+        model.panelStateVersion &+= 1
+    }
+
     /// The concept's declared default params as a params object.
     static func defaultParams(_ conceptId: String) -> [String: Any] {
         guard let concept = WorkspaceData.load()?.concept(conceptId),
