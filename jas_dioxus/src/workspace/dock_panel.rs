@@ -739,6 +739,9 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
 
     // Mutable swatch libraries for rendering
     m.insert("_swatch_libraries".into(), st.swatch_libraries.clone());
+    // Mutable brush libraries for rendering — the Brushes panel binds its
+    // per-library disclosure label/tiles to data.brush_libraries[lib.id].
+    m.insert("_brush_libraries".into(), st.brush_libraries.clone());
 
     // Document generation counter — changes on every document mutation,
     // ensuring the layers panel re-renders when selection, visibility,
@@ -1267,6 +1270,8 @@ pub(crate) fn build_dock_groups(
                             eval_map.insert("icons".into(), serde_json::json!({}));
                             eval_map.insert("data".into(), serde_json::json!({
                                 "swatch_libraries": live_state_map.get("_swatch_libraries")
+                                    .cloned().unwrap_or(serde_json::Value::Null),
+                                "brush_libraries": live_state_map.get("_brush_libraries")
                                     .cloned().unwrap_or(serde_json::Value::Null),
                                 "concepts": workspace_concepts_list(),
                                 "_doc_generation": live_state_map.get("_doc_generation")
