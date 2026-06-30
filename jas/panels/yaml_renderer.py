@@ -147,6 +147,11 @@ _PATH_B_UNSUPPORTED = {
     # as a fixed-height column the generic layout cannot fit. Stays native until
     # it uses the dedicated fill_stroke_widget leaf.
     "swatches_panel_content",
+    # brushes embeds a per-library disclosure header + foreach-expanded brush
+    # tiles the v1 absolute pass cannot size yet; the flex path renders the
+    # library header, not just the leaf tiles. Mirrors the OCaml path_b_excluded
+    # set (color/gradient/layers/swatches + brushes).
+    "brushes_panel_content",
 }
 
 

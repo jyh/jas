@@ -1670,6 +1670,7 @@ class MainWindow(QMainWindow):
         from workspace.workspace_layout import PanelKind
         table = {
             "magic_wand": PanelKind.MAGIC_WAND,
+            "brushes": PanelKind.BRUSHES,
         }
         if panel_id in table:
             return table[panel_id]

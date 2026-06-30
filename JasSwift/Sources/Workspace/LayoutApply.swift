@@ -26,9 +26,9 @@
 
 import Foundation
 
-// MARK: - Kind parse / serialize (complete over all 13 PanelKinds)
+// MARK: - Kind parse / serialize (complete over all 14 PanelKinds)
 
-/// Parse a panel-kind string to its `PanelKind`. Complete over all 13 kinds; an
+/// Parse a panel-kind string to its `PanelKind`. Complete over all 14 kinds; an
 /// unknown/garbage string falls back to `.layers` so a malformed op never
 /// crashes. (The pre-3d-2 harness shim had a 4-kind subset; the runtime
 /// dispatcher needs the full set because the production `show_panel` handler
@@ -47,13 +47,14 @@ func layoutParsePanelKind(_ s: String) -> PanelKind {
     case "opacity": return .opacity
     case "magic_wand": return .magicWand
     case "symbols": return .symbols
+    case "brushes": return .brushes
     default: return .layers
     }
 }
 
 /// Serialize a `PanelKind` to its canonical lowercase op string (the inverse of
 /// `layoutParsePanelKind`). Production `show_panel` sites use this to build the
-/// op dictionary, so the round-trip is lossless across all 13 kinds.
+/// op dictionary, so the round-trip is lossless across all 14 kinds.
 public func layoutPanelKindStr(_ k: PanelKind) -> String {
     switch k {
     case .layers: return "layers"
@@ -69,6 +70,7 @@ public func layoutPanelKindStr(_ k: PanelKind) -> String {
     case .opacity: return "opacity"
     case .magicWand: return "magic_wand"
     case .symbols: return "symbols"
+    case .brushes: return "brushes"
     }
 }
 

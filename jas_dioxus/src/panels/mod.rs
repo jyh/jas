@@ -12,6 +12,7 @@ pub mod panel_menu_view;
 pub mod align_panel;
 pub mod artboards_panel;
 pub mod boolean_panel;
+pub mod brushes_panel;
 pub mod character_panel;
 pub mod color_panel;
 pub mod layers_panel;
@@ -45,6 +46,7 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Layers => layers_panel::menu_items(),
         PanelKind::Color => color_panel::menu_items(),
         PanelKind::Swatches => swatches_panel::menu_items(),
+        PanelKind::Brushes => brushes_panel::menu_items(),
         PanelKind::Stroke => stroke_panel::menu_items(),
         PanelKind::Properties => properties_panel::menu_items(),
         PanelKind::Character => character_panel::menu_items(),
@@ -69,6 +71,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Layers => layers_panel::dispatch(cmd, addr, state),
         PanelKind::Color => color_panel::dispatch(cmd, addr, state),
         PanelKind::Swatches => swatches_panel::dispatch(cmd, addr, state),
+        PanelKind::Brushes => brushes_panel::dispatch(cmd, addr, state),
         PanelKind::Stroke => stroke_panel::dispatch(cmd, addr, state),
         PanelKind::Properties => properties_panel::dispatch(cmd, addr, state),
         PanelKind::Character => character_panel::dispatch(cmd, addr, state),
@@ -103,6 +106,7 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Layers => layers_panel::is_checked(cmd, state),
         PanelKind::Color => color_panel::is_checked(cmd, state),
         PanelKind::Swatches => swatches_panel::is_checked(cmd, state),
+        PanelKind::Brushes => brushes_panel::is_checked(cmd, state),
         PanelKind::Stroke => stroke_panel::is_checked(cmd, state),
         PanelKind::Properties => properties_panel::is_checked(cmd, state),
         PanelKind::Character => character_panel::is_checked(cmd, state),

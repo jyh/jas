@@ -71,7 +71,8 @@ class PathBHelpersTest(absltest.TestCase):
         self.assertEqual(
             _PATH_B_UNSUPPORTED,
             {"color_panel_content", "gradient_panel_content",
-             "layers_panel_content", "swatches_panel_content"})
+             "layers_panel_content", "swatches_panel_content",
+             "brushes_panel_content"})
 
     def test_node_at_path_walks_children(self):
         content = _opacity_panel()["content"]

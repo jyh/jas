@@ -551,14 +551,20 @@ private func testLayout() -> WorkspaceLayout {
     #expect(l.hiddenPanels.isEmpty)
 }
 
-@Test func panelMenuItemsAllVisible() {
+@Test func panelMenuItemsVisibilityFollowsGroups() {
     let l = testLayout()
     let items = l.panelMenuItems()
     #expect(items.count == PanelKind.all.count)
-    // `isPanelVisible` is defined as "not in hiddenPanels", so a panel
-    // that is defined but not in any group still reports visible by
-    // default — matches the pre-Character/Paragraph/Artboards behavior.
-    for (_, visible) in items { #expect(visible) }
+    // `isPanelVisible` follows on-screen state: a panel is visible iff it
+    // appears in some loaded dock group. testLayout()'s groups hold
+    // {color, swatches, stroke, properties, layers}; every other defined
+    // kind is absent from all groups and so reports not-visible. (Mirrors
+    // the OCaml `is_panel_visible` group-scan; the Window-menu checkmark
+    // tracks on-screen state, not the closed-list state.)
+    let inLayout: Set<PanelKind> = [.color, .swatches, .stroke, .properties, .layers]
+    for (kind, visible) in items {
+        #expect(visible == inLayout.contains(kind), "visibility mismatch for \(kind)")
+    }
 }
 
 @Test func panelMenuItemsWithHidden() {

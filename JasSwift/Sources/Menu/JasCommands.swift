@@ -869,13 +869,15 @@ public struct JasCommands: Commands {
 
 // MARK: - Menu evaluation context (chrome seam)
 
-/// The 14 Window-menu panel ids whose visibility populates the `panels.*`
+/// The Window-menu panel ids whose visibility populates the `panels.*`
 /// namespace of the menu ctx. `concepts` has no ``PanelKind`` case in this app,
-/// so it resolves to not-visible (see ``panelKindForMenuId(_:)``).
+/// so it resolves to not-visible (see ``panelKindForMenuId(_:)``); `brushes` is
+/// a toggle-only panel (not in the default layout) whose `panels.brushes`
+/// checkmark must reflect on-screen state.
 let menuPanelIds: [String] = [
     "artboards", "layers", "color", "swatches", "stroke", "properties",
     "character", "paragraph", "align", "boolean", "magic_wand", "opacity",
-    "symbols", "concepts",
+    "symbols", "brushes", "concepts",
 ]
 
 /// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``. Free function
@@ -908,6 +910,7 @@ func panelKindForMenuId(_ id: String) -> PanelKind? {
     case "opacity": return .opacity
     case "magic_wand": return .magicWand
     case "symbols": return .symbols
+    case "brushes": return .brushes
     default: return nil
     }
 }

@@ -99,6 +99,7 @@ def _panel_kind_str(k: PanelKind) -> str:
         PanelKind.OPACITY: "opacity",
         PanelKind.MAGIC_WAND: "magic_wand",
         PanelKind.SYMBOLS: "symbols",
+        PanelKind.BRUSHES: "brushes",
     }[k]
 
 
@@ -457,6 +458,7 @@ def _parse_panel_kind(v) -> PanelKind:
         "opacity": PanelKind.OPACITY,
         "magic_wand": PanelKind.MAGIC_WAND,
         "symbols": PanelKind.SYMBOLS,
+        "brushes": PanelKind.BRUSHES,
     }.get(v, PanelKind.LAYERS)
 
 

@@ -515,6 +515,27 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
+                "toggle_panel_brushes" => {
+                    // Brushes is a TOGGLE-ONLY panel that is NOT in the default
+                    // layout, so "currently shown" is "in a dock group"
+                    // (`find_panel`), NOT "absent from hidden_panels"
+                    // (`is_panel_visible`, which reports a never-shown panel as
+                    // visible). Gate on actual group membership so the first
+                    // click summons the panel and a second click closes it.
+                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
+                        if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Brushes) {
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_close_panel(addr),
+                            );
+                        } else {
+                            crate::workspace::layout_apply::layout_apply(
+                                &mut st.workspace_layout,
+                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Brushes),
+                            );
+                        }
+                    }));
+                }
                 "toggle_panel_align" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Align) {
@@ -1089,11 +1110,12 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     // Window-menu panel id -> PanelKind (the `panels.*` namespace). `concepts`
     // has no PanelKind in this app, so it resolves to not-visible defensively
     // (mirrors Python's `_menu_panel_kinds` getattr fallback).
-    let panel_kinds: [(&str, PanelKind); 13] = [
+    let panel_kinds: [(&str, PanelKind); 14] = [
         ("artboards", PanelKind::Artboards),
         ("layers", PanelKind::Layers),
         ("color", PanelKind::Color),
         ("swatches", PanelKind::Swatches),
+        ("brushes", PanelKind::Brushes),
         ("stroke", PanelKind::Stroke),
         ("properties", PanelKind::Properties),
         ("character", PanelKind::Character),

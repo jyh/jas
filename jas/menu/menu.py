@@ -292,7 +292,7 @@ def _menu_panel_kinds() -> dict:
         "character": PanelKind.CHARACTER, "paragraph": PanelKind.PARAGRAPH,
         "align": PanelKind.ALIGN, "boolean": PanelKind.BOOLEAN,
         "magic_wand": PanelKind.MAGIC_WAND, "opacity": PanelKind.OPACITY,
-        "symbols": PanelKind.SYMBOLS,
+        "symbols": PanelKind.SYMBOLS, "brushes": PanelKind.BRUSHES,
     }
     concepts_kind = getattr(PanelKind, "CONCEPTS", None)
     if concepts_kind is not None:
@@ -510,7 +510,7 @@ def _toggle_panel_by_name(window: QMainWindow, panel: str) -> None:
         "character": PanelKind.CHARACTER, "paragraph": PanelKind.PARAGRAPH,
         "align": PanelKind.ALIGN, "boolean": PanelKind.BOOLEAN,
         "magic_wand": PanelKind.MAGIC_WAND, "opacity": PanelKind.OPACITY,
-        "symbols": PanelKind.SYMBOLS,
+        "symbols": PanelKind.SYMBOLS, "brushes": PanelKind.BRUSHES,
     }
     concepts_kind = getattr(PanelKind, "CONCEPTS", None)
     if concepts_kind is not None:

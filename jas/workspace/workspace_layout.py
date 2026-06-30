@@ -53,6 +53,11 @@ class PanelKind(Enum):
     OPACITY = auto()
     MAGIC_WAND = auto()
     SYMBOLS = auto()
+    # Brushes is a toggle-only panel: it is NOT part of the default layout
+    # (see named()), so it never appears in workspace_default. Window>Brushes
+    # adds it on demand via show_panel. Deliberately excluded from
+    # ALL_PANEL_KINDS below (mirrors the OCaml app's all_panel_kinds).
+    BRUSHES = auto()
 
 ALL_PANEL_KINDS = [
     PanelKind.LAYERS, PanelKind.COLOR, PanelKind.SWATCHES,
@@ -472,6 +477,7 @@ class WorkspaceLayout:
             PanelKind.OPACITY: "Opacity",
             PanelKind.MAGIC_WAND: "Magic Wand",
             PanelKind.SYMBOLS: "Symbols",
+            PanelKind.BRUSHES: "Brushes",
         }[kind]
 
     # -- Close / show panels --
@@ -488,9 +494,17 @@ class WorkspaceLayout:
         self._bump()
 
     def show_panel(self, kind: PanelKind):
-        if kind not in self.hidden_panels:
+        # Mirrors the OCaml app's show_panel: ADD the panel whenever it is not
+        # currently on screen, whether it was a user-closed panel (in
+        # hidden_panels) OR a toggle-only panel that lives in no group at all
+        # (e.g. Brushes / Magic Wand / Opacity — absent from the default
+        # layout AND absent from hidden_panels). The old guard early-returned
+        # for the latter, so Window>Brushes toggle-ON was a no-op; this branch
+        # appends it to the first anchored group and makes it active.
+        if self.is_panel_visible(kind):
             return
-        self.hidden_panels.remove(kind)
+        if kind in self.hidden_panels:
+            self.hidden_panels.remove(kind)
         if self.anchored:
             _, dock = self.anchored[0]
             if not dock.groups:
@@ -501,7 +515,23 @@ class WorkspaceLayout:
         self._bump()
 
     def is_panel_visible(self, kind: PanelKind) -> bool:
-        return kind not in self.hidden_panels
+        # True iff the panel kind currently appears in some loaded dock group
+        # (anchored or floating). hidden_panels is only the list of user-closed
+        # panels remembered across show/hide cycles -- it is NOT the source of
+        # truth for "is on screen right now". A panel can be absent from
+        # hidden_panels yet absent from every dock (a toggle-only panel like
+        # Brushes/Magic Wand/Opacity, or a layout that simply omits Artboards);
+        # the Window menu checkmark must follow the on-screen state, not the
+        # closed-list state. Mirrors the OCaml app's is_panel_visible.
+        for _, d in self.anchored:
+            for g in d.groups:
+                if kind in g.panels:
+                    return True
+        for fd in self.floating:
+            for g in fd.dock.groups:
+                if kind in g.panels:
+                    return True
+        return False
 
     def panel_menu_items(self) -> list[tuple[PanelKind, bool]]:
         return [(k, self.is_panel_visible(k)) for k in ALL_PANEL_KINDS]

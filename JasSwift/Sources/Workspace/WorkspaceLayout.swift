@@ -39,9 +39,14 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magicWand, symbols
+    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magicWand, symbols, brushes
 
-    /// All panel kinds, for iteration.
+    /// All panel kinds that seed the legacy native Window-menu list
+    /// (`panelMenuItems`). Brushes is deliberately omitted: it is a
+    /// toggle-only panel that is NOT part of the default layout and is
+    /// surfaced solely through the YAML menubar's Window>Brushes entry, so
+    /// it never needs to seed the default all-panels iteration. (Mirrors
+    /// the OCaml `all_panel_kinds`, which likewise excludes Brushes.)
     public static let all: [PanelKind] = [
         .layers, .color, .swatches, .stroke, .properties,
         .character, .paragraph, .artboards, .align, .boolean, .opacity,
@@ -630,8 +635,15 @@ public struct WorkspaceLayout: Codable {
     }
 
     public mutating func showPanel(_ kind: PanelKind) {
-        guard let pos = hiddenPanels.firstIndex(of: kind) else { return }
-        hiddenPanels.remove(at: pos)
+        // Already on screen in some group? Nothing to do.
+        guard !isPanelVisible(kind) else { return }
+        // Un-hide if it was a user-closed panel. This is a no-op for a
+        // panel that was never shown (in no group AND not in hiddenPanels,
+        // e.g. Brushes, which is toggle-only and not in the default
+        // layout); the append below still adds it on demand so the
+        // Window>Brushes toggle-ON works. Mirrors the OCaml `show_panel`,
+        // whose guard scans dock groups rather than only the hidden list.
+        hiddenPanels.removeAll { $0 == kind }
         if !anchored.isEmpty {
             if anchored[0].1.groups.isEmpty {
                 anchored[0].1.groups.append(PanelGroup(panels: [kind]))
@@ -644,7 +656,19 @@ public struct WorkspaceLayout: Codable {
     }
 
     public func isPanelVisible(_ kind: PanelKind) -> Bool {
-        !hiddenPanels.contains(kind)
+        // True iff the panel currently appears in some loaded dock group
+        // (anchored or floating). `hiddenPanels` only remembers
+        // user-closed panels across show/hide cycles; it is NOT the source
+        // of truth for "on screen right now". A panel can be absent from
+        // `hiddenPanels` yet absent from every dock (e.g. Brushes, which is
+        // toggle-only and not in the default layout), so the Window-menu
+        // checkmark must follow on-screen state, not the closed-list state.
+        // Mirrors the OCaml `is_panel_visible` group-scan.
+        func inGroups(_ groups: [PanelGroup]) -> Bool {
+            groups.contains { $0.panels.contains(kind) }
+        }
+        return anchored.contains { inGroups($0.1.groups) }
+            || floating.contains { inGroups($0.dock.groups) }
     }
 
     public func panelMenuItems() -> [(PanelKind, Bool)] {
