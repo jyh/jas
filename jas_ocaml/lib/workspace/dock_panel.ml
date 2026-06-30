@@ -70,6 +70,16 @@ let apply_dark_css w css_str =
 
 let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GPack.box) (layout : workspace_layout) =
   let drag_ref = ref No_drag in
+  (* A tab [button_press] only RECORDS the press here; the actual panel
+     drag ([drag_ref := Dragging_panel]) is armed lazily in the tab's
+     [motion_notify] once the pointer moves past [tab_drag_threshold].
+     Without this, a plain click (press + release, no movement) was armed
+     as a drag and the release resolved as a "drop back on my own group",
+     which the drop handler reorders to the end — so every click shoved
+     the clicked tab to the rightmost slot. Recording press position +
+     gating on real motion makes a click just activate. *)
+  let tab_press : (float * float * panel_addr) option ref = ref None in
+  let tab_drag_threshold = 5.0 in
   let _color_panel_refresh = ref (fun () -> ()) in
   (* Each rebuild records the current anchored groups as
      (group_addr, panel_count, event_box) so the drop handler can hit-test the
@@ -219,10 +229,11 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                | _ -> ())
             ) |> ignore;
             btn#event#connect#button_press ~callback:(fun ev ->
-              drag_ref := Dragging_panel { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi };
-              create_preview ~label
-                ~x:(GdkEvent.Button.x_root ev)
-                ~y:(GdkEvent.Button.y_root ev);
+              (* Record the press only; arm the drag lazily on motion past
+                 the threshold so a click (no movement) just activates. *)
+              tab_press := Some
+                (GdkEvent.Button.x_root ev, GdkEvent.Button.y_root ev,
+                 { group = { dock_id = dock.id; group_idx = gi }; panel_idx = pi });
               false
             ) |> ignore;
             (* Tab button has implicit pointer grab from button_press,
@@ -235,8 +246,12 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
             btn#event#connect#button_release ~callback:(fun ev ->
               let xr = GdkEvent.Button.x_root ev in
               let yr = GdkEvent.Button.y_root ev in
+              (* [try_handle_drop] no-ops when [drag_ref = No_drag], so a
+                 plain click (drag never armed) falls through to [clicked],
+                 which activates the tab. *)
               ignore (try_handle_drop ~x_root:xr ~y_root:yr);
               destroy_preview ();
+              tab_press := None;
               false
             ) |> ignore;
             (* Forward motion to the dock-panel motion hook so the
@@ -246,9 +261,21 @@ let create ~get_model ~get_fill_on_top ~(window : GWindow.window) (dock_box : GP
                the canvas's motion handler never fires while the user
                drags from a tab. *)
             btn#event#connect#motion_notify ~callback:(fun ev ->
-              notify_drag_motion
-                ~x_root:(GdkEvent.Motion.x_root ev)
-                ~y_root:(GdkEvent.Motion.y_root ev);
+              let xr = GdkEvent.Motion.x_root ev in
+              let yr = GdkEvent.Motion.y_root ev in
+              (* Arm the real drag once the pointer moves past the threshold
+                 from the recorded press — turning a press-and-hold-move into
+                 a drag while leaving a stationary click as a plain click. *)
+              (match !tab_press with
+               | Some (px, py, addr)
+                 when !drag_ref = No_drag
+                      && (abs_float (xr -. px) > tab_drag_threshold
+                          || abs_float (yr -. py) > tab_drag_threshold) ->
+                 drag_ref := Dragging_panel addr;
+                 create_preview ~label ~x:xr ~y:yr
+               | _ -> ());
+              if !drag_ref <> No_drag then
+                notify_drag_motion ~x_root:xr ~y_root:yr;
               false
             ) |> ignore;
             btn#event#add [`BUTTON_PRESS; `BUTTON_RELEASE; `POINTER_MOTION]
