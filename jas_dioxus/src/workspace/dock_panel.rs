@@ -1571,6 +1571,21 @@ mod stroke_panel_override_tests {
         st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
     }
 
+    // Brushes panel data fix: the live-state map must carry a non-empty
+    // _brush_libraries so the panel data namespace resolves
+    // data.brush_libraries[lib.id].name / .brushes.
+    #[test]
+    fn live_state_map_carries_brush_libraries() {
+        let st = AppState::new();
+        let m = build_live_state_map(&st);
+        let bl = m.get("_brush_libraries").expect("_brush_libraries present");
+        let obj = bl.as_object().expect("_brush_libraries is an object");
+        assert!(obj.contains_key("default_brushes"),
+            "default_brushes seeded, got keys {:?}", obj.keys().collect::<Vec<_>>());
+        let name = bl.pointer("/default_brushes/name").and_then(|v| v.as_str());
+        assert_eq!(name, Some("Default Brushes"));
+    }
+
     // Part B.3: rotation / opacity / blend from the first selected element.
     #[test]
     fn properties_attrs_from_first_selected() {
