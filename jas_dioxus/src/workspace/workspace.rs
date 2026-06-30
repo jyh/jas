@@ -808,7 +808,21 @@ impl WorkspaceLayout {
 
     /// Check if a panel kind is currently visible (not hidden).
     pub fn is_panel_visible(&self, kind: PanelKind) -> bool {
-        !self.hidden_panels.contains(&kind)
+        // True iff the panel currently appears in some loaded dock group
+        // (anchored or floating). `hidden_panels` only remembers user-closed
+        // panels across show/hide cycles; it is NOT the source of truth for
+        // "on screen now". A toggle-only panel (e.g. Brushes, not in the
+        // default layout) is absent from both hidden_panels and every group,
+        // so the Window-menu checkmark must follow group membership and the
+        // toggle must route to show (not the no-op close branch). Mirrors the
+        // OCaml is_panel_visible group-scan (and the Swift/Python fixes).
+        self.anchored
+            .iter()
+            .any(|(_, d)| d.groups.iter().any(|g| g.panels.contains(&kind)))
+            || self
+                .floating
+                .iter()
+                .any(|fd| fd.dock.groups.iter().any(|g| g.panels.contains(&kind)))
     }
 
     /// Return all panel kinds with their visibility, for a Window menu.
@@ -2010,15 +2024,21 @@ mod tests {
     }
 
     #[test]
-    fn panel_menu_items_all_visible() {
+    fn panel_menu_items_reflect_dock_membership() {
         let l = WorkspaceLayout::default_layout();
         let items = l.panel_menu_items();
         assert_eq!(items.len(), PanelKind::ALL.len());
-        // `is_panel_visible` is defined as "not in hidden_panels", so a
-        // panel that is defined but not in any group still reports
-        // visible by default — matches the pre-Character behavior.
-        for (_, visible) in &items {
-            assert!(visible);
+        // `is_panel_visible` is dock-group based (mirrors OCaml): a panel
+        // reports visible iff it currently appears in some loaded group.
+        // Assert each menu item's flag tracks actual group membership in the
+        // default layout (toggle-only panels absent from every group, e.g.
+        // Brushes, report not-visible until shown on demand).
+        for (kind, visible) in &items {
+            let docked = l
+                .anchored
+                .iter()
+                .any(|(_, d)| d.groups.iter().any(|g| g.panels.contains(kind)));
+            assert_eq!(*visible, docked, "visibility mismatch for {:?}", kind);
         }
     }
 
