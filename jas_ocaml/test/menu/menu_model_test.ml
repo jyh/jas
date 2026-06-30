@@ -173,9 +173,9 @@ let tests = [
           ( "panels",
             `Assoc
               (bools
-                 [ "artboards"; "layers"; "color"; "swatches"; "stroke";
-                   "properties"; "character"; "paragraph"; "align"; "boolean";
-                   "magic_wand"; "opacity"; "symbols"; "concepts" ]) );
+                 [ "artboards"; "layers"; "color"; "swatches"; "brushes";
+                   "stroke"; "properties"; "character"; "paragraph"; "align";
+                   "boolean"; "magic_wand"; "opacity"; "symbols"; "concepts" ]) );
           ("panes", `Assoc (bools [ "toolbar"; "dock" ])) ]
     in
     Alcotest.(check bool)

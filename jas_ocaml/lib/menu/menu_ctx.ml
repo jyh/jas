@@ -15,6 +15,7 @@ let panel_ids : (string * Workspace_layout.panel_kind option) list =
     ("layers", Some Workspace_layout.Layers);
     ("color", Some Workspace_layout.Color);
     ("swatches", Some Workspace_layout.Swatches);
+    ("brushes", Some Workspace_layout.Brushes);
     ("stroke", Some Workspace_layout.Stroke);
     ("properties", Some Workspace_layout.Properties);
     ("character", Some Workspace_layout.Character);
