@@ -8481,6 +8481,15 @@
           "checked_when": "panels.swatches"
         },
         {
+          "id": "menu_brushes",
+          "label": "Br&ushes",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "brushes"
+          },
+          "checked_when": "panels.brushes"
+        },
+        {
           "id": "menu_stroke",
           "label": "&Stroke",
           "action": "toggle_panel",
