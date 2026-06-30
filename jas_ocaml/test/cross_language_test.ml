@@ -434,6 +434,7 @@ let action_fixtures = [
   "new_symbol.json";
   "place_instance.json";
   "place_concept_instance.json";
+  "menu_object_ops.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -515,7 +516,37 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
           | `Assoc pairs -> pairs
           | _ -> []
         in
-        Jas.Panel_menu.dispatch_yaml_action_with_store ~params action model store
+        (* Object / Edit menu model-pure verbs are bespoke-native: their
+           actions.yaml entries are [log] stubs (the real behavior lives in the
+           Menubar [on_menu_action] router / the Controller mutators), so the
+           generic [dispatch_yaml_action_with_store] would no-op them. Route
+           each to the SAME native handler the menu invokes, so the action
+           corpus gates their cross-app document mutation. Mirrors the Python
+           harness [_MENU_NATIVE_HANDLERS] intercept and the Rust
+           [dispatch_action] menu arm. (Unlike the Symbols / Concepts
+           intercepts these CANNOT live inside Panel_menu: Menubar already
+           depends on Panel_menu, so a Panel_menu -> Menubar edge would cycle;
+           the intercept therefore sits at the test seam, exactly like Python.)
+           The minting verb [make_instance] draws its ids from the seeded
+           [Element.generate_id] counter installed above, so target/ref ids are
+           golden-pinned. *)
+        let menu_native () =
+          match action with
+          | "select_all" ->
+            (Jas.Controller.create ~model ())#select_all; true
+          | "group" -> Jas.Menubar.group_selection model (); true
+          | "ungroup" -> Jas.Menubar.ungroup_selection model (); true
+          | "ungroup_all" -> Jas.Menubar.ungroup_all model (); true
+          | "lock" ->
+            (Jas.Controller.create ~model ())#lock_selection; true
+          | "hide_selection" ->
+            (Jas.Controller.create ~model ())#hide_selection; true
+          | "make_instance" -> Jas.Menubar.make_instance model (); true
+          | _ -> false
+        in
+        if not (menu_native ()) then
+          Jas.Panel_menu.dispatch_yaml_action_with_store ~params action model
+            store
       ) (tc |> member "actions" |> to_list));
   model
 

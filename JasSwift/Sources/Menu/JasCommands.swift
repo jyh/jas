@@ -715,145 +715,50 @@ public struct JasCommands: Commands {
         }
     }
 
+    // The model-pure Object / Edit menu verbs delegate to the shared
+    // ``MenuActions`` handlers (extracted so the cross-language ACTION corpus
+    // drives the SAME implementation, not a reimplementation). Each wrapper only
+    // unwraps the focused, optional ``Model``; the behavior — `withTxn`
+    // bracketing, Controller calls, id minting — lives in ``MenuActions``.
+
     private func groupSelection() {
         guard let model = model else { return }
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        // withTxn opens ONE bracket; the Controller mutator's editDocument joins
-        // it (one undo step). Mirrors Rust's with_txn { Controller::... }.
-        let controller = Controller(model: model)
-        model.withTxn { controller.groupSelection() }
+        MenuActions.groupSelection(model)
     }
 
-    /// "Make Instance": the first user-facing way to create a live
-    /// reference. Native UI glue (NOT a Controller op) that composes two
-    /// already-pinned ops under ONE snapshot: `createReference` (the UI
-    /// mints `targetId`/`refId`, value-in-op, with a collision-retry loop
-    /// over existing ids — never minted in a Controller) then a move of
-    /// the now-selected reference by `(pasteOffset, pasteOffset)`. The
-    /// offset rides on the new reference's transform via `moveSelection`.
-    /// Enabled only when exactly ONE whole element (kind=.all; not a
-    /// control-point sub-selection) is selected. Mirrors Rust's
-    /// `make_instance` menu_bar dispatch.
     private func makeInstance() {
         guard let model = model else { return }
-        let doc = model.document
-        // `Selection` is a Set; sort by path lexicographically so the
-        // single-selection pick is deterministic.
-        let sorted = doc.selection.sorted {
-            $0.path.lexicographicallyPrecedes($1.path)
-        }
-        guard sorted.count == 1, let es = sorted.first else { return }
-        guard es.kind == .all else { return }
-        let targetPath = es.path
-        // Gather every existing element id so the freshly minted
-        // targetId / refId can avoid collisions.
-        var existing: Set<String> = []
-        func gatherIds(_ elem: Element) {
-            if let id = elem.id { existing.insert(id) }
-            switch elem {
-            case .group(let g): for c in g.children { gatherIds(c) }
-            case .layer(let l): for c in l.children { gatherIds(c) }
-            default: break
-            }
-        }
-        for layer in doc.layers { gatherIds(.layer(layer)) }
-        // Mint two distinct, collision-free ids (mirrors the artboard
-        // mint loop in LayersPanel).
-        func mint() -> String? {
-            for _ in 0..<100 {
-                let c = generateElementId()
-                if !existing.contains(c) { return c }
-            }
-            return nil
-        }
-        guard let targetId = mint() else { return }
-        existing.insert(targetId)
-        guard let refId = mint() else { return }
-        // createReference + offset-move under ONE snapshot = a single
-        // undo step (offset rides on the new reference's transform via
-        // moveSelection).
-        // Both ops join ONE withTxn bracket = a single undo step (each
-        // Controller mutator's editDocument joins it). Mirrors Rust's
-        // with_txn around make_instance's two ops.
-        let controller = Controller(model: model)
-        model.withTxn {
-            controller.createReference(targetPath, targetId: targetId, refId: refId)
-            controller.moveSelection(dx: pasteOffset, dy: pasteOffset)
-        }
+        MenuActions.makeInstance(model)
     }
 
     private func ungroupSelection() {
         guard let model = model else { return }
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.ungroupSelection() }
+        MenuActions.ungroupSelection(model)
     }
 
     private func ungroupAll() {
         guard let model = model else { return }
-        let doc = model.document
-        var changed = false
-
-        func flatten(_ children: [Element]) -> [Element] {
-            var result: [Element] = []
-            for child in children {
-                switch child {
-                case .group(let g) where !g.locked:
-                    changed = true
-                    result.append(contentsOf: flatten(g.children))
-                case .group(let g):
-                    // Locked group: recurse into children but keep the group
-                    let newChildren = flatten(g.children)
-                    result.append(.group(Group(children: newChildren,
-                                               opacity: g.opacity, transform: g.transform,
-                                               locked: g.locked)))
-                default:
-                    result.append(child)
-                }
-            }
-            return result
-        }
-
-        let newLayers = doc.layers.map { layer in
-            let newChildren = flatten(layer.children)
-            return Layer(name: layer.name, children: newChildren,
-                         opacity: layer.opacity, transform: layer.transform,
-                         locked: layer.locked)
-        }
-        guard changed else { return }
-        // Undoable: editDocument self-brackets one undo step.
-        model.editDocument(Document(layers: newLayers,
-                                  selectedLayer: doc.selectedLayer, selection: []))
+        MenuActions.ungroupAll(model)
     }
 
     private func lockSelection() {
         guard let model = model else { return }
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.lockSelection() }
+        MenuActions.lockSelection(model)
     }
 
     private func unlockAll() {
         guard let model = model else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.unlockAll() }
+        MenuActions.unlockAll(model)
     }
 
     private func hideSelection() {
         guard let model = model else { return }
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.hideSelection() }
+        MenuActions.hideSelection(model)
     }
 
     private func showAll() {
         guard let model = model else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.showAll() }
+        MenuActions.showAll(model)
     }
 
     private func deleteSelection() {
@@ -918,8 +823,7 @@ public struct JasCommands: Commands {
 
     private func selectAll() {
         guard let model = model else { return }
-        let controller = Controller(model: model)
-        controller.selectAll()
+        MenuActions.selectAll(model)
     }
 
     private func cutSelection() {

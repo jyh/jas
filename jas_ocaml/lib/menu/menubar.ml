@@ -168,11 +168,17 @@ let ungroup_selection (model : Model.model) () =
         let child_idx = (match gpath with _ :: i :: _ -> i | _ -> 0) + !offset in
         for j = 0 to n_children - 1 do
           let path = [layer_idx; child_idx + j] in
-          let elem = Document.get_element new_doc path in
-          let n = Element.control_point_count elem in
-          new_sel := Document.PathMap.add path
-            (Document.make_element_selection ~control_points:(List.init n Fun.id) path)
-            !new_sel
+          (* Select each unpacked child as a WHOLE element (SelKindAll),
+             matching the cross-app golden (Python / Rust / Swift all push
+             element_selection_all here). An earlier revision selected every
+             control point (SelKindPartial), which diverged from the other
+             apps' ungroup result. Guard on the child's presence like the Rust
+             handler so a stale path is simply skipped. *)
+          (match (try Some (Document.get_element new_doc path) with _ -> None) with
+           | Some _ ->
+             new_sel := Document.PathMap.add path
+               (Document.element_selection_all path) !new_sel
+           | None -> ())
         done;
         offset := !offset + n_children - 1
       ) sorted_paths;

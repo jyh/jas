@@ -1085,6 +1085,15 @@ mod tests {
         "new_symbol.json",
         "place_instance.json",
         "place_concept_instance.json",
+        // Object / Edit menu model-pure verbs (select_all, group, ungroup,
+        // ungroup_all, lock, hide_selection, make_instance). These are
+        // bespoke-native: their actions.yaml entries are `log` stubs (the
+        // real behavior lives in menu_bar.rs's dispatch), so the generic
+        // dispatch_action would no-op them. The corpus runner intercepts each
+        // verb and routes it to the SAME headless Controller mutation the menu
+        // invokes (see run_action_model). Mirrors the Python
+        // _MENU_NATIVE_HANDLERS intercept.
+        "menu_object_ops.json",
     ];
 
     /// Build an `AppState` whose active tab holds the document parsed
@@ -1160,6 +1169,36 @@ mod tests {
                 .and_then(|p| p.as_object())
                 .cloned()
                 .unwrap_or_default();
+            // Object / Edit menu model-pure verbs are bespoke-native: their
+            // actions.yaml entries are `log` stubs (the real behavior lives in
+            // menu_bar.rs's dispatch — NOT in dispatch_action), so the generic
+            // dispatcher would no-op them. Route each to the SAME headless
+            // mutation path the menu invokes — the Controller methods (and, for
+            // make_instance, the shared menu_bar::make_instance_on_model that
+            // mints ids in the UI layer then calls create_reference +
+            // move_selection) — so the action corpus gates their cross-app
+            // document mutation. Mirrors the Python _MENU_NATIVE_HANDLERS
+            // intercept in _dispatch_action. The verbs self-bracket (the
+            // Controller mutation rides one with_txn, exactly as the menu
+            // closure does); select_all writes the non-undoable selection.
+            let handled = {
+                use crate::document::controller::Controller;
+                let model = &mut st.tabs[st.active_tab].model;
+                match action {
+                    "select_all" => { Controller::select_all(model); true }
+                    "group" => { model.with_txn(|m| Controller::group_selection(m)); true }
+                    "ungroup" => { model.with_txn(|m| Controller::ungroup_selection(m)); true }
+                    "ungroup_all" => { model.with_txn(|m| Controller::ungroup_all(m)); true }
+                    "lock" => { model.with_txn(|m| Controller::lock_selection(m)); true }
+                    "hide_selection" => { model.with_txn(|m| Controller::hide_selection(m)); true }
+                    "make_instance" => {
+                        crate::workspace::menu_bar::make_instance_on_model(model);
+                        true
+                    }
+                    _ => false,
+                }
+            };
+            if handled { continue; }
             crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
         }
         crate::document::artboard::set_test_id_rng(None);
