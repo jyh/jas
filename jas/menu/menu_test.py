@@ -532,14 +532,14 @@ class BuildMenuModelTest(absltest.TestCase):
                  and e.params.get("panel") == "color"]
         self.assertEqual(len(color), 1)
 
-    def test_window_has_all_fourteen_panel_toggles(self):
+    def test_window_has_all_fifteen_panel_toggles(self):
         from menu.menu_model import MenuAction
         model = self._model()
         window = self._find(model, "&Window")
         panels = {e.params.get("panel") for e in window.entries
                   if isinstance(e, MenuAction) and e.action == "toggle_panel"}
-        expected = {"artboards", "layers", "color", "swatches", "stroke",
-                    "properties", "character", "paragraph", "align",
+        expected = {"artboards", "layers", "color", "swatches", "brushes",
+                    "stroke", "properties", "character", "paragraph", "align",
                     "boolean", "magic_wand", "opacity", "symbols", "concepts"}
         self.assertEqual(panels, expected)
 

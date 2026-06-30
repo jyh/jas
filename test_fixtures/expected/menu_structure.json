@@ -1,1 +1,337 @@
-{"menus":[{"items":[{"action":"new_document","label":"&New","shortcut":"Ctrl+N"},{"action":"open_file","label":"&Open...","shortcut":"Ctrl+O"},{"action":"save","label":"&Save","shortcut":"Ctrl+S"},{"action":"save_as","label":"Save &As...","shortcut":"Ctrl+Shift+S"},{"action":"revert","label":"&Revert","shortcut":""},{"separator":true},{"action":"open_document_setup","label":"Document Set&up...","shortcut":""},{"action":"open_print_dialog","label":"&Print...","shortcut":"Ctrl+P"},{"action":"export_to_pdf","label":"Export to PDF...","shortcut":""},{"separator":true},{"action":"quit","label":"&Quit","shortcut":"Ctrl+Q"}],"label":"&File"},{"items":[{"action":"undo","label":"&Undo","shortcut":"Ctrl+Z"},{"action":"redo","label":"&Redo","shortcut":"Ctrl+Shift+Z"},{"separator":true},{"action":"cut","label":"Cu&t","shortcut":"Ctrl+X"},{"action":"copy","label":"&Copy","shortcut":"Ctrl+C"},{"action":"paste","label":"&Paste","shortcut":"Ctrl+V"},{"action":"paste_in_place","label":"Paste in &Place","shortcut":"Ctrl+Shift+V"},{"separator":true},{"action":"select_all","label":"Select &All","shortcut":"Ctrl+A"}],"label":"&Edit"},{"items":[{"action":"group","label":"&Group","shortcut":"Ctrl+G"},{"action":"ungroup","label":"&Ungroup","shortcut":"Ctrl+Shift+G"},{"action":"ungroup_all","label":"Ungroup A&ll","shortcut":""},{"separator":true},{"action":"lock","label":"&Lock","shortcut":"Ctrl+2"},{"action":"unlock_all","label":"Unlock &All","shortcut":"Ctrl+Alt+2"},{"separator":true},{"action":"hide_selection","label":"&Hide","shortcut":"Ctrl+3"},{"action":"show_all","label":"&Show All","shortcut":"Ctrl+Alt+3"},{"separator":true},{"action":"make_instance","label":"&Make Instance","shortcut":""},{"action":"promote_to_concept","label":"&Promote to Concept","shortcut":""}],"label":"&Object"},{"items":[{"action":"zoom_in","label":"Zoom &In","shortcut":"Ctrl+="},{"action":"zoom_out","label":"Zoom &Out","shortcut":"Ctrl+-"},{"action":"zoom_to_actual_size","label":"Actual &Size","shortcut":"Ctrl+1"},{"action":"fit_active_artboard","label":"Fit &Artboard in Window","shortcut":"Ctrl+0"},{"action":"fit_all_artboards","label":"Fit A&ll in Window","shortcut":"Ctrl+Alt+0"},{"action":"fit_in_window","label":"&Fit in Window","shortcut":""}],"label":"&View"},{"items":[{"label":"Workspace","submenu":[{"action":"save_workspace_as","label":"Save As...","shortcut":""},{"separator":true},{"action":"reset_workspace","label":"Reset to Default","shortcut":""},{"action":"revert_workspace","label":"Revert to Saved","shortcut":""}]},{"label":"Appearance","submenu":[{"action":"save_appearance_as","label":"Save As...","shortcut":""}]},{"separator":true},{"action":"tile_panes","label":"Tile","shortcut":""},{"separator":true},{"action":"toggle_pane","label":"Toolbar","shortcut":""},{"action":"toggle_pane","label":"Panels","shortcut":""},{"separator":true},{"action":"toggle_panel","label":"&Artboards","shortcut":""},{"action":"toggle_panel","label":"&Layers","shortcut":""},{"action":"toggle_panel","label":"&Color","shortcut":""},{"action":"toggle_panel","label":"S&watches","shortcut":""},{"action":"toggle_panel","label":"&Stroke","shortcut":""},{"action":"toggle_panel","label":"&Properties","shortcut":""},{"action":"toggle_panel","label":"Ch&aracter","shortcut":""},{"action":"toggle_panel","label":"Para&graph","shortcut":""},{"action":"toggle_panel","label":"Ali&gn","shortcut":""},{"action":"toggle_panel","label":"&Boolean","shortcut":""},{"action":"toggle_panel","label":"&Magic Wand","shortcut":""},{"action":"toggle_panel","label":"&Opacity","shortcut":""},{"action":"toggle_panel","label":"S&ymbols","shortcut":""},{"action":"toggle_panel","label":"Co&ncepts","shortcut":""}],"label":"&Window"}]}
+{
+  "menus": [
+    {
+      "items": [
+        {
+          "action": "new_document",
+          "label": "&New",
+          "shortcut": "Ctrl+N"
+        },
+        {
+          "action": "open_file",
+          "label": "&Open...",
+          "shortcut": "Ctrl+O"
+        },
+        {
+          "action": "save",
+          "label": "&Save",
+          "shortcut": "Ctrl+S"
+        },
+        {
+          "action": "save_as",
+          "label": "Save &As...",
+          "shortcut": "Ctrl+Shift+S"
+        },
+        {
+          "action": "revert",
+          "label": "&Revert",
+          "shortcut": ""
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "open_document_setup",
+          "label": "Document Set&up...",
+          "shortcut": ""
+        },
+        {
+          "action": "open_print_dialog",
+          "label": "&Print...",
+          "shortcut": "Ctrl+P"
+        },
+        {
+          "action": "export_to_pdf",
+          "label": "Export to PDF...",
+          "shortcut": ""
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "quit",
+          "label": "&Quit",
+          "shortcut": "Ctrl+Q"
+        }
+      ],
+      "label": "&File"
+    },
+    {
+      "items": [
+        {
+          "action": "undo",
+          "label": "&Undo",
+          "shortcut": "Ctrl+Z"
+        },
+        {
+          "action": "redo",
+          "label": "&Redo",
+          "shortcut": "Ctrl+Shift+Z"
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "cut",
+          "label": "Cu&t",
+          "shortcut": "Ctrl+X"
+        },
+        {
+          "action": "copy",
+          "label": "&Copy",
+          "shortcut": "Ctrl+C"
+        },
+        {
+          "action": "paste",
+          "label": "&Paste",
+          "shortcut": "Ctrl+V"
+        },
+        {
+          "action": "paste_in_place",
+          "label": "Paste in &Place",
+          "shortcut": "Ctrl+Shift+V"
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "select_all",
+          "label": "Select &All",
+          "shortcut": "Ctrl+A"
+        }
+      ],
+      "label": "&Edit"
+    },
+    {
+      "items": [
+        {
+          "action": "group",
+          "label": "&Group",
+          "shortcut": "Ctrl+G"
+        },
+        {
+          "action": "ungroup",
+          "label": "&Ungroup",
+          "shortcut": "Ctrl+Shift+G"
+        },
+        {
+          "action": "ungroup_all",
+          "label": "Ungroup A&ll",
+          "shortcut": ""
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "lock",
+          "label": "&Lock",
+          "shortcut": "Ctrl+2"
+        },
+        {
+          "action": "unlock_all",
+          "label": "Unlock &All",
+          "shortcut": "Ctrl+Alt+2"
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "hide_selection",
+          "label": "&Hide",
+          "shortcut": "Ctrl+3"
+        },
+        {
+          "action": "show_all",
+          "label": "&Show All",
+          "shortcut": "Ctrl+Alt+3"
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "make_instance",
+          "label": "&Make Instance",
+          "shortcut": ""
+        },
+        {
+          "action": "promote_to_concept",
+          "label": "&Promote to Concept",
+          "shortcut": ""
+        }
+      ],
+      "label": "&Object"
+    },
+    {
+      "items": [
+        {
+          "action": "zoom_in",
+          "label": "Zoom &In",
+          "shortcut": "Ctrl+="
+        },
+        {
+          "action": "zoom_out",
+          "label": "Zoom &Out",
+          "shortcut": "Ctrl+-"
+        },
+        {
+          "action": "zoom_to_actual_size",
+          "label": "Actual &Size",
+          "shortcut": "Ctrl+1"
+        },
+        {
+          "action": "fit_active_artboard",
+          "label": "Fit &Artboard in Window",
+          "shortcut": "Ctrl+0"
+        },
+        {
+          "action": "fit_all_artboards",
+          "label": "Fit A&ll in Window",
+          "shortcut": "Ctrl+Alt+0"
+        },
+        {
+          "action": "fit_in_window",
+          "label": "&Fit in Window",
+          "shortcut": ""
+        }
+      ],
+      "label": "&View"
+    },
+    {
+      "items": [
+        {
+          "label": "Workspace",
+          "submenu": [
+            {
+              "action": "save_workspace_as",
+              "label": "Save As...",
+              "shortcut": ""
+            },
+            {
+              "separator": true
+            },
+            {
+              "action": "reset_workspace",
+              "label": "Reset to Default",
+              "shortcut": ""
+            },
+            {
+              "action": "revert_workspace",
+              "label": "Revert to Saved",
+              "shortcut": ""
+            }
+          ]
+        },
+        {
+          "label": "Appearance",
+          "submenu": [
+            {
+              "action": "save_appearance_as",
+              "label": "Save As...",
+              "shortcut": ""
+            }
+          ]
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "tile_panes",
+          "label": "Tile",
+          "shortcut": ""
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "toggle_pane",
+          "label": "Toolbar",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_pane",
+          "label": "Panels",
+          "shortcut": ""
+        },
+        {
+          "separator": true
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Artboards",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Layers",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Color",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "S&watches",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "Br&ushes",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Stroke",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Properties",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "Ch&aracter",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "Para&graph",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "Ali&gn",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Boolean",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Magic Wand",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "&Opacity",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "S&ymbols",
+          "shortcut": ""
+        },
+        {
+          "action": "toggle_panel",
+          "label": "Co&ncepts",
+          "shortcut": ""
+        }
+      ],
+      "label": "&Window"
+    }
+  ]
+}
