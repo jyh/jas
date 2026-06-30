@@ -165,6 +165,7 @@ let panel_label = function
   | Layers -> "Layers"
   | Color -> "Color"
   | Swatches -> "Swatches"
+  | Brushes -> "Brushes"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
   | Character -> "Character"
