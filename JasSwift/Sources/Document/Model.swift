@@ -341,11 +341,15 @@ public class Model: ObservableObject {
         self.document = document
         self.savedDocument = document
         self.filename = filename ?? freshFilename()
-        // Center the current artboard in the default viewport at
-        // construction time. Per ZOOM_TOOL.md §Document-open
-        // behavior. The first canvas-size sync re-centers using the
-        // real viewport dimensions.
-        self.centerViewOnCurrentArtboard()
+        // NOTE: the view starts at the IDENTITY transform (zoom 1, offset 0) —
+        // `Model.init` does NOT center. This matches the cross-app convention
+        // (Rust `Model::new` / OCaml / Python all build an identity-view model)
+        // so a bare Model is screen==doc for the gesture / action / artboard
+        // test seams. View centering on document-open (ZOOM_TOOL.md
+        // §Document-open) happens at the canvas/app layer instead, like Rust's
+        // TabState: `WorkspaceState.addCanvas` + `Session` restore center with
+        // the default viewport, and `CanvasSubwindow`'s first draw re-centers
+        // with the real viewport (before it renders any layer, so no flash).
     }
 
     /// Center the canvas view on the current artboard using the

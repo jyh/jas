@@ -63,23 +63,15 @@ private func modelWithOneArtboard() -> Model {
         x: 0, y: 0, width: 200, height: 200
     )
     let layer = Layer(name: "Layer", children: [])
-    let model = Model(document: Document(
+    // `Model.init` builds an IDENTITY-view model (screen == doc), matching the
+    // cross-app convention and Rust's `model_with_one_artboard` — view
+    // centering on document-open happens at the canvas/app layer, not in the
+    // Model. So no view reset is needed here; the Artboard tool's gesture math
+    // is driven in identity-view doc space, exactly like the Rust reference.
+    return Model(document: Document(
         layers: [layer], selectedLayer: 0, selection: [],
         artboards: [a]
     ))
-    // Reset to the IDENTITY view (screen == doc). Swift's `Model.init` centers
-    // the view on the current artboard at construction (ZOOM_TOOL.md
-    // §Document-open), so a bare Model with a 200x200 artboard starts with a
-    // non-zero pan (~+344,+350) — whereas Rust's `Model::new` is identity and
-    // defers centering to the TabState/canvas layer. These tests are a 1:1 port
-    // of the Rust `artboard_parity_*` references and assert against their
-    // identity-view doc-space numbers, so reset the view here to verify the
-    // Artboard TOOL's gesture math (not the per-app view-init difference). See
-    // CanvasSubwindow's wasDefault re-center for the production centering path.
-    model.zoomLevel = 1.0
-    model.viewOffsetX = 0.0
-    model.viewOffsetY = 0.0
-    return model
 }
 
 /// The single artboard's (x, y, w, h) — id "A". Returns nil if absent

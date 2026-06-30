@@ -273,6 +273,13 @@ public class WorkspaceState: ObservableObject {
             selectedTab = existing.id
             return
         }
+        // Center the view on the current artboard at document-install time
+        // (with the construction-default 888x900 viewport). `Model.init` no
+        // longer centers — it leaves the identity view for the cross-app
+        // convention — so this is the app-layer centering, mirroring Rust's
+        // TabState construction (app_state.rs). CanvasSubwindow's first draw
+        // re-centers with the real viewport.
+        model.centerViewOnCurrentArtboard()
         let entry = CanvasEntry(model: model)
         canvases.append(entry)
         selectedTab = entry.id

@@ -133,6 +133,12 @@ public extension WorkspaceState {
                     )
                 }
                 let model = Model(document: doc, filename: tab.filename)
+                // Center on the active artboard at restore time (default
+                // viewport); Model.init leaves the identity view per the
+                // cross-app convention, so the app layer centers here (mirrors
+                // WorkspaceState.addCanvas + Rust TabState). The canvas first
+                // draw re-centers with the real viewport.
+                model.centerViewOnCurrentArtboard()
                 loaded.append(CanvasEntry(model: model))
             } catch {
                 NSLog("[session] decode \(tab.binFile) failed: \(error)")
