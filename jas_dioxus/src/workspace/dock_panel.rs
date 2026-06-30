@@ -1586,6 +1586,49 @@ mod stroke_panel_override_tests {
         assert_eq!(name, Some("Default Brushes"));
     }
 
+    // End-to-end render-context check for the Brushes panel body: replicate
+    // the eval_map the dock builds (lines ~1244-1274) and evaluate the real
+    // disclosure-label / tile-foreach expressions from brushes.yaml.
+    #[test]
+    fn brushes_panel_body_expressions_resolve() {
+        use crate::interpreter::workspace::Workspace;
+        use crate::interpreter::expr;
+        let st = AppState::new();
+        let ws = Workspace::load().expect("workspace");
+        let content_id = "brushes_panel_content";
+        let panel_name = "brushes";
+        let live_state_map = build_live_state_map(&st);
+
+        let panel_map: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults(content_id).into_iter().collect();
+        let panel_state = build_panel_state_subset(panel_name, &live_state_map);
+        let mut eval_map = serde_json::Map::new();
+        eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
+        eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
+        eval_map.insert("data".into(), serde_json::json!({
+            "brush_libraries": live_state_map.get("_brush_libraries")
+                .cloned().unwrap_or(serde_json::Value::Null),
+        }));
+        let ctx = serde_json::Value::Object(eval_map);
+
+        // Outer foreach source.
+        use crate::interpreter::expr_types::Value;
+        let open = expr::eval("panel.open_libraries", &ctx);
+        let open_json = match open { Value::List(ref v) => serde_json::Value::Array(v.clone()), Value::Str(ref s) => serde_json::from_str(s).unwrap_or(serde_json::Value::Null), _ => serde_json::Value::Null };
+        let arr = open_json.as_array().expect("open_libraries is a list");
+        assert_eq!(arr.len(), 1, "one open library, got {:?}", open_json);
+        let lib_id = arr[0].get("id").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(lib_id, "default_brushes", "lib.id");
+
+        // Build the foreach child scope and evaluate the disclosure label.
+        let mut child = ctx.as_object().unwrap().clone();
+        child.insert("lib".into(), arr[0].clone());
+        let child_ctx = serde_json::Value::Object(child);
+        let name = expr::eval("data.brush_libraries[lib.id].name", &child_ctx);
+        assert_eq!(name.to_string_coerce(), "Default Brushes",
+            "disclosure label resolved (got {:?})", name);
+    }
+
     // Part B.3: rotation / opacity / blend from the first selected element.
     #[test]
     fn properties_attrs_from_first_selected() {
