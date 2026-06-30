@@ -1,0 +1,121 @@
+[
+  {
+    "name": "menu_select_all_two_rects",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_select_all_two_rects_expected.json"
+  },
+  {
+    "name": "menu_group_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "group",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_group_two_rects_expected.json"
+  },
+  {
+    "name": "menu_ungroup_nested",
+    "setup_svg": "group_nested.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "ungroup",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_ungroup_nested_expected.json"
+  },
+  {
+    "name": "menu_ungroup_all_nested",
+    "setup_svg": "group_nested.svg",
+    "actions": [
+      {
+        "action": "ungroup_all",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_ungroup_all_nested_expected.json"
+  },
+  {
+    "name": "menu_lock_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "lock",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_lock_two_rects_expected.json"
+  },
+  {
+    "name": "menu_hide_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "hide_selection",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_hide_two_rects_expected.json"
+  },
+  {
+    "name": "menu_make_instance_rect",
+    "setup_svg": "rect_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "make_instance",
+        "params": {}
+      }
+    ],
+    "expected_json": "menu_make_instance_rect_expected.json"
+  }
+]
