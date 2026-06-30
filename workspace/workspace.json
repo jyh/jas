@@ -8431,7 +8431,8 @@
           "action": "toggle_pane",
           "params": {
             "pane": "toolbar"
-          }
+          },
+          "checked_when": "panes.toolbar"
         },
         {
           "id": "menu_panels",
@@ -8439,7 +8440,8 @@
           "action": "toggle_pane",
           "params": {
             "pane": "dock"
-          }
+          },
+          "checked_when": "panes.dock"
         },
         "separator",
         {
@@ -8448,7 +8450,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "artboards"
-          }
+          },
+          "checked_when": "panels.artboards"
         },
         {
           "id": "menu_layers",
@@ -8456,7 +8459,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "layers"
-          }
+          },
+          "checked_when": "panels.layers"
         },
         {
           "id": "menu_color",
@@ -8464,7 +8468,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "color"
-          }
+          },
+          "checked_when": "panels.color"
         },
         {
           "id": "menu_swatches",
@@ -8472,7 +8477,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "swatches"
-          }
+          },
+          "checked_when": "panels.swatches"
         },
         {
           "id": "menu_stroke",
@@ -8480,7 +8486,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "stroke"
-          }
+          },
+          "checked_when": "panels.stroke"
         },
         {
           "id": "menu_properties",
@@ -8488,7 +8495,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "properties"
-          }
+          },
+          "checked_when": "panels.properties"
         },
         {
           "id": "menu_character",
@@ -8496,7 +8504,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "character"
-          }
+          },
+          "checked_when": "panels.character"
         },
         {
           "id": "menu_paragraph",
@@ -8504,7 +8513,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "paragraph"
-          }
+          },
+          "checked_when": "panels.paragraph"
         },
         {
           "id": "menu_align",
@@ -8512,7 +8522,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "align"
-          }
+          },
+          "checked_when": "panels.align"
         },
         {
           "id": "menu_boolean",
@@ -8520,7 +8531,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "boolean"
-          }
+          },
+          "checked_when": "panels.boolean"
         },
         {
           "id": "menu_magic_wand",
@@ -8528,7 +8540,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "magic_wand"
-          }
+          },
+          "checked_when": "panels.magic_wand"
         },
         {
           "id": "menu_opacity",
@@ -8536,7 +8549,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "opacity"
-          }
+          },
+          "checked_when": "panels.opacity"
         },
         {
           "id": "menu_symbols",
@@ -8544,7 +8558,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "symbols"
-          }
+          },
+          "checked_when": "panels.symbols"
         },
         {
           "id": "menu_concepts",
@@ -8552,7 +8567,8 @@
           "action": "toggle_panel",
           "params": {
             "panel": "concepts"
-          }
+          },
+          "checked_when": "panels.concepts"
         }
       ]
     }

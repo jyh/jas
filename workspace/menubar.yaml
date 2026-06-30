@@ -111,20 +111,25 @@ menubar:
       - separator
       - { id: menu_tile,       label: "Tile",        action: tile_panes }
       - separator
-      - { id: menu_toolbar,    label: "Toolbar",     action: toggle_pane,  params: { pane: toolbar } }
-      - { id: menu_panels,     label: "Panels",      action: toggle_pane,  params: { pane: dock } }
+      # The pane / panel toggles carry a `checked_when` expression so the menu
+      # check mark reflects live visibility through the SAME shared evaluator
+      # the apps use for `enabled_when` (the `panes` / `panels` namespaces map
+      # each id to its current visibility). This replaces the per-app native
+      # check-mark machinery with one declarative predicate.
+      - { id: menu_toolbar,    label: "Toolbar",     action: toggle_pane,  params: { pane: toolbar }, checked_when: "panes.toolbar" }
+      - { id: menu_panels,     label: "Panels",      action: toggle_pane,  params: { pane: dock },    checked_when: "panes.dock" }
       - separator
-      - { id: menu_artboards,     label: "&Artboards",    action: toggle_panel, params: { panel: artboards } }
-      - { id: menu_layers,        label: "&Layers",       action: toggle_panel, params: { panel: layers } }
-      - { id: menu_color,         label: "&Color",        action: toggle_panel, params: { panel: color } }
-      - { id: menu_swatches,      label: "S&watches",     action: toggle_panel, params: { panel: swatches } }
-      - { id: menu_stroke,        label: "&Stroke",       action: toggle_panel, params: { panel: stroke } }
-      - { id: menu_properties,    label: "&Properties",   action: toggle_panel, params: { panel: properties } }
-      - { id: menu_character,     label: "Ch&aracter",    action: toggle_panel, params: { panel: character } }
-      - { id: menu_paragraph,     label: "Para&graph",    action: toggle_panel, params: { panel: paragraph } }
-      - { id: menu_align,         label: "Ali&gn",        action: toggle_panel, params: { panel: align } }
-      - { id: menu_boolean,       label: "&Boolean",      action: toggle_panel, params: { panel: boolean } }
-      - { id: menu_magic_wand,    label: "&Magic Wand",   action: toggle_panel, params: { panel: magic_wand } }
-      - { id: menu_opacity,       label: "&Opacity",      action: toggle_panel, params: { panel: opacity } }
-      - { id: menu_symbols,       label: "S&ymbols",      action: toggle_panel, params: { panel: symbols } }
-      - { id: menu_concepts,      label: "Co&ncepts",     action: toggle_panel, params: { panel: concepts } }
+      - { id: menu_artboards,     label: "&Artboards",    action: toggle_panel, params: { panel: artboards },  checked_when: "panels.artboards" }
+      - { id: menu_layers,        label: "&Layers",       action: toggle_panel, params: { panel: layers },     checked_when: "panels.layers" }
+      - { id: menu_color,         label: "&Color",        action: toggle_panel, params: { panel: color },      checked_when: "panels.color" }
+      - { id: menu_swatches,      label: "S&watches",     action: toggle_panel, params: { panel: swatches },   checked_when: "panels.swatches" }
+      - { id: menu_stroke,        label: "&Stroke",       action: toggle_panel, params: { panel: stroke },     checked_when: "panels.stroke" }
+      - { id: menu_properties,    label: "&Properties",   action: toggle_panel, params: { panel: properties }, checked_when: "panels.properties" }
+      - { id: menu_character,     label: "Ch&aracter",    action: toggle_panel, params: { panel: character },  checked_when: "panels.character" }
+      - { id: menu_paragraph,     label: "Para&graph",    action: toggle_panel, params: { panel: paragraph },  checked_when: "panels.paragraph" }
+      - { id: menu_align,         label: "Ali&gn",        action: toggle_panel, params: { panel: align },      checked_when: "panels.align" }
+      - { id: menu_boolean,       label: "&Boolean",      action: toggle_panel, params: { panel: boolean },    checked_when: "panels.boolean" }
+      - { id: menu_magic_wand,    label: "&Magic Wand",   action: toggle_panel, params: { panel: magic_wand }, checked_when: "panels.magic_wand" }
+      - { id: menu_opacity,       label: "&Opacity",      action: toggle_panel, params: { panel: opacity },    checked_when: "panels.opacity" }
+      - { id: menu_symbols,       label: "S&ymbols",      action: toggle_panel, params: { panel: symbols },    checked_when: "panels.symbols" }
+      - { id: menu_concepts,      label: "Co&ncepts",     action: toggle_panel, params: { panel: concepts },   checked_when: "panels.concepts" }

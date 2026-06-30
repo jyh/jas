@@ -34,6 +34,7 @@ from workspace.workspace_test_json import (
 from workspace.layout_apply import layout_apply
 from workspace_interpreter.panel_layout import layout_panel
 from workspace_interpreter.widget_tree import widget_tree
+from workspace_interpreter.menu_state import menu_state
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore
 
@@ -2169,6 +2170,36 @@ class CrossLanguageTest(absltest.TestCase):
             actual = widget_tree(panels[args["panel"]], args.get("ctx", {}))
             self.assertEqual(actual, expected,
                 msg=f"Panel widget tree '{name}' mismatch")
+
+    # ---------------------------------------------------------------
+    # Menu enabled/checked evaluation (TESTING_STRATEGY.md chrome seam)
+    # ---------------------------------------------------------------
+    # The bundle / live-widget gates pin the menu's STRUCTURE; this pins its
+    # DYNAMIC state. Each case seeds a menu context (state.tab_count,
+    # active_document.*, workspace.has_saved_layout, panels.*, panes.*) and
+    # byte-compares the per-item {enabled, checked} every app must compute by
+    # evaluating the bundle's enabled_when / checked_when through the shared
+    # expression evaluator. Closes the "grays out / checks differently across
+    # apps" class as data.
+
+    def test_algorithm_menu_state(self):
+        json_str = _read_fixture("algorithms/menu_state.json")
+        tests = json.loads(json_str)
+        bundle_path = os.path.join(
+            os.path.dirname(__file__), "..", "workspace", "workspace.json")
+        with open(bundle_path) as f:
+            menubar = json.load(f)["menubar"]
+
+        for tc in tests:
+            name = tc["name"]
+            func = tc["function"]
+            args = tc["args"]
+            expected = tc["expected"]
+            if func != "menu_state":
+                self.fail(f"Unknown function: {func}")
+            actual = menu_state(menubar, args.get("ctx", {}))
+            self.assertEqual(actual, expected,
+                msg=f"Menu state '{name}' mismatch")
 
 
 if __name__ == "__main__":
