@@ -2521,9 +2521,18 @@ def _render_disclosure(el, store, ctx, dispatch_fn):
     if isinstance(label_text, str) and "{{" in label_text:
         label_text = evaluate_text(label_text, store.eval_context(ctx))
 
+    # Explicit theme text color: a flat QPushButton otherwise inherits the
+    # system ButtonText role (dark), which is invisible on the dark panel
+    # theme \u2014 the header text would render but vanish. Mirrors _render_text
+    # / the dock's THEME_TEXT convention. (The Swatches "Web Colors" header
+    # comes through a native path that already colors itself; this generic
+    # disclosure header \u2014 used by the Brushes panel \u2014 did not.)
+    from workspace.dock_panel import THEME_TEXT
     header = QPushButton(f"\u25BC {label_text}")
     header.setFlat(True)
-    header.setStyleSheet("text-align: left; padding: 2px 4px; font-weight: bold; font-size: 11px;")
+    header.setStyleSheet(
+        f"text-align: left; padding: 2px 4px; font-weight: bold; "
+        f"font-size: 11px; color: {THEME_TEXT}; border: none;")
     layout.addWidget(header)
 
     content_widget = QWidget()
