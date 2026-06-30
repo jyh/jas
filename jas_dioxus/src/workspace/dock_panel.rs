@@ -1627,6 +1627,16 @@ mod stroke_panel_override_tests {
         let name = expr::eval("data.brush_libraries[lib.id].name", &child_ctx);
         assert_eq!(name.to_string_coerce(), "Default Brushes",
             "disclosure label resolved (got {:?})", name);
+
+        // The disclosure renders its label via eval_text (the {{...}} form),
+        // and the tile foreach source is also an indexed data path. Pin both
+        // through the exact render entrypoints.
+        let label_text = expr::eval_text("{{data.brush_libraries[lib.id].name}}", &child_ctx);
+        assert_eq!(label_text, "Default Brushes", "eval_text label (got {:?})", label_text);
+        let brushes = expr::eval("data.brush_libraries[lib.id].brushes", &child_ctx);
+        let brushes_json = match brushes { Value::List(ref v) => serde_json::Value::Array(v.clone()), Value::Str(ref s) => serde_json::from_str(s).unwrap_or(serde_json::Value::Null), _ => serde_json::Value::Null };
+        assert!(brushes_json.as_array().map(|a| !a.is_empty()).unwrap_or(false),
+            "tile foreach source non-empty (got {:?})", brushes_json);
     }
 
     // Part B.3: rotation / opacity / blend from the first selected element.
