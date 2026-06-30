@@ -1000,13 +1000,44 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
         (match b |> member "effects" with
          | `List effects ->
            List.iter (fun e ->
-             match e |> member "set" with
-             | `Assoc pairs ->
-               List.iter (fun (k, v) ->
-                 _write_back_bind ("state." ^ k) (resolve_value v);
-                 wrote_state := true
-               ) pairs
-             | _ -> ()
+             (match e |> member "set" with
+              | `Assoc pairs ->
+                List.iter (fun (k, v) ->
+                  _write_back_bind ("state." ^ k) (resolve_value v);
+                  wrote_state := true
+                ) pairs
+              | _ -> ());
+             (* select: { target, list, scope, scope_value, mode } — the
+                generic tile-selection effect used by the Swatches (and
+                Brushes) grid. Route it through the same
+                [Effects.apply_select_effect] the generic run_effects runner
+                uses, then schedule a body rebuild so the [selected_in]
+                outline repaints. Without this the swatch click set the
+                active color but never updated panel.selected_swatches, so
+                no selection feedback appeared and the selection-gated menu
+                items (Duplicate / Delete / Swatch Options) stayed disabled
+                — a divergence from the Rust / Swift / Python ports, which
+                all apply this effect. *)
+             (match e |> member "select" with
+              | `Assoc spec ->
+                (match !_current_store, ctx with
+                 | Some store, `Assoc ctx_pairs ->
+                   (* [apply_select_effect] writes to the store's active
+                      panel, but OCaml never calls [set_active_panel]
+                      anywhere, so it is always None and the effect
+                      no-ops. Point it at the panel this click dispatcher
+                      is operating on (the same id [click_ctx] uses) for
+                      the duration of the call, then restore — keeping the
+                      blast radius to this one effect rather than flipping
+                      a global other effects key off [get_active_panel_id]. *)
+                   let prev = State_store.get_active_panel_id store in
+                   State_store.set_active_panel store !_current_panel_id;
+                   Effects.apply_select_effect spec ctx_pairs store;
+                   State_store.set_active_panel store prev;
+                   schedule_panel_rerender ();
+                   wrote_state := true
+                 | _ -> ())
+              | _ -> ())
            ) effects
          | _ -> ());
         (match b |> member "action" |> to_string_option with
@@ -3250,15 +3281,26 @@ and render_color_swatch ~packing ~ctx el =
          captured Yojson; a recent-swatch click using stale ctx
          resolves [panel.recent_colors.0] to null and the condition
          gate ([panel.recent_colors.0 != null]) fails silently. *)
+      (* Carry the click modifiers so a [select] effect can resolve
+         extend (Shift) / toggle (Ctrl or Cmd) / single mode the same way
+         the other ports do. apply_select_effect reads these from
+         [ctx.event]; with no event entry it falls back to single. *)
+      let modifiers = Gdk.Convert.modifier (GdkEvent.Button.state ev) in
+      let event_json = `Assoc [
+        ("shift", `Bool (List.mem `SHIFT modifiers));
+        ("ctrl", `Bool (List.mem `CONTROL modifiers));
+        ("meta", `Bool (List.mem `META modifiers));
+      ] in
       let click_ctx =
         match !_current_store, !_current_panel_id, ctx with
         | Some store, Some pid, `Assoc pairs ->
           let live_panel = State_store.get_panel_state store pid in
           let live_state = State_store.get_all store in
           let pairs' = List.filter
-            (fun (k, _) -> k <> "panel" && k <> "state") pairs in
+            (fun (k, _) -> k <> "panel" && k <> "state" && k <> "event") pairs in
           `Assoc (("panel", `Assoc live_panel)
-                  :: ("state", `Assoc live_state) :: pairs')
+                  :: ("state", `Assoc live_state)
+                  :: ("event", event_json) :: pairs')
         | _ -> ctx in
       (* TWO_BUTTON_PRESS fires GTK's double-click after the second
          BUTTON_PRESS. Dispatch double_click behaviors (e.g. the

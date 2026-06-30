@@ -46,6 +46,20 @@ val state_defaults : Yojson.Safe.t -> (string * Yojson.Safe.t) list
 (** Convert an evaluated expression value to JSON for storage. *)
 val value_to_json : Expr_eval.value -> Yojson.Safe.t
 
+(** Apply a [select: { target, list, scope, scope_value, mode }] effect to
+    the active panel's state. Mirrors the Rust [apply_select_effect] and the
+    Swift [applySelectEffect]. Used by tile-style panels (swatches / brushes)
+    to update the panel-state list of selected indices on click. [ctx] is the
+    eval context (loop vars + an optional [event] entry carrying shift/ctrl/
+    meta modifiers for extend/toggle/single mode resolution). Exposed so the
+    panel-view click dispatcher can route a swatch's [select] effect through
+    the same logic as the generic [run_effects] runner. *)
+val apply_select_effect :
+  (string * Yojson.Safe.t) list ->
+  (string * Yojson.Safe.t) list ->
+  State_store.t ->
+  unit
+
 (** Build a [Stroke] from the state store's [stroke_*] keys and apply
     it to the controller's current selection.
     Currently not wired into the OCaml dispatch path (see note in the
