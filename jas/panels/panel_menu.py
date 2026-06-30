@@ -304,6 +304,7 @@ _PANEL_LABELS: dict[PanelKind, str] = {
     PanelKind.OPACITY: "Opacity",
     PanelKind.MAGIC_WAND: "Magic Wand",
     PanelKind.SYMBOLS: "Symbols",
+    PanelKind.BRUSHES: "Brushes",
 }
 
 
