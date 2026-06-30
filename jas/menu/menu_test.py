@@ -593,6 +593,121 @@ class MenuStructureFromBundleTest(absltest.TestCase):
             titles, ["&File", "&Edit", "&Object", "&View", "&Window"])
 
 
+class LiveMenuReflectionTest(absltest.TestCase):
+    """Live-widget reflection gate (TESTING_STRATEGY.md chrome seam).
+
+    The bundle gate (``scripts/check_menu_structure.py``) pins that the
+    *compiled* ``menubar`` matches the golden. This test closes the
+    complementary gap the bundle gate cannot see: that the *actual rendered
+    QMenuBar* — the real QAction tree Qt builds in :func:`menu.menu.create_menus`
+    — reflects that same bundle structure. It walks the live widget and
+    byte-compares to ``test_fixtures/expected/menu_structure.json``.
+
+    Catches render-step drift the bundle/model gates miss: a dropped or
+    reordered item, a mis-stripped mnemonic, a wrong shortcut, an item wired
+    to the wrong action name.
+
+    Two contents are inherently user-state-dependent and NOT spec-pinned, so
+    both this walk and the golden normalize them away:
+      * the Workspace / Appearance dynamic submenu *contents* (saved layouts,
+        appearances) — collapsed to a ``"dynamic"`` sentinel; only the submenu
+        label is compared;
+      * shortcut string formatting — both sides pass through
+        ``QKeySequence(s).toString()`` so the gate pins shortcut *equivalence*,
+        not Qt's display spelling.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+        cls.window = MainWindow()
+
+    @staticmethod
+    def _golden_path():
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        return root / "test_fixtures" / "expected" / "menu_structure.json"
+
+    @staticmethod
+    def _canonical(obj) -> str:
+        # Same canonical discipline as scripts/check_menu_structure.py.
+        import json
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=False)
+
+    @staticmethod
+    def _norm_shortcut(seq) -> str:
+        from PySide6.QtGui import QKeySequence
+        if isinstance(seq, str):
+            seq = QKeySequence(seq)
+        return seq.toString()
+
+    def _walk_live(self):
+        """Walk the live QMenuBar to the canonical menu-structure shape.
+
+        Top-level menus are read via the durable ``_menu_objects`` handles
+        :func:`create_menus` stashes on the window (``menuBar().actions()[i]
+        .menu()`` can report an already-deleted C++ wrapper once several
+        MainWindows exist in-process — a PySide ownership quirk). Items are
+        classified WITHOUT ``QAction.menu()``: every real action carries its
+        bundle action name via ``setData``, so a non-separator item with no
+        data is a dynamic submenu.
+        """
+        menubar = self.window.menuBar()
+        n_top = len(menubar.actions())
+        menus = []
+        for top in self.window._menu_objects[:n_top]:
+            items = []
+            for act in top.actions():
+                if act.isSeparator():
+                    items.append({"separator": True})
+                elif not act.data():
+                    items.append({"label": act.text(), "submenu": "dynamic"})
+                else:
+                    items.append({
+                        "action": act.data(),
+                        "label": act.text(),
+                        "shortcut": self._norm_shortcut(act.shortcut()),
+                    })
+            menus.append({"label": top.title(), "items": items})
+        return {"menus": menus}
+
+    def _normalize_expected(self, golden):
+        """Apply the same two normalizations to the golden so the byte-compare
+        pins structure, not user-state or shortcut spelling."""
+        menus = []
+        for menu in golden["menus"]:
+            items = []
+            for it in menu["items"]:
+                if "separator" in it:
+                    items.append({"separator": True})
+                elif "submenu" in it:
+                    items.append({"label": it["label"], "submenu": "dynamic"})
+                else:
+                    items.append({
+                        "action": it["action"],
+                        "label": it["label"],
+                        "shortcut": self._norm_shortcut(it["shortcut"]),
+                    })
+            menus.append({"label": menu["label"], "items": items})
+        return {"menus": menus}
+
+    def test_live_menubar_matches_bundle_golden(self):
+        import json
+        golden = json.loads(self._golden_path().read_text())
+        expected = self._canonical(self._normalize_expected(golden))
+        actual = self._canonical(self._walk_live())
+        self.assertEqual(
+            actual, expected,
+            "The live QMenuBar drifted from the compiled menubar.\n"
+            "  The rendered menu structure no longer matches "
+            "test_fixtures/expected/menu_structure.json.\n"
+            f"  live:     {actual}\n  expected: {expected}")
+
+
 class ZoomRoutingTest(absltest.TestCase):
     """The View zoom/fit family mutates the active model's view state.
     Pins that the bundle-driven View entries reach working zoom handlers

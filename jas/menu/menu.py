@@ -354,6 +354,11 @@ def create_menus(window: QMainWindow) -> None:
                     act.setShortcut(QKeySequence(entry.shortcut))
                 a_name = entry.action
                 a_params = dict(entry.params)
+                # Stamp the bundle action name on the QAction so the live-widget
+                # reflection gate (menu_test.LiveMenuReflectionTest) can recover
+                # which action each rendered item is wired to. Inert at runtime
+                # (nothing else reads QAction.data); the trigger uses the closure.
+                act.setData(a_name)
                 act.triggered.connect(
                     lambda checked=False, n=a_name, p=a_params:
                     _on_menu_action(window, n, p))
