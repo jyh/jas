@@ -30,7 +30,7 @@ type dock_id = int
 
 type dock_edge = Left | Right | Bottom
 
-type panel_kind = Layers | Color | Swatches | Stroke | Properties | Character | Paragraph | Artboards | Align | Boolean | Opacity | Magic_wand | Symbols
+type panel_kind = Layers | Color | Swatches | Brushes | Stroke | Properties | Character | Paragraph | Artboards | Align | Boolean | Opacity | Magic_wand | Symbols
 
 type color_panel_mode = Grayscale | Hsb_mode | Rgb_mode | Cmyk_mode | Web_safe_rgb
 
@@ -178,7 +178,7 @@ type workspace_layout = {
 let named name = {
   version = layout_version;
   name;
-  anchored = [(Right, make_dock 0 [[Color; Swatches]; [Align; Boolean]; [Character; Paragraph]; [Stroke; Properties]; [Artboards; Layers; Symbols]] default_dock_width)];
+  anchored = [(Right, make_dock 0 [[Color; Swatches; Brushes]; [Align; Boolean]; [Character; Paragraph]; [Stroke; Properties]; [Artboards; Layers; Symbols]] default_dock_width)];
   floating = [];
   hidden_panels = [];
   z_order = [];
@@ -470,6 +470,7 @@ let panel_label = function
   | Layers -> "Layers"
   | Color -> "Color"
   | Swatches -> "Swatches"
+  | Brushes -> "Brushes"
   | Stroke -> "Stroke"
   | Properties -> "Properties"
   | Character -> "Character"
@@ -532,7 +533,7 @@ let show_panel l kind =
     bump l
   end
 
-let all_panel_kinds = [Layers; Color; Swatches; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity; Magic_wand; Symbols]
+let all_panel_kinds = [Layers; Color; Swatches; Brushes; Stroke; Properties; Character; Paragraph; Artboards; Align; Boolean; Opacity; Magic_wand; Symbols]
 
 let panel_menu_items l =
   List.map (fun k -> (k, is_panel_visible l k)) all_panel_kinds
@@ -661,11 +662,11 @@ let edge_to_json = function Left -> "Left" | Right -> "Right" | Bottom -> "Botto
 let edge_of_json = function "Left" -> Left | "Right" -> Right | _ -> Bottom
 
 let kind_to_json = function
-  | Layers -> "Layers" | Color -> "Color" | Swatches -> "Swatches" | Stroke -> "Stroke" | Properties -> "Properties"
+  | Layers -> "Layers" | Color -> "Color" | Swatches -> "Swatches" | Brushes -> "Brushes" | Stroke -> "Stroke" | Properties -> "Properties"
   | Character -> "Character" | Paragraph -> "Paragraph" | Artboards -> "Artboards" | Align -> "Align"
   | Boolean -> "Boolean" | Opacity -> "Opacity" | Magic_wand -> "MagicWand" | Symbols -> "Symbols"
 let kind_of_json = function
-  | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Stroke" -> Stroke
+  | "Layers" -> Layers | "Color" -> Color | "Swatches" -> Swatches | "Brushes" -> Brushes | "Stroke" -> Stroke
   | "Character" -> Character | "Paragraph" -> Paragraph | "Artboards" -> Artboards
   | "Align" -> Align | "Boolean" -> Boolean | "Opacity" -> Opacity
   | "MagicWand" -> Magic_wand | "Symbols" -> Symbols

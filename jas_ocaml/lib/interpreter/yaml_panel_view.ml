@@ -1677,6 +1677,24 @@ and build_widget_click_ctx ev (ctx : Yojson.Safe.t) : Yojson.Safe.t =
             :: ("event", event_json) :: pairs')
   | _ -> ctx
 
+(* Capture the panel store + id current at widget-CREATION time and return a
+   wrapper that restores them for the duration of a click dispatch. At click
+   time the [_current_store]/[_current_panel_id] globals point at whatever
+   panel rendered LAST (the dock renders every visible panel; the last group
+   wins), which is usually NOT the clicked widget's panel — so a per-panel
+   effect like [select] would write to the wrong store and the selection
+   never shows when the panel isn't bottom-most. Restoring the captured
+   globals fixes this without threading the store through every dispatcher. *)
+and capture_widget_panel_ctx () =
+  let store = !_current_store and pid = !_current_panel_id in
+  fun (thunk : unit -> 'a) : 'a ->
+    let s = !_current_store and p = !_current_panel_id in
+    _current_store := store;
+    _current_panel_id := pid;
+    Fun.protect
+      ~finally:(fun () -> _current_store := s; _current_panel_id := p)
+      thunk
+
 and render_container ~packing ~ctx el etype =
   let open Yojson.Safe.Util in
   let layout_dir = el |> member "layout" |> to_string_option |> Option.value ~default:"column" in
@@ -1716,11 +1734,12 @@ and render_container ~packing ~ctx el etype =
   let packing =
     if not has_click_behavior then packing
     else begin
+      let with_panel_ctx = capture_widget_panel_ctx () in
       let evt = GBin.event_box ~packing () in
       evt#event#add [`BUTTON_PRESS];
       ignore (evt#event#connect#button_press ~callback:(fun ev ->
         if GdkEvent.Button.button ev <> 1 then false
-        else begin
+        else with_panel_ctx (fun () ->
           let click_ctx = build_widget_click_ctx ev ctx in
           if GdkEvent.get_type ev = `TWO_BUTTON_PRESS then begin
             dispatch_double_click_behaviors el click_ctx; true
@@ -1728,8 +1747,7 @@ and render_container ~packing ~ctx el etype =
             let wrote_state = dispatch_click_behaviors el click_ctx in
             if wrote_state then schedule_panel_rerender ();
             true
-          end
-        end));
+          end)));
       evt#add
     end in
   (* When the container is a selectable tile (binds [selected_in], like a
@@ -3328,9 +3346,10 @@ and render_color_swatch ~packing ~ctx el =
   in
   (* Dispatch the swatch's [behavior] array on click. Mirrors the
      Rust [renderer.rs] color_swatch click handler. *)
+  let with_panel_ctx = capture_widget_panel_ctx () in
   evt#event#add [`BUTTON_PRESS];
   ignore (evt#event#connect#button_press ~callback:(fun ev ->
-    if GdkEvent.Button.button ev = 1 then begin
+    if GdkEvent.Button.button ev = 1 then with_panel_ctx (fun () ->
       (* Rebuild the panel/state portions of ctx from the live store
          before dispatching. The ctx captured at widget creation
          time has stale panel.recent_colors etc. — the bridge writes
@@ -3373,8 +3392,7 @@ and render_color_swatch ~packing ~ctx el =
         if fill_on_top_before <> fill_on_top_after then
           !fill_stroke_swap_hook ()
       end;
-      true
-    end else false
+      true) else false
   ));
   (* Register fill/stroke swatch + recent slots so document-change
      and recent-color-push updates land on them without a body

@@ -38,6 +38,7 @@ let parse_panel_kind_str s =
   match s with
   | "color" -> Color
   | "swatches" -> Swatches
+  | "brushes" -> Brushes
   | "stroke" -> Stroke
   | "properties" -> Properties
   | "character" -> Character
@@ -54,6 +55,7 @@ let panel_kind_str = function
   | Layers -> "layers"
   | Color -> "color"
   | Swatches -> "swatches"
+  | Brushes -> "brushes"
   | Stroke -> "stroke"
   | Properties -> "properties"
   | Character -> "character"
