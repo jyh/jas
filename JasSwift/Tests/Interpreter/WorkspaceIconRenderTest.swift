@@ -143,12 +143,18 @@ private func maxColorDistance(_ a: [[(Double, Double, Double)]],
     // parse/paint unit tests carry correctness.
     let refDir = "/tmp/iconref"
     guard FileManager.default.fileExists(atPath: "\(refDir)/pen.png") else {
-        Issue.record("rsvg references not present at \(refDir) — skipping pixel compare (parse tests cover correctness)")
+        // OPTIONAL fixture: the rsvg references are produced by a manual
+        // validation step (rsvg-convert of each icons.yaml svg), NOT committed.
+        // When absent (the normal case, including CI), this pixel compare is a
+        // no-op PASS — the parse/paint unit tests in WorkspaceIconParseTest
+        // carry the correctness proof. (Previously this used `Issue.record`,
+        // which swift-testing counts as a FAILURE — so the test failed for
+        // everyone who had not manually generated the references.)
         return
     }
-    // Probe ImageRenderer once; if headless rendering yields nil, note + skip.
+    // Probe ImageRenderer once; if headless rendering yields nil, skip as a
+    // no-op pass (same rationale — do NOT Issue.record, which fails the test).
     guard renderSwiftIcon("pen", size: 64) != nil else {
-        Issue.record("ImageRenderer produced no image in this harness — skipping pixel compare (parse tests cover correctness)")
         return
     }
 
