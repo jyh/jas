@@ -277,57 +277,9 @@ pub(crate) fn MenuBarView(
                 }
                 "make_instance" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        use crate::document::artboard::generate_element_id;
-                        use crate::document::document::SelectionKind;
-                        let Some(tab) = st.tab_mut() else { return; };
-                        // Enabled only when exactly ONE whole element is
-                        // selected (kind = All; not a control-point sub-
-                        // selection). Otherwise no-op, like group's guard.
-                        let sel = &tab.model.document().selection;
-                        let [es] = sel.as_slice() else { return; };
-                        if es.kind != SelectionKind::All { return; }
-                        let target_path = es.path.clone();
-                        // Gather every existing element id so the freshly
-                        // minted target_id / ref_id can avoid collisions.
-                        let mut existing: std::collections::HashSet<String> =
-                            std::collections::HashSet::new();
-                        fn gather_ids(
-                            elem: &crate::geometry::element::Element,
-                            out: &mut std::collections::HashSet<String>,
-                        ) {
-                            if let Some(id) = elem.common().id.as_deref() {
-                                out.insert(id.to_string());
-                            }
-                            if let Some(children) = elem.children() {
-                                for c in children { gather_ids(c, out); }
-                            }
+                        if let Some(tab) = st.tab_mut() {
+                            make_instance_on_model(&mut tab.model);
                         }
-                        for layer in &tab.model.document().layers {
-                            gather_ids(layer, &mut existing);
-                        }
-                        // Mint two distinct, collision-free ids (mirrors the
-                        // artboard mint loop in effects.rs).
-                        let mut mint = |existing: &std::collections::HashSet<String>| -> Option<String> {
-                            for _ in 0..100 {
-                                let c = generate_element_id(None);
-                                if !existing.contains(&c) { return Some(c); }
-                            }
-                            None
-                        };
-                        let Some(target_id) = mint(&existing) else { return; };
-                        existing.insert(target_id.clone());
-                        let Some(ref_id) = mint(&existing) else { return; };
-                        // create_reference + offset-move under ONE snapshot
-                        // = a single undo step (offset rides on the new
-                        // reference's common.transform via move_selection).
-                        tab.model.with_txn(|m| {
-                            Controller::create_reference(
-                                m, &target_path, &target_id, &ref_id,
-                            );
-                            Controller::move_selection(
-                                m, PASTE_OFFSET, PASTE_OFFSET,
-                            );
-                        });
                     }));
                 }
                 "simplify" => {
@@ -1222,6 +1174,65 @@ fn cmd_for(action: &str, params: &serde_json::Map<String, serde_json::Value>) ->
         ),
         other => other.to_string(),
     }
+}
+
+/// Object > Make Instance, as a headless mutation on a [`Model`].
+///
+/// Replaces the single whole-element selection with a by-id reference to it,
+/// offset by [`PASTE_OFFSET`], under ONE undo transaction. Shared by the live
+/// menu handler (the `"make_instance"` arm above) and the cross-language
+/// action corpus, so both drive the identical mutation. No-op unless exactly
+/// ONE `All`-kind element is selected (the same guard the menu item's
+/// enablement uses).
+///
+/// The two element ids are minted HERE in the UI layer (NOT inside a
+/// `Controller` method — see `generate_element_id`'s contract) via a
+/// collision-avoidance loop against the existing ids, then passed in to
+/// `create_reference`. Under the action corpus's deterministic id source the
+/// loop yields the golden-pinned `"01234567"` / `"89abcdef"`.
+pub(crate) fn make_instance_on_model(model: &mut crate::document::model::Model) {
+    use crate::document::artboard::generate_element_id;
+    use crate::document::document::SelectionKind;
+    // Enabled only when exactly ONE whole element is selected (kind = All; not
+    // a control-point sub-selection). Otherwise no-op, like group's guard.
+    let target_path = {
+        let sel = &model.document().selection;
+        let [es] = sel.as_slice() else { return; };
+        if es.kind != SelectionKind::All { return; }
+        es.path.clone()
+    };
+    // Gather every existing element id so the freshly minted target_id /
+    // ref_id can avoid collisions.
+    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+    fn gather_ids(elem: &GeoElement, out: &mut std::collections::HashSet<String>) {
+        if let Some(id) = elem.common().id.as_deref() {
+            out.insert(id.to_string());
+        }
+        if let Some(children) = elem.children() {
+            for c in children { gather_ids(c, out); }
+        }
+    }
+    for layer in &model.document().layers {
+        gather_ids(layer, &mut existing);
+    }
+    // Mint two distinct, collision-free ids (mirrors the artboard mint loop in
+    // effects.rs).
+    let mut mint = |existing: &std::collections::HashSet<String>| -> Option<String> {
+        for _ in 0..100 {
+            let c = generate_element_id(None);
+            if !existing.contains(&c) { return Some(c); }
+        }
+        None
+    };
+    let Some(target_id) = mint(&existing) else { return; };
+    existing.insert(target_id.clone());
+    let Some(ref_id) = mint(&existing) else { return; };
+    // create_reference + offset-move under ONE snapshot = a single undo step
+    // (offset rides on the new reference's common.transform via move_selection).
+    model.with_txn(|m| {
+        Controller::create_reference(m, &target_path, &target_id, &ref_id);
+        Controller::move_selection(m, PASTE_OFFSET, PASTE_OFFSET);
+    });
 }
 
 /// Strip a known extension from a filename so we can append a new one
