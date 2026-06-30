@@ -5,7 +5,7 @@
    so the live menu and the cross-app [Menu_state] gate evaluate the same
    expressions against the same shape. See the .mli for the full shape. *)
 
-(* The 14 Window-menu panel-toggle ids paired with their layout panel kind.
+(* The 15 Window-menu panel-toggle ids paired with their layout panel kind.
    Mirrors the Python _menu_panel_kinds dict. "concepts" has no dockable
    panel_kind in this app (the Concepts panel is a widget, not a layout
    panel), so it maps to [None] and evaluates to not-visible — matching the

@@ -13,7 +13,7 @@
       all-false when [model] is [None] (no open document).
     - [workspace.has_saved_layout] : bool — the active layout is not the
       system "Workspace" layout.
-    - [panels.<id>] : bool for all 14 panel ids (concepts is always false —
+    - [panels.<id>] : bool for all 15 panel ids (concepts is always false —
       it has no layout panel kind in this app).
     - [panes.<id>] : bool for [toolbar] and [dock].
 
