@@ -211,7 +211,7 @@ private func menu(_ model: [MenuModel], _ label: String) -> MenuModel? {
         let a = $0["action"] as? String
         return a == "toggle_pane" || a == "toggle_panel"
     }
-    #expect(toggles.count == 16)  // 2 panes + 14 panels
+    #expect(toggles.count == 17)  // 2 panes + 15 panels (incl. Brushes)
     #expect(toggles.allSatisfy { ($0["checked"] as? Bool) == false })
     let newDoc = items.first { ($0["action"] as? String) == "new_document" }
     #expect(newDoc?["checked"] is NSNull)

@@ -547,14 +547,34 @@ struct YamlElementView: View {
         // option dialogs frame their fields this way). Draw a 1px border with
         // the resolved color, inset by the container's padding. Borderless
         // containers render unchanged (the common panel case).
+        //
+        // Explicit numeric width/height are applied as a fixed frame BEFORE
+        // the border so a childless styled box (e.g. a Brushes-panel brush
+        // tile: 48x16 + border) draws at its declared size instead of
+        // collapsing to zero and rendering an invisible border. Layout
+        // containers (no numeric size, or width:"100%") get nil dimensions,
+        // which SwiftUI treats as "inherit" — a no-op.
         let style = element["style"] as? [String: Any] ?? [:]
+        let w = containerNumericDim(style["width"])
+        let h = containerNumericDim(style["height"])
         if style["border"] != nil {
             containerBody()
+                .frame(width: w, height: h)
                 .padding(containerPadding(style))
                 .border(containerBorderColor(style), width: 1)
         } else {
             containerBody()
+                .frame(width: w, height: h)
         }
+    }
+
+    /// A container style dimension as points, or nil when absent or
+    /// non-numeric (e.g. "100%"). Used to fixed-size styled boxes.
+    private func containerNumericDim(_ v: Any?) -> CGFloat? {
+        if let n = v as? CGFloat { return n }
+        if let n = v as? Double { return CGFloat(n) }
+        if let n = v as? Int { return CGFloat(n) }
+        return nil
     }
 
     /// Padding (points) declared on a container's style, used to inset content
