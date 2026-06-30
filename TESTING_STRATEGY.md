@@ -248,16 +248,17 @@ also gained the missing Generated arm (it was a no-op → a generated element di
 align; correctness fix, not action-gated since the generated-element SVG round-trip is
 deferred). Boolean is exact-vertex at BOTH the action level (`document_to_test_json` pins the
 polygon vertices) and the algorithm level (`boolean.json` / `boolean_normalize` upgraded
-property→exact, 4 ports bit-identical at IEEE-754). The symbols panel is now fully gated:
-`place_instance` joined via a **persistent app-state seam** (the `[new_symbol, place_instance]`
-sequence threads the panel-selected master across the harness's dispatch loop — Rust via
+property→exact, 4 ports bit-identical at IEEE-754). The symbols AND concepts panels are now
+fully gated — ALL creation verbs (`new_artboard` / `new_symbol` / `place_instance` /
+`place_concept_instance`) gate byte-identically, via a **persistent app-state seam**: a
+`[new_symbol, place_instance]` / `[concepts_panel_select, place_concept_instance]` sequence
+threads the panel-selected master/concept across the harness's dispatch loop — Rust via
 AppState, Swift via model.stateStore, Python via a harness holder, OCaml via one persistent
-State_store; the OCaml work surfaced that `State_store.set_panel` silently no-ops on an
-un-init_panel-ed scope). STILL OPEN: `place_concept_instance` (the same app-state seam now
-exists, but it additionally needs `concepts_selected` seeding + a placed concept pack / the
-Generated SVG round-trip); and a separate pre-existing Swift
-`YamlToolArtboardTests.artboardParity` drag-coordinate divergence (fails on a clean tree;
-unrelated to this work).
+State_store. The seam work surfaced a consistent cross-app state-store quirk (`set_panel` /
+`setPanel` silently no-ops on an un-init_panel-ed scope; the harnesses now init the panel
+scope). STILL OPEN: only a separate **pre-existing** Swift `YamlToolArtboardTests.artboardParity`
+drag-coordinate divergence (fails on a clean `main`; unrelated to this work — its own latent
+bug).
 **key→action (rec 3) now DONE** — pure `key_resolver` + `test_fixtures/keys/` corpus gated
 in all 4 apps; modifier flags a forward-looking 4-app increment (consistently hardcoded
 `false` on the pointer seam today); hit-test fixture (rec 4) folded into the gesture corpus,
