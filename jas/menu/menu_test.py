@@ -708,6 +708,67 @@ class LiveMenuReflectionTest(absltest.TestCase):
             f"  live:     {actual}\n  expected: {expected}")
 
 
+class LiveMenuStateWiringTest(absltest.TestCase):
+    """The live menu APPLIES the bundle ``enabled_when`` / ``checked_when``
+    through the shared evaluator (the behavior the cross-app ``menu_state`` gate
+    pins). Seeds a window with a known document + layout, syncs, and asserts a
+    few items' enabled / checked reflect that state — the behavior change from
+    the prior "enabled_when carried but not evaluated" state."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not QApplication.instance():
+            cls.app = QApplication([])
+        else:
+            cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.window = MainWindow()
+
+    def _by_data(self, name):
+        for menu in self.window._menu_objects:
+            for act in menu.actions():
+                if act.data() == name:
+                    return act
+        return None
+
+    def _by_label(self, label):
+        for menu in self.window._menu_objects:
+            for act in menu.actions():
+                if act.text() == label:
+                    return act
+        return None
+
+    def test_enabled_reflects_selection(self):
+        # Two selected elements + an active document.
+        self.window.add_canvas(_make_model_with_rects(2))
+        self.window.sync_panel_menu_checks()  # apply enabled/checked now
+        # selection_count >= 2 -> Group enabled; == 1 -> Make Instance disabled.
+        self.assertTrue(self._by_data("group").isEnabled())
+        self.assertFalse(self._by_data("make_instance").isEnabled())
+        # tab_count > 0 -> Select All enabled.
+        self.assertTrue(self._by_data("select_all").isEnabled())
+
+    def test_single_selection_enables_make_instance(self):
+        self.window.add_canvas(_make_model_with_rects(1))
+        self.window.sync_panel_menu_checks()
+        # Exactly one selected -> Make Instance enabled, Group disabled.
+        self.assertTrue(self._by_data("make_instance").isEnabled())
+        self.assertFalse(self._by_data("group").isEnabled())
+
+    def test_toggle_checked_matches_layout(self):
+        from workspace.workspace_layout import PanelKind
+        self.window.add_canvas(_make_model_with_rects(1))
+        self.window.sync_panel_menu_checks()
+        layers = self._by_label("&Layers")
+        self.assertIsNotNone(layers)
+        self.assertTrue(layers.isCheckable())
+        # checked_when "panels.layers" -> the live layout's visibility.
+        self.assertEqual(
+            layers.isChecked(),
+            self.window.workspace_layout.is_panel_visible(PanelKind.LAYERS))
+
+
 class ZoomRoutingTest(absltest.TestCase):
     """The View zoom/fit family mutates the active model's view state.
     Pins that the bundle-driven View entries reach working zoom handlers

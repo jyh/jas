@@ -280,6 +280,104 @@ def _on_menu_action(window: QMainWindow, action: str, params: dict) -> bool:
     return True
 
 
+def _menu_panel_kinds() -> dict:
+    """Bundle panel-toggle id -> ``PanelKind`` (for the ``panels.*`` ctx
+    namespace). ``concepts`` has no ``PanelKind`` in some builds — resolved
+    defensively so its toggle still evaluates (to not-visible when absent)."""
+    from workspace.workspace_layout import PanelKind
+    kinds = {
+        "artboards": PanelKind.ARTBOARDS, "layers": PanelKind.LAYERS,
+        "color": PanelKind.COLOR, "swatches": PanelKind.SWATCHES,
+        "stroke": PanelKind.STROKE, "properties": PanelKind.PROPERTIES,
+        "character": PanelKind.CHARACTER, "paragraph": PanelKind.PARAGRAPH,
+        "align": PanelKind.ALIGN, "boolean": PanelKind.BOOLEAN,
+        "magic_wand": PanelKind.MAGIC_WAND, "opacity": PanelKind.OPACITY,
+        "symbols": PanelKind.SYMBOLS,
+    }
+    concepts_kind = getattr(PanelKind, "CONCEPTS", None)
+    if concepts_kind is not None:
+        kinds["concepts"] = concepts_kind
+    return kinds
+
+
+def _build_menu_ctx(window: QMainWindow) -> dict:
+    """Build the menu evaluation context (TESTING_STRATEGY.md chrome seam): the
+    exact namespaces the bundle's ``enabled_when`` / ``checked_when`` predicates
+    read. Its shape matches the seeded contexts in
+    ``test_fixtures/algorithms/menu_state.json`` so the live menu evaluates
+    precisely what the cross-app ``menu_state`` gate pins. Mirrors the
+    per-app menu ctx built in the other three apps."""
+    # create_menus runs during MainWindow.__init__ before tab_widget exists
+    # (the initial sync), so guard on it rather than on active_model (a method
+    # that itself reaches into tab_widget).
+    has_tabs = hasattr(window, "tab_widget")
+    m = window.active_model() if has_tabs else None
+    tab_count = window.tab_widget.count() if has_tabs else 0
+    if m is not None:
+        doc = m.document
+        active_document = {
+            "has_selection": len(doc.selection) > 0,
+            "selection_count": len(doc.selection),
+            "can_undo": m.can_undo,
+            "can_redo": m.can_redo,
+            "is_modified": m.is_modified,
+            "has_filename": not m.filename.startswith("Untitled-"),
+        }
+    else:
+        active_document = {
+            "has_selection": False, "selection_count": 0, "can_undo": False,
+            "can_redo": False, "is_modified": False, "has_filename": False,
+        }
+    has_saved_layout = False
+    if hasattr(window, "app_config"):
+        from workspace.workspace_layout import WORKSPACE_LAYOUT_NAME
+        has_saved_layout = (
+            window.app_config.active_layout != WORKSPACE_LAYOUT_NAME)
+    panels: dict = {}
+    panes: dict = {}
+    if hasattr(window, "workspace_layout"):
+        layout = window.workspace_layout
+        for pid, kind in _menu_panel_kinds().items():
+            try:
+                panels[pid] = layout.is_panel_visible(kind)
+            except Exception:
+                panels[pid] = False
+        from workspace.pane import PaneKind
+        pane_layout = getattr(layout, "pane_layout", None)
+        for pnid, kind in {"toolbar": PaneKind.TOOLBAR,
+                           "dock": PaneKind.DOCK}.items():
+            try:
+                panes[pnid] = (pane_layout.is_pane_visible(kind)
+                               if pane_layout is not None else False)
+            except Exception:
+                panes[pnid] = False
+    return {
+        "state": {"tab_count": tab_count},
+        "active_document": active_document,
+        "workspace": {"has_saved_layout": has_saved_layout},
+        "panels": panels,
+        "panes": panes,
+    }
+
+
+def _sync_menu(window: QMainWindow, items: list) -> None:
+    """Re-evaluate each ``(act, enabled_when, checked_when)`` against live state
+    and apply it to the QAction. Fired on a top menu's ``aboutToShow`` (so
+    enable/check reflect the document + layout at open time) and once at build.
+    Uses the SAME shared expression evaluator the ``menu_state`` corpus gate
+    pins, so the live menu and the gate agree by construction."""
+    from workspace_interpreter.expr import evaluate
+    ctx = _build_menu_ctx(window)
+    for act, enabled_when, checked_when in items:
+        try:
+            if enabled_when:
+                act.setEnabled(evaluate(enabled_when, ctx).to_bool())
+            if checked_when:
+                act.setChecked(evaluate(checked_when, ctx).to_bool())
+        except Exception:
+            pass
+
+
 def create_menus(window: QMainWindow) -> None:
     """Build the top menu bar from the compiled bundle ``menubar``.
 
@@ -289,8 +387,12 @@ def create_menus(window: QMainWindow) -> None:
     consumes ``&`` as its native accelerator marker); shortcuts pass straight
     to ``QKeySequence`` (Qt parses ``"Ctrl+Shift+S"`` / ``"Ctrl+="`` /
     ``"Ctrl+Alt+0"`` directly); ``triggered`` routes through
-    :func:`_on_menu_action`. The dynamic Workspace / Appearance submenus and
-    the checkable panel toggles are rebuilt by the bespoke code below.
+    :func:`_on_menu_action`. Each item's bundle ``enabled_when`` /
+    ``checked_when`` predicate is (re-)evaluated by :func:`_sync_menu` through
+    the shared expression evaluator on the menu's ``aboutToShow`` (so enable /
+    check reflect live document + layout state) — the same evaluation the
+    cross-app ``menu_state`` gate pins. The dynamic Workspace / Appearance
+    submenus are rebuilt by the bespoke code below.
 
     Args:
         window: The QMainWindow to add menus to (must have active_model()).
@@ -302,42 +404,21 @@ def create_menus(window: QMainWindow) -> None:
     menubar = window.menuBar()
     model = build_menu_model()
 
-    # Map a bundle panel-toggle param -> PanelKind so the checkable panel
-    # toggles can be tracked + re-synced (the bespoke checkmark machinery).
-    from workspace.workspace_layout import PanelKind
-    panel_param_to_kind = {
-        "artboards": PanelKind.ARTBOARDS,
-        "layers": PanelKind.LAYERS,
-        "color": PanelKind.COLOR,
-        "swatches": PanelKind.SWATCHES,
-        "stroke": PanelKind.STROKE,
-        "properties": PanelKind.PROPERTIES,
-        "character": PanelKind.CHARACTER,
-        "paragraph": PanelKind.PARAGRAPH,
-        "align": PanelKind.ALIGN,
-        "boolean": PanelKind.BOOLEAN,
-        "magic_wand": PanelKind.MAGIC_WAND,
-        "opacity": PanelKind.OPACITY,
-        "symbols": PanelKind.SYMBOLS,
-    }
-    # PanelKind has no CONCEPTS member in some builds; resolve defensively
-    # so the Concepts toggle still tracks its checkmark when present.
-    concepts_kind = getattr(PanelKind, "CONCEPTS", None)
-    if concepts_kind is not None:
-        panel_param_to_kind["concepts"] = concepts_kind
-
-    panel_menu_actions: dict = {}
-
     # Hold Python references to the created QMenu objects on the window so
     # PySide does not garbage-collect (and delete the underlying C++ object
     # of) the top-level dropdowns. Without this, the menus still render but
     # the QMenu wrappers can become stale "already deleted" handles.
     menu_objects: list = []
     window._menu_objects = menu_objects
+    # Every action item paired with its bundle enabled_when / checked_when, so
+    # _sync_menu can re-evaluate both against live state when a menu opens (and
+    # once at build, + on external panel-visibility changes).
+    all_items: list = []
 
     for top in model:
         qmenu = menubar.addMenu(top.label)
         menu_objects.append(qmenu)
+        menu_items: list = []
         for entry in top.entries:
             if isinstance(entry, MenuSeparator):
                 qmenu.addSeparator()
@@ -362,36 +443,25 @@ def create_menus(window: QMainWindow) -> None:
                 act.triggered.connect(
                     lambda checked=False, n=a_name, p=a_params:
                     _on_menu_action(window, n, p))
-                # Revert stays natively enable-gated (enabled_when carried in
-                # the bundle but not evaluated — same as Rust v1).
-                if a_name == "revert":
-                    qmenu.aboutToShow.connect(
-                        lambda mb=qmenu, ac=act: ac.setEnabled(
-                            window.active_model() is not None
-                            and window.active_model().is_modified
-                            and not window.active_model().filename.startswith(
-                                "Untitled-")))
-                # Checkable panel toggles: track each by PanelKind so the
-                # checkmark can be re-synced from layout state after any
-                # change (close from header X, drag-out, layout restore).
-                if a_name == "toggle_panel":
-                    kind = panel_param_to_kind.get(a_params.get("panel"))
-                    if kind is not None:
-                        act.setCheckable(True)
-                        panel_menu_actions[kind] = act
+                # A checked_when predicate makes the item checkable; both
+                # predicates are (re-)evaluated by _sync_menu through the shared
+                # expression evaluator — replacing the prior bespoke Revert
+                # aboutToShow gate and the per-PanelKind checkmark machinery.
+                if entry.checked_when:
+                    act.setCheckable(True)
+                if entry.enabled_when or entry.checked_when:
+                    menu_items.append(
+                        (act, entry.enabled_when, entry.checked_when))
+        if menu_items:
+            all_items.extend(menu_items)
+            qmenu.aboutToShow.connect(
+                lambda items=menu_items: _sync_menu(window, items))
 
+    # Sync once now for the initial enabled/checked state, and expose a
+    # re-sync for the external callers (dock rebuild, drag-out, layout
+    # restore) that flip panel visibility outside the menu.
     def _sync_panel_menu_checks() -> None:
-        if not hasattr(window, 'workspace_layout'):
-            return
-        layout = window.workspace_layout
-        for k, a in panel_menu_actions.items():
-            try:
-                a.setChecked(layout.is_panel_visible(k))
-            except Exception:
-                pass
-
-    # Stash the syncer on the window so dock_panel.rebuild can fire it after
-    # a rebuild and external paths (drag-out, layout restore) flip the checks.
+        _sync_menu(window, all_items)
     window.sync_panel_menu_checks = _sync_panel_menu_checks
     _sync_panel_menu_checks()
 
