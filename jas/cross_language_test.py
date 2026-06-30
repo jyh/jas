@@ -781,6 +781,7 @@ class CrossLanguageTest(absltest.TestCase):
         "new_symbol.json",
         "place_instance.json",
         "place_concept_instance.json",
+        "menu_object_ops.json",
     ]
 
     @staticmethod
@@ -832,6 +833,28 @@ class CrossLanguageTest(absltest.TestCase):
             apply_place_concept_instance(
                 model, selected_concept[0] if selected_concept else None)
             return
+        # Object / Edit menu model-pure verbs are bespoke-native: their
+        # actions.yaml entries are `log` stubs (the real behavior lives in
+        # menu.menu — see _on_menu_action), so the generic layers dispatcher
+        # would no-op them. Route them to the SAME native handlers the menu
+        # invokes, so the action corpus gates their cross-app document
+        # mutation. Mirrors the symbols / concepts intercepts above.
+        _MENU_NATIVE_HANDLERS = {
+            "select_all": "_select_all",
+            "group": "_group_selection",
+            "ungroup": "_ungroup_selection",
+            "ungroup_all": "_ungroup_all",
+            "lock": "_lock_selection",
+            "unlock_all": "_unlock_all",
+            "hide_selection": "_hide_selection",
+            "show_all": "_show_all",
+            "make_instance": "_link_to_selection",
+        }
+        if action_name in _MENU_NATIVE_HANDLERS:
+            import menu.menu as _menu_mod
+            getattr(_menu_mod, _MENU_NATIVE_HANDLERS[action_name])(model)
+            return
+
         from panels.panel_menu import _dispatch_yaml_layers_action
         _dispatch_yaml_layers_action(action_name, model, params=params)
 
