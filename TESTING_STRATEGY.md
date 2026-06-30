@@ -129,9 +129,32 @@ is snapshot-able as data even where its *pixels* are framework-rendered.
   **compile-time** `type:` validator in the compiler, and a per-app *dispatch*-coverage
   assert (the snapshot pins the SHARED resolved tree + vocab; it does not yet record each
   app's own dispatch-table result).
-- **Menus / toolbar** — `menu_structure_json` and `toolbar_structure_json` gates exist but
-  currently gate **stale mirrors** (see §7). Re-source them from the real menu/toolbar and
-  from compiled `menubar.yaml`.
+- **Toolbar** — `toolbar_structure_json` gates a **stale mirror** (see §7); re-source from
+  the real toolbar.
+- **Menu bar** — gated at three depths:
+  1. **Structure (bundle)** — `scripts/check_menu_structure.py` projects the compiled
+     `menubar` to `test_fixtures/expected/menu_structure.json` (labels / actions / shortcuts /
+     separators / submenus). All apps render the same bundle, so this is the cross-app
+     structure oracle. (The old per-app `menu_structure_json` serializers were retired as
+     "four projections of identical input" — they had drifted to a stale shared literal.)
+  2. **Structure (live widget)** — closes the gap the bundle gate cannot see: does each app's
+     *actual rendered* menu match the bundle? `jas/menu/menu_test.py::LiveMenuReflectionTest`
+     walks the real `QMenuBar` (headless offscreen Qt) and byte-compares to the same golden
+     (mnemonics kept; shortcuts normalized through `QKeySequence`; dynamic Workspace /
+     Appearance submenu *contents* collapsed to a `"dynamic"` sentinel). This is **Python-only
+     by feasibility**: Python's menu is an in-process walkable widget tree; **Swift** renders
+     through SwiftUI's `.commands` DSL (deliberately remapped to macOS conventions — app menu,
+     system slots, ⌘, stripped labels — so its live `NSMenu` is *not* bundle-comparable);
+     **Rust** renders to a sandboxed browser DOM; **OCaml**'s GTK menu *is* bundle-faithful but
+     a live dump needs `menubar.ml` instrumentation + a GTK-display integration test (deferred).
+  3. **Dynamic state** — `menu_state(menubar, ctx)` purely evaluates each item's `enabled_when`
+     / `checked_when` against a seeded context (`state.tab_count`, `active_document.*`,
+     `workspace.has_saved_layout`, `panels.*`, `panes.*`), emitting per-item `{path, action,
+     enabled, checked}`. Pinned in `test_fixtures/algorithms/menu_state.json` (4 seeds) and
+     byte-gated cross-app in all 4 native apps + Python (sibling of the `widget_tree` corpus).
+     Headless and uniform across every app (Rust included) — it's pure expression evaluation,
+     so menu enable/check equivalence rides on the already-gated expression corpus. This
+     closes the *grays-out / checks differently across apps* class as data.
 
 What still needs per-app pixels: final flow *position*, content *fit*, theming colors,
 glyph rendering (checkmarks, icons), native popups. These are the layer where logic
@@ -287,9 +310,15 @@ sign-off ratified the model + byte-gated rects, not a separate pixel-diff artifa
    hand / zoom / eyedropper / artboard. The gate is green only because every app mirrors
    the stale literal. Re-derive each serializer from the real toolbar; add
    `has_alternates`, icon-name id, and dblclick options-destination.
-3. **Re-source the drifted `menu_structure.json` golden** — currently `[File, Edit, Object,
-   Window]`, missing View, while `menubar.yaml` declares View and all apps build it.
-   Re-point to compiled `menubar.yaml`.
+3. ~~**Re-source the drifted `menu_structure.json` golden**~~ **DONE** — `check_menu_structure.py`
+   now projects the compiled `menubar` (5 menus incl. View + nested submenus). Added on top:
+   the **Python live-widget reflection gate** (`LiveMenuReflectionTest` walks the real
+   `QMenuBar`) and the **`menu_state` dynamic-state corpus** (`enabled_when` / `checked_when`
+   evaluation byte-gated cross-app in all 4 native apps + Python). Remaining: live-widget
+   reflection for OCaml (GTK dump via FIFO — deferred); Swift / Rust are framework-opaque
+   (SwiftUI macOS remap / browser DOM); and the **live wiring** that makes the renderers
+   *apply* the evaluated `enabled_when` / `checked_when` (so menus actually gray out / check
+   through the shared evaluator) — the `menu_state` gate protects that evaluation.
 4. ~~**Resolved-widget-tree snapshot**~~ **DONE** (`widget_tree` pass + `panel_widget_tree.json`,
    16 panels / 610 records, byte-gated in all 4 native apps + Python). Remaining: the **Flask
    render-all-panels CI gate** (render every panel/dialog from `workspace.json`, fail on
