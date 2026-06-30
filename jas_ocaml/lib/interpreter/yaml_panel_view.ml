@@ -2485,47 +2485,29 @@ and render_slider ~packing ~ctx el =
               ~step_incr:step ~page_size:0.0 ~value:initial () in
   let scale = GRange.scale `HORIZONTAL ~adjustment:adj ~draw_value:false ~packing () in
 
-  (* Per-channel gradient on the trough. Channel comes from the
-     panel.X bind expression (slider_row template wraps each color
-     channel as bind: panel.h / panel.s / panel.b / panel.r / etc.).
-     The gradients here are a simplified, channel-only ramp — Rust
-     and Swift mix in the other channels' current values for a
-     more accurate preview, but a fixed ramp still gives the
-     "where am I in the channel range" cue that's the user's
-     reason for wanting a track. *)
-  let channel = match bind_expr with
-    | s when String.length s > 6 && String.sub s 0 6 = "panel." ->
-      String.sub s 6 (String.length s - 6)
-    | _ -> ""
-  in
-  let gradient = match channel with
-    | "h" -> "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)"
-    | "s" -> "linear-gradient(to right, #888, #f00)"
-    | "b" -> "linear-gradient(to right, #000, #fff)"
-    | "r" -> "linear-gradient(to right, #000, #f00)"
-    | "g" -> "linear-gradient(to right, #000, #0f0)"
-    | "bl" -> "linear-gradient(to right, #000, #00f)"
-    | "c" -> "linear-gradient(to right, #fff, #0ff)"
-    | "m" -> "linear-gradient(to right, #fff, #f0f)"
-    | "y" -> "linear-gradient(to right, #fff, #ff0)"
-    | "k" -> "linear-gradient(to right, #fff, #000)"
-    | _ -> "linear-gradient(to right, #888, #ccc)"
-  in
-  let css = Printf.sprintf
+  (* Plain progress-fill slider track (no per-channel gradient) to match
+     Rust/Swift/Python/Flask. The slider_row template
+     (workspace/templates/slider_row.yaml) uses the generic [slider] widget
+     with no gradient/track param, so a plain trough with a solid progress
+     highlight is the spec-conformant rendering; the earlier per-channel
+     colored gradient was an OCaml-only embellishment that broke cross-app
+     parity (caught by GUI spot-check, not the conformance gate, since
+     trough styling has no seam-testable surface). *)
+  let css =
     "scale { padding: 0 5px; margin: 0 4px; min-height: 12px; } \
-     scale trough { min-height: 8px; background-image: %s; \
-       border: 1px solid #444; border-radius: 2px; } \
+     scale trough { min-height: 8px; background-image: none; \
+       background-color: #555; border: 1px solid #444; border-radius: 2px; } \
      scale trough highlight, scale highlight { \
-       background-image: none; background-color: transparent; \
-       border: 0; box-shadow: none; } \
+       background-image: none; background-color: #3584e4; \
+       border: 0; box-shadow: none; border-radius: 2px; } \
      scale slider { min-width: 10px; min-height: 12px; \
        background: #ccc; border: 1px solid #222; \
        border-radius: 2px; margin: -2px 0; }"
-    gradient in
+  in
   let provider = GObj.css_provider () in
   provider#load_from_data css;
   scale#misc#style_context#add_provider provider 800;
-  (* Cap the slider at ~100px wide × 12px tall so the gradient track
+  (* Cap the slider at ~100px wide × 12px tall so the track
      stays compact instead of expanding to the full row slack and
      wasting vertical space (CLR-002 OCaml — user feedback "slider
      too wide / too tall"). The row packs each child with
