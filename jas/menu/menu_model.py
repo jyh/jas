@@ -46,8 +46,10 @@ class MenuAction:
     """One resolved action entry.
 
     ``label`` keeps the ``&`` mnemonic markers verbatim (Qt consumes ``&`` as
-    its native accelerator marker). ``enabled_when`` is carried for fidelity
-    but NOT evaluated here — enable/disable stays native (same as Rust v1).
+    its native accelerator marker). ``enabled_when`` / ``checked_when`` are the
+    bundle predicates the renderer evaluates (through the shared expression
+    evaluator) to set the item's enabled / checked state — see
+    ``menu.menu._sync_menu``.
     """
 
     label: str
@@ -55,6 +57,7 @@ class MenuAction:
     params: dict = field(default_factory=dict)
     shortcut: str = ""
     enabled_when: str | None = None
+    checked_when: str | None = None
 
 
 @dataclass
@@ -114,4 +117,5 @@ def _project_entry(item):
         params=params,
         shortcut=item.get("shortcut", "") or "",
         enabled_when=item.get("enabled_when"),
+        checked_when=item.get("checked_when"),
     )
