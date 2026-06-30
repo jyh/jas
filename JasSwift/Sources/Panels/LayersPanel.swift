@@ -96,6 +96,24 @@ public enum LayersPanel {
         case "new_symbol", "place_instance", "delete_symbol_action":
             SymbolsPanel.dispatchSymbolAction(actionName, model: model)
             return
+        // Native intercept for the Concepts-panel verbs (CONCEPTS.md §6),
+        // mirroring the Symbols arm above. `place_concept_instance`'s YAML action
+        // is a `log` stub — the real work (mint the element id, build the
+        // Generated element from the panel-selected concept + its default params,
+        // append + select) lives in ``ConceptsPanel/dispatch`` so every app mints
+        // an identical value-in-op id. `concepts_panel_select` is normally the
+        // generic `set_panel_state` effect, but that effect is a no-op on an
+        // UNINITIALIZED panel scope (the store's optional-chaining write), so
+        // route it through ``ConceptsPanel/setSelectedConcept`` — which seeds the
+        // scope from its YAML defaults before writing — so a fresh Model (e.g.
+        // the action corpus) records the selection that `place_concept_instance`
+        // then reads.
+        case "place_concept_instance":
+            ConceptsPanel.dispatch(actionName, model: model)
+            return
+        case "concepts_panel_select":
+            ConceptsPanel.setSelectedConcept(model, params["concept_id"] as? String)
+            return
         default:
             break
         }

@@ -1,0 +1,11 @@
+[
+  {
+    "name": "place_concept_instance",
+    "setup_svg": "empty_layer.svg",
+    "actions": [
+      {"action": "concepts_panel_select", "params": {"concept_id": "regular_polygon"}},
+      {"action": "place_concept_instance", "params": {}}
+    ],
+    "expected_json": "place_concept_instance_expected.json"
+  }
+]

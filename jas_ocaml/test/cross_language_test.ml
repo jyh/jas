@@ -433,6 +433,7 @@ let action_fixtures = [
   "new_artboard.json";
   "new_symbol.json";
   "place_instance.json";
+  "place_concept_instance.json";
 ]
 
 (* Run one action case and return the resulting Model. Loads [setup_svg] into a
@@ -495,6 +496,12 @@ let run_action_model (tc : Yojson.Safe.t) : Jas.Model.model =
      uninitialized scope. *)
   let store = Jas.State_store.create () in
   Jas.State_store.init_panel store Jas.Symbols_panel.content_id [];
+  (* The Concepts panel scope is likewise initialized up front so the
+     [concepts_panel_select] intercept's [set_panel] write of [selected_concept]
+     lands — production mounts the panel (init_panel); [set_panel] is a silent
+     no-op on an uninitialized scope. The following [place_concept_instance]
+     reads the selection back through the same persistent store. *)
+  Jas.State_store.init_panel store Jas.Concepts_panel.content_id [];
   Fun.protect
     ~finally:(fun () ->
       Jas.Artboard.set_test_id_rng None;
