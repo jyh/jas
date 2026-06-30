@@ -15,6 +15,11 @@ type entry =
       params : (string * Yojson.Safe.t) list;
       shortcut : string;
       enabled_when : string option;
+      checked_when : string option;
+          (** Bundle predicate evaluated (through the shared expression
+              evaluator) to drive the item's check mark. [None] when the
+              bundle declares no [checked_when] (the item is not checkable).
+              See [Menubar]'s live menu sync. *)
     }
 
 (** One top-level menu (e.g. "&File") and its entries. *)

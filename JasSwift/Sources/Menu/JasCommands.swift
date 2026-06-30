@@ -147,7 +147,7 @@ public struct JasCommands: Commands {
     /// (Save, Save As, Revert, Document Setup, Print, Export, Quit) goes in
     /// `.saveItem`.
     private func isFileNewItem(_ entry: MenuEntry) -> Bool {
-        if case .action(_, let action, _, _, _) = entry {
+        if case .action(_, let action, _, _, _, _) = entry {
             return action == "new_document" || action == "open_file"
         }
         return false
@@ -155,7 +155,7 @@ public struct JasCommands: Commands {
 
     /// The Edit entries that belong in the `.undoRedo` slot (Undo, Redo).
     private func isEditUndoRedo(_ entry: MenuEntry) -> Bool {
-        if case .action(_, let action, _, _, _) = entry {
+        if case .action(_, let action, _, _, _, _) = entry {
             return action == "undo" || action == "redo"
         }
         return false
@@ -185,9 +185,10 @@ public struct JasCommands: Commands {
 
     /// A single non-Window entry → its SwiftUI view. Mnemonic markers are
     /// stripped for display (macOS has no `&` mnemonics); the shortcut is
-    /// parsed from the bundle string; the enabled predicate stays NATIVE,
-    /// keyed by the action name (the bundle `enabled_when` expression is NOT
-    /// evaluated — same as the Rust v1 migration).
+    /// parsed from the bundle string; the enabled / checked state is driven by
+    /// the bundle `enabled_when` / `checked_when` predicates, evaluated through
+    /// the shared expression evaluator against the live menu ctx (the same
+    /// evaluation the cross-app `menu_state` gate pins).
     @ViewBuilder
     private func entryView(_ entry: MenuEntry) -> some View {
         switch entry {
@@ -196,9 +197,11 @@ public struct JasCommands: Commands {
         case .dynamicSubmenu:
             // No dynamic submenus outside Window today; render nothing.
             EmptyView()
-        case .action(let label, let action, let params, let shortcut, _):
+        case .action(let label, let action, let params, let shortcut,
+                     let enabledWhen, let checkedWhen):
             actionButton(label: label, action: action, params: params,
-                         shortcut: shortcut)
+                         shortcut: shortcut, enabledWhen: enabledWhen,
+                         checkedWhen: checkedWhen)
         }
     }
 
@@ -214,25 +217,49 @@ public struct JasCommands: Commands {
             case .workspace: workspaceSubmenu()
             case .appearance: appearanceSubmenu()
             }
-        case .action(let label, let action, let params, let shortcut, _):
+        case .action(let label, let action, let params, let shortcut,
+                     let enabledWhen, let checkedWhen):
             actionButton(label: label, action: action, params: params,
-                         shortcut: shortcut)
+                         shortcut: shortcut, enabledWhen: enabledWhen,
+                         checkedWhen: checkedWhen)
         }
     }
 
-    /// Build one action Button: stripped label (+ check-mark prefix for pane /
-    /// panel toggles), parsed keyboard shortcut, native disabled predicate,
-    /// and the dispatch to the bespoke handler / generic route.
+    /// Build one action Button: stripped label (+ check-mark prefix when a
+    /// `checked_when` predicate evaluates true), parsed keyboard shortcut, the
+    /// `enabled_when`-driven disabled state, and the dispatch to the bespoke
+    /// handler / generic route. `enabled_when` / `checked_when` are evaluated
+    /// through the shared expression evaluator against ``menuCtx`` — the SAME
+    /// evaluation the cross-app `menu_state` gate pins (so per-item enabled /
+    /// checked equals ``MenuState/menuState(_:_:)`` by construction). SwiftUI
+    /// re-renders the menu body reactively (focused model / selection / undo
+    /// signals), so evaluating inline keeps the grays-out / check-mark state
+    /// live. Mirrors the Python jas `_sync_menu`.
     @ViewBuilder
     private func actionButton(label: String, action: String,
-                              params: [String: Any], shortcut: String) -> some View {
+                              params: [String: Any], shortcut: String,
+                              enabledWhen: String?, checkedWhen: String?) -> some View {
+        let ctx = menuCtx
         let display = stripMnemonic(label)
-        let prefixed = toggleCheckPrefix(action: action, params: params)
-            .map { $0 + display } ?? display
+        // checked_when present (non-empty) → drive the check-mark prefix from
+        // its evaluated bool (✓ for true, aligned spaces for false, keeping
+        // unchecked rows flush with checked ones). Absent → no prefix. This is
+        // exactly MenuState's `checked` projection (null when absent).
+        let prefix: String? = checkedWhen.flatMap { cw in
+            cw.isEmpty ? nil
+                : (evaluate(cw, context: ctx).toBool() ? "\u{2713} " : "    ")
+        }
+        let prefixed = prefix.map { $0 + display } ?? display
+        // enabled_when present (non-empty) → evaluate it; absent → enabled
+        // (matches MenuState's `enabled` default).
+        let enabled: Bool = {
+            guard let ew = enabledWhen, !ew.isEmpty else { return true }
+            return evaluate(ew, context: ctx).toBool()
+        }()
         let btn = Button(prefixed) {
             dispatchMenuAction(action, params: params)
         }
-        .disabled(!actionEnabled(action))
+        .disabled(!enabled)
         if let parsed = parseShortcut(shortcut) {
             btn.keyboardShortcut(KeyEquivalent(parsed.key), modifiers: parsed.modifiers)
         } else {
@@ -240,61 +267,14 @@ public struct JasCommands: Commands {
         }
     }
 
-    /// Native enable/disable predicate keyed by the bundle action name. This
-    /// preserves the prior hand-written `.disabled(...)` rules verbatim; the
-    /// bundle `enabled_when` expression string is intentionally NOT evaluated
-    /// (matching the Rust v1 migration — `enabled_when` stays native).
-    private func actionEnabled(_ action: String) -> Bool {
-        switch action {
-        case "save", "save_as":
-            return true
-        case "revert":
-            return !(model == nil
-                     || !(model?.isModified ?? false)
-                     || (model?.filename.hasPrefix("Untitled-") ?? true))
-        case "open_document_setup", "open_print_dialog", "export_to_pdf":
-            return model != nil
-        case "undo":
-            return canUndo ?? false
-        case "redo":
-            return canRedo ?? false
-        case "cut", "copy":
-            return hasSelection ?? false
-        case "group", "ungroup":
-            return hasSelection ?? false
-        case "lock", "hide_selection":
-            return hasSelection ?? false
-        case "make_instance", "promote_to_concept":
-            return (model?.document.selection.count ?? 0) == 1
-        case "zoom_in", "zoom_out", "zoom_to_actual_size",
-             "fit_active_artboard", "fit_all_artboards", "fit_in_window":
-            return model != nil
-        default:
-            return true
-        }
-    }
-
-    /// Check-mark prefix for the pane / panel toggle entries, mirroring the
-    /// prior `paneToggle` / `panelToggle` helpers. Returns nil for non-toggle
-    /// actions (no prefix). The leading-space form keeps non-checked rows
-    /// aligned with checked ones, matching the prior native menus.
-    private func toggleCheckPrefix(action: String, params: [String: Any]) -> String? {
-        switch action {
-        case "toggle_pane":
-            guard let ws = workspace,
-                  let paneId = params["pane"] as? String,
-                  let kind = paneKindForId(paneId) else { return "    " }
-            let visible = ws.workspaceLayout.panes()?.isPaneVisible(kind) ?? true
-            return visible ? "\u{2713} " : "    "
-        case "toggle_panel":
-            guard let ws = workspace,
-                  let panelId = params["panel"] as? String,
-                  let kind = panelKindForMenuId(panelId) else { return "    " }
-            let visible = ws.workspaceLayout.isPanelVisible(kind)
-            return visible ? "\u{2713} " : "    "
-        default:
-            return nil
-        }
+    /// The menu evaluation context (TESTING_STRATEGY.md chrome seam): the exact
+    /// namespaces the bundle `enabled_when` / `checked_when` predicates read,
+    /// built from the live focused model + workspace. Delegates to the testable
+    /// free function ``buildMenuContext(model:tabCount:hasSelection:canUndo:canRedo:workspace:)``.
+    private var menuCtx: [String: Any] {
+        buildMenuContext(model: model, tabCount: workspace?.canvases.count ?? 0,
+                         hasSelection: hasSelection, canUndo: canUndo,
+                         canRedo: canRedo, workspace: workspace)
     }
 
     /// Dispatch a bundle action to the EXISTING bespoke handler or generic
@@ -426,37 +406,6 @@ public struct JasCommands: Commands {
             ws.workspaceLayout.saveIfNeeded()
         default:
             break
-        }
-    }
-
-    /// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``.
-    private func paneKindForId(_ id: String) -> PaneKind? {
-        switch id {
-        case "toolbar": return .toolbar
-        case "dock": return .dock
-        case "canvas": return .canvas
-        default: return nil
-        }
-    }
-
-    /// Map a bundle Window-menu panel id to ``PanelKind``. Returns nil for
-    /// `concepts` (no PanelKind case — see the `toggle_panel` dispatch arm).
-    private func panelKindForMenuId(_ id: String) -> PanelKind? {
-        switch id {
-        case "layers": return .layers
-        case "color": return .color
-        case "swatches": return .swatches
-        case "stroke": return .stroke
-        case "properties": return .properties
-        case "character": return .character
-        case "paragraph": return .paragraph
-        case "artboards": return .artboards
-        case "align": return .align
-        case "boolean": return .boolean
-        case "opacity": return .opacity
-        case "magic_wand": return .magicWand
-        case "symbols": return .symbols
-        default: return nil
         }
     }
 
@@ -1012,4 +961,116 @@ public struct JasCommands: Commands {
         pasteboard.clearContents()
         pasteboard.setString(svg, forType: .string)
     }
+}
+
+// MARK: - Menu evaluation context (chrome seam)
+
+/// The 14 Window-menu panel ids whose visibility populates the `panels.*`
+/// namespace of the menu ctx. `concepts` has no ``PanelKind`` case in this app,
+/// so it resolves to not-visible (see ``panelKindForMenuId(_:)``).
+let menuPanelIds: [String] = [
+    "artboards", "layers", "color", "swatches", "stroke", "properties",
+    "character", "paragraph", "align", "boolean", "magic_wand", "opacity",
+    "symbols", "concepts",
+]
+
+/// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``. Free function
+/// shared by the menu dispatch and the menu-ctx builder.
+func paneKindForId(_ id: String) -> PaneKind? {
+    switch id {
+    case "toolbar": return .toolbar
+    case "dock": return .dock
+    case "canvas": return .canvas
+    default: return nil
+    }
+}
+
+/// Map a bundle Window-menu panel id to ``PanelKind``. Returns nil for
+/// `concepts` (no PanelKind case — the Concepts panel is not wired into this
+/// app's dock/PanelKind layout, see the `toggle_panel` dispatch arm). Free
+/// function shared by the menu dispatch and the menu-ctx builder.
+func panelKindForMenuId(_ id: String) -> PanelKind? {
+    switch id {
+    case "layers": return .layers
+    case "color": return .color
+    case "swatches": return .swatches
+    case "stroke": return .stroke
+    case "properties": return .properties
+    case "character": return .character
+    case "paragraph": return .paragraph
+    case "artboards": return .artboards
+    case "align": return .align
+    case "boolean": return .boolean
+    case "opacity": return .opacity
+    case "magic_wand": return .magicWand
+    case "symbols": return .symbols
+    default: return nil
+    }
+}
+
+/// Build the menu evaluation context (TESTING_STRATEGY.md chrome seam): the
+/// exact namespaces the bundle's `enabled_when` / `checked_when` predicates
+/// read. Its shape matches the seeded contexts in
+/// `test_fixtures/algorithms/menu_state.json` so the live menu evaluates exactly
+/// what the cross-app `menu_state` gate pins; per-item enabled / checked then
+/// equals ``MenuState/menuState(_:_:)``. Mirrors the Python jas `_build_menu_ctx`.
+///
+/// - `state.tab_count` — the open-document/tab count.
+/// - `active_document` — has_selection / selection_count / can_undo / can_redo /
+///   is_modified / has_filename (has_filename = filename does NOT start with
+///   `Untitled-`); all-false when no document is active.
+/// - `workspace.has_saved_layout` — the active layout is not the system
+///   "Workspace" layout.
+/// - `panels` — `isPanelVisible(kind)` for each of the 14 ids (concepts → false).
+/// - `panes` — `isPaneVisible(kind)` for `toolbar` / `dock`.
+func buildMenuContext(model: Model?, tabCount: Int, hasSelection: Bool?,
+                      canUndo: Bool?, canRedo: Bool?,
+                      workspace: WorkspaceState?) -> [String: Any] {
+    let activeDocument: [String: Any]
+    if let model = model {
+        let doc = model.document
+        activeDocument = [
+            "has_selection": hasSelection ?? !doc.selection.isEmpty,
+            "selection_count": doc.selection.count,
+            "can_undo": canUndo ?? model.canUndo,
+            "can_redo": canRedo ?? model.canRedo,
+            "is_modified": model.isModified,
+            "has_filename": !model.filename.hasPrefix("Untitled-"),
+        ]
+    } else {
+        activeDocument = [
+            "has_selection": false, "selection_count": 0,
+            "can_undo": false, "can_redo": false,
+            "is_modified": false, "has_filename": false,
+        ]
+    }
+    var hasSavedLayout = false
+    var panels: [String: Any] = [:]
+    var panes: [String: Any] = [:]
+    if let ws = workspace {
+        hasSavedLayout = ws.appConfig.activeLayout != workspaceLayoutName
+        let layout = ws.workspaceLayout
+        for pid in menuPanelIds {
+            // concepts → false (no PanelKind case), matching the Python ctx.
+            panels[pid] = panelKindForMenuId(pid).map { layout.isPanelVisible($0) } ?? false
+        }
+        let paneLayout = layout.panes()
+        for pnid in ["toolbar", "dock"] {
+            if let kind = paneKindForId(pnid), let pl = paneLayout {
+                panes[pnid] = pl.isPaneVisible(kind)
+            } else {
+                panes[pnid] = false
+            }
+        }
+    } else {
+        for pid in menuPanelIds { panels[pid] = false }
+        for pnid in ["toolbar", "dock"] { panes[pnid] = false }
+    }
+    return [
+        "state": ["tab_count": tabCount],
+        "active_document": activeDocument,
+        "workspace": ["has_saved_layout": hasSavedLayout],
+        "panels": panels,
+        "panes": panes,
+    ]
 }

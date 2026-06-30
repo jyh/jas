@@ -20,13 +20,16 @@ public enum SubmenuKind: Equatable {
     case appearance
 }
 
-/// One resolved menu entry.
+/// One resolved menu entry. `enabledWhen` / `checkedWhen` are the bundle
+/// predicates the renderer evaluates (through the shared expression evaluator)
+/// to set the item's enabled / checked state — see `JasCommands.actionButton`
+/// and the cross-app `MenuState` gate.
 public enum MenuEntry {
     case separator
     case dynamicSubmenu(label: String, kind: SubmenuKind)
     case action(label: String, action: String,
                 params: [String: Any], shortcut: String,
-                enabledWhen: String?)
+                enabledWhen: String?, checkedWhen: String?)
 }
 
 /// One top-level menu (e.g. "&File") and its entries.
@@ -77,7 +80,8 @@ private func projectEntry(_ item: Any) -> MenuEntry {
         action: (obj["action"] as? String) ?? "",
         params: params,
         shortcut: (obj["shortcut"] as? String) ?? "",
-        enabledWhen: obj["enabled_when"] as? String)
+        enabledWhen: obj["enabled_when"] as? String,
+        checkedWhen: obj["checked_when"] as? String)
 }
 
 /// Strip Windows/GTK-style `&` mnemonic markers from a label for display.
