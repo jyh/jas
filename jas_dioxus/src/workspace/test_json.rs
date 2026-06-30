@@ -97,6 +97,7 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Layers => "layers",
         PanelKind::Color => "color",
         PanelKind::Swatches => "swatches",
+        PanelKind::Brushes => "brushes",
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
         PanelKind::Character => "character",
@@ -446,6 +447,7 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
     match v.as_str().unwrap_or("layers") {
         "color" => PanelKind::Color,
         "swatches" => PanelKind::Swatches,
+        "brushes" => PanelKind::Brushes,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         "character" => PanelKind::Character,

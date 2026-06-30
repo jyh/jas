@@ -46,6 +46,7 @@ pub enum PanelKind {
     Layers,
     Color,
     Swatches,
+    Brushes,
     Stroke,
     Properties,
     Character,
@@ -747,13 +748,31 @@ impl WorkspaceLayout {
         self.bump();
     }
 
-    /// Show a hidden panel: remove from hidden list and add to the first
-    /// group of the first anchored dock (or create one if needed).
+    /// Show a panel: remove it from the hidden list (if present) and add it
+    /// to the group it was last in (or the first anchored group as a
+    /// fallback). This covers two cases: re-opening a previously-closed panel
+    /// (it is in `hidden_panels`), AND summoning a panel that is in NO group
+    /// and was never hidden — e.g. a "toggle-only, not in the default layout"
+    /// panel like Brushes. Only a no-op when the panel is already on screen
+    /// (already in some dock group), so a Window-menu toggle-ON always adds it.
     pub fn show_panel(&mut self, kind: PanelKind) {
+        // Already in a dock group (anchored or floating)? It is on screen;
+        // nothing to do (and never add a duplicate).
+        let already_shown = self
+            .anchored
+            .iter()
+            .any(|(_, d)| d.groups.iter().any(|g| g.panels.contains(&kind)))
+            || self
+                .floating
+                .iter()
+                .any(|fd| fd.dock.groups.iter().any(|g| g.panels.contains(&kind)));
+        if already_shown {
+            return;
+        }
+        // Drop it from the closed-panel list if it was a previously-closed
+        // panel (a panel that was never hidden simply is not in the list).
         if let Some(pos) = self.hidden_panels.iter().position(|&k| k == kind) {
             self.hidden_panels.remove(pos);
-        } else {
-            return; // not hidden
         }
         // Try to restore to the group the panel was in when it was closed.
         let saved_group = self.hidden_panel_positions

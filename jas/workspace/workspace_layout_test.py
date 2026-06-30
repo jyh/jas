@@ -494,15 +494,18 @@ def test_show_panel_removes_from_hidden():
 def test_hidden_panels_default_empty():
     assert _test_layout().hidden_panels == []
 
-def test_panel_menu_items_all_visible():
+def test_panel_menu_items_reflect_dock_membership():
     l = _test_layout()
     items = l.panel_menu_items()
     assert len(items) == len(ALL_PANEL_KINDS)
-    # `is_panel_visible` is defined as "not in hidden_panels", so a
-    # panel defined but not in any group still reports visible by
-    # default — matches the pre-Character/Paragraph/Artboards behavior.
-    for _, v in items:
-        assert v
+    # `is_panel_visible` is dock-group based (mirrors the OCaml app): a panel
+    # reports visible iff it currently appears in some loaded group. The
+    # _test_layout docks Color/Swatches/Stroke/Properties/Layers; the rest of
+    # ALL_PANEL_KINDS (toggle-only panels never placed by this layout, e.g.
+    # Magic Wand / Opacity) report not-visible until shown on demand.
+    docked = {p for _, d in l.anchored for g in d.groups for p in g.panels}
+    for k, v in items:
+        assert v == (k in docked)
 
 def test_panel_menu_items_with_hidden():
     l = _test_layout()

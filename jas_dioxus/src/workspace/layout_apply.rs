@@ -45,6 +45,7 @@ fn parse_panel_kind(s: &str) -> PanelKind {
     match s {
         "color" => PanelKind::Color,
         "swatches" => PanelKind::Swatches,
+        "brushes" => PanelKind::Brushes,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         "character" => PanelKind::Character,
@@ -68,6 +69,7 @@ pub fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Layers => "layers",
         PanelKind::Color => "color",
         PanelKind::Swatches => "swatches",
+        PanelKind::Brushes => "brushes",
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
         PanelKind::Character => "character",

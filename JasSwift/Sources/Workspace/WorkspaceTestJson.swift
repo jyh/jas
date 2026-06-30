@@ -89,6 +89,7 @@ private func panelKindStr(_ k: PanelKind) -> String {
     case .opacity: return "opacity"
     case .magicWand: return "magic_wand"
     case .symbols: return "symbols"
+    case .brushes: return "brushes"
     }
 }
 
@@ -423,6 +424,7 @@ private func parsePanelKind(_ v: Any?) -> PanelKind {
     case "opacity": return .opacity
     case "magic_wand": return .magicWand
     case "symbols": return .symbols
+    case "brushes": return .brushes
     default: return .layers
     }
 }

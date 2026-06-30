@@ -137,6 +137,7 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .opacity: return OpacityPanel.menuItems()
     case .magicWand: return MagicWandPanel.menuItems()
     case .symbols: return SymbolsPanel.menuItems()
+    case .brushes: return BrushesPanel.menuItems()
     }
 }
 
@@ -169,6 +170,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .opacity: OpacityPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     }
 }
 
@@ -193,6 +195,7 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
     case .opacity: return OpacityPanel.isChecked(cmd, layout: layout)
     case .magicWand: return MagicWandPanel.isChecked(cmd, layout: layout)
     case .symbols: return SymbolsPanel.isChecked(cmd, layout: layout)
+    case .brushes: return BrushesPanel.isCheckedWithModel(cmd, model: model)
     }
 }
 
