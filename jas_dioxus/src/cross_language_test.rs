@@ -4199,6 +4199,37 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // Menu enabled/checked (chrome seam) algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_menu_state_vectors() {
+        use crate::interpreter::menu_state::menu_state;
+
+        let json_str = read_fixture("algorithms/menu_state.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let menubar = &bundle["menubar"];
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "menu_state", "Unknown function: {}", func);
+            // ctx is a JSON object data scope (state / active_document / workspace
+            // / panels / panes namespaces); it passes straight to the expr
+            // evaluator as the per-item enabled_when/checked_when context.
+            let ctx = &tc["args"]["ctx"];
+            let expected = &tc["expected"];
+
+            let actual = menu_state(menubar, ctx);
+            assert_eq!(&actual, expected, "Menu state '{}' mismatch", name);
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------
 

@@ -1721,6 +1721,48 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Menu enabled/checked state (chrome seam) algorithm vectors
+
+@Test func testAlgorithmMenuState() throws {
+    let json = readFixture("algorithms/menu_state.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    // Source of truth is the compiled bundle (workspace/workspace.json), which
+    // sits beside test_fixtures at the repo root. Mirror the widget-tree gate.
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let menubar = bundle["menubar"] as! [Any]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "menu_state", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let expected = tc["expected"] as! [[String: Any]]
+
+        let actual = MenuState.menuState(menubar, ctx)
+
+        // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
+        // with sorted keys and compare bytes.
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Menu state '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+    }
+}
+
 // MARK: - Hit test algorithm vectors
 
 @Test func algorithmHitTestVectors() throws {
