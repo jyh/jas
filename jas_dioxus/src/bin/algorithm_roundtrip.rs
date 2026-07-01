@@ -18,7 +18,7 @@ use jas_dioxus::algorithms::path_text_layout::layout_path_text;
 use jas_dioxus::algorithms::planar::{FaceId, PlanarGraph};
 use jas_dioxus::algorithms::shape_recognize::{recognize, RecognizeConfig, RecognizedShape};
 use jas_dioxus::algorithms::text_layout;
-use jas_dioxus::geometry::element::PathCommand;
+use jas_dioxus::geometry::element::{PathCommand, Element, flatten_path_commands};
 
 use serde_json::{json, Value};
 
@@ -64,6 +64,7 @@ fn main() {
     let results: Vec<Value> = match algo.as_str() {
         "measure" => run_measure(&vectors),
         "element_bounds" => run_element_bounds(&vectors),
+        "flatten" => run_flatten(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
@@ -121,6 +122,27 @@ fn run_element_bounds(vectors: &[Value]) -> Vec<Value> {
             let elem = parse_element(elem_json);
             let (x, y, w, h) = elem.bounds();
             json!({"name": name, "result": [x, y, w, h]})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// flatten (path commands -> polyline; exercises multi-subpath close)
+// ---------------------------------------------------------------
+
+fn run_flatten(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let pts = flatten_path_commands(&d);
+            let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
         })
         .collect()
 }

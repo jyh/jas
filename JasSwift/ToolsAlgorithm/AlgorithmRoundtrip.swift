@@ -45,6 +45,7 @@ let results: [[String: Any]]
 switch algo {
 case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
+case "flatten":           results = runFlatten(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
@@ -73,6 +74,20 @@ func runElementBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let elem = parseElement(elemJson)
         let b = elem.bounds
         return ["name": name, "result": [b.x, b.y, b.width, b.height]]
+    }
+}
+
+// MARK: - Flatten (path commands -> polyline; exercises multi-subpath close)
+
+func runFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let pts = flattenPathCommands(d)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
     }
 }
 

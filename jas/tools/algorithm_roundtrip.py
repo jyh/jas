@@ -38,7 +38,9 @@ from algorithms.text_layout import (
     ParagraphSegment, TextAlign,
 )
 from algorithms.path_text_layout import layout_path_text
-from geometry.element import MoveTo, LineTo, CurveTo, QuadTo, ClosePath, Rect
+from geometry.element import (
+    MoveTo, LineTo, CurveTo, QuadTo, ClosePath, Rect, flatten_path_commands,
+)
 from geometry.measure import Measure, Unit
 from geometry.test_json import parse_element_json
 
@@ -65,6 +67,7 @@ def main():
     runners = {
         "measure": run_measure,
         "element_bounds": run_element_bounds,
+        "flatten": run_flatten,
         "hit_test": run_hit_test,
         "boolean": run_boolean,
         "boolean_normalize": run_boolean_normalize,
@@ -114,6 +117,20 @@ def run_element_bounds(vectors):
         elem = parse_element_json(tc["element"])
         x, y, w, h = elem.bounds()
         results.append({"name": tc["name"], "result": [x, y, w, h]})
+    return results
+
+
+# ---------------------------------------------------------------
+# flatten (path commands -> polyline; exercises multi-subpath close)
+# ---------------------------------------------------------------
+
+def run_flatten(vectors):
+    results = []
+    for tc in vectors:
+        elem = parse_element_json(tc["element"])
+        d = getattr(elem, "d", ())
+        pts = flatten_path_commands(d)
+        results.append({"name": tc["name"], "result": [[x, y] for (x, y) in pts]})
     return results
 
 
