@@ -3550,6 +3550,35 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
                     qp.closeSubpath()
                     p.drawPath(qp)
                 p.end()
+            elif btype == "bristle":
+                # Stroke the offset bristle lines with per-bristle opacity.
+                from algorithms.bristle_stroke import BristleBrush, bristle_stroke
+                from geometry.element import MoveTo, LineTo
+                br = BristleBrush(
+                    size=float(brush.get("size", 3.0)),
+                    density=float(brush.get("density", 50.0)),
+                    thickness=float(brush.get("thickness", 30.0)),
+                    opacity=float(brush.get("opacity", 30.0)),
+                    stroke_weight=6.0,
+                )
+                lines = bristle_stroke([MoveTo(4.0, 20.0), LineTo(36.0, 20.0)], br)
+                p = QPainter(self)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                pen_color = QColor("#cccccc")
+                pen_color.setAlphaF(br.alpha())
+                pen = QPen(pen_color, br.line_width())
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                for line in lines:
+                    if len(line) < 2:
+                        continue
+                    qp = QPainterPath()
+                    qp.moveTo(QPointF(line[0][0], line[0][1]))
+                    for x, y in line[1:]:
+                        qp.lineTo(QPointF(x, y))
+                    p.drawPath(qp)
+                p.end()
 
     return _NibPreview()
 

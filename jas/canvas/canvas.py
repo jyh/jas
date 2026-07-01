@@ -158,6 +158,21 @@ def _pattern_from_dict(brush: dict, stroke_weight: float):
     )
 
 
+def _bristle_from_dict(brush: dict, stroke_weight: float):
+    """Extract a BristleBrush from a brush dict. Returns None for
+    non-Bristle types."""
+    if brush.get("type") != "bristle":
+        return None
+    from algorithms.bristle_stroke import BristleBrush
+    return BristleBrush(
+        size=float(brush.get("size", 3.0)),
+        density=float(brush.get("density", 50.0)),
+        thickness=float(brush.get("thickness", 30.0)),
+        opacity=float(brush.get("opacity", 30.0)),
+        stroke_weight=stroke_weight,
+    )
+
+
 def _fill_polygon(painter: QPainter, pts) -> None:
     if len(pts) < 3:
         return
@@ -212,6 +227,29 @@ def _draw_brushed_path(painter: QPainter, d, stroke, slug: str) -> bool:
         painter.setPen(QPen(0))
         for poly in polys:
             _fill_polygon(painter, poly)
+        return True
+
+    br = _bristle_from_dict(brush, stroke_weight)
+    if br is not None:
+        from algorithms.bristle_stroke import bristle_stroke
+        lines = bristle_stroke(d, br)
+        if not lines:
+            return True
+        pen_color = QColor(color)
+        pen_color.setAlphaF(br.alpha())
+        pen = QPen(pen_color, br.line_width())
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for line in lines:
+            if len(line) < 2:
+                continue
+            qpath = QPainterPath()
+            qpath.moveTo(QPointF(line[0][0], line[0][1]))
+            for x, y in line[1:]:
+                qpath.lineTo(QPointF(x, y))
+            painter.drawPath(qpath)
         return True
 
     return False
