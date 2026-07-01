@@ -513,6 +513,15 @@ class type_on_path_tool = object (_self)
        Cairo.stroke cr;
        Cairo.set_dash cr [||]
      | _ -> ());
+    (* The offset handle + caret/selection geometry are in document coords,
+       so apply the canvas view transform around them (mirrors
+       type_tool#draw_overlay) — without it they render at doc coords on a
+       screen-space canvas and drift under zoom / pan. The drag-create
+       marquee above is stored in widget coords, so it stays outside. *)
+    let z = ctx.model#zoom_level in
+    Cairo.save cr;
+    Cairo.translate cr ctx.model#view_offset_x ctx.model#view_offset_y;
+    Cairo.scale cr z z;
     (* Draw offset handle for selected TextPath elements *)
     let doc = ctx.model#document in
     Document.PathMap.iter (fun _key (es : Document.element_selection) ->
@@ -590,5 +599,6 @@ class type_on_path_tool = object (_self)
            Cairo.move_to cr (cx +. nx *. (h *. 0.7)) (cy +. ny *. (h *. 0.7));
            Cairo.line_to cr (cx -. nx *. (h *. 0.2)) (cy -. ny *. (h *. 0.2));
            Cairo.stroke cr
-       end)
+       end);
+    Cairo.restore cr
 end
