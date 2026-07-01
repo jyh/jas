@@ -3327,11 +3327,7 @@ private func pathToString(_ path: ElementPath) -> String {
 }
 
 private func cycleVisibility(_ vis: Visibility) -> Visibility {
-    switch vis {
-    case .preview: return .outline
-    case .outline: return .invisible
-    case .invisible: return .preview
-    }
+    vis.cycled
 }
 
 /// Build a fitted-viewBox SVG fragment for a single element.

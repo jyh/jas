@@ -507,6 +507,45 @@ pub(crate) struct HyphenationDialogValues {
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
+/// Advance a visibility state one step in the Layers eye-button cycle:
+/// Preview -> Outline -> Invisible -> Preview. Pure; shared by the tree_view
+/// eye onclick. Mirrors the Swift `cycleVisibility`, OCaml, and Python
+/// `_cycle_visibility` cycle order.
+pub(crate) fn cycle_visibility(
+    v: crate::geometry::element::Visibility,
+) -> crate::geometry::element::Visibility {
+    use crate::geometry::element::Visibility;
+    match v {
+        Visibility::Preview => Visibility::Outline,
+        Visibility::Outline => Visibility::Invisible,
+        Visibility::Invisible => Visibility::Preview,
+    }
+}
+
+/// Element-level behavior of the Layers tree eye button (regular click):
+/// cycle the visibility of the element at `path` and, when it becomes
+/// Invisible, drop it (and its descendants) from the selection. Pure —
+/// returns a new Document. Mirrors the Python/OCaml/Swift eye handlers.
+pub(crate) fn cycle_element_visibility_at(
+    doc: &crate::document::document::Document,
+    path: &crate::document::document::ElementPath,
+) -> crate::document::document::Document {
+    use crate::geometry::element::Visibility;
+    let Some(elem) = doc.get_element(path) else {
+        return doc.clone();
+    };
+    let new_vis = cycle_visibility(elem.visibility());
+    let mut new_elem = elem.clone();
+    new_elem.common_mut().visibility = new_vis;
+    let mut new_doc = doc.replace_element(path, new_elem);
+    if new_vis == Visibility::Invisible {
+        new_doc
+            .selection
+            .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
+    }
+    new_doc
+}
+
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
@@ -9089,22 +9128,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 st.layers_solo_state = None;
                                 if let Some(tab) = st.tab_mut() {
                                     tab.model.begin_txn();
-                                    let mut doc = tab.model.document().clone();
-                                    if let Some(elem) = doc.get_element_mut(&p) {
-                                        let new_vis = match elem.visibility() {
-                                            Visibility::Preview => Visibility::Outline,
-                                            Visibility::Outline => Visibility::Invisible,
-                                            Visibility::Invisible => Visibility::Preview,
-                                        };
-                                        elem.common_mut().visibility = new_vis;
-                                        if new_vis == Visibility::Invisible {
-                                            let path = p.clone();
-                                            doc.selection.retain(|es| {
-                                                !(es.path == path || es.path.starts_with(&path))
-                                            });
-                                        }
-                                    }
-                                    tab.model.set_document(doc);
+                                    let new_doc = cycle_element_visibility_at(
+                                        tab.model.document(),
+                                        &p,
+                                    );
+                                    tab.model.set_document(new_doc);
                                     tab.model.commit_txn();
                                 }
                             }
@@ -12751,6 +12779,35 @@ mod tests {
             {"__path__": [0, 2]},
         ]);
         assert_eq!(view["element_selection"], expected);
+    }
+
+    // ── Layers eye-button visibility cycle (LYR) ──────────────────
+    #[test]
+    fn cycle_visibility_advances_preview_outline_invisible_preview() {
+        use crate::geometry::element::Visibility;
+        assert_eq!(cycle_visibility(Visibility::Preview), Visibility::Outline);
+        assert_eq!(cycle_visibility(Visibility::Outline), Visibility::Invisible);
+        assert_eq!(cycle_visibility(Visibility::Invisible), Visibility::Preview);
+    }
+
+    #[test]
+    fn cycle_element_visibility_at_cycles_and_deselects_on_invisible() {
+        use crate::document::document::ElementSelection;
+        use crate::geometry::element::Visibility;
+        let st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        doc.selection = vec![ElementSelection::all(vec![0usize])];
+        // Preview -> Outline; selection intact.
+        let d1 = cycle_element_visibility_at(&doc, &vec![0usize]);
+        assert_eq!(d1.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Outline);
+        assert_eq!(d1.selection.len(), 1);
+        // Outline -> Invisible; element dropped from selection.
+        let d2 = cycle_element_visibility_at(&d1, &vec![0usize]);
+        assert_eq!(d2.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Invisible);
+        assert!(d2.selection.is_empty());
+        // Invisible -> Preview.
+        let d3 = cycle_element_visibility_at(&d2, &vec![0usize]);
+        assert_eq!(d3.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Preview);
     }
 
     #[test]

@@ -213,6 +213,18 @@ public enum Visibility: Int, Equatable, Hashable, Comparable {
     public static func < (lhs: Visibility, rhs: Visibility) -> Bool {
         return lhs.rawValue < rhs.rawValue
     }
+
+    /// Advance one step in the Layers eye cycle: preview -> outline ->
+    /// invisible -> preview. Pure; used by the tree-row eye button.
+    /// Cross-app equivalent of OCaml `Element.cycle_visibility`, Python
+    /// `_cycle_visibility`, Rust `cycle_element_visibility`.
+    public var cycled: Visibility {
+        switch self {
+        case .preview: return .outline
+        case .outline: return .invisible
+        case .invisible: return .preview
+        }
+    }
 }
 
 /// Blend mode for compositing an element against its parent layer.

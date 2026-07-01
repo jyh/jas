@@ -62,3 +62,8 @@
  (name stroke_panel_state_test)
  (modules stroke_panel_state_test)
  (libraries jas alcotest))
+
+(test
+ (name layers_visibility_test)
+ (modules layers_visibility_test)
+ (libraries jas alcotest))
