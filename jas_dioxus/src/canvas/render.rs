@@ -11,6 +11,7 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::algorithms::calligraphic_outline::{calligraphic_outline, CalligraphicBrush};
 use crate::algorithms::art_along_path::{art_along_path, ArtBrush};
+use crate::algorithms::pattern_along_path::{pattern_along_path, PatternBrush};
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
 use crate::geometry::element::Visibility;
@@ -240,7 +241,74 @@ fn draw_brushed_path(
         return true;
     }
 
+    // Pattern: side tile repeated along the path; fill each warped tile.
+    if let Some(pat) = pattern_from_json(&brush, stroke_weight) {
+        let polys = pattern_along_path(&elem.d, &pat);
+        if polys.is_empty() {
+            return true;
+        }
+        ctx.set_fill_style_str(&color);
+        for poly in &polys {
+            if poly.len() < 3 {
+                continue;
+            }
+            ctx.begin_path();
+            ctx.move_to(poly[0].0, poly[0].1);
+            for p in &poly[1..] {
+                ctx.line_to(p.0, p.1);
+            }
+            ctx.close_path();
+            ctx.fill();
+        }
+        return true;
+    }
+
     false // other brush types → plain stroke fallback
+}
+
+/// Parse a `{ width, height, polygons: [[[x,y],...],...] }` object into a
+/// (width, height, polygons) tuple. Shared by the art / pattern parsers.
+pub(crate) fn parse_inline_artwork(
+    aw: &serde_json::Value,
+) -> Option<(f64, f64, Vec<Vec<(f64, f64)>>)> {
+    let width = aw.get("width").and_then(|v| v.as_f64())?;
+    let height = aw.get("height").and_then(|v| v.as_f64())?;
+    let polys = aw.get("polygons").and_then(|v| v.as_array())?;
+    let polygons: Vec<Vec<(f64, f64)>> = polys
+        .iter()
+        .filter_map(|p| {
+            p.as_array().map(|pts| {
+                pts.iter()
+                    .filter_map(|pt| {
+                        let a = pt.as_array()?;
+                        Some((a.first()?.as_f64()?, a.get(1)?.as_f64()?))
+                    })
+                    .collect()
+            })
+        })
+        .collect();
+    Some((width, height, polygons))
+}
+
+/// Build a `PatternBrush` from the library JSON. Side tile stored inline as
+/// `tiles: { side: { width, height, polygons } }` (Phase 1: side only).
+/// Shared with the Brushes-panel `brush_preview` thumbnail.
+pub(crate) fn pattern_from_json(brush: &serde_json::Value, stroke_weight: f64) -> Option<PatternBrush> {
+    if brush.get("type").and_then(|v| v.as_str()) != Some("pattern") {
+        return None;
+    }
+    let side = brush.get("tiles")?.get("side")?;
+    let (width, height, polygons) = parse_inline_artwork(side)?;
+    Some(PatternBrush {
+        tile_width: width,
+        tile_height: height,
+        side: polygons,
+        scale: brush.get("scale").and_then(|v| v.as_f64()).unwrap_or(100.0),
+        spacing: brush.get("spacing").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        flip_across: brush.get("flip_across").and_then(|v| v.as_bool()).unwrap_or(false),
+        flip_along: brush.get("flip_along").and_then(|v| v.as_bool()).unwrap_or(false),
+        stroke_weight,
+    })
 }
 
 /// Build an `ArtBrush` from the library JSON. Artwork is stored inline as

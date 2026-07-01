@@ -78,7 +78,8 @@ pub fn art_along_path(commands: &[PathCommand], brush: &ArtBrush) -> Vec<Vec<(f6
 }
 
 /// Point, and tangent (radians), at arc-length `s` along the polyline.
-fn point_at_arclength(
+/// Shared with pattern_along_path / bristle_stroke.
+pub(crate) fn point_at_arclength(
     pts: &[(f64, f64)],
     cum: &[f64],
     total: f64,
@@ -109,8 +110,8 @@ fn point_at_arclength(
 
 /// Flatten the first subpath of `commands` into a polyline. Cubics/quads
 /// are subdivided uniformly; matches the conservative Phase-1 sampler used
-/// by `calligraphic_outline`.
-fn flatten(commands: &[PathCommand]) -> Vec<(f64, f64)> {
+/// by `calligraphic_outline`. Shared with pattern_along_path / bristle_stroke.
+pub(crate) fn flatten(commands: &[PathCommand]) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
     let (mut cx, mut cy) = (0.0_f64, 0.0_f64);
     let (mut sx, mut sy) = (0.0_f64, 0.0_f64);

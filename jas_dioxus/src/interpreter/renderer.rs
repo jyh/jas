@@ -10082,6 +10082,39 @@ fn render_brush_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: 
                 dangerous_inner_html: "{svg}",
             }
         }
+    } else if btype == "pattern" {
+        // Pattern: tile the side artwork along a short horizontal path.
+        use crate::geometry::element::PathCommand;
+        let mut svg = String::new();
+        if let Some(mut pat) = crate::canvas::render::pattern_from_json(brush.unwrap_or(&serde_json::Value::Null), 10.0) {
+            pat.scale = 100.0;
+            let cmds = vec![
+                PathCommand::MoveTo { x: 4.0, y: 20.0 },
+                PathCommand::LineTo { x: 36.0, y: 20.0 },
+            ];
+            let polys = crate::algorithms::pattern_along_path::pattern_along_path(&cmds, &pat);
+            for poly in &polys {
+                if poly.len() < 3 {
+                    continue;
+                }
+                let pts: String = poly
+                    .iter()
+                    .map(|(x, y)| format!("{:.2},{:.2}", x, y))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                svg.push_str(&format!(r#"<polygon points="{pts}" fill="var(--jas-text,#ccc)"/>"#));
+            }
+        }
+        let svg = format!(
+            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{svg}</svg>"#
+        );
+        rsx! {
+            div {
+                id: "{id}",
+                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
+                dangerous_inner_html: "{svg}",
+            }
+        }
     } else {
         rsx! { div { id: "{id}", style: "width:100%;height:100%;pointer-events:none;" } }
     }
