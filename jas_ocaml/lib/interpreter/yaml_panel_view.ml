@@ -1648,6 +1648,7 @@ let rec render_element ~packing ~ctx (el : Yojson.Safe.t) =
   | "panel" -> render_panel ~packing ~ctx el
   | "tree_view" -> render_tree_view ~packing ~ctx el
   | "element_preview" -> render_element_preview ~packing el
+  | "brush_preview" -> render_brush_preview ~packing ~ctx el
   | "dropdown" -> render_layers_filter_dropdown ~packing el
   | "tabs" -> render_tabs ~packing ~ctx el
   | "icon" -> render_icon ~packing el
@@ -5356,6 +5357,40 @@ and render_tree_view ~packing ~ctx:_ _el =
 and render_element_preview ~packing _el =
   let frame = GBin.frame ~shadow_type:`ETCHED_IN ~packing () in
   frame#misc#set_size_request ~width:32 ~height:32 ()
+
+(* A brush tip / stroke preview drawn from the enclosing tile's [brush]
+   loop variable (read via the expr evaluator against [ctx]). Calligraphic
+   draws a nib ellipse — [size] scales the display diameter, [roundness]
+   flattens the minor axis, [angle] rotates it; other types fall back to an
+   empty box until their preview lands. Manual-floor GUI (the widget_tree
+   gate pins only the [brush_preview] kind, not the pixels). *)
+and render_brush_preview ~packing ~ctx el =
+  ignore el;
+  let eval_str e =
+    match Expr_eval.evaluate e ctx with
+    | Expr_eval.Str s -> s | Expr_eval.Color c -> c | _ -> "" in
+  let eval_num e ~default =
+    match Expr_eval.evaluate e ctx with
+    | Expr_eval.Number n -> n | _ -> default in
+  let area = GMisc.drawing_area ~packing () in
+  area#misc#set_size_request ~width:48 ~height:16 ();
+  if eval_str "brush.type" = "calligraphic" then begin
+    let size = eval_num "brush.size" ~default:5.0 in
+    let roundness = eval_num "brush.roundness" ~default:100.0 in
+    let angle = eval_num "brush.angle" ~default:0.0 in
+    let major = Float.min (Float.max (size *. 1.3) 2.0) 13.0 in
+    let minor = Float.min (Float.max (major *. (roundness /. 100.0)) 1.0) major in
+    ignore (area#misc#connect#draw ~callback:(fun cr ->
+      Cairo.save cr;
+      Cairo.translate cr 24.0 8.0;
+      Cairo.rotate cr (angle *. Float.pi /. 180.0);
+      Cairo.scale cr (major /. 2.0) (minor /. 2.0);
+      Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);
+      Cairo.restore cr;
+      Cairo.set_source_rgb cr 0.8 0.8 0.8;
+      Cairo.fill cr;
+      true))
+  end
 
 (* PRINT.md §1B: tabs widget. Left-rail tab list + content area
    showing the active tab. Active tab read from [bind.value]
