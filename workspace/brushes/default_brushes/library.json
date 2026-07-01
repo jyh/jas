@@ -1,14 +1,69 @@
 {
   "name": "Default Brushes",
-  "description": "Starter brush library shipped with the application. Calligraphic seed for Phase 1; other brush types added as renderer support lands.",
+  "description": "Starter brush library shipped with the application. Ships the default Calligraphic set; Art, Pattern, and Bristle brushes are added as their renderers land.",
   "brushes": [
+    {
+      "name": "Basic",
+      "slug": "basic",
+      "type": "calligraphic",
+      "angle": 0,
+      "roundness": 100,
+      "size": 1,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    },
+    {
+      "name": "3 pt. Round",
+      "slug": "round_3pt",
+      "type": "calligraphic",
+      "angle": 0,
+      "roundness": 100,
+      "size": 3,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    },
+    {
+      "name": "7 pt. Round",
+      "slug": "round_7pt",
+      "type": "calligraphic",
+      "angle": 0,
+      "roundness": 100,
+      "size": 7,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    },
+    {
+      "name": "5 pt. Flat",
+      "slug": "flat_5pt",
+      "type": "calligraphic",
+      "angle": 0,
+      "roundness": 20,
+      "size": 5,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    },
     {
       "name": "5 pt. Oval",
       "slug": "oval_5pt",
       "type": "calligraphic",
+      "angle": 45,
+      "roundness": 40,
+      "size": 5,
+      "angle_variation": { "mode": "fixed" },
+      "roundness_variation": { "mode": "fixed" },
+      "size_variation": { "mode": "fixed" }
+    },
+    {
+      "name": "10 pt. Round",
+      "slug": "round_10pt",
+      "type": "calligraphic",
       "angle": 0,
       "roundness": 100,
-      "size": 5,
+      "size": 10,
       "angle_variation": { "mode": "fixed" },
       "roundness_variation": { "mode": "fixed" },
       "size_variation": { "mode": "fixed" }
