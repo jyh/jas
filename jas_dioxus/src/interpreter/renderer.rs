@@ -10115,6 +10115,43 @@ fn render_brush_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: 
                 dangerous_inner_html: "{svg}",
             }
         }
+    } else if btype == "bristle" {
+        // Bristle: stroke the offset bristle lines across the tile with
+        // per-bristle opacity (they overlap and build up).
+        use crate::geometry::element::PathCommand;
+        let mut svg = String::new();
+        if let Some(br) = crate::canvas::render::bristle_from_json(brush.unwrap_or(&serde_json::Value::Null), 6.0) {
+            let cmds = vec![
+                PathCommand::MoveTo { x: 4.0, y: 20.0 },
+                PathCommand::LineTo { x: 36.0, y: 20.0 },
+            ];
+            let lines = crate::algorithms::bristle_stroke::bristle_stroke(&cmds, &br);
+            for line in &lines {
+                if line.len() < 2 {
+                    continue;
+                }
+                let pts: String = line
+                    .iter()
+                    .map(|(x, y)| format!("{:.2},{:.2}", x, y))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                svg.push_str(&format!(
+                    r#"<polyline points="{pts}" fill="none" stroke="var(--jas-text,#ccc)" stroke-width="{}" stroke-opacity="{}" stroke-linecap="round"/>"#,
+                    br.line_width(),
+                    br.alpha()
+                ));
+            }
+        }
+        let svg = format!(
+            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{svg}</svg>"#
+        );
+        rsx! {
+            div {
+                id: "{id}",
+                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
+                dangerous_inner_html: "{svg}",
+            }
+        }
     } else {
         rsx! { div { id: "{id}", style: "width:100%;height:100%;pointer-events:none;" } }
     }

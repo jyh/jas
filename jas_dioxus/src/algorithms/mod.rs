@@ -3,6 +3,7 @@ pub mod boolean;
 pub mod calligraphic_outline;
 pub mod art_along_path;
 pub mod pattern_along_path;
+pub mod bristle_stroke;
 pub mod dash_renderer;
 pub mod fit_curve;
 pub mod simplify;
