@@ -279,6 +279,16 @@ def _render_container(el, store, ctx, dispatch_fn):
         else:
             layout.addWidget(child_widget)
 
+    # A container with explicit numeric width/height (e.g. a Brushes brush
+    # tile: 40x40) is fixed to that size, so a childless / preview box draws
+    # at its declared size instead of collapsing to its content. Layout
+    # containers omit these (or use a "100%" string), so they're unaffected.
+    sw = style.get("width")
+    sh = style.get("height")
+    if isinstance(sw, (int, float)):
+        widget.setFixedWidth(int(sw))
+    if isinstance(sh, (int, float)):
+        widget.setFixedHeight(int(sh))
     # Propagate child minimum heights up to this container's
     # minimumHeight without touching width. Qt's layouts compute
     # minimumSize from children but only update the widget's
@@ -3447,7 +3457,7 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
     class _NibPreview(QWidget):
         def __init__(self):
             super().__init__()
-            self.setFixedSize(48, 16)
+            self.setFixedSize(40, 40)
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         def paintEvent(self, _ev):
@@ -3456,11 +3466,11 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
             size = float(brush.get("size") or 5)
             roundness = float(brush.get("roundness") or 100)
             angle = float(brush.get("angle") or 0)
-            major = min(max(size * 1.3, 2.0), 13.0)
-            minor = min(max(major * (roundness / 100.0), 1.0), major)
+            major = min(max(size * 2.8, 4.0), 30.0)
+            minor = min(max(major * (roundness / 100.0), 1.5), major)
             p = QPainter(self)
             p.setRenderHint(QPainter.Antialiasing, True)
-            p.translate(24, 8)
+            p.translate(20, 20)
             p.rotate(angle)
             p.setPen(QPen(Qt.NoPen))
             p.setBrush(QColor("#cccccc"))

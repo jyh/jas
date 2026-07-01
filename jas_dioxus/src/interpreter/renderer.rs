@@ -10029,14 +10029,14 @@ fn render_brush_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: 
         let size = brush.and_then(|b| b.get("size")).and_then(|v| v.as_f64()).unwrap_or(5.0);
         let roundness = brush.and_then(|b| b.get("roundness")).and_then(|v| v.as_f64()).unwrap_or(100.0);
         let angle = brush.and_then(|b| b.get("angle")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-        // Map pt size -> display px so the nib fits the ~16px-tall tile;
-        // roundness flattens the minor axis (100 = circle).
-        let major = (size * 1.3).clamp(2.0, 13.0);
-        let minor = (major * (roundness / 100.0)).clamp(1.0, major);
+        // Map pt size -> display px so the nib fills the square tile;
+        // roundness flattens the minor axis (100 = circle), angle rotates it.
+        let major = (size * 2.8).clamp(4.0, 30.0);
+        let minor = (major * (roundness / 100.0)).clamp(1.5, major);
         let rx = major / 2.0;
         let ry = minor / 2.0;
         let svg = format!(
-            r#"<svg viewBox="0 0 48 16" width="48" height="16" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"><ellipse cx="24" cy="8" rx="{rx}" ry="{ry}" fill="var(--jas-text,#ccc)" transform="rotate({angle} 24 8)"/></svg>"#
+            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"><ellipse cx="20" cy="20" rx="{rx}" ry="{ry}" fill="var(--jas-text,#ccc)" transform="rotate({angle} 20 20)"/></svg>"#
         );
         rsx! {
             div {

@@ -2550,8 +2550,8 @@ struct YamlElementView: View {
             let size = Double(containerNumericDim(brush["size"]) ?? 5)
             let roundness = Double(containerNumericDim(brush["roundness"]) ?? 100)
             let angle = Double(containerNumericDim(brush["angle"]) ?? 0)
-            let major = min(max(size * 1.3, 2.0), 13.0)
-            let minor = min(max(major * (roundness / 100.0), 1.0), major)
+            let major = min(max(size * 2.8, 4.0), 30.0)
+            let minor = min(max(major * (roundness / 100.0), 1.5), major)
             let color: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
             SwiftUI.Ellipse()
                 .fill(color)
