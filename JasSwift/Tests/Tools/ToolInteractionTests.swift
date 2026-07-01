@@ -349,6 +349,49 @@ private func scaleTool() -> CanvasTool {
             "opposite corner should double to (200,200); got \(corner)")
 }
 
+// Regression: Type-on-Path must convert screen -> doc in its pointer
+// handlers (like TypeTool / the Rust reference). Pre-fix it fed raw widget
+// coords into path geometry, so a drag-created path landed at screen coords
+// and drifted under zoom/pan. Guarded only here — corpora run at identity.
+@Test func typeOnPathDragCreateConvertsScreenToDocAtNonIdentityView() {
+    let doc = Document(layers: [Layer(name: "L", children: [])])
+    let model = Model(document: doc)
+    // screen = doc * 2 + (10, 20)  =>  doc = (screen - off) / 2.
+    model.zoomLevel = 2.0
+    model.viewOffsetX = 10.0
+    model.viewOffsetY = 20.0
+    let (ctx, _, _) = makeCtx(model: model)
+    let tool = TypeOnPathTool()
+
+    // Drag SCREEN (110,120) -> (410,120): doc (50,50) -> (200,50), well past
+    // the drag threshold, so a new TextPath is created spanning those coords.
+    tool.onPress(ctx, x: 110, y: 120, shift: false, alt: false)
+    tool.onMove(ctx, x: 410, y: 120, shift: false, alt: false, dragging: true)
+    tool.onRelease(ctx, x: 410, y: 120, shift: false, alt: false)
+
+    let children = layerChildren(model)
+    #expect(children.count == 1, "drag-create should add one TextPath")
+    guard case .textPath(let tp) = children[0] else {
+        Issue.record("expected a TextPath; got \(children.first as Any)")
+        return
+    }
+    guard case .moveTo(let mx, let my) = tp.d.first else {
+        Issue.record("expected d to start with moveTo; got \(tp.d)")
+        return
+    }
+    #expect(abs(mx - 50.0) < 1e-6 && abs(my - 50.0) < 1e-6,
+            "path start should be doc (50,50), not raw screen; got (\(mx),\(my))")
+    // Last command's endpoint (line or curve) should be doc (200,50).
+    let end: (Double, Double)?
+    switch tp.d.last {
+    case .lineTo(let x, let y): end = (x, y)
+    case .curveTo(_, _, _, _, let x, let y): end = (x, y)
+    default: end = nil
+    }
+    #expect(end != nil && abs(end!.0 - 200.0) < 1e-6 && abs(end!.1 - 50.0) < 1e-6,
+            "path end should be doc (200,50), not raw screen; got \(end as Any)")
+}
+
 // MARK: - Add Anchor Point tool tests (YAML-driven per Phase 7.11-13)
 //
 // Drag-adjusts-handles, cusp-drag, and Space+drag reposition from the
