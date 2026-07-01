@@ -21,6 +21,7 @@ jobs:
       - run: python scripts/check_toolbar_structure.py
       - run: python scripts/check_action_refs.py
       - run: bash scripts/check_panel_goldens.sh
+      - run: python scripts/check_path_b_exclusions.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
