@@ -50,6 +50,22 @@ class LengthInputTest(absltest.TestCase):
         widget = render_element(el, store, ctx)
         self.assertEqual(widget.text(), "12 pt")
 
+    def test_initial_display_cursor_at_start(self):
+        # A narrow field (e.g. a dash/gap cell) must show the START of the
+        # value ("12 pt"), not scroll to the cursor-at-end and hide the
+        # leading digit ("2 pt"). QLineEdit.setText leaves the cursor at
+        # the end, so the renderer must home it. Regression for the Stroke
+        # panel dash fields displaying "2 pt" for a value of 12.
+        store, ctx = self._make_store_with_weight(12.0)
+        el = {
+            "type": "length_input",
+            "unit": "pt",
+            "bind": {"value": "panel.weight"},
+        }
+        widget = render_element(el, store, ctx)
+        self.assertEqual(widget.text(), "12 pt")
+        self.assertEqual(widget.cursorPosition(), 0)
+
     def test_initial_display_uses_format_in(self):
         # 72 pt → 1 in.
         store, ctx = self._make_store_with_weight(72.0)
