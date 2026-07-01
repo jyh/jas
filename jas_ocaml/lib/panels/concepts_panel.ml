@@ -103,7 +103,7 @@ let set_concept_param_op (_store : State_store.t) (m : Model.model)
   let doc = m#document in
   match Document.PathMap.bindings doc.Document.selection with
   | [ (path, _) ] ->
-    (match (try Some (Document.get_element doc path) with _ -> None) with
+    (match (Document.get_element_opt doc path) with
      | Some (Element.Live (Element.Generated _)) ->
        Some (`Assoc [
          ("op", `String "set_concept_param");
@@ -129,7 +129,7 @@ let apply_concept_operation_op (_store : State_store.t) (m : Model.model)
   let doc = m#document in
   match Document.PathMap.bindings doc.Document.selection with
   | [ (path, _) ] ->
-    (match (try Some (Document.get_element doc path) with _ -> None) with
+    (match (Document.get_element_opt doc path) with
      | Some (Element.Live (Element.Generated gen)) ->
        let concept_id = gen.Element.gen_concept_id in
        let params = gen.Element.gen_params in
@@ -203,7 +203,7 @@ let promote_to_concept_op (m : Model.model)
   let doc = m#document in
   match Document.PathMap.bindings doc.Document.selection with
   | [ (path, _) ] ->
-    (match (try Some (Document.get_element doc path) with _ -> None) with
+    (match (Document.get_element_opt doc path) with
      | Some elem ->
        (* Only a Polygon / Polyline carries promotable vertices in v1. *)
        let raw_points = match elem with

@@ -926,8 +926,7 @@ let resolve_overlay_ref_point (render : Yojson.Safe.t)
   | None ->
     let elements = Document.PathMap.bindings doc.selection
                    |> List.filter_map (fun (path, _) ->
-                     try Some (Document.get_element doc path)
-                     with _ -> None)
+                     Document.get_element_opt doc path)
     in
     if elements = [] then None
     else
@@ -1047,8 +1046,7 @@ let draw_bbox_ghost (cr : Cairo.context) (render : Yojson.Safe.t)
     in
     let elements = Document.PathMap.bindings doc.selection
                    |> List.filter_map (fun (path, _) ->
-                     try Some (Document.get_element doc path)
-                     with _ -> None)
+                     Document.get_element_opt doc path)
     in
     if elements = [] then () else begin
       let (bx, by, bw, bh) =
