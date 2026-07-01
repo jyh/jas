@@ -4210,3 +4210,438 @@ mod oplog_bracket_tests {
         assert_eq!(n_restored, 2, "undo restored both rects");
     }
 }
+
+// ── Character panel apply-to-selection seam tests ────────────────
+//
+// Cross-language-equivalent port of the Python reference suite
+// jas/panels/character_panel_state_test.py. Python exposes a pure
+// `_attrs_from_panel` helper; the Rust apply is inline in
+// `apply_character_panel_to_selection`, so these tests drive the
+// full panel -> whole-element write path (no active edit session ->
+// object-level write) and assert the resulting Text attribute
+// matches the SAME input->output values as Python. Also covers the
+// pure helpers (fmt_num / parse_style_name / text_decoration_from_flags)
+// and the Auto-leading hooks (character_element_has_auto_leading /
+// character_panel_post_write).
+#[cfg(test)]
+mod character_panel_apply_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem, TextElem, TextPathElem,
+    };
+
+    fn text12() -> TextElem {
+        TextElem::from_string(
+            0.0, 0.0, "hello", "sans-serif", 12.0,
+            "normal", "normal", "none", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        )
+    }
+
+    fn state_with_element(elem: Element, selected: bool) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: if selected {
+                vec![ElementSelection::all(vec![0, 0])]
+            } else {
+                vec![]
+            },
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    fn get_text(st: &AppState) -> TextElem {
+        match st.tab().unwrap().model.document().get_element(&vec![0usize, 0]).unwrap() {
+            Element::Text(t) => t.clone(),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    /// Build a default-panel state over a 12pt Text, run the provided
+    /// mutation on the Character panel, apply, and return the element.
+    fn apply_and_get(modify: impl FnOnce(&mut CharacterPanelState)) -> TextElem {
+        let mut st = state_with_element(Element::Text(text12()), true);
+        modify(&mut st.character_panel);
+        st.apply_character_panel_to_selection();
+        get_text(&st)
+    }
+
+    // ── font_size ────────────────────────────────────────────────
+    #[test]
+    fn font_size_24_on_12pt_text() {
+        let t = apply_and_get(|cp| cp.font_size = 24.0);
+        assert_eq!(t.font_size, 24.0);
+    }
+
+    // ── style_name -> font_weight / font_style ───────────────────
+    #[test]
+    fn style_bold() {
+        let t = apply_and_get(|cp| cp.style_name = "Bold".into());
+        assert_eq!(t.font_weight, "bold");
+        assert_eq!(t.font_style, "normal");
+    }
+
+    #[test]
+    fn style_italic() {
+        let t = apply_and_get(|cp| cp.style_name = "Italic".into());
+        assert_eq!(t.font_weight, "normal");
+        assert_eq!(t.font_style, "italic");
+    }
+
+    #[test]
+    fn style_bold_italic() {
+        let t = apply_and_get(|cp| cp.style_name = "Bold Italic".into());
+        assert_eq!(t.font_weight, "bold");
+        assert_eq!(t.font_style, "italic");
+    }
+
+    #[test]
+    fn style_regular() {
+        // Start from a bold element, click Regular -> back to normal.
+        let mut base = text12();
+        base.font_weight = "bold".into();
+        base.font_style = "italic".into();
+        let mut st = state_with_element(Element::Text(base), true);
+        st.character_panel.style_name = "Regular".into();
+        st.apply_character_panel_to_selection();
+        let t = get_text(&st);
+        assert_eq!(t.font_weight, "normal");
+        assert_eq!(t.font_style, "normal");
+    }
+
+    // ── caps / small-caps ────────────────────────────────────────
+    #[test]
+    fn all_caps() {
+        let t = apply_and_get(|cp| cp.all_caps = true);
+        assert_eq!(t.text_transform, "uppercase");
+        assert_eq!(t.font_variant, "");
+    }
+
+    #[test]
+    fn small_caps() {
+        let t = apply_and_get(|cp| cp.small_caps = true);
+        assert_eq!(t.font_variant, "small-caps");
+        assert_eq!(t.text_transform, "");
+    }
+
+    #[test]
+    fn all_caps_wins_over_small_caps() {
+        let t = apply_and_get(|cp| { cp.all_caps = true; cp.small_caps = true; });
+        assert_eq!(t.text_transform, "uppercase");
+        assert_eq!(t.font_variant, "");
+    }
+
+    // ── text-decoration ──────────────────────────────────────────
+    #[test]
+    fn underline_only() {
+        let t = apply_and_get(|cp| cp.underline = true);
+        assert_eq!(t.text_decoration, "underline");
+    }
+
+    #[test]
+    fn strikethrough_only() {
+        let t = apply_and_get(|cp| cp.strikethrough = true);
+        assert_eq!(t.text_decoration, "line-through");
+    }
+
+    #[test]
+    fn underline_and_strikethrough_alphabetical() {
+        let t = apply_and_get(|cp| { cp.underline = true; cp.strikethrough = true; });
+        assert_eq!(t.text_decoration, "line-through underline");
+    }
+
+    // ── leading -> line-height ───────────────────────────────────
+    #[test]
+    fn leading_auto_empties_line_height() {
+        // Default leading 14.4 == 12 * 1.2 (Auto) -> empty.
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.line_height, "");
+    }
+
+    #[test]
+    fn leading_explicit_writes_pt() {
+        let t = apply_and_get(|cp| cp.leading = 20.0);
+        assert_eq!(t.line_height, "20pt");
+    }
+
+    // ── tracking -> letter-spacing ───────────────────────────────
+    #[test]
+    fn tracking_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.letter_spacing, "");
+    }
+
+    #[test]
+    fn tracking_25_is_0025em() {
+        let t = apply_and_get(|cp| cp.tracking = 25.0);
+        assert_eq!(t.letter_spacing, "0.025em");
+    }
+
+    // ── kerning ──────────────────────────────────────────────────
+    #[test]
+    fn kerning_default_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_auto_empties() {
+        let t = apply_and_get(|cp| cp.kerning = "Auto".into());
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_zero_string_empties() {
+        let t = apply_and_get(|cp| cp.kerning = "0".into());
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_50_is_005em() {
+        let t = apply_and_get(|cp| cp.kerning = "50".into());
+        assert_eq!(t.kerning, "0.05em");
+    }
+
+    #[test]
+    fn kerning_optical_passes_through() {
+        let t = apply_and_get(|cp| cp.kerning = "Optical".into());
+        assert_eq!(t.kerning, "Optical");
+    }
+
+    #[test]
+    fn kerning_metrics_passes_through() {
+        let t = apply_and_get(|cp| cp.kerning = "Metrics".into());
+        assert_eq!(t.kerning, "Metrics");
+    }
+
+    // ── baseline-shift ───────────────────────────────────────────
+    #[test]
+    fn baseline_shift_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.baseline_shift, "");
+    }
+
+    #[test]
+    fn baseline_shift_numeric_pt() {
+        let t = apply_and_get(|cp| cp.baseline_shift = 3.0);
+        assert_eq!(t.baseline_shift, "3pt");
+    }
+
+    #[test]
+    fn baseline_shift_super_wins() {
+        let t = apply_and_get(|cp| { cp.superscript = true; cp.baseline_shift = 5.0; });
+        assert_eq!(t.baseline_shift, "super");
+    }
+
+    #[test]
+    fn baseline_shift_sub() {
+        let t = apply_and_get(|cp| cp.subscript = true);
+        assert_eq!(t.baseline_shift, "sub");
+    }
+
+    // ── character rotation ───────────────────────────────────────
+    #[test]
+    fn rotation_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.rotate, "");
+    }
+
+    #[test]
+    fn rotation_15() {
+        let t = apply_and_get(|cp| cp.character_rotation = 15.0);
+        assert_eq!(t.rotate, "15");
+    }
+
+    // ── h/v scale ────────────────────────────────────────────────
+    #[test]
+    fn scale_identity_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.horizontal_scale, "");
+        assert_eq!(t.vertical_scale, "");
+    }
+
+    #[test]
+    fn horizontal_scale_120() {
+        let t = apply_and_get(|cp| cp.horizontal_scale = 120.0);
+        assert_eq!(t.horizontal_scale, "120");
+    }
+
+    #[test]
+    fn vertical_scale_120() {
+        let t = apply_and_get(|cp| cp.vertical_scale = 120.0);
+        assert_eq!(t.vertical_scale, "120");
+    }
+
+    // ── language / anti-aliasing ─────────────────────────────────
+    #[test]
+    fn language_fr() {
+        let t = apply_and_get(|cp| cp.language = "fr".into());
+        assert_eq!(t.xml_lang, "fr");
+    }
+
+    #[test]
+    fn anti_aliasing_sharp_empties() {
+        let t = apply_and_get(|cp| cp.anti_aliasing = "Sharp".into());
+        assert_eq!(t.aa_mode, "");
+    }
+
+    #[test]
+    fn anti_aliasing_crisp_passes_through() {
+        let t = apply_and_get(|cp| cp.anti_aliasing = "Crisp".into());
+        assert_eq!(t.aa_mode, "Crisp");
+    }
+
+    // ── end-to-end: font_family write + no-op on empty selection ─
+    #[test]
+    fn font_family_written_to_selected_text() {
+        let t = apply_and_get(|cp| cp.font_family = "Arial".into());
+        assert_eq!(t.font_family, "Arial");
+    }
+
+    #[test]
+    fn no_op_when_selection_empty() {
+        // Mirrors Python TestApplyEndToEnd.test_no_op_when_selection_empty:
+        // apply with an empty selection touches nothing and pushes no
+        // undo step.
+        let mut st = state_with_element(Element::Text(text12()), false);
+        st.character_panel.font_family = "Arial".into();
+        st.apply_character_panel_to_selection();
+        let t = get_text(&st);
+        assert_eq!(t.font_family, "sans-serif", "empty selection must not write");
+        assert!(!st.tabs[st.active_tab].model.can_undo(),
+                "no-op apply pushes no undo step");
+    }
+
+    // ── end-to-end applies to TextPath too ───────────────────────
+    #[test]
+    fn underline_written_to_selected_textpath() {
+        let tp = TextPathElem::from_string(
+            vec![], "hi", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let mut st = state_with_element(Element::TextPath(tp), true);
+        st.character_panel.underline = true;
+        st.apply_character_panel_to_selection();
+        match st.tab().unwrap().model.document().get_element(&vec![0usize, 0]).unwrap() {
+            Element::TextPath(t) => assert_eq!(t.text_decoration, "underline"),
+            other => panic!("expected TextPath, got {other:?}"),
+        }
+    }
+
+    // ── pure helpers (mirror Python TestFmtNum / TestStyleName /
+    //    TestTextDecoration) ──────────────────────────────────────
+    #[test]
+    fn fmt_num_matches_python() {
+        assert_eq!(fmt_num(12.0), "12");
+        assert_eq!(fmt_num(14.4), "14.4");
+        assert_eq!(fmt_num(14.5000), "14.5");
+        assert_eq!(fmt_num(-3.0), "-3");
+    }
+
+    #[test]
+    fn parse_style_name_matches_python() {
+        assert_eq!(parse_style_name("Regular"), Some(("normal".into(), "normal".into())));
+        assert_eq!(parse_style_name("Italic"), Some(("normal".into(), "italic".into())));
+        assert_eq!(parse_style_name("Bold"), Some(("bold".into(), "normal".into())));
+        assert_eq!(parse_style_name("Bold Italic"), Some(("bold".into(), "italic".into())));
+        // Unknown names leave weight/style untouched (None).
+        assert_eq!(parse_style_name("Something Weird"), None);
+    }
+
+    #[test]
+    fn text_decoration_from_flags_matches_python() {
+        assert_eq!(text_decoration_from_flags(false, false), "");
+        assert_eq!(text_decoration_from_flags(true, false), "underline");
+        assert_eq!(text_decoration_from_flags(false, true), "line-through");
+        assert_eq!(text_decoration_from_flags(true, true), "line-through underline");
+    }
+
+    // ── Auto-leading hooks ───────────────────────────────────────
+    #[test]
+    fn has_auto_leading_true_for_empty_line_height() {
+        let st = state_with_element(Element::Text(text12()), true);
+        assert!(st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_explicit_line_height() {
+        let mut t = text12();
+        t.line_height = "20pt".into();
+        let st = state_with_element(Element::Text(t), true);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_true_for_textpath_empty_line_height() {
+        let tp = TextPathElem::from_string(
+            vec![], "hi", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let st = state_with_element(Element::TextPath(tp), true);
+        assert!(st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_empty_selection() {
+        let st = state_with_element(Element::Text(text12()), false);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_non_text_selection() {
+        let r = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let st = state_with_element(r, true);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn post_write_font_size_bumps_leading_when_auto() {
+        let mut st = state_with_element(Element::Text(text12()), true); // line_height "" = Auto
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 14.4;
+        st.character_panel_post_write("font_size");
+        assert_eq!(st.character_panel.leading, 24.0 * 1.2);
+    }
+
+    #[test]
+    fn post_write_does_nothing_for_other_keys() {
+        let mut st = state_with_element(Element::Text(text12()), true);
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 14.4;
+        st.character_panel_post_write("tracking");
+        assert_eq!(st.character_panel.leading, 14.4);
+    }
+
+    #[test]
+    fn post_write_does_nothing_when_explicit_leading() {
+        let mut t = text12();
+        t.line_height = "20pt".into();
+        let mut st = state_with_element(Element::Text(t), true);
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 20.0;
+        st.character_panel_post_write("font_size");
+        assert_eq!(st.character_panel.leading, 20.0);
+    }
+}
