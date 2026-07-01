@@ -1797,3 +1797,195 @@ mod concept_tests {
         assert!(arr.iter().all(|c| c.get("name").and_then(|n| n.as_str()).is_some()));
     }
 }
+
+// ── Paragraph panel text-kind gating + attr read-back seam tests ──
+//
+// Cross-language-equivalent port of the text-kind gating and indent
+// read-back cases from the Python reference suite
+// jas/panels/paragraph_panel_state_test.py
+// (TestSyncParagraphPanelFromSelection + TestPhase3bParagraphAttrReads).
+// In Rust these live-panel values are computed in
+// `build_live_panel_overrides`: `text_selected` / `area_text_selected`
+// mark whether a text element (and specifically an area-text element)
+// is selected, and the paragraph-wrapper attrs are aggregated onto the
+// panel keys. (The panel->element WRITE path — apply / mutual
+// exclusion / reset / alignment sync — is already covered by the
+// existing paragraph tests in interpreter/renderer.rs.)
+#[cfg(test)]
+mod paragraph_gating_tests {
+    use super::*;
+    use crate::workspace::app_state::{AppState, TabState};
+    use crate::document::document::ElementSelection;
+    use crate::geometry::element::{
+        CommonProps, Color, Fill, RectElem, TextElem, TextPathElem, Element as GeoEl,
+    };
+    use crate::geometry::tspan::Tspan;
+
+    fn ensure_tab(st: &mut AppState) {
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+    }
+
+    /// Put `children` under layer 0 and select every listed path.
+    fn state_with(children: Vec<GeoEl>, selection: Vec<Vec<usize>>) -> AppState {
+        let mut st = AppState::new();
+        ensure_tab(&mut st);
+        let mut new_doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(GeoEl::Layer(layer)) = new_doc.layers.get_mut(0) {
+            layer.children = children.into_iter().map(std::rc::Rc::new).collect();
+        }
+        new_doc.selection = selection.into_iter().map(ElementSelection::all).collect();
+        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st
+    }
+
+    fn text(width: f64, height: f64) -> GeoEl {
+        GeoEl::Text(TextElem::from_string(
+            0.0, 0.0, "hi", "sans-serif", 12.0,
+            "normal", "normal", "none", width, height,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        ))
+    }
+
+    fn area_text_with_wrapper(w: Tspan) -> GeoEl {
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "hello", "sans-serif", 12.0,
+            "normal", "normal", "none", 200.0, 100.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let body = Tspan { id: 1, content: "hello".into(), ..Tspan::default_tspan() };
+        t.tspans = vec![w, body];
+        GeoEl::Text(t)
+    }
+
+    fn get_bool(st: &AppState, key: &str) -> bool {
+        build_live_panel_overrides(st).get(key).and_then(|v| v.as_bool())
+            .unwrap_or_else(|| panic!("{key} missing / not a bool"))
+    }
+
+    fn get_f64(st: &AppState, key: &str) -> f64 {
+        build_live_panel_overrides(st).get(key).and_then(|v| v.as_f64())
+            .unwrap_or_else(|| panic!("{key} missing / not a number"))
+    }
+
+    fn get_str(st: &AppState, key: &str) -> String {
+        build_live_panel_overrides(st).get(key).and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{key} missing / not a string")).to_string()
+    }
+
+    #[test]
+    fn point_text_enables_universal_only() {
+        // width=0,height=0 -> point text.
+        let st = state_with(vec![text(0.0, 0.0)], vec![vec![0, 0]]);
+        assert!(get_bool(&st, "text_selected"));
+        assert!(!get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn area_text_enables_all() {
+        let st = state_with(vec![text(200.0, 100.0)], vec![vec![0, 0]]);
+        assert!(get_bool(&st, "text_selected"));
+        assert!(get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn text_path_enables_universal_only() {
+        let tp = GeoEl::TextPath(TextPathElem::from_string(
+            vec![], "path", 0.0, "sans-serif", 14.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        ));
+        let st = state_with(vec![tp], vec![vec![0, 0]]);
+        assert!(get_bool(&st, "text_selected"));
+        assert!(!get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn empty_selection_disables_panel() {
+        let st = state_with(vec![text(200.0, 100.0)], vec![]);
+        assert!(!get_bool(&st, "text_selected"));
+        assert!(!get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn non_text_selection_disables_panel() {
+        let r = GeoEl::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let st = state_with(vec![r], vec![vec![0, 0]]);
+        assert!(!get_bool(&st, "text_selected"));
+        assert!(!get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn mixed_area_and_point_disables_area_only_controls() {
+        // "a control is enabled iff every selected text element supports
+        // it" -> area_text_selected stays false when a point text is
+        // also selected.
+        let st = state_with(vec![text(200.0, 100.0), text(0.0, 0.0)],
+                            vec![vec![0, 0], vec![0, 1]]);
+        assert!(get_bool(&st, "text_selected"));
+        assert!(!get_bool(&st, "area_text_selected"));
+    }
+
+    #[test]
+    fn reads_para_wrapper_indents_and_bullets() {
+        let w = Tspan {
+            id: 0, content: String::new(),
+            jas_role: Some("paragraph".into()),
+            jas_left_indent: Some(18.0),
+            jas_right_indent: Some(9.0),
+            jas_hyphenate: Some(true),
+            jas_list_style: Some("bullet-disc".into()),
+            ..Tspan::default_tspan()
+        };
+        let st = state_with(vec![area_text_with_wrapper(w)], vec![vec![0, 0]]);
+        assert_eq!(get_f64(&st, "left_indent"), 18.0);
+        assert_eq!(get_f64(&st, "right_indent"), 9.0);
+        assert!(get_bool(&st, "hyphenate"));
+        assert_eq!(get_str(&st, "bullets"), "bullet-disc");
+        assert_eq!(get_str(&st, "numbered_list"), "");
+    }
+
+    #[test]
+    fn num_list_style_routes_to_numbered_dropdown() {
+        let w = Tspan {
+            id: 0, content: String::new(),
+            jas_role: Some("paragraph".into()),
+            jas_list_style: Some("num-decimal".into()),
+            ..Tspan::default_tspan()
+        };
+        let st = state_with(vec![area_text_with_wrapper(w)], vec![vec![0, 0]]);
+        assert_eq!(get_str(&st, "numbered_list"), "num-decimal");
+        assert_eq!(get_str(&st, "bullets"), "");
+    }
+
+    #[test]
+    fn mixed_numeric_indent_omits_override() {
+        // Two wrappers disagreeing on left_indent -> no agreed value ->
+        // panel keeps the typed-struct default (0).
+        let w1 = Tspan {
+            id: 0, content: String::new(), jas_role: Some("paragraph".into()),
+            jas_left_indent: Some(12.0), ..Tspan::default_tspan()
+        };
+        let c1 = Tspan { id: 1, content: "first ".into(), ..Tspan::default_tspan() };
+        let w2 = Tspan {
+            id: 2, content: String::new(), jas_role: Some("paragraph".into()),
+            jas_left_indent: Some(24.0), ..Tspan::default_tspan()
+        };
+        let c2 = Tspan { id: 3, content: "second".into(), ..Tspan::default_tspan() };
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "first second", "sans-serif", 12.0,
+            "normal", "normal", "none", 200.0, 100.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        t.tspans = vec![w1, c1, w2, c2];
+        let st = state_with(vec![GeoEl::Text(t)], vec![vec![0, 0]]);
+        assert_eq!(get_f64(&st, "left_indent"), 0.0);
+    }
+}

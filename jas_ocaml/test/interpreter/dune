@@ -47,3 +47,13 @@
  (name tool_options_dispatch_test)
  (modules tool_options_dispatch_test)
  (libraries jas alcotest))
+
+(test
+ (name character_panel_state_test)
+ (modules character_panel_state_test)
+ (libraries jas alcotest))
+
+(test
+ (name paragraph_panel_state_test)
+ (modules paragraph_panel_state_test)
+ (libraries jas alcotest))
