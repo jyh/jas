@@ -1474,15 +1474,92 @@ def _render_select(el, store, ctx, dispatch_fn):
     return combo
 
 
+def _combo_raw_text(v):
+    """Display string for a combo_box editable field: the RAW value, not
+    the option label (mirrors Rust render_combo_box's input value)."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
 def _render_combo_box(el, store, ctx, dispatch_fn):
+    """Editable dropdown: the field shows the RAW bound value ("100"), the
+    dropdown list carries the option LABELS ("100%") with the value as item
+    data, and picking / typing writes the raw value back to panel (or dialog)
+    state. Mirrors the Rust reference (render_combo_box). Used by the Stroke
+    panel arrowhead-scale fields."""
     combo = QComboBox()
     combo.setStyleSheet(_combo_css())
     combo.setEditable(True)
     for opt in el.get("options", []):
         if isinstance(opt, dict):
-            combo.addItem(opt.get("label", ""), opt.get("value", ""))
+            combo.addItem(str(opt.get("label", "")), opt.get("value"))
         else:
-            combo.addItem(str(opt), str(opt))
+            combo.addItem(str(opt), opt)
+
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    if value_expr is None:
+        return combo
+
+    write_key = None
+    if value_expr.startswith("panel."):
+        rest = value_expr[len("panel."):]
+        if rest and rest.replace("_", "").isalnum():
+            write_key = rest
+    dialog_field = (value_expr[len("dialog."):]
+                    if value_expr.startswith("dialog.") else None)
+    widget_pid = ctx.get("_panel_id")
+
+    def _show(v):
+        combo.blockSignals(True)
+        le = combo.lineEdit()
+        if le is not None:
+            le.blockSignals(True)
+        combo.setEditText(_combo_raw_text(v))
+        if le is not None:
+            le.setCursorPosition(0)
+            le.blockSignals(False)
+        combo.blockSignals(False)
+
+    try:
+        init = evaluate(value_expr, store.eval_context(ctx))
+        _show(getattr(init, "value", None))
+    except Exception:
+        pass
+    combo._jas_combo_raw = True  # reactive bind routes through _set_widget_value
+
+    def _write(raw):
+        # Parse to a number when possible (scale %, arrowhead presets);
+        # named values (kerning Auto/Optical/Metrics) stay strings. Mirrors
+        # the Rust onchange parse.
+        val = raw
+        if isinstance(raw, str):
+            s = raw.strip()
+            try:
+                f = float(s)
+                val = int(f) if f.is_integer() else f
+            except ValueError:
+                val = s
+        elif isinstance(raw, float) and raw.is_integer():
+            val = int(raw)
+        if dialog_field is not None:
+            store.set_dialog(dialog_field, val)
+        elif write_key is not None:
+            pid = widget_pid or store.get_active_panel_id()
+            if pid is not None:
+                store.set_panel(pid, write_key, val)
+
+    def _on_activated(idx):
+        data = combo.itemData(idx)
+        _show(data)
+        _write(data)
+
+    combo.activated.connect(_on_activated)
+    combo.lineEdit().editingFinished.connect(
+        lambda: _write(combo.currentText()))
     return combo
 
 
@@ -4124,6 +4201,19 @@ def _set_widget_value(widget: QWidget, value):
             widget.setCursorPosition(0)
         else:
             widget.setText(str(value) if value is not None else "")
+    elif isinstance(widget, QComboBox):
+        # combo_box shows the RAW value in its editable field (not the
+        # option label); guarded so plain selects are untouched.
+        if getattr(widget, "_jas_combo_raw", False):
+            widget.blockSignals(True)
+            le = widget.lineEdit()
+            if le is not None:
+                le.blockSignals(True)
+            widget.setEditText(_combo_raw_text(value))
+            if le is not None:
+                le.setCursorPosition(0)
+                le.blockSignals(False)
+            widget.blockSignals(False)
     elif isinstance(widget, QLabel):
         widget.setText(str(value) if value is not None else "")
 
