@@ -1,3 +1,14 @@
+# Actions that are referenced from the menubar / panels / toolbar but are
+# handled entirely in native per-app code (no declarative `actions:` entry),
+# per NATIVE_BOUNDARY.md. The referential-integrity gate
+# (scripts/check_action_refs.py) treats a reference as resolved if the action
+# is defined in `actions:` below OR listed here. Keep this list minimal — an
+# entry is an explicit admission that a behavior escapes the generic runtime.
+native_intercepts:
+  # PDF export uses platform rasterization libraries available only natively
+  # (NATIVE_BOUNDARY.md §Kernel: "PDF / PNG export").
+  - export_to_pdf
+
 actions:
   # ── File ──────────────────────────────────────────────────
   new_document:

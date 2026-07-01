@@ -403,9 +403,16 @@ class TestAppearanceLoading:
 
 
 class TestValidateActionRefs:
+    @staticmethod
+    def _resolvable(data):
+        """Action names that resolve at dispatch: declarative `actions:`
+        entries plus `native_intercepts:` (handled in native per-app code,
+        no YAML entry — see NATIVE_BOUNDARY.md)."""
+        return set(data["actions"]) | set(data.get("native_intercepts", []))
+
     def test_all_shortcut_actions_exist(self, workspace_path):
         data = load_workspace(workspace_path)
-        actions = data["actions"]
+        actions = self._resolvable(data)
         for shortcut in data["shortcuts"]:
             assert shortcut["action"] in actions, (
                 f"Shortcut action '{shortcut['action']}' not in actions"
@@ -416,7 +423,7 @@ class TestValidateActionRefs:
         click behaviors, toolbar buttons) must be registered in
         actions.yaml so the interpreter can dispatch them."""
         data = load_workspace(workspace_path)
-        actions = data["actions"]
+        actions = self._resolvable(data)
         panel = data["panels"]["brushes_panel_content"]
 
         # Collect action names from the menu list.
@@ -451,7 +458,7 @@ class TestValidateActionRefs:
 
     def test_all_menu_actions_exist(self, workspace_path):
         data = load_workspace(workspace_path)
-        actions = data["actions"]
+        actions = self._resolvable(data)
 
         def check_items(items):
             for item in items:

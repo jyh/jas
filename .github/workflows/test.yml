@@ -19,6 +19,7 @@ jobs:
       - run: bash scripts/check_workspace_json.sh
       - run: python scripts/check_menu_structure.py
       - run: python scripts/check_toolbar_structure.py
+      - run: python scripts/check_action_refs.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -106,11 +107,14 @@ jobs:
           python-version: "3.12"
       - run: pip install numpy PySide6 pytest absl-py PyYAML
       - run: cd jas && python -m pytest
-      # The Python app's expression evaluator lives in workspace_interpreter;
-      # gate the shared conformance corpora (the Python reference) explicitly —
-      # `cd jas && pytest` does not discover workspace_interpreter/tests.
-      - name: Expression + concept conformance (Python reference)
-        run: python -m pytest workspace_interpreter/tests/test_expr.py workspace_interpreter/tests/test_concepts.py
+      # The shared reference interpreter lives in workspace_interpreter/ — the
+      # exact modules (effects, state_store, scope, doc_primitives, loader,
+      # expr) every native app mirrors. `cd jas && pytest` does not discover it,
+      # so gate the WHOLE suite explicitly, not just expr+concepts. Previously
+      # only test_expr.py + test_concepts.py ran, so ~700 reference tests
+      # (incl. the action-ref referential-integrity check) never gated CI.
+      - name: Reference interpreter conformance (Python reference)
+        run: python -m pytest workspace_interpreter/tests
 
   ocaml:
     name: OCaml tests
