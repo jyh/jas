@@ -204,12 +204,6 @@ let common_fields o ~opacity ~transform ~locked ~visibility ~name ?(id = None) (
   json_raw o "transform" (transform_json transform);
   json_str o "visibility" (visibility_str visibility)
 
-let common_fields_no_name o ~opacity ~transform ~locked ~visibility =
-  json_bool o "locked" locked;
-  json_num o "opacity" opacity;
-  json_raw o "transform" (transform_json transform);
-  json_str o "visibility" (visibility_str visibility)
-
 (** Emit `text_decoration` as a sorted JSON array of CSS tokens. Empty
     string or `"none"` produces `[]`. Matches Rust's canonical form. *)
 let text_decoration_array_json (td : string) =
