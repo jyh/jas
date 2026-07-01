@@ -1474,15 +1474,92 @@ def _render_select(el, store, ctx, dispatch_fn):
     return combo
 
 
+def _combo_raw_text(v):
+    """Display string for a combo_box editable field: the RAW value, not
+    the option label (mirrors Rust render_combo_box's input value)."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
 def _render_combo_box(el, store, ctx, dispatch_fn):
+    """Editable dropdown: the field shows the RAW bound value ("100"), the
+    dropdown list carries the option LABELS ("100%") with the value as item
+    data, and picking / typing writes the raw value back to panel (or dialog)
+    state. Mirrors the Rust reference (render_combo_box). Used by the Stroke
+    panel arrowhead-scale fields."""
     combo = QComboBox()
     combo.setStyleSheet(_combo_css())
     combo.setEditable(True)
     for opt in el.get("options", []):
         if isinstance(opt, dict):
-            combo.addItem(opt.get("label", ""), opt.get("value", ""))
+            combo.addItem(str(opt.get("label", "")), opt.get("value"))
         else:
-            combo.addItem(str(opt), str(opt))
+            combo.addItem(str(opt), opt)
+
+    bind = el.get("bind", {}) if isinstance(el.get("bind"), dict) else {}
+    value_expr = bind.get("value") if isinstance(bind.get("value"), str) else None
+    if value_expr is None:
+        return combo
+
+    write_key = None
+    if value_expr.startswith("panel."):
+        rest = value_expr[len("panel."):]
+        if rest and rest.replace("_", "").isalnum():
+            write_key = rest
+    dialog_field = (value_expr[len("dialog."):]
+                    if value_expr.startswith("dialog.") else None)
+    widget_pid = ctx.get("_panel_id")
+
+    def _show(v):
+        combo.blockSignals(True)
+        le = combo.lineEdit()
+        if le is not None:
+            le.blockSignals(True)
+        combo.setEditText(_combo_raw_text(v))
+        if le is not None:
+            le.setCursorPosition(0)
+            le.blockSignals(False)
+        combo.blockSignals(False)
+
+    try:
+        init = evaluate(value_expr, store.eval_context(ctx))
+        _show(getattr(init, "value", None))
+    except Exception:
+        pass
+    combo._jas_combo_raw = True  # reactive bind routes through _set_widget_value
+
+    def _write(raw):
+        # Parse to a number when possible (scale %, arrowhead presets);
+        # named values (kerning Auto/Optical/Metrics) stay strings. Mirrors
+        # the Rust onchange parse.
+        val = raw
+        if isinstance(raw, str):
+            s = raw.strip()
+            try:
+                f = float(s)
+                val = int(f) if f.is_integer() else f
+            except ValueError:
+                val = s
+        elif isinstance(raw, float) and raw.is_integer():
+            val = int(raw)
+        if dialog_field is not None:
+            store.set_dialog(dialog_field, val)
+        elif write_key is not None:
+            pid = widget_pid or store.get_active_panel_id()
+            if pid is not None:
+                store.set_panel(pid, write_key, val)
+
+    def _on_activated(idx):
+        data = combo.itemData(idx)
+        _show(data)
+        _write(data)
+
+    combo.activated.connect(_on_activated)
+    combo.lineEdit().editingFinished.connect(
+        lambda: _write(combo.currentText()))
     return combo
 
 
@@ -2651,6 +2728,28 @@ def _cycle_visibility(vis):
     if vis == Visibility.OUTLINE: return Visibility.INVISIBLE
     return Visibility.PREVIEW
 
+
+def _cycle_element_visibility_at(doc, path):
+    """Layers eye-button (regular click): cycle the element at `path`
+    Preview -> Outline -> Invisible -> Preview and, when it becomes
+    Invisible, drop it (and its descendants) from the selection. Pure;
+    returns a new document. Mirrors Rust cycle_element_visibility_at, OCaml
+    Document.cycle_element_visibility_at, Swift cyclingElementVisibility(at:)."""
+    from dataclasses import replace as dc_replace
+    from geometry.element import Visibility
+    e = doc.get_element(path)
+    if e is None:
+        return doc
+    new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
+    new_doc = doc.replace_element(path, dc_replace(e, visibility=new_vis))
+    if new_vis == Visibility.INVISIBLE:
+        new_doc = dc_replace(new_doc, selection=frozenset(
+            es for es in new_doc.selection
+            if not (es.path == path or es.path[:len(path)] == path)
+        ))
+    return new_doc
+
+
 def _render_tree_view(el, store, ctx, dispatch_fn):
     """Render a tree_view widget from the live document model."""
     from dataclasses import replace as dc_replace
@@ -3236,18 +3335,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     solo_state[0] = (p, saved)
             else:
                 solo_state[0] = None
-                d = m.document
-                e = d.get_element(p)
-                if e is None:
-                    return
-                new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
-                new_e = dc_replace(e, visibility=new_vis)
-                new_doc = d.replace_element(p, new_e)
-                if new_vis == Visibility.INVISIBLE:
-                    new_doc = dc_replace(new_doc, selection=frozenset(
-                        es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
-                    ))
-                m.edit_document(new_doc)
+                # Cycle visibility + deselect-on-invisible, one undoable edit.
+                m.edit_document(_cycle_element_visibility_at(m.document, p))
             _rebuild()
         eye_btn.mousePressEvent = _on_eye_mouse
         row_layout.addWidget(eye_btn)
@@ -4117,8 +4206,26 @@ def _set_widget_value(widget: QWidget, value):
             widget.setText(format_length(
                 value if isinstance(value, (int, float)) else None,
                 unit, precision))
+            # setText leaves the cursor at the end, so a field too narrow to
+            # fit the whole value (e.g. a dash/gap cell showing "12 pt")
+            # scrolls to the cursor and hides the leading digit ("2 pt").
+            # Home the cursor so the field displays from the start.
+            widget.setCursorPosition(0)
         else:
             widget.setText(str(value) if value is not None else "")
+    elif isinstance(widget, QComboBox):
+        # combo_box shows the RAW value in its editable field (not the
+        # option label); guarded so plain selects are untouched.
+        if getattr(widget, "_jas_combo_raw", False):
+            widget.blockSignals(True)
+            le = widget.lineEdit()
+            if le is not None:
+                le.blockSignals(True)
+            widget.setEditText(_combo_raw_text(value))
+            if le is not None:
+                le.setCursorPosition(0)
+                le.blockSignals(False)
+            widget.blockSignals(False)
     elif isinstance(widget, QLabel):
         widget.setText(str(value) if value is not None else "")
 
