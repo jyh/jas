@@ -119,36 +119,98 @@ let calligraphic_from_json (brush : Yojson.Safe.t) : Calligraphic_outline.t opti
      | _ -> None)
   | _ -> None
 
-(* Render a brushed Path: compute the Calligraphic outline polygon
-   and fill it with the path's stroke colour. Returns true if
-   handled; false to fall back to plain stroke (missing brush,
-   non-Calligraphic type). *)
+(* Extract Art brush params (inline polygon artwork) from JSON. Non-Art
+   types return None. *)
+let art_from_json (brush : Yojson.Safe.t) (stroke_weight : float) :
+    Art_along_path.t option =
+  let numv = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+  match brush with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "art") ->
+       (match List.assoc_opt "artwork" fields with
+        | Some (`Assoc aw) ->
+          let num_of key default =
+            match List.assoc_opt key aw with Some v -> numv v | None -> default
+          in
+          let artwork =
+            match List.assoc_opt "polygons" aw with
+            | Some (`List polys) ->
+              List.map
+                (function
+                  | `List pts ->
+                    List.filter_map
+                      (function
+                        | `List (x :: y :: _) -> Some (numv x, numv y)
+                        | _ -> None)
+                      pts
+                  | _ -> [])
+                polys
+            | _ -> []
+          in
+          let field_num key default =
+            match List.assoc_opt key fields with Some v -> numv v | None -> default
+          in
+          let field_bool key =
+            match List.assoc_opt key fields with Some (`Bool b) -> b | _ -> false
+          in
+          Some
+            Art_along_path.{
+              artwork_width = num_of "width" 0.0;
+              artwork_height = num_of "height" 0.0;
+              artwork;
+              scale = field_num "scale" 100.0;
+              flip_across = field_bool "flip_across";
+              flip_along = field_bool "flip_along";
+              stroke_weight;
+            }
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+
+(* Fill a polygon (list of points) on [cr]. *)
+let fill_polygon cr = function
+  | (x0, y0) :: rest ->
+    Cairo.move_to cr x0 y0;
+    List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+    Cairo.Path.close cr;
+    Cairo.fill cr
+  | [] -> ()
+
+(* Render a brushed Path: Calligraphic -> variable-width outline polygon;
+   Art -> artwork warped along the path. Fills with the stroke colour.
+   Returns true if handled; false to fall back to plain stroke (missing
+   brush, or a brush type without a renderer). *)
 let draw_brushed_path cr (d : Element.path_command list)
     (stroke : Element.stroke option)
     (slug : string) : bool =
   match lookup_brush slug with
   | None -> false
   | Some brush ->
+    let (r, g, b, a) = match stroke with
+      | Some s -> Element.color_to_rgba s.stroke_color
+      | None -> (0.0, 0.0, 0.0, 1.0)
+    in
+    let stroke_weight = match stroke with Some s -> s.stroke_width | None -> 1.0 in
     (match calligraphic_from_json brush with
-     | None -> false
      | Some cal ->
        let pts = Calligraphic_outline.outline d cal in
        if List.length pts < 3 then true
        else begin
-         let (r, g, b, a) = match stroke with
-           | Some s -> Element.color_to_rgba s.stroke_color
-           | None -> (0.0, 0.0, 0.0, 1.0)
-         in
          Cairo.set_source_rgba cr r g b a;
-         (match pts with
-          | (x0, y0) :: rest ->
-            Cairo.move_to cr x0 y0;
-            List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
-            Cairo.Path.close cr;
-            Cairo.fill cr
-          | [] -> ());
+         fill_polygon cr pts;
          true
-       end)
+       end
+     | None ->
+       (match art_from_json brush stroke_weight with
+        | Some art ->
+          let polys = Art_along_path.warp d art in
+          Cairo.set_source_rgba cr r g b a;
+          List.iter
+            (fun poly -> if List.length poly >= 3 then fill_polygon cr poly)
+            polys;
+          true
+        | None -> false))
 
 let title_bar_height = 24
 
