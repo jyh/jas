@@ -5494,6 +5494,41 @@ and render_brush_preview ~packing ~ctx el =
         polys;
       true))
   end
+  else if eval_str "brush.type" = "bristle" then begin
+    (* Bristle: stroke the offset bristle lines with per-bristle opacity. *)
+    let brush_json = Yojson.Safe.Util.member "brush" ctx in
+    let numj = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+    let field key default =
+      match Yojson.Safe.Util.member key brush_json with
+      | (`Int _ | `Float _) as v -> numj v
+      | _ -> default
+    in
+    let br =
+      Bristle_stroke.{
+        size = field "size" 3.0;
+        density = field "density" 50.0;
+        thickness = field "thickness" 30.0;
+        opacity = field "opacity" 30.0;
+        stroke_weight = 6.0;
+      }
+    in
+    let cmds = [ Element.MoveTo (4.0, 20.0); Element.LineTo (36.0, 20.0) ] in
+    let lines = Bristle_stroke.stroke cmds br in
+    ignore (area#misc#connect#draw ~callback:(fun cr ->
+      Cairo.set_source_rgba cr 0.8 0.8 0.8 (Bristle_stroke.alpha br);
+      Cairo.set_line_width cr (Bristle_stroke.line_width br);
+      Cairo.set_line_cap cr Cairo.ROUND;
+      List.iter
+        (fun line ->
+          match line with
+          | (x0, y0) :: rest ->
+            Cairo.move_to cr x0 y0;
+            List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+            Cairo.stroke cr
+          | [] -> ())
+        lines;
+      true))
+  end
 
 (* PRINT.md §1B: tabs widget. Left-rail tab list + content area
    showing the active tab. Active tab read from [bind.value]

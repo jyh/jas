@@ -14,6 +14,11 @@
  (libraries jas alcotest))
 
 (test
+ (name bristle_stroke_test)
+ (modules bristle_stroke_test)
+ (libraries jas alcotest))
+
+(test
  (name fit_curve_test)
  (modules fit_curve_test)
  (libraries jas alcotest))
