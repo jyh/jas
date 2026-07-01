@@ -71,24 +71,76 @@ private func calligraphicFromJson(_ brush: [String: Any]) -> CalligraphicBrush? 
 /// and fill it with the path's stroke colour. Returns true if the
 /// brushed render handled the path; false to fall back to the plain
 /// stroke pipeline (missing brush, non-Calligraphic type).
+private func artNum(_ v: Any?) -> Double? {
+    if let d = v as? Double { return d }
+    if let i = v as? Int { return Double(i) }
+    if let n = v as? NSNumber { return n.doubleValue }
+    return nil
+}
+
+/// Build an `ArtBrush` from the library JSON (inline polygon artwork
+/// `artwork: { width, height, polygons: [[[x, y], ...], ...] }`).
+private func artFromJson(_ brush: [String: Any], _ strokeWeight: Double) -> ArtBrush? {
+    guard (brush["type"] as? String) == "art",
+          let aw = brush["artwork"] as? [String: Any],
+          let width = artNum(aw["width"]), let height = artNum(aw["height"]),
+          let polysAny = aw["polygons"] as? [Any] else { return nil }
+    let artwork: [[[Double]]] = polysAny.compactMap { polyAny in
+        guard let poly = polyAny as? [Any] else { return nil }
+        return poly.compactMap { ptAny -> [Double]? in
+            guard let pt = ptAny as? [Any], pt.count >= 2,
+                  let x = artNum(pt[0]), let y = artNum(pt[1]) else { return nil }
+            return [x, y]
+        }
+    }
+    return ArtBrush(artworkWidth: width, artworkHeight: height, artwork: artwork,
+                    scale: artNum(brush["scale"]) ?? 100.0,
+                    flipAcross: (brush["flip_across"] as? Bool) ?? false,
+                    flipAlong: (brush["flip_along"] as? Bool) ?? false,
+                    strokeWeight: strokeWeight)
+}
+
 private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
     guard let slug = v.strokeBrush, let brush = lookupBrush(slug) else {
         return false
     }
-    guard let cal = calligraphicFromJson(brush) else { return false }
-    let pts = calligraphicOutline(v.d, cal)
-    if pts.count < 3 { return true }
     let color = v.stroke.map { cgColor($0.color) }
         ?? CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-    ctx.setFillColor(color)
-    ctx.beginPath()
-    ctx.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
-    for p in pts.dropFirst() {
-        ctx.addLine(to: CGPoint(x: p.0, y: p.1))
+    let strokeWeight = v.stroke?.width ?? 1.0
+
+    // Calligraphic: one variable-width outline polygon.
+    if let cal = calligraphicFromJson(brush) {
+        let pts = calligraphicOutline(v.d, cal)
+        if pts.count < 3 { return true }
+        ctx.setFillColor(color)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
+        for p in pts.dropFirst() {
+            ctx.addLine(to: CGPoint(x: p.0, y: p.1))
+        }
+        ctx.closePath()
+        ctx.fillPath()
+        return true
     }
-    ctx.closePath()
-    ctx.fillPath()
-    return true
+
+    // Art: one artwork warped along the path; fill each warped polygon.
+    if let art = artFromJson(brush, strokeWeight) {
+        let polys = artAlongPath(v.d, art)
+        if polys.isEmpty { return true }
+        ctx.setFillColor(color)
+        for poly in polys where poly.count >= 3 {
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: poly[0][0], y: poly[0][1]))
+            for p in poly.dropFirst() {
+                ctx.addLine(to: CGPoint(x: p[0], y: p[1]))
+            }
+            ctx.closePath()
+            ctx.fillPath()
+        }
+        return true
+    }
+
+    return false  // other brush types → plain stroke fallback
 }
 
 // MARK: - Element drawing
