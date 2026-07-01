@@ -2553,6 +2553,12 @@ def _render_disclosure(el, store, ctx, dispatch_fn):
         if child_widget:
             content_layout.addWidget(child_widget)
     layout.addWidget(content_widget)
+    # Propagate the content's minimumHeight up so a flex:1 ancestor (e.g.
+    # bp_brush_tiles) can't squish the disclosure body and clip fixed-size
+    # children (the Brushes nib tiles). _render_repeat sets its own min; this
+    # carries it through the disclosure content_widget and the disclosure.
+    _set_min_height_from_children(content_widget, content_layout, False)
+    _set_min_height_from_children(widget, layout, False)
 
     # Toggle collapse
     def toggle():
@@ -3641,6 +3647,20 @@ def _render_repeat(el, store, ctx, dispatch_fn):
                 layout.addWidget(child_widget, i // cols, i % cols)
             else:
                 layout.addWidget(child_widget)
+
+    # A foreach container gets no automatic minimumHeight from its expanded
+    # items (unlike _render_container's _set_min_height_from_children), so a
+    # flex:1 ancestor (e.g. bp_brush_tiles) would squish it in the enclosing
+    # column and clip fixed-size items (the 40x40 Brushes nib tiles rendered
+    # as ~15px). Propagate a minimumHeight so the items keep their size.
+    if items:
+        if is_wrap:
+            ih = tstyle.get("height")
+            item_h = int(ih) if isinstance(ih, (int, float)) else item_w
+            nrows = (len(items) + cols - 1) // cols
+            container.setMinimumHeight(nrows * item_h + max(0, nrows - 1) * gap)
+        elif layout_dir != "row":
+            _set_min_height_from_children(container, layout, False)
 
     return container
 
