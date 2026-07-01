@@ -658,6 +658,31 @@
     "type": "number"
   },
   {
+    "expr": "all([1, 2, 3], fun x -> x > 0)",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "all([1, 0 - 2, 3], fun x -> x > 0)",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "any([1, 2, 9], fun x -> x > 5)",
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "any([1, 2, 3], fun x -> x > 5)",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "fold(filter([1, 2, 3, 4], fun x -> x > 2), 0, fun (acc, x) -> acc + x)",
+    "expected": 7,
+    "type": "number"
+  },
+  {
     "expr": "atan2(0, 1)",
     "expected": 0,
     "type": "number"

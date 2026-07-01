@@ -540,6 +540,31 @@ tests:
     expected: 4
     type: number
 
+  # Higher-order builtins take (list, predicate-closure) — 2 args. The corpus
+  # never exercised all / any / filter (coverage gap #19). List results are
+  # reduced to a scalar via fold, per the convention above.
+  - expr: "all([1, 2, 3], fun x -> x > 0)"
+    expected: true
+    type: bool
+
+  - expr: "all([1, 0 - 2, 3], fun x -> x > 0)"
+    expected: false
+    type: bool
+    note: "one element fails the predicate"
+
+  - expr: "any([1, 2, 9], fun x -> x > 5)"
+    expected: true
+    type: bool
+
+  - expr: "any([1, 2, 3], fun x -> x > 5)"
+    expected: false
+    type: bool
+
+  - expr: "fold(filter([1, 2, 3, 4], fun x -> x > 2), 0, fun (acc, x) -> acc + x)"
+    expected: 7
+    type: number
+    note: "filter keeps [3, 4]; fold sums to 7"
+
   # atan2(y, x) returns DEGREES (the inverse of sin/cos; used by concept fitters
   # to recover a placement angle). Args are (y, x), matching libm order.
   - expr: "atan2(0, 1)"
