@@ -1,6 +1,7 @@
 pub mod align;
 pub mod boolean;
 pub mod calligraphic_outline;
+pub mod art_along_path;
 pub mod dash_renderer;
 pub mod fit_curve;
 pub mod simplify;
