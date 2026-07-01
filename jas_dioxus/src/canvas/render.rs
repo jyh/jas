@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::algorithms::calligraphic_outline::{calligraphic_outline, CalligraphicBrush};
+use crate::algorithms::art_along_path::{art_along_path, ArtBrush};
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
 use crate::geometry::element::Visibility;
@@ -194,27 +195,87 @@ fn draw_brushed_path(
         Some(b) => b,
         None => return false, // null-on-missing fallback
     };
-    let cal = match calligraphic_from_json(&brush) {
-        Some(c) => c,
-        None => return false, // non-Calligraphic types → plain stroke fallback
-    };
-    let pts = calligraphic_outline(&elem.d, &cal);
-    if pts.len() < 3 {
-        return true; // degenerate — emit nothing, but we did "handle" it
-    }
     let color = match elem.stroke.as_ref() {
         Some(s) => css_color(&s.color),
         None => "#000000".to_string(),
     };
-    ctx.set_fill_style_str(&color);
-    ctx.begin_path();
-    ctx.move_to(pts[0].0, pts[0].1);
-    for p in &pts[1..] {
-        ctx.line_to(p.0, p.1);
+    let stroke_weight = elem.stroke.as_ref().map(|s| s.width).unwrap_or(1.0);
+
+    // Calligraphic: one variable-width outline polygon.
+    if let Some(cal) = calligraphic_from_json(&brush) {
+        let pts = calligraphic_outline(&elem.d, &cal);
+        if pts.len() < 3 {
+            return true; // degenerate — handled (emit nothing)
+        }
+        ctx.set_fill_style_str(&color);
+        ctx.begin_path();
+        ctx.move_to(pts[0].0, pts[0].1);
+        for p in &pts[1..] {
+            ctx.line_to(p.0, p.1);
+        }
+        ctx.close_path();
+        ctx.fill();
+        return true;
     }
-    ctx.close_path();
-    ctx.fill();
-    true
+
+    // Art: one artwork warped along the path; fill each warped polygon.
+    if let Some(art) = art_from_json(&brush, stroke_weight) {
+        let polys = art_along_path(&elem.d, &art);
+        if polys.is_empty() {
+            return true;
+        }
+        ctx.set_fill_style_str(&color);
+        for poly in &polys {
+            if poly.len() < 3 {
+                continue;
+            }
+            ctx.begin_path();
+            ctx.move_to(poly[0].0, poly[0].1);
+            for p in &poly[1..] {
+                ctx.line_to(p.0, p.1);
+            }
+            ctx.close_path();
+            ctx.fill();
+        }
+        return true;
+    }
+
+    false // other brush types → plain stroke fallback
+}
+
+/// Build an `ArtBrush` from the library JSON. Artwork is stored inline as
+/// `artwork: { width, height, polygons: [[[x,y], ...], ...] }` (BRUSHES.md
+/// §Brush libraries; inline polygon form for Phase 1).
+fn art_from_json(brush: &serde_json::Value, stroke_weight: f64) -> Option<ArtBrush> {
+    if brush.get("type").and_then(|v| v.as_str()) != Some("art") {
+        return None;
+    }
+    let aw = brush.get("artwork")?;
+    let width = aw.get("width").and_then(|v| v.as_f64())?;
+    let height = aw.get("height").and_then(|v| v.as_f64())?;
+    let polys = aw.get("polygons").and_then(|v| v.as_array())?;
+    let artwork: Vec<Vec<(f64, f64)>> = polys
+        .iter()
+        .filter_map(|p| {
+            p.as_array().map(|pts| {
+                pts.iter()
+                    .filter_map(|pt| {
+                        let a = pt.as_array()?;
+                        Some((a.first()?.as_f64()?, a.get(1)?.as_f64()?))
+                    })
+                    .collect()
+            })
+        })
+        .collect();
+    Some(ArtBrush {
+        artwork_width: width,
+        artwork_height: height,
+        artwork,
+        scale: brush.get("scale").and_then(|v| v.as_f64()).unwrap_or(100.0),
+        flip_across: brush.get("flip_across").and_then(|v| v.as_bool()).unwrap_or(false),
+        flip_along: brush.get("flip_along").and_then(|v| v.as_bool()).unwrap_or(false),
+        stroke_weight,
+    })
 }
 
 // ---------------------------------------------------------------------------
