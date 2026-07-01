@@ -40208,6 +40208,48 @@
           "overlap": "prevent",
           "colorization": "none",
           "key_color": "#000000"
+        },
+        {
+          "name": "Diamonds",
+          "slug": "pattern_diamonds",
+          "type": "pattern",
+          "tiles": {
+            "side": {
+              "width": 20,
+              "height": 20,
+              "polygons": [
+                [
+                  [
+                    0,
+                    10
+                  ],
+                  [
+                    10,
+                    0
+                  ],
+                  [
+                    20,
+                    10
+                  ],
+                  [
+                    10,
+                    20
+                  ]
+                ]
+              ]
+            },
+            "start": null,
+            "end": null,
+            "outer_corner": null,
+            "inner_corner": null
+          },
+          "scale": 100,
+          "spacing": 40,
+          "flip_across": false,
+          "flip_along": false,
+          "fit": "stretch",
+          "colorization": "none",
+          "key_color": "#000000"
         }
       ]
     }
