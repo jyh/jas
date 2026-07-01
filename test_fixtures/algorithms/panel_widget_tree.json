@@ -2193,6 +2193,23 @@
           0,
           0,
           0,
+          0,
+          0
+        ],
+        "type": "brush_preview",
+        "id": "",
+        "kind": "brush_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
           1
         ],
         "type": "container",
@@ -2215,6 +2232,23 @@
           0,
           0,
           0,
+          1,
+          0
+        ],
+        "type": "brush_preview",
+        "id": "",
+        "kind": "brush_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
           2
         ],
         "type": "container",
@@ -2231,6 +2265,23 @@
           "height",
           "width"
         ]
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          2,
+          0
+        ],
+        "type": "brush_preview",
+        "id": "",
+        "kind": "brush_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
       },
       {
         "path": [

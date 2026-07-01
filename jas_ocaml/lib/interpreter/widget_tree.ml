@@ -35,6 +35,7 @@ let canonical_widget_kinds =
     "separator"; "spacer"; "disclosure"; "panel";
     "fill_stroke_widget"; "tree_view"; "element_preview"; "tabs";
     "icon_button_group"; "reference_point_widget";
+    "brush_preview";
     "placeholder" ]
 
 (* Field access over a Yojson object, returning Null for a missing key or a

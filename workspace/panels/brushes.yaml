@@ -253,6 +253,18 @@ content:
               style: { width: 48, height: 16, border: "1px solid var(--app-border,#555)" }
               bind:
                 selected_in: "panel.selected_brushes"
+              children:
+                # Nib / stroke preview drawn from the loop-var `brush`. Each
+                # app renders this natively (parametric drawing isn't
+                # expressible in declarative YAML): calligraphic -> an ellipse
+                # sized by `size`, flattened by `roundness`, rotated by
+                # `angle`; other types grow a stroke-sample preview as their
+                # renderers land. Falls back to an empty box where unimplemented.
+                - type: brush_preview
+                  summary: "Preview of {{brush.name}}"
+                  description: >
+                    Visual preview of the brush tip / stroke, read from the
+                    enclosing tile's `brush` loop variable.
               behavior:
                 - event: click
                   effects:
