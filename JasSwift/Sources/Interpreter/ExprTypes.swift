@@ -121,10 +121,7 @@ enum Value: Equatable {
         case .null: return ""
         case .bool(let b): return b ? "true" : "false"
         case .number(let n):
-            if n == Double(Int64(n)) {
-                return "\(Int64(n))"
-            }
-            return "\(n)"
+            return numberToCanonicalString(n)
         case .string(let s): return s
         case .color(let c): return c
         case .list: return "[list]"
@@ -210,4 +207,58 @@ private func normalizeColor(_ c: String) -> String {
         return "#\(chars[1])\(chars[1])\(chars[2])\(chars[2])\(chars[3])\(chars[3])"
     }
     return c
+}
+
+/// Expand a scientific-notation float string (e.g. "1e-05", "-1.23e+20") to
+/// positional decimal — Rust's f64 Display never uses scientific notation.
+private func sciToPositional(_ input: String) -> String {
+    let neg = input.hasPrefix("-")
+    let s = neg ? String(input.dropFirst()) : input
+    guard let eIdx = s.firstIndex(where: { $0 == "e" || $0 == "E" }) else {
+        return neg ? "-" + s : s
+    }
+    let mant = String(s[s.startIndex..<eIdx])
+    let exp = Int(s[s.index(after: eIdx)...]) ?? 0
+    let intPart: String, fracPart: String
+    if let dot = mant.firstIndex(of: ".") {
+        intPart = String(mant[mant.startIndex..<dot])
+        fracPart = String(mant[mant.index(after: dot)...])
+    } else {
+        intPart = mant
+        fracPart = ""
+    }
+    let digits = intPart + fracPart
+    let point = intPart.count + exp  // decimal-point offset from start of `digits`
+    var out: String
+    if point <= 0 {
+        out = "0." + String(repeating: "0", count: -point) + digits
+    } else if point >= digits.count {
+        out = digits + String(repeating: "0", count: point - digits.count)
+    } else {
+        let idx = digits.index(digits.startIndex, offsetBy: point)
+        out = String(digits[digits.startIndex..<idx]) + "." + String(digits[idx...])
+    }
+    if out.contains(".") {
+        while out.hasSuffix("0") { out.removeLast() }
+        if out.hasSuffix(".") { out.removeLast() }
+    }
+    if out.isEmpty { out = "0" }
+    return (neg && out != "0") ? "-" + out : out
+}
+
+/// Coerce a number to a string, matching the Rust reference
+/// (Value::to_string_coerce): integer-valued floats print as integers (any
+/// magnitude — no Int64 overflow trap); other values use the shortest
+/// round-trip decimal in positional, never scientific, notation. Keeps
+/// {{ }} interpolation and string concatenation byte-identical across apps.
+func numberToCanonicalString(_ n: Double) -> String {
+    if n.isNaN { return "NaN" }
+    if n == .infinity { return "inf" }
+    if n == -.infinity { return "-inf" }
+    if n == n.rounded(.towardZero) {  // integer-valued
+        if n == 0 { return "0" }      // normalize -0.0
+        return String(format: "%.0f", n)
+    }
+    let s = "\(n)"  // Swift's shortest round-trip description
+    return (s.contains("e") || s.contains("E")) ? sciToPositional(s) : s
 }

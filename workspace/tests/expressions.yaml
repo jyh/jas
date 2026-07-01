@@ -623,3 +623,37 @@ tests:
     expected: null
     type: "null"
     note: "mod by zero is null"
+
+  # Number -> string coercion (via the string-concat path, same coercion as
+  # {{ }} interpolation). Canonical form = Rust Value::to_string_coerce:
+  # integer-valued -> integer (any magnitude); other values -> shortest
+  # round-trip decimal in POSITIONAL (never scientific) notation. These pin
+  # the four-way split the finding flagged (OCaml truncated to ~12 digits;
+  # Swift crashed on the integer cast; OCaml returned -1 on overflow).
+  - expr: '"" + (1 / 3)'
+    expected: "0.3333333333333333"
+    type: string
+    note: "full shortest round-trip, not OCaml string_of_float's 12 digits"
+
+  - expr: '"" + (0.1 + 0.2)'
+    expected: "0.30000000000000004"
+    type: string
+
+  - expr: '"" + (0 - 5 / 2)'
+    expected: "-2.5"
+    type: string
+
+  - expr: '"" + (1 / 100000)'
+    expected: "0.00001"
+    type: string
+    note: "positional, not scientific 1e-05"
+
+  - expr: '"" + (100000000000 * 1000000000)'
+    expected: "100000000000000000000"
+    type: string
+    note: "1e20 integer-valued: full decimal, no crash/overflow, no sci notation"
+
+  - expr: '"" + 5'
+    expected: "5"
+    type: string
+    note: "integer-valued: no trailing .0"

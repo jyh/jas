@@ -1,9 +1,50 @@
 """Value types for the expression language."""
 
 from __future__ import annotations
+import math
 from enum import Enum, auto
 from dataclasses import dataclass
 from typing import Any
+
+
+def _sci_to_positional(s: str) -> str:
+    """Expand a scientific-notation float string (e.g. '1e-05', '-1.23e+20')
+    to positional decimal — Rust's f64 Display never uses scientific notation."""
+    neg = s.startswith("-")
+    if neg:
+        s = s[1:]
+    mant, _, exp_s = s.partition("e")
+    exp = int(exp_s)
+    int_part, _, frac_part = mant.partition(".")
+    digits = int_part + frac_part
+    point = len(int_part) + exp  # decimal-point offset from start of `digits`
+    if point <= 0:
+        out = "0." + "0" * (-point) + digits
+    elif point >= len(digits):
+        out = digits + "0" * (point - len(digits))
+    else:
+        out = digits[:point] + "." + digits[point:]
+    if "." in out:
+        out = out.rstrip("0").rstrip(".")
+    if out in ("", "-"):
+        out = "0"
+    return ("-" + out) if (neg and out != "0") else out
+
+
+def number_to_canonical_string(n: Any) -> str:
+    """Coerce a number to a string, matching the Rust reference
+    (Value::to_string_coerce): integer-valued floats print as integers (any
+    magnitude, no overflow); other values use the shortest round-trip decimal
+    in positional — never scientific — notation. Keeps {{ }} interpolation and
+    string concatenation byte-identical across all apps."""
+    if isinstance(n, int):
+        return str(n)
+    if not math.isfinite(n):
+        return "inf" if n > 0 else ("-inf" if n < 0 else "NaN")
+    if n == int(n):
+        return str(int(n))  # integer-valued (also normalizes -0.0 -> "0")
+    s = repr(n)  # shortest round-trip digits
+    return s if ("e" not in s and "E" not in s) else _sci_to_positional(s)
 
 
 class ValueType(Enum):
@@ -123,9 +164,7 @@ class Value:
         if self.type == ValueType.BOOL:
             return "true" if self.value else "false"
         if self.type == ValueType.NUMBER:
-            if isinstance(self.value, float) and self.value == int(self.value):
-                return str(int(self.value))
-            return str(self.value)
+            return number_to_canonical_string(self.value)
         if self.type == ValueType.STRING:
             return self.value
         if self.type == ValueType.COLOR:
