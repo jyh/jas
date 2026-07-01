@@ -110,7 +110,18 @@ class TypeOnPathTool: CanvasTool {
         return nil
     }
 
-    func onPress(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+    // Convert canvas-widget px -> document coords (view pan + zoom).
+    // Path hit-tests and stored geometry are in doc coords; mirrors
+    // TypeTool.toDoc and the Rust reference.
+    private func toDoc(_ ctx: ToolContext, _ x: Double, _ y: Double) -> (Double, Double) {
+        let z = ctx.model.zoomLevel
+        if z == 0 { return (x, y) }
+        return ((x - ctx.model.viewOffsetX) / z,
+                (y - ctx.model.viewOffsetY) / z)
+    }
+
+    func onPress(_ ctx: ToolContext, x rawX: Double, y rawY: Double, shift: Bool, alt: Bool) {
+        let (x, y) = toDoc(ctx, rawX, rawY)
         // 1) If editing, click that stays on the edited element moves the caret
         if let s = session {
             let editedPath = s.path
@@ -175,7 +186,8 @@ class TypeOnPathTool: CanvasTool {
         controlPt = nil
     }
 
-    func onMove(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool, dragging: Bool) {
+    func onMove(_ ctx: ToolContext, x rawX: Double, y rawY: Double, shift: Bool, alt: Bool, dragging: Bool) {
+        let (x, y) = toDoc(ctx, rawX, rawY)
         // Editing-session selection drag
         if let s = session, s.dragActive, dragging {
             let cursor = cursorAt(ctx, x, y)
@@ -207,7 +219,8 @@ class TypeOnPathTool: CanvasTool {
         ctx.requestUpdate()
     }
 
-    func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {
+    func onRelease(_ ctx: ToolContext, x rawX: Double, y rawY: Double, shift: Bool, alt: Bool) {
+        let (x, y) = toDoc(ctx, rawX, rawY)
         // Finish editing-session selection drag
         if let s = session, s.dragActive {
             s.dragActive = false
@@ -418,18 +431,30 @@ class TypeOnPathTool: CanvasTool {
     }
 
     func drawOverlay(_ ctx: ToolContext, _ cgCtx: CGContext) {
+        // The canvas runs drawOverlay in screen space (post-transform). Our
+        // geometry (drag rect from doc-converted onPress/onMove, path handle,
+        // caret/selection from the doc-space layout) is in document coords, so
+        // map each point doc -> screen here — otherwise it drifts under
+        // zoom/pan. Mirrors TypeTool.drawOverlay and the Rust reference.
+        let z = ctx.model.zoomLevel
+        let ox = ctx.model.viewOffsetX
+        let oy = ctx.model.viewOffsetY
+        func sx(_ d: Double) -> Double { d * z + ox }
+        func sy(_ d: Double) -> Double { d * z + oy }
+        func sp(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: sx(x), y: sy(y)) }
+
         // Drag-create preview
-        if let (sx, sy) = dragStart, let (ex, ey) = dragEnd {
+        if let (dsx, dsy) = dragStart, let (dex, dey) = dragEnd {
             cgCtx.setStrokeColor(CGColor(gray: 0.4, alpha: 1.0))
             cgCtx.setLineWidth(1.0)
             cgCtx.setLineDash(phase: 0, lengths: [4, 4])
-            cgCtx.move(to: CGPoint(x: sx, y: sy))
+            cgCtx.move(to: sp(dsx, dsy))
             if let (cx, cy) = controlPt {
-                cgCtx.addCurve(to: CGPoint(x: ex, y: ey),
-                               control1: CGPoint(x: cx, y: cy),
-                               control2: CGPoint(x: cx, y: cy))
+                cgCtx.addCurve(to: sp(dex, dey),
+                               control1: sp(cx, cy),
+                               control2: sp(cx, cy))
             } else {
-                cgCtx.addLine(to: CGPoint(x: ex, y: ey))
+                cgCtx.addLine(to: sp(dex, dey))
             }
             cgCtx.strokePath()
             cgCtx.setLineDash(phase: 0, lengths: [])
@@ -449,17 +474,17 @@ class TypeOnPathTool: CanvasTool {
             let (hx, hy) = pathPointAtOffset(tp.d, t: offset)
             let r = offsetHandleRadius
             cgCtx.setLineWidth(1.5)
-            cgCtx.move(to: CGPoint(x: hx, y: hy - r))
-            cgCtx.addLine(to: CGPoint(x: hx + r, y: hy))
-            cgCtx.addLine(to: CGPoint(x: hx, y: hy + r))
-            cgCtx.addLine(to: CGPoint(x: hx - r, y: hy))
+            cgCtx.move(to: sp(hx, hy - r))
+            cgCtx.addLine(to: sp(hx + r, hy))
+            cgCtx.addLine(to: sp(hx, hy + r))
+            cgCtx.addLine(to: sp(hx - r, hy))
             cgCtx.closePath()
             cgCtx.setFillColor(CGColor(red: 1.0, green: 0.78, blue: 0.31, alpha: 1.0))
             cgCtx.fillPath()
-            cgCtx.move(to: CGPoint(x: hx, y: hy - r))
-            cgCtx.addLine(to: CGPoint(x: hx + r, y: hy))
-            cgCtx.addLine(to: CGPoint(x: hx, y: hy + r))
-            cgCtx.addLine(to: CGPoint(x: hx - r, y: hy))
+            cgCtx.move(to: sp(hx, hy - r))
+            cgCtx.addLine(to: sp(hx + r, hy))
+            cgCtx.addLine(to: sp(hx, hy + r))
+            cgCtx.addLine(to: sp(hx - r, hy))
             cgCtx.closePath()
             cgCtx.setStrokeColor(CGColor(red: 1.0, green: 0.55, blue: 0.0, alpha: 1.0))
             cgCtx.strokePath()
@@ -480,10 +505,10 @@ class TypeOnPathTool: CanvasTool {
                 let ay = g.cy + sin(g.angle) * half
                 let nx = -sin(g.angle) * (h / 2)
                 let ny = cos(g.angle) * (h / 2)
-                cgCtx.move(to: CGPoint(x: bx + nx, y: by + ny))
-                cgCtx.addLine(to: CGPoint(x: ax + nx, y: ay + ny))
-                cgCtx.addLine(to: CGPoint(x: ax - nx, y: ay - ny))
-                cgCtx.addLine(to: CGPoint(x: bx - nx, y: by - ny))
+                cgCtx.move(to: sp(bx + nx, by + ny))
+                cgCtx.addLine(to: sp(ax + nx, ay + ny))
+                cgCtx.addLine(to: sp(ax - nx, ay - ny))
+                cgCtx.addLine(to: sp(bx - nx, by - ny))
                 cgCtx.closePath()
                 cgCtx.fillPath()
             }
@@ -499,8 +524,8 @@ class TypeOnPathTool: CanvasTool {
             let (cr, cg, cb, _) = color.toRgba()
             cgCtx.setStrokeColor(CGColor(red: cr, green: cg, blue: cb, alpha: 1.0))
             cgCtx.setLineWidth(1.5)
-            cgCtx.move(to: CGPoint(x: cx + nx * (h * 0.7), y: cy + ny * (h * 0.7)))
-            cgCtx.addLine(to: CGPoint(x: cx - nx * (h * 0.2), y: cy - ny * (h * 0.2)))
+            cgCtx.move(to: sp(cx + nx * (h * 0.7), cy + ny * (h * 0.7)))
+            cgCtx.addLine(to: sp(cx - nx * (h * 0.2), cy - ny * (h * 0.2)))
             cgCtx.strokePath()
         }
     }
