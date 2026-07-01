@@ -565,6 +565,17 @@ tests:
     type: number
     note: "filter keeps [3, 4]; fold sums to 7"
 
+  # Sequencing (;) — evaluate the left for side effects, return the right.
+  # Was uncovered (#19). (Assignment <- needs a mutable store the conformance
+  # harness does not wire, so it stays out of the pure-expression corpus.)
+  - expr: "1; 2"
+    expected: 2
+    type: number
+
+  - expr: "let x = 5 in (x; x + 1)"
+    expected: 6
+    type: number
+
   # atan2(y, x) returns DEGREES (the inverse of sin/cos; used by concept fitters
   # to recover a placement angle). Args are (y, x), matching libm order.
   - expr: "atan2(0, 1)"
