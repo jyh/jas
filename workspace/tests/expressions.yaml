@@ -518,6 +518,28 @@ tests:
     type: number
     note: "fractional exponent = square root"
 
+  # Arithmetic builtins that the corpus never exercised (coverage gap #19).
+  - expr: "abs(0 - 7)"
+    expected: 7
+    type: number
+
+  - expr: "min(3, 8)"
+    expected: 3
+    type: number
+
+  - expr: "max(3, 8)"
+    expected: 8
+    type: number
+
+  - expr: "hypot(3, 4)"
+    expected: 5
+    type: number
+    note: "euclidean distance sqrt(3^2 + 4^2)"
+
+  - expr: "sqrt(16)"
+    expected: 4
+    type: number
+
   # atan2(y, x) returns DEGREES (the inverse of sin/cos; used by concept fitters
   # to recover a placement angle). Args are (y, x), matching libm order.
   - expr: "atan2(0, 1)"

@@ -633,6 +633,31 @@
     "type": "number"
   },
   {
+    "expr": "abs(0 - 7)",
+    "expected": 7,
+    "type": "number"
+  },
+  {
+    "expr": "min(3, 8)",
+    "expected": 3,
+    "type": "number"
+  },
+  {
+    "expr": "max(3, 8)",
+    "expected": 8,
+    "type": "number"
+  },
+  {
+    "expr": "hypot(3, 4)",
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "sqrt(16)",
+    "expected": 4,
+    "type": "number"
+  },
+  {
     "expr": "atan2(0, 1)",
     "expected": 0,
     "type": "number"
