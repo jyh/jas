@@ -557,17 +557,24 @@ class TestAppearanceLoading:
 
 
 class TestValidateActionRefs:
+    @staticmethod
+    def _resolvable(data):
+        """Action names that resolve at dispatch: declarative actions plus
+        native_intercepts (handled in native per-app code, e.g. export_to_pdf
+        — see NATIVE_BOUNDARY.md)."""
+        return set(data["actions"]) | set(data.get("native_intercepts", []))
+
     def test_all_shortcut_actions_exist(self, workspace_path):
         from loader import load_workspace
         data = load_workspace(workspace_path)
-        actions = data["actions"]
+        actions = self._resolvable(data)
         for shortcut in data["shortcuts"]:
             assert shortcut["action"] in actions, f"Shortcut action '{shortcut['action']}' not in actions"
 
     def test_all_menu_actions_exist(self, workspace_path):
         from loader import load_workspace
         data = load_workspace(workspace_path)
-        actions = data["actions"]
+        actions = self._resolvable(data)
 
         def check_items(items):
             for item in items:

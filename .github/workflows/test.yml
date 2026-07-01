@@ -134,6 +134,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: cd JasSwift && swift test
 
+  # Flask is a non-gating reference renderer (TESTING_STRATEGY.md §6), so this
+  # job does not block the merge (continue-on-error) — but it keeps the flask
+  # reference renderer and its parked workspace-spec tests (Path B layout,
+  # opacity/artboards/concepts panels) from rotting silently, as they had:
+  # a stale test_all_menu_actions_exist was red here for lack of any CI.
+  flask:
+    name: Flask reference tests (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r jas_flask/requirements.txt
+      - run: cd jas_flask && python -m pytest tests/
+
   cross-language:
     name: Cross-language equivalence
     needs: [rust, python, ocaml, swift]
