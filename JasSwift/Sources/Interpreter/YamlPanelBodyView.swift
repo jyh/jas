@@ -2574,9 +2574,47 @@ struct YamlElementView: View {
             .fill(color)
             .frame(width: 40, height: 40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if (brush["type"] as? String) == "pattern", let pat = patternBrushForPreview(brush) {
+            // Pattern: tile the side artwork along a short horizontal path.
+            let color: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
+            let polys = patternAlongPath([.moveTo(4, 20), .lineTo(36, 20)], pat)
+            SwiftUI.Path { p in
+                for poly in polys where poly.count >= 3 {
+                    p.move(to: CGPoint(x: poly[0][0], y: poly[0][1]))
+                    for pt in poly.dropFirst() { p.addLine(to: CGPoint(x: pt[0], y: pt[1])) }
+                    p.closeSubpath()
+                }
+            }
+            .fill(color)
+            .frame(width: 40, height: 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             SwiftUI.Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Build a PatternBrush for the tile preview (fixed ribbon height).
+    private func patternBrushForPreview(_ brush: [String: Any]) -> PatternBrush? {
+        guard let tiles = brush["tiles"] as? [String: Any],
+              let side = tiles["side"] as? [String: Any],
+              let width = containerNumericDim(side["width"]).map(Double.init),
+              let height = containerNumericDim(side["height"]).map(Double.init),
+              let polysAny = side["polygons"] as? [Any] else { return nil }
+        let polys: [[[Double]]] = polysAny.compactMap { polyAny in
+            guard let poly = polyAny as? [Any] else { return nil }
+            return poly.compactMap { ptAny -> [Double]? in
+                guard let pt = ptAny as? [Any], pt.count >= 2,
+                      let x = containerNumericDim(pt[0]).map(Double.init),
+                      let y = containerNumericDim(pt[1]).map(Double.init) else { return nil }
+                return [x, y]
+            }
+        }
+        return PatternBrush(tileWidth: width, tileHeight: height, side: polys,
+                            scale: 100.0,
+                            spacing: containerNumericDim(brush["spacing"]).map(Double.init) ?? 0.0,
+                            flipAcross: (brush["flip_across"] as? Bool) ?? false,
+                            flipAlong: (brush["flip_along"] as? Bool) ?? false,
+                            strokeWeight: 10.0)
     }
 
     /// Build an ArtBrush for the tile preview (fixed ribbon height, the

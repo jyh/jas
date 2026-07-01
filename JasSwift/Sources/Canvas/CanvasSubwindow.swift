@@ -100,6 +100,35 @@ private func artFromJson(_ brush: [String: Any], _ strokeWeight: Double) -> ArtB
                     strokeWeight: strokeWeight)
 }
 
+/// Parse a `{ width, height, polygons }` object into (width, height, polygons).
+private func artPolygons(_ obj: [String: Any]) -> (Double, Double, [[[Double]]])? {
+    guard let width = artNum(obj["width"]), let height = artNum(obj["height"]),
+          let polysAny = obj["polygons"] as? [Any] else { return nil }
+    let polys: [[[Double]]] = polysAny.compactMap { polyAny in
+        guard let poly = polyAny as? [Any] else { return nil }
+        return poly.compactMap { ptAny -> [Double]? in
+            guard let pt = ptAny as? [Any], pt.count >= 2,
+                  let x = artNum(pt[0]), let y = artNum(pt[1]) else { return nil }
+            return [x, y]
+        }
+    }
+    return (width, height, polys)
+}
+
+/// Build a `PatternBrush` from the library JSON (inline `tiles.side`).
+private func patternFromJson(_ brush: [String: Any], _ strokeWeight: Double) -> PatternBrush? {
+    guard (brush["type"] as? String) == "pattern",
+          let tiles = brush["tiles"] as? [String: Any],
+          let side = tiles["side"] as? [String: Any],
+          let (width, height, polys) = artPolygons(side) else { return nil }
+    return PatternBrush(tileWidth: width, tileHeight: height, side: polys,
+                        scale: artNum(brush["scale"]) ?? 100.0,
+                        spacing: artNum(brush["spacing"]) ?? 0.0,
+                        flipAcross: (brush["flip_across"] as? Bool) ?? false,
+                        flipAlong: (brush["flip_along"] as? Bool) ?? false,
+                        strokeWeight: strokeWeight)
+}
+
 private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
     guard let slug = v.strokeBrush, let brush = lookupBrush(slug) else {
         return false
@@ -126,6 +155,23 @@ private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
     // Art: one artwork warped along the path; fill each warped polygon.
     if let art = artFromJson(brush, strokeWeight) {
         let polys = artAlongPath(v.d, art)
+        if polys.isEmpty { return true }
+        ctx.setFillColor(color)
+        for poly in polys where poly.count >= 3 {
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: poly[0][0], y: poly[0][1]))
+            for p in poly.dropFirst() {
+                ctx.addLine(to: CGPoint(x: p[0], y: p[1]))
+            }
+            ctx.closePath()
+            ctx.fillPath()
+        }
+        return true
+    }
+
+    // Pattern: side tile repeated along the path; fill each warped tile.
+    if let pat = patternFromJson(brush, strokeWeight) {
+        let polys = patternAlongPath(v.d, pat)
         if polys.isEmpty { return true }
         ctx.setFillColor(color)
         for poly in polys where poly.count >= 3 {
