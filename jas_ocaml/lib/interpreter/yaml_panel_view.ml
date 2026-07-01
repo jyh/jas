@@ -5373,16 +5373,16 @@ and render_brush_preview ~packing ~ctx el =
     match Expr_eval.evaluate e ctx with
     | Expr_eval.Number n -> n | _ -> default in
   let area = GMisc.drawing_area ~packing () in
-  area#misc#set_size_request ~width:48 ~height:16 ();
+  area#misc#set_size_request ~width:40 ~height:40 ();
   if eval_str "brush.type" = "calligraphic" then begin
     let size = eval_num "brush.size" ~default:5.0 in
     let roundness = eval_num "brush.roundness" ~default:100.0 in
     let angle = eval_num "brush.angle" ~default:0.0 in
-    let major = Float.min (Float.max (size *. 1.3) 2.0) 13.0 in
-    let minor = Float.min (Float.max (major *. (roundness /. 100.0)) 1.0) major in
+    let major = Float.min (Float.max (size *. 2.8) 4.0) 30.0 in
+    let minor = Float.min (Float.max (major *. (roundness /. 100.0)) 1.5) major in
     ignore (area#misc#connect#draw ~callback:(fun cr ->
       Cairo.save cr;
-      Cairo.translate cr 24.0 8.0;
+      Cairo.translate cr 20.0 20.0;
       Cairo.rotate cr (angle *. Float.pi /. 180.0);
       Cairo.scale cr (major /. 2.0) (minor /. 2.0);
       Cairo.arc cr 0.0 0.0 ~r:1.0 ~a1:0.0 ~a2:(2.0 *. Float.pi);

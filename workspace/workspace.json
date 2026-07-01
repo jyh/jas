@@ -11881,8 +11881,8 @@
                     "id": "bp_tile_{{lib.id}}_{{brush.slug}}",
                     "summary": "{{brush.name}}",
                     "style": {
-                      "width": 48,
-                      "height": 16,
+                      "width": 40,
+                      "height": 40,
                       "border": "1px solid var(--app-border,#555)"
                     },
                     "bind": {
