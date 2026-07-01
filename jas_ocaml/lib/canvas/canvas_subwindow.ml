@@ -168,6 +168,63 @@ let art_from_json (brush : Yojson.Safe.t) (stroke_weight : float) :
      | _ -> None)
   | _ -> None
 
+(* Parse inline `{width,height,polygons}` into (width, height, polygons). *)
+let parse_inline_artwork (aw : Yojson.Safe.t) : float * float * (float * float) list list =
+  let numv = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+  match aw with
+  | `Assoc fields ->
+    let num_of key = match List.assoc_opt key fields with Some v -> numv v | None -> 0.0 in
+    let polygons =
+      match List.assoc_opt "polygons" fields with
+      | Some (`List polys) ->
+        List.map
+          (function
+            | `List pts ->
+              List.filter_map
+                (function `List (x :: y :: _) -> Some (numv x, numv y) | _ -> None)
+                pts
+            | _ -> [])
+          polys
+      | _ -> []
+    in
+    (num_of "width", num_of "height", polygons)
+  | _ -> (0.0, 0.0, [])
+
+(* Extract Pattern brush params (inline tiles.side) from JSON. *)
+let pattern_from_json (brush : Yojson.Safe.t) (stroke_weight : float) :
+    Pattern_along_path.t option =
+  let numv = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+  match brush with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "pattern") ->
+       (match List.assoc_opt "tiles" fields with
+        | Some (`Assoc tiles) ->
+          (match List.assoc_opt "side" tiles with
+           | Some side ->
+             let width, height, side_polys = parse_inline_artwork side in
+             let field_num key default =
+               match List.assoc_opt key fields with Some v -> numv v | None -> default
+             in
+             let field_bool key =
+               match List.assoc_opt key fields with Some (`Bool b) -> b | _ -> false
+             in
+             Some
+               Pattern_along_path.{
+                 tile_width = width;
+                 tile_height = height;
+                 side = side_polys;
+                 scale = field_num "scale" 100.0;
+                 spacing = field_num "spacing" 0.0;
+                 flip_across = field_bool "flip_across";
+                 flip_along = field_bool "flip_along";
+                 stroke_weight;
+               }
+           | None -> None)
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+
 (* Fill a polygon (list of points) on [cr]. *)
 let fill_polygon cr = function
   | (x0, y0) :: rest ->
@@ -210,7 +267,16 @@ let draw_brushed_path cr (d : Element.path_command list)
             (fun poly -> if List.length poly >= 3 then fill_polygon cr poly)
             polys;
           true
-        | None -> false))
+        | None ->
+          (match pattern_from_json brush stroke_weight with
+           | Some pat ->
+             let polys = Pattern_along_path.tile d pat in
+             Cairo.set_source_rgba cr r g b a;
+             List.iter
+               (fun poly -> if List.length poly >= 3 then fill_polygon cr poly)
+               polys;
+             true
+           | None -> false)))
 
 let title_bar_height = 24
 

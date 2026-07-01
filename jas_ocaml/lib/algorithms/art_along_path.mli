@@ -23,3 +23,13 @@ type t = {
 
 val warp : Element.path_command list -> t -> (float * float) list list
 (* One warped polygon per artwork polygon; [] on degenerate input. *)
+
+val flatten : Element.path_command list -> (float * float) array
+(* Flatten the first subpath into a polyline. Shared with pattern /
+   bristle brushes. *)
+
+val point_at_arclength :
+  (float * float) array -> float array -> float -> float -> float * float * float
+(* Point (x, y) and tangent (radians) at arc-length [s]; args are the
+   flattened points, their cumulative arc-lengths, the total length, and
+   [s]. Shared with pattern / bristle brushes. *)

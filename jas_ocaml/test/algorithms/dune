@@ -9,6 +9,11 @@
  (libraries jas alcotest))
 
 (test
+ (name pattern_along_path_test)
+ (modules pattern_along_path_test)
+ (libraries jas alcotest))
+
+(test
  (name fit_curve_test)
  (modules fit_curve_test)
  (libraries jas alcotest))
