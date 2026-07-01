@@ -26,7 +26,7 @@ from algorithms.path_text_layout import layout_path_text, PathTextLayout
 from tools.text_edit import EditTarget, TextEditSession, empty_text_path_elem
 from tools.text_measure import make_measurer
 from tools.tool import CanvasTool, KeyMods, ToolContext, DRAG_THRESHOLD, HIT_RADIUS
-from tools.type_tool import _now_ms, _cursor_visible
+from tools.type_tool import _now_ms, _cursor_visible, _to_doc
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QPainter
@@ -225,6 +225,9 @@ class TypeOnPathTool(CanvasTool):
 
     def on_press(self, ctx: ToolContext, x: float, y: float,
                  shift: bool = False, alt: bool = False) -> None:
+        # Tools receive raw widget px; path hit-tests and stored geometry
+        # are in document coords (mirrors TypeTool.on_press / Rust to_doc).
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None:
             try:
                 elem = ctx.document.get_element(self.session.path)
@@ -272,6 +275,7 @@ class TypeOnPathTool(CanvasTool):
     def on_move(self, ctx: ToolContext, x: float, y: float,
                 shift: bool = False, alt: bool = False,
                 dragging: bool = False) -> None:
+        x, y = _to_doc(ctx, x, y)
 
         if self.session is not None and self.session.drag_active and dragging:
             cursor = self._cursor_at(ctx, x, y)
@@ -308,6 +312,7 @@ class TypeOnPathTool(CanvasTool):
 
     def on_release(self, ctx: ToolContext, x: float, y: float,
                    shift: bool = False, alt: bool = False) -> None:
+        x, y = _to_doc(ctx, x, y)
         if self.session is not None:
             self.session.drag_active = False
             self.session.blink_epoch_ms = _now_ms()
@@ -501,6 +506,20 @@ class TypeOnPathTool(CanvasTool):
         self._end_session(ctx)
 
     def draw_overlay(self, ctx: ToolContext, painter: "QPainter") -> None:
+        # The canvas restored its screen-space transform before calling us;
+        # our geometry (path handles, caret, selection) is in document coords,
+        # so apply the view pan + zoom here — otherwise it renders at doc coords
+        # on a screen-space canvas and drifts under zoom/pan. Mirrors
+        # TypeTool.draw_overlay and the Rust reference.
+        painter.save()
+        painter.translate(ctx.model.view_offset_x, ctx.model.view_offset_y)
+        painter.scale(ctx.model.zoom_level, ctx.model.zoom_level)
+        try:
+            self._draw_overlay_doc(ctx, painter)
+        finally:
+            painter.restore()
+
+    def _draw_overlay_doc(self, ctx: ToolContext, painter: "QPainter") -> None:
         from PySide6.QtCore import QPointF, QRectF, Qt
         from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen, QTransform
 
