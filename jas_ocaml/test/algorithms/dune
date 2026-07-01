@@ -4,6 +4,11 @@
  (libraries jas alcotest))
 
 (test
+ (name art_along_path_test)
+ (modules art_along_path_test)
+ (libraries jas alcotest))
+
+(test
  (name fit_curve_test)
  (modules fit_curve_test)
  (libraries jas alcotest))
