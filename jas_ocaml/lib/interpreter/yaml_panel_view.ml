@@ -5442,6 +5442,58 @@ and render_brush_preview ~packing ~ctx el =
         polys;
       true))
   end
+  else if eval_str "brush.type" = "pattern" then begin
+    (* Pattern: tile the side artwork along a short horizontal path. *)
+    let brush_json = Yojson.Safe.Util.member "brush" ctx in
+    let numj = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+    let boolj key =
+      match Yojson.Safe.Util.member key brush_json with `Bool b -> b | _ -> false
+    in
+    let side = Yojson.Safe.Util.member "side" (Yojson.Safe.Util.member "tiles" brush_json) in
+    let width = numj (Yojson.Safe.Util.member "width" side) in
+    let height = numj (Yojson.Safe.Util.member "height" side) in
+    let side_polys =
+      match Yojson.Safe.Util.member "polygons" side with
+      | `List polys ->
+        List.map
+          (function
+            | `List pts ->
+              List.filter_map
+                (function `List (x :: y :: _) -> Some (numj x, numj y) | _ -> None)
+                pts
+            | _ -> [])
+          polys
+      | _ -> []
+    in
+    let spacing = numj (Yojson.Safe.Util.member "spacing" brush_json) in
+    let pat =
+      Pattern_along_path.{
+        tile_width = width;
+        tile_height = height;
+        side = side_polys;
+        scale = 100.0;
+        spacing;
+        flip_across = boolj "flip_across";
+        flip_along = boolj "flip_along";
+        stroke_weight = 10.0;
+      }
+    in
+    let cmds = [ Element.MoveTo (4.0, 20.0); Element.LineTo (36.0, 20.0) ] in
+    let polys = Pattern_along_path.tile cmds pat in
+    ignore (area#misc#connect#draw ~callback:(fun cr ->
+      Cairo.set_source_rgb cr 0.8 0.8 0.8;
+      List.iter
+        (fun poly ->
+          match poly with
+          | (x0, y0) :: rest ->
+            Cairo.move_to cr x0 y0;
+            List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+            Cairo.Path.close cr;
+            Cairo.fill cr
+          | [] -> ())
+        polys;
+      true))
+  end
 
 (* PRINT.md §1B: tabs widget. Left-rail tab list + content area
    showing the active tab. Active tab read from [bind.value]
