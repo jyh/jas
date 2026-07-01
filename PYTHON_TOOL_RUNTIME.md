@@ -1,5 +1,10 @@
 # Python YAML Tool Runtime — port plan
 
+> **Status: complete.** The migration shipped and merged; 14 tools are
+> YAML-driven, completing the Rust → Swift → OCaml → Python propagation.
+> Type / TypeOnPath remain permanently native per NATIVE_BOUNDARY.md §6.
+> Kept as the design record, not open work.
+
 Propagates the Rust/Swift/OCaml tool-runtime migration to `jas`
 (the Python/Qt app). Last stop in the Rust → Swift → OCaml →
 Python propagation order. YAML specs in `workspace/tools/*.yaml`

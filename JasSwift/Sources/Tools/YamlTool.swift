@@ -6,10 +6,9 @@
 // and routes CanvasTool events through the declared handlers via
 // runEffects + buildYamlToolEffects.
 //
-// Phase 5 of the Swift YAML tool-runtime migration (see
-// SWIFT_TOOL_RUNTIME.md): CanvasTool conformance + event dispatch.
-// Overlay rendering is a stub — overlay specs are parsed but not
-// drawn (Phase 5b).
+// Swift YAML tool-runtime migration (see SWIFT_TOOL_RUNTIME.md): CanvasTool
+// conformance, event dispatch, AND overlay rendering are implemented — the
+// spec's overlay declarations dispatch all 16 render types when drawn.
 
 import AppKit
 import Foundation

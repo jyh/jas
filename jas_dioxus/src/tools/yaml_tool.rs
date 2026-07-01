@@ -3,12 +3,11 @@
 //! Parses a tool spec from `workspace/tools/*.yaml` (via the compiled
 //! `workspace.json`) into a [`ToolSpec`], then implements the
 //! [`CanvasTool`] trait by routing native events through the YAML
-//! handlers declared in the spec. Mirrors the tool dispatcher in
-//! `jas_flask/static/js/engine/tools.mjs`.
+//! handlers declared in the spec.
 //!
-//! Phase 3c of the Rust YAML tool runtime (see RUST_TOOL_RUNTIME.md):
-//! event dispatch through [`CanvasTool`] is wired; overlay rendering
-//! remains a Phase 3d stub.
+//! Rust YAML tool runtime (see RUST_TOOL_RUNTIME.md): both event dispatch
+//! through [`CanvasTool`] and overlay rendering are implemented — the spec's
+//! overlay declarations dispatch through `draw_overlay` (all 16 render types).
 
 use std::collections::HashMap;
 

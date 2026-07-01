@@ -1,5 +1,9 @@
 # Rust YAML Tool Runtime — port plan
 
+> **Status: complete (2026-04).** The migration shipped and merged; 16 tools
+> are YAML-driven. Type / TypeOnPath remain permanently native per
+> NATIVE_BOUNDARY.md §6. Kept as the design record, not open work.
+
 Audit item #2 from the genericity review: *port Flask's tool YAML
 pattern to one native app to validate it works cross-language.*
 Flask proves the pattern in `jas_flask/static/js/engine/`; this doc

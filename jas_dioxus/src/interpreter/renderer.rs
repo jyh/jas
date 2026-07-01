@@ -9508,9 +9508,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             .unwrap_or(0);
                                         (target.clone(), child_count, true)
                                     } else {
-                                        let parent = target[..target.len()-1].to_vec();
-                                        let idx = *target.last().unwrap();
-                                        (parent, idx, false)
+                                        // split_last avoids the len()-1 underflow /
+                                        // last().unwrap() panic on an empty path. `target`
+                                        // is a non-empty layer-row path today, so the None
+                                        // arm is defensive (no parent -> root, no-op idx).
+                                        match target.split_last() {
+                                            Some((&idx, parent)) => (parent.to_vec(), idx, false),
+                                            None => (Vec::new(), 0, false),
+                                        }
                                     }
                                 };
                                 let allowed = {
