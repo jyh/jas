@@ -225,6 +225,28 @@ let pattern_from_json (brush : Yojson.Safe.t) (stroke_weight : float) :
      | _ -> None)
   | _ -> None
 
+(* Extract Bristle brush params from JSON. Non-Bristle types return None. *)
+let bristle_from_json (brush : Yojson.Safe.t) (stroke_weight : float) :
+    Bristle_stroke.t option =
+  let numv = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+  match brush with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "bristle") ->
+       let field_num key default =
+         match List.assoc_opt key fields with Some v -> numv v | None -> default
+       in
+       Some
+         Bristle_stroke.{
+           size = field_num "size" 3.0;
+           density = field_num "density" 50.0;
+           thickness = field_num "thickness" 30.0;
+           opacity = field_num "opacity" 30.0;
+           stroke_weight;
+         }
+     | _ -> None)
+  | _ -> None
+
 (* Fill a polygon (list of points) on [cr]. *)
 let fill_polygon cr = function
   | (x0, y0) :: rest ->
@@ -276,7 +298,24 @@ let draw_brushed_path cr (d : Element.path_command list)
                (fun poly -> if List.length poly >= 3 then fill_polygon cr poly)
                polys;
              true
-           | None -> false)))
+           | None ->
+             (match bristle_from_json brush stroke_weight with
+              | Some br ->
+                let lines = Bristle_stroke.stroke d br in
+                Cairo.set_source_rgba cr r g b (Bristle_stroke.alpha br);
+                Cairo.set_line_width cr (Bristle_stroke.line_width br);
+                Cairo.set_line_cap cr Cairo.ROUND;
+                List.iter
+                  (fun line ->
+                    match line with
+                    | (x0, y0) :: rest ->
+                      Cairo.move_to cr x0 y0;
+                      List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+                      Cairo.stroke cr
+                    | [] -> ())
+                  lines;
+                true
+              | None -> false))))
 
 let title_bar_height = 24
 
