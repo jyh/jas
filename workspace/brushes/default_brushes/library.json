@@ -67,6 +67,27 @@
       "angle_variation": { "mode": "fixed" },
       "roundness_variation": { "mode": "fixed" },
       "size_variation": { "mode": "fixed" }
+    },
+    {
+      "name": "Tapered",
+      "slug": "art_tapered",
+      "type": "art",
+      "artwork": {
+        "width": 100,
+        "height": 20,
+        "polygons": [
+          [[0, 10], [25, 3], [50, 1], [75, 3], [100, 10],
+           [75, 17], [50, 19], [25, 17]]
+        ]
+      },
+      "direction": "along",
+      "scale_mode": "proportional",
+      "scale": 100,
+      "flip_across": false,
+      "flip_along": false,
+      "overlap": "prevent",
+      "colorization": "none",
+      "key_color": "#000000"
     }
   ]
 }
