@@ -2588,6 +2588,25 @@ struct YamlElementView: View {
             .fill(color)
             .frame(width: 40, height: 40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if (brush["type"] as? String) == "bristle" {
+            // Bristle: stroke the offset bristle lines with per-bristle opacity.
+            let color: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
+            let br = BristleBrush(size: containerNumericDim(brush["size"]).map(Double.init) ?? 3.0,
+                                  density: containerNumericDim(brush["density"]).map(Double.init) ?? 50.0,
+                                  thickness: containerNumericDim(brush["thickness"]).map(Double.init) ?? 30.0,
+                                  opacity: containerNumericDim(brush["opacity"]).map(Double.init) ?? 30.0,
+                                  strokeWeight: 6.0)
+            let lines = bristleStroke([.moveTo(4, 20), .lineTo(36, 20)], br)
+            SwiftUI.Path { p in
+                for line in lines where line.count >= 2 {
+                    p.move(to: CGPoint(x: line[0][0], y: line[0][1]))
+                    for pt in line.dropFirst() { p.addLine(to: CGPoint(x: pt[0], y: pt[1])) }
+                }
+            }
+            .stroke(color.opacity(br.alpha()),
+                    style: StrokeStyle(lineWidth: br.lineWidth(), lineCap: .round))
+            .frame(width: 40, height: 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             SwiftUI.Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }

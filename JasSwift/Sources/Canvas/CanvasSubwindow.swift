@@ -129,6 +129,16 @@ private func patternFromJson(_ brush: [String: Any], _ strokeWeight: Double) -> 
                         strokeWeight: strokeWeight)
 }
 
+/// Build a `BristleBrush` from the library JSON.
+private func bristleFromJson(_ brush: [String: Any], _ strokeWeight: Double) -> BristleBrush? {
+    guard (brush["type"] as? String) == "bristle" else { return nil }
+    return BristleBrush(size: artNum(brush["size"]) ?? 3.0,
+                        density: artNum(brush["density"]) ?? 50.0,
+                        thickness: artNum(brush["thickness"]) ?? 30.0,
+                        opacity: artNum(brush["opacity"]) ?? 30.0,
+                        strokeWeight: strokeWeight)
+}
+
 private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
     guard let slug = v.strokeBrush, let brush = lookupBrush(slug) else {
         return false
@@ -182,6 +192,27 @@ private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
             }
             ctx.closePath()
             ctx.fillPath()
+        }
+        return true
+    }
+
+    // Bristle: stroke N offset bristle lines in the stroke colour with
+    // per-bristle alpha (they overlap and build up).
+    if let br = bristleFromJson(brush, strokeWeight) {
+        let lines = bristleStroke(v.d, br)
+        if lines.isEmpty { return true }
+        let (r, g, b, _): (Double, Double, Double, Double) =
+            v.stroke.map { $0.color.toRgba() } ?? (0, 0, 0, 1)
+        ctx.setStrokeColor(CGColor(red: r, green: g, blue: b, alpha: br.alpha()))
+        ctx.setLineWidth(br.lineWidth())
+        ctx.setLineCap(.round)
+        for line in lines where line.count >= 2 {
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: line[0][0], y: line[0][1]))
+            for p in line.dropFirst() {
+                ctx.addLine(to: CGPoint(x: p[0], y: p[1]))
+            }
+            ctx.strokePath()
         }
         return true
     }
