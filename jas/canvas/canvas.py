@@ -135,6 +135,29 @@ def _art_from_dict(brush: dict, stroke_weight: float):
     )
 
 
+def _pattern_from_dict(brush: dict, stroke_weight: float):
+    """Extract a PatternBrush (inline tiles.side) from a brush dict.
+    Returns None for non-Pattern types."""
+    if brush.get("type") != "pattern":
+        return None
+    from algorithms.pattern_along_path import PatternBrush
+    side = (brush.get("tiles") or {}).get("side") or {}
+    polys = []
+    for poly in side.get("polygons", []):
+        polys.append([(float(pt[0]), float(pt[1])) for pt in poly
+                      if isinstance(pt, (list, tuple)) and len(pt) >= 2])
+    return PatternBrush(
+        tile_width=float(side.get("width", 0.0)),
+        tile_height=float(side.get("height", 0.0)),
+        side=polys,
+        scale=float(brush.get("scale", 100.0)),
+        spacing=float(brush.get("spacing", 0.0)),
+        flip_across=bool(brush.get("flip_across", False)),
+        flip_along=bool(brush.get("flip_along", False)),
+        stroke_weight=stroke_weight,
+    )
+
+
 def _fill_polygon(painter: QPainter, pts) -> None:
     if len(pts) < 3:
         return
@@ -171,6 +194,18 @@ def _draw_brushed_path(painter: QPainter, d, stroke, slug: str) -> bool:
     if art is not None:
         from algorithms.art_along_path import art_along_path
         polys = art_along_path(d, art)
+        if not polys:
+            return True
+        painter.setBrush(QBrush(color))
+        painter.setPen(QPen(0))
+        for poly in polys:
+            _fill_polygon(painter, poly)
+        return True
+
+    pat = _pattern_from_dict(brush, stroke_weight)
+    if pat is not None:
+        from algorithms.pattern_along_path import pattern_along_path
+        polys = pattern_along_path(d, pat)
         if not polys:
             return True
         painter.setBrush(QBrush(color))

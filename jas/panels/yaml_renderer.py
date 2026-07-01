@@ -3515,6 +3515,41 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
                     qp.closeSubpath()
                     p.drawPath(qp)
                 p.end()
+            elif btype == "pattern":
+                # Tile the side artwork along a short horizontal path.
+                from algorithms.pattern_along_path import (
+                    PatternBrush, pattern_along_path,
+                )
+                from geometry.element import MoveTo, LineTo
+                side = (brush.get("tiles") or {}).get("side") or {}
+                polys_in = []
+                for poly in side.get("polygons", []):
+                    polys_in.append([(float(pt[0]), float(pt[1]))
+                                     for pt in poly if len(pt) >= 2])
+                pat = PatternBrush(
+                    tile_width=float(side.get("width", 0.0)),
+                    tile_height=float(side.get("height", 0.0)),
+                    side=polys_in, scale=100.0,
+                    spacing=float(brush.get("spacing", 0.0)),
+                    flip_across=bool(brush.get("flip_across", False)),
+                    flip_along=bool(brush.get("flip_along", False)),
+                    stroke_weight=10.0,
+                )
+                warped = pattern_along_path([MoveTo(4.0, 20.0), LineTo(36.0, 20.0)], pat)
+                p = QPainter(self)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                p.setPen(QPen(Qt.NoPen))
+                p.setBrush(QColor("#cccccc"))
+                for poly in warped:
+                    if len(poly) < 3:
+                        continue
+                    qp = QPainterPath()
+                    qp.moveTo(QPointF(poly[0][0], poly[0][1]))
+                    for x, y in poly[1:]:
+                        qp.lineTo(QPointF(x, y))
+                    qp.closeSubpath()
+                    p.drawPath(qp)
+                p.end()
 
     return _NibPreview()
 
