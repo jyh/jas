@@ -4439,11 +4439,7 @@ and handle_eye_click path evt =
     end else begin
       Layers_panel_state.solo_state := None;
       let e = Document.get_element d path in
-      let new_vis = match Element.get_visibility e with
-        | Element.Preview -> Element.Outline
-        | Element.Outline -> Element.Invisible
-        | Element.Invisible -> Element.Preview
-      in
+      let new_vis = Element.cycle_visibility (Element.get_visibility e) in
       (* Undoable edit (one self-bracketed undo step) via edit_document. *)
       m#edit_document (Document.replace_element d path (Element.set_visibility new_vis e))
     end

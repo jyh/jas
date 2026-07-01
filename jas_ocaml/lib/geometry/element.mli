@@ -770,6 +770,10 @@ val get_visibility : element -> visibility
 val get_blend_mode : element -> blend_mode
 val set_visibility : visibility -> element -> element
 
+val cycle_visibility : visibility -> visibility
+(** Advance one step in the Layers eye cycle: Preview -> Outline ->
+    Invisible -> Preview. Pure; shared by the tree-row eye button. *)
+
 val get_transform : element -> transform option
 val set_transform : transform option -> element -> element
 

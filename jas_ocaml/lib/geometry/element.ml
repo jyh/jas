@@ -1451,6 +1451,15 @@ let set_visibility v = function
   | Live (Recorded rec_) -> Live (Recorded { rec_ with rec_visibility = v })
   | Live (Generated gen) -> Live (Generated { gen with gen_visibility = v })
 
+(* Advance a visibility one step in the Layers-panel eye cycle:
+   Preview -> Outline -> Invisible -> Preview. Shared by the tree-row eye
+   button; kept pure so it is directly testable (matches the Rust / Swift /
+   Python cycle order). *)
+let cycle_visibility = function
+  | Preview -> Outline
+  | Outline -> Invisible
+  | Invisible -> Preview
+
 let get_transform = function
   | Line { transform; _ } | Rect { transform; _ } | Circle { transform; _ }
   | Ellipse { transform; _ } | Polyline { transform; _ }
