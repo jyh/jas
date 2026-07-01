@@ -159,7 +159,9 @@ let distribute_along_axis elements reference axis anchor bounds_fn =
       let (_, e) = elements_arr.(i) in
       (i, anchor_position (bounds_fn e) axis anchor)
     ) in
-    Array.sort (fun (_, a) (_, b) -> compare a b) indexed;
+    (* stable_sort: ties keep original element order, matching Python
+       list.sort / Rust sort_by so distribute is cross-language identical. *)
+    Array.stable_sort (fun (_, a) (_, b) -> compare a b) indexed;
     let (min_anchor, max_anchor) =
       match reference with
       | Selection _ | Key_object _ ->
@@ -236,7 +238,8 @@ let distribute_spacing_along_axis elements reference axis explicit_gap bounds_fn
       let (lo, hi, _) = axis_extent (bounds_fn e) axis in
       (i, lo, hi)
     ) in
-    Array.sort (fun (_, a, _) (_, b, _) -> compare a b) sorted;
+    (* stable_sort: ties keep original element order (see above). *)
+    Array.stable_sort (fun (_, a, _) (_, b, _) -> compare a b) sorted;
 
     let new_mins = match explicit_gap with
       | Some gap ->

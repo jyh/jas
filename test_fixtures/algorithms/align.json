@@ -194,6 +194,18 @@
       "use_preview_bounds": false,
       "explicit_gap": null,
       "translations": []
+    },
+    {
+      "name": "distribute_left_tied_anchor",
+      "_doc": "rects [1] and [2] share left edge 30 (a tie). distribute_left spaces left edges to 0/30/60/90. The sort must be STABLE: ties keep original order, so [2] takes slot 60 (dx +30) and [1] stays put. An unstable sort would swap them and move [1] instead — the OCaml Array.sort / Swift .sort divergence this pins.",
+      "op": "distribute_left",
+      "rects": [[0, 0, 10, 10], [30, 0, 10, 10], [30, 0, 10, 10], [90, 0, 10, 10]],
+      "reference": {"kind": "selection"},
+      "use_preview_bounds": false,
+      "explicit_gap": null,
+      "translations": [
+        {"path": [2], "dx": 30.0, "dy": 0.0}
+      ]
     }
   ]
 }

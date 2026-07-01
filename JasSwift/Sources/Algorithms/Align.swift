@@ -236,7 +236,10 @@ public func distributeAlongAxis(
     var indexed: [(Int, Double)] = elements.enumerated().map { (i, pair) in
         (i, alignAnchorPosition(boundsFn(pair.1), axis, anchor))
     }
-    indexed.sort { $0.1 < $1.1 }
+    // Tie-break on original index: Swift's sort is not guaranteed stable, so
+    // ties must keep original element order to match Python list.sort / Rust
+    // sort_by (Array.stable_sort in OCaml) — otherwise distribute diverges.
+    indexed.sort { $0.1 != $1.1 ? $0.1 < $1.1 : $0.0 < $1.0 }
 
     let (minAnchor, maxAnchor): (Double, Double) = switch reference {
     case .selection, .keyObject:
@@ -347,7 +350,8 @@ public func distributeSpacingAlongAxis(
         let (lo, hi, _) = alignAxisExtent(boundsFn(pair.1), axis)
         return (i, lo, hi)
     }
-    sorted.sort { $0.1 < $1.1 }
+    // Stable tie-break on original index (see distribute-anchor above).
+    sorted.sort { $0.1 != $1.1 ? $0.1 < $1.1 : $0.0 < $1.0 }
 
     let newMins: [Double]
     if let gap = explicitGap {
