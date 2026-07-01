@@ -274,6 +274,50 @@ def main():
             errors += 1
             continue
 
+        # Oracle check: the app-vs-app comparison below only proves the four
+        # apps AGREE, not that they are CORRECT — a shared bug (features
+        # propagate by copying logic) produces the same wrong value in all
+        # four and stays green. Where a fixture pins a golden (`expected` per
+        # case, or `translations` per align vector), also assert the reference
+        # app reproduces it. Restricted to the simple tolerance/exact
+        # strategies; the boolean/planar/shape strategies carry differently
+        # shaped goldens compared by their own logic.
+        has_name_wrapper = (
+            len(ref_output) == 0
+            or (isinstance(ref_output[0], dict) and "name" in ref_output[0])
+        )
+        if strategy in ("tolerance", "exact"):
+            with open(fixture_path) as fh:
+                fixture_doc = json.load(fh)
+            fixture_cases = (fixture_doc if isinstance(fixture_doc, list)
+                             else fixture_doc.get("vectors", []))
+            for idx, out_vec in enumerate(ref_output):
+                if idx >= len(fixture_cases):
+                    break
+                case = fixture_cases[idx]
+                golden = case.get("expected", case.get("translations"))
+                if golden is None:
+                    continue  # no golden pinned for this vector
+                # Extract the comparable body: {name,result} wrapper for most
+                # algos, {translations:[...]} for align (unwrap to the list).
+                if has_name_wrapper:
+                    body = out_vec["result"]
+                elif isinstance(out_vec, dict) and "translations" in out_vec:
+                    body = out_vec["translations"]
+                else:
+                    body = out_vec
+                name = case.get("name", f"#{idx}")
+                oracle_ok = (values_close(golden, body, tol) if strategy == "tolerance"
+                             else golden == body)
+                if oracle_ok:
+                    passed += 1
+                else:
+                    print(f"  FAIL: {algo}/{name} [oracle: {ref_lang} vs pinned expected]")
+                    if args.verbose:
+                        print(f"    expected: {json.dumps(golden, sort_keys=True)[:200]}")
+                        print(f"    {ref_lang}:   {json.dumps(body, sort_keys=True)[:200]}")
+                    failed += 1
+
         # Run each comparison language
         for lang in compare_langs:
             if (lang, algo) in SKIP_LANG_ALGO:
