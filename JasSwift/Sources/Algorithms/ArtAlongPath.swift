@@ -68,7 +68,7 @@ public func artAlongPath(_ commands: [PathCommand], _ brush: ArtBrush) -> [[[Dou
 }
 
 /// Point, and tangent (radians), at arc-length `s` along the polyline.
-private func pointAtArcLength(_ pts: [(Double, Double)], _ cum: [Double],
+func pointAtArcLength(_ pts: [(Double, Double)], _ cum: [Double],
                              _ total: Double, _ sIn: Double) -> (Double, Double, Double) {
     let s = min(max(sIn, 0.0), total)
     var lo = 1, hi = pts.count - 1
@@ -88,7 +88,7 @@ private func pointAtArcLength(_ pts: [(Double, Double)], _ cum: [Double],
 }
 
 /// Flatten the first subpath of `commands` into a polyline.
-private func flattenArtPath(_ commands: [PathCommand]) -> [(Double, Double)] {
+func flattenArtPath(_ commands: [PathCommand]) -> [(Double, Double)] {
     var out: [(Double, Double)] = []
     var cx = 0.0, cy = 0.0, sx = 0.0, sy = 0.0
     var started = false
