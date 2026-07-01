@@ -245,6 +245,8 @@ struct YamlElementView: View {
                 renderTreeView()
             case "element_preview":
                 renderElementPreview()
+            case "brush_preview":
+                renderBrushPreview()
             case "tabs":
                 renderTabs()
             case "icon":
@@ -2534,6 +2536,31 @@ struct YamlElementView: View {
             .fill(SwiftUI.Color.white)
             .overlay(Rectangle().stroke(SwiftUI.Color.gray, lineWidth: 1))
             .frame(width: CGFloat(sz), height: CGFloat(sz))
+    }
+
+    /// A brush tip / stroke preview drawn from the enclosing tile's `brush`
+    /// loop variable. Calligraphic draws a nib ellipse — `size` scales the
+    /// display diameter, `roundness` flattens the minor axis, `angle` rotates
+    /// it; other types fall back to an empty box until their preview lands.
+    /// Manual-floor GUI (widget_tree pins only the `brush_preview` kind).
+    @ViewBuilder
+    private func renderBrushPreview() -> some View {
+        let brush = context["brush"] as? [String: Any] ?? [:]
+        if (brush["type"] as? String) == "calligraphic" {
+            let size = Double(containerNumericDim(brush["size"]) ?? 5)
+            let roundness = Double(containerNumericDim(brush["roundness"]) ?? 100)
+            let angle = Double(containerNumericDim(brush["angle"]) ?? 0)
+            let major = min(max(size * 1.3, 2.0), 13.0)
+            let minor = min(max(major * (roundness / 100.0), 1.0), major)
+            let color: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
+            SwiftUI.Ellipse()
+                .fill(color)
+                .frame(width: CGFloat(major), height: CGFloat(minor))
+                .rotationEffect(.degrees(angle))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            SwiftUI.Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     // MARK: - Placeholder

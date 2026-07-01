@@ -3433,6 +3433,43 @@ def _render_element_preview(el, store, ctx, dispatch_fn):
     return frame
 
 
+def _render_brush_preview(el, store, ctx, dispatch_fn):
+    """Brush tip / stroke preview drawn from the enclosing tile's ``brush``
+    loop variable. Calligraphic draws a nib ellipse — ``size`` scales the
+    display diameter, ``roundness`` flattens the minor axis, ``angle``
+    rotates it; other types fall back to an empty box until their preview
+    lands. Manual-floor GUI (the widget_tree gate pins only the
+    ``brush_preview`` kind, not the pixels)."""
+    from PySide6.QtGui import QPainter, QPen
+    from PySide6.QtCore import QPointF
+    brush = ctx.get("brush") or {}
+
+    class _NibPreview(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.setFixedSize(48, 16)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        def paintEvent(self, _ev):
+            if brush.get("type") != "calligraphic":
+                return
+            size = float(brush.get("size") or 5)
+            roundness = float(brush.get("roundness") or 100)
+            angle = float(brush.get("angle") or 0)
+            major = min(max(size * 1.3, 2.0), 13.0)
+            minor = min(max(major * (roundness / 100.0), 1.0), major)
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.translate(24, 8)
+            p.rotate(angle)
+            p.setPen(QPen(Qt.NoPen))
+            p.setBrush(QColor("#cccccc"))
+            p.drawEllipse(QPointF(0, 0), major / 2.0, minor / 2.0)
+            p.end()
+
+    return _NibPreview()
+
+
 def _render_placeholder(el, store, ctx, dispatch_fn):
     summary = el.get("summary", el.get("type", "?"))
     # Opacity panel previews (OPACITY.md §Preview interactions):
@@ -4381,6 +4418,7 @@ _RENDERERS = {
     "fill_stroke_widget": lambda el, s, c, d: _render_fill_stroke_widget(el, s, c, d),
     "tree_view": _render_tree_view,
     "element_preview": _render_element_preview,
+    "brush_preview": _render_brush_preview,
     "dropdown": _render_dropdown,
     "tabs": _render_tabs,
     "placeholder": _render_placeholder,
