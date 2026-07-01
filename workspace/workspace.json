@@ -11888,6 +11888,13 @@
                     "bind": {
                       "selected_in": "panel.selected_brushes"
                     },
+                    "children": [
+                      {
+                        "type": "brush_preview",
+                        "summary": "Preview of {{brush.name}}",
+                        "description": "Visual preview of the brush tip / stroke, read from the enclosing tile's `brush` loop variable.\n"
+                      }
+                    ],
                     "behavior": [
                       {
                         "event": "click",

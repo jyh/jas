@@ -45,6 +45,7 @@ public enum WidgetTree {
         "separator", "spacer", "disclosure", "panel",
         "fill_stroke_widget", "tree_view", "element_preview", "tabs",
         "icon_button_group", "reference_point_widget",
+        "brush_preview",
         "placeholder",
     ]
 

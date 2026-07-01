@@ -32,7 +32,7 @@ use super::expr_types::Value as EVal;
 /// and the `panel_widget_tree.json` golden enforces they stay in sync — a
 /// drifted copy flips a `kind` from its `type` to "placeholder" (or back) and
 /// reddens the cross-app gate.
-const CANONICAL_WIDGET_KINDS: [&str; 37] = [
+const CANONICAL_WIDGET_KINDS: [&str; 38] = [
     "container", "row", "col", "grid",
     "text", "button", "icon", "icon_button", "icon_select",
     "slider", "number_input", "text_input", "length_input",
@@ -42,6 +42,7 @@ const CANONICAL_WIDGET_KINDS: [&str; 37] = [
     "separator", "spacer", "disclosure", "panel",
     "fill_stroke_widget", "tree_view", "element_preview", "tabs",
     "icon_button_group", "reference_point_widget",
+    "brush_preview",
     "placeholder",
 ];
 

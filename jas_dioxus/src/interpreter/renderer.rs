@@ -109,6 +109,7 @@ fn render_el(
         "panel" => render_panel(el, ctx, rctx),
         "tree_view" => render_tree_view(el, ctx, rctx),
         "element_preview" => render_element_preview(el, ctx, rctx),
+        "brush_preview" => render_brush_preview(el, ctx, rctx),
         "dropdown" => render_layers_filter_dropdown(el, ctx, rctx),
         "tabs" => render_tabs(el, ctx, rctx),
         _ => render_placeholder(el, ctx, rctx),
@@ -10011,6 +10012,41 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 }
             }
         }
+    }
+}
+
+/// Render a brush_preview widget: a small preview of the brush tip / stroke,
+/// read from the enclosing tile's `brush` loop variable. Calligraphic draws
+/// a nib ellipse — `size` scales the display diameter, `roundness` flattens
+/// the minor axis, `angle` rotates it. Other brush types fall back to an
+/// empty box until their stroke-sample preview lands. Manual-floor GUI
+/// (the widget_tree gate only pins the `brush_preview` kind, not the pixels).
+fn render_brush_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let brush = ctx.get("brush");
+    let btype = brush.and_then(|b| b.get("type")).and_then(|v| v.as_str()).unwrap_or("");
+    if btype == "calligraphic" {
+        let size = brush.and_then(|b| b.get("size")).and_then(|v| v.as_f64()).unwrap_or(5.0);
+        let roundness = brush.and_then(|b| b.get("roundness")).and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let angle = brush.and_then(|b| b.get("angle")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        // Map pt size -> display px so the nib fits the ~16px-tall tile;
+        // roundness flattens the minor axis (100 = circle).
+        let major = (size * 1.3).clamp(2.0, 13.0);
+        let minor = (major * (roundness / 100.0)).clamp(1.0, major);
+        let rx = major / 2.0;
+        let ry = minor / 2.0;
+        let svg = format!(
+            r#"<svg viewBox="0 0 48 16" width="48" height="16" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"><ellipse cx="24" cy="8" rx="{rx}" ry="{ry}" fill="var(--jas-text,#ccc)" transform="rotate({angle} 24 8)"/></svg>"#
+        );
+        rsx! {
+            div {
+                id: "{id}",
+                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
+                dangerous_inner_html: "{svg}",
+            }
+        }
+    } else {
+        rsx! { div { id: "{id}", style: "width:100%;height:100%;pointer-events:none;" } }
     }
 }
 
