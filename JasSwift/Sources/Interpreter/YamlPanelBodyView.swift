@@ -3780,8 +3780,8 @@ struct TreeViewContent: View {
             }
         } else {
             soloState = nil
-            let newVis = cycleVisibility(e.visibility)
-            model.editDocument(model.document.replaceElement(path, with: e.withVisibility(newVis)))
+            // Cycle visibility + deselect-on-invisible, one undoable edit.
+            model.editDocument(model.document.cyclingElementVisibility(at: path))
         }
     }
 

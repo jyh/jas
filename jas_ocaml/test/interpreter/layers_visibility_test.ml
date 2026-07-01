@@ -33,6 +33,33 @@ let test_applies_to_element () =
   let e2 = set_visibility (cycle_visibility (get_visibility e1)) e1 in
   Alcotest.check vis "after 2 cycles invisible" Invisible (get_visibility e2)
 
+(* cycle_element_visibility_at: the eye handler cycles the element at [path]
+   and drops it from the selection when it becomes Invisible. Mirrors Rust
+   cycle_element_visibility_at + the Python eye handler. *)
+let test_deselect_on_invisible () =
+  let e = Jas.Element.make_rect 0.0 0.0 10.0 10.0 in
+  let path = [ 0 ] in
+  let selection =
+    Jas.Document.PathMap.add path
+      (Jas.Document.make_element_selection path)
+      Jas.Document.PathMap.empty
+  in
+  let doc = Jas.Document.make_document ~selection [| e |] in
+  Alcotest.(check bool) "selected initially" true
+    (Jas.Document.PathMap.mem path doc.Jas.Document.selection);
+  (* Preview -> Outline: still selected. *)
+  let d1 = Jas.Document.cycle_element_visibility_at doc path in
+  Alcotest.check vis "outline" Jas.Element.Outline
+    (Jas.Element.get_visibility (Jas.Document.get_element d1 path));
+  Alcotest.(check bool) "still selected at outline" true
+    (Jas.Document.PathMap.mem path d1.Jas.Document.selection);
+  (* Outline -> Invisible: deselected. *)
+  let d2 = Jas.Document.cycle_element_visibility_at d1 path in
+  Alcotest.check vis "invisible" Jas.Element.Invisible
+    (Jas.Element.get_visibility (Jas.Document.get_element d2 path));
+  Alcotest.(check bool) "deselected at invisible" false
+    (Jas.Document.PathMap.mem path d2.Jas.Document.selection)
+
 let () =
   Alcotest.run "LayersVisibility"
     [
@@ -41,5 +68,6 @@ let () =
           Alcotest.test_case "order" `Quick test_cycle_order;
           Alcotest.test_case "full loop" `Quick test_full_loop;
           Alcotest.test_case "applies to element" `Quick test_applies_to_element;
+          Alcotest.test_case "deselect on invisible" `Quick test_deselect_on_invisible;
         ] );
     ]

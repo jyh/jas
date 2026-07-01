@@ -291,6 +291,24 @@ public struct Document: Equatable {
         )
     }
 
+    /// Layers eye-button (regular click): cycle the visibility of the element
+    /// at `path` Preview -> Outline -> Invisible -> Preview and, when it
+    /// becomes Invisible, drop it (and its descendants) from the selection.
+    /// Pure. Mirrors Rust `cycle_element_visibility_at`, OCaml
+    /// `Document.cycle_element_visibility_at`, and the Python eye handler.
+    public func cyclingElementVisibility(at path: ElementPath) -> Document {
+        let e = getElement(path)
+        let newVis = e.visibility.cycled
+        let doc = replaceElement(path, with: e.withVisibility(newVis))
+        if newVis == .invisible {
+            let filtered = doc.selection.filter {
+                !($0.path == path || $0.path.starts(with: path))
+            }
+            return doc.replacing(selection: filtered)
+        }
+        return doc
+    }
+
     /// Return the ElementSelection for the given path, or nil.
     public func getElementSelection(_ path: ElementPath) -> ElementSelection? {
         selection.first { $0.path == path }
