@@ -11,6 +11,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# repo root, for the shared workspace_interpreter.length (the length reference).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from algorithms.hit_test import (
     point_in_rect, segments_intersect, segment_intersects_rect,
@@ -68,6 +70,7 @@ def main():
         "measure": run_measure,
         "element_bounds": run_element_bounds,
         "flatten": run_flatten,
+        "length": run_length,
         "hit_test": run_hit_test,
         "boolean": run_boolean,
         "boolean_normalize": run_boolean_normalize,
@@ -131,6 +134,22 @@ def run_flatten(vectors):
         d = getattr(elem, "d", ())
         pts = flatten_path_commands(d)
         results.append({"name": tc["name"], "result": [[x, y] for (x, y) in pts]})
+    return results
+
+
+# ---------------------------------------------------------------
+# length (unit-aware parse "12 px" -> pt, and format pt -> "16 px")
+# ---------------------------------------------------------------
+
+def run_length(vectors):
+    from workspace_interpreter.length import parse_length, format_length
+    results = []
+    for tc in vectors:
+        if tc["function"] == "parse":
+            r = parse_length(tc["input"], tc["default_unit"])
+        else:  # format
+            r = format_length(tc.get("pt"), tc["unit"], tc["precision"])
+        results.append({"name": tc["name"], "result": r})
     return results
 
 

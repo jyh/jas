@@ -19,6 +19,7 @@ use jas_dioxus::algorithms::planar::{FaceId, PlanarGraph};
 use jas_dioxus::algorithms::shape_recognize::{recognize, RecognizeConfig, RecognizedShape};
 use jas_dioxus::algorithms::text_layout;
 use jas_dioxus::geometry::element::{PathCommand, Element, flatten_path_commands};
+use jas_dioxus::interpreter::length;
 
 use serde_json::{json, Value};
 
@@ -65,6 +66,7 @@ fn main() {
         "measure" => run_measure(&vectors),
         "element_bounds" => run_element_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
+        "length" => run_length(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
@@ -142,6 +144,33 @@ fn run_flatten(vectors: &[Value]) -> Vec<Value> {
             };
             let pts = flatten_path_commands(&d);
             let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// length (unit-aware parse "12 px" -> pt, and format pt -> "16 px")
+// ---------------------------------------------------------------
+
+fn run_length(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let result: Value = if tc["function"].as_str() == Some("parse") {
+                let input = tc["input"].as_str().unwrap_or("");
+                let du = tc["default_unit"].as_str().unwrap_or("");
+                match length::parse(input, du) {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            } else {
+                let pt = tc.get("pt").and_then(|v| v.as_f64());
+                let unit = tc["unit"].as_str().unwrap_or("");
+                let precision = tc["precision"].as_u64().unwrap_or(2) as usize;
+                json!(length::format(pt, unit, precision))
+            };
             json!({"name": name, "result": result})
         })
         .collect()
