@@ -77,11 +77,19 @@ pub enum Expr {
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Set when a required token is missing (a failed `expect`, a malformed
+    /// let/assign/lambda header). Poisons the whole parse so `parse` returns
+    /// None -> the expression evaluates to null, matching the Python and OCaml
+    /// reference parsers which raise on the same input. Without this, a
+    /// structurally-broken expression like `if c then t` (no else),
+    /// `let x = 5 x`, or `fun x 5` would build a complete AST and evaluate to
+    /// a value in Rust/Swift but null in Python/OCaml.
+    error: bool,
 }
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self { tokens, pos: 0, error: false }
     }
 
     fn peek(&self) -> &TokenKind {
@@ -105,6 +113,9 @@ impl Parser {
             self.pos += 1;
             true
         } else {
+            // A required token is missing -> the input is malformed. Poison the
+            // parse so the whole expression rejects to null (see `error`).
+            self.error = true;
             false
         }
     }
@@ -120,6 +131,13 @@ impl Parser {
             return None;
         }
         let node = self.parse_sequence();
+        // A poisoned parse (a missing required token: no `else`, no `in`, no
+        // `->`, a bad let/assign target) rejects to null, matching Python/OCaml
+        // which raise on the same input. Checked before the trailing-token
+        // guard because a poisoned parse may have stopped short of EOF.
+        if self.error {
+            return None;
+        }
         // Strict: a complete expression must consume all its tokens. Leftover
         // tokens mean malformed input (an unsupported operator that lexed to
         // Error, a stray token, a typo), so reject rather than silently
@@ -153,7 +171,10 @@ impl Parser {
             // Expect IDENT
             let name = match self.advance_clone() {
                 TokenKind::Ident(n) => n,
-                _ => return Expr::Literal(LiteralKind::Null), // error fallback
+                _ => {
+                    self.error = true; // `let` without an identifier target
+                    return Expr::Literal(LiteralKind::Null);
+                }
             };
             self.expect(&TokenKind::Equals);
             let value = self.parse_sequence();
@@ -185,6 +206,7 @@ impl Parser {
                 }
             }
             // Error: assignment target must be an identifier
+            self.error = true;
             return Expr::Literal(LiteralKind::Null);
         }
         node

@@ -331,6 +331,14 @@ indirect enum Expr {
 private class Parser {
     let tokens: [Token]
     var pos: Int = 0
+    /// Set when a required token is missing (a failed `expect`, a malformed
+    /// let/assign target). Poisons the whole parse so `parse` returns nil ->
+    /// the expression evaluates to null, matching the Python and OCaml
+    /// reference parsers which raise on the same input. Without this, a
+    /// structurally-broken expression like `if c then t` (no else),
+    /// `let x = 5 x`, or `fun x 5` would build a complete AST and evaluate to
+    /// a value in Swift/Rust but null in Python/OCaml.
+    var error = false
 
     init(_ tokens: [Token]) {
         self.tokens = tokens
@@ -353,6 +361,9 @@ private class Parser {
             pos += 1
             return true
         }
+        // A required token is missing -> the input is malformed. Poison the
+        // parse so the whole expression rejects to null (see `error`).
+        error = true
         return false
     }
 
@@ -411,6 +422,11 @@ private class Parser {
     func parse() -> Expr? {
         if case .eof = peek() { return nil }
         let node = parseSequence()
+        // A poisoned parse (a missing required token: no `else`, no `in`, no
+        // `->`, a bad let/assign target) rejects to null, matching Python/OCaml
+        // which raise on the same input. Checked before the trailing-token
+        // guard because a poisoned parse may have stopped short of EOF.
+        if error { return nil }
         // Strict: a complete expression must consume all its tokens. Leftover
         // tokens mean malformed input (an unsupported operator that lexed to
         // error, a stray token, a typo), so reject rather than silently
@@ -435,6 +451,7 @@ private class Parser {
         if case .let = peek() {
             pos += 1
             guard case .ident(let name) = peek() else {
+                error = true // `let` without an identifier target
                 return .literal(.null)
             }
             pos += 1
@@ -457,7 +474,8 @@ private class Parser {
                 let value = parseAssign()
                 return .assign(target: segs[0], value: value)
             }
-            // Parse error — fall through with null
+            // Parse error — assignment target must be an identifier
+            error = true
             return .literal(.null)
         }
         return node

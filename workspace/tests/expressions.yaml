@@ -203,6 +203,29 @@ tests:
     type: "null"
     note: "valid (1 + 2) followed by garbage — rejected, not truncated to 3"
 
+  # Structural parse errors — a required keyword/token is missing, so the
+  # whole expression rejects to null in every app. (Rust/Swift once recovered
+  # from these, building a partial AST that evaluated to a value while
+  # OCaml/Python rejected to null; the parsers now poison on a failed
+  # `expect`.)
+  - expr: "if true then 1"
+    state: {}
+    expected: null
+    type: "null"
+    note: "ternary with no else clause — rejected, not Ternary(true, 1, null)"
+
+  - expr: "let x = 5 x"
+    state: {}
+    expected: null
+    type: "null"
+    note: "let binding with no 'in' keyword — rejected"
+
+  - expr: "fun x 5"
+    state: {}
+    expected: null
+    type: "null"
+    note: "lambda with no '->' arrow — rejected"
+
   # Function calls
   - expr: "hsb_h(#ff0000)"
     expected: 0

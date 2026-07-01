@@ -238,6 +238,24 @@
     "type": "null"
   },
   {
+    "expr": "if true then 1",
+    "state": {},
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "let x = 5 x",
+    "state": {},
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "fun x 5",
+    "state": {},
+    "expected": null,
+    "type": "null"
+  },
+  {
     "expr": "hsb_h(#ff0000)",
     "expected": 0,
     "type": "number"
