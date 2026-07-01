@@ -1001,6 +1001,89 @@ def _quadratic_eval(p0: float, p1: float, p2: float, t: float) -> float:
     return u*u*p0 + 2*u*t*p1 + t*t*p2
 
 
+def _arc_extrema_points(
+    x0: float, y0: float,
+    rx: float, ry: float, x_rotation_deg: float,
+    large_arc: bool, sweep: bool,
+    x: float, y: float,
+) -> list[tuple[float, float]]:
+    """Candidate (x, y) extrema for an SVG arc: the two endpoints plus any
+    cardinal-tangent points of the underlying ellipse that fall within the
+    arc's actual sweep range. Used by path bounds to fix the "ArcTo bbox
+    skips the peak" gap. Degenerate arcs (zero radius) collapse to the
+    endpoint pair. SVG 1.1 §F.6 endpoint-to-center parameterization.
+
+    Mirrors jas_dioxus geometry/element.rs::arc_extrema_points exactly so
+    path bounds are byte-equivalent across all apps (gated by the
+    element_bounds conformance corpus)."""
+    if abs(rx) < 1e-12 or abs(ry) < 1e-12:
+        return [(x0, y0), (x, y)]
+    two_pi = 2.0 * math.pi
+    phi = math.radians(x_rotation_deg)
+    cos_phi = math.cos(phi)
+    sin_phi = math.sin(phi)
+
+    dx = (x0 - x) / 2.0
+    dy = (y0 - y) / 2.0
+    x1p = cos_phi * dx + sin_phi * dy
+    y1p = -sin_phi * dx + cos_phi * dy
+    rx_eff = abs(rx)
+    ry_eff = abs(ry)
+    lam = (x1p * x1p) / (rx_eff * rx_eff) + (y1p * y1p) / (ry_eff * ry_eff)
+    if lam > 1.0:
+        s = math.sqrt(lam)
+        rx_eff *= s
+        ry_eff *= s
+    sign = -1.0 if large_arc == sweep else 1.0
+    num = max(
+        rx_eff * rx_eff * ry_eff * ry_eff
+        - rx_eff * rx_eff * y1p * y1p
+        - ry_eff * ry_eff * x1p * x1p,
+        0.0,
+    )
+    den = rx_eff * rx_eff * y1p * y1p + ry_eff * ry_eff * x1p * x1p
+    factor = 0.0 if den < 1e-12 else sign * math.sqrt(num / den)
+    cxp = factor * (rx_eff * y1p) / ry_eff
+    cyp = -factor * (ry_eff * x1p) / rx_eff
+    cx_arc = cos_phi * cxp - sin_phi * cyp + (x0 + x) / 2.0
+    cy_arc = sin_phi * cxp + cos_phi * cyp + (y0 + y) / 2.0
+
+    theta1 = math.atan2((y1p - cyp) / ry_eff, (x1p - cxp) / rx_eff)
+    theta2 = math.atan2((-y1p - cyp) / ry_eff, (-x1p - cxp) / rx_eff)
+    delta = theta2 - theta1
+    if not sweep and delta > 0.0:
+        delta -= two_pi
+    elif sweep and delta < 0.0:
+        delta += two_pi
+
+    tx = math.atan2(-ry_eff * sin_phi, rx_eff * cos_phi)
+    ty = math.atan2(ry_eff * cos_phi, rx_eff * sin_phi)
+    candidates = (tx, tx + math.pi, ty, ty + math.pi)
+
+    def in_sweep(t: float) -> bool:
+        dt = t - theta1
+        if delta >= 0.0:
+            while dt < 0.0:
+                dt += two_pi
+            while dt > two_pi:
+                dt -= two_pi
+            return dt <= delta + 1e-9
+        else:
+            while dt > 0.0:
+                dt -= two_pi
+            while dt < -two_pi:
+                dt += two_pi
+            return dt >= delta - 1e-9
+
+    points = [(x0, y0), (x, y)]
+    for t in candidates:
+        if in_sweep(t):
+            px = cx_arc + rx_eff * cos_phi * math.cos(t) - ry_eff * sin_phi * math.sin(t)
+            py = cy_arc + rx_eff * sin_phi * math.cos(t) + ry_eff * cos_phi * math.sin(t)
+            points.append((px, py))
+    return points
+
+
 def _path_bounds(d) -> tuple[float, float, float, float]:
     """Compute tight bounds by finding Bezier extrema."""
     xs: list[float] = []
@@ -1051,9 +1134,11 @@ def _path_bounds(d) -> tuple[float, float, float, float]:
             case SmoothQuadTo(x, y):
                 xs.append(x); ys.append(y)
                 cx, cy = x, y
-            case ArcTo(_, _, _, _, _, x, y):
-                # TODO: compute true arc extrema
-                xs.append(x); ys.append(y)
+            case ArcTo(rx, ry, x_rotation, large_arc, sweep, x, y):
+                for px, py in _arc_extrema_points(
+                    cx, cy, rx, ry, x_rotation, large_arc, sweep, x, y
+                ):
+                    xs.append(px); ys.append(py)
                 cx, cy = x, y
             case ClosePath():
                 cx, cy = sx, sy
@@ -2325,12 +2410,14 @@ def flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
     """Flatten path commands into a polyline by evaluating Bezier curves."""
     pts: list[tuple[float, float]] = []
     cx, cy = 0.0, 0.0
+    sx, sy = 0.0, 0.0  # current subpath start (reset on each MoveTo)
     steps = FLATTEN_STEPS
     for cmd in d:
         match cmd:
             case MoveTo(x, y):
                 pts.append((x, y))
                 cx, cy = x, y
+                sx, sy = x, y
             case LineTo(x, y):
                 pts.append((x, y))
                 cx, cy = x, y
@@ -2351,8 +2438,11 @@ def flatten_path_commands(d: tuple) -> list[tuple[float, float]]:
                     pts.append((px, py))
                 cx, cy = x, y
             case ClosePath():
+                # Close to the CURRENT subpath start, not the whole-path first
+                # point — matters once there are >=2 subpaths (compound shapes,
+                # glyphs-with-holes, boolean outputs). Matches OCaml/Swift.
                 if pts:
-                    pts.append(pts[0])
+                    pts.append((sx, sy))
             case _:
                 # SmoothCurveTo, SmoothQuadTo, ArcTo — approximate as line
                 if hasattr(cmd, 'x') and hasattr(cmd, 'y'):

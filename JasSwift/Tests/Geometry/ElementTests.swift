@@ -203,9 +203,12 @@ import Testing
 }
 
 @Test func pathArcTo() {
+    // Semicircle from (0,0) to (50,0), r=25: bulges 25 units off the chord
+    // (extrema-aware bounds; endpoint-only would give height 0).
     let p = Path(d: [.moveTo(0, 0), .arcTo(rx: 25, ry: 25, rotation: 0, largeArc: true, sweep: false, x: 50, y: 0)])
     let b = p.bounds
     #expect(b.x == 0 && b.width == 50)
+    #expect(abs(b.y - 0) < 1e-9 && abs(b.height - 25) < 1e-9)
 }
 
 @Test func pathEmpty() {

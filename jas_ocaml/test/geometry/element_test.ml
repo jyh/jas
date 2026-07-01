@@ -182,10 +182,13 @@ let () =
         assert (x = 0.0 && w = 20.0);
         assert (abs_float (h -. 5.0) < 1e-10));
 
+      (* Semicircle from (0,0) to (50,0), r=25: bulges 25 units off the chord
+         (extrema-aware bounds; endpoint-only would give height 0). *)
       Alcotest.test_case "path with ArcTo" `Quick (fun () ->
         let pa = make_path [MoveTo (0.0, 0.0); ArcTo (25.0, 25.0, 0.0, true, false, 50.0, 0.0)] in
-        let (x, _, w, _) = bounds pa in
-        assert (x = 0.0 && w = 50.0));
+        let (x, y, w, h) = bounds pa in
+        assert (x = 0.0 && w = 50.0);
+        assert (Float.abs (y -. 0.0) < 1e-9 && Float.abs (h -. 25.0) < 1e-9));
 
       Alcotest.test_case "empty polyline" `Quick (fun () ->
         let epl = make_polyline [] in

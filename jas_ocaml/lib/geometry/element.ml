@@ -962,6 +962,81 @@ let quadratic_eval p0 p1 p2 t =
   let u = 1.0 -. t in
   u *. u *. p0 +. 2.0 *. u *. t *. p1 +. t *. t *. p2
 
+(* Candidate (x, y) extrema for an SVG arc: the two endpoints plus any
+   cardinal-tangent points of the underlying ellipse that fall within the
+   arc actual sweep range. Fixes the ArcTo bbox skips-the-peak gap.
+   Degenerate arcs (zero radius) collapse to the endpoint pair. SVG 1.1
+   section F.6 endpoint-to-center parameterization. Mirrors the Rust
+   reference (geometry/element.rs arc_extrema_points) so path bounds are
+   byte-equivalent across apps, gated by the element_bounds corpus. *)
+let arc_extrema_points x0 y0 rx ry x_rotation_deg large_arc sweep x y =
+  if Float.abs rx < 1e-12 || Float.abs ry < 1e-12 then
+    [ (x0, y0); (x, y) ]
+  else begin
+    let two_pi = 2.0 *. Float.pi in
+    let phi = x_rotation_deg *. Float.pi /. 180.0 in
+    let cos_phi = cos phi and sin_phi = sin phi in
+    let dx = (x0 -. x) /. 2.0 and dy = (y0 -. y) /. 2.0 in
+    let x1p = (cos_phi *. dx) +. (sin_phi *. dy) in
+    let y1p = (-. sin_phi *. dx) +. (cos_phi *. dy) in
+    let rx_eff0 = ref (Float.abs rx) and ry_eff0 = ref (Float.abs ry) in
+    let lambda =
+      (x1p *. x1p) /. (!rx_eff0 *. !rx_eff0)
+      +. (y1p *. y1p) /. (!ry_eff0 *. !ry_eff0)
+    in
+    if lambda > 1.0 then begin
+      let s = sqrt lambda in
+      rx_eff0 := !rx_eff0 *. s;
+      ry_eff0 := !ry_eff0 *. s
+    end;
+    let rx_eff = !rx_eff0 and ry_eff = !ry_eff0 in
+    let sign = if large_arc = sweep then -1.0 else 1.0 in
+    let num =
+      Float.max
+        ((rx_eff *. rx_eff *. ry_eff *. ry_eff)
+         -. (rx_eff *. rx_eff *. y1p *. y1p)
+         -. (ry_eff *. ry_eff *. x1p *. x1p))
+        0.0
+    in
+    let den = (rx_eff *. rx_eff *. y1p *. y1p) +. (ry_eff *. ry_eff *. x1p *. x1p) in
+    let factor = if den < 1e-12 then 0.0 else sign *. sqrt (num /. den) in
+    let cxp = factor *. (rx_eff *. y1p) /. ry_eff in
+    let cyp = -. factor *. (ry_eff *. x1p) /. rx_eff in
+    let cx_arc = (cos_phi *. cxp) -. (sin_phi *. cyp) +. ((x0 +. x) /. 2.0) in
+    let cy_arc = (sin_phi *. cxp) +. (cos_phi *. cyp) +. ((y0 +. y) /. 2.0) in
+    let theta1 = atan2 ((y1p -. cyp) /. ry_eff) ((x1p -. cxp) /. rx_eff) in
+    let theta2 = atan2 ((-. y1p -. cyp) /. ry_eff) ((-. x1p -. cxp) /. rx_eff) in
+    let delta0 = ref (theta2 -. theta1) in
+    if (not sweep) && !delta0 > 0.0 then delta0 := !delta0 -. two_pi
+    else if sweep && !delta0 < 0.0 then delta0 := !delta0 +. two_pi;
+    let delta = !delta0 in
+    let tx = atan2 (-. ry_eff *. sin_phi) (rx_eff *. cos_phi) in
+    let ty = atan2 (ry_eff *. cos_phi) (rx_eff *. sin_phi) in
+    let candidates = [ tx; tx +. Float.pi; ty; ty +. Float.pi ] in
+    let in_sweep t =
+      let dt = ref (t -. theta1) in
+      if delta >= 0.0 then begin
+        while !dt < 0.0 do dt := !dt +. two_pi done;
+        while !dt > two_pi do dt := !dt -. two_pi done;
+        !dt <= delta +. 1e-9
+      end
+      else begin
+        while !dt > 0.0 do dt := !dt -. two_pi done;
+        while !dt < -. two_pi do dt := !dt +. two_pi done;
+        !dt >= delta -. 1e-9
+      end
+    in
+    let points = ref [ (x, y); (x0, y0) ] in
+    List.iter (fun t ->
+      if in_sweep t then begin
+        let px = cx_arc +. (rx_eff *. cos_phi *. cos t) -. (ry_eff *. sin_phi *. sin t) in
+        let py = cy_arc +. (rx_eff *. sin_phi *. cos t) +. (ry_eff *. cos_phi *. sin t) in
+        points := (px, py) :: !points
+      end
+    ) candidates;
+    !points
+  end
+
 let path_cmd_bounds cmds =
   let xs = ref [] and ys = ref [] in
   let add_x x = xs := x :: !xs in
@@ -1009,8 +1084,9 @@ let path_cmd_bounds cmds =
     | SmoothQuadTo (x, y) ->
       add_x x; add_y y;
       cx := x; cy := y
-    | ArcTo (_, _, _, _, _, x, y) ->
-      add_x x; add_y y;
+    | ArcTo (rx, ry, x_rotation, large_arc, sweep, x, y) ->
+      List.iter (fun (px, py) -> add_x px; add_y py)
+        (arc_extrema_points !cx !cy rx ry x_rotation large_arc sweep x y);
       cx := x; cy := y
     | ClosePath ->
       cx := !sx; cy := !sy);
