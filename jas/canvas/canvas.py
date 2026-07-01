@@ -110,29 +110,76 @@ def _calligraphic_from_dict(brush: dict) -> CalligraphicBrush | None:
     )
 
 
-def _draw_brushed_path(painter: QPainter, d, stroke, slug: str) -> bool:
-    """Render a brushed Path: compute the Calligraphic outline
-    polygon and fill it with the stroke colour. Returns True when
-    handled; False to fall back to the plain stroke pipeline."""
-    brush = _lookup_brush(slug)
-    if brush is None:
-        return False
-    cal = _calligraphic_from_dict(brush)
-    if cal is None:
-        return False
-    pts = calligraphic_outline(d, cal)
+def _art_from_dict(brush: dict, stroke_weight: float):
+    """Extract an ArtBrush (inline polygon artwork) from a brush dict.
+    Returns None for non-Art types."""
+    if brush.get("type") != "art":
+        return None
+    from algorithms.art_along_path import ArtBrush
+    aw = brush.get("artwork") or {}
+    polys = []
+    for poly in aw.get("polygons", []):
+        pts = []
+        for pt in poly:
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                pts.append((float(pt[0]), float(pt[1])))
+        polys.append(pts)
+    return ArtBrush(
+        artwork_width=float(aw.get("width", 0.0)),
+        artwork_height=float(aw.get("height", 0.0)),
+        artwork=polys,
+        scale=float(brush.get("scale", 100.0)),
+        flip_across=bool(brush.get("flip_across", False)),
+        flip_along=bool(brush.get("flip_along", False)),
+        stroke_weight=stroke_weight,
+    )
+
+
+def _fill_polygon(painter: QPainter, pts) -> None:
     if len(pts) < 3:
-        return True
-    color = _qcolor(stroke.color) if stroke is not None else _qcolor(Color.from_hex("000000"))
-    painter.setBrush(QBrush(color))
-    painter.setPen(QPen(0))
+        return
     qpath = QPainterPath()
     qpath.moveTo(QPointF(pts[0][0], pts[0][1]))
     for x, y in pts[1:]:
         qpath.lineTo(QPointF(x, y))
     qpath.closeSubpath()
     painter.drawPath(qpath)
-    return True
+
+
+def _draw_brushed_path(painter: QPainter, d, stroke, slug: str) -> bool:
+    """Render a brushed Path: Calligraphic -> variable-width outline;
+    Art -> artwork warped along the path. Fills with the stroke colour.
+    Returns True when handled; False to fall back to the plain stroke
+    pipeline (missing brush, or a type without a renderer)."""
+    brush = _lookup_brush(slug)
+    if brush is None:
+        return False
+    color = _qcolor(stroke.color) if stroke is not None else _qcolor(Color.from_hex("000000"))
+    stroke_weight = float(getattr(stroke, "width", 1.0)) if stroke is not None else 1.0
+
+    cal = _calligraphic_from_dict(brush)
+    if cal is not None:
+        pts = calligraphic_outline(d, cal)
+        if len(pts) < 3:
+            return True
+        painter.setBrush(QBrush(color))
+        painter.setPen(QPen(0))
+        _fill_polygon(painter, pts)
+        return True
+
+    art = _art_from_dict(brush, stroke_weight)
+    if art is not None:
+        from algorithms.art_along_path import art_along_path
+        polys = art_along_path(d, art)
+        if not polys:
+            return True
+        painter.setBrush(QBrush(color))
+        painter.setPen(QPen(0))
+        for poly in polys:
+            _fill_polygon(painter, poly)
+        return True
+
+    return False
 
 
 def _make_white_arrow_cursor() -> QCursor:
