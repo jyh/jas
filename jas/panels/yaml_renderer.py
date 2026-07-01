@@ -2728,6 +2728,28 @@ def _cycle_visibility(vis):
     if vis == Visibility.OUTLINE: return Visibility.INVISIBLE
     return Visibility.PREVIEW
 
+
+def _cycle_element_visibility_at(doc, path):
+    """Layers eye-button (regular click): cycle the element at `path`
+    Preview -> Outline -> Invisible -> Preview and, when it becomes
+    Invisible, drop it (and its descendants) from the selection. Pure;
+    returns a new document. Mirrors Rust cycle_element_visibility_at, OCaml
+    Document.cycle_element_visibility_at, Swift cyclingElementVisibility(at:)."""
+    from dataclasses import replace as dc_replace
+    from geometry.element import Visibility
+    e = doc.get_element(path)
+    if e is None:
+        return doc
+    new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
+    new_doc = doc.replace_element(path, dc_replace(e, visibility=new_vis))
+    if new_vis == Visibility.INVISIBLE:
+        new_doc = dc_replace(new_doc, selection=frozenset(
+            es for es in new_doc.selection
+            if not (es.path == path or es.path[:len(path)] == path)
+        ))
+    return new_doc
+
+
 def _render_tree_view(el, store, ctx, dispatch_fn):
     """Render a tree_view widget from the live document model."""
     from dataclasses import replace as dc_replace
@@ -3313,18 +3335,8 @@ def _render_tree_view(el, store, ctx, dispatch_fn):
                     solo_state[0] = (p, saved)
             else:
                 solo_state[0] = None
-                d = m.document
-                e = d.get_element(p)
-                if e is None:
-                    return
-                new_vis = _cycle_visibility(getattr(e, 'visibility', Visibility.PREVIEW))
-                new_e = dc_replace(e, visibility=new_vis)
-                new_doc = d.replace_element(p, new_e)
-                if new_vis == Visibility.INVISIBLE:
-                    new_doc = dc_replace(new_doc, selection=frozenset(
-                        es for es in new_doc.selection if not (es.path == p or es.path[:len(p)] == p)
-                    ))
-                m.edit_document(new_doc)
+                # Cycle visibility + deselect-on-invisible, one undoable edit.
+                m.edit_document(_cycle_element_visibility_at(m.document, p))
             _rebuild()
         eye_btn.mousePressEvent = _on_eye_mouse
         row_layout.addWidget(eye_btn)

@@ -111,5 +111,11 @@ val insert_element_after : document -> element_path -> Element.element -> docume
 val insert_element_at : document -> element_path -> Element.element -> document
 val delete_element : document -> element_path -> document
 val delete_selection : document -> document
+
+val cycle_element_visibility_at : document -> element_path -> document
+(** Layers eye-button: cycle the element at [path]
+    Preview -> Outline -> Invisible -> Preview and, when it becomes
+    Invisible, drop it (and its descendants) from the selection. Pure. *)
+
 val children_of : Element.element -> Element.element array
 val with_children : Element.element -> Element.element array -> Element.element
