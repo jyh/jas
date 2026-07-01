@@ -57,3 +57,8 @@
  (name paragraph_panel_state_test)
  (modules paragraph_panel_state_test)
  (libraries jas alcotest))
+
+(test
+ (name stroke_panel_state_test)
+ (modules stroke_panel_state_test)
+ (libraries jas alcotest))

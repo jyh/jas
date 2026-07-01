@@ -4645,3 +4645,290 @@ mod character_panel_apply_tests {
         assert_eq!(st.character_panel.leading, 20.0);
     }
 }
+
+// ── Stroke panel apply-to-selection seam tests ───────────────────
+//
+// Cross-language-equivalent port of the canonical STROKE apply cases
+// (panel field -> element stroke attribute). The Rust reference apply
+// is `apply_stroke_panel_to_selection` (this file, ~1098): it takes the
+// StrokePanelState + a selected stroked shape (Line/Path/Rect that HAS
+// a Stroke) and writes the stroke attributes. These tests build a doc
+// with a SELECTED stroked Line, set the panel fields, run apply, and
+// assert the element's resulting stroke matches the SAME input->output
+// values used by every app.
+//
+// NOTE on `weight`: Weight is NOT a field on StrokePanelState. The apply
+// reads the width from `tab.model.default_stroke.width` (the weight
+// input pushes the value there, per set_stroke_field / build_live_panel_
+// overrides). So `weight = 2.5 -> stroke.width == 2.5` is driven by
+// seeding `default_stroke` at 2.5 before apply, mirroring the runtime.
+//
+// The SYNC/read side (element -> panel weight/cap/join reflection) is
+// already covered in dock_panel.rs `stroke_panel_override_tests`
+// (weight_from_selected_element / cap_join_from_selected_element via
+// build_live_panel_overrides), so it is not duplicated here.
+#[cfg(test)]
+mod stroke_panel_apply_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Arrowhead, ArrowAlign, Color, CommonProps, Element, LayerElem, LineCap,
+        LineElem, LineJoin, Stroke, StrokeAlign,
+    };
+
+    /// A straight Line with a plain 1pt black stroke, selected in a
+    /// single-layer document. Line/Path/Rect all route through
+    /// `Element::stroke()` identically; Line keeps the fixture minimal.
+    fn line_with_stroke() -> LineElem {
+        LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        }
+    }
+
+    fn state_with_element(elem: Element, selected: bool) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: if selected {
+                vec![ElementSelection::all(vec![0, 0])]
+            } else {
+                vec![]
+            },
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    fn get_stroke(st: &AppState) -> Stroke {
+        st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .stroke().cloned().expect("selected element has a stroke")
+    }
+
+    /// Build a default-panel state over a stroked Line, run the provided
+    /// mutation on the Stroke panel, apply, and return the element stroke.
+    fn apply_and_get(modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        modify(&mut st.stroke_panel);
+        st.apply_stroke_panel_to_selection();
+        get_stroke(&st)
+    }
+
+    /// Same, but also lets the caller seed the tab's `default_stroke`
+    /// (the "weight input" seam) before apply.
+    fn apply_with_width(width: f64, modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke = Some(Stroke::new(Color::BLACK, width));
+        }
+        st.app_default_stroke = Some(Stroke::new(Color::BLACK, width));
+        modify(&mut st.stroke_panel);
+        st.apply_stroke_panel_to_selection();
+        get_stroke(&st)
+    }
+
+    // ── weight -> stroke.width ───────────────────────────────────
+    #[test]
+    fn weight_2_5() {
+        let s = apply_with_width(2.5, |_sp| {});
+        assert_eq!(s.width, 2.5);
+    }
+
+    // ── cap -> linecap ───────────────────────────────────────────
+    #[test]
+    fn cap_round() {
+        let s = apply_and_get(|sp| sp.cap = "round".into());
+        assert_eq!(s.linecap, LineCap::Round);
+    }
+
+    #[test]
+    fn cap_square() {
+        let s = apply_and_get(|sp| sp.cap = "square".into());
+        assert_eq!(s.linecap, LineCap::Square);
+    }
+
+    #[test]
+    fn cap_butt_default() {
+        let s = apply_and_get(|sp| sp.cap = "butt".into());
+        assert_eq!(s.linecap, LineCap::Butt);
+    }
+
+    // ── join -> linejoin ─────────────────────────────────────────
+    #[test]
+    fn join_round() {
+        let s = apply_and_get(|sp| sp.join = "round".into());
+        assert_eq!(s.linejoin, LineJoin::Round);
+    }
+
+    #[test]
+    fn join_bevel() {
+        let s = apply_and_get(|sp| sp.join = "bevel".into());
+        assert_eq!(s.linejoin, LineJoin::Bevel);
+    }
+
+    #[test]
+    fn join_miter_default() {
+        let s = apply_and_get(|sp| sp.join = "miter".into());
+        assert_eq!(s.linejoin, LineJoin::Miter);
+    }
+
+    // ── miter_limit ──────────────────────────────────────────────
+    #[test]
+    fn miter_limit_8() {
+        let s = apply_and_get(|sp| sp.miter_limit = 8.0);
+        assert_eq!(s.miter_limit, 8.0);
+    }
+
+    // ── align -> StrokeAlign ─────────────────────────────────────
+    #[test]
+    fn align_inside() {
+        let s = apply_and_get(|sp| sp.align = "inside".into());
+        assert_eq!(s.align, StrokeAlign::Inside);
+    }
+
+    #[test]
+    fn align_outside() {
+        let s = apply_and_get(|sp| sp.align = "outside".into());
+        assert_eq!(s.align, StrokeAlign::Outside);
+    }
+
+    #[test]
+    fn align_center_default() {
+        let s = apply_and_get(|sp| sp.align = "center".into());
+        assert_eq!(s.align, StrokeAlign::Center);
+    }
+
+    // ── dash pattern ─────────────────────────────────────────────
+    #[test]
+    fn dash_two_entries() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+        });
+        assert_eq!(s.dash_array(), &[12.0, 6.0]);
+    }
+
+    #[test]
+    fn dash_four_entries() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+            sp.dash_2 = Some(3.0);
+            sp.gap_2 = Some(3.0);
+        });
+        assert_eq!(s.dash_array(), &[12.0, 6.0, 3.0, 3.0]);
+    }
+
+    #[test]
+    fn dash_none_when_not_dashed() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = false;
+            // Even with residual dash values, dashed=false -> no pattern.
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+        });
+        assert!(s.dash_array().is_empty(), "dash_array={:?}", s.dash_array());
+        assert_eq!(s.dash_len, 0);
+    }
+
+    // ── arrowheads ───────────────────────────────────────────────
+    #[test]
+    fn start_arrowhead_simple_arrow() {
+        let s = apply_and_get(|sp| sp.start_arrowhead = "simple_arrow".into());
+        assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
+    }
+
+    #[test]
+    fn end_arrowhead_none() {
+        // Start set to an arrow, end explicitly "none" -> no end arrow.
+        let s = apply_and_get(|sp| {
+            sp.start_arrowhead = "simple_arrow".into();
+            sp.end_arrowhead = "none".into();
+        });
+        assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
+        assert_eq!(s.end_arrow, Arrowhead::None);
+    }
+
+    // ── optional extras (arrow scale / align / dash-anchor) ──────
+    #[test]
+    fn arrowhead_scales() {
+        let s = apply_and_get(|sp| {
+            sp.start_arrowhead = "simple_arrow".into();
+            sp.end_arrowhead = "simple_arrow".into();
+            sp.start_arrowhead_scale = 150.0;
+            sp.end_arrowhead_scale = 75.0;
+        });
+        assert_eq!(s.start_arrow_scale, 150.0);
+        assert_eq!(s.end_arrow_scale, 75.0);
+    }
+
+    #[test]
+    fn arrow_align_center_at_end() {
+        let s = apply_and_get(|sp| sp.arrow_align = "center_at_end".into());
+        assert_eq!(s.arrow_align, ArrowAlign::CenterAtEnd);
+    }
+
+    #[test]
+    fn arrow_align_tip_at_end_default() {
+        let s = apply_and_get(|sp| sp.arrow_align = "tip_at_end".into());
+        assert_eq!(s.arrow_align, ArrowAlign::TipAtEnd);
+    }
+
+    #[test]
+    fn dash_align_anchors_flag() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+            sp.dash_align_anchors = true;
+        });
+        assert!(s.dash_align_anchors);
+    }
+
+    // ── end-to-end: multi-field apply + no-op on empty selection ─
+    #[test]
+    fn combined_fields_apply_together() {
+        let s = apply_with_width(4.0, |sp| {
+            sp.cap = "round".into();
+            sp.join = "bevel".into();
+            sp.miter_limit = 8.0;
+            sp.align = "inside".into();
+        });
+        assert_eq!(s.width, 4.0);
+        assert_eq!(s.linecap, LineCap::Round);
+        assert_eq!(s.linejoin, LineJoin::Bevel);
+        assert_eq!(s.miter_limit, 8.0);
+        assert_eq!(s.align, StrokeAlign::Inside);
+    }
+
+    #[test]
+    fn no_op_when_selection_empty() {
+        // apply with an empty selection touches nothing and pushes no
+        // undo step (mirrors the Character-panel no-op case).
+        let mut st = state_with_element(Element::Line(line_with_stroke()), false);
+        st.stroke_panel.cap = "round".into();
+        st.apply_stroke_panel_to_selection();
+        let s = get_stroke(&st);
+        assert_eq!(s.linecap, LineCap::Butt, "empty selection must not write");
+        assert!(!st.tabs[st.active_tab].model.can_undo(),
+                "no-op apply pushes no undo step");
+    }
+}
