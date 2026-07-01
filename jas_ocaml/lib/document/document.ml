@@ -346,3 +346,25 @@ let delete_selection doc =
   let sorted_paths = List.sort (fun a b -> compare b a) paths in
   let doc' = List.fold_left (fun d p -> delete_element d p) doc sorted_paths in
   { doc' with selection = PathMap.empty }
+
+(** Layers eye-button behavior (regular click): cycle the visibility of the
+    element at [path] and, when it becomes Invisible, drop it (and its
+    descendants) from the selection. Pure. Mirrors Rust
+    [cycle_element_visibility_at] and the Python eye handler. *)
+let cycle_element_visibility_at doc path =
+  let e = get_element doc path in
+  let new_vis = Element.cycle_visibility (Element.get_visibility e) in
+  let doc' = replace_element doc path (Element.set_visibility new_vis e) in
+  if new_vis = Element.Invisible then
+    let rec is_prefix pre lst =
+      match pre, lst with
+      | [], _ -> true
+      | x :: xs, y :: ys -> x = y && is_prefix xs ys
+      | _ :: _, [] -> false
+    in
+    { doc' with
+      selection =
+        PathMap.filter
+          (fun sp _ -> not (sp = path || is_prefix path sp))
+          doc'.selection }
+  else doc'

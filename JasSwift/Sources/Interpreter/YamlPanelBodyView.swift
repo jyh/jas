@@ -3012,23 +3012,35 @@ struct YamlElementView: View {
         // take intrinsic width so the combo doesn't ballow into empty
         // space.
         let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
-        let picker = Picker("", selection: Binding<String>(
-            get: { currentValue },
-            set: { newVal in
-                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
-            }
-        )) {
+        // The field shows the RAW value ("100"); the menu lists the option
+        // LABELS ("100%"). Mirrors the Rust reference (input value = raw
+        // value, datalist carries the labels). A plain Picker shows the
+        // selected option's label in the closed field, so use a Menu whose
+        // label is the raw value.
+        let textColor: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
+        let menu = Menu {
             ForEach(entries) { e in
-                SwiftUI.Text(e.displayLabel).tag(e.val)
+                Button(e.displayLabel) {
+                    if let t = writeTarget { commitWidgetWrite(target: t, value: e.val) }
+                }
             }
+        } label: {
+            HStack(spacing: 2) {
+                SwiftUI.Text(currentValue).lineLimit(1).foregroundColor(textColor)
+                Spacer(minLength: 0)
+                SwiftUI.Text("\u{2304}").foregroundColor(textColor).opacity(0.6)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 3)
+                .stroke(SwiftUI.Color(white: 0.33), lineWidth: 1))
         }
-        .labelsHidden()
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         if fillsParent {
-            // Leave a trailing gap so the dropdown doesn't crowd the
-            // next col-2 icon to its right (matches renderNumberInput).
-            picker.frame(maxWidth: .infinity).padding(.trailing, 24)
+            menu.frame(maxWidth: .infinity).padding(.trailing, 24)
         } else {
-            picker.fixedSize(horizontal: true, vertical: false)
+            menu.fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -3315,11 +3327,7 @@ private func pathToString(_ path: ElementPath) -> String {
 }
 
 private func cycleVisibility(_ vis: Visibility) -> Visibility {
-    switch vis {
-    case .preview: return .outline
-    case .outline: return .invisible
-    case .invisible: return .preview
-    }
+    vis.cycled
 }
 
 /// Build a fitted-viewBox SVG fragment for a single element.
@@ -3772,8 +3780,8 @@ struct TreeViewContent: View {
             }
         } else {
             soloState = nil
-            let newVis = cycleVisibility(e.visibility)
-            model.editDocument(model.document.replaceElement(path, with: e.withVisibility(newVis)))
+            // Cycle visibility + deselect-on-invisible, one undoable edit.
+            model.editDocument(model.document.cyclingElementVisibility(at: path))
         }
     }
 

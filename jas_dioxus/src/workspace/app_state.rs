@@ -4210,3 +4210,725 @@ mod oplog_bracket_tests {
         assert_eq!(n_restored, 2, "undo restored both rects");
     }
 }
+
+// ── Character panel apply-to-selection seam tests ────────────────
+//
+// Cross-language-equivalent port of the Python reference suite
+// jas/panels/character_panel_state_test.py. Python exposes a pure
+// `_attrs_from_panel` helper; the Rust apply is inline in
+// `apply_character_panel_to_selection`, so these tests drive the
+// full panel -> whole-element write path (no active edit session ->
+// object-level write) and assert the resulting Text attribute
+// matches the SAME input->output values as Python. Also covers the
+// pure helpers (fmt_num / parse_style_name / text_decoration_from_flags)
+// and the Auto-leading hooks (character_element_has_auto_leading /
+// character_panel_post_write).
+#[cfg(test)]
+mod character_panel_apply_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem, TextElem, TextPathElem,
+    };
+
+    fn text12() -> TextElem {
+        TextElem::from_string(
+            0.0, 0.0, "hello", "sans-serif", 12.0,
+            "normal", "normal", "none", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        )
+    }
+
+    fn state_with_element(elem: Element, selected: bool) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: if selected {
+                vec![ElementSelection::all(vec![0, 0])]
+            } else {
+                vec![]
+            },
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    fn get_text(st: &AppState) -> TextElem {
+        match st.tab().unwrap().model.document().get_element(&vec![0usize, 0]).unwrap() {
+            Element::Text(t) => t.clone(),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    /// Build a default-panel state over a 12pt Text, run the provided
+    /// mutation on the Character panel, apply, and return the element.
+    fn apply_and_get(modify: impl FnOnce(&mut CharacterPanelState)) -> TextElem {
+        let mut st = state_with_element(Element::Text(text12()), true);
+        modify(&mut st.character_panel);
+        st.apply_character_panel_to_selection();
+        get_text(&st)
+    }
+
+    // ── font_size ────────────────────────────────────────────────
+    #[test]
+    fn font_size_24_on_12pt_text() {
+        let t = apply_and_get(|cp| cp.font_size = 24.0);
+        assert_eq!(t.font_size, 24.0);
+    }
+
+    // ── style_name -> font_weight / font_style ───────────────────
+    #[test]
+    fn style_bold() {
+        let t = apply_and_get(|cp| cp.style_name = "Bold".into());
+        assert_eq!(t.font_weight, "bold");
+        assert_eq!(t.font_style, "normal");
+    }
+
+    #[test]
+    fn style_italic() {
+        let t = apply_and_get(|cp| cp.style_name = "Italic".into());
+        assert_eq!(t.font_weight, "normal");
+        assert_eq!(t.font_style, "italic");
+    }
+
+    #[test]
+    fn style_bold_italic() {
+        let t = apply_and_get(|cp| cp.style_name = "Bold Italic".into());
+        assert_eq!(t.font_weight, "bold");
+        assert_eq!(t.font_style, "italic");
+    }
+
+    #[test]
+    fn style_regular() {
+        // Start from a bold element, click Regular -> back to normal.
+        let mut base = text12();
+        base.font_weight = "bold".into();
+        base.font_style = "italic".into();
+        let mut st = state_with_element(Element::Text(base), true);
+        st.character_panel.style_name = "Regular".into();
+        st.apply_character_panel_to_selection();
+        let t = get_text(&st);
+        assert_eq!(t.font_weight, "normal");
+        assert_eq!(t.font_style, "normal");
+    }
+
+    // ── caps / small-caps ────────────────────────────────────────
+    #[test]
+    fn all_caps() {
+        let t = apply_and_get(|cp| cp.all_caps = true);
+        assert_eq!(t.text_transform, "uppercase");
+        assert_eq!(t.font_variant, "");
+    }
+
+    #[test]
+    fn small_caps() {
+        let t = apply_and_get(|cp| cp.small_caps = true);
+        assert_eq!(t.font_variant, "small-caps");
+        assert_eq!(t.text_transform, "");
+    }
+
+    #[test]
+    fn all_caps_wins_over_small_caps() {
+        let t = apply_and_get(|cp| { cp.all_caps = true; cp.small_caps = true; });
+        assert_eq!(t.text_transform, "uppercase");
+        assert_eq!(t.font_variant, "");
+    }
+
+    // ── text-decoration ──────────────────────────────────────────
+    #[test]
+    fn underline_only() {
+        let t = apply_and_get(|cp| cp.underline = true);
+        assert_eq!(t.text_decoration, "underline");
+    }
+
+    #[test]
+    fn strikethrough_only() {
+        let t = apply_and_get(|cp| cp.strikethrough = true);
+        assert_eq!(t.text_decoration, "line-through");
+    }
+
+    #[test]
+    fn underline_and_strikethrough_alphabetical() {
+        let t = apply_and_get(|cp| { cp.underline = true; cp.strikethrough = true; });
+        assert_eq!(t.text_decoration, "line-through underline");
+    }
+
+    // ── leading -> line-height ───────────────────────────────────
+    #[test]
+    fn leading_auto_empties_line_height() {
+        // Default leading 14.4 == 12 * 1.2 (Auto) -> empty.
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.line_height, "");
+    }
+
+    #[test]
+    fn leading_explicit_writes_pt() {
+        let t = apply_and_get(|cp| cp.leading = 20.0);
+        assert_eq!(t.line_height, "20pt");
+    }
+
+    // ── tracking -> letter-spacing ───────────────────────────────
+    #[test]
+    fn tracking_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.letter_spacing, "");
+    }
+
+    #[test]
+    fn tracking_25_is_0025em() {
+        let t = apply_and_get(|cp| cp.tracking = 25.0);
+        assert_eq!(t.letter_spacing, "0.025em");
+    }
+
+    // ── kerning ──────────────────────────────────────────────────
+    #[test]
+    fn kerning_default_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_auto_empties() {
+        let t = apply_and_get(|cp| cp.kerning = "Auto".into());
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_zero_string_empties() {
+        let t = apply_and_get(|cp| cp.kerning = "0".into());
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_50_is_005em() {
+        let t = apply_and_get(|cp| cp.kerning = "50".into());
+        assert_eq!(t.kerning, "0.05em");
+    }
+
+    #[test]
+    fn kerning_optical_passes_through() {
+        let t = apply_and_get(|cp| cp.kerning = "Optical".into());
+        assert_eq!(t.kerning, "Optical");
+    }
+
+    #[test]
+    fn kerning_metrics_passes_through() {
+        let t = apply_and_get(|cp| cp.kerning = "Metrics".into());
+        assert_eq!(t.kerning, "Metrics");
+    }
+
+    // ── baseline-shift ───────────────────────────────────────────
+    #[test]
+    fn baseline_shift_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.baseline_shift, "");
+    }
+
+    #[test]
+    fn baseline_shift_numeric_pt() {
+        let t = apply_and_get(|cp| cp.baseline_shift = 3.0);
+        assert_eq!(t.baseline_shift, "3pt");
+    }
+
+    #[test]
+    fn baseline_shift_super_wins() {
+        let t = apply_and_get(|cp| { cp.superscript = true; cp.baseline_shift = 5.0; });
+        assert_eq!(t.baseline_shift, "super");
+    }
+
+    #[test]
+    fn baseline_shift_sub() {
+        let t = apply_and_get(|cp| cp.subscript = true);
+        assert_eq!(t.baseline_shift, "sub");
+    }
+
+    // ── character rotation ───────────────────────────────────────
+    #[test]
+    fn rotation_zero_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.rotate, "");
+    }
+
+    #[test]
+    fn rotation_15() {
+        let t = apply_and_get(|cp| cp.character_rotation = 15.0);
+        assert_eq!(t.rotate, "15");
+    }
+
+    // ── h/v scale ────────────────────────────────────────────────
+    #[test]
+    fn scale_identity_empties() {
+        let t = apply_and_get(|_cp| {});
+        assert_eq!(t.horizontal_scale, "");
+        assert_eq!(t.vertical_scale, "");
+    }
+
+    #[test]
+    fn horizontal_scale_120() {
+        let t = apply_and_get(|cp| cp.horizontal_scale = 120.0);
+        assert_eq!(t.horizontal_scale, "120");
+    }
+
+    #[test]
+    fn vertical_scale_120() {
+        let t = apply_and_get(|cp| cp.vertical_scale = 120.0);
+        assert_eq!(t.vertical_scale, "120");
+    }
+
+    // ── language / anti-aliasing ─────────────────────────────────
+    #[test]
+    fn language_fr() {
+        let t = apply_and_get(|cp| cp.language = "fr".into());
+        assert_eq!(t.xml_lang, "fr");
+    }
+
+    #[test]
+    fn anti_aliasing_sharp_empties() {
+        let t = apply_and_get(|cp| cp.anti_aliasing = "Sharp".into());
+        assert_eq!(t.aa_mode, "");
+    }
+
+    #[test]
+    fn anti_aliasing_crisp_passes_through() {
+        let t = apply_and_get(|cp| cp.anti_aliasing = "Crisp".into());
+        assert_eq!(t.aa_mode, "Crisp");
+    }
+
+    // ── end-to-end: font_family write + no-op on empty selection ─
+    #[test]
+    fn font_family_written_to_selected_text() {
+        let t = apply_and_get(|cp| cp.font_family = "Arial".into());
+        assert_eq!(t.font_family, "Arial");
+    }
+
+    #[test]
+    fn no_op_when_selection_empty() {
+        // Mirrors Python TestApplyEndToEnd.test_no_op_when_selection_empty:
+        // apply with an empty selection touches nothing and pushes no
+        // undo step.
+        let mut st = state_with_element(Element::Text(text12()), false);
+        st.character_panel.font_family = "Arial".into();
+        st.apply_character_panel_to_selection();
+        let t = get_text(&st);
+        assert_eq!(t.font_family, "sans-serif", "empty selection must not write");
+        assert!(!st.tabs[st.active_tab].model.can_undo(),
+                "no-op apply pushes no undo step");
+    }
+
+    // ── end-to-end applies to TextPath too ───────────────────────
+    #[test]
+    fn underline_written_to_selected_textpath() {
+        let tp = TextPathElem::from_string(
+            vec![], "hi", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let mut st = state_with_element(Element::TextPath(tp), true);
+        st.character_panel.underline = true;
+        st.apply_character_panel_to_selection();
+        match st.tab().unwrap().model.document().get_element(&vec![0usize, 0]).unwrap() {
+            Element::TextPath(t) => assert_eq!(t.text_decoration, "underline"),
+            other => panic!("expected TextPath, got {other:?}"),
+        }
+    }
+
+    // ── pure helpers (mirror Python TestFmtNum / TestStyleName /
+    //    TestTextDecoration) ──────────────────────────────────────
+    #[test]
+    fn fmt_num_matches_python() {
+        assert_eq!(fmt_num(12.0), "12");
+        assert_eq!(fmt_num(14.4), "14.4");
+        assert_eq!(fmt_num(14.5000), "14.5");
+        assert_eq!(fmt_num(-3.0), "-3");
+    }
+
+    #[test]
+    fn parse_style_name_matches_python() {
+        assert_eq!(parse_style_name("Regular"), Some(("normal".into(), "normal".into())));
+        assert_eq!(parse_style_name("Italic"), Some(("normal".into(), "italic".into())));
+        assert_eq!(parse_style_name("Bold"), Some(("bold".into(), "normal".into())));
+        assert_eq!(parse_style_name("Bold Italic"), Some(("bold".into(), "italic".into())));
+        // Unknown names leave weight/style untouched (None).
+        assert_eq!(parse_style_name("Something Weird"), None);
+    }
+
+    #[test]
+    fn text_decoration_from_flags_matches_python() {
+        assert_eq!(text_decoration_from_flags(false, false), "");
+        assert_eq!(text_decoration_from_flags(true, false), "underline");
+        assert_eq!(text_decoration_from_flags(false, true), "line-through");
+        assert_eq!(text_decoration_from_flags(true, true), "line-through underline");
+    }
+
+    // ── Auto-leading hooks ───────────────────────────────────────
+    #[test]
+    fn has_auto_leading_true_for_empty_line_height() {
+        let st = state_with_element(Element::Text(text12()), true);
+        assert!(st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_explicit_line_height() {
+        let mut t = text12();
+        t.line_height = "20pt".into();
+        let st = state_with_element(Element::Text(t), true);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_true_for_textpath_empty_line_height() {
+        let tp = TextPathElem::from_string(
+            vec![], "hi", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        let st = state_with_element(Element::TextPath(tp), true);
+        assert!(st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_empty_selection() {
+        let st = state_with_element(Element::Text(text12()), false);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn has_auto_leading_false_for_non_text_selection() {
+        let r = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let st = state_with_element(r, true);
+        assert!(!st.character_element_has_auto_leading());
+    }
+
+    #[test]
+    fn post_write_font_size_bumps_leading_when_auto() {
+        let mut st = state_with_element(Element::Text(text12()), true); // line_height "" = Auto
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 14.4;
+        st.character_panel_post_write("font_size");
+        assert_eq!(st.character_panel.leading, 24.0 * 1.2);
+    }
+
+    #[test]
+    fn post_write_does_nothing_for_other_keys() {
+        let mut st = state_with_element(Element::Text(text12()), true);
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 14.4;
+        st.character_panel_post_write("tracking");
+        assert_eq!(st.character_panel.leading, 14.4);
+    }
+
+    #[test]
+    fn post_write_does_nothing_when_explicit_leading() {
+        let mut t = text12();
+        t.line_height = "20pt".into();
+        let mut st = state_with_element(Element::Text(t), true);
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 20.0;
+        st.character_panel_post_write("font_size");
+        assert_eq!(st.character_panel.leading, 20.0);
+    }
+}
+
+// ── Stroke panel apply-to-selection seam tests ───────────────────
+//
+// Cross-language-equivalent port of the canonical STROKE apply cases
+// (panel field -> element stroke attribute). The Rust reference apply
+// is `apply_stroke_panel_to_selection` (this file, ~1098): it takes the
+// StrokePanelState + a selected stroked shape (Line/Path/Rect that HAS
+// a Stroke) and writes the stroke attributes. These tests build a doc
+// with a SELECTED stroked Line, set the panel fields, run apply, and
+// assert the element's resulting stroke matches the SAME input->output
+// values used by every app.
+//
+// NOTE on `weight`: Weight is NOT a field on StrokePanelState. The apply
+// reads the width from `tab.model.default_stroke.width` (the weight
+// input pushes the value there, per set_stroke_field / build_live_panel_
+// overrides). So `weight = 2.5 -> stroke.width == 2.5` is driven by
+// seeding `default_stroke` at 2.5 before apply, mirroring the runtime.
+//
+// The SYNC/read side (element -> panel weight/cap/join reflection) is
+// already covered in dock_panel.rs `stroke_panel_override_tests`
+// (weight_from_selected_element / cap_join_from_selected_element via
+// build_live_panel_overrides), so it is not duplicated here.
+#[cfg(test)]
+mod stroke_panel_apply_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Arrowhead, ArrowAlign, Color, CommonProps, Element, LayerElem, LineCap,
+        LineElem, LineJoin, Stroke, StrokeAlign,
+    };
+
+    /// A straight Line with a plain 1pt black stroke, selected in a
+    /// single-layer document. Line/Path/Rect all route through
+    /// `Element::stroke()` identically; Line keeps the fixture minimal.
+    fn line_with_stroke() -> LineElem {
+        LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        }
+    }
+
+    fn state_with_element(elem: Element, selected: bool) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: if selected {
+                vec![ElementSelection::all(vec![0, 0])]
+            } else {
+                vec![]
+            },
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st
+    }
+
+    fn get_stroke(st: &AppState) -> Stroke {
+        st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .stroke().cloned().expect("selected element has a stroke")
+    }
+
+    /// Build a default-panel state over a stroked Line, run the provided
+    /// mutation on the Stroke panel, apply, and return the element stroke.
+    fn apply_and_get(modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        modify(&mut st.stroke_panel);
+        st.apply_stroke_panel_to_selection();
+        get_stroke(&st)
+    }
+
+    /// Same, but also lets the caller seed the tab's `default_stroke`
+    /// (the "weight input" seam) before apply.
+    fn apply_with_width(width: f64, modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke = Some(Stroke::new(Color::BLACK, width));
+        }
+        st.app_default_stroke = Some(Stroke::new(Color::BLACK, width));
+        modify(&mut st.stroke_panel);
+        st.apply_stroke_panel_to_selection();
+        get_stroke(&st)
+    }
+
+    // ── weight -> stroke.width ───────────────────────────────────
+    #[test]
+    fn weight_2_5() {
+        let s = apply_with_width(2.5, |_sp| {});
+        assert_eq!(s.width, 2.5);
+    }
+
+    // ── cap -> linecap ───────────────────────────────────────────
+    #[test]
+    fn cap_round() {
+        let s = apply_and_get(|sp| sp.cap = "round".into());
+        assert_eq!(s.linecap, LineCap::Round);
+    }
+
+    #[test]
+    fn cap_square() {
+        let s = apply_and_get(|sp| sp.cap = "square".into());
+        assert_eq!(s.linecap, LineCap::Square);
+    }
+
+    #[test]
+    fn cap_butt_default() {
+        let s = apply_and_get(|sp| sp.cap = "butt".into());
+        assert_eq!(s.linecap, LineCap::Butt);
+    }
+
+    // ── join -> linejoin ─────────────────────────────────────────
+    #[test]
+    fn join_round() {
+        let s = apply_and_get(|sp| sp.join = "round".into());
+        assert_eq!(s.linejoin, LineJoin::Round);
+    }
+
+    #[test]
+    fn join_bevel() {
+        let s = apply_and_get(|sp| sp.join = "bevel".into());
+        assert_eq!(s.linejoin, LineJoin::Bevel);
+    }
+
+    #[test]
+    fn join_miter_default() {
+        let s = apply_and_get(|sp| sp.join = "miter".into());
+        assert_eq!(s.linejoin, LineJoin::Miter);
+    }
+
+    // ── miter_limit ──────────────────────────────────────────────
+    #[test]
+    fn miter_limit_8() {
+        let s = apply_and_get(|sp| sp.miter_limit = 8.0);
+        assert_eq!(s.miter_limit, 8.0);
+    }
+
+    // ── align -> StrokeAlign ─────────────────────────────────────
+    #[test]
+    fn align_inside() {
+        let s = apply_and_get(|sp| sp.align = "inside".into());
+        assert_eq!(s.align, StrokeAlign::Inside);
+    }
+
+    #[test]
+    fn align_outside() {
+        let s = apply_and_get(|sp| sp.align = "outside".into());
+        assert_eq!(s.align, StrokeAlign::Outside);
+    }
+
+    #[test]
+    fn align_center_default() {
+        let s = apply_and_get(|sp| sp.align = "center".into());
+        assert_eq!(s.align, StrokeAlign::Center);
+    }
+
+    // ── dash pattern ─────────────────────────────────────────────
+    #[test]
+    fn dash_two_entries() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+        });
+        assert_eq!(s.dash_array(), &[12.0, 6.0]);
+    }
+
+    #[test]
+    fn dash_four_entries() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+            sp.dash_2 = Some(3.0);
+            sp.gap_2 = Some(3.0);
+        });
+        assert_eq!(s.dash_array(), &[12.0, 6.0, 3.0, 3.0]);
+    }
+
+    #[test]
+    fn dash_none_when_not_dashed() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = false;
+            // Even with residual dash values, dashed=false -> no pattern.
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+        });
+        assert!(s.dash_array().is_empty(), "dash_array={:?}", s.dash_array());
+        assert_eq!(s.dash_len, 0);
+    }
+
+    // ── arrowheads ───────────────────────────────────────────────
+    #[test]
+    fn start_arrowhead_simple_arrow() {
+        let s = apply_and_get(|sp| sp.start_arrowhead = "simple_arrow".into());
+        assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
+    }
+
+    #[test]
+    fn end_arrowhead_none() {
+        // Start set to an arrow, end explicitly "none" -> no end arrow.
+        let s = apply_and_get(|sp| {
+            sp.start_arrowhead = "simple_arrow".into();
+            sp.end_arrowhead = "none".into();
+        });
+        assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
+        assert_eq!(s.end_arrow, Arrowhead::None);
+    }
+
+    // ── optional extras (arrow scale / align / dash-anchor) ──────
+    #[test]
+    fn arrowhead_scales() {
+        let s = apply_and_get(|sp| {
+            sp.start_arrowhead = "simple_arrow".into();
+            sp.end_arrowhead = "simple_arrow".into();
+            sp.start_arrowhead_scale = 150.0;
+            sp.end_arrowhead_scale = 75.0;
+        });
+        assert_eq!(s.start_arrow_scale, 150.0);
+        assert_eq!(s.end_arrow_scale, 75.0);
+    }
+
+    #[test]
+    fn arrow_align_center_at_end() {
+        let s = apply_and_get(|sp| sp.arrow_align = "center_at_end".into());
+        assert_eq!(s.arrow_align, ArrowAlign::CenterAtEnd);
+    }
+
+    #[test]
+    fn arrow_align_tip_at_end_default() {
+        let s = apply_and_get(|sp| sp.arrow_align = "tip_at_end".into());
+        assert_eq!(s.arrow_align, ArrowAlign::TipAtEnd);
+    }
+
+    #[test]
+    fn dash_align_anchors_flag() {
+        let s = apply_and_get(|sp| {
+            sp.dashed = true;
+            sp.dash_1 = 12.0;
+            sp.gap_1 = 6.0;
+            sp.dash_align_anchors = true;
+        });
+        assert!(s.dash_align_anchors);
+    }
+
+    // ── end-to-end: multi-field apply + no-op on empty selection ─
+    #[test]
+    fn combined_fields_apply_together() {
+        let s = apply_with_width(4.0, |sp| {
+            sp.cap = "round".into();
+            sp.join = "bevel".into();
+            sp.miter_limit = 8.0;
+            sp.align = "inside".into();
+        });
+        assert_eq!(s.width, 4.0);
+        assert_eq!(s.linecap, LineCap::Round);
+        assert_eq!(s.linejoin, LineJoin::Bevel);
+        assert_eq!(s.miter_limit, 8.0);
+        assert_eq!(s.align, StrokeAlign::Inside);
+    }
+
+    #[test]
+    fn no_op_when_selection_empty() {
+        // apply with an empty selection touches nothing and pushes no
+        // undo step (mirrors the Character-panel no-op case).
+        let mut st = state_with_element(Element::Line(line_with_stroke()), false);
+        st.stroke_panel.cap = "round".into();
+        st.apply_stroke_panel_to_selection();
+        let s = get_stroke(&st);
+        assert_eq!(s.linecap, LineCap::Butt, "empty selection must not write");
+        assert!(!st.tabs[st.active_tab].model.can_undo(),
+                "no-op apply pushes no undo step");
+    }
+}

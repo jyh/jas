@@ -3256,35 +3256,69 @@ and render_toggle ~packing ~ctx el =
          refresh_disabled ())
      | _ -> ())
 
-and render_combo_box ~packing ~ctx:_ el =
+and render_combo_box ~packing ~ctx el =
   let open Yojson.Safe.Util in
   let options = match el |> member "options" with `List l -> l | _ -> [] in
+  let bind_expr = el |> member "bind" |> safe_member "value" |> to_string_option in
+  (* combo_box shows the RAW value in its field (mirrors the Rust reference:
+     input value = the bound value, not the option label). The rows carry
+     the raw value string; picking a row surfaces it in the collapsed view.
+     [values] are parallel to the rows for write-back. *)
+  let value_str_of opt = match opt with
+    | `Assoc _ ->
+      (match opt |> member "value" with
+       | `String s -> s
+       | `Int i -> string_of_int i
+       | `Float f ->
+         if Float.is_integer f then string_of_int (int_of_float f)
+         else string_of_float f
+       | `Bool b -> string_of_bool b
+       | _ -> "")
+    | `String s -> s
+    | _ -> "" in
+  let values = List.map value_str_of options in
   let (combo, (store, col)) = GEdit.combo_box_text ~has_entry:true ~packing () in
-  (* Same width clamp as render_select — without it the kerning combo
-     ("Optical", "Metrics", "-100" etc) reports a wide natural and
+  (* Same width clamp as render_select — without it a wide option label
      forces the homogeneous Bootstrap-12 grid open. *)
   if !_current_panel_id <> None then
     combo#misc#set_size_request ~width:1 ();
   (* Dark-theme the collapsed combo so it matches the entries beside it. *)
   install_dark_combo_css ();
-  List.iter (fun opt ->
-    let label = match opt with
-      | `Assoc _ ->
-        let lbl = opt |> member "label" |> to_string_option in
-        (* `value` can be a string ("range"), int (75), or bool — coerce
-           to a display string for the fallback when label is absent. *)
-        let value_str = match opt |> member "value" with
-          | `String s -> Some s
-          | `Int i -> Some (string_of_int i)
-          | `Float f -> Some (string_of_float f)
-          | `Bool b -> Some (string_of_bool b)
-          | _ -> None in
-        (match lbl with Some l -> l | None -> Option.value ~default:"" value_str)
-      | `String s -> s
-      | _ -> "" in
+  List.iter (fun v ->
     let row = store#append () in
-    store#set ~row ~column:col label
-  ) options
+    store#set ~row ~column:col v
+  ) values;
+  (* Surface the current bound value by selecting its row. *)
+  let current = match bind_expr with
+    | Some expr ->
+      (match Expr_eval.evaluate expr ctx with
+       | Expr_eval.Str s -> s
+       | Expr_eval.Number n ->
+         if Float.is_integer n then string_of_int (int_of_float n)
+         else string_of_float n
+       | _ -> "")
+    | None -> "" in
+  (match List.mapi (fun i v -> (i, v)) values
+         |> List.find_opt (fun (_, v) -> v = current) with
+   | Some (i, _) -> combo#set_active i
+   | None -> ());
+  (* Write the RAW value back on selection (number when parseable, else
+     string — kerning Auto/Optical/Metrics stay strings). Mirrors Rust. *)
+  (match bind_expr with
+   | Some expr ->
+     ignore (combo#connect#changed ~callback:(fun () ->
+       let idx = combo#active in
+       if idx >= 0 && idx < List.length values then begin
+         let raw = List.nth values idx in
+         let json =
+           match float_of_string_opt raw with
+           | Some f ->
+             if Float.is_integer f then `Int (int_of_float f) else `Float f
+           | None -> `String raw
+         in
+         _write_back_bind expr json
+       end))
+   | None -> ())
 
 and render_color_swatch ~packing ~ctx el =
   let open Yojson.Safe.Util in
@@ -4404,14 +4438,8 @@ and handle_eye_click path evt =
       end
     end else begin
       Layers_panel_state.solo_state := None;
-      let e = Document.get_element d path in
-      let new_vis = match Element.get_visibility e with
-        | Element.Preview -> Element.Outline
-        | Element.Outline -> Element.Invisible
-        | Element.Invisible -> Element.Preview
-      in
-      (* Undoable edit (one self-bracketed undo step) via edit_document. *)
-      m#edit_document (Document.replace_element d path (Element.set_visibility new_vis e))
+      (* Cycle visibility + deselect-on-invisible, one undoable edit. *)
+      m#edit_document (Document.cycle_element_visibility_at d path)
     end
 
 (** Delete currently panel-selected elements via YAML dispatch (Phase 3).
