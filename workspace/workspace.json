@@ -40250,6 +40250,18 @@
           "fit": "stretch",
           "colorization": "none",
           "key_color": "#000000"
+        },
+        {
+          "name": "Bristle",
+          "slug": "bristle_round",
+          "type": "bristle",
+          "shape": "round",
+          "size": 3,
+          "length": 100,
+          "density": 60,
+          "thickness": 40,
+          "opacity": 35,
+          "stiffness": 50
         }
       ]
     }

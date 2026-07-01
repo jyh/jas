@@ -12,6 +12,7 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use crate::algorithms::calligraphic_outline::{calligraphic_outline, CalligraphicBrush};
 use crate::algorithms::art_along_path::{art_along_path, ArtBrush};
 use crate::algorithms::pattern_along_path::{pattern_along_path, PatternBrush};
+use crate::algorithms::bristle_stroke::{bristle_stroke, BristleBrush};
 use crate::document::artboard::{Artboard, ArtboardFill};
 use crate::document::document::Document;
 use crate::geometry::element::Visibility;
@@ -263,7 +264,53 @@ fn draw_brushed_path(
         return true;
     }
 
+    // Bristle: N semi-transparent offset bristle lines stroked in the
+    // stroke colour (per-bristle alpha, they overlap and build up).
+    if let Some(br) = bristle_from_json(&brush, stroke_weight) {
+        let lines = bristle_stroke(&elem.d, &br);
+        if lines.is_empty() {
+            return true;
+        }
+        let (r, g, b) = elem
+            .stroke
+            .as_ref()
+            .map(|s| {
+                let (rf, gf, bf, _) = s.color.to_rgba();
+                ((rf * 255.0).round() as u8, (gf * 255.0).round() as u8, (bf * 255.0).round() as u8)
+            })
+            .unwrap_or((0, 0, 0));
+        ctx.set_stroke_style_str(&format!("rgba({r},{g},{b},{})", br.alpha()));
+        ctx.set_line_width(br.line_width());
+        for line in &lines {
+            if line.len() < 2 {
+                continue;
+            }
+            ctx.begin_path();
+            ctx.move_to(line[0].0, line[0].1);
+            for p in &line[1..] {
+                ctx.line_to(p.0, p.1);
+            }
+            ctx.stroke();
+        }
+        return true;
+    }
+
     false // other brush types → plain stroke fallback
+}
+
+/// Build a `BristleBrush` from the library JSON. Shared with the
+/// Brushes-panel `brush_preview` thumbnail.
+pub(crate) fn bristle_from_json(brush: &serde_json::Value, stroke_weight: f64) -> Option<BristleBrush> {
+    if brush.get("type").and_then(|v| v.as_str()) != Some("bristle") {
+        return None;
+    }
+    Some(BristleBrush {
+        size: brush.get("size").and_then(|v| v.as_f64()).unwrap_or(3.0),
+        density: brush.get("density").and_then(|v| v.as_f64()).unwrap_or(50.0),
+        thickness: brush.get("thickness").and_then(|v| v.as_f64()).unwrap_or(30.0),
+        opacity: brush.get("opacity").and_then(|v| v.as_f64()).unwrap_or(30.0),
+        stroke_weight,
+    })
 }
 
 /// Parse a `{ width, height, polygons: [[[x,y],...],...] }` object into a
