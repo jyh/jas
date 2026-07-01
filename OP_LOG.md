@@ -223,6 +223,16 @@ Replay must be a pure, deterministic function of inputs (`VISION.md` §8):
   (Fork 4) is additive metadata recorded *alongside*, for recipe-rebind and merge
   conflict-detection — never an op rewrite.
 
+**Invariant-enforcement strictness differs by app, intentionally.** The
+id-index-rebuild and `in_txn` mutation-path gates use OCaml `assert` (active in
+release) but Rust `debug_assert!` (stripped in release). So on an invariant
+*violation* — which must never happen in correct operation — OCaml aborts
+where Rust proceeds silently. This is a deliberate fail-fast choice, not a
+divergence in normal behavior; both fire identically in debug/test, and the
+conformance corpus never exercises a violation. If strict release crash-parity
+is ever required, add `-noassert` to the OCaml release build or promote Rust's
+`debug_assert!`s to `assert!`.
+
 ---
 
 ## 8. Keep-ready — design in now, build later

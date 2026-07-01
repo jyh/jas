@@ -1,10 +1,14 @@
 # Jas
 
 Jas is a vector graphics editor — a small, inspectable vector illustration
-application — that exists as **four parallel implementations** of the
-same application, one per language, each tracking the same
-architecture, the same document model, the same tool set, and the
-same tests.
+application — that exists as **four parallel, behaviourally-identical
+implementations** of the same application, one per language, each tracking the
+same architecture, the same document model, the same tool set, and the same
+tests. A fifth implementation, **Flask** (`jas_flask/`), is a thin,
+non-gating web reference renderer of the shared YAML/JSON artifacts — it is
+*not* a source of truth and *not* an interactive-parity target (see
+`TESTING_STRATEGY.md` §6), so it is excluded from the "behave identically"
+guarantees below.
 
 | Implementation | UI framework           | Directory      | How to run                |
 |----------------|------------------------|----------------|---------------------------|
@@ -12,8 +16,9 @@ same tests.
 | OCaml          | GTK 3 / lablgtk3       | [`jas_ocaml/`](jas_ocaml/)   | `cd jas_ocaml && ./run.sh`    |
 | Rust           | Dioxus (HTML5 canvas)  | [`jas_dioxus/`](jas_dioxus/) | `cd jas_dioxus && dx serve`   |
 | Swift          | AppKit                 | [`JasSwift/`](JasSwift/)     | `cd JasSwift && swift run`    |
+| Flask (ref.)   | Flask + JS (web)       | [`jas_flask/`](jas_flask/)   | `cd jas_flask && flask run`   |
 
-The four apps are expected to behave identically: the same SVG round-
+The four native apps are expected to behave identically: the same SVG round-
 trips through all of them, the same in-canvas text editor reacts to
 the same key events, the same selection tool picks the same elements
 from the same marquee. New features land in one port first (usually
