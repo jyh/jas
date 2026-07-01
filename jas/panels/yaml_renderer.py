@@ -3456,7 +3456,7 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
     rotates it; other types fall back to an empty box until their preview
     lands. Manual-floor GUI (the widget_tree gate pins only the
     ``brush_preview`` kind, not the pixels)."""
-    from PySide6.QtGui import QPainter, QPen
+    from PySide6.QtGui import QPainter, QPen, QPainterPath
     from PySide6.QtCore import QPointF
     brush = ctx.get("brush") or {}
 
@@ -3467,21 +3467,54 @@ def _render_brush_preview(el, store, ctx, dispatch_fn):
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         def paintEvent(self, _ev):
-            if brush.get("type") != "calligraphic":
-                return
-            size = float(brush.get("size") or 5)
-            roundness = float(brush.get("roundness") or 100)
-            angle = float(brush.get("angle") or 0)
-            major = min(max(size * 2.8, 4.0), 30.0)
-            minor = min(max(major * (roundness / 100.0), 1.5), major)
-            p = QPainter(self)
-            p.setRenderHint(QPainter.Antialiasing, True)
-            p.translate(20, 20)
-            p.rotate(angle)
-            p.setPen(QPen(Qt.NoPen))
-            p.setBrush(QColor("#cccccc"))
-            p.drawEllipse(QPointF(0, 0), major / 2.0, minor / 2.0)
-            p.end()
+            btype = brush.get("type")
+            if btype == "calligraphic":
+                size = float(brush.get("size") or 5)
+                roundness = float(brush.get("roundness") or 100)
+                angle = float(brush.get("angle") or 0)
+                major = min(max(size * 2.8, 4.0), 30.0)
+                minor = min(max(major * (roundness / 100.0), 1.5), major)
+                p = QPainter(self)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                p.translate(20, 20)
+                p.rotate(angle)
+                p.setPen(QPen(Qt.NoPen))
+                p.setBrush(QColor("#cccccc"))
+                p.drawEllipse(QPointF(0, 0), major / 2.0, minor / 2.0)
+                p.end()
+            elif btype == "art":
+                # Warp the artwork along a short horizontal path across the
+                # tile — a stroke sample (reuses art_along_path).
+                from algorithms.art_along_path import ArtBrush, art_along_path
+                from geometry.element import MoveTo, LineTo
+                aw = brush.get("artwork") or {}
+                polys_in = []
+                for poly in aw.get("polygons", []):
+                    polys_in.append([(float(pt[0]), float(pt[1]))
+                                     for pt in poly if len(pt) >= 2])
+                art = ArtBrush(
+                    artwork_width=float(aw.get("width", 0.0)),
+                    artwork_height=float(aw.get("height", 0.0)),
+                    artwork=polys_in, scale=100.0,
+                    flip_across=bool(brush.get("flip_across", False)),
+                    flip_along=bool(brush.get("flip_along", False)),
+                    stroke_weight=14.0,
+                )
+                warped = art_along_path([MoveTo(5.0, 20.0), LineTo(35.0, 20.0)], art)
+                p = QPainter(self)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                p.setPen(QPen(Qt.NoPen))
+                p.setBrush(QColor("#cccccc"))
+                for poly in warped:
+                    if len(poly) < 3:
+                        continue
+                    qp = QPainterPath()
+                    qp.moveTo(QPointF(poly[0][0], poly[0][1]))
+                    for x, y in poly[1:]:
+                        qp.lineTo(QPointF(x, y))
+                    qp.closeSubpath()
+                    p.drawPath(qp)
+                p.end()
 
     return _NibPreview()
 

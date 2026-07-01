@@ -5391,6 +5391,57 @@ and render_brush_preview ~packing ~ctx el =
       Cairo.fill cr;
       true))
   end
+  else if eval_str "brush.type" = "art" then begin
+    (* Art: warp the inline artwork along a short horizontal path across
+       the tile — a stroke sample (reuses Art_along_path). *)
+    let brush_json = Yojson.Safe.Util.member "brush" ctx in
+    let aw = Yojson.Safe.Util.member "artwork" brush_json in
+    let numj = function `Int n -> float_of_int n | `Float f -> f | _ -> 0.0 in
+    let boolj key =
+      match Yojson.Safe.Util.member key brush_json with `Bool b -> b | _ -> false
+    in
+    let width = numj (Yojson.Safe.Util.member "width" aw) in
+    let height = numj (Yojson.Safe.Util.member "height" aw) in
+    let artwork =
+      match Yojson.Safe.Util.member "polygons" aw with
+      | `List polys ->
+        List.map
+          (function
+            | `List pts ->
+              List.filter_map
+                (function `List (x :: y :: _) -> Some (numj x, numj y) | _ -> None)
+                pts
+            | _ -> [])
+          polys
+      | _ -> []
+    in
+    let art =
+      Art_along_path.{
+        artwork_width = width;
+        artwork_height = height;
+        artwork;
+        scale = 100.0;
+        flip_across = boolj "flip_across";
+        flip_along = boolj "flip_along";
+        stroke_weight = 14.0;
+      }
+    in
+    let cmds = [ Element.MoveTo (5.0, 20.0); Element.LineTo (35.0, 20.0) ] in
+    let polys = Art_along_path.warp cmds art in
+    ignore (area#misc#connect#draw ~callback:(fun cr ->
+      Cairo.set_source_rgb cr 0.8 0.8 0.8;
+      List.iter
+        (fun poly ->
+          match poly with
+          | (x0, y0) :: rest ->
+            Cairo.move_to cr x0 y0;
+            List.iter (fun (x, y) -> Cairo.line_to cr x y) rest;
+            Cairo.Path.close cr;
+            Cairo.fill cr
+          | [] -> ())
+        polys;
+      true))
+  end
 
 (* PRINT.md §1B: tabs widget. Left-rail tab list + content area
    showing the active tab. Active tab read from [bind.value]

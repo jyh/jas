@@ -2558,9 +2558,48 @@ struct YamlElementView: View {
                 .frame(width: CGFloat(major), height: CGFloat(minor))
                 .rotationEffect(.degrees(angle))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if (brush["type"] as? String) == "art", let art = artBrushForPreview(brush) {
+            // Art: warp the artwork along a short horizontal path across the
+            // tile — a stroke sample (reuses artAlongPath, so the thumbnail
+            // exercises the canvas algorithm).
+            let color: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
+            let polys = artAlongPath([.moveTo(5, 20), .lineTo(35, 20)], art)
+            SwiftUI.Path { p in
+                for poly in polys where poly.count >= 3 {
+                    p.move(to: CGPoint(x: poly[0][0], y: poly[0][1]))
+                    for pt in poly.dropFirst() { p.addLine(to: CGPoint(x: pt[0], y: pt[1])) }
+                    p.closeSubpath()
+                }
+            }
+            .fill(color)
+            .frame(width: 40, height: 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             SwiftUI.Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Build an ArtBrush for the tile preview (fixed ribbon height, the
+    /// brush's own artwork + flips). Mirrors the canvas artFromJson parse.
+    private func artBrushForPreview(_ brush: [String: Any]) -> ArtBrush? {
+        guard let aw = brush["artwork"] as? [String: Any],
+              let width = containerNumericDim(aw["width"]).map(Double.init),
+              let height = containerNumericDim(aw["height"]).map(Double.init),
+              let polysAny = aw["polygons"] as? [Any] else { return nil }
+        let artwork: [[[Double]]] = polysAny.compactMap { polyAny in
+            guard let poly = polyAny as? [Any] else { return nil }
+            return poly.compactMap { ptAny -> [Double]? in
+                guard let pt = ptAny as? [Any], pt.count >= 2,
+                      let x = containerNumericDim(pt[0]).map(Double.init),
+                      let y = containerNumericDim(pt[1]).map(Double.init) else { return nil }
+                return [x, y]
+            }
+        }
+        return ArtBrush(artworkWidth: width, artworkHeight: height, artwork: artwork,
+                        scale: 100.0,
+                        flipAcross: (brush["flip_across"] as? Bool) ?? false,
+                        flipAlong: (brush["flip_along"] as? Bool) ?? false,
+                        strokeWeight: 14.0)
     }
 
     // MARK: - Placeholder

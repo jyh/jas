@@ -245,8 +245,9 @@ fn draw_brushed_path(
 
 /// Build an `ArtBrush` from the library JSON. Artwork is stored inline as
 /// `artwork: { width, height, polygons: [[[x,y], ...], ...] }` (BRUSHES.md
-/// §Brush libraries; inline polygon form for Phase 1).
-fn art_from_json(brush: &serde_json::Value, stroke_weight: f64) -> Option<ArtBrush> {
+/// §Brush libraries; inline polygon form for Phase 1). Shared with the
+/// Brushes-panel `brush_preview` thumbnail.
+pub(crate) fn art_from_json(brush: &serde_json::Value, stroke_weight: f64) -> Option<ArtBrush> {
     if brush.get("type").and_then(|v| v.as_str()) != Some("art") {
         return None;
     }
