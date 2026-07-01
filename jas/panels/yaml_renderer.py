@@ -4117,6 +4117,11 @@ def _set_widget_value(widget: QWidget, value):
             widget.setText(format_length(
                 value if isinstance(value, (int, float)) else None,
                 unit, precision))
+            # setText leaves the cursor at the end, so a field too narrow to
+            # fit the whole value (e.g. a dash/gap cell showing "12 pt")
+            # scrolls to the cursor and hides the leading digit ("2 pt").
+            # Home the cursor so the field displays from the start.
+            widget.setCursorPosition(0)
         else:
             widget.setText(str(value) if value is not None else "")
     elif isinstance(widget, QLabel):
