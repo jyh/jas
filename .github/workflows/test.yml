@@ -107,7 +107,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install numpy PySide6 pytest absl-py PyYAML
+      # Install from requirements.txt so the CI deps cannot drift from what the
+      # app actually imports (msgpack in geometry/binary, reportlab in
+      # geometry/pdf were declared there but omitted from the hardcoded list,
+      # so binary_test / pdf_test / cross_language_test failed to collect).
+      - run: pip install -r requirements.txt
       - run: cd jas && python -m pytest
       # The shared reference interpreter lives in workspace_interpreter/ — the
       # exact modules (effects, state_store, scope, doc_primitives, loader,
@@ -126,7 +130,10 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.2"
-      - run: opam install --yes dune lablgtk3 xmlm yojson
+      # alcotest is the test framework the jas_ocaml test/ dune files depend on
+      # (libraries jas lablgtk3 alcotest) — it was missing from the install list
+      # so `dune test` could not build the test executables.
+      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest
       - run: cd jas_ocaml && opam exec -- dune test
 
   swift:
@@ -134,6 +141,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin a recent Xcode: Tests/Document/WriteChokepointTests uses swift-testing
+      # exit tests (`#expect(processExitsWith:)`), which need Swift 6.2+ (Xcode
+      # 26+). The runner default was older, so the whole suite failed to compile.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - run: cd JasSwift && swift test
 
   # Flask is a non-gating reference renderer (TESTING_STRATEGY.md §6), so this
@@ -160,14 +173,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.2"
-      - run: pip install numpy PySide6 pytest absl-py
-      - run: opam install --yes dune lablgtk3 xmlm yojson
+      - run: pip install -r requirements.txt
+      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest
       - name: Build all
         run: |
           (cd jas_dioxus && cargo build --bins)
