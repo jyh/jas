@@ -1106,16 +1106,6 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
     vec![]
 }
 
-/// Run effects (e.g., `set: { fill_on_top: true }`).
-/// Returns a list of deferred dialog effects (open_dialog/close_dialog)
-/// that must be applied outside the AppState borrow.
-fn run_effects(
-    effects: &[serde_json::Value],
-    st: &mut crate::workspace::app_state::AppState,
-) -> Vec<serde_json::Value> {
-    run_effects_with_ctx(effects, None, st)
-}
-
 /// Resolve a `dispatch` effect's params map. String values are
 /// expression strings: evaluated against ctx, with the bare-identifier
 /// fallback (`{ target: artboard }` resolves to the literal string
@@ -1151,136 +1141,6 @@ fn resolve_dispatch_params(
         resolved.insert(k.clone(), val);
     }
     resolved
-}
-
-/// As [`run_effects`] but with a caller-provided eval context (e.g. the
-/// foreach-aware ctx captured at click time). Anything the caller
-/// passes is merged into the AppState ctx so foreach iterator
-/// variables (like `swatch._index`) resolve in `select.target`,
-/// `set:` value expressions, etc.
-fn run_effects_with_ctx(
-    effects: &[serde_json::Value],
-    extra_ctx: Option<&serde_json::Value>,
-    st: &mut crate::workspace::app_state::AppState,
-) -> Vec<serde_json::Value> {
-    let mut dialog_effects = Vec::new();
-    // Build an evaluation context once per call. Set-effect values are
-    // expression strings (e.g. "not state.stroke_dashed"); they must
-    // be evaluated before the schema validator looks at them, or the
-    // unevaluated string is passed to the Bool / Number coercer and
-    // the schema rejects it as a type_mismatch. Mirrors the
-    // run_yaml_effects path.
-    let mut eval_ctx = build_appstate_ctx(&serde_json::Map::new(), st);
-    if let Some(extra) = extra_ctx {
-        if let (serde_json::Value::Object(base), serde_json::Value::Object(more))
-            = (&mut eval_ctx, extra)
-        {
-            for (k, v) in more {
-                base.insert(k.clone(), v.clone());
-            }
-        }
-    }
-    for effect in effects {
-        if let Some(set_map) = effect.get("set").and_then(|v| v.as_object()) {
-            let mut evaluated = serde_json::Map::new();
-            for (k, v) in set_map {
-                let val = if let Some(expr_str) = v.as_str() {
-                    super::effects::value_to_json(&super::expr::eval(expr_str, &eval_ctx))
-                } else {
-                    v.clone()
-                };
-                evaluated.insert(k.clone(), val);
-            }
-            apply_set_effects(&evaluated, st);
-        }
-        // set_panel_state: { key, value }
-        if let Some(sps) = effect.get("set_panel_state").and_then(|v| v.as_object()) {
-            apply_set_panel_state(sps, st);
-        }
-        // dispatch: <action_name> | { action: <name>, params: { ... } }
-        // Generic indirection so YAML widgets can fire actions through
-        // the dispatch_action pipeline. Used by the Align panel's
-        // align / distribute buttons (see workspace/panels/align.yaml).
-        if let Some(disp) = effect.get("dispatch") {
-            let (action_name, params) = match disp {
-                serde_json::Value::String(s) => (s.clone(), serde_json::Map::new()),
-                serde_json::Value::Object(m) => {
-                    let name = m.get("action").and_then(|v| v.as_str())
-                        .unwrap_or("").to_string();
-                    let raw_params = m.get("params").and_then(|p| p.as_object())
-                        .cloned().unwrap_or_default();
-                    let resolved = resolve_dispatch_params(&raw_params, &eval_ctx);
-                    (name, resolved)
-                }
-                _ => continue,
-            };
-            if !action_name.is_empty() {
-                dialog_effects.extend(dispatch_action(&action_name, &params, st));
-            }
-        }
-        // select: { target, list, scope, scope_value, mode } — generic
-        // tile-selection effect for swatch / brush / row panels.
-        if let Some(spec) = effect.get("select").and_then(|v| v.as_object()) {
-            apply_select_effect(spec, &eval_ctx, st);
-        }
-        // swap_panel_state: [key_a, key_b]
-        if let Some(serde_json::Value::Array(keys)) = effect.get("swap_panel_state") {
-            if keys.len() == 2 {
-                let a = keys[0].as_str().unwrap_or("");
-                let b = keys[1].as_str().unwrap_or("");
-                let sp = &mut st.stroke_panel;
-                let a_val = get_stroke_field(sp, a);
-                let b_val = get_stroke_field(sp, b);
-                set_stroke_field(sp, a, &b_val);
-                set_stroke_field(sp, b, &a_val);
-            }
-        }
-        // swap: [state_key_a, state_key_b]
-        if let Some(serde_json::Value::Array(keys)) = effect.get("swap") {
-            if keys.len() == 2 {
-                let a = keys[0].as_str().unwrap_or("").to_string();
-                let b = keys[1].as_str().unwrap_or("").to_string();
-                let a_val = get_app_state_field(&a, st);
-                let b_val = get_app_state_field(&b, st);
-                set_app_state_field(&a, &b_val, st);
-                set_app_state_field(&b, &a_val, st);
-            }
-        }
-        // pop: panel.field_name
-        if let Some(target) = effect.get("pop").and_then(|v| v.as_str()) {
-            if target == "panel.isolation_stack" {
-                st.layers_isolation_stack.pop();
-            }
-        }
-        // Defer dialog effects — they need the dialog signal, not AppState
-        if effect.get("open_dialog").is_some() || effect.get("close_dialog").is_some() {
-            dialog_effects.push(effect.clone());
-        }
-        // if: { condition, then, else } — used by the color picker's OK
-        // button to branch between `set fill_color` and `set stroke_color`
-        // based on `param.target`. Recursively run the chosen branch
-        // through this same function so its set / close_dialog / etc.
-        // effects are honored and any deferred dialog effects bubble up.
-        if let Some(if_val) = effect.get("if") {
-            let (cond_expr, then_arr, else_arr) = match if_val {
-                serde_json::Value::String(s) => (
-                    s.clone(),
-                    effect.get("then").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
-                    effect.get("else").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
-                ),
-                serde_json::Value::Object(obj) => (
-                    obj.get("condition").and_then(|v| v.as_str()).unwrap_or("false").to_string(),
-                    obj.get("then").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
-                    obj.get("else").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
-                ),
-                _ => continue,
-            };
-            let took_then = super::expr::eval(&cond_expr, &eval_ctx).to_bool();
-            let branch = if took_then { &then_arr } else { &else_arr };
-            dialog_effects.extend(run_effects_with_ctx(branch, extra_ctx, st));
-        }
-    }
-    dialog_effects
 }
 
 /// Apply `set: { key: value, ... }` effects to AppState (schema-driven).
@@ -1647,14 +1507,6 @@ fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document
         .filter_map(|v| v.as_u64().map(|n| n as usize))
         .collect();
     Some(path)
-}
-
-/// Apply `set_panel_state: { key, value }` effects to the stroke panel state.
-fn apply_set_panel_state(
-    sps: &serde_json::Map<String, serde_json::Value>,
-    st: &mut crate::workspace::app_state::AppState,
-) {
-    apply_set_panel_state_with_ctx(sps, st, None);
 }
 
 /// As `apply_set_panel_state` but threads the action's eval ctx so
@@ -4501,13 +4353,18 @@ fn build_mouse_event_handler(
                             continue;
                         }
                     }
-                    // Run effects (returns deferred dialog effects).
-                    // Pass the click-time ctx so foreach iterator
-                    // vars (e.g. `swatch._index`) resolve in select
-                    // targets / scope_value / set: expressions.
+                    // Run effects through the unified runner (returns deferred
+                    // dialog effects). Pass the click-time ctx so foreach
+                    // iterator vars (e.g. `swatch._index`) resolve in select
+                    // targets / scope_value / set: expressions. Uses
+                    // run_yaml_effects (the full dispatch) rather than the old
+                    // panel-only run_effects_with_ctx, so panel/menu clicks can
+                    // also foreach / doc.* / snapshot like every other surface
+                    // (finding #26 — the panel path previously silently dropped
+                    // those keys). No multi-key effect objects exist in the
+                    // bundle, so first-match dispatch is behavior-equivalent.
                     if !effects.is_empty() {
-                        let dialog_effs = run_effects_with_ctx(
-                            effects, Some(&ctx_snap), &mut st);
+                        let dialog_effs = run_yaml_effects(effects, &ctx_snap, &mut st);
                         deferred_dialog_effects.extend(dialog_effs);
                     }
                     // Dispatch action
@@ -7278,10 +7135,10 @@ fn render_radio(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
                 }
             }
 
-            // Run any remaining (non-dialog) effects through the normal runner.
+            // Run any remaining (non-dialog) effects through the unified runner.
             if !other_effects.is_empty() {
                 let mut st = app.borrow_mut();
-                run_effects_with_ctx(&other_effects, Some(&ctx_snap), &mut st);
+                run_yaml_effects(&other_effects, &ctx_snap, &mut st);
             }
 
             revision += 1;
@@ -10620,7 +10477,7 @@ mod tests {
     fn swap_fill_stroke_via_run_effects() {
         let mut st = make_state_with_colors("ff0000", "0000ff");
         let effects = vec![serde_json::json!({"swap": ["fill_color", "stroke_color"]})];
-        run_effects(&effects, &mut st);
+        run_yaml_effects(&effects, &serde_json::json!({}), &mut st);
         // After swap: fill should be the old stroke color, stroke should be old fill color
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         let stroke_hex = st.app_default_stroke.map(|s| format!("#{}", s.color.to_hex()));
@@ -10634,7 +10491,7 @@ mod tests {
         st.app_default_fill = None;
         st.app_default_stroke = Color::from_hex("0000ff").map(|c| Stroke::new(c, 2.0));
         let effects = vec![serde_json::json!({"swap": ["fill_color", "stroke_color"]})];
-        run_effects(&effects, &mut st);
+        run_yaml_effects(&effects, &serde_json::json!({}), &mut st);
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         assert_eq!(fill_hex, Some("#0000ff".to_string()));
         assert!(st.app_default_stroke.is_none());
