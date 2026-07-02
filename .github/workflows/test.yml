@@ -133,7 +133,7 @@ jobs:
       # alcotest is the test framework the jas_ocaml test/ dune files depend on
       # (libraries jas lablgtk3 alcotest) — it was missing from the install list
       # so `dune test` could not build the test executables.
-      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest
+      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest msgpck camlzip
       - run: cd jas_ocaml && opam exec -- dune test
 
   swift:
@@ -183,7 +183,7 @@ jobs:
         with:
           ocaml-compiler: "5.2"
       - run: pip install -r requirements.txt
-      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest
+      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest msgpck camlzip
       - name: Build all
         run: |
           (cd jas_dioxus && cargo build --bins)
