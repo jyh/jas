@@ -174,7 +174,7 @@ let ungroup_selection (model : Model.model) () =
              control point (SelKindPartial), which diverged from the other
              apps' ungroup result. Guard on the child's presence like the Rust
              handler so a stale path is simply skipped. *)
-          (match (try Some (Document.get_element new_doc path) with _ -> None) with
+          (match (Document.get_element_opt new_doc path) with
            | Some _ ->
              new_sel := Document.PathMap.add path
                (Document.element_selection_all path) !new_sel

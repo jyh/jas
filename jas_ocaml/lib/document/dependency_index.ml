@@ -345,7 +345,7 @@ let orphaned_references (doc : Document.document) (deletion_paths : int list lis
   List.iter (fun path ->
     (* [get_element] raises on an out-of-range / malformed path; an
        invalid path resolves to no element and is skipped. *)
-    match (try Some (Document.get_element doc path) with _ -> None) with
+    match (Document.get_element_opt doc path) with
     | Some elem -> collect_ids elem deleted_ids
     | None -> ()
   ) deletion_paths;

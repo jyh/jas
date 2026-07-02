@@ -20,8 +20,20 @@ transcript/
 __pycache__/
 *.pyc
 
-# Editor backup files (emacs, etc.)
+# Editor backup / scratch files (emacs backups + auto-saves + locks, vim swap)
+# (\# escapes the leading '#' so the pattern is not read as a comment)
 *~
+\#*\#
+.\#*
+*.sw[a-p]
+.*.sw[a-p]
+
+# macOS Finder metadata (do not rely on a contributor's global gitignore)
+.DS_Store
+**/.DS_Store
+
+# Scratch images (e.g. article/figures/**/x.png)
+x.png
 
 # Screenshot output from capture.sh (capture.sh <AppName> screenshot.png)
 screenshot.png
@@ -29,4 +41,3 @@ screenshot.png
 # NOTE: workspace/workspace.json is COMMITTED. Regenerate with:
 #   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
 # CI enforces freshness; see scripts/check_workspace_json.sh.
-#EXPRESSION_LANGUAGE.md#

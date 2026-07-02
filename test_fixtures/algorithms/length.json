@@ -1,0 +1,22 @@
+[
+  {"name": "parse_px_to_pt", "function": "parse", "input": "12 px", "default_unit": "px", "expected": 9.0},
+  {"name": "parse_bare_uses_default", "function": "parse", "input": "12", "default_unit": "pt", "expected": 12.0},
+  {"name": "parse_mm", "function": "parse", "input": "0.5 mm", "default_unit": "px", "expected": 1.4173228346456694},
+  {"name": "parse_in_no_space", "function": "parse", "input": "1in", "default_unit": "px", "expected": 72.0},
+  {"name": "parse_whitespace_tolerated", "function": "parse", "input": "  3  pc  ", "default_unit": "px", "expected": 36.0},
+  {"name": "parse_empty_is_null", "function": "parse", "input": "", "default_unit": "px", "expected": null},
+  {"name": "parse_garbage_is_null", "function": "parse", "input": "abc", "default_unit": "px", "expected": null},
+  {"name": "parse_unknown_unit_is_null", "function": "parse", "input": "5 furlong", "default_unit": "px", "expected": null},
+  {"name": "parse_negative", "function": "parse", "input": "-2.5pt", "default_unit": "px", "expected": -2.5},
+  {"name": "parse_decimal_px", "function": "parse", "input": "10.50 px", "default_unit": "px", "expected": 7.875},
+
+  {"name": "format_pt_to_px", "function": "format", "pt": 12.0, "unit": "px", "precision": 2, "expected": "16 px"},
+  {"name": "format_pt_to_in", "function": "format", "pt": 96.0, "unit": "in", "precision": 2, "expected": "1.33 in"},
+  {"name": "format_null_is_empty", "function": "format", "pt": null, "unit": "px", "precision": 2, "expected": ""},
+  {"name": "format_round_half_even", "function": "format", "pt": 0.125, "unit": "px", "precision": 2, "expected": "0.17 px"},
+  {"name": "format_precision_zero", "function": "format", "pt": 10.0, "unit": "px", "precision": 0, "expected": "13 px"},
+  {"name": "format_pt_trims_zeros", "function": "format", "pt": 2.5, "unit": "pt", "precision": 2, "expected": "2.5 pt"},
+  {"name": "format_mm", "function": "format", "pt": 100.0, "unit": "mm", "precision": 2, "expected": "35.28 mm"},
+  {"name": "format_zero", "function": "format", "pt": 0.0, "unit": "px", "precision": 2, "expected": "0 px"},
+  {"name": "format_negative", "function": "format", "pt": -3.0, "unit": "px", "precision": 2, "expected": "-4 px"}
+]

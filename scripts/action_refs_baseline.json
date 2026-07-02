@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Action names referenced from the bundle (panel flyout menus) that have no",
+    "actions: entry yet, and are NOT native intercepts — they are forward-declared",
+    "menu items for panels not yet fully implemented (gradient / opacity / swatches /",
+    "character). They currently no-op in every app. This is a MONOTONICALLY-DECREASING",
+    "debt list: check_action_refs.py fails if a NEW unresolved ref appears (that is",
+    "the real guard, e.g. it would have caught export_to_pdf), and also fails if a",
+    "listed action becomes resolved but is left here (implement it -> remove it here).",
+    "Do not add to this list to silence a genuinely broken reference."
+  ],
+  "unresolved_actions": [
+    "disable_opacity_mask",
+    "gradient_distribute_stops",
+    "gradient_reset_midpoints",
+    "gradient_reverse",
+    "gradient_save_library",
+    "make_opacity_mask",
+    "open_opacity_slider_popover",
+    "open_swatch_library",
+    "release_opacity_mask",
+    "toggle_all_caps",
+    "toggle_new_masks_clipping",
+    "toggle_new_masks_inverted",
+    "toggle_opacity_options",
+    "toggle_opacity_thumbnails",
+    "toggle_page_isolated_blending",
+    "toggle_page_knockout_group",
+    "toggle_small_caps",
+    "toggle_snap_to_glyph_visible",
+    "toggle_subscript",
+    "toggle_superscript",
+    "unlink_opacity_mask"
+  ]
+}

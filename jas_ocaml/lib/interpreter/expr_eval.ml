@@ -87,14 +87,76 @@ let to_bool (v : value) : bool =
   | Path p -> p <> []
   | Closure _ -> true
 
+(* Expand a scientific-notation float string (e.g. 1e-05) to positional
+   decimal. Rust f64 Display never uses scientific notation, so the canonical
+   number-to-string form must not either. *)
+let sci_to_positional s =
+  let neg = String.length s > 0 && s.[0] = '-' in
+  let s = if neg then String.sub s 1 (String.length s - 1) else s in
+  let e_idx =
+    match String.index_opt s 'e' with
+    | Some i -> i
+    | None -> (match String.index_opt s 'E' with Some i -> i | None -> -1)
+  in
+  if e_idx < 0 then (if neg then "-" ^ s else s)
+  else begin
+    let mant = String.sub s 0 e_idx in
+    let exp = int_of_string (String.sub s (e_idx + 1) (String.length s - e_idx - 1)) in
+    let int_part, frac_part =
+      match String.index_opt mant '.' with
+      | Some d -> (String.sub mant 0 d, String.sub mant (d + 1) (String.length mant - d - 1))
+      | None -> (mant, "")
+    in
+    let digits = int_part ^ frac_part in
+    let point = String.length int_part + exp in
+    let out =
+      if point <= 0 then "0." ^ String.make (- point) '0' ^ digits
+      else if point >= String.length digits then
+        digits ^ String.make (point - String.length digits) '0'
+      else String.sub digits 0 point ^ "." ^ String.sub digits point (String.length digits - point)
+    in
+    let out =
+      if String.contains out '.' then begin
+        let n = ref (String.length out) in
+        while !n > 0 && out.[!n - 1] = '0' do decr n done;
+        if !n > 0 && out.[!n - 1] = '.' then decr n;
+        String.sub out 0 !n
+      end
+      else out
+    in
+    let out = if out = "" then "0" else out in
+    if neg && out <> "0" then "-" ^ out else out
+  end
+
+(* Shortest decimal string that round-trips to [n], matching the digits Rust
+   f64 Display produces. Try increasing significant-digit counts until one
+   parses back exactly. *)
+let shortest_float n =
+  let rec try_prec p =
+    if p > 17 then Printf.sprintf "%.17g" n
+    else
+      let s = Printf.sprintf "%.*g" p n in
+      if float_of_string s = n then s else try_prec (p + 1)
+  in
+  try_prec 1
+
+(* Canonical number-to-string, matching the Rust reference
+   Value.to_string_coerce: integer-valued floats print as integers (any
+   magnitude, no Float.to_int overflow); other values use the shortest
+   round-trip decimal in positional, never scientific, notation. *)
+let number_to_canonical n =
+  if Float.is_nan n then "NaN"
+  else if n = Float.infinity then "inf"
+  else if n = Float.neg_infinity then "-inf"
+  else if Float.is_integer n then (if n = 0.0 then "0" else Printf.sprintf "%.0f" n)
+  else sci_to_positional (shortest_float n)
+
 let to_string_coerce (v : value) : string =
   match v with
   | Null -> ""
   | Bool true -> "true"
   | Bool false -> "false"
-  | Number n ->
-    if Float.is_integer n then string_of_int (Float.to_int n)
-    else string_of_float n
+  | Number n -> number_to_canonical n
   | Str s -> s
   | Color c -> c
   | List _ -> "[list]"

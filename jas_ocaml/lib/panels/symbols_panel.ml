@@ -108,8 +108,7 @@ let new_symbol (store : State_store.t) (m : Model.model) : unit =
           (* Resolve which id actually became the master from the
              in-place reference instance's target. *)
           let resolved =
-            match (try Some (Document.get_element m#document path)
-                   with _ -> None) with
+            match Document.get_element_opt m#document path with
             | Some (Element.Live (Element.Reference r)) -> r.Element.ref_target
             | _ -> master_id
           in

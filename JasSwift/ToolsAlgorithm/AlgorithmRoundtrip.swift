@@ -45,6 +45,8 @@ let results: [[String: Any]]
 switch algo {
 case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
+case "flatten":           results = runFlatten(activeVectors)
+case "length":            results = runLength(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
@@ -73,6 +75,40 @@ func runElementBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let elem = parseElement(elemJson)
         let b = elem.bounds
         return ["name": name, "result": [b.x, b.y, b.width, b.height]]
+    }
+}
+
+// MARK: - Flatten (path commands -> polyline; exercises multi-subpath close)
+
+func runFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let pts = flattenPathCommands(d)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Length (unit-aware parse "12 px" -> pt, and format pt -> "16 px")
+
+func runLength(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let result: Any
+        if (tc["function"] as? String) == "parse" {
+            let input = tc["input"] as? String ?? ""
+            let du = tc["default_unit"] as? String ?? ""
+            if let v = Length.parse(input, defaultUnit: du) { result = v } else { result = NSNull() }
+        } else {
+            let pt = (tc["pt"] as? NSNumber)?.doubleValue  // JSON null/absent -> nil
+            let unit = tc["unit"] as? String ?? ""
+            let precision = (tc["precision"] as? NSNumber)?.intValue ?? 2
+            result = Length.format(pt, unit: unit, precision: precision)
+        }
+        return ["name": name, "result": result]
     }
 }
 

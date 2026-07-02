@@ -1,5 +1,9 @@
 # OCaml YAML Tool Runtime — port plan
 
+> **Status: complete.** The migration shipped and merged; 14 tools are
+> YAML-driven. Type / TypeOnPath remain permanently native per
+> NATIVE_BOUNDARY.md §6. Kept as the design record, not open work.
+
 Propagates the Rust/Swift tool-runtime migration (see
 `RUST_TOOL_RUNTIME.md` / `SWIFT_TOOL_RUNTIME.md` and the memory
 notes `project_rust_yaml_tool_runtime.md` /

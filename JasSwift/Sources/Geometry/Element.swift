@@ -2931,6 +2931,81 @@ private func quadraticEval(_ p0: Double, _ p1: Double, _ p2: Double, _ t: Double
     return u*u*p0 + 2*u*t*p1 + t*t*p2
 }
 
+/// Candidate (x, y) extrema for an SVG arc: the two endpoints plus any
+/// cardinal-tangent points of the underlying ellipse that fall within the
+/// arc's actual sweep range. Fixes the "ArcTo bbox skips the peak" gap.
+/// Degenerate arcs (zero radius) collapse to the endpoint pair. SVG 1.1
+/// §F.6 endpoint-to-center parameterization. Mirrors the Rust reference
+/// (jas_dioxus geometry/element.rs arcExtremaPoints) so path bounds are
+/// byte-equivalent across apps, gated by the element_bounds corpus.
+private func arcExtremaPoints(
+    _ x0: Double, _ y0: Double,
+    _ rx: Double, _ ry: Double, _ xRotationDeg: Double,
+    _ largeArc: Bool, _ sweep: Bool,
+    _ x: Double, _ y: Double
+) -> [(Double, Double)] {
+    if abs(rx) < 1e-12 || abs(ry) < 1e-12 {
+        return [(x0, y0), (x, y)]
+    }
+    let twoPi = 2.0 * Double.pi
+    let phi = xRotationDeg * Double.pi / 180.0
+    let cosPhi = cos(phi), sinPhi = sin(phi)
+
+    let dx = (x0 - x) / 2.0, dy = (y0 - y) / 2.0
+    let x1p = cosPhi * dx + sinPhi * dy
+    let y1p = -sinPhi * dx + cosPhi * dy
+    var rxEff = abs(rx), ryEff = abs(ry)
+    let lambda = (x1p * x1p) / (rxEff * rxEff) + (y1p * y1p) / (ryEff * ryEff)
+    if lambda > 1.0 {
+        let s = lambda.squareRoot()
+        rxEff *= s
+        ryEff *= s
+    }
+    let sign = (largeArc == sweep) ? -1.0 : 1.0
+    let num = Swift.max(
+        rxEff * rxEff * ryEff * ryEff
+        - rxEff * rxEff * y1p * y1p
+        - ryEff * ryEff * x1p * x1p,
+        0.0)
+    let den = rxEff * rxEff * y1p * y1p + ryEff * ryEff * x1p * x1p
+    let factor = den < 1e-12 ? 0.0 : sign * (num / den).squareRoot()
+    let cxp = factor * (rxEff * y1p) / ryEff
+    let cyp = -factor * (ryEff * x1p) / rxEff
+    let cxArc = cosPhi * cxp - sinPhi * cyp + (x0 + x) / 2.0
+    let cyArc = sinPhi * cxp + cosPhi * cyp + (y0 + y) / 2.0
+
+    let theta1 = atan2((y1p - cyp) / ryEff, (x1p - cxp) / rxEff)
+    let theta2 = atan2((-y1p - cyp) / ryEff, (-x1p - cxp) / rxEff)
+    var delta = theta2 - theta1
+    if !sweep && delta > 0.0 { delta -= twoPi }
+    else if sweep && delta < 0.0 { delta += twoPi }
+
+    let tx = atan2(-ryEff * sinPhi, rxEff * cosPhi)
+    let ty = atan2(ryEff * cosPhi, rxEff * sinPhi)
+    let candidates = [tx, tx + Double.pi, ty, ty + Double.pi]
+
+    func inSweep(_ t: Double) -> Bool {
+        var dt = t - theta1
+        if delta >= 0.0 {
+            while dt < 0.0 { dt += twoPi }
+            while dt > twoPi { dt -= twoPi }
+            return dt <= delta + 1e-9
+        } else {
+            while dt > 0.0 { dt -= twoPi }
+            while dt < -twoPi { dt += twoPi }
+            return dt >= delta - 1e-9
+        }
+    }
+
+    var points: [(Double, Double)] = [(x0, y0), (x, y)]
+    for t in candidates where inSweep(t) {
+        let px = cxArc + rxEff * cosPhi * cos(t) - ryEff * sinPhi * sin(t)
+        let py = cyArc + rxEff * sinPhi * cos(t) + ryEff * cosPhi * sin(t)
+        points.append((px, py))
+    }
+    return points
+}
+
 /// SVG \<path\> element.
 /// Compute tight bounds by finding Bezier extrema.
 func pathBounds(_ d: [PathCommand]) -> BBox {
@@ -2968,8 +3043,10 @@ func pathBounds(_ d: [PathCommand]) -> BBox {
         case .smoothQuadTo(let x, let y):
             xs.append(x); ys.append(y)
             cx = x; cy = y
-        case .arcTo(_, _, _, _, _, let x, let y):
-            xs.append(x); ys.append(y)
+        case .arcTo(let rx, let ry, let rot, let la, let sw, let x, let y):
+            for (px, py) in arcExtremaPoints(cx, cy, rx, ry, rot, la, sw, x, y) {
+                xs.append(px); ys.append(py)
+            }
             cx = x; cy = y
         case .closePath:
             cx = sx; cy = sy

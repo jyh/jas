@@ -1,0 +1,28 @@
+[
+  {"name": "single_square_close", "function": "flatten",
+   "_comment": "one subpath: Z closes back to the MoveTo. All apps always agreed here.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0},
+     {"cmd": "L", "x": 10.0, "y": 10.0}, {"cmd": "L", "x": 0.0, "y": 10.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[0,0],[10,0],[10,10],[0,10],[0,0]]},
+
+  {"name": "two_disjoint_squares", "function": "flatten",
+   "_comment": "the #2 discriminator: the SECOND Z must close to the second subpath start (20,0), not the whole-path first point (0,0). Python/Rust closed to (0,0) before the fix.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0},
+     {"cmd": "L", "x": 10.0, "y": 10.0}, {"cmd": "L", "x": 0.0, "y": 10.0}, {"cmd": "Z"},
+     {"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0},
+     {"cmd": "L", "x": 30.0, "y": 10.0}, {"cmd": "L", "x": 20.0, "y": 10.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[0,0],[10,0],[10,10],[0,10],[0,0],[20,0],[30,0],[30,10],[20,10],[20,0]]},
+
+  {"name": "open_then_closed_subpath", "function": "flatten",
+   "_comment": "first subpath open (no Z), second closed: the Z closes to (10,0), the second subpath start.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 5.0, "y": 0.0},
+     {"cmd": "M", "x": 10.0, "y": 0.0}, {"cmd": "L", "x": 15.0, "y": 0.0},
+     {"cmd": "L", "x": 15.0, "y": 5.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[0,0],[5,0],[10,0],[15,0],[15,5],[10,0]]}
+]

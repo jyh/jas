@@ -93,6 +93,12 @@ val get_element_selection : selection -> element_path -> element_selection optio
 val default_document : unit -> document
 val bounds : document -> float * float * float * float
 val get_element : document -> element_path -> Element.element
+
+(** Bounds-checked total lookup. Returns [None] for an empty, out-of-range, or
+    non-container-traversing (stale) path, without swallowing unrelated
+    exceptions the way [try get_element ... with _ -> None] did. *)
+val get_element_opt : document -> element_path -> Element.element option
+
 val replace_element : document -> element_path -> Element.element -> document
 
 (** Effective visibility of the element at [path], computed as the

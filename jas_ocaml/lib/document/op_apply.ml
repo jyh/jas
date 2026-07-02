@@ -614,7 +614,7 @@ let apply_duplicate_artboard (model : Model.model) (source_id : string)
    than raising (Document.get_element raises on a bad path). *)
 let get_element_opt (doc : Document.document) (path : int list) :
     Element.element option =
-  try Some (Document.get_element doc path) with _ -> None
+  Document.get_element_opt doc path
 
 (* Delete the element at [path]. Returns (changed, targets). *)
 let apply_delete_element_at (model : Model.model) (path : int list) :

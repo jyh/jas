@@ -86,11 +86,11 @@ fn opt_bool(o: Option<bool>) -> Value {
     match o { Some(b) => vbool(b), None => vnil() }
 }
 
-fn as_opt_f64(v: &Value) -> Option<f64> {
-    if v.is_nil() { None } else { Some(as_f64(v)) }
+fn as_opt_f64(v: &Value) -> Result<Option<f64>, String> {
+    if v.is_nil() { Ok(None) } else { Ok(Some(as_f64(v)?)) }
 }
-fn as_opt_str(v: &Value) -> Option<String> {
-    if v.is_nil() { None } else { Some(as_str(v).to_string()) }
+fn as_opt_str(v: &Value) -> Result<Option<String>, String> {
+    if v.is_nil() { Ok(None) } else { Ok(Some(as_str(v)?.to_string())) }
 }
 fn as_opt_bool(v: &Value) -> Option<bool> {
     if v.is_nil() { None } else { v.as_bool() }
@@ -272,76 +272,80 @@ fn pack_tspan(t: &crate::geometry::tspan::Tspan) -> Value {
 
 /// Inverse of `pack_tspan`. Tolerant of trailing field additions:
 /// any field not present in the blob falls back to the tspan default.
-fn unpack_tspan(v: &Value) -> crate::geometry::tspan::Tspan {
+fn unpack_tspan(v: &Value) -> Result<crate::geometry::tspan::Tspan, String> {
     use crate::geometry::tspan::Tspan;
-    let arr = as_array(v);
+    let arr = as_array(v)?;
     let get = |i: usize| arr.get(i).unwrap_or(&Value::Nil);
-    let id = if arr.len() > 0 { as_i64(&arr[0]) as u32 } else { 0 };
-    let content = if arr.len() > 1 { as_str(&arr[1]).to_string() } else { String::new() };
+    let id = if !arr.is_empty() { as_i64(&arr[0])? as u32 } else { 0 };
+    let content = if arr.len() > 1 { as_str(&arr[1])?.to_string() } else { String::new() };
     let decor = match get(17) {
-        Value::Array(xs) => Some(xs.iter().map(|x| as_str(x).to_string()).collect()),
+        Value::Array(xs) => Some(
+            xs.iter()
+                .map(|x| as_str(x).map(|s| s.to_string()))
+                .collect::<Result<Vec<_>, String>>()?,
+        ),
         _ => None,
     };
     let transform = match get(20) {
         Value::Array(xs) if xs.len() >= 6 => Some(crate::geometry::element::Transform {
-            a: as_f64(&xs[0]), b: as_f64(&xs[1]), c: as_f64(&xs[2]),
-            d: as_f64(&xs[3]), e: as_f64(&xs[4]), f: as_f64(&xs[5]),
+            a: as_f64(&xs[0])?, b: as_f64(&xs[1])?, c: as_f64(&xs[2])?,
+            d: as_f64(&xs[3])?, e: as_f64(&xs[4])?, f: as_f64(&xs[5])?,
         }),
         _ => None,
     };
-    Tspan {
+    Ok(Tspan {
         id,
         content,
-        baseline_shift: as_opt_f64(get(2)),
-        dx: as_opt_f64(get(3)),
-        font_family: as_opt_str(get(4)),
-        font_size: as_opt_f64(get(5)),
-        font_style: as_opt_str(get(6)),
-        font_variant: as_opt_str(get(7)),
-        font_weight: as_opt_str(get(8)),
-        jas_aa_mode: as_opt_str(get(9)),
+        baseline_shift: as_opt_f64(get(2))?,
+        dx: as_opt_f64(get(3))?,
+        font_family: as_opt_str(get(4))?,
+        font_size: as_opt_f64(get(5))?,
+        font_style: as_opt_str(get(6))?,
+        font_variant: as_opt_str(get(7))?,
+        font_weight: as_opt_str(get(8))?,
+        jas_aa_mode: as_opt_str(get(9))?,
         jas_fractional_widths: as_opt_bool(get(10)),
-        jas_kerning_mode: as_opt_str(get(11)),
+        jas_kerning_mode: as_opt_str(get(11))?,
         jas_no_break: as_opt_bool(get(12)),
-        letter_spacing: as_opt_f64(get(13)),
-        line_height: as_opt_f64(get(14)),
-        rotate: as_opt_f64(get(15)),
-        style_name: as_opt_str(get(16)),
+        letter_spacing: as_opt_f64(get(13))?,
+        line_height: as_opt_f64(get(14))?,
+        rotate: as_opt_f64(get(15))?,
+        style_name: as_opt_str(get(16))?,
         text_decoration: decor,
-        text_rendering: as_opt_str(get(18)),
-        text_transform: as_opt_str(get(19)),
+        text_rendering: as_opt_str(get(18))?,
+        text_transform: as_opt_str(get(19))?,
         transform,
-        xml_lang: as_opt_str(get(21)),
-        jas_role: as_opt_str(get(22)),
-        jas_left_indent: as_opt_f64(get(23)),
-        jas_right_indent: as_opt_f64(get(24)),
+        xml_lang: as_opt_str(get(21))?,
+        jas_role: as_opt_str(get(22))?,
+        jas_left_indent: as_opt_f64(get(23))?,
+        jas_right_indent: as_opt_f64(get(24))?,
         jas_hyphenate: as_opt_bool(get(25)),
         jas_hanging_punctuation: as_opt_bool(get(26)),
-        jas_list_style: as_opt_str(get(27)),
-        text_align: as_opt_str(get(28)),
-        text_align_last: as_opt_str(get(29)),
-        text_indent: as_opt_f64(get(30)),
-        jas_space_before: as_opt_f64(get(31)),
-        jas_space_after: as_opt_f64(get(32)),
-        jas_word_spacing_min: as_opt_f64(get(33)),
-        jas_word_spacing_desired: as_opt_f64(get(34)),
-        jas_word_spacing_max: as_opt_f64(get(35)),
-        jas_letter_spacing_min: as_opt_f64(get(36)),
-        jas_letter_spacing_desired: as_opt_f64(get(37)),
-        jas_letter_spacing_max: as_opt_f64(get(38)),
-        jas_glyph_scaling_min: as_opt_f64(get(39)),
-        jas_glyph_scaling_desired: as_opt_f64(get(40)),
-        jas_glyph_scaling_max: as_opt_f64(get(41)),
-        jas_auto_leading: as_opt_f64(get(42)),
-        jas_single_word_justify: as_opt_str(get(43)),
-        jas_hyphenate_min_word: as_opt_f64(get(44)),
-        jas_hyphenate_min_before: as_opt_f64(get(45)),
-        jas_hyphenate_min_after: as_opt_f64(get(46)),
-        jas_hyphenate_limit: as_opt_f64(get(47)),
-        jas_hyphenate_zone: as_opt_f64(get(48)),
-        jas_hyphenate_bias: as_opt_f64(get(49)),
+        jas_list_style: as_opt_str(get(27))?,
+        text_align: as_opt_str(get(28))?,
+        text_align_last: as_opt_str(get(29))?,
+        text_indent: as_opt_f64(get(30))?,
+        jas_space_before: as_opt_f64(get(31))?,
+        jas_space_after: as_opt_f64(get(32))?,
+        jas_word_spacing_min: as_opt_f64(get(33))?,
+        jas_word_spacing_desired: as_opt_f64(get(34))?,
+        jas_word_spacing_max: as_opt_f64(get(35))?,
+        jas_letter_spacing_min: as_opt_f64(get(36))?,
+        jas_letter_spacing_desired: as_opt_f64(get(37))?,
+        jas_letter_spacing_max: as_opt_f64(get(38))?,
+        jas_glyph_scaling_min: as_opt_f64(get(39))?,
+        jas_glyph_scaling_desired: as_opt_f64(get(40))?,
+        jas_glyph_scaling_max: as_opt_f64(get(41))?,
+        jas_auto_leading: as_opt_f64(get(42))?,
+        jas_single_word_justify: as_opt_str(get(43))?,
+        jas_hyphenate_min_word: as_opt_f64(get(44))?,
+        jas_hyphenate_min_before: as_opt_f64(get(45))?,
+        jas_hyphenate_min_after: as_opt_f64(get(46))?,
+        jas_hyphenate_limit: as_opt_f64(get(47))?,
+        jas_hyphenate_zone: as_opt_f64(get(48))?,
+        jas_hyphenate_bias: as_opt_f64(get(49))?,
         jas_hyphenate_capitalized: as_opt_bool(get(50)),
-    }
+    })
 }
 
 fn pack_common(c: &CommonProps) -> (Value, Value, Value, Value, Value, Value) {
@@ -534,96 +538,111 @@ fn pack_document(doc: &Document) -> Value {
 
 // -- Unpack (Value -> Document) ----------------------------------------------
 
-fn as_i64(v: &Value) -> i64 {
-    v.as_i64().unwrap_or_else(|| {
+// The unpack helpers below return `Result` rather than panicking so a
+// malformed-but-msgpack-decodable blob surfaces as an `Err` from
+// `binary_to_document` instead of aborting the process. This matters on wasm,
+// where `save_session` reads the blob from localStorage on every startup and a
+// panic aborts the whole module (no `catch_unwind`): one corrupted entry would
+// otherwise brick the app on every load. The Python reference raises a
+// catchable exception on the same input.
+
+fn as_i64(v: &Value) -> Result<i64, String> {
+    v.as_i64()
         // Handle unsigned integers too.
-        v.as_u64().map(|u| u as i64).expect("expected integer")
+        .or_else(|| v.as_u64().map(|u| u as i64))
+        .ok_or_else(|| format!("expected integer, got {:?}", v))
+}
+
+fn as_f64(v: &Value) -> Result<f64, String> {
+    match v {
+        Value::F64(f) => Ok(*f),
+        Value::F32(f) => Ok(*f as f64),
+        Value::Integer(i) => i
+            .as_f64()
+            .ok_or_else(|| format!("expected float-compatible integer, got {:?}", i)),
+        _ => Err(format!("expected f64, got {:?}", v)),
+    }
+}
+
+fn as_bool(v: &Value) -> Result<bool, String> {
+    v.as_bool().ok_or_else(|| format!("expected bool, got {:?}", v))
+}
+
+fn as_str(v: &Value) -> Result<&str, String> {
+    v.as_str().ok_or_else(|| format!("expected string, got {:?}", v))
+}
+
+fn as_array(v: &Value) -> Result<&Vec<Value>, String> {
+    v.as_array().ok_or_else(|| format!("expected array, got {:?}", v))
+}
+
+/// Bounds-checked positional access, replacing raw `arr[i]` in the unpack
+/// path so a too-short array yields an `Err` instead of an index panic.
+fn at(arr: &[Value], i: usize) -> Result<&Value, String> {
+    arr.get(i)
+        .ok_or_else(|| format!("index {} out of range (len {})", i, arr.len()))
+}
+
+fn unpack_color(v: &Value) -> Result<Color, String> {
+    let arr = as_array(v)?;
+    let space = as_i64(at(arr, 0)?)?;
+    Ok(match space {
+        SPACE_RGB => Color::Rgb {
+            r: as_f64(at(arr, 1)?)?, g: as_f64(at(arr, 2)?)?, b: as_f64(at(arr, 3)?)?, a: as_f64(at(arr, 5)?)?,
+        },
+        SPACE_HSB => Color::Hsb {
+            h: as_f64(at(arr, 1)?)?, s: as_f64(at(arr, 2)?)?, b: as_f64(at(arr, 3)?)?, a: as_f64(at(arr, 5)?)?,
+        },
+        SPACE_CMYK => Color::Cmyk {
+            c: as_f64(at(arr, 1)?)?, m: as_f64(at(arr, 2)?)?, y: as_f64(at(arr, 3)?)?,
+            k: as_f64(at(arr, 4)?)?, a: as_f64(at(arr, 5)?)?,
+        },
+        _ => return Err(format!("unknown color space: {}", space)),
     })
 }
 
-fn as_f64(v: &Value) -> f64 {
-    match v {
-        Value::F64(f) => *f,
-        Value::F32(f) => *f as f64,
-        Value::Integer(i) => {
-            i.as_f64().expect("expected float-compatible integer")
-        }
-        _ => panic!("expected f64, got {:?}", v),
-    }
+fn unpack_fill(v: &Value) -> Result<Option<Fill>, String> {
+    if v.is_nil() { return Ok(None); }
+    let arr = as_array(v)?;
+    Ok(Some(Fill { color: unpack_color(at(arr, 0)?)?, opacity: as_f64(at(arr, 1)?)? }))
 }
 
-fn as_bool(v: &Value) -> bool {
-    v.as_bool().expect("expected bool")
-}
-
-fn as_str(v: &Value) -> &str {
-    v.as_str().expect("expected string")
-}
-
-fn as_array(v: &Value) -> &Vec<Value> {
-    v.as_array().expect("expected array")
-}
-
-fn unpack_color(v: &Value) -> Color {
-    let arr = as_array(v);
-    let space = as_i64(&arr[0]);
-    match space {
-        SPACE_RGB => Color::Rgb {
-            r: as_f64(&arr[1]), g: as_f64(&arr[2]), b: as_f64(&arr[3]), a: as_f64(&arr[5]),
-        },
-        SPACE_HSB => Color::Hsb {
-            h: as_f64(&arr[1]), s: as_f64(&arr[2]), b: as_f64(&arr[3]), a: as_f64(&arr[5]),
-        },
-        SPACE_CMYK => Color::Cmyk {
-            c: as_f64(&arr[1]), m: as_f64(&arr[2]), y: as_f64(&arr[3]),
-            k: as_f64(&arr[4]), a: as_f64(&arr[5]),
-        },
-        _ => panic!("unknown color space: {}", space),
-    }
-}
-
-fn unpack_fill(v: &Value) -> Option<Fill> {
-    if v.is_nil() { return None; }
-    let arr = as_array(v);
-    Some(Fill { color: unpack_color(&arr[0]), opacity: as_f64(&arr[1]) })
-}
-
-fn unpack_stroke(v: &Value) -> Option<Stroke> {
-    if v.is_nil() { return None; }
-    let arr = as_array(v);
-    let cap = match as_i64(&arr[2]) {
+fn unpack_stroke(v: &Value) -> Result<Option<Stroke>, String> {
+    if v.is_nil() { return Ok(None); }
+    let arr = as_array(v)?;
+    let cap = match as_i64(at(arr, 2)?)? {
         0 => LineCap::Butt,
         1 => LineCap::Round,
         2 => LineCap::Square,
-        n => panic!("unknown linecap: {}", n),
+        n => return Err(format!("unknown linecap: {}", n)),
     };
-    let join = match as_i64(&arr[3]) {
+    let join = match as_i64(at(arr, 3)?)? {
         0 => LineJoin::Miter,
         1 => LineJoin::Round,
         2 => LineJoin::Bevel,
-        n => panic!("unknown linejoin: {}", n),
+        n => return Err(format!("unknown linejoin: {}", n)),
     };
     // Extended fields (backward compatible: old files have 5 elements)
     let (miter_limit, align, dash_pattern, dash_len,
          start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align)
     = if arr.len() > 5 {
-        let ml = as_f64(&arr[5]);
-        let al = match as_i64(&arr[6]) {
+        let ml = as_f64(at(arr, 5)?)?;
+        let al = match as_i64(at(arr, 6)?)? {
             1 => StrokeAlign::Inside,
             2 => StrokeAlign::Outside,
             _ => StrokeAlign::Center,
         };
-        let dash_arr = as_array(&arr[7]);
+        let dash_arr = as_array(at(arr, 7)?)?;
         let mut dp = [0.0f64; 6];
         let dl = dash_arr.len().min(6) as u8;
-        for (i, v) in dash_arr.iter().enumerate().take(6) {
-            dp[i] = as_f64(v);
+        for (i, dv) in dash_arr.iter().enumerate().take(6) {
+            dp[i] = as_f64(dv)?;
         }
-        let sa = Arrowhead::from_str(as_str(&arr[8]));
-        let ea = Arrowhead::from_str(as_str(&arr[9]));
-        let sas = as_f64(&arr[10]);
-        let eas = as_f64(&arr[11]);
-        let aa = match as_i64(&arr[12]) {
+        let sa = Arrowhead::from_str(as_str(at(arr, 8)?)?);
+        let ea = Arrowhead::from_str(as_str(at(arr, 9)?)?);
+        let sas = as_f64(at(arr, 10)?)?;
+        let eas = as_f64(at(arr, 11)?)?;
+        let aa = match as_i64(at(arr, 12)?)? {
             1 => ArrowAlign::CenterAtEnd,
             _ => ArrowAlign::TipAtEnd,
         };
@@ -635,13 +654,13 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
     // Element 13: dash_align_anchors (added later — backward compatible
     // with older files that had 13 elements).
     let dash_align_anchors = if arr.len() > 13 {
-        as_bool(&arr[13])
+        as_bool(at(arr, 13)?)?
     } else {
         false
     };
-    Some(Stroke {
-        color: unpack_color(&arr[0]),
-        width: as_f64(&arr[1]),
+    Ok(Some(Stroke {
+        color: unpack_color(at(arr, 0)?)?,
+        width: as_f64(at(arr, 1)?)?,
         linecap: cap,
         linejoin: join,
         miter_limit,
@@ -654,162 +673,164 @@ fn unpack_stroke(v: &Value) -> Option<Stroke> {
         start_arrow_scale,
         end_arrow_scale,
         arrow_align,
-        opacity: as_f64(&arr[4]),
-    })
+        opacity: as_f64(at(arr, 4)?)?,
+    }))
 }
 
-fn unpack_width_points(v: &Value) -> Vec<StrokeWidthPoint> {
-    if v.is_nil() { return vec![]; }
-    as_array(v).iter().map(|p| {
-        let a = as_array(p);
-        StrokeWidthPoint {
-            t: as_f64(&a[0]),
-            width_left: as_f64(&a[1]),
-            width_right: as_f64(&a[2]),
-        }
+fn unpack_width_points(v: &Value) -> Result<Vec<StrokeWidthPoint>, String> {
+    if v.is_nil() { return Ok(vec![]); }
+    as_array(v)?.iter().map(|p| {
+        let a = as_array(p)?;
+        Ok(StrokeWidthPoint {
+            t: as_f64(at(a, 0)?)?,
+            width_left: as_f64(at(a, 1)?)?,
+            width_right: as_f64(at(a, 2)?)?,
+        })
     }).collect()
 }
 
-fn unpack_transform(v: &Value) -> Option<Transform> {
-    if v.is_nil() { return None; }
-    let arr = as_array(v);
-    Some(Transform {
-        a: as_f64(&arr[0]), b: as_f64(&arr[1]), c: as_f64(&arr[2]),
-        d: as_f64(&arr[3]), e: as_f64(&arr[4]), f: as_f64(&arr[5]),
+fn unpack_transform(v: &Value) -> Result<Option<Transform>, String> {
+    if v.is_nil() { return Ok(None); }
+    let arr = as_array(v)?;
+    Ok(Some(Transform {
+        a: as_f64(at(arr, 0)?)?, b: as_f64(at(arr, 1)?)?, c: as_f64(at(arr, 2)?)?,
+        d: as_f64(at(arr, 3)?)?, e: as_f64(at(arr, 4)?)?, f: as_f64(at(arr, 5)?)?,
+    }))
+}
+
+fn unpack_path_command(v: &Value) -> Result<PathCommand, String> {
+    let arr = as_array(v)?;
+    let tag = as_i64(at(arr, 0)?)?;
+    Ok(match tag {
+        CMD_MOVE_TO => PathCommand::MoveTo { x: as_f64(at(arr, 1)?)?, y: as_f64(at(arr, 2)?)? },
+        CMD_LINE_TO => PathCommand::LineTo { x: as_f64(at(arr, 1)?)?, y: as_f64(at(arr, 2)?)? },
+        CMD_CURVE_TO => PathCommand::CurveTo {
+            x1: as_f64(at(arr, 1)?)?, y1: as_f64(at(arr, 2)?)?,
+            x2: as_f64(at(arr, 3)?)?, y2: as_f64(at(arr, 4)?)?,
+            x: as_f64(at(arr, 5)?)?, y: as_f64(at(arr, 6)?)?,
+        },
+        CMD_SMOOTH_CURVE_TO => PathCommand::SmoothCurveTo {
+            x2: as_f64(at(arr, 1)?)?, y2: as_f64(at(arr, 2)?)?,
+            x: as_f64(at(arr, 3)?)?, y: as_f64(at(arr, 4)?)?,
+        },
+        CMD_QUAD_TO => PathCommand::QuadTo {
+            x1: as_f64(at(arr, 1)?)?, y1: as_f64(at(arr, 2)?)?,
+            x: as_f64(at(arr, 3)?)?, y: as_f64(at(arr, 4)?)?,
+        },
+        CMD_SMOOTH_QUAD_TO => PathCommand::SmoothQuadTo {
+            x: as_f64(at(arr, 1)?)?, y: as_f64(at(arr, 2)?)?,
+        },
+        CMD_ARC_TO => PathCommand::ArcTo {
+            rx: as_f64(at(arr, 1)?)?, ry: as_f64(at(arr, 2)?)?,
+            x_rotation: as_f64(at(arr, 3)?)?,
+            large_arc: as_bool(at(arr, 4)?)?, sweep: as_bool(at(arr, 5)?)?,
+            x: as_f64(at(arr, 6)?)?, y: as_f64(at(arr, 7)?)?,
+        },
+        CMD_CLOSE_PATH => PathCommand::ClosePath,
+        _ => return Err(format!("unknown path command tag: {}", tag)),
     })
 }
 
-fn unpack_path_command(v: &Value) -> PathCommand {
-    let arr = as_array(v);
-    let tag = as_i64(&arr[0]);
-    match tag {
-        CMD_MOVE_TO => PathCommand::MoveTo { x: as_f64(&arr[1]), y: as_f64(&arr[2]) },
-        CMD_LINE_TO => PathCommand::LineTo { x: as_f64(&arr[1]), y: as_f64(&arr[2]) },
-        CMD_CURVE_TO => PathCommand::CurveTo {
-            x1: as_f64(&arr[1]), y1: as_f64(&arr[2]),
-            x2: as_f64(&arr[3]), y2: as_f64(&arr[4]),
-            x: as_f64(&arr[5]), y: as_f64(&arr[6]),
-        },
-        CMD_SMOOTH_CURVE_TO => PathCommand::SmoothCurveTo {
-            x2: as_f64(&arr[1]), y2: as_f64(&arr[2]),
-            x: as_f64(&arr[3]), y: as_f64(&arr[4]),
-        },
-        CMD_QUAD_TO => PathCommand::QuadTo {
-            x1: as_f64(&arr[1]), y1: as_f64(&arr[2]),
-            x: as_f64(&arr[3]), y: as_f64(&arr[4]),
-        },
-        CMD_SMOOTH_QUAD_TO => PathCommand::SmoothQuadTo {
-            x: as_f64(&arr[1]), y: as_f64(&arr[2]),
-        },
-        CMD_ARC_TO => PathCommand::ArcTo {
-            rx: as_f64(&arr[1]), ry: as_f64(&arr[2]),
-            x_rotation: as_f64(&arr[3]),
-            large_arc: as_bool(&arr[4]), sweep: as_bool(&arr[5]),
-            x: as_f64(&arr[6]), y: as_f64(&arr[7]),
-        },
-        CMD_CLOSE_PATH => PathCommand::ClosePath,
-        _ => panic!("unknown path command tag: {}", tag),
-    }
-}
-
-fn unpack_common(arr: &[Value]) -> CommonProps {
-    let vis = match as_i64(&arr[3]) {
+fn unpack_common(arr: &[Value]) -> Result<CommonProps, String> {
+    let vis = match as_i64(at(arr, 3)?)? {
         0 => Visibility::Invisible,
         1 => Visibility::Outline,
         2 => Visibility::Preview,
-        n => panic!("unknown visibility: {}", n),
+        n => return Err(format!("unknown visibility: {}", n)),
     };
-    CommonProps {
-        locked: as_bool(&arr[1]),
-        opacity: as_f64(&arr[2]),
+    Ok(CommonProps {
+        locked: as_bool(at(arr, 1)?)?,
+        opacity: as_f64(at(arr, 2)?)?,
         mode: crate::geometry::element::BlendMode::default(),
         visibility: vis,
-        transform: unpack_transform(&arr[4]),
+        transform: unpack_transform(at(arr, 4)?)?,
         mask: None,
         tool_origin: None,
         // v2: name and id ride in the shared common block at indices 5 and 6.
-        name: as_opt_str(&arr[5]),
-        id: as_opt_str(&arr[6]),
-    }
+        name: as_opt_str(at(arr, 5)?)?,
+        id: as_opt_str(at(arr, 6)?)?,
+    })
 }
 
-fn unpack_element(v: &Value) -> Element {
-    let arr = as_array(v);
-    let tag = as_i64(&arr[0]);
-    let common = unpack_common(arr);
+fn unpack_element(v: &Value) -> Result<Element, String> {
+    let arr = as_array(v)?;
+    let tag = as_i64(at(arr, 0)?)?;
+    let common = unpack_common(arr)?;
 
-    match tag {
+    Ok(match tag {
         TAG_LAYER => {
-            let children: Vec<Rc<Element>> = as_array(&arr[7]).iter()
-                .map(|c| Rc::new(unpack_element(c))).collect();
+            let children: Vec<Rc<Element>> = as_array(at(arr, 7)?)?.iter()
+                .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
             Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_GROUP => {
-            let children: Vec<Rc<Element>> = as_array(&arr[7]).iter()
-                .map(|c| Rc::new(unpack_element(c))).collect();
+            let children: Vec<Rc<Element>> = as_array(at(arr, 7)?)?.iter()
+                .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
             Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false })
         }
         TAG_LINE => Element::Line(LineElem {
-            x1: as_f64(&arr[7]), y1: as_f64(&arr[8]),
-            x2: as_f64(&arr[9]), y2: as_f64(&arr[10]),
-            stroke: unpack_stroke(&arr[11]),
-            width_points: if arr.len() > 12 { unpack_width_points(&arr[12]) } else { vec![] },
+            x1: as_f64(at(arr, 7)?)?, y1: as_f64(at(arr, 8)?)?,
+            x2: as_f64(at(arr, 9)?)?, y2: as_f64(at(arr, 10)?)?,
+            stroke: unpack_stroke(at(arr, 11)?)?,
+            width_points: if arr.len() > 12 { unpack_width_points(at(arr, 12)?)? } else { vec![] },
             common,
                     stroke_gradient: None,
         }),
         TAG_RECT => Element::Rect(RectElem {
-            x: as_f64(&arr[7]), y: as_f64(&arr[8]),
-            width: as_f64(&arr[9]), height: as_f64(&arr[10]),
-            rx: as_f64(&arr[11]), ry: as_f64(&arr[12]),
-            fill: unpack_fill(&arr[13]), stroke: unpack_stroke(&arr[14]),
+            x: as_f64(at(arr, 7)?)?, y: as_f64(at(arr, 8)?)?,
+            width: as_f64(at(arr, 9)?)?, height: as_f64(at(arr, 10)?)?,
+            rx: as_f64(at(arr, 11)?)?, ry: as_f64(at(arr, 12)?)?,
+            fill: unpack_fill(at(arr, 13)?)?, stroke: unpack_stroke(at(arr, 14)?)?,
             common,
                     fill_gradient: None,
             stroke_gradient: None,
         }),
         TAG_CIRCLE => Element::Circle(CircleElem {
-            cx: as_f64(&arr[7]), cy: as_f64(&arr[8]), r: as_f64(&arr[9]),
-            fill: unpack_fill(&arr[10]), stroke: unpack_stroke(&arr[11]),
+            cx: as_f64(at(arr, 7)?)?, cy: as_f64(at(arr, 8)?)?, r: as_f64(at(arr, 9)?)?,
+            fill: unpack_fill(at(arr, 10)?)?, stroke: unpack_stroke(at(arr, 11)?)?,
             common,
                     fill_gradient: None,
             stroke_gradient: None,
         }),
         TAG_ELLIPSE => Element::Ellipse(EllipseElem {
-            cx: as_f64(&arr[7]), cy: as_f64(&arr[8]),
-            rx: as_f64(&arr[9]), ry: as_f64(&arr[10]),
-            fill: unpack_fill(&arr[11]), stroke: unpack_stroke(&arr[12]),
+            cx: as_f64(at(arr, 7)?)?, cy: as_f64(at(arr, 8)?)?,
+            rx: as_f64(at(arr, 9)?)?, ry: as_f64(at(arr, 10)?)?,
+            fill: unpack_fill(at(arr, 11)?)?, stroke: unpack_stroke(at(arr, 12)?)?,
             common,
                     fill_gradient: None,
             stroke_gradient: None,
         }),
         TAG_POLYLINE => {
-            let points: Vec<(f64, f64)> = as_array(&arr[7]).iter()
-                .map(|p| { let a = as_array(p); (as_f64(&a[0]), as_f64(&a[1])) }).collect();
+            let points: Vec<(f64, f64)> = as_array(at(arr, 7)?)?.iter()
+                .map(|p| { let a = as_array(p)?; Ok((as_f64(at(a, 0)?)?, as_f64(at(a, 1)?)?)) })
+                .collect::<Result<Vec<_>, String>>()?;
             Element::Polyline(PolylineElem {
                 points,
-                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
+                fill: unpack_fill(at(arr, 8)?)?, stroke: unpack_stroke(at(arr, 9)?)?,
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
             })
         }
         TAG_POLYGON => {
-            let points: Vec<(f64, f64)> = as_array(&arr[7]).iter()
-                .map(|p| { let a = as_array(p); (as_f64(&a[0]), as_f64(&a[1])) }).collect();
+            let points: Vec<(f64, f64)> = as_array(at(arr, 7)?)?.iter()
+                .map(|p| { let a = as_array(p)?; Ok((as_f64(at(a, 0)?)?, as_f64(at(a, 1)?)?)) })
+                .collect::<Result<Vec<_>, String>>()?;
             Element::Polygon(PolygonElem {
                 points,
-                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
+                fill: unpack_fill(at(arr, 8)?)?, stroke: unpack_stroke(at(arr, 9)?)?,
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
             })
         }
         TAG_PATH => {
-            let cmds: Vec<PathCommand> = as_array(&arr[7]).iter()
-                .map(unpack_path_command).collect();
+            let cmds: Vec<PathCommand> = as_array(at(arr, 7)?)?.iter()
+                .map(unpack_path_command).collect::<Result<Vec<_>, String>>()?;
             Element::Path(PathElem {
                 d: cmds,
-                fill: unpack_fill(&arr[8]), stroke: unpack_stroke(&arr[9]),
-                width_points: if arr.len() > 10 { unpack_width_points(&arr[10]) } else { vec![] },
+                fill: unpack_fill(at(arr, 8)?)?, stroke: unpack_stroke(at(arr, 9)?)?,
+                width_points: if arr.len() > 10 { unpack_width_points(at(arr, 10)?)? } else { vec![] },
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
@@ -820,15 +841,15 @@ fn unpack_element(v: &Value) -> Element {
         }
         TAG_TEXT => {
             let mut t = TextElem::from_string(
-                as_f64(&arr[7]), as_f64(&arr[8]),
-                as_str(&arr[9]),
-                as_str(&arr[10]),
-                as_f64(&arr[11]),
-                as_str(&arr[12]),
-                as_str(&arr[13]),
-                as_str(&arr[14]),
-                as_f64(&arr[15]), as_f64(&arr[16]),
-                unpack_fill(&arr[17]), unpack_stroke(&arr[18]),
+                as_f64(at(arr, 7)?)?, as_f64(at(arr, 8)?)?,
+                as_str(at(arr, 9)?)?,
+                as_str(at(arr, 10)?)?,
+                as_f64(at(arr, 11)?)?,
+                as_str(at(arr, 12)?)?,
+                as_str(at(arr, 13)?)?,
+                as_str(at(arr, 14)?)?,
+                as_f64(at(arr, 15)?)?, as_f64(at(arr, 16)?)?,
+                unpack_fill(at(arr, 17)?)?, unpack_stroke(at(arr, 18)?)?,
                 common,
             );
             // Trailing tspans field overrides the single-default-tspan
@@ -837,48 +858,48 @@ fn unpack_element(v: &Value) -> Element {
             if let Some(tspans_val) = arr.get(19) {
                 if let Value::Array(xs) = tspans_val {
                     if !xs.is_empty() {
-                        t.tspans = xs.iter().map(unpack_tspan).collect();
+                        t.tspans = xs.iter().map(unpack_tspan).collect::<Result<Vec<_>, String>>()?;
                     }
                 }
             }
             Element::Text(t)
         }
         TAG_TEXT_PATH => {
-            let cmds: Vec<PathCommand> = as_array(&arr[7]).iter()
-                .map(unpack_path_command).collect();
+            let cmds: Vec<PathCommand> = as_array(at(arr, 7)?)?.iter()
+                .map(unpack_path_command).collect::<Result<Vec<_>, String>>()?;
             let mut tp = TextPathElem::from_string(
                 cmds,
-                as_str(&arr[8]),
-                as_f64(&arr[9]),
-                as_str(&arr[10]),
-                as_f64(&arr[11]),
-                as_str(&arr[12]),
-                as_str(&arr[13]),
-                as_str(&arr[14]),
-                unpack_fill(&arr[15]), unpack_stroke(&arr[16]),
+                as_str(at(arr, 8)?)?,
+                as_f64(at(arr, 9)?)?,
+                as_str(at(arr, 10)?)?,
+                as_f64(at(arr, 11)?)?,
+                as_str(at(arr, 12)?)?,
+                as_str(at(arr, 13)?)?,
+                as_str(at(arr, 14)?)?,
+                unpack_fill(at(arr, 15)?)?, unpack_stroke(at(arr, 16)?)?,
                 common,
             );
             if let Some(tspans_val) = arr.get(17) {
                 if let Value::Array(xs) = tspans_val {
                     if !xs.is_empty() {
-                        tp.tspans = xs.iter().map(unpack_tspan).collect();
+                        tp.tspans = xs.iter().map(unpack_tspan).collect::<Result<Vec<_>, String>>()?;
                     }
                 }
             }
             Element::TextPath(tp)
         }
         TAG_LIVE => {
-            let kind = as_str(&arr[7]);
+            let kind = as_str(at(arr, 7)?)?;
             match kind {
                 "compound_shape" => {
-                    let operation = match as_str(&arr[8]) {
+                    let operation = match as_str(at(arr, 8)?)? {
                         "subtract_front" => crate::geometry::live::CompoundOperation::SubtractFront,
                         "intersection" => crate::geometry::live::CompoundOperation::Intersection,
                         "exclude" => crate::geometry::live::CompoundOperation::Exclude,
                         _ => crate::geometry::live::CompoundOperation::Union,
                     };
-                    let operands = as_array(&arr[9]).iter()
-                        .map(|c| Rc::new(unpack_element(c))).collect();
+                    let operands = as_array(at(arr, 9)?)?.iter()
+                        .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
                     Element::Live(crate::geometry::live::LiveVariant::CompoundShape(
                         crate::geometry::live::CompoundShape {
                             operation, operands, fill: None, stroke: None, common,
@@ -886,75 +907,75 @@ fn unpack_element(v: &Value) -> Element {
                     ))
                 }
                 "reference" => {
-                    let target = crate::geometry::live::ElementRef(as_str(&arr[8]).to_string());
+                    let target = crate::geometry::live::ElementRef(as_str(at(arr, 8)?)?.to_string());
                     let mut re = crate::geometry::live::ReferenceElem::new(target, common);
                     // Symbols P4: the instance `transform` rides slot 9, read
                     // TOLERANTLY so existing 9-element .bin (no slot 9) decode
                     // to None (SYMBOLS.md §4 / Fork F2).
-                    if let Some(v) = arr.get(9) {
-                        re.transform = unpack_transform(v);
+                    if let Some(tv) = arr.get(9) {
+                        re.transform = unpack_transform(tv)?;
                     }
                     Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
                 "recorded" => {
                     let inputs: Vec<String> =
-                        serde_json::from_str(as_str(&arr[8])).unwrap_or_default();
+                        serde_json::from_str(as_str(at(arr, 8)?)?).unwrap_or_default();
                     let inputs = inputs.into_iter()
                         .map(crate::geometry::live::ElementRef)
                         .collect();
-                    let ops = serde_json::from_str(as_str(&arr[9])).unwrap_or_default();
+                    let ops = serde_json::from_str(as_str(at(arr, 9)?)?).unwrap_or_default();
                     Element::Live(crate::geometry::live::LiveVariant::Recorded(
                         crate::geometry::live::RecordedElem::new(ops, inputs, common),
                     ))
                 }
                 "generated" => {
-                    let concept_id = as_str(&arr[8]).to_string();
-                    let params = serde_json::from_str(as_str(&arr[9]))
+                    let concept_id = as_str(at(arr, 8)?)?.to_string();
+                    let params = serde_json::from_str(as_str(at(arr, 9)?)?)
                         .unwrap_or(serde_json::Value::Object(Default::default()));
                     Element::Live(crate::geometry::live::LiveVariant::Generated(
                         crate::geometry::live::GeneratedElem::new(concept_id, params, common),
                     ))
                 }
-                other => panic!("unknown live kind: {}", other),
+                other => return Err(format!("unknown live kind: {}", other)),
             }
         }
-        _ => panic!("unknown element tag: {}", tag),
-    }
+        _ => return Err(format!("unknown element tag: {}", tag)),
+    })
 }
 
-fn unpack_selection(v: &Value) -> Selection {
-    let arr = as_array(v);
+fn unpack_selection(v: &Value) -> Result<Selection, String> {
+    let arr = as_array(v)?;
     arr.iter().map(|item| {
-        let item_arr = as_array(item);
-        let path: ElementPath = as_array(&item_arr[0]).iter()
-            .map(|i| as_i64(i) as usize).collect();
-        let kind = if item_arr[1].is_i64() || item_arr[1].is_u64() {
+        let item_arr = as_array(item)?;
+        let path: ElementPath = as_array(at(item_arr, 0)?)?.iter()
+            .map(|i| Ok(as_i64(i)? as usize)).collect::<Result<Vec<_>, String>>()?;
+        let kind_val = at(item_arr, 1)?;
+        let kind = if kind_val.is_i64() || kind_val.is_u64() {
             // kind == 0 means All
             SelectionKind::All
         } else {
             // kind == [1, ...cps]
-            let kind_arr = as_array(&item_arr[1]);
-            let cps = SortedCps::from_iter(
-                kind_arr[1..].iter().map(|v| as_i64(v) as usize)
-            );
-            SelectionKind::Partial(cps)
+            let kind_arr = as_array(kind_val)?;
+            let cps: Vec<usize> = kind_arr.get(1..).unwrap_or(&[]).iter()
+                .map(|v| Ok(as_i64(v)? as usize)).collect::<Result<Vec<_>, String>>()?;
+            SelectionKind::Partial(SortedCps::from_iter(cps))
         };
-        ElementSelection { path, kind }
+        Ok(ElementSelection { path, kind })
     }).collect()
 }
 
-fn unpack_document(v: &Value) -> Document {
-    let arr = as_array(v);
-    let layers: Vec<Element> = as_array(&arr[0]).iter()
-        .map(unpack_element).collect();
-    let selected_layer = as_i64(&arr[1]) as usize;
-    let selection = unpack_selection(&arr[2]);
+fn unpack_document(v: &Value) -> Result<Document, String> {
+    let arr = as_array(v)?;
+    let layers: Vec<Element> = as_array(at(arr, 0)?)?.iter()
+        .map(unpack_element).collect::<Result<Vec<_>, String>>()?;
+    let selected_layer = as_i64(at(arr, 1)?)? as usize;
+    let selection = unpack_selection(at(arr, 2)?)?;
     // Symbols (master store): a trailing element array at index 3. TOLERANT of
     // its absence — existing .bin fixtures predate symbols and decode to an
     // empty store (arr.get(3) is None). Present-but-empty arrays decode the
     // same, so empty-symbols docs round-trip unchanged.
     let symbols: Vec<Element> = match arr.get(3) {
-        Some(Value::Array(xs)) => xs.iter().map(unpack_element).collect(),
+        Some(Value::Array(xs)) => xs.iter().map(unpack_element).collect::<Result<Vec<_>, String>>()?,
         _ => Vec::new(),
     };
     // Binary format predates the artboards feature — parsed docs
@@ -964,7 +985,7 @@ fn unpack_document(v: &Value) -> Document {
     // ARTBOARDS.md §At-least-one-artboard invariant; the
     // cross-language round-trip tests intentionally don't (they
     // compare bytes, not semantics).
-    Document {
+    Ok(Document {
         layers,
         symbols,
         selected_layer,
@@ -973,7 +994,7 @@ fn unpack_document(v: &Value) -> Document {
         artboard_options: crate::document::artboard::ArtboardOptions::default(),
         document_setup: crate::document::document_setup::DocumentSetup::default(),
         print_preferences: crate::document::print_preferences::PrintPreferences::default(),
-    }
+    })
 }
 
 // -- Public API --------------------------------------------------------------
@@ -1048,5 +1069,68 @@ pub fn binary_to_document(data: &[u8]) -> Result<Document, String> {
 
     // Enforce the unique-id invariant on import (first-pre-order-wins);
     // a no-op for well-formed (unique-id) documents. See REFERENCE_GRAPH.md §2.5.
-    Ok(crate::geometry::normalize::dedupe_element_ids(&unpack_document(&value)))
+    Ok(crate::geometry::normalize::dedupe_element_ids(&unpack_document(&value)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(payload_value: &Value) -> Vec<u8> {
+        // Wrap a msgpack Value in a valid, current-version, uncompressed header.
+        let mut raw = Vec::new();
+        rmpv::encode::write_value(&mut raw, payload_value).unwrap();
+        let mut blob = Vec::new();
+        blob.extend_from_slice(MAGIC);
+        blob.extend_from_slice(&VERSION.to_le_bytes());
+        blob.extend_from_slice(&0u16.to_le_bytes()); // flags: COMPRESS_NONE
+        blob.extend_from_slice(&raw);
+        blob
+    }
+
+    /// A blob with a valid header + version whose msgpack payload DECODES but
+    /// has the wrong internal structure must return Err, not panic. On wasm a
+    /// panic aborts the whole module (no catch_unwind), and since save_session
+    /// loads from localStorage on every startup, a single corrupt entry would
+    /// otherwise brick the app on every load. Regression guard for #8.
+    #[test]
+    fn malformed_but_decodable_blob_errors_not_panics() {
+        // (1) Top-level shape wrong: [0] should be an array of elements.
+        let wrong_shape = Value::Array(vec![
+            Value::from(0i64),      // expected: array of elements
+            Value::from(0i64),
+            Value::Array(vec![]),
+        ]);
+        assert!(
+            binary_to_document(&frame(&wrong_shape)).is_err(),
+            "wrong-shape payload should Err, not panic"
+        );
+
+        // (2) A structurally-plausible document whose single element array is
+        // too short — exercises the bounds-checked `at()` inside unpack_common
+        // (index 3 missing) where a raw arr[3] would have panicked.
+        let short_element = Value::Array(vec![
+            Value::Array(vec![Value::Array(vec![Value::from(TAG_RECT)])]), // layers: [ [TAG_RECT] ]
+            Value::from(0i64),
+            Value::Array(vec![]),
+        ]);
+        assert!(
+            binary_to_document(&frame(&short_element)).is_err(),
+            "too-short element should Err, not panic"
+        );
+
+        // (3) Unknown element tag must Err, not panic.
+        let bad_tag = Value::Array(vec![
+            Value::Array(vec![Value::Array(vec![
+                Value::from(9999i64), Value::from(false), Value::from(1.0f64),
+                Value::from(2i64), Value::Nil, Value::Nil, Value::Nil,
+            ])]),
+            Value::from(0i64),
+            Value::Array(vec![]),
+        ]);
+        assert!(
+            binary_to_document(&frame(&bad_tag)).is_err(),
+            "unknown element tag should Err, not panic"
+        );
+    }
 }

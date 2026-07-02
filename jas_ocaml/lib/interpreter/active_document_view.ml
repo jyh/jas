@@ -179,7 +179,7 @@ let concepts_workspace = lazy (Workspace_loader.load ())
 let selected_concept_view (doc : Document.document) : Yojson.Safe.t =
   match Document.PathMap.bindings doc.Document.selection with
   | [ (path, _) ] ->
-    (match (try Some (Document.get_element doc path) with _ -> None) with
+    (match (Document.get_element_opt doc path) with
      | Some (Element.Live (Element.Generated gen)) ->
        let concept_id = gen.Element.gen_concept_id in
        (match Lazy.force concepts_workspace with

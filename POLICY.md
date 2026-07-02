@@ -25,8 +25,11 @@ same input.
 
 ## 2. Genericity — generic YAML preferred, native code discouraged
 
-The Flask app is the reference implementation. It must remain generic:
-no jas-specific features baked into Flask code. All app-specific
+The Flask app is a thin, non-gating reference *renderer* of the shared
+YAML/JSON artifacts — not the source of truth and not an interactive-parity
+target (see `TESTING_STRATEGY.md` §6; the earlier "Flask is THE reference
+implementation, develop Flask-first" charter is retired). It must still remain
+generic: no jas-specific features baked into Flask code. All app-specific
 features are declared through `workspace/*.yaml`.
 
 All apps should use generic YAML-driven renderers wherever possible.
@@ -68,11 +71,13 @@ preferred ordering.
 
 ### Adding a new feature
 
-**Flask → Rust → Swift → OCaml → Python.**
+**Spec + conformance corpus → Rust → Swift → OCaml → Python.**
 
-Flask is the reference; propagate to the most-developed native
-runtime first (Rust), then Swift, then OCaml, then Python (least
-trafficked).
+Author the generic spec (`workspace/*.yaml`) and its golden-pinned,
+language-agnostic conformance corpus first, then propagate to the
+most-developed native runtime (Rust), then Swift, then OCaml, then Python
+(least trafficked). Flask consumes the spec for visual reference only and is
+not a propagation step.
 
 ### Removing native code in favor of YAML dispatch
 
@@ -92,8 +97,9 @@ there), then apply to all others in parallel — the fix is proven.
 
 ### Schema / interpreter change
 
-**Flask first** to pin the behavior, natives in any order,
-cross-language fixture added alongside so all 5 stay aligned.
+**Conformance corpus first** to pin the behavior (the Python reference
+interpreter in `workspace_interpreter/` is the golden), then the natives in
+any order — the shared fixture keeps all apps aligned.
 
 ---
 

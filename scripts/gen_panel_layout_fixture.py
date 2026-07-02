@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from workspace_interpreter.panel_layout import layout_panel  # noqa: E402
+from workspace_interpreter.widget_tree import widget_tree  # noqa: E402
 
 # (case name, compiled panel id, available content width).
 # avail_w = 228 is the canonical dock content width (dock 240 - 12 scrollbar).
@@ -144,6 +145,24 @@ def main() -> int:
         json.dump(cases, f, indent=2)
         f.write("\n")
     print(f"wrote {len(cases)} cases -> {out_path}")
+
+    # Widget-tree golden from the SAME seeds/ctx (the panel_widget_tree.json
+    # gate had no generator, so it could drift undetected — finding #32). Each
+    # app's cross_language_test asserts its widget_tree against this file.
+    wt_cases = []
+    for name, panel_id, _avail_w, _avail_h, ctx in SEED:
+        tree = widget_tree(panels[panel_id], ctx)
+        wt_cases.append({
+            "name": panel_id,
+            "function": "widget_tree",
+            "args": {"panel": panel_id, "ctx": ctx},
+            "expected": tree,
+        })
+    wt_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_widget_tree.json")
+    with open(wt_path, "w") as f:
+        json.dump(wt_cases, f, indent=2)
+        f.write("\n")
+    print(f"wrote {len(wt_cases)} cases -> {wt_path}")
     return 0
 
 

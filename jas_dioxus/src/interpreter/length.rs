@@ -149,9 +149,10 @@ pub fn format(pt: Option<f64>, unit: &str, precision: usize) -> String {
         None => ("pt".to_string(), 1.0),
     };
     let value = pt / factor;
-    // Round to `precision` decimal places, half-away-from-zero — the
-    // implicit behaviour of `format!("{:.N}")` plus a `+ 0.0` to
-    // normalise -0.0 → 0.0 on the round.
+    // Round to `precision` decimal places. `format!("{:.N}")` rounds
+    // half-to-EVEN (banker's rounding), e.g. 0.125 -> "0.12", matching the
+    // other ports — do NOT "correct" this to half-away-from-zero, that would
+    // introduce the very divergence this pins. `+ 0.0` normalises -0.0 -> 0.0.
     let rounded_text = format!("{:.*}", precision, value + 0.0);
     // Trim trailing zeros and a stranded trailing decimal point.
     let trimmed = if rounded_text.contains('.') {

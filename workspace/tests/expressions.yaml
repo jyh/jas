@@ -203,6 +203,29 @@ tests:
     type: "null"
     note: "valid (1 + 2) followed by garbage — rejected, not truncated to 3"
 
+  # Structural parse errors — a required keyword/token is missing, so the
+  # whole expression rejects to null in every app. (Rust/Swift once recovered
+  # from these, building a partial AST that evaluated to a value while
+  # OCaml/Python rejected to null; the parsers now poison on a failed
+  # `expect`.)
+  - expr: "if true then 1"
+    state: {}
+    expected: null
+    type: "null"
+    note: "ternary with no else clause — rejected, not Ternary(true, 1, null)"
+
+  - expr: "let x = 5 x"
+    state: {}
+    expected: null
+    type: "null"
+    note: "let binding with no 'in' keyword — rejected"
+
+  - expr: "fun x 5"
+    state: {}
+    expected: null
+    type: "null"
+    note: "lambda with no '->' arrow — rejected"
+
   # Function calls
   - expr: "hsb_h(#ff0000)"
     expected: 0
@@ -495,6 +518,64 @@ tests:
     type: number
     note: "fractional exponent = square root"
 
+  # Arithmetic builtins that the corpus never exercised (coverage gap #19).
+  - expr: "abs(0 - 7)"
+    expected: 7
+    type: number
+
+  - expr: "min(3, 8)"
+    expected: 3
+    type: number
+
+  - expr: "max(3, 8)"
+    expected: 8
+    type: number
+
+  - expr: "hypot(3, 4)"
+    expected: 5
+    type: number
+    note: "euclidean distance sqrt(3^2 + 4^2)"
+
+  - expr: "sqrt(16)"
+    expected: 4
+    type: number
+
+  # Higher-order builtins take (list, predicate-closure) — 2 args. The corpus
+  # never exercised all / any / filter (coverage gap #19). List results are
+  # reduced to a scalar via fold, per the convention above.
+  - expr: "all([1, 2, 3], fun x -> x > 0)"
+    expected: true
+    type: bool
+
+  - expr: "all([1, 0 - 2, 3], fun x -> x > 0)"
+    expected: false
+    type: bool
+    note: "one element fails the predicate"
+
+  - expr: "any([1, 2, 9], fun x -> x > 5)"
+    expected: true
+    type: bool
+
+  - expr: "any([1, 2, 3], fun x -> x > 5)"
+    expected: false
+    type: bool
+
+  - expr: "fold(filter([1, 2, 3, 4], fun x -> x > 2), 0, fun (acc, x) -> acc + x)"
+    expected: 7
+    type: number
+    note: "filter keeps [3, 4]; fold sums to 7"
+
+  # Sequencing (;) — evaluate the left for side effects, return the right.
+  # Was uncovered (#19). (Assignment <- needs a mutable store the conformance
+  # harness does not wire, so it stays out of the pure-expression corpus.)
+  - expr: "1; 2"
+    expected: 2
+    type: number
+
+  - expr: "let x = 5 in (x; x + 1)"
+    expected: 6
+    type: number
+
   # atan2(y, x) returns DEGREES (the inverse of sin/cos; used by concept fitters
   # to recover a placement angle). Args are (y, x), matching libm order.
   - expr: "atan2(0, 1)"
@@ -600,3 +681,37 @@ tests:
     expected: null
     type: "null"
     note: "mod by zero is null"
+
+  # Number -> string coercion (via the string-concat path, same coercion as
+  # {{ }} interpolation). Canonical form = Rust Value::to_string_coerce:
+  # integer-valued -> integer (any magnitude); other values -> shortest
+  # round-trip decimal in POSITIONAL (never scientific) notation. These pin
+  # the four-way split the finding flagged (OCaml truncated to ~12 digits;
+  # Swift crashed on the integer cast; OCaml returned -1 on overflow).
+  - expr: '"" + (1 / 3)'
+    expected: "0.3333333333333333"
+    type: string
+    note: "full shortest round-trip, not OCaml string_of_float's 12 digits"
+
+  - expr: '"" + (0.1 + 0.2)'
+    expected: "0.30000000000000004"
+    type: string
+
+  - expr: '"" + (0 - 5 / 2)'
+    expected: "-2.5"
+    type: string
+
+  - expr: '"" + (1 / 100000)'
+    expected: "0.00001"
+    type: string
+    note: "positional, not scientific 1e-05"
+
+  - expr: '"" + (100000000000 * 1000000000)'
+    expected: "100000000000000000000"
+    type: string
+    note: "1e20 integer-valued: full decimal, no crash/overflow, no sci notation"
+
+  - expr: '"" + 5'
+    expected: "5"
+    type: string
+    note: "integer-valued: no trailing .0"

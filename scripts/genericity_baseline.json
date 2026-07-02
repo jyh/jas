@@ -1,6 +1,9 @@
 {
   "flask": {
+    "app_py_workspace_keys": 5,
     "jas_prefixed_globals": 0,
+    "js_feature_tokens": 27,
+    "mjs_feature_tokens": 67,
     "panel_name_dicts": 0,
     "swatch_library_reachin": 0
   },

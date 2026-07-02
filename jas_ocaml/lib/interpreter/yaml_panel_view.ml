@@ -214,7 +214,7 @@ let update_color_panel_widgets () =
     let elem_opt =
       match Document.PathMap.bindings m#document.Document.selection with
       | (path, _) :: _ ->
-        (try Some (Document.get_element m#document path) with _ -> None)
+        (Document.get_element_opt m#document path)
       | [] -> None in
     let fill_color = match elem_opt with
       | Some e -> _elem_fill_color e
@@ -1151,8 +1151,7 @@ let dispatch_click_behaviors (el : Yojson.Safe.t) (ctx : Yojson.Safe.t) : bool =
                   match Document.PathMap.bindings
                           m#document.Document.selection with
                   | (path, _) :: _ ->
-                    (try Some (Document.get_element m#document path)
-                     with _ -> None)
+                    Document.get_element_opt m#document path
                   | [] -> None in
                 let sel_fill = match elem_opt with
                   | Some e ->
@@ -5953,8 +5952,7 @@ let create_panel_body ~packing ~(kind : panel_kind) ?(get_model = fun () -> None
           let elem_opt =
             match Document.PathMap.bindings m#document.Document.selection with
             | (path, _) :: _ ->
-              (try Some (Document.get_element m#document path)
-               with _ -> None)
+              Document.get_element_opt m#document path
             | [] -> None in
           let fc_override = match elem_opt with
             | Some e ->

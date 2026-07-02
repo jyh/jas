@@ -170,7 +170,7 @@ class controller ?(model = Model.create ()) () =
         responsibility; reference remapping arrives with the graph). *)
     method assign_id (path : Document.element_path) (id : string) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some elem ->
         let new_elem = Element.with_id elem (Some id) in
@@ -187,7 +187,7 @@ class controller ?(model = Model.create ()) () =
     method create_reference (target_path : Document.element_path)
         (target_id : string) (ref_id : string) =
       let doc = model#document in
-      match (try Some (Document.get_element doc target_path) with _ -> None) with
+      match (Document.get_element_opt doc target_path) with
       | None -> ()
       | Some target ->
         let resolved_id =
@@ -223,7 +223,7 @@ class controller ?(model = Model.create ()) () =
     method make_symbol (path : Document.element_path)
         (master_id : string) (ref_id : string) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some target ->
         (* Resolve the master id: keep the element own id if it has one, else
@@ -278,7 +278,7 @@ class controller ?(model = Model.create ()) () =
     method set_concept_param (path : Document.element_path)
         (name : string) (value : float) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some elem ->
         match elem with
@@ -312,7 +312,7 @@ class controller ?(model = Model.create ()) () =
       | `Assoc [] -> ()
       | `Assoc change_kvs ->
         let doc = model#document in
-        (match (try Some (Document.get_element doc path) with _ -> None) with
+        (match (Document.get_element_opt doc path) with
          | Some (Element.Live (Element.Generated gen)) ->
            let members = match gen.Element.gen_params with
              | `Assoc kvs -> kvs | _ -> [] in
@@ -343,7 +343,7 @@ class controller ?(model = Model.create ()) () =
         (concept_id : string) (params : Yojson.Safe.t)
         (transform : Element.transform) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some existing ->
         (* Preserve the raw element's identity; (re)set only the placement. The
@@ -385,7 +385,7 @@ class controller ?(model = Model.create ()) () =
         target is unresolvable. *)
     method detach (path : Document.element_path) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some elem ->
         (* Must be a reference instance. *)
@@ -449,7 +449,7 @@ class controller ?(model = Model.create ()) () =
     method set_instance_transform (path : Document.element_path)
         (transform : Element.transform) =
       let doc = model#document in
-      match (try Some (Document.get_element doc path) with _ -> None) with
+      match (Document.get_element_opt doc path) with
       | None -> ()
       | Some elem ->
         match elem with
@@ -487,7 +487,7 @@ class controller ?(model = Model.create ()) () =
       match master_idx with
       | None -> ()
       | Some master_idx ->
-        match (try Some (Document.get_element doc path) with _ -> None) with
+        match (Document.get_element_opt doc path) with
         | None -> ()
         | Some source ->
           (* New master = clone of the selection, re-id to master_id. *)
@@ -910,7 +910,7 @@ class controller ?(model = Model.create ()) () =
           closed := false
         in
         let new_doc = Document.PathMap.fold (fun path _ acc ->
-          match (try Some (Document.get_element acc path) with _ -> None) with
+          match (Document.get_element_opt acc path) with
           | None -> acc
           | Some elem ->
             (match elem with

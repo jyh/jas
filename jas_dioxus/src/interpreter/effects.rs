@@ -237,6 +237,38 @@ fn run_one(
         return;
     }
 
+    // foreach: { source, as } do: [...]
+    //
+    // Iterate a list, re-entering the runner once per item with `<as>` bound to
+    // the item and `_index` bound to its position (both top-level in the
+    // iteration scope). Mirrors the panel-path runner's foreach
+    // (renderer.rs run_yaml_effects, ~line 3200) EXACTLY so a tool / action
+    // effect list can use foreach too. Before this, the tool/action path
+    // (this runner) silently no-op'd foreach while the panel path honored it —
+    // finding #26; the other apps have a single runner so never had the gap.
+    if let Some(serde_json::Value::Object(spec)) = effect.get("foreach") {
+        let source_expr = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
+        let var_name = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
+        let items = match eval_expr(source_expr, store, ctx) {
+            Value::List(arr) => arr,
+            _ => return,
+        };
+        if let Some(serde_json::Value::Array(body)) = effect.get("do") {
+            for (i, item) in items.iter().enumerate() {
+                // Fresh iteration scope inheriting from the outer ctx.
+                let mut iter_ctx = ctx.clone();
+                if let Some(m) = iter_ctx.as_object_mut() {
+                    m.insert(var_name.to_string(), item.clone());
+                    m.insert("_index".to_string(), serde_json::json!(i));
+                }
+                run_effects(
+                    body, &iter_ctx, store,
+                    model.as_deref_mut(), actions, dialogs, None);
+            }
+        }
+        return;
+    }
+
     // if: two supported shapes
     //
     //   Flat (Flask / tool handlers):
@@ -8902,6 +8934,32 @@ mod tests {
         assert_eq!(ab.y, 70.0);
         assert_eq!(ab.width, 200.0);
         assert_eq!(ab.height, 200.0);
+    }
+
+    #[test]
+    fn foreach_in_tool_runner_runs_do_body_per_item_with_bindings() {
+        // #26: the tool/action runner (this effects::run_effects) must honor
+        // foreach, which it silently no-op'd before while the panel-path runner
+        // honored it. Iterate [10, 20, 30]; each iteration list_pushes
+        // `x * 100 + _index`, so the result proves the do-body ran once per
+        // item AND that both the item var (`x`) and `_index` are bound per
+        // iteration. Order-independent (list_push insertion order is not the
+        // point). Before the fix, `acc` would be absent (foreach unrecognized).
+        let mut store = StateStore::new();
+        store.init_panel("p", std::collections::HashMap::new());
+        store.set_active_panel(Some("p"));
+        let effects = vec![serde_json::json!({
+            "foreach": {"source": "[10, 20, 30]", "as": "x"},
+            "do": [{"list_push": {"target": "panel.acc", "value": "x * 100 + _index"}}]
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            None, None, None, None);
+        let acc = store.get_panel("p", "acc").as_array()
+            .expect("foreach do-body must have list_pushed 3 items").clone();
+        let mut vals: Vec<i64> = acc.iter().map(|v| v.as_i64().unwrap()).collect();
+        vals.sort();
+        // 10*100+0, 20*100+1, 30*100+2
+        assert_eq!(vals, vec![1000, 2001, 3002]);
     }
 
     #[test]

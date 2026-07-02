@@ -179,6 +179,30 @@ let get_element doc path =
     in
     walk doc.layers.(i) rest
 
+(** Bounds-checked total lookup: returns the element at [path], or [None] for
+    any empty, out-of-range, or non-container-traversing (stale) path. Unlike
+    the previous [try get_element ... with _ -> None] idiom, this returns None
+    ONLY for those path errors and does not swallow unrelated exceptions such
+    as Stack_overflow. *)
+let get_element_opt doc path =
+  let children_opt = function
+    | Group { children; _ } | Layer { children; _ } -> Some children
+    | _ -> None
+  in
+  match path with
+  | [] -> None
+  | i :: rest ->
+    if i < 0 || i >= Array.length doc.layers then None
+    else
+      let rec walk node = function
+        | [] -> Some node
+        | j :: rest ->
+          (match children_opt node with
+           | Some ch when j >= 0 && j < Array.length ch -> walk ch.(j) rest
+           | _ -> None)
+      in
+      walk doc.layers.(i) rest
+
 let effective_visibility doc path =
   match path with
   | [] -> Element.Preview

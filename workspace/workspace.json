@@ -1,4 +1,7 @@
 {
+  "native_intercepts": [
+    "export_to_pdf"
+  ],
   "actions": {
     "new_document": {
       "description": "Create a new untitled document. Adds a tab labeled \"Untitled-N\" to the canvas tab bar and a blank white canvas to the drawing surface. The new tab becomes active immediately. The tab's close button dispatches close_tab (which checks for unsaved changes). Tab index is captured at creation time via prop so click handlers remain correct as more tabs are added.\n",

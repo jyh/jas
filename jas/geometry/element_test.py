@@ -13,6 +13,7 @@ from geometry.element import (
     BlendMode, Color, RgbColor, HsbColor, CmykColor,
     Fill, Mask, Stroke, LineCap, LineJoin, Transform,
     MoveTo, LineTo, CurveTo, SmoothCurveTo, QuadTo, SmoothQuadTo, ArcTo, ClosePath,
+    flatten_path_commands,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
     clear_ids,
@@ -152,6 +153,35 @@ class ElementTest(absltest.TestCase):
         self.assertAlmostEqual(bw, 10)
         self.assertAlmostEqual(bh, 5.0)  # true Bezier extremum, not control point
 
+    def test_path_arc_extrema_large_arc(self):
+        # Long-way arc from (10,0) to (0,10): SVG picks center (10,10) and
+        # sweeps the 3/4 reaching (20,10),(10,20),(0,0). Endpoint-only bounds
+        # would wrongly be (0,0,10,10); extrema-aware bounds reach (0,0,20,20).
+        p = Path(d=(MoveTo(10, 0),
+                    ArcTo(10, 10, 0, True, True, 0, 10)))
+        bx, by, bw, bh = p.bounds()
+        self.assertAlmostEqual(bx, 0)
+        self.assertAlmostEqual(by, 0)
+        self.assertAlmostEqual(bw, 20)
+        self.assertAlmostEqual(bh, 20)
+
+    def test_path_arc_zero_radius_is_line(self):
+        p = Path(d=(MoveTo(0, 0),
+                    ArcTo(0, 0, 0, False, False, 100, 50)))
+        self.assertEqual(p.bounds(), (0, 0, 100, 50))
+
+    def test_flatten_multi_subpath_closes_to_subpath_start(self):
+        # Two disjoint squares. Each Z must close to the CURRENT subpath
+        # start, not the whole-path first point. The second Z closing to
+        # (0,0) instead of (20,0) was the multi-subpath divergence.
+        d = (MoveTo(0, 0), LineTo(10, 0), LineTo(10, 10), LineTo(0, 10), ClosePath(),
+             MoveTo(20, 0), LineTo(30, 0), LineTo(30, 10), LineTo(20, 10), ClosePath())
+        pts = flatten_path_commands(d)
+        self.assertEqual(pts, [
+            (0, 0), (10, 0), (10, 10), (0, 10), (0, 0),
+            (20, 0), (30, 0), (30, 10), (20, 10), (20, 0),
+        ])
+
     def test_path_smooth_quad_to(self):
         p = Path(d=(MoveTo(0, 0), QuadTo(5, 10, 10, 0), SmoothQuadTo(20, 5)))
         bx, by, bw, bh = p.bounds()
@@ -161,8 +191,10 @@ class ElementTest(absltest.TestCase):
         self.assertAlmostEqual(bh, 5.0)  # tight quadratic bounds
 
     def test_path_arc_to(self):
+        # Semicircle from (0,0) to (50,0), r=25: bulges 25 units off the chord.
+        # (Previously asserted height 0 — the endpoint-only bug this fixes.)
         p = Path(d=(MoveTo(0, 0), ArcTo(rx=25, ry=25, x_rotation=0, large_arc=True, sweep=False, x=50, y=0)))
-        self.assertEqual(p.bounds(), (0, 0, 50, 0))
+        self.assertEqual(p.bounds(), (0, 0, 50, 25.0))
 
     def test_path_empty(self):
         p = Path(d=())

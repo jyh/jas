@@ -181,6 +181,41 @@ let run_element_bounds vectors =
     `Assoc [("name", `String name); ("result", `List [`Float x; `Float y; `Float w; `Float h])]
   ) vectors
 
+(* flatten (path commands -> polyline; exercises multi-subpath close) *)
+let run_flatten vectors =
+  List.map (fun tc ->
+    let name = member "name" tc |> to_string in
+    let elem_json = member "element" tc in
+    let d = match Jas.Test_json.parse_element elem_json with
+      | Jas.Element.Path { d; _ } -> d
+      | _ -> []
+    in
+    let pts = Jas.Element.flatten_path_commands d in
+    let result = `List (List.map (fun (x, y) -> `List [`Float x; `Float y]) pts) in
+    `Assoc [("name", `String name); ("result", result)]
+  ) vectors
+
+(* length (unit-aware parse "12 px" -> pt, and format pt -> "16 px") *)
+let run_length vectors =
+  List.map (fun tc ->
+    let name = member "name" tc |> to_string in
+    let func = member "function" tc |> to_string in
+    let result =
+      if func = "parse" then
+        let input = member "input" tc |> to_string in
+        let du = member "default_unit" tc |> to_string in
+        (match Jas.Length.parse input ~default_unit:du with
+         | Some v -> `Float v
+         | None -> `Null)
+      else
+        let pt = match member "pt" tc with `Null -> None | j -> Some (to_float_lenient j) in
+        let unit = member "unit" tc |> to_string in
+        let precision = member "precision" tc |> to_int in
+        `String (Jas.Length.format pt ~unit ~precision)
+    in
+    `Assoc [("name", `String name); ("result", result)]
+  ) vectors
+
 let run_measure vectors =
   List.map (fun tc ->
     let name = member "name" tc |> to_string in
@@ -633,6 +668,8 @@ let () =
   let results = match algo with
     | "measure" -> run_measure vectors
     | "element_bounds" -> run_element_bounds vectors
+    | "flatten" -> run_flatten vectors
+    | "length" -> run_length vectors
     | "hit_test" -> run_hit_test vectors
     | "boolean" -> run_boolean vectors
     | "boolean_normalize" -> run_boolean_normalize vectors

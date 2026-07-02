@@ -50,5 +50,45 @@
      {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
      {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 15.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}
    ], "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
-   "expected": [5.0, 10.0, 100.0, 55.0]}
+   "expected": [5.0, 10.0, 100.0, 55.0]},
+
+  {"name": "path_arc_large_semicircle", "function": "bounds",
+   "_comment": "large_arc+sweep 3/4 circle from (10,0) to (0,10): bulges to (20,10),(10,20),(0,0). Endpoint-only bbox would wrongly be (0,0,10,10).",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 10.0, "y": 0.0},
+     {"cmd": "A", "rx": 10.0, "ry": 10.0, "x_rotation": 0.0, "large_arc": true, "sweep": true, "x": 0.0, "y": 10.0}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 20.0, 20.0]},
+
+  {"name": "path_arc_quarter_ccw", "function": "bounds",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 10.0, "y": 0.0},
+     {"cmd": "A", "rx": 10.0, "ry": 10.0, "x_rotation": 0.0, "large_arc": false, "sweep": false, "x": 0.0, "y": 10.0}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 10.0, 10.0]},
+
+  {"name": "path_arc_zero_radius_line", "function": "bounds",
+   "_comment": "degenerate arc (zero radius) collapses to a line; bbox is the endpoint pair.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0},
+     {"cmd": "A", "rx": 0.0, "ry": 0.0, "x_rotation": 0.0, "large_arc": false, "sweep": false, "x": 100.0, "y": 50.0}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 100.0, 50.0]},
+
+  {"name": "path_arc_elliptical_rotated", "function": "bounds",
+   "_comment": "rotated elliptical arc exercises the x_rotation (phi != 0) cardinal-tangent math.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0},
+     {"cmd": "A", "rx": 40.0, "ry": 20.0, "x_rotation": 30.0, "large_arc": true, "sweep": false, "x": 60.0, "y": 20.0}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [-3.9391529481406375, 0.0, 72.1110255092798, 49.37896567336027]},
+
+  {"name": "path_arc_half_then_close", "function": "bounds",
+   "_comment": "half elliptical arc then Z: arc peak at y=-30 sets the top bound.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 0.0, "y": 0.0},
+     {"cmd": "A", "rx": 50.0, "ry": 30.0, "x_rotation": 0.0, "large_arc": false, "sweep": true, "x": 100.0, "y": 0.0},
+     {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [0.0, -30.0, 100.0, 30.0]}
 ]

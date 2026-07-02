@@ -2008,6 +2008,8 @@ pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
     let mut pts = Vec::new();
     let mut cx = 0.0_f64;
     let mut cy = 0.0_f64;
+    let mut sx = 0.0_f64; // current subpath start (reset on each MoveTo)
+    let mut sy = 0.0_f64;
     let steps = FLATTEN_STEPS;
     for cmd in d {
         match cmd {
@@ -2015,6 +2017,8 @@ pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
                 pts.push((*x, *y));
                 cx = *x;
                 cy = *y;
+                sx = *x;
+                sy = *y;
             }
             PathCommand::LineTo { x, y } => {
                 pts.push((*x, *y));
@@ -2052,8 +2056,11 @@ pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
                 cy = *y;
             }
             PathCommand::ClosePath => {
-                if let Some(&first) = pts.first() {
-                    pts.push(first);
+                // Close to the CURRENT subpath start, not the whole-path first
+                // point — matters once there are >=2 subpaths (compound shapes,
+                // glyphs-with-holes, boolean outputs). Matches OCaml/Swift.
+                if !pts.is_empty() {
+                    pts.push((sx, sy));
                 }
             }
             other => {
@@ -4339,5 +4346,30 @@ mod tests {
         assert!((y - 0.0).abs() < 1e-6);
         assert!((w - 100.0).abs() < 1e-6);
         assert!((h - 50.0).abs() < 1e-6);
+    }
+
+    /// Two disjoint squares: each ClosePath must close to the CURRENT
+    /// subpath start, not the whole-path first point. Closing the second
+    /// subpath back to (0,0) instead of (20,0) was the multi-subpath
+    /// divergence (Python+Rust vs the SVG-correct OCaml+Swift).
+    #[test]
+    fn flatten_multi_subpath_closes_to_subpath_start() {
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 10.0 },
+            PathCommand::LineTo { x: 0.0, y: 10.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 20.0, y: 0.0 },
+            PathCommand::LineTo { x: 30.0, y: 0.0 },
+            PathCommand::LineTo { x: 30.0, y: 10.0 },
+            PathCommand::LineTo { x: 20.0, y: 10.0 },
+            PathCommand::ClosePath,
+        ];
+        let pts = flatten_path_commands(&d);
+        assert_eq!(pts, vec![
+            (0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0),
+            (20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0), (20.0, 0.0),
+        ]);
     }
 }

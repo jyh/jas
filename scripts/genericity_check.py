@@ -138,6 +138,33 @@ PATTERNS = {
             "glob": "jas_flask/renderer.py",
             "regex": r"['\"]swatch_libraries['\"]",
         },
+        # The client-side engine (.mjs) hard-codes jas-specific feature names —
+        # arrowhead shapes/fields + marker URLs, calligraphic-brush special-
+        # casing, etc. It was previously UNSCANNED: the js glob above was
+        # `*.js` (non-recursive, .js only), so all 22 engine .mjs files were
+        # invisible. Recursive tripwire + baseline; shrink by driving from YAML
+        # or a documented NATIVE_BOUNDARY exception.
+        "mjs_feature_tokens": {
+            "kind": "regex_count",
+            "glob": "jas_flask/static/js/**/*.mjs",
+            "regex": r"arrowhead|calligraphic|blob_brush|paintbrush|magic_wand|jas-stroke",
+        },
+        # The same lowercase feature tokens in the scanned .js — the JAS_
+        # tripwire above only caught UPPERCASE globals and missed these.
+        "js_feature_tokens": {
+            "kind": "regex_count",
+            "glob": "jas_flask/static/js/**/*.js",
+            "regex": r"arrowhead|calligraphic|blob_brush|paintbrush|magic_wand|jas-stroke",
+        },
+        # app.py (the server bootstrap) was never in PATTERNS at all, yet it
+        # hardcodes jas-specific workspace keys (_DATA_KEYS), relocated here
+        # from renderer.py to dodge the renderer-scoped linter. Shrink by
+        # driving _DATA_KEYS / concepts from a generic manifest.
+        "app_py_workspace_keys": {
+            "kind": "regex_count",
+            "glob": "jas_flask/app.py",
+            "regex": r"_DATA_KEYS|swatch_libraries|brush_libraries",
+        },
     },
 }
 
