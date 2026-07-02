@@ -234,6 +234,20 @@ class Document:
             node = node.children[idx]
         return node
 
+    def get_element_opt(self, path: ElementPath) -> "Element | None":
+        """Total variant of ``get_element``: return ``None`` instead of raising
+        when ``path`` is empty, out of range, or descends into a non-Group.
+
+        Use this at sites that resolve a *possibly stale* path — e.g. a path
+        held in the selection after another action deleted or moved the target.
+        Mirrors Rust's ``Option``-returning ``get_element`` and OCaml's
+        ``get_element_opt`` so all apps degrade gracefully rather than trapping.
+        """
+        try:
+            return self.get_element(path)
+        except ValueError:
+            return None
+
     def effective_visibility(self, path: ElementPath) -> "Visibility":
         """Return the effective visibility of the element at ``path``.
 

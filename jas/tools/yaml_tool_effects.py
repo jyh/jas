@@ -158,11 +158,7 @@ def extract_path_list(
 
 def is_valid_path(doc: Document, path: ElementPath) -> bool:
     """True when ``path`` references an existing element in ``doc``."""
-    try:
-        doc.get_element(path)
-        return True
-    except Exception:
-        return False
+    return doc.get_element_opt(path) is not None
 
 
 def normalize_rect_args(
@@ -308,8 +304,10 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             from canvas.canvas import set_canvas_brush_libraries
             libs = store.get_data_path("brush_libraries") or {}
             set_canvas_brush_libraries(libs)
-        except Exception:
-            # Ran outside the canvas context (e.g. tests).
+        except ImportError:
+            # Ran outside the canvas context (e.g. tests) — the canvas module
+            # is not importable there. A failure *inside* the canvas call is a
+            # real bug and is intentionally allowed to surface.
             pass
 
     def _library_brushes_path(lib_id):
@@ -734,7 +732,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         if v.type in (ValueType.COLOR, ValueType.STRING):
             try:
                 return Fill(color=Color.from_hex(v.value))
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 return default_fill
         return default_fill
 
@@ -747,7 +745,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         if v.type in (ValueType.COLOR, ValueType.STRING):
             try:
                 return Stroke(color=Color.from_hex(v.value), width=1.0)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 return default_stroke
         return default_stroke
 
@@ -853,7 +851,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                     sz = obj["size"]
                     if isinstance(sz, (int, float)):
                         return float(sz)
-            except Exception:
+            except (ValueError, TypeError):
                 pass
         parts = stroke_brush.split("/", 1)
         if len(parts) != 2:
@@ -1195,9 +1193,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         doc = controller.document
         for es in doc.selection:
             path = es.path
-            try:
-                elem = doc.get_element(path)
-            except Exception:
+            elem = doc.get_element_opt(path)
+            if elem is None:
                 continue
             if not isinstance(elem, PathElem) or elem.locked:
                 continue
@@ -1253,9 +1250,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         if len(drag_points) < 2:
             return None
         doc = controller.document
-        try:
-            target_elem = doc.get_element(target_path)
-        except Exception:
+        target_elem = doc.get_element_opt(target_path)
+        if target_elem is None:
             return None
         if not isinstance(target_elem, PathElem) or target_elem.locked:
             return None
@@ -1357,7 +1353,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
                     size = float(ovr.get("size", size))
                     angle = float(ovr.get("angle", angle))
                     roundness = float(ovr.get("roundness", roundness))
-            except Exception:
+            except (ValueError, TypeError):
                 pass
         return (size, angle, roundness)
 
@@ -1512,7 +1508,7 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         if fill_val.type in (ValueType.COLOR, ValueType.STRING):
             try:
                 new_fill = Fill(color=Color.from_hex(fill_val.value))
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 new_fill = None
         doc = controller.document
         selected_paths = {tuple(es.path) for es in doc.selection}
@@ -1628,9 +1624,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         changed = False
         for es in list(doc.selection):
             path = es.path
-            try:
-                elem = doc.get_element(path)
-            except Exception:
+            elem = doc.get_element_opt(path)
+            if elem is None:
                 continue
             if not isinstance(elem, PathElem) or elem.locked:
                 continue
@@ -1737,9 +1732,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         mode = mode_raw if mode_raw else "replace"
 
         doc = controller.document
-        try:
-            seed_elem = doc.get_element(seed_path)
-        except Exception:
+        seed_elem = doc.get_element_opt(seed_path)
+        if seed_elem is None:
             return None
         cfg = _read_magic_wand_config(store, ctx)
 
@@ -1834,9 +1828,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         )
         from geometry.element import Group, Layer
 
-        try:
-            elem = doc.get_element(path)
-        except Exception:
+        elem = doc.get_element_opt(path)
+        if elem is None:
             return doc
 
         if isinstance(elem, (Group, Layer)):
@@ -1867,9 +1860,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             return None
 
         doc = controller.document
-        try:
-            source_elem = doc.get_element(source_path)
-        except Exception:
+        source_elem = doc.get_element_opt(source_path)
+        if source_elem is None:
             return None
         if not is_source_eligible(source_elem):
             return None
@@ -1957,10 +1949,9 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         doc = controller.document
         elements = []
         for es in doc.selection:
-            try:
-                elements.append(doc.get_element(es.path))
-            except Exception:
-                pass
+            elem = doc.get_element_opt(es.path)
+            if elem is not None:
+                elements.append(elem)
         if not elements:
             return (0.0, 0.0)
         x, y, w, h = union_bounds(elements, geometric_bounds)
@@ -2023,9 +2014,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         doc = controller.document
         new_doc = doc
         for es in doc.selection:
-            try:
-                elem = new_doc.get_element(es.path)
-            except Exception:
+            elem = new_doc.get_element_opt(es.path)
+            if elem is None:
                 continue
             current = getattr(elem, "transform", None) or Transform()
             new_t = matrix.multiply(current)
@@ -2292,9 +2282,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             return None
         ai_raw = store.get_tool("anchor_point", "hit_anchor_idx") or 0
         ai = int(ai_raw)
-        try:
-            elem = controller.document.get_element(path)
-        except Exception:
+        elem = controller.document.get_element_opt(path)
+        if elem is None:
             return None
         if not isinstance(elem, PathElem):
             return None
@@ -2359,9 +2348,8 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
         # 1. Handle hit on selected path.
         handle_hit = None
         for es in doc.selection:
-            try:
-                elem = doc.get_element(es.path)
-            except Exception:
+            elem = doc.get_element_opt(es.path)
+            if elem is None:
                 continue
             if not isinstance(elem, PathElem):
                 continue
@@ -2469,6 +2457,10 @@ def build(controller: Controller) -> dict[str, PlatformEffect]:
             value = viewport.get(key, default)
             return float(value)
         except Exception:
+            # Best-effort optional read: load_workspace may be unavailable, the
+            # workspace file may be missing or malformed (OSError / parse error),
+            # or the value may be non-numeric — any failure falls back to the
+            # caller's default, so the broad catch here is intentional.
             return default
 
     def _read_tool_zoom_state(ctx: dict, key: str, default: float) -> float:

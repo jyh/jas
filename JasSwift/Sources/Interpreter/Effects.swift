@@ -803,8 +803,8 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
     // Get base stroke from selection or default
     let doc = controller.model.document
     let baseStroke: Stroke?
-    if let first = doc.selection.first {
-        baseStroke = doc.getElement(first.path).stroke
+    if let first = doc.selection.first, let el = doc.tryGetElement(first.path) {
+        baseStroke = el.stroke
     } else {
         baseStroke = controller.model.defaultStroke
     }
@@ -854,7 +854,7 @@ func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
 func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
     let doc = controller.model.document
     guard let first = doc.selection.first else { return }
-    guard let s = doc.getElement(first.path).stroke else { return }
+    guard let el = doc.tryGetElement(first.path), let s = el.stroke else { return }
 
     store.set("stroke_cap", s.linecap == .butt ? "butt" : s.linecap == .round ? "round" : "square")
     store.set("stroke_join", s.linejoin == .miter ? "miter" : s.linejoin == .round ? "round" : "bevel")
@@ -990,7 +990,7 @@ public func syncGradientPanelFromSelection(store: StateStore, controller: Contro
     var mixed = false
     var firstSolidColor: Color? = nil
     for es in doc.selection {
-        let elem = doc.getElement(es.path)
+        guard let elem = doc.tryGetElement(es.path) else { continue }
         let g = fillOnTop ? elem.fillGradient : elem.strokeGradient
         if firstSolidColor == nil && g == nil {
             let solid = fillOnTop ? elem.fill?.color : elem.stroke?.color
@@ -1681,7 +1681,8 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
     let model = controller.model
     let doc = model.document
     let targetPaths = doc.selection.compactMap { es -> [Int]? in
-        switch doc.getElement(es.path) {
+        guard let el = doc.tryGetElement(es.path) else { return nil }
+        switch el {
         case .text, .textPath: return es.path
         default: return nil
         }
@@ -1830,7 +1831,8 @@ public func applyJustificationDialogToSelection(
     let model = controller.model
     let doc = model.document
     let targetPaths = doc.selection.compactMap { es -> [Int]? in
-        switch doc.getElement(es.path) {
+        guard let el = doc.tryGetElement(es.path) else { return nil }
+        switch el {
         case .text, .textPath: return es.path
         default: return nil
         }
@@ -1932,7 +1934,8 @@ public func applyHyphenationDialogToSelection(
     let model = controller.model
     let doc = model.document
     let targetPaths = doc.selection.compactMap { es -> [Int]? in
-        switch doc.getElement(es.path) {
+        guard let el = doc.tryGetElement(es.path) else { return nil }
+        switch el {
         case .text, .textPath: return es.path
         default: return nil
         }
@@ -2264,7 +2267,8 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
     let doc = model.document
     var elements: [(ElementPath, Element)] = []
     for es in doc.selection {
-        elements.append((es.path, doc.getElement(es.path)))
+        guard let el = doc.tryGetElement(es.path) else { continue }
+        elements.append((es.path, el))
     }
     if elements.count < 2 { return }
 
@@ -2306,7 +2310,7 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
         guard let kp = keyPath else { return }
         // Guard the path is valid in the document.
         guard let _ = doc.selection.first(where: { $0.path == kp }) else { return }
-        let keyElem = doc.getElement(kp)
+        guard let keyElem = doc.tryGetElement(kp) else { return }
         reference = .keyObject(bbox: boundsFn(keyElem), path: kp)
     default:
         let refs = elements.map(\.1)
@@ -2401,7 +2405,8 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
     // (matches what the user sees).
     var hit: ElementPath? = nil
     for es in doc.selection {
-        let b = doc.getElement(es.path).bounds
+        guard let el = doc.tryGetElement(es.path) else { continue }
+        let b = el.bounds
         if x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height {
             hit = es.path
             break

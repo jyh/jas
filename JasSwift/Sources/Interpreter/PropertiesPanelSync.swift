@@ -84,8 +84,8 @@ public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
     // Part B.3: rotation / opacity / blend from the FIRST selected element
     // (like the Stroke weight). Defaults 0deg / 100% / normal.
     var rotation = 0.0, shear = 0.0, opacity = 100.0, blend = "normal"
-    if let first = doc.selection.first {
-        let elem = doc.getElement(first.path)
+    if let first = doc.selection.first,
+       let elem = doc.tryGetElement(first.path) {
         if let t = elem.transform {
             rotation = atan2(t.b, t.a) * 180.0 / .pi
             shear = propShearAngle(t)
@@ -209,7 +209,8 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
             let op = max(0, min(100, v)) / 100
             var d = doc
             for es in doc.selection {
-                d = d.replaceElement(es.path, with: doc.getElement(es.path).withCommon(opacity: op))
+                guard let el = doc.tryGetElement(es.path) else { continue }
+                d = d.replaceElement(es.path, with: el.withCommon(opacity: op))
             }
             model.editDocument(d)
         }
@@ -217,7 +218,8 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         if let s = value as? String, let bm = BlendMode(rawValue: s) {
             var d = doc
             for es in doc.selection {
-                d = d.replaceElement(es.path, with: doc.getElement(es.path).withCommon(blendMode: bm))
+                guard let el = doc.tryGetElement(es.path) else { continue }
+                d = d.replaceElement(es.path, with: el.withCommon(blendMode: bm))
             }
             model.editDocument(d)
         }
@@ -228,7 +230,7 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
                                                    "prop_constrain") as? Bool) ?? false
         if doc.selection.count == 1, let es = doc.selection.first {
             // SINGLE: local-axes scale / absolute rotation about its center.
-            let elem = doc.getElement(es.path)
+            guard let elem = doc.tryGetElement(es.path) else { return }
             let local = elem.geometricBounds
             let mat = elem.transform ?? .identity
             let newT: Transform
@@ -267,7 +269,8 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         case "shear":
             guard let v = num() else { return }
             var cur = 0.0
-            if let f = doc.selection.first, let ft = doc.getElement(f.path).transform {
+            if let f = doc.selection.first,
+               let ft = doc.tryGetElement(f.path)?.transform {
                 cur = propShearAngle(ft)
             }
             let cy = bbox.y + bbox.height / 2
@@ -278,7 +281,8 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         default:
             guard let v = num() else { return }
             var cur = 0.0
-            if let f = doc.selection.first, let ft = doc.getElement(f.path).transform {
+            if let f = doc.selection.first,
+               let ft = doc.tryGetElement(f.path)?.transform {
                 cur = atan2(ft.b, ft.a) * 180 / .pi
             }
             let cx = bbox.x + bbox.width / 2, cy = bbox.y + bbox.height / 2
@@ -286,7 +290,7 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         }
         var d = doc
         for es in doc.selection {
-            let elem = doc.getElement(es.path)
+            guard let elem = doc.tryGetElement(es.path) else { continue }
             let old = elem.transform ?? .identity
             d = d.replaceElement(es.path, with: elem.withCommon(transform: group.multiply(old)))
         }

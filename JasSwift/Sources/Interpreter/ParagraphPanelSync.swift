@@ -32,7 +32,7 @@ public func paragraphPanelLiveOverrides(model: Model) -> [String: Any] {
     var allArea = true
     var wrappers: [Tspan] = []
     for es in model.document.selection {
-        let elem = model.document.getElement(es.path)
+        guard let elem = model.document.tryGetElement(es.path) else { continue }
         switch elem {
         case .text(let t):
             anyText = true

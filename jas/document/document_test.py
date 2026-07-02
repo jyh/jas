@@ -91,6 +91,30 @@ class SelectionTest(absltest.TestCase):
         with self.assertRaises(ValueError):
             self.doc.get_element((0, 2, 99))
 
+    # get_element_opt — total variant: None instead of ValueError on a stale
+    # or out-of-range path (mirrors Rust's Option and OCaml's get_element_opt).
+
+    def test_get_element_opt_valid_returns_element(self):
+        self.assertIs(self.doc.get_element_opt((0,)), self.layer0)
+        self.assertIsInstance(self.doc.get_element_opt((0, 1)), Circle)
+        self.assertIsInstance(self.doc.get_element_opt((0, 2, 0)), Line)
+
+    def test_get_element_opt_empty_path_returns_none(self):
+        self.assertIsNone(self.doc.get_element_opt(()))
+
+    def test_get_element_opt_layer_out_of_range_returns_none(self):
+        self.assertIsNone(self.doc.get_element_opt((99,)))
+
+    def test_get_element_opt_child_out_of_range_returns_none(self):
+        self.assertIsNone(self.doc.get_element_opt((0, 99)))
+
+    def test_get_element_opt_nested_child_out_of_range_returns_none(self):
+        self.assertIsNone(self.doc.get_element_opt((0, 2, 99)))
+
+    def test_get_element_opt_descend_into_non_group_returns_none(self):
+        # (0, 0) is a Rect, not a Group — descending further is a stale path.
+        self.assertIsNone(self.doc.get_element_opt((0, 0, 0)))
+
     # replace_element
 
     def test_replace_element_child(self):
