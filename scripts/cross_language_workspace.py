@@ -37,7 +37,11 @@ def run_rust(args: list[str]) -> str:
 
 def run_swift(args: list[str]) -> str:
     result = subprocess.run(
-        ["swift", "run", "-c", "release", "WorkspaceRoundtrip"] + args,
+        # Debug (not -c release) to match the algorithm/commutativity drivers
+        # and the CI `swift build` pre-build — a roundtrip's output is
+        # opt-level-independent, and release-only left the binary to compile
+        # on-demand inside the 60s timeout (finding #25).
+        ["swift", "run", "WorkspaceRoundtrip"] + args,
         cwd=os.path.join(REPO_ROOT, "JasSwift"),
         capture_output=True, text=True, timeout=60,
     )
