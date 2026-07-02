@@ -184,11 +184,17 @@ jobs:
           ocaml-compiler: "5.2"
       - run: pip install -r requirements.txt
       - run: opam install --yes dune lablgtk3 xmlm yojson alcotest msgpck camlzip
+      # Pre-build exactly the binaries the equivalence drivers invoke, so the
+      # first driver call does not compile inside its per-command timeout
+      # (finding #25). The drivers run `swift run AlgorithmRoundtrip` (DEBUG),
+      # `cargo run --bin algorithm_roundtrip`, and `dune exec` — so the Swift
+      # build must be DEBUG (the old `swift build -c release` left the debug
+      # binary to compile on-demand, timing out `measure swift` after 60s).
       - name: Build all
         run: |
           (cd jas_dioxus && cargo build --bins)
           (cd jas_ocaml && opam exec -- dune build)
-          (cd JasSwift && swift build -c release)
+          (cd JasSwift && swift build)
       - name: Algorithm equivalence
         run: opam exec -- python scripts/cross_language_algorithms.py
       - name: SVG commutativity
