@@ -632,28 +632,16 @@ fn eval_func(
         // Higher-order functions (Phase 3 §6.1)
         "any" | "all" | "map" | "filter" => {
             if args.len() != 2 {
-                return match name {
-                    "map" | "filter" => Value::Null,
-                    "all" => Value::Bool(true),
-                    _ => Value::Bool(false),
-                };
+                return Value::Null;
             }
             let lst = eval_inner(&args[0], ctx, scope, store_cb);
             let callable = eval_inner(&args[1], ctx, scope, store_cb);
             let items = match lst {
                 Value::List(a) => a,
-                _ => return match name {
-                    "map" | "filter" => Value::Null,
-                    "all" => Value::Bool(true),
-                    _ => Value::Bool(false),
-                },
+                _ => return Value::Null,
             };
             if !matches!(callable, Value::Closure { .. }) {
-                return match name {
-                    "map" | "filter" => Value::Null,
-                    "all" => Value::Bool(true),
-                    _ => Value::Bool(false),
-                };
+                return Value::Null;
             }
             let mut results: Vec<Value> = Vec::with_capacity(items.len());
             for item in &items {

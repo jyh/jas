@@ -916,7 +916,7 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
     (* Higher-order functions (Phase 3 §6.1) *)
     else if name = "any" || name = "all" || name = "map" || name = "filter" then begin
       if List.length args <> 2 then
-        (match name with "map" | "filter" -> Null | "all" -> Bool true | _ -> Bool false)
+        Null
       else
         let lst = eval_node ~local_env ?store_cb (List.nth args 0) ctx in
         let callable = eval_node ~local_env ?store_cb (List.nth args 1) ctx in
@@ -945,7 +945,7 @@ and eval_func ?(local_env : env = []) ?(store_cb : store_cb option)
               List kept
             | _ -> Null)
          | _ ->
-           (match name with "map" | "filter" -> Null | "all" -> Bool true | _ -> Bool false))
+           Null)
     end
 
     (* Path functions (Phase 3 §6.2) *)

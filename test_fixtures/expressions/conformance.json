@@ -683,6 +683,31 @@
     "type": "number"
   },
   {
+    "expr": "all([true, false])",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "any([1, 2])",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "all([1, 2, 3], 5)",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "any(5, fun x -> x > 0)",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "map([1, 2], 3)",
+    "expected": null,
+    "type": "null"
+  },
+  {
     "expr": "1; 2",
     "expected": 2,
     "type": "number"
@@ -691,6 +716,81 @@
     "expr": "let x = 5 in (x; x + 1)",
     "expected": 6,
     "type": "number"
+  },
+  {
+    "expr": "true; 42",
+    "expected": 42,
+    "type": "number"
+  },
+  {
+    "expr": "null; 5",
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "5 && 10",
+    "expected": 10,
+    "type": "number"
+  },
+  {
+    "expr": "0 && 10",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "5 && 0",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "5 && false",
+    "expected": false,
+    "type": "bool"
+  },
+  {
+    "expr": "null && 10",
+    "expected": null,
+    "type": "null"
+  },
+  {
+    "expr": "\"\" && \"b\"",
+    "expected": "",
+    "type": "string"
+  },
+  {
+    "expr": "\"a\" && \"b\"",
+    "expected": "b",
+    "type": "string"
+  },
+  {
+    "expr": "5 || 10",
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "0 || 10",
+    "expected": 10,
+    "type": "number"
+  },
+  {
+    "expr": "false || 5",
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "null || 10",
+    "expected": 10,
+    "type": "number"
+  },
+  {
+    "expr": "\"\" || \"b\"",
+    "expected": "b",
+    "type": "string"
+  },
+  {
+    "expr": "\"a\" || \"b\"",
+    "expected": "a",
+    "type": "string"
   },
   {
     "expr": "atan2(0, 1)",

@@ -565,6 +565,36 @@ tests:
     type: number
     note: "filter keeps [3, 4]; fold sums to 7"
 
+  # Misuse of the higher-order builtins returns null — the same null-on-misuse
+  # convention every other builtin follows (grayscale, path, ...). Pins finding
+  # #19: all / any wrongly returned a bool on the arity / type-mismatch branch
+  # (all -> true, any -> false), diverging from map / filter (already null) and
+  # from the shared convention. Fixed identically in all four apps.
+  - expr: "all([true, false])"
+    expected: null
+    type: "null"
+    note: "one arg: the predicate is missing — arity error, not 'all elements truthy'"
+
+  - expr: "any([1, 2])"
+    expected: null
+    type: "null"
+    note: "one arg: arity error -> null (previously false)"
+
+  - expr: "all([1, 2, 3], 5)"
+    expected: null
+    type: "null"
+    note: "second arg is not a closure -> null (previously true)"
+
+  - expr: "any(5, fun x -> x > 0)"
+    expected: null
+    type: "null"
+    note: "first arg is not a list -> null (previously false)"
+
+  - expr: "map([1, 2], 3)"
+    expected: null
+    type: "null"
+    note: "map was already null on misuse; pins the now-uniform behavior"
+
   # Sequencing (;) — evaluate the left for side effects, return the right.
   # Was uncovered (#19). (Assignment <- needs a mutable store the conformance
   # harness does not wire, so it stays out of the pure-expression corpus.)
@@ -575,6 +605,85 @@ tests:
   - expr: "let x = 5 in (x; x + 1)"
     expected: 6
     type: number
+
+  - expr: "true; 42"
+    expected: 42
+    type: number
+    note: "sequencing is value-returning across types: discards left, yields right"
+
+  - expr: "null; 5"
+    expected: 5
+    type: number
+    note: "null left is discarded; the sequence is the right operand"
+
+  # && / || are value-returning (not coerced to bool): && yields the left when
+  # it is falsy else the right; || yields the left when it is truthy else the
+  # right. Truthiness: 0, "" and null are falsy. The existing && / || cases only
+  # used booleans, so the value-returning behavior (#19) was never pinned.
+  - expr: "5 && 10"
+    expected: 10
+    type: number
+    note: "left truthy -> right operand"
+
+  - expr: "0 && 10"
+    expected: 0
+    type: number
+    note: "left falsy (0) -> left operand"
+
+  - expr: "5 && 0"
+    expected: 0
+    type: number
+    note: "left truthy -> right operand (which is 0)"
+
+  - expr: "5 && false"
+    expected: false
+    type: bool
+    note: "left truthy -> right operand keeps its own type"
+
+  - expr: "null && 10"
+    expected: null
+    type: "null"
+    note: "left falsy (null) -> left operand"
+
+  - expr: '"" && "b"'
+    expected: ""
+    type: string
+    note: "empty string is falsy -> left operand"
+
+  - expr: '"a" && "b"'
+    expected: "b"
+    type: string
+    note: "non-empty string is truthy -> right operand"
+
+  - expr: "5 || 10"
+    expected: 5
+    type: number
+    note: "left truthy -> left operand"
+
+  - expr: "0 || 10"
+    expected: 10
+    type: number
+    note: "left falsy (0) -> right operand"
+
+  - expr: "false || 5"
+    expected: 5
+    type: number
+    note: "left falsy -> right operand keeps its own type"
+
+  - expr: "null || 10"
+    expected: 10
+    type: number
+    note: "left falsy (null) -> right operand"
+
+  - expr: '"" || "b"'
+    expected: "b"
+    type: string
+    note: "empty string is falsy -> right operand"
+
+  - expr: '"a" || "b"'
+    expected: "a"
+    type: string
+    note: "non-empty string is truthy -> left operand"
 
   # atan2(y, x) returns DEGREES (the inverse of sin/cos; used by concept fitters
   # to recover a placement angle). Args are (y, x), matching libm order.

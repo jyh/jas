@@ -1173,15 +1173,15 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // Higher-order functions (Phase 3 §6.1)
     case "any", "all", "map", "filter":
         guard args.count == 2 else {
-            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+            return .null
         }
         let lst = evalNode(args[0], ctx)
         let callable = evalNode(args[1], ctx)
         guard case .list(let items) = lst else {
-            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+            return .null
         }
         guard case .closure = callable else {
-            return (name == "map" || name == "filter") ? .null : .bool(name == "all")
+            return .null
         }
         var results: [Value] = []
         for item in items {

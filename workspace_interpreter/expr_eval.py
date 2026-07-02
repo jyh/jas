@@ -371,11 +371,11 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
     # ── Higher-order functions (Phase 3 §6.1) ─────────────
     if name in ("any", "all", "map", "filter"):
         if len(node.args) != 2:
-            return Value.null() if name in ("map", "filter") else Value.bool_(name == "all")
+            return Value.null()
         lst = eval_node(node.args[0], ctx)
         callable_val = eval_node(node.args[1], ctx)
         if lst.type != ValueType.LIST or callable_val.type != ValueType.CLOSURE:
-            return Value.null() if name in ("map", "filter") else Value.bool_(name == "all")
+            return Value.null()
         # Apply the closure to each item; _apply_closure handles arity checks
         results = [_apply_closure(callable_val, [Value.from_python(item)], ctx)
                    for item in lst.value]
