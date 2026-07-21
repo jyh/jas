@@ -1,4 +1,18 @@
-# Jas
+# Jas — one vector editor, written five times
+
+[![arXiv](https://img.shields.io/badge/arXiv-2606.07828-b31b1b.svg)](https://arxiv.org/abs/2606.07828)
+
+Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **five parallel, behaviourally-identical implementations** — Rust, Swift, OCaml, Python, and a Flask web reference — all driven from one shared executable YAML specification. The four native ports are expected to behave identically; cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. New features land in one port, get tuned, then propagate to the rest with matching tests.
+
+This repository is the artifact for the paper **"Five Implementations, One Spec: AI-Paired Engineering as a Revival of N-Version Programming"** (Jason Hickey) — [read it on arXiv](https://arxiv.org/abs/2606.07828). The founding vision lives in [`transcripts/AI.md`](transcripts/AI.md) and per-feature prompt transcripts in [`transcripts/`](transcripts/). Status: actively maintained, Apache-2.0.
+
+## The five ports, one panel
+
+The same color panel, rendered by each implementation from the shared spec — visual parity is the point:
+
+| Rust (Dioxus) | Swift (AppKit) | Python (Qt) | OCaml (GTK) | Flask (web ref.) |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Rust / Dioxus color panel](article/figures/color_panel/jas_dioxus.png) | ![Swift / AppKit color panel](article/figures/color_panel/jas_swift.png) | ![Python / Qt color panel](article/figures/color_panel/jas_python.png) | ![OCaml / GTK color panel](article/figures/color_panel/jas_ocaml.png) | ![Flask web color panel](article/figures/color_panel/jas_flask.png) |
 
 Jas is a vector graphics editor — a small, inspectable vector illustration
 application — that exists as **four parallel, behaviourally-identical
@@ -99,8 +113,8 @@ short:
   shortcut set used as a reference.
 - [REQUIREMENTS.md](REQUIREMENTS.md) — the high-level product
   requirements the project started from.
-- [TRANSCRIPT.md](TRANSCRIPT.md) — the original prompts used to
-  bootstrap each feature.
+- [`transcripts/`](transcripts/) — the original per-feature prompts used
+  to bootstrap each feature.
 
 ## Project structure
 
