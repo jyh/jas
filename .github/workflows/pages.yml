@@ -1,0 +1,67 @@
+name: Deploy web demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege token for the Pages deployment: read the repo, write the
+# Pages site, and mint the OIDC token deploy-pages uses to authenticate.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build WASM bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jas_dioxus
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Pin dioxus-cli to the version the bundle was verified against. Prefer
+      # a prebuilt binary via binstall (seconds); fall back to compiling from
+      # source with the crate's own lockfile if no prebuilt artifact matches.
+      - name: Install dioxus-cli 0.7.9
+        run: |
+          cargo binstall -y dioxus-cli@0.7.9 \
+            || cargo install dioxus-cli --version 0.7.9 --locked
+
+      - name: Build the web bundle
+        working-directory: jas_dioxus
+        run: dx build --release --web --base-path jas
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: jas_dioxus/target/dx/jas_dioxus/release/web/public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
