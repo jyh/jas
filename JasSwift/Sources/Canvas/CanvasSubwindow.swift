@@ -2504,16 +2504,33 @@ class CanvasNSView: NSView {
                 // non-undoable (OP_LOG.md §7/§8). Mirrors the tool-change
                 // selection-restore unbracketed write in OCaml/Python.
                 if document.selection != savedSelection {
-                    var doc = document
-                    doc = Document(layers: doc.layers,
-                                      selectedLayer: doc.selectedLayer,
-                                      selection: savedSelection)
+                    let doc = CanvasNSView.rebuildForToolChangeSelectionRestore(
+                        document, restoring: savedSelection)
                     controller?.model.setDocumentUnbracketed(doc, intent: .selection)
                 }
             }
             window?.invalidateCursorRects(for: self)
         }
     }
+
+    /// Rebuild the document for the tool-change selection restore: carry the
+    /// FULL current document forward, changing ONLY the selection back to the
+    /// value captured before the tool switch. Extracted as a pure seam so the
+    /// "a tool switch must not drop artboards / document setup / print
+    /// preferences / symbols" regression is testable without driving an NSView
+    /// (see CanvasTests). Rebuilding the document from a subset of its fields
+    /// via the designated `Document(...)` initializer silently defaulted every
+    /// field the tool switch did not name — the class of bug the `.selection`
+    /// intent teeth in `Model` catch — so this uses copy-with-selection
+    /// semantics (`Document.replacing`) instead. The write it feeds is
+    /// selection-only by construction. Mirrors the OCaml/Python tool-change
+    /// selection-restore write.
+    static func rebuildForToolChangeSelectionRestore(
+        _ document: Document, restoring savedSelection: Selection
+    ) -> Document {
+        document.replacing(selection: savedSelection)
+    }
+
     var onToolRead: (() -> Tool)?
     var onToolChange: ((Tool) -> Void)?
     var onFocus: (() -> Void)?
