@@ -1125,6 +1125,18 @@ mod tests {
         "toggle_all_layers_visibility.json",
         "toggle_all_layers_lock.json",
         "toggle_all_layers_outline.json",
+        // S4 second-branch coverage: each toggle_all_layers_* verb branches on
+        // the CURRENT uniform state (any-visible->invisible vs all-invisible->
+        // preview, etc.). SVG does not serialize visibility/lock, so the
+        // second branch is reached by dispatching the SAME verb twice — the
+        // first call establishes the uniform state on the production path, the
+        // second exercises the branch the single-toggle fixtures above cannot.
+        // (These branches were reference-only pins in workspace/tests/phase3/
+        // until these fixtures; the single-toggle fixtures keep the
+        // global-no-op trap covered since a no-op dispatcher reds them.)
+        "toggle_all_layers_visibility_all_invisible.json",
+        "toggle_all_layers_lock_all_locked.json",
+        "toggle_all_layers_outline_all_outline.json",
         "new_layer.json",
         "make_compound_shape.json",
         "align.json",
