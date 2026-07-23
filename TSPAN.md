@@ -221,6 +221,22 @@ so round-trips are byte-stable:
   trip to SVG without a `<tspan>` element, so pre-Tspan documents
   serialize identically.
 
+### Known limitation (2026-07-22)
+
+Nested-tspan flattening on import is specified above but is not
+implemented in the active ports, and their current behavior
+diverges: the Rust parser drops a nested tspan's content, while
+the Swift parser concatenates it into the enclosing tspan. The
+divergence is pinned by per-port probes —
+`nested_tspan_current_behavior_probe` in
+`jas_dioxus/src/geometry/svg.rs` and
+`nestedTspanCurrentBehaviorProbe` in
+`JasSwift/Tests/Geometry/SvgTests.swift`. Leading whitespace
+inside a tspan also diverges (Rust trims, Swift preserves) and is
+not exercised by the conformance corpus. Implementation is
+deferred to the Paragraph-panel phase; until then no
+cross-language fixture carries a nested tspan.
+
 ## Primitives
 
 All primitives are **pure functions**. They take a `Text` value and
