@@ -2840,7 +2840,7 @@ private func scaleApply(
     }
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
-    model.setDocumentUnbracketed(newDoc)
+    model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
 }
 
 /// Rotate apply. Rigid transform — no stroke / corner options.
@@ -2862,7 +2862,7 @@ private func rotateApply(
     }
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
-    model.setDocumentUnbracketed(newDoc)
+    model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
 }
 
 /// Shear apply. Pure shear has determinant 1 — strokes preserved
@@ -2887,7 +2887,7 @@ private func shearApply(
     }
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
-    model.setDocumentUnbracketed(newDoc)
+    model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
 }
 
 /// Multiply the element's stroke-width by `factor` if present.
@@ -3786,7 +3786,7 @@ private func artboardTranslateFromPreview(
         selectedLayer: doc.selectedLayer,
         selection: doc.selection,
         artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+        artboardOptions: doc.artboardOptions), intent: .liveDrag)
 }
 
 /// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
@@ -3994,7 +3994,7 @@ private func artboardResizeApply(
     model.setDocumentUnbracketed(Document(
         layers: doc.layers, selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+        artboardOptions: doc.artboardOptions), intent: .liveDrag)
 }
 
 /// doc.artboard.resize_commit — integer-pt rounded final bounds.

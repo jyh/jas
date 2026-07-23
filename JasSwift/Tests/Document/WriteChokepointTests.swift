@@ -9,8 +9,11 @@ import Testing
 ///
 /// The live `assert(isInTxn)` in `setDocument` is the ORACLE: any undoable
 /// write that skipped the transaction bracket fails the suite, so the journal is
-/// complete by construction. Swift `assert` is active in the default (debug)
-/// test build and stripped under `-Ounchecked`, so it costs nothing in release.
+/// complete by construction. Swift `assert` is compiled only into debug
+/// (`-Onone`) builds — the default test build — and is stripped under plain
+/// `-O` (release), not just `-Ounchecked`; in release, `setDocument`'s S1c
+/// fail-safe (log + self-bracket via `editDocument` semantics) takes over,
+/// so the journal stays complete and the app survives a stray write.
 ///
 /// The whole group lives in a `.serialized` suite. The oracle is a Swift
 /// Testing exit test, and the exit-test harness captures the subprocess
@@ -53,10 +56,12 @@ struct WriteChokepointTests {
         // Sanctioned non-undoable write: legal with no open transaction, and it
         // does NOT advance the journal cursor (no undo step) — the property that
         // lets the live guard tell "deliberately not undoable" from "forgot a
-        // transaction".
+        // transaction". Exercises the real channel (not the test helper)
+        // deliberately; mirrored by the Rust
+        // `unbracketed_write_never_journals_and_never_advances_the_cursor`.
         let model = Model()
         let head = model.journalHeadValue
-        model.setDocumentUnbracketed(Document(layers: []))
+        model.setDocumentUnbracketed(Document(layers: []), intent: .testOnly)
         #expect(model.document.layers.count == 0)
         #expect(model.journalHeadValue == head)
         #expect(!model.canUndo)

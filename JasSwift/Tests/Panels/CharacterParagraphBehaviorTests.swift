@@ -32,7 +32,7 @@ private func charModelWithSelectedText(
         baselineShift: "", lineHeight: "", letterSpacing: "",
         xmlLang: "", aaMode: "", rotate: "",
         horizontalScale: "", verticalScale: "", kerning: ""))
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [text])],
         selectedLayer: 0,
         selection: [ElementSelection(path: [0, 0])]))
@@ -87,7 +87,7 @@ private func applyCharPanel(
     let m = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontWeight: "bold", fontStyle: "italic"))
-    m.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    m.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let t = applyCharPanel(m, ["style_name": "Regular"])
@@ -276,7 +276,7 @@ private func applyCharPanel(
     // Empty selection -> apply must not mutate any element.
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi", fontFamily: "serif"))
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [text])],
         selectedLayer: 0,
         selection: []))
@@ -295,7 +295,7 @@ private func applyCharPanel(
 /// Build a Model with a single selected element.
 private func paraModel(_ elem: Element) -> Model {
     let model = Model()
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [elem])],
         selectedLayer: 0,
         selection: [ElementSelection(path: [0, 0])]))

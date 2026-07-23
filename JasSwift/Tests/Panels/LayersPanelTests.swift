@@ -72,7 +72,7 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
         let removed = model.document.layers[idx]
         var newLayers = model.document.layers
         newLayers.remove(at: idx)
-        model.setDocumentUnbracketed(Document(layers: newLayers,
+        model.setDocumentForTest(Document(layers: newLayers,
                                    selectedLayer: model.document.selectedLayer,
                                    selection: model.document.selection))
         return removed
@@ -102,7 +102,7 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
         let insertIdx = min(indices[0] + 1, model.document.layers.count)
         var newLayers = model.document.layers
         newLayers.insert(elem, at: insertIdx)
-        model.setDocumentUnbracketed(Document(layers: newLayers,
+        model.setDocumentForTest(Document(layers: newLayers,
                                    selectedLayer: model.document.selectedLayer,
                                    selection: model.document.selection))
         return nil

@@ -36,7 +36,7 @@ import Testing
     let model = Model()
     var received: [Int] = []
     model.onDocumentChanged { doc in received.append(doc.layers.count) }
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(received == [0])
 }
 
@@ -46,7 +46,7 @@ import Testing
     var b: [Int] = []
     model.onDocumentChanged { doc in a.append(doc.layers.count) }
     model.onDocumentChanged { doc in b.append(doc.layers.count) }
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(a == [0])
     #expect(b == [0])
 }
@@ -56,15 +56,15 @@ import Testing
     var counts: [Int] = []
     model.onDocumentChanged { doc in counts.append(doc.layers.count) }
     let layer = Layer(name: "L1", children: [])
-    model.setDocumentUnbracketed(Document(layers: [layer]))
-    model.setDocumentUnbracketed(Document(layers: [layer, layer]))
+    model.setDocumentForTest(Document(layers: [layer]))
+    model.setDocumentForTest(Document(layers: [layer, layer]))
     #expect(counts == [1, 2])
 }
 
 @Test func modelImmutability() {
     let model = Model()
     let before = model.document
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     let after = model.document
     #expect(before.layers.count == 1)
     #expect(after.layers.count == 0)
@@ -81,7 +81,7 @@ import Testing
     let model = Model()
     #expect(!model.canUndo)
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(model.canUndo)
     #expect(!model.canRedo)
     model.undo()
@@ -95,14 +95,14 @@ import Testing
     let layer = Layer(name: "L1", children: [])
     let model = Model()
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: [layer]))
+    model.setDocumentForTest(Document(layers: [layer]))
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: [layer, layer]))
+    model.setDocumentForTest(Document(layers: [layer, layer]))
     model.undo()
     #expect(model.document.layers.count == 1)
     #expect(model.canRedo)
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(!model.canRedo)
 }
 
@@ -131,7 +131,7 @@ import Testing
 @Test func modelIsModifiedAfterCommittedEdit() {
     let model = Model()
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(model.isModified)
 }
 
@@ -139,7 +139,7 @@ import Testing
     let model = Model()
     model.markSaved()  // saved at journalHead 0
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(model.isModified)
     model.undo()
     #expect(!model.isModified, "undo back to the saved point is not modified")
@@ -150,7 +150,7 @@ import Testing
 @Test func modelIsModifiedFalseAfterMarkSaved() {
     let model = Model()
     model.snapshot()
-    model.setDocumentUnbracketed(Document(layers: []))
+    model.setDocumentForTest(Document(layers: []))
     #expect(model.isModified)
     model.markSaved()
     #expect(!model.isModified)
@@ -418,11 +418,11 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
     // didSet chokepoint, so the companion tracks set-document and controller
     // edits alike. Mirrors Rust set_document / document_mut tracking.
     let model = Model()
-    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("a")))
+    model.setDocumentForTest(appendToLayer0(model.document, idRect("a")))
     #expect(model.idIndex["a"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))
 
-    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("b")))
+    model.setDocumentForTest(appendToLayer0(model.document, idRect("b")))
     #expect(model.idIndex["b"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))
 }
@@ -436,10 +436,10 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
 
     // Edit 1: add id-bearing rect "r1" (undoable).
     model.snapshot()
-    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("r1")))
+    model.setDocumentForTest(appendToLayer0(model.document, idRect("r1")))
     // Edit 2: add a second id-bearing rect "r2" (undoable).
     model.snapshot()
-    model.setDocumentUnbracketed(appendToLayer0(model.document, idRect("r2")))
+    model.setDocumentForTest(appendToLayer0(model.document, idRect("r2")))
     #expect(model.idIndex["r1"] != nil)
     #expect(model.idIndex["r2"] != nil)
     #expect(model.idIndex == rebuildIdIndex(model.document))

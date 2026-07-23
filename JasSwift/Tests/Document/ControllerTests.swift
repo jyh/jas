@@ -1525,7 +1525,7 @@ private func setupTwoRectSelection() -> Controller {
     let firstPath = doc.selection.first!.path
     let elem = doc.getElement(firstPath)
     doc = doc.replaceElement(firstPath, with: withMask(elem, mask: nil))
-    ctrl.model.setDocumentUnbracketed(doc)
+    ctrl.model.setDocumentForTest(doc)
     #expect(firstMask(ctrl.document) == nil)
     #expect(selectionHasMask(ctrl.document) == false)
 }

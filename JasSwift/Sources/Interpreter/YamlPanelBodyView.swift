@@ -3958,7 +3958,7 @@ struct TreeViewContent: View {
                         selection: [ElementSelection.all(path)],
                         artboards: model.document.artboards,
                         artboardOptions: model.document.artboardOptions
-                    ))
+                    ), intent: .selection)
                 }
         }
         .frame(height: 24)
@@ -4180,7 +4180,7 @@ struct TreeViewContent: View {
                         selection: [ElementSelection.all(path)],
                         artboards: model.document.artboards,
                         artboardOptions: model.document.artboardOptions
-                    ))
+                    ), intent: .selection)
                 }
         }
         .frame(height: 24)

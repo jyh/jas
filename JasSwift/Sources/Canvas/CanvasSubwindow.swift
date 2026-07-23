@@ -2508,7 +2508,7 @@ class CanvasNSView: NSView {
                     doc = Document(layers: doc.layers,
                                       selectedLayer: doc.selectedLayer,
                                       selection: savedSelection)
-                    controller?.model.setDocumentUnbracketed(doc)
+                    controller?.model.setDocumentUnbracketed(doc, intent: .selection)
                 }
             }
             window?.invalidateCursorRects(for: self)

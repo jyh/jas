@@ -59,6 +59,50 @@ func advanceNextUntitledPast(_ filenames: [String]) {
     nextUntitled = max(nextUntitled, maxUntitledN(filenames) + 1)
 }
 
+/// Why a write is deliberately NOT undoable — the required classification of
+/// every ``Model/setDocumentUnbracketed(_:intent:)`` call (Arc 1 S1,
+/// census-frozen 2026-07-23). Mirrors Rust `NonUndoableIntent` in `model.rs`
+/// (which carries the full census table; both ports froze the same variant
+/// list from the same census).
+///
+/// Census summary (production sites at freeze; both active ports):
+/// - ``selection`` — 9 Swift / 10 Rust sites: selection-only writes — the
+///   `Controller` select family, layers-panel row select
+///   (`YamlPanelBodyView`), tool-change selection restore
+///   (`CanvasSubwindow`), and (Rust) canvas click-select.
+/// - ``previewReapply`` — 3 Swift / 3 Rust sites: the dialog-preview
+///   transform applies (`scaleApply` / `rotateApply` / `shearApply` in
+///   `YamlToolEffects`), written out-of-band off the preview snapshot; only
+///   the CONFIRM path journals (OP_LOG.md §8.4).
+/// - ``liveDrag`` — 4 Swift / 4 Rust sites: per-tick writes inside a drag —
+///   artboard move/resize live-drag (`artboardTranslateFromPreview` /
+///   `artboardResizeApply`, idempotent restore+re-apply per mousemove) and
+///   the per-tick color apply during a picker drag (`setSelectionFillLive` /
+///   `setSelectionStrokeLive`); undo is captured once at the gesture
+///   boundary.
+/// - ``testOnly`` — test-fixture seeding, routed via the test-target-only
+///   `setDocumentForTest` extension (so production code cannot reach it; the
+///   Rust twin additionally debug-asserts `cfg!(test)`).
+///
+/// NOT variants, per the census: `viewState` (zero production view-state
+/// writes go through this channel in either port — view state lives outside
+/// the `Document`), and `historyNav` (undo/redo write via the `didSet`
+/// chokepoint with a snapshot-carried index; neither port routes history
+/// navigation through this channel).
+public enum NonUndoableIntent {
+    /// The new document differs from the old ONLY in selection state.
+    case selection
+    /// Dialog-preview re-apply off the captured preview snapshot; the
+    /// CONFIRM path journals separately.
+    case previewReapply
+    /// Per-tick write inside a drag gesture; undo is captured once at the
+    /// gesture boundary.
+    case liveDrag
+    /// Test-fixture seeding; production code must never pass it (the
+    /// test-target-only `setDocumentForTest` helper is its sole caller).
+    case testOnly
+}
+
 /// The transaction being accumulated between ``Model/beginTxn()`` and
 /// ``Model/commitTxn()`` (OP_LOG.md Increment 2). ``name`` / ``ops`` are
 /// populated by the op-apply path; ``genAtBegin`` snapshots the generation at
@@ -124,9 +168,9 @@ public class Model: ObservableObject {
     //                                one-step undo and a nested one joins the
     //                                owning action.
     //   - `setDocumentUnbracketed` — sanctioned NON-undoable write (selection /
-    //                                preview re-apply / live drag / view-state /
-    //                                undo-redo history-nav / test setup); never
-    //                                asserts (OP_LOG.md §7/§8).
+    //                                preview re-apply / live drag / test setup,
+    //                                stated per-call via `NonUndoableIntent`);
+    //                                never asserts (OP_LOG.md §7/§8).
     // The distinct names let the live `isInTxn` guard in `setDocument` tell
     // "deliberately not undoable" from "forgot to open a transaction": the former
     // says so by calling `setDocumentUnbracketed` directly.
@@ -134,18 +178,40 @@ public class Model: ObservableObject {
     /// Replace the document — the committing write for UNDOABLE mutations. The
     /// `assert(isInTxn)` is LIVE (OP_LOG.md Increment 1, enforced chokepoint):
     /// any undoable edit that skipped the transaction bracket fails the test
-    /// suite, so the journal cursor is complete by construction. Active in the
-    /// debug/test build (the whole suite runs in debug, like the id-index gate)
-    /// and stripped under `-Ounchecked`, so it costs nothing in release.
-    /// Self-bracketing mutators use ``editDocument(_:)``; sanctioned non-undoable
-    /// writes use ``setDocumentUnbracketed(_:)`` (which never asserts). Mirrors
-    /// the Rust `set_document`.
+    /// suite, so the journal cursor is complete by construction. Swift
+    /// `assert` is compiled only into debug (`-Onone`) builds — the whole
+    /// test suite runs in debug, like the id-index gate — and is stripped
+    /// under plain `-O` (release), not just `-Ounchecked`.
+    /// Self-bracketing mutators use ``editDocument(_:)``; sanctioned
+    /// non-undoable writes use ``setDocumentUnbracketed(_:intent:)`` (which
+    /// never asserts on the bracket). Mirrors the Rust `set_document`.
+    ///
+    /// Bracket-violation semantics (Arc 1 S1c, ratified 2026-07-22, mirroring
+    /// Rust):
+    /// - debug/CI: the `assert` is the referee — a stray un-bracketed
+    ///   undoable write aborts and fails the suite (the WriteChokepointTests
+    ///   exit test pins this).
+    /// - release (`assert` stripped): the failure guarded here is a MISSING
+    ///   JOURNAL/UNDO CHECKPOINT, not byte corruption — the write itself
+    ///   executes correctly either way. The fall-through below logs loudly
+    ///   and self-brackets the stray write (``editDocument(_:)`` semantics):
+    ///   the journal stays complete and the app survives.
     public func setDocument(_ doc: Document) {
         assert(isInTxn,
             "setDocument outside a transaction: undoable edits use beginTxn/" +
             "commitTxn or withTxn; Controller mutators use editDocument; " +
-            "non-undoable writes (selection, preview, live-drag, view-state, " +
-            "undo/redo, test setup) use setDocumentUnbracketed.")
+            "non-undoable writes (selection, preview, live-drag, test setup) " +
+            "use setDocumentUnbracketed.")
+        if !isInTxn {
+            // Release fail-safe (S1c): reachable only when the assert above
+            // is stripped (release). Log loudly, then self-bracket so the
+            // stray write still lands as a complete one-step transaction.
+            NSLog("[jas] setDocument outside a transaction; self-bracketing " +
+                  "the stray write (journal-complete fail-safe, see " +
+                  "Model.setDocument)")
+            editDocument(doc)
+            return
+        }
         document = doc
     }
 
@@ -167,13 +233,17 @@ public class Model: ObservableObject {
     }
 
     /// Committing write for sanctioned NON-undoable mutations — selection-only
-    /// and pure view-state changes, dialog-preview re-apply, live drag, undo/redo
-    /// history-nav, and test setup (OP_LOG.md §7/§8). Same effect as
-    /// ``setDocument(_:)`` but the distinct name is what lets the live `isInTxn`
-    /// guard in ``setDocument(_:)`` tell "deliberately not undoable" from "forgot
-    /// to open a transaction": this path never asserts. Mirrors the Rust
-    /// `set_document_unbracketed`.
-    public func setDocumentUnbracketed(_ doc: Document) {
+    /// changes, dialog-preview re-apply, live drag, and test setup (OP_LOG.md
+    /// §7/§8). Same effect as ``setDocument(_:)`` but the distinct name is what
+    /// lets the live `isInTxn` guard in ``setDocument(_:)`` tell "deliberately
+    /// not undoable" from "forgot to open a transaction": this path never
+    /// asserts. Every caller states WHY the write is deliberately not undoable
+    /// via `intent` (see ``NonUndoableIntent`` for the frozen variant list and
+    /// the call-site census). Mirrors the Rust `set_document_unbracketed`
+    /// (whose `TestOnly` / `Selection` intents additionally carry debug-only
+    /// teeth; in Swift the `.testOnly` seclusion is compile-time — the
+    /// `setDocumentForTest` helper lives in the test target).
+    public func setDocumentUnbracketed(_ doc: Document, intent: NonUndoableIntent) {
         document = doc
     }
     /// Monotonic modification generation (Phase 4c). Bumped in the `document`

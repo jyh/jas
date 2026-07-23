@@ -422,7 +422,7 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
             dy: op["dy"]!.value as! Double)
     case "delete_selection":
         let newDoc = model.document.deleteSelection()
-        model.setDocumentUnbracketed(newDoc)
+        model.setDocumentForTest(newDoc)
     case "snapshot":
         model.snapshot()
     case "undo":
