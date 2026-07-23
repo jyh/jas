@@ -103,6 +103,21 @@ public enum NonUndoableIntent {
     case testOnly
 }
 
+/// True iff `new` differs from `old` in AT MOST the `selection` field — the
+/// debug-only validation behind ``NonUndoableIntent/selection`` (the Selection
+/// teeth). `Document` IS `Equatable`, so ALIGN the selection field (copy
+/// `old` with `new`'s selection) and let the synthesized `==` decide: if the
+/// aligned `old` equals `new`, the only field that changed was the selection.
+/// `selectedLayer` (the active-layer cursor) is deliberately NOT aligned away
+/// — no production Selection site writes it, and a future site that does should
+/// surface here for review. Only ever CALLED from an `assert` (debug/test
+/// builds; stripped under `-O`), so its O(document) compare shares the cost
+/// class of the debug id-index-rebuild gate. Mirrors Rust
+/// `differs_only_in_selection` (model.rs).
+func differsOnlyInSelection(_ old: Document, _ new: Document) -> Bool {
+    old.replacing(selection: new.selection) == new
+}
+
 /// The transaction being accumulated between ``Model/beginTxn()`` and
 /// ``Model/commitTxn()`` (OP_LOG.md Increment 2). ``name`` / ``ops`` are
 /// populated by the op-apply path; ``genAtBegin`` snapshots the generation at
@@ -244,6 +259,22 @@ public class Model: ObservableObject {
     /// teeth; in Swift the `.testOnly` seclusion is compile-time — the
     /// `setDocumentForTest` helper lives in the test target).
     public func setDocumentUnbracketed(_ doc: Document, intent: NonUndoableIntent) {
+        // Selection teeth (Arc 1 FA): a `.selection` write may change ONLY the
+        // `selection` field. `assert` runs in debug/test builds (like the
+        // bracket guard in `setDocument` and the id-index gate) and is stripped
+        // under `-O`, so a misclassified call site — one that drops artboards /
+        // setup / prefs, or sneaks a content edit through the selection channel
+        // — fails the suite instead of silently landing an unjournaled
+        // non-selection change. Mirrors the Rust `NonUndoableIntent::Selection`
+        // teeth in `set_document_unbracketed` (model.rs). The `.testOnly`
+        // seclusion stays compile-time (the `setDocumentForTest` helper lives
+        // in the test target), so it needs no runtime teeth here.
+        if case .selection = intent {
+            assert(differsOnlyInSelection(document, doc),
+                "NonUndoableIntent.selection write differs from the old " +
+                "document outside selection state: reclassify the intent (or " +
+                "bracket the edit) instead of widening Selection.")
+        }
         document = doc
     }
     /// Monotonic modification generation (Phase 4c). Bumped in the `document`

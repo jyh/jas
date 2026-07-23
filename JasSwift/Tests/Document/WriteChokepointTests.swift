@@ -92,4 +92,35 @@ struct WriteChokepointTests {
         #expect(model.document.layers.count == 1,
             "one undo step reverts the whole joined session")
     }
+
+    // MARK: - The Selection teeth (Arc 1 FA)
+
+    /// A `.selection`-intent write that changes ONLY the selection is legal and
+    /// lands. Mirrors Rust `selection_intent_allows_a_selection_only_write`.
+    @Test func selectionIntentAllowsSelectionOnlyWrite() {
+        let model = Model()
+        let selected = model.document.replacing(
+            selection: [ElementSelection.all([0])])
+        model.setDocumentUnbracketed(selected, intent: .selection)
+        #expect(model.document.selection.count == 1)
+        #expect(!model.canUndo, "selection writes push no checkpoint")
+    }
+
+    /// The teeth: a `.selection`-intent write that also changes document
+    /// content (here, the layer list) trips the debug-only validation in
+    /// `setDocumentUnbracketed`, aborting the subprocess. So a misclassified
+    /// call site — one that drops artboards / setup / prefs or sneaks a content
+    /// edit through the selection channel — fails the suite instead of silently
+    /// landing an unjournaled non-selection change. Mirrors Rust
+    /// `selection_intent_with_content_change_panics` (a `#[should_panic]`),
+    /// realized in Swift as an abort-observing exit test like the bracket
+    /// oracle above.
+    @Test func selectionIntentWithContentChangeAborts() async {
+        await #expect(processExitsWith: .failure) {
+            let model = Model()
+            // Old document has one layer; the new one has zero — a content
+            // change outside the selection field.
+            model.setDocumentUnbracketed(Document(layers: []), intent: .selection)
+        }
+    }
 }
