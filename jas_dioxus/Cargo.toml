@@ -24,6 +24,11 @@ path = "src/bin/workspace_roundtrip.rs"
 name = "algorithm_roundtrip"
 path = "src/bin/algorithm_roundtrip.rs"
 
+[[bin]]
+name = "corpus_replay"
+path = "src/bin/corpus_replay.rs"
+required-features = ["web"]
+
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger", "dep:console_error_panic_hook"]
