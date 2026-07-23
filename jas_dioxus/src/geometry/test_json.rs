@@ -1364,7 +1364,7 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
         paper_color: v["paper_color"].as_str().map(String::from).unwrap_or(d.paper_color),
         simulate_colored_paper: v["simulate_colored_paper"].as_bool().unwrap_or(d.simulate_colored_paper),
         transparency_flattener_preset: v["transparency_flattener_preset"].as_str()
-            .map(flattener_preset_from).unwrap_or(d.transparency_flattener_preset),
+            .and_then(flattener_preset_from).unwrap_or(d.transparency_flattener_preset),
         discard_white_overprint: v["discard_white_overprint"].as_bool().unwrap_or(d.discard_white_overprint),
     }
 }
@@ -1377,7 +1377,7 @@ fn parse_advanced(v: &serde_json::Value) -> Advanced {
     Advanced {
         print_as_bitmap: v["print_as_bitmap"].as_bool().unwrap_or(d.print_as_bitmap),
         overprint_flattener_preset: v["overprint_flattener_preset"].as_str()
-            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
+            .and_then(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
     }
 }
 
@@ -1390,11 +1390,11 @@ fn parse_color_management(v: &serde_json::Value) -> ColorManagement {
         document_profile: v["document_profile"].as_str()
             .map(String::from).unwrap_or(d.document_profile),
         color_handling: v["color_handling"].as_str()
-            .map(color_handling_from).unwrap_or(d.color_handling),
+            .and_then(color_handling_from).unwrap_or(d.color_handling),
         printer_profile: v["printer_profile"].as_str()
             .map(String::from).unwrap_or(d.printer_profile),
         rendering_intent: v["rendering_intent"].as_str()
-            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+            .and_then(rendering_intent_from).unwrap_or(d.rendering_intent),
         preserve_rgb_numbers: v["preserve_rgb_numbers"].as_bool()
             .unwrap_or(d.preserve_rgb_numbers),
     }
@@ -1408,11 +1408,11 @@ fn parse_graphics(v: &serde_json::Value) -> Graphics {
     Graphics {
         flatness: v["flatness"].as_f64().unwrap_or(d.flatness),
         font_download: v["font_download"].as_str()
-            .map(font_download_from).unwrap_or(d.font_download),
+            .and_then(font_download_from).unwrap_or(d.font_download),
         postscript_level: v["postscript_level"].as_str()
-            .map(postscript_level_from).unwrap_or(d.postscript_level),
+            .and_then(postscript_level_from).unwrap_or(d.postscript_level),
         data_format: v["data_format"].as_str()
-            .map(data_format_from).unwrap_or(d.data_format),
+            .and_then(data_format_from).unwrap_or(d.data_format),
         compatible_gradient_printing: v["compatible_gradient_printing"]
             .as_bool().unwrap_or(d.compatible_gradient_printing),
         raster_effects_resolution: v["raster_effects_resolution"]
@@ -1427,7 +1427,7 @@ fn parse_ink_override(v: &serde_json::Value) -> InkOverride {
         frequency: v["frequency"].as_f64().unwrap_or(75.0),
         angle: v["angle"].as_f64().unwrap_or(45.0),
         dot_shape: v["dot_shape"].as_str()
-            .map(dot_shape_from)
+            .and_then(dot_shape_from)
             .unwrap_or(crate::document::print_preferences::DotShape::Round),
     }
 }
@@ -1442,10 +1442,10 @@ fn parse_output(v: &serde_json::Value) -> Output {
         None => d.inks,
     };
     Output {
-        mode: v["mode"].as_str().map(output_mode_from).unwrap_or(d.mode),
-        emulsion: v["emulsion"].as_str().map(emulsion_from).unwrap_or(d.emulsion),
+        mode: v["mode"].as_str().and_then(output_mode_from).unwrap_or(d.mode),
+        emulsion: v["emulsion"].as_str().and_then(emulsion_from).unwrap_or(d.emulsion),
         image_polarity: v["image_polarity"].as_str()
-            .map(image_polarity_from).unwrap_or(d.image_polarity),
+            .and_then(image_polarity_from).unwrap_or(d.image_polarity),
         printer_resolution: v["printer_resolution"].as_str()
             .map(String::from).unwrap_or(d.printer_resolution),
         convert_spot_to_process: v["convert_spot_to_process"].as_bool()
@@ -1467,7 +1467,7 @@ fn parse_marks_and_bleed(v: &serde_json::Value) -> MarksAndBleed {
         color_bars: v["color_bars"].as_bool().unwrap_or(d.color_bars),
         page_information: v["page_information"].as_bool().unwrap_or(d.page_information),
         printer_mark_type: v["printer_mark_type"].as_str()
-            .map(printer_mark_type_from).unwrap_or(d.printer_mark_type),
+            .and_then(printer_mark_type_from).unwrap_or(d.printer_mark_type),
         trim_mark_weight: v["trim_mark_weight"].as_f64().unwrap_or(d.trim_mark_weight),
         mark_offset: v["mark_offset"].as_f64().unwrap_or(d.mark_offset),
         use_document_bleed: v["use_document_bleed"].as_bool().unwrap_or(d.use_document_bleed),
@@ -1490,20 +1490,20 @@ fn parse_print_preferences(v: &serde_json::Value) -> PrintPreferences {
         collate: v["collate"].as_bool().unwrap_or(d.collate),
         reverse_order: v["reverse_order"].as_bool().unwrap_or(d.reverse_order),
         artboard_range_mode: v["artboard_range_mode"].as_str()
-            .map(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
+            .and_then(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
         artboard_range: v["artboard_range"].as_str().map(String::from).unwrap_or(d.artboard_range),
         ignore_artboards: v["ignore_artboards"].as_bool().unwrap_or(d.ignore_artboards),
         skip_blank_artboards: v["skip_blank_artboards"].as_bool().unwrap_or(d.skip_blank_artboards),
-        media_size: v["media_size"].as_str().map(media_size_from).unwrap_or(d.media_size),
+        media_size: v["media_size"].as_str().and_then(media_size_from).unwrap_or(d.media_size),
         media_width: v["media_width"].as_f64().unwrap_or(d.media_width),
         media_height: v["media_height"].as_f64().unwrap_or(d.media_height),
-        orientation: v["orientation"].as_str().map(orientation_from).unwrap_or(d.orientation),
+        orientation: v["orientation"].as_str().and_then(orientation_from).unwrap_or(d.orientation),
         auto_rotate: v["auto_rotate"].as_bool().unwrap_or(d.auto_rotate),
         transverse: v["transverse"].as_bool().unwrap_or(d.transverse),
-        print_layers: v["print_layers"].as_str().map(print_layers_from).unwrap_or(d.print_layers),
+        print_layers: v["print_layers"].as_str().and_then(print_layers_from).unwrap_or(d.print_layers),
         placement_x: v["placement_x"].as_f64().unwrap_or(d.placement_x),
         placement_y: v["placement_y"].as_f64().unwrap_or(d.placement_y),
-        scaling_mode: v["scaling_mode"].as_str().map(scaling_mode_from).unwrap_or(d.scaling_mode),
+        scaling_mode: v["scaling_mode"].as_str().and_then(scaling_mode_from).unwrap_or(d.scaling_mode),
         custom_scale: v["custom_scale"].as_f64().unwrap_or(d.custom_scale),
         tile_overlap_h: v["tile_overlap_h"].as_f64().unwrap_or(d.tile_overlap_h),
         tile_overlap_v: v["tile_overlap_v"].as_f64().unwrap_or(d.tile_overlap_v),

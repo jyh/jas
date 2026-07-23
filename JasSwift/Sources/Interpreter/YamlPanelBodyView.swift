@@ -3952,13 +3952,15 @@ struct TreeViewContent: View {
                 .frame(width: 12, height: 12)
                 .onTapGesture {
                     // Selection-only row-select: non-undoable (OP_LOG.md §7/§8).
-                    model.setDocumentUnbracketed(Document(
-                        layers: model.document.layers,
-                        selectedLayer: model.document.selectedLayer,
-                        selection: [ElementSelection.all(path)],
-                        artboards: model.document.artboards,
-                        artboardOptions: model.document.artboardOptions
-                    ), intent: .selection)
+                    // Copy-with-selection so the row click carries the FULL
+                    // document forward (symbols / documentSetup /
+                    // printPreferences included) rather than defaulting away
+                    // the fields the designated initializer does not name — the
+                    // class of drop the `.selection` intent teeth catch.
+                    model.setDocumentUnbracketed(
+                        model.document.replacing(
+                            selection: [ElementSelection.all(path)]),
+                        intent: .selection)
                 }
         }
         .frame(height: 24)
@@ -4174,13 +4176,15 @@ struct TreeViewContent: View {
                 .frame(width: 12, height: 12)
                 .onTapGesture {
                     // Selection-only row-select: non-undoable (OP_LOG.md §7/§8).
-                    model.setDocumentUnbracketed(Document(
-                        layers: model.document.layers,
-                        selectedLayer: model.document.selectedLayer,
-                        selection: [ElementSelection.all(path)],
-                        artboards: model.document.artboards,
-                        artboardOptions: model.document.artboardOptions
-                    ), intent: .selection)
+                    // Copy-with-selection so the row click carries the FULL
+                    // document forward (symbols / documentSetup /
+                    // printPreferences included) rather than defaulting away
+                    // the fields the designated initializer does not name — the
+                    // class of drop the `.selection` intent teeth catch.
+                    model.setDocumentUnbracketed(
+                        model.document.replacing(
+                            selection: [ElementSelection.all(path)]),
+                        intent: .selection)
                 }
         }
         .frame(height: 24)

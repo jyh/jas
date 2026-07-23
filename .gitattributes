@@ -1,0 +1,19 @@
+# LF is law in this repository. The cross-language referee byte-compares
+# goldens, fixtures, and canonical serializations, and scripts/*.sh must
+# run as committed — so no client's core.autocrlf setting may ever rewrite
+# a checkout. Text files are LF on every platform, including Windows.
+* text=auto eol=lf
+
+# Binary assets — never normalize. (The .ai icon sources contain raw \r
+# bytes and git's auto-detection misreads them as text; the rest are here
+# so detection never gets the chance to guess wrong.)
+*.ai binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.wasm binary

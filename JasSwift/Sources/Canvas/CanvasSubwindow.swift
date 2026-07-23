@@ -261,6 +261,37 @@ private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
 }
 
+// MARK: - SH-4 document-render culling state
+//
+// Per-paint context for the dirty-rect / viewport cull, installed by `draw(_:)`
+// around the Layer-3 document pass only (chrome / overlays / carets draw in
+// other passes and are never culled). Mirrors the existing per-paint globals
+// (`_currentRefResolver`, recompute-cache generation): `draw` is a free-function
+// pipeline, so this shared state is cleaner than threading a param through every
+// recursive `drawElement` call site. `_cullDirtyDoc == nil` disables culling.
+private var _cullDirtyDoc: CGRect? = nil
+/// Inverse of the doc→device CTM captured right after `draw` applies the view
+/// transform. Used to convert an element's local→device matrix (from `ctx.ctm`,
+/// which folds in the backing scale) back into backing-scale-free doc space.
+private var _cullDocToDeviceInv: CGAffineTransform = .identity
+
+func setCanvasCull(dirtyDoc: CGRect?, docToDevice: CGAffineTransform) {
+    _cullDirtyDoc = dirtyDoc
+    _cullDocToDeviceInv = docToDevice.inverted()
+}
+
+/// Element kinds safe to cull: simple filled/stroked geometry whose `.bounds`
+/// (geometry + half-stroke) is a reliable superset of its ink. Lines (arrowheads
+/// past the endpoints), text, textPath, live elements (evaluated / effectful
+/// geometry), and containers (group / layer — culled via their children, never
+/// as a whole) are drawn unconditionally. "When in doubt, draw it."
+private func isCullableLeaf(_ e: Element) -> Bool {
+    switch e {
+    case .rect, .circle, .ellipse, .polyline, .polygon, .path: return true
+    default: return false
+    }
+}
+
 /// The geometric-mean scale of a 2x3 affine — `sqrt(|det|)` of the linear part
 /// (`a*d - b*c`). 1.0 for `nil` or a degenerate (det 0) transform. The
 /// per-transform building block of `selectionOutlineScale` and the
@@ -1125,6 +1156,23 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
     // it. The accumulated `elemScale` is threaded to group/layer children
     // below. Mirrors the Python `_counter_scaled_element` element-copy.
     let (elem, elemScale) = counterScaledElement(inElem, elementScale: elementScale)
+    // SH-4 cull: skip cullable leaf elements whose POST-transform doc extent
+    // cannot touch the dirty region. `ctx.ctm` here maps this element's parent
+    // space → device; compose the element's own transform, then strip the
+    // doc→device (backing-scale-carrying) part to land in doc space, where the
+    // dirty rect lives. Conservative margin absorbs stroke / miter / AA bleed.
+    if let dirty = _cullDirtyDoc, isCullableLeaf(inElem) {
+        let own: CGAffineTransform = inElem.transform.map {
+            CGAffineTransform(a: $0.a, b: $0.b, c: $0.c, d: $0.d, tx: $0.e, ty: $0.f)
+        } ?? .identity
+        let localToDoc = own.concatenating(ctx.ctm).concatenating(_cullDocToDeviceInv)
+        let strokeW = inElem.stroke?.width ?? 0
+        let margin = CGFloat(64.0 + strokeW * 4.0)
+        if !CanvasCull.mayDraw(bounds: inElem.bounds, localToDoc: localToDoc,
+                               dirtyDoc: dirty, margin: margin) {
+            return
+        }
+    }
     ctx.saveGState()
     ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
@@ -2504,16 +2552,33 @@ class CanvasNSView: NSView {
                 // non-undoable (OP_LOG.md §7/§8). Mirrors the tool-change
                 // selection-restore unbracketed write in OCaml/Python.
                 if document.selection != savedSelection {
-                    var doc = document
-                    doc = Document(layers: doc.layers,
-                                      selectedLayer: doc.selectedLayer,
-                                      selection: savedSelection)
+                    let doc = CanvasNSView.rebuildForToolChangeSelectionRestore(
+                        document, restoring: savedSelection)
                     controller?.model.setDocumentUnbracketed(doc, intent: .selection)
                 }
             }
             window?.invalidateCursorRects(for: self)
         }
     }
+
+    /// Rebuild the document for the tool-change selection restore: carry the
+    /// FULL current document forward, changing ONLY the selection back to the
+    /// value captured before the tool switch. Extracted as a pure seam so the
+    /// "a tool switch must not drop artboards / document setup / print
+    /// preferences / symbols" regression is testable without driving an NSView
+    /// (see CanvasTests). Rebuilding the document from a subset of its fields
+    /// via the designated `Document(...)` initializer silently defaulted every
+    /// field the tool switch did not name — the class of bug the `.selection`
+    /// intent teeth in `Model` catch — so this uses copy-with-selection
+    /// semantics (`Document.replacing`) instead. The write it feeds is
+    /// selection-only by construction. Mirrors the OCaml/Python tool-change
+    /// selection-restore write.
+    static func rebuildForToolChangeSelectionRestore(
+        _ document: Document, restoring savedSelection: Selection
+    ) -> Document {
+        document.replacing(selection: savedSelection)
+    }
+
     var onToolRead: (() -> Tool)?
     var onToolChange: ((Tool) -> Void)?
     var onFocus: (() -> Void)?
@@ -2527,6 +2592,39 @@ class CanvasNSView: NSView {
 
     // Blink timer that drives caret animation while a tool is editing.
     private var blinkTimer: Timer?
+
+    /// Fingerprint of the state the last `draw` rendered. `updateNSView` uses it
+    /// to repaint only when canvas-relevant state changed (SH-5). `nil` forces
+    /// the first repaint. Interactive paths (gestures, tool overlays) invalidate
+    /// directly via `needsDisplay`, independent of this gate.
+    private var lastRenderSignature: CanvasRenderSignature?
+
+    /// Recompute the render fingerprint from the current model / tool / chrome.
+    /// `nil` when no model is attached (a detached view — always repaint).
+    func currentRenderSignature() -> CanvasRenderSignature? {
+        guard let model = controller?.model else { return nil }
+        return CanvasRenderSignature(
+            model: model,
+            tool: onToolRead?() ?? currentTool,
+            artboardsPanelSelection: artboardsPanelSelection)
+    }
+
+    /// Invalidate the canvas only if canvas-relevant state changed since the last
+    /// render. A `nil` signature (no model) falls back to an unconditional
+    /// repaint. Returns whether a repaint was requested (for tests).
+    @discardableResult
+    func repaintIfRenderStateChanged() -> Bool {
+        guard let sig = currentRenderSignature() else {
+            needsDisplay = true
+            return true
+        }
+        if sig != lastRenderSignature {
+            lastRenderSignature = sig
+            needsDisplay = true
+            return true
+        }
+        return false
+    }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -2869,6 +2967,28 @@ class CanvasNSView: NSView {
             ctx.scaleBy(x: CGFloat(model.zoomLevel),
                         y: CGFloat(model.zoomLevel))
         }
+        // SH-4: capture the doc→device CTM (with backing scale) now, while the
+        // context is at pure doc space, and convert the incoming dirtyRect
+        // (view points) into doc space. `draw` already fills the whole `bounds`
+        // background, but the Layer-3 document pass below skips elements whose
+        // doc extent misses this rect — respecting a partial dirtyRect (a) and,
+        // when the dirtyRect is the full bounds, culling to the visible viewport
+        // (b). Disabled (nil) when no model / degenerate zoom.
+        let docToDevice = ctx.ctm
+        var cullDirtyDoc: CGRect? = nil
+        if let model = controller?.model, model.zoomLevel != 0 {
+            // Screen(view-point) → doc with the SAME formula the tools use
+            // (mouseDown: doc = (view - offset) / zoom) — no transform-composition
+            // convention to get wrong.
+            let z = model.zoomLevel
+            let ox = model.viewOffsetX, oy = model.viewOffsetY
+            let x0 = (Double(dirtyRect.minX) - ox) / z
+            let y0 = (Double(dirtyRect.minY) - oy) / z
+            let x1 = (Double(dirtyRect.maxX) - ox) / z
+            let y1 = (Double(dirtyRect.maxY) - oy) / z
+            cullDirtyDoc = CGRect(x: min(x0, x1), y: min(y0, y1),
+                                  width: abs(x1 - x0), height: abs(y1 - y0))
+        }
         // Install the reference resolver so live by-id references resolve and
         // display (REFERENCE_GRAPH.md §2.4 Phase 4b). Reads the Model's
         // already-built persistent id->element index (an O(log n)-lookup map
@@ -2896,6 +3016,8 @@ class CanvasNSView: NSView {
         // (OPACITY.md §Preview interactions), render only the mask
         // subtree of the isolated element — everything else on the
         // canvas is hidden until the user exits isolation.
+        // Culling is active only across this pass; cleared immediately after.
+        setCanvasCull(dirtyDoc: cullDirtyDoc, docToDevice: docToDevice)
         let isolationPath = controller?.model.maskIsolationPath
         if let path = isolationPath,
            let mask = document.getElement(path).mask {
@@ -2905,6 +3027,7 @@ class CanvasNSView: NSView {
                 drawElement(ctx, .layer(layer))
             }
         }
+        setCanvasCull(dirtyDoc: nil, docToDevice: .identity)
         // Layer 4: fade overlay (dims regions outside any artboard).
         drawFadeOverlay(ctx, document, bounds: bounds)
         // Layer 5: artboard borders.
@@ -2936,6 +3059,10 @@ class CanvasNSView: NSView {
         if let toolCtx = toolContext {
             activeTool.drawOverlay(toolCtx, ctx)
         }
+        // SH-5: record what this paint rendered so the next updateNSView can
+        // skip a redundant repaint. Also refreshes the fingerprint after direct
+        // (gesture / tool-overlay) invalidations that bypass updateNSView.
+        lastRenderSignature = currentRenderSignature()
     }
 
     // MARK: - Hit tests
@@ -3091,17 +3218,7 @@ class CanvasNSView: NSView {
         }
         switch chars {
         case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
-            if let model = controller?.model, !model.document.selection.isEmpty {
-                // Reference-aware delete (warn-then-orphan): same guard as the
-                // Edit-menu Delete. Empty orphan set -> delete as today.
-                let doc = model.document
-                let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
-                if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-                    return
-                }
-                // Undoable: editDocument self-brackets one undo step.
-                model.editDocument(doc.deleteSelection())
-            }
+            performDeleteSelection()
         case "\u{1B}":  // Escape
             // OPACITY.md §Preview interactions: Escape exits mask-isolation
             // first (if active); then mask-editing back to content-mode.
@@ -3334,15 +3451,16 @@ class CanvasNSView: NSView {
         model: Model, factor: Double, ax: Double, ay: Double,
         minZoom: Double, maxZoom: Double
     ) {
-        let z = model.zoomLevel
-        let px = model.viewOffsetX
-        let py = model.viewOffsetY
-        let docAx = (ax - px) / z
-        let docAy = (ay - py) / z
-        let zNew = min(max(z * factor, minZoom), maxZoom)
-        model.zoomLevel = zNew
-        model.viewOffsetX = ax - docAx * zNew
-        model.viewOffsetY = ay - docAy * zNew
+        // Shares the exact anchor math the pinch-zoom gesture uses
+        // (CanvasNavMath.zoomAbout), which mirrors doc.zoom.apply.
+        let (z, ox, oy) = CanvasNavMath.zoomAbout(
+            zoom: model.zoomLevel,
+            offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+            factor: factor, anchorX: ax, anchorY: ay,
+            minZoom: minZoom, maxZoom: maxZoom)
+        model.zoomLevel = z
+        model.viewOffsetX = ox
+        model.viewOffsetY = oy
     }
 
     /// Switch the active tool from a keyboard-initiated change (shortcut,
@@ -3415,6 +3533,139 @@ class CanvasNSView: NSView {
         ensureBlinkTimer()
     }
 
+    // MARK: - Navigation gestures (scroll pan / pinch zoom)
+
+    /// Apply an abstract canvas navigation intent through the SAME Model
+    /// view-state channel the Hand and Zoom tools use — `doc.pan.apply` writes
+    /// `view_offset_x/y`; `doc.zoom.apply` writes `zoom_level` + offsets. No
+    /// new mutation channel: this mirrors those exact writes so a gesture and
+    /// the equivalent tool drag land the view in the identical place. View
+    /// state is per-tab and non-undoable, so — like the tool effects — these
+    /// are bare `@Published` field writes, not bracketed ops.
+    func applyNavIntent(_ intent: CanvasNavIntent) {
+        guard let model = controller?.model else { return }
+        switch intent {
+        case let .pan(dx, dy):
+            let (ox, oy) = CanvasNavMath.pan(
+                offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+                dx: dx, dy: dy)
+            model.viewOffsetX = ox
+            model.viewOffsetY = oy
+        case let .zoomAbout(factor, ax, ay):
+            let minZoom = readPrefNumber("min_zoom", default: 0.1)
+            let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+            let (z, ox, oy) = CanvasNavMath.zoomAbout(
+                zoom: model.zoomLevel,
+                offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+                factor: factor, anchorX: ax, anchorY: ay,
+                minZoom: minZoom, maxZoom: maxZoom)
+            model.zoomLevel = z
+            model.viewOffsetX = ox
+            model.viewOffsetY = oy
+        }
+        needsDisplay = true
+    }
+
+    /// Pinch (magnify) → zoom about the cursor (SH-2). A thin AppKit adapter:
+    /// AppKit's `event.magnification` is an incremental fractional delta, so
+    /// the multiplicative factor is `1 + magnification`. The anchor is the
+    /// cursor position in viewport-local pixels, so the document point under
+    /// the fingers stays fixed as the user pinches. Routes through the shared
+    /// zoom write path, which clamps to the app's zoom bounds.
+    override func magnify(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        let factor = 1.0 + Double(event.magnification)
+        applyNavIntent(.zoomAbout(factor: factor,
+                                  anchorX: Double(pt.x), anchorY: Double(pt.y)))
+    }
+
+    // MARK: - Canvas context menu (SH-3)
+
+    /// Right-click / two-finger-tap on the canvas → a thin AppKit edit menu of
+    /// EXISTING verbs. Item set, titles, and enabled predicates come from the
+    /// data-described ``CanvasContextMenu`` (which mirrors the menubar.yaml Edit
+    /// predicates); each item dispatches through the SAME path the main menu /
+    /// keyboard use — cut/copy/paste share ``EditClipboard`` with the Edit menu,
+    /// Delete mirrors the canvas keyboard Delete, Select All calls
+    /// ``MenuActions.selectAll``. No new verbs, no new dispatch channel.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let model = controller?.model else { return nil }
+        let hasSelection = !model.document.selection.isEmpty
+        let hasTab = true  // a canvas with a model is an open tab (tab_count > 0)
+        let menu = NSMenu()
+        menu.autoenablesItems = false  // enabled state is set explicitly below
+        let selectors: [CanvasContextMenu.Item: Selector] = [
+            .cut:       #selector(contextCut(_:)),
+            .copy:      #selector(contextCopy(_:)),
+            .paste:     #selector(contextPaste(_:)),
+            .delete:    #selector(contextDelete(_:)),
+            .selectAll: #selector(contextSelectAll(_:)),
+        ]
+        for item in CanvasContextMenu.Item.allCases {
+            if CanvasContextMenu.separatorBefore(item) {
+                menu.addItem(.separator())
+            }
+            let mi = NSMenuItem(title: CanvasContextMenu.title(item),
+                                action: selectors[item], keyEquivalent: "")
+            mi.target = self
+            mi.isEnabled = CanvasContextMenu.isEnabled(
+                item, hasSelection: hasSelection, hasTab: hasTab)
+            menu.addItem(mi)
+        }
+        return menu
+    }
+
+    @objc private func contextCut(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.cutSelection(model, confirmOrphaning: JasCommands.confirmOrphaningCut)
+    }
+
+    @objc private func contextCopy(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.copySelection(model)
+    }
+
+    @objc private func contextPaste(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.pasteClipboard(model, offset: pasteOffset)
+    }
+
+    @objc private func contextDelete(_ sender: Any?) {
+        performDeleteSelection()
+    }
+
+    @objc private func contextSelectAll(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        MenuActions.selectAll(model)
+    }
+
+    /// Delete the current selection with the reference-aware warn-then-orphan
+    /// guard — the canvas's single Delete path, shared by the keyboard Delete /
+    /// Backspace and the context-menu Delete so they behave identically.
+    private func performDeleteSelection() {
+        guard let model = controller?.model, !model.document.selection.isEmpty else { return }
+        let doc = model.document
+        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
+        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
+            return
+        }
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(doc.deleteSelection())
+    }
+
+    /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's
+    /// scrolling deltas, translate to an abstract pan intent, and route it
+    /// through the shared pan write path. Momentum "just works" — AppKit
+    /// delivers momentum frames as further scrollWheel events and we apply
+    /// each delta as it arrives.
+    override func scrollWheel(with event: NSEvent) {
+        let intent = CanvasNavAdapter.panIntent(
+            scrollingDeltaX: Double(event.scrollingDeltaX),
+            scrollingDeltaY: Double(event.scrollingDeltaY),
+            hasPreciseScrollingDeltas: event.hasPreciseScrollingDeltas)
+        applyNavIntent(intent)
+    }
+
     override func mouseMoved(with event: NSEvent) {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
@@ -3468,6 +3719,11 @@ struct CanvasRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> CanvasNSView {
         let view = CanvasNSView()
+        // macOS 14+ defaults clipsToBounds to false, so an unclipped canvas
+        // paints doc-space content (artboard fill, viewport-straddling
+        // elements) OVER sibling views — seen live as the canvas obscuring
+        // the dock panels. A canvas never legitimately draws outside itself.
+        view.clipsToBounds = true
         view.document = document
         view.controller = controller
         view.currentTool = currentTool
@@ -3484,6 +3740,15 @@ struct CanvasRepresentable: NSViewRepresentable {
         nsView.onToolRead = { [self] in self.currentTool }
         nsView.onToolChange = { [self] tool in self.currentTool = tool }
         nsView.onFocus = onFocus
-        nsView.needsDisplay = true
+        // SH-5: repaint only when canvas-relevant state changed. SwiftUI re-runs
+        // updateNSView for any observed @Published churn (panel state, recent
+        // colors, hover, …); most does not touch the canvas, and unconditionally
+        // forcing needsDisplay = true made every such churn a whole-canvas
+        // repaint. The signature gate keeps every legitimate trigger (document
+        // edits, selection, view transform, tool, isolation, key object) while
+        // dropping the redundant paints. Correctness over cleverness: it is a
+        // full invalidation when something did change — no partial invalidRect,
+        // since a document edit can touch anywhere.
+        nsView.repaintIfRenderStateChanged()
     }
 }

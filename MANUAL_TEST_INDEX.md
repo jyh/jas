@@ -155,6 +155,7 @@ corpus entry). Run after touching the relevant subsystem.
 | File | Covers | Notes |
 |------|--------|-------|
 | [COORD_RECONCILE_TESTS.md](transcripts/COORD_RECONCILE_TESTS.md) | scale / rotate / shear / blob_brush at a **panned + zoomed** view | The per-tool suites run at the identity view (where doc == screen) and pass even pre-fix. This pass adds the non-identity dimension + the `doc.snapshot.restore` (Escape) and `doc.blob_brush.sweep_sample` effects. Branch `testing-strategy` (`ad79310b`, `84d2de5d`). |
+| [JASSWIFT_CANVAS_NAV_TESTS.md](transcripts/JASSWIFT_CANVAS_NAV_TESTS.md) | **Swift-only** trackpad pan / pinch-zoom, canvas context menu, dirty-rect culling + repaint scoping | Framework-fused AppKit gestures + render hygiene with no yaml / corpus. Not a parity suite — the gestures are Mac-native and absent on other ports. Run after touching `CanvasSubwindow` navigation / draw / updateNSView. |
 
 ---
 
@@ -205,6 +206,7 @@ has icon / dblclick deferrals (see each file's Known broken).
 | [EYEDROPPER_TOOL_TESTS.md](transcripts/EYEDROPPER_TOOL_TESTS.md) | 6 |
 | [GRADIENT_TESTS.md](transcripts/GRADIENT_TESTS.md) | 7 |
 | [HAND_TOOL_TESTS.md](transcripts/HAND_TOOL_TESTS.md) | 0 |
+| [JASSWIFT_CANVAS_NAV_TESTS.md](transcripts/JASSWIFT_CANVAS_NAV_TESTS.md) | X-cut |
 | [LASSO_TOOL_TESTS.md](transcripts/LASSO_TOOL_TESTS.md) | 4 |
 | [LAYERS_TESTS.md](transcripts/LAYERS_TESTS.md) | 0 |
 | [LINE_TOOL_TESTS.md](transcripts/LINE_TOOL_TESTS.md) | 1 |
