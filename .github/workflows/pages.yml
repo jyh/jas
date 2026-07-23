@@ -40,10 +40,21 @@ jobs:
       # Pin dioxus-cli to the version the bundle was verified against. Prefer
       # a prebuilt binary via binstall (seconds); fall back to compiling from
       # source with the crate's own lockfile if no prebuilt artifact matches.
+      #
+      # --force + the `dx --version` guard matter: the restored cargo cache
+      # carries install METADATA (.crates2.json) from the first cold run, so
+      # a plain `cargo binstall -y` exits 0 in ~0s believing dioxus-cli is
+      # already installed — but rust-cache never caches ~/.cargo/bin, so the
+      # dx binary itself is absent and the build dies with `dx: command not
+      # found`. Trust only a real binary check, never the metadata.
       - name: Install dioxus-cli 0.7.9
         run: |
-          cargo binstall -y dioxus-cli@0.7.9 \
-            || cargo install dioxus-cli --version 0.7.9 --locked
+          if dx --version 2>/dev/null | grep -q '0\.7\.9'; then
+            echo "dx 0.7.9 already present"
+          else
+            cargo binstall -y --force dioxus-cli@0.7.9 \
+              || cargo install dioxus-cli --version 0.7.9 --locked --force
+          fi
 
       - name: Build the web bundle
         working-directory: jas_dioxus
