@@ -436,6 +436,15 @@ impl PrintPreset {
 // Keep these snake_case for cross-language byte parity. The variant
 // → string mapping is part of the wire format; renaming a variant is
 // fine but the string form must stay.
+//
+// STRICT-REJECT (arc1-followups stone FB): each `*_from` is the exact
+// inverse of its `*_str` — it returns `Some(variant)` for a recognized
+// wire string and `None` for anything else. An unknown enum string is a
+// typo, not a value; the print-config op arms turn that `None` into a
+// `BadParamType` skip through the S3 error channel, byte-for-byte
+// identical to JasSwift's `EnumType(rawValue:)`-based parse (which
+// yields `nil` on an unknown rawValue). Do NOT reintroduce a silent
+// default arm — that would hide the typo and diverge from the Swift port.
 
 pub fn artboard_range_mode_str(m: &ArtboardRangeMode) -> &'static str {
     match m {
@@ -443,10 +452,11 @@ pub fn artboard_range_mode_str(m: &ArtboardRangeMode) -> &'static str {
         ArtboardRangeMode::Range => "range",
     }
 }
-pub fn artboard_range_mode_from(s: &str) -> ArtboardRangeMode {
+pub fn artboard_range_mode_from(s: &str) -> Option<ArtboardRangeMode> {
     match s {
-        "range" => ArtboardRangeMode::Range,
-        _ => ArtboardRangeMode::All,
+        "all" => Some(ArtboardRangeMode::All),
+        "range" => Some(ArtboardRangeMode::Range),
+        _ => None,
     }
 }
 
@@ -462,16 +472,17 @@ pub fn media_size_str(m: &MediaSize) -> &'static str {
         MediaSize::Custom => "custom",
     }
 }
-pub fn media_size_from(s: &str) -> MediaSize {
+pub fn media_size_from(s: &str) -> Option<MediaSize> {
     match s {
-        "letter" => MediaSize::Letter,
-        "legal" => MediaSize::Legal,
-        "tabloid" => MediaSize::Tabloid,
-        "a3" => MediaSize::A3,
-        "a4" => MediaSize::A4,
-        "a5" => MediaSize::A5,
-        "custom" => MediaSize::Custom,
-        _ => MediaSize::DefinedByDriver,
+        "defined_by_driver" => Some(MediaSize::DefinedByDriver),
+        "letter" => Some(MediaSize::Letter),
+        "legal" => Some(MediaSize::Legal),
+        "tabloid" => Some(MediaSize::Tabloid),
+        "a3" => Some(MediaSize::A3),
+        "a4" => Some(MediaSize::A4),
+        "a5" => Some(MediaSize::A5),
+        "custom" => Some(MediaSize::Custom),
+        _ => None,
     }
 }
 
@@ -481,10 +492,11 @@ pub fn orientation_str(o: &Orientation) -> &'static str {
         Orientation::Landscape => "landscape",
     }
 }
-pub fn orientation_from(s: &str) -> Orientation {
+pub fn orientation_from(s: &str) -> Option<Orientation> {
     match s {
-        "landscape" => Orientation::Landscape,
-        _ => Orientation::Portrait,
+        "portrait" => Some(Orientation::Portrait),
+        "landscape" => Some(Orientation::Landscape),
+        _ => None,
     }
 }
 
@@ -495,11 +507,12 @@ pub fn print_layers_str(p: &PrintLayers) -> &'static str {
         PrintLayers::All => "all",
     }
 }
-pub fn print_layers_from(s: &str) -> PrintLayers {
+pub fn print_layers_from(s: &str) -> Option<PrintLayers> {
     match s {
-        "visible" => PrintLayers::Visible,
-        "all" => PrintLayers::All,
-        _ => PrintLayers::VisiblePrintable,
+        "visible_printable" => Some(PrintLayers::VisiblePrintable),
+        "visible" => Some(PrintLayers::Visible),
+        "all" => Some(PrintLayers::All),
+        _ => None,
     }
 }
 
@@ -510,11 +523,12 @@ pub fn scaling_mode_str(m: &ScalingMode) -> &'static str {
         ScalingMode::Custom => "custom",
     }
 }
-pub fn scaling_mode_from(s: &str) -> ScalingMode {
+pub fn scaling_mode_from(s: &str) -> Option<ScalingMode> {
     match s {
-        "fit_to_page" => ScalingMode::FitToPage,
-        "custom" => ScalingMode::Custom,
-        _ => ScalingMode::DoNotScale,
+        "do_not_scale" => Some(ScalingMode::DoNotScale),
+        "fit_to_page" => Some(ScalingMode::FitToPage),
+        "custom" => Some(ScalingMode::Custom),
+        _ => None,
     }
 }
 
@@ -524,10 +538,11 @@ pub fn printer_mark_type_str(t: &PrinterMarkType) -> &'static str {
         PrinterMarkType::Japanese => "japanese",
     }
 }
-pub fn printer_mark_type_from(s: &str) -> PrinterMarkType {
+pub fn printer_mark_type_from(s: &str) -> Option<PrinterMarkType> {
     match s {
-        "japanese" => PrinterMarkType::Japanese,
-        _ => PrinterMarkType::Roman,
+        "roman" => Some(PrinterMarkType::Roman),
+        "japanese" => Some(PrinterMarkType::Japanese),
+        _ => None,
     }
 }
 
@@ -537,10 +552,11 @@ pub fn output_mode_str(m: &OutputMode) -> &'static str {
         OutputMode::Separations => "separations",
     }
 }
-pub fn output_mode_from(s: &str) -> OutputMode {
+pub fn output_mode_from(s: &str) -> Option<OutputMode> {
     match s {
-        "separations" => OutputMode::Separations,
-        _ => OutputMode::Composite,
+        "composite" => Some(OutputMode::Composite),
+        "separations" => Some(OutputMode::Separations),
+        _ => None,
     }
 }
 
@@ -550,10 +566,11 @@ pub fn emulsion_str(e: &Emulsion) -> &'static str {
         Emulsion::DownRight => "down_right",
     }
 }
-pub fn emulsion_from(s: &str) -> Emulsion {
+pub fn emulsion_from(s: &str) -> Option<Emulsion> {
     match s {
-        "down_right" => Emulsion::DownRight,
-        _ => Emulsion::UpRight,
+        "up_right" => Some(Emulsion::UpRight),
+        "down_right" => Some(Emulsion::DownRight),
+        _ => None,
     }
 }
 
@@ -563,10 +580,11 @@ pub fn image_polarity_str(p: &ImagePolarity) -> &'static str {
         ImagePolarity::Negative => "negative",
     }
 }
-pub fn image_polarity_from(s: &str) -> ImagePolarity {
+pub fn image_polarity_from(s: &str) -> Option<ImagePolarity> {
     match s {
-        "negative" => ImagePolarity::Negative,
-        _ => ImagePolarity::Positive,
+        "positive" => Some(ImagePolarity::Positive),
+        "negative" => Some(ImagePolarity::Negative),
+        _ => None,
     }
 }
 
@@ -578,12 +596,13 @@ pub fn flattener_preset_str(p: &FlattenerPreset) -> &'static str {
         FlattenerPreset::Custom => "custom",
     }
 }
-pub fn flattener_preset_from(s: &str) -> FlattenerPreset {
+pub fn flattener_preset_from(s: &str) -> Option<FlattenerPreset> {
     match s {
-        "low_resolution" => FlattenerPreset::LowResolution,
-        "high_resolution" => FlattenerPreset::HighResolution,
-        "custom" => FlattenerPreset::Custom,
-        _ => FlattenerPreset::MediumResolution,
+        "low_resolution" => Some(FlattenerPreset::LowResolution),
+        "medium_resolution" => Some(FlattenerPreset::MediumResolution),
+        "high_resolution" => Some(FlattenerPreset::HighResolution),
+        "custom" => Some(FlattenerPreset::Custom),
+        _ => None,
     }
 }
 
@@ -594,11 +613,12 @@ pub fn color_handling_str(c: &ColorHandling) -> &'static str {
         ColorHandling::PostscriptColorManagement => "postscript_color_management",
     }
 }
-pub fn color_handling_from(s: &str) -> ColorHandling {
+pub fn color_handling_from(s: &str) -> Option<ColorHandling> {
     match s {
-        "let_printer_determine" => ColorHandling::LetPrinterDetermine,
-        "postscript_color_management" => ColorHandling::PostscriptColorManagement,
-        _ => ColorHandling::LetAppDetermine,
+        "let_app_determine" => Some(ColorHandling::LetAppDetermine),
+        "let_printer_determine" => Some(ColorHandling::LetPrinterDetermine),
+        "postscript_color_management" => Some(ColorHandling::PostscriptColorManagement),
+        _ => None,
     }
 }
 
@@ -610,12 +630,13 @@ pub fn rendering_intent_str(r: &RenderingIntent) -> &'static str {
         RenderingIntent::AbsoluteColorimetric => "absolute_colorimetric",
     }
 }
-pub fn rendering_intent_from(s: &str) -> RenderingIntent {
+pub fn rendering_intent_from(s: &str) -> Option<RenderingIntent> {
     match s {
-        "perceptual" => RenderingIntent::Perceptual,
-        "saturation" => RenderingIntent::Saturation,
-        "absolute_colorimetric" => RenderingIntent::AbsoluteColorimetric,
-        _ => RenderingIntent::RelativeColorimetric,
+        "perceptual" => Some(RenderingIntent::Perceptual),
+        "relative_colorimetric" => Some(RenderingIntent::RelativeColorimetric),
+        "saturation" => Some(RenderingIntent::Saturation),
+        "absolute_colorimetric" => Some(RenderingIntent::AbsoluteColorimetric),
+        _ => None,
     }
 }
 
@@ -626,11 +647,12 @@ pub fn font_download_str(f: &FontDownload) -> &'static str {
         FontDownload::Complete => "complete",
     }
 }
-pub fn font_download_from(s: &str) -> FontDownload {
+pub fn font_download_from(s: &str) -> Option<FontDownload> {
     match s {
-        "none" => FontDownload::None,
-        "complete" => FontDownload::Complete,
-        _ => FontDownload::Subset,
+        "none" => Some(FontDownload::None),
+        "subset" => Some(FontDownload::Subset),
+        "complete" => Some(FontDownload::Complete),
+        _ => None,
     }
 }
 
@@ -640,10 +662,11 @@ pub fn postscript_level_str(p: &PostScriptLevel) -> &'static str {
         PostScriptLevel::Level3 => "level_3",
     }
 }
-pub fn postscript_level_from(s: &str) -> PostScriptLevel {
+pub fn postscript_level_from(s: &str) -> Option<PostScriptLevel> {
     match s {
-        "level_2" => PostScriptLevel::Level2,
-        _ => PostScriptLevel::Level3,
+        "level_2" => Some(PostScriptLevel::Level2),
+        "level_3" => Some(PostScriptLevel::Level3),
+        _ => None,
     }
 }
 
@@ -653,10 +676,11 @@ pub fn data_format_str(d: &DataFormat) -> &'static str {
         DataFormat::Binary => "binary",
     }
 }
-pub fn data_format_from(s: &str) -> DataFormat {
+pub fn data_format_from(s: &str) -> Option<DataFormat> {
     match s {
-        "ascii" => DataFormat::Ascii,
-        _ => DataFormat::Binary,
+        "ascii" => Some(DataFormat::Ascii),
+        "binary" => Some(DataFormat::Binary),
+        _ => None,
     }
 }
 
@@ -671,15 +695,16 @@ pub fn dot_shape_str(d: &DotShape) -> &'static str {
         DotShape::Euclidean => "euclidean",
     }
 }
-pub fn dot_shape_from(s: &str) -> DotShape {
+pub fn dot_shape_from(s: &str) -> Option<DotShape> {
     match s {
-        "square" => DotShape::Square,
-        "ellipse" => DotShape::Ellipse,
-        "diamond" => DotShape::Diamond,
-        "line" => DotShape::Line,
-        "cross" => DotShape::Cross,
-        "euclidean" => DotShape::Euclidean,
-        _ => DotShape::Round,
+        "round" => Some(DotShape::Round),
+        "square" => Some(DotShape::Square),
+        "ellipse" => Some(DotShape::Ellipse),
+        "diamond" => Some(DotShape::Diamond),
+        "line" => Some(DotShape::Line),
+        "cross" => Some(DotShape::Cross),
+        "euclidean" => Some(DotShape::Euclidean),
+        _ => None,
     }
 }
 
@@ -800,58 +825,60 @@ mod tests {
 
     #[test]
     fn enum_strings_round_trip() {
+        // `*_from` is the exact inverse of `*_str`: every canonical wire
+        // string parses back to `Some(variant)`.
         for m in [ArtboardRangeMode::All, ArtboardRangeMode::Range] {
-            assert_eq!(artboard_range_mode_from(artboard_range_mode_str(&m)), m);
+            assert_eq!(artboard_range_mode_from(artboard_range_mode_str(&m)), Some(m));
         }
         for m in [
             MediaSize::DefinedByDriver, MediaSize::Letter, MediaSize::Legal,
             MediaSize::Tabloid, MediaSize::A3, MediaSize::A4, MediaSize::A5,
             MediaSize::Custom,
         ] {
-            assert_eq!(media_size_from(media_size_str(&m)), m);
+            assert_eq!(media_size_from(media_size_str(&m)), Some(m));
         }
         for o in [Orientation::Portrait, Orientation::Landscape] {
-            assert_eq!(orientation_from(orientation_str(&o)), o);
+            assert_eq!(orientation_from(orientation_str(&o)), Some(o));
         }
         for p in [PrintLayers::VisiblePrintable, PrintLayers::Visible, PrintLayers::All] {
-            assert_eq!(print_layers_from(print_layers_str(&p)), p);
+            assert_eq!(print_layers_from(print_layers_str(&p)), Some(p));
         }
         for m in [ScalingMode::DoNotScale, ScalingMode::FitToPage, ScalingMode::Custom] {
-            assert_eq!(scaling_mode_from(scaling_mode_str(&m)), m);
+            assert_eq!(scaling_mode_from(scaling_mode_str(&m)), Some(m));
         }
         for t in [PrinterMarkType::Roman, PrinterMarkType::Japanese] {
-            assert_eq!(printer_mark_type_from(printer_mark_type_str(&t)), t);
+            assert_eq!(printer_mark_type_from(printer_mark_type_str(&t)), Some(t));
         }
         for m in [OutputMode::Composite, OutputMode::Separations] {
-            assert_eq!(output_mode_from(output_mode_str(&m)), m);
+            assert_eq!(output_mode_from(output_mode_str(&m)), Some(m));
         }
         for e in [Emulsion::UpRight, Emulsion::DownRight] {
-            assert_eq!(emulsion_from(emulsion_str(&e)), e);
+            assert_eq!(emulsion_from(emulsion_str(&e)), Some(e));
         }
         for p in [ImagePolarity::Positive, ImagePolarity::Negative] {
-            assert_eq!(image_polarity_from(image_polarity_str(&p)), p);
+            assert_eq!(image_polarity_from(image_polarity_str(&p)), Some(p));
         }
         for d in [
             DotShape::Round, DotShape::Square, DotShape::Ellipse,
             DotShape::Diamond, DotShape::Line, DotShape::Cross, DotShape::Euclidean,
         ] {
-            assert_eq!(dot_shape_from(dot_shape_str(&d)), d);
+            assert_eq!(dot_shape_from(dot_shape_str(&d)), Some(d));
         }
         for f in [FontDownload::None, FontDownload::Subset, FontDownload::Complete] {
-            assert_eq!(font_download_from(font_download_str(&f)), f);
+            assert_eq!(font_download_from(font_download_str(&f)), Some(f));
         }
         for p in [PostScriptLevel::Level2, PostScriptLevel::Level3] {
-            assert_eq!(postscript_level_from(postscript_level_str(&p)), p);
+            assert_eq!(postscript_level_from(postscript_level_str(&p)), Some(p));
         }
         for d in [DataFormat::Ascii, DataFormat::Binary] {
-            assert_eq!(data_format_from(data_format_str(&d)), d);
+            assert_eq!(data_format_from(data_format_str(&d)), Some(d));
         }
         for c in [
             ColorHandling::LetAppDetermine,
             ColorHandling::LetPrinterDetermine,
             ColorHandling::PostscriptColorManagement,
         ] {
-            assert_eq!(color_handling_from(color_handling_str(&c)), c);
+            assert_eq!(color_handling_from(color_handling_str(&c)), Some(c));
         }
         for r in [
             RenderingIntent::Perceptual,
@@ -859,7 +886,7 @@ mod tests {
             RenderingIntent::Saturation,
             RenderingIntent::AbsoluteColorimetric,
         ] {
-            assert_eq!(rendering_intent_from(rendering_intent_str(&r)), r);
+            assert_eq!(rendering_intent_from(rendering_intent_str(&r)), Some(r));
         }
         for f in [
             FlattenerPreset::LowResolution,
@@ -867,27 +894,30 @@ mod tests {
             FlattenerPreset::HighResolution,
             FlattenerPreset::Custom,
         ] {
-            assert_eq!(flattener_preset_from(flattener_preset_str(&f)), f);
+            assert_eq!(flattener_preset_from(flattener_preset_str(&f)), Some(f));
         }
     }
 
     #[test]
-    fn unknown_enum_strings_fall_back_to_default() {
-        assert_eq!(artboard_range_mode_from("garbage"), ArtboardRangeMode::All);
-        assert_eq!(media_size_from("garbage"), MediaSize::DefinedByDriver);
-        assert_eq!(orientation_from("garbage"), Orientation::Portrait);
-        assert_eq!(print_layers_from("garbage"), PrintLayers::VisiblePrintable);
-        assert_eq!(scaling_mode_from("garbage"), ScalingMode::DoNotScale);
-        assert_eq!(printer_mark_type_from("garbage"), PrinterMarkType::Roman);
-        assert_eq!(output_mode_from("garbage"), OutputMode::Composite);
-        assert_eq!(emulsion_from("garbage"), Emulsion::UpRight);
-        assert_eq!(image_polarity_from("garbage"), ImagePolarity::Positive);
-        assert_eq!(dot_shape_from("garbage"), DotShape::Round);
-        assert_eq!(font_download_from("garbage"), FontDownload::Subset);
-        assert_eq!(postscript_level_from("garbage"), PostScriptLevel::Level3);
-        assert_eq!(data_format_from("garbage"), DataFormat::Binary);
-        assert_eq!(color_handling_from("garbage"), ColorHandling::LetAppDetermine);
-        assert_eq!(rendering_intent_from("garbage"), RenderingIntent::RelativeColorimetric);
-        assert_eq!(flattener_preset_from("garbage"), FlattenerPreset::MediumResolution);
+    fn unknown_enum_strings_reject() {
+        // Strict-reject (stone FB): an unknown enum string is `None`, never a
+        // silent default — the print-config op arms turn that into a
+        // `BadParamType` skip, byte-identical to JasSwift's `rawValue` parse.
+        assert_eq!(artboard_range_mode_from("garbage"), None);
+        assert_eq!(media_size_from("garbage"), None);
+        assert_eq!(orientation_from("garbage"), None);
+        assert_eq!(print_layers_from("garbage"), None);
+        assert_eq!(scaling_mode_from("garbage"), None);
+        assert_eq!(printer_mark_type_from("garbage"), None);
+        assert_eq!(output_mode_from("garbage"), None);
+        assert_eq!(emulsion_from("garbage"), None);
+        assert_eq!(image_polarity_from("garbage"), None);
+        assert_eq!(dot_shape_from("garbage"), None);
+        assert_eq!(font_download_from("garbage"), None);
+        assert_eq!(postscript_level_from("garbage"), None);
+        assert_eq!(data_format_from("garbage"), None);
+        assert_eq!(color_handling_from("garbage"), None);
+        assert_eq!(rendering_intent_from("garbage"), None);
+        assert_eq!(flattener_preset_from("garbage"), None);
     }
 }

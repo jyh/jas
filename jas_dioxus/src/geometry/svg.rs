@@ -2070,7 +2070,7 @@ fn parse_document_setup(
             .map(|s| parse_bool(s, d.simulate_colored_paper))
             .unwrap_or(d.simulate_colored_paper),
         transparency_flattener_preset: get_attr(node, "transparency-flattener-preset")
-            .map(crate::document::print_preferences::flattener_preset_from)
+            .and_then(crate::document::print_preferences::flattener_preset_from)
             .unwrap_or(d.transparency_flattener_preset),
         discard_white_overprint: get_attr(node, "discard-white-overprint")
             .map(|s| parse_bool(s, d.discard_white_overprint))
@@ -2117,7 +2117,7 @@ fn parse_marks_and_bleed(
         page_information: get_attr(node, "page-information")
             .map(|s| parse_bool(s, d.page_information)).unwrap_or(d.page_information),
         printer_mark_type: get_attr(node, "printer-mark-type")
-            .map(printer_mark_type_from).unwrap_or(d.printer_mark_type),
+            .and_then(printer_mark_type_from).unwrap_or(d.printer_mark_type),
         trim_mark_weight: get_attr(node, "trim-mark-weight")
             .and_then(|s| s.parse().ok()).unwrap_or(d.trim_mark_weight),
         mark_offset: get_attr(node, "mark-offset")
@@ -2173,7 +2173,7 @@ fn parse_advanced(
         print_as_bitmap: get_attr(node, "print-as-bitmap")
             .map(|s| parse_bool(s, d.print_as_bitmap)).unwrap_or(d.print_as_bitmap),
         overprint_flattener_preset: get_attr(node, "overprint-flattener-preset")
-            .map(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
+            .and_then(flattener_preset_from).unwrap_or(d.overprint_flattener_preset),
     }
 }
 
@@ -2202,11 +2202,11 @@ fn parse_color_management(
         document_profile: get_attr(node, "document-profile")
             .map(str::to_string).unwrap_or(d.document_profile),
         color_handling: get_attr(node, "color-handling")
-            .map(color_handling_from).unwrap_or(d.color_handling),
+            .and_then(color_handling_from).unwrap_or(d.color_handling),
         printer_profile: get_attr(node, "printer-profile")
             .map(str::to_string).unwrap_or(d.printer_profile),
         rendering_intent: get_attr(node, "rendering-intent")
-            .map(rendering_intent_from).unwrap_or(d.rendering_intent),
+            .and_then(rendering_intent_from).unwrap_or(d.rendering_intent),
         preserve_rgb_numbers: get_attr(node, "preserve-rgb-numbers")
             .map(|s| parse_bool(s, d.preserve_rgb_numbers))
             .unwrap_or(d.preserve_rgb_numbers),
@@ -2239,11 +2239,11 @@ fn parse_graphics(
         flatness: get_attr(node, "flatness")
             .and_then(|s| s.parse().ok()).unwrap_or(d.flatness),
         font_download: get_attr(node, "font-download")
-            .map(font_download_from).unwrap_or(d.font_download),
+            .and_then(font_download_from).unwrap_or(d.font_download),
         postscript_level: get_attr(node, "postscript-level")
-            .map(postscript_level_from).unwrap_or(d.postscript_level),
+            .and_then(postscript_level_from).unwrap_or(d.postscript_level),
         data_format: get_attr(node, "data-format")
-            .map(data_format_from).unwrap_or(d.data_format),
+            .and_then(data_format_from).unwrap_or(d.data_format),
         compatible_gradient_printing: get_attr(node, "compatible-gradient-printing")
             .map(|s| parse_bool(s, d.compatible_gradient_printing))
             .unwrap_or(d.compatible_gradient_printing),
@@ -2292,7 +2292,7 @@ fn parse_ink_override(
         angle: get_attr(node, "angle")
             .and_then(|s| s.parse().ok()).unwrap_or(d.angle),
         dot_shape: get_attr(node, "dot-shape")
-            .map(dot_shape_from).unwrap_or(d.dot_shape),
+            .and_then(dot_shape_from).unwrap_or(d.dot_shape),
     }
 }
 
@@ -2303,11 +2303,11 @@ fn parse_output(
     let d = Output::default();
     let mut o = Output {
         mode: get_attr(node, "mode")
-            .map(output_mode_from).unwrap_or(d.mode),
+            .and_then(output_mode_from).unwrap_or(d.mode),
         emulsion: get_attr(node, "emulsion")
-            .map(emulsion_from).unwrap_or(d.emulsion),
+            .and_then(emulsion_from).unwrap_or(d.emulsion),
         image_polarity: get_attr(node, "image-polarity")
-            .map(image_polarity_from).unwrap_or(d.image_polarity),
+            .and_then(image_polarity_from).unwrap_or(d.image_polarity),
         printer_resolution: get_attr(node, "printer-resolution")
             .map(str::to_string).unwrap_or(d.printer_resolution),
         convert_spot_to_process: get_attr(node, "convert-spot-to-process")
@@ -2400,7 +2400,7 @@ fn parse_print_preferences(
         reverse_order: get_attr(node, "reverse-order")
             .map(|s| parse_bool(s, d.reverse_order)).unwrap_or(d.reverse_order),
         artboard_range_mode: get_attr(node, "artboard-range-mode")
-            .map(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
+            .and_then(artboard_range_mode_from).unwrap_or(d.artboard_range_mode),
         artboard_range: get_attr(node, "artboard-range")
             .map(str::to_string).unwrap_or(d.artboard_range),
         ignore_artboards: get_attr(node, "ignore-artboards")
@@ -2408,25 +2408,25 @@ fn parse_print_preferences(
         skip_blank_artboards: get_attr(node, "skip-blank-artboards")
             .map(|s| parse_bool(s, d.skip_blank_artboards)).unwrap_or(d.skip_blank_artboards),
         media_size: get_attr(node, "media-size")
-            .map(media_size_from).unwrap_or(d.media_size),
+            .and_then(media_size_from).unwrap_or(d.media_size),
         media_width: get_attr(node, "media-width")
             .and_then(|s| s.parse().ok()).unwrap_or(d.media_width),
         media_height: get_attr(node, "media-height")
             .and_then(|s| s.parse().ok()).unwrap_or(d.media_height),
         orientation: get_attr(node, "orientation")
-            .map(orientation_from).unwrap_or(d.orientation),
+            .and_then(orientation_from).unwrap_or(d.orientation),
         auto_rotate: get_attr(node, "auto-rotate")
             .map(|s| parse_bool(s, d.auto_rotate)).unwrap_or(d.auto_rotate),
         transverse: get_attr(node, "transverse")
             .map(|s| parse_bool(s, d.transverse)).unwrap_or(d.transverse),
         print_layers: get_attr(node, "print-layers")
-            .map(print_layers_from).unwrap_or(d.print_layers),
+            .and_then(print_layers_from).unwrap_or(d.print_layers),
         placement_x: get_attr(node, "placement-x")
             .and_then(|s| s.parse().ok()).unwrap_or(d.placement_x),
         placement_y: get_attr(node, "placement-y")
             .and_then(|s| s.parse().ok()).unwrap_or(d.placement_y),
         scaling_mode: get_attr(node, "scaling-mode")
-            .map(scaling_mode_from).unwrap_or(d.scaling_mode),
+            .and_then(scaling_mode_from).unwrap_or(d.scaling_mode),
         custom_scale: get_attr(node, "custom-scale")
             .and_then(|s| s.parse().ok()).unwrap_or(d.custom_scale),
         tile_overlap_h: get_attr(node, "tile-overlap-h")

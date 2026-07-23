@@ -94,8 +94,10 @@ pub fn apply_print_config_field(
                 },
                 "collate" => match as_bool { Some(b) => { p.collate = b; true } None => false },
                 "reverse_order" => match as_bool { Some(b) => { p.reverse_order = b; true } None => false },
-                "artboard_range_mode" => match as_str {
-                    Some(s) => { p.artboard_range_mode = pp::artboard_range_mode_from(s); true }
+                // Enum-string fields strict-reject an unknown value (the helper
+                // returns None) → skip → BadParamType, mirroring JasSwift.
+                "artboard_range_mode" => match as_str.and_then(pp::artboard_range_mode_from) {
+                    Some(v) => { p.artboard_range_mode = v; true }
                     None => false,
                 },
                 "artboard_range" => match as_str {
@@ -104,26 +106,26 @@ pub fn apply_print_config_field(
                 },
                 "ignore_artboards" => match as_bool { Some(b) => { p.ignore_artboards = b; true } None => false },
                 "skip_blank_artboards" => match as_bool { Some(b) => { p.skip_blank_artboards = b; true } None => false },
-                "media_size" => match as_str {
-                    Some(s) => { p.media_size = pp::media_size_from(s); true }
+                "media_size" => match as_str.and_then(pp::media_size_from) {
+                    Some(v) => { p.media_size = v; true }
                     None => false,
                 },
                 "media_width" => match as_num { Some(n) => { p.media_width = n; true } None => false },
                 "media_height" => match as_num { Some(n) => { p.media_height = n; true } None => false },
-                "orientation" => match as_str {
-                    Some(s) => { p.orientation = pp::orientation_from(s); true }
+                "orientation" => match as_str.and_then(pp::orientation_from) {
+                    Some(v) => { p.orientation = v; true }
                     None => false,
                 },
                 "auto_rotate" => match as_bool { Some(b) => { p.auto_rotate = b; true } None => false },
                 "transverse" => match as_bool { Some(b) => { p.transverse = b; true } None => false },
-                "print_layers" => match as_str {
-                    Some(s) => { p.print_layers = pp::print_layers_from(s); true }
+                "print_layers" => match as_str.and_then(pp::print_layers_from) {
+                    Some(v) => { p.print_layers = v; true }
                     None => false,
                 },
                 "placement_x" => match as_num { Some(n) => { p.placement_x = n; true } None => false },
                 "placement_y" => match as_num { Some(n) => { p.placement_y = n; true } None => false },
-                "scaling_mode" => match as_str {
-                    Some(s) => { p.scaling_mode = pp::scaling_mode_from(s); true }
+                "scaling_mode" => match as_str.and_then(pp::scaling_mode_from) {
+                    Some(v) => { p.scaling_mode = v; true }
                     None => false,
                 },
                 "custom_scale" => match as_num { Some(n) => { p.custom_scale = n; true } None => false },
@@ -144,8 +146,8 @@ pub fn apply_print_config_field(
                 "registration_marks" => match as_bool { Some(b) => { m.registration_marks = b; true } None => false },
                 "color_bars" => match as_bool { Some(b) => { m.color_bars = b; true } None => false },
                 "page_information" => match as_bool { Some(b) => { m.page_information = b; true } None => false },
-                "printer_mark_type" => match as_str {
-                    Some(s) => { m.printer_mark_type = pp::printer_mark_type_from(s); true }
+                "printer_mark_type" => match as_str.and_then(pp::printer_mark_type_from) {
+                    Some(v) => { m.printer_mark_type = v; true }
                     None => false,
                 },
                 "trim_mark_weight" => match as_num { Some(n) => { m.trim_mark_weight = n; true } None => false },
@@ -161,9 +163,9 @@ pub fn apply_print_config_field(
         "set_output_field" => {
             let o = &mut new_doc.print_preferences.output;
             match field {
-                "mode" => match as_str { Some(s) => { o.mode = pp::output_mode_from(s); true } None => false },
-                "emulsion" => match as_str { Some(s) => { o.emulsion = pp::emulsion_from(s); true } None => false },
-                "image_polarity" => match as_str { Some(s) => { o.image_polarity = pp::image_polarity_from(s); true } None => false },
+                "mode" => match as_str.and_then(pp::output_mode_from) { Some(v) => { o.mode = v; true } None => false },
+                "emulsion" => match as_str.and_then(pp::emulsion_from) { Some(v) => { o.emulsion = v; true } None => false },
+                "image_polarity" => match as_str.and_then(pp::image_polarity_from) { Some(v) => { o.image_polarity = v; true } None => false },
                 "printer_resolution" => match as_str { Some(s) => { o.printer_resolution = s.to_string(); true } None => false },
                 "convert_spot_to_process" => match as_bool { Some(b) => { o.convert_spot_to_process = b; true } None => false },
                 "overprint_black" => match as_bool { Some(b) => { o.overprint_black = b; true } None => false },
@@ -177,7 +179,7 @@ pub fn apply_print_config_field(
                     "print" => match as_bool { Some(b) => { ink.print = b; true } None => false },
                     "frequency" => match as_num { Some(n) => { ink.frequency = n; true } None => false },
                     "angle" => match as_num { Some(n) => { ink.angle = n; true } None => false },
-                    "dot_shape" => match as_str { Some(s) => { ink.dot_shape = pp::dot_shape_from(s); true } None => false },
+                    "dot_shape" => match as_str.and_then(pp::dot_shape_from) { Some(v) => { ink.dot_shape = v; true } None => false },
                     "name" => match as_str { Some(s) => { ink.name = s.to_string(); true } None => false },
                     _ => false,
                 },
@@ -189,9 +191,9 @@ pub fn apply_print_config_field(
             let g = &mut new_doc.print_preferences.graphics;
             match field {
                 "flatness" => match as_num { Some(n) => { g.flatness = n; true } None => false },
-                "font_download" => match as_str { Some(s) => { g.font_download = pp::font_download_from(s); true } None => false },
-                "postscript_level" => match as_str { Some(s) => { g.postscript_level = pp::postscript_level_from(s); true } None => false },
-                "data_format" => match as_str { Some(s) => { g.data_format = pp::data_format_from(s); true } None => false },
+                "font_download" => match as_str.and_then(pp::font_download_from) { Some(v) => { g.font_download = v; true } None => false },
+                "postscript_level" => match as_str.and_then(pp::postscript_level_from) { Some(v) => { g.postscript_level = v; true } None => false },
+                "data_format" => match as_str.and_then(pp::data_format_from) { Some(v) => { g.data_format = v; true } None => false },
                 "compatible_gradient_printing" => match as_bool { Some(b) => { g.compatible_gradient_printing = b; true } None => false },
                 "raster_effects_resolution" => match as_num { Some(n) => { g.raster_effects_resolution = n; true } None => false },
                 _ => false,
@@ -201,9 +203,9 @@ pub fn apply_print_config_field(
             let c = &mut new_doc.print_preferences.color_management;
             match field {
                 "document_profile" => match as_str { Some(s) => { c.document_profile = s.to_string(); true } None => false },
-                "color_handling" => match as_str { Some(s) => { c.color_handling = pp::color_handling_from(s); true } None => false },
+                "color_handling" => match as_str.and_then(pp::color_handling_from) { Some(v) => { c.color_handling = v; true } None => false },
                 "printer_profile" => match as_str { Some(s) => { c.printer_profile = s.to_string(); true } None => false },
-                "rendering_intent" => match as_str { Some(s) => { c.rendering_intent = pp::rendering_intent_from(s); true } None => false },
+                "rendering_intent" => match as_str.and_then(pp::rendering_intent_from) { Some(v) => { c.rendering_intent = v; true } None => false },
                 "preserve_rgb_numbers" => match as_bool { Some(b) => { c.preserve_rgb_numbers = b; true } None => false },
                 _ => false,
             }
@@ -212,8 +214,8 @@ pub fn apply_print_config_field(
             let a = &mut new_doc.print_preferences.advanced;
             match field {
                 "print_as_bitmap" => match as_bool { Some(b) => { a.print_as_bitmap = b; true } None => false },
-                "overprint_flattener_preset" => match as_str {
-                    Some(s) => { a.overprint_flattener_preset = pp::flattener_preset_from(s); true }
+                "overprint_flattener_preset" => match as_str.and_then(pp::flattener_preset_from) {
+                    Some(v) => { a.overprint_flattener_preset = v; true }
                     None => false,
                 },
                 _ => false,
@@ -237,8 +239,8 @@ pub fn apply_print_config_field(
                 // which both serialize to a JSON string).
                 "grid_color" => match as_str { Some(s) => { d.grid_color = s.to_string(); true } None => false },
                 "paper_color" => match as_str { Some(s) => { d.paper_color = s.to_string(); true } None => false },
-                "transparency_flattener_preset" => match as_str {
-                    Some(s) => { d.transparency_flattener_preset = pp::flattener_preset_from(s); true }
+                "transparency_flattener_preset" => match as_str.and_then(pp::flattener_preset_from) {
+                    Some(v) => { d.transparency_flattener_preset = v; true }
                     None => false,
                 },
                 _ => false,

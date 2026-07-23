@@ -89,5 +89,50 @@
       }
     ],
     "expected_json": "print_config_type_mismatch_skips.json"
+  },
+  {
+    "name": "print_config_enum_string_reject",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "print_options_confirm",
+        "ops": [
+          { "op": "set_print_preferences_field", "field": "artboard_range_mode", "value": "everything", "expected_error": "BadParamType" },
+          { "op": "set_print_preferences_field", "field": "media_size", "value": "a6", "expected_error": "BadParamType" },
+          { "op": "set_print_preferences_field", "field": "orientation", "value": "sideways", "expected_error": "BadParamType" },
+          { "op": "set_print_preferences_field", "field": "print_layers", "value": "hidden", "expected_error": "BadParamType" },
+          { "op": "set_print_preferences_field", "field": "scaling_mode", "value": "shrink", "expected_error": "BadParamType" },
+          { "op": "set_marks_and_bleed_field", "field": "printer_mark_type", "value": "korean", "expected_error": "BadParamType" },
+          { "op": "set_output_field", "field": "mode", "value": "duotone", "expected_error": "BadParamType" },
+          { "op": "set_output_field", "field": "emulsion", "value": "up_left", "expected_error": "BadParamType" },
+          { "op": "set_output_field", "field": "image_polarity", "value": "neutral", "expected_error": "BadParamType" },
+          { "op": "set_output_ink_field", "field": "dot_shape", "value": "hexagon", "index": 0, "expected_error": "BadParamType" },
+          { "op": "set_graphics_field", "field": "font_download", "value": "partial", "expected_error": "BadParamType" },
+          { "op": "set_graphics_field", "field": "postscript_level", "value": "level_4", "expected_error": "BadParamType" },
+          { "op": "set_graphics_field", "field": "data_format", "value": "utf8", "expected_error": "BadParamType" },
+          { "op": "set_color_management_field", "field": "color_handling", "value": "let_gpu_determine", "expected_error": "BadParamType" },
+          { "op": "set_color_management_field", "field": "rendering_intent", "value": "photographic", "expected_error": "BadParamType" },
+          { "op": "set_advanced_field", "field": "overprint_flattener_preset", "value": "ultra_resolution", "expected_error": "BadParamType" },
+          { "op": "set_document_setup_field", "field": "transparency_flattener_preset", "value": "ultra_resolution", "expected_error": "BadParamType" }
+        ]
+      }
+    ],
+    "expected_json": "print_config_enum_string_reject.json"
+  },
+  {
+    "name": "print_config_flattener_reject_keeps_edits",
+    "setup_svg": "rect_basic.svg",
+    "txns": [
+      {
+        "name": "document_setup_confirm",
+        "ops": [
+          { "op": "set_document_setup_field", "field": "bleed_top", "value": 5 },
+          { "op": "set_document_setup_field", "field": "transparency_flattener_preset", "value": "ultra_resolution", "expected_error": "BadParamType" },
+          { "op": "set_advanced_field", "field": "overprint_flattener_preset", "value": "ultra_resolution", "expected_error": "BadParamType" },
+          { "op": "set_document_setup_field", "field": "grid_size", "value": 50 }
+        ]
+      }
+    ],
+    "expected_json": "print_config_flattener_reject_keeps_edits.json"
   }
 ]
