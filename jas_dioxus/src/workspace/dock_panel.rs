@@ -1570,7 +1570,7 @@ mod stroke_panel_override_tests {
             layer.children = vec![std::rc::Rc::new(r)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
     }
 
     fn select_element(st: &mut AppState, e: GeoEl) {
@@ -1583,7 +1583,7 @@ mod stroke_panel_override_tests {
             layer.children = vec![std::rc::Rc::new(e)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
     }
 
     // Brushes panel data fix: the live-state map must carry a non-empty
@@ -1837,7 +1837,7 @@ mod paragraph_gating_tests {
             layer.children = children.into_iter().map(std::rc::Rc::new).collect();
         }
         new_doc.selection = selection.into_iter().map(ElementSelection::all).collect();
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         st
     }
 

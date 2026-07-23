@@ -30,7 +30,7 @@ private func strokeModelWithSelectedRect(
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 100, height: 50,
                                  stroke: baseStroke))
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [rect])],
         selectedLayer: 0,
         selection: [ElementSelection(path: [0, 0])]))
@@ -225,7 +225,7 @@ private func applyStrokePanel(
     let rect = Element.rect(Rect(x: 0, y: 0, width: 100, height: 50,
                                  stroke: Stroke(color: Color(r: 0, g: 0, b: 0),
                                                 width: 1.0, linecap: .butt)))
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [rect])],
         selectedLayer: 0,
         selection: []))
@@ -252,7 +252,7 @@ private func applyStrokePanel(
 private func syncModel(_ stroke: Stroke) -> Model {
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, stroke: stroke))
-    model.setDocumentUnbracketed(Document(
+    model.setDocumentForTest(Document(
         layers: [Layer(children: [rect])],
         selectedLayer: 0,
         selection: [ElementSelection(path: [0, 0])]))

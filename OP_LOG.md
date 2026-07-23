@@ -229,11 +229,16 @@ Replay must be a pure, deterministic function of inputs (`VISION.md` §8):
 id-index-rebuild and `in_txn` mutation-path gates use OCaml `assert` (active in
 release) but Rust `debug_assert!` (stripped in release). So on an invariant
 *violation* — which must never happen in correct operation — OCaml aborts
-where Rust proceeds silently. This is a deliberate fail-fast choice, not a
+where Rust proceeds. This is a deliberate fail-fast choice, not a
 divergence in normal behavior; both fire identically in debug/test, and the
-conformance corpus never exercises a violation. If strict release crash-parity
-is ever required, add `-noassert` to the OCaml release build or promote Rust's
-`debug_assert!`s to `assert!`.
+conformance corpus never exercises a violation. (Arc 1 S1c, ratified
+2026-07-22: in the Rust and Swift release builds the `in_txn` gate no longer
+proceeds *silently* — a stray un-bracketed `set_document` logs loudly and
+self-brackets, keeping the journal complete; see §8.4.) If strict release
+crash-parity is ever required, add `-noassert` to the OCaml release build or
+promote the Rust `in_txn` `debug_assert!` ONLY — NEVER the O(document)
+id-index-rebuild `debug_assert!`s, which sit on the per-mousemove hot path
+and would make every release drag frame O(document).
 
 ---
 
@@ -254,9 +259,18 @@ the **first** pinned format even though collaboration/versioning land much later
    gate. Concretely: the AI proposes into the preview snapshot (no Transaction); on
    **accept**, the proposed edits are replayed through `begin_txn`/`commit_txn` into a
    single Transaction with `actor: "ai"` (legible + summarizable like any other); on
-   **reject**, `restore_preview_snapshot` discards them. In a later increment, make
-   `set_document` assert "inside an open transaction OR the preview flag," so that bypass
-   is the only unguarded path — primacy enforced by construction.
+   **reject**, `restore_preview_snapshot` discards them. The deferred "make
+   `set_document` assert 'inside an open transaction OR the preview flag'" item is
+   **DISCHARGED (Arc 1 S1, 2026-07-23)** by the shipped three-method split plus the S1
+   hardening: `set_document` live-asserts `in_txn` (debug/CI); `edit_document`
+   self-brackets; and the sanctioned non-undoable channel is
+   `set_document_unbracketed(doc, intent)`, where every call site states a typed
+   `NonUndoableIntent` (Selection / PreviewReapply / LiveDrag / TestOnly —
+   census-frozen; Selection and TestOnly carry debug-only teeth). All non-history-nav
+   writes funnel through the single `write_document` (undo/redo carry their paired
+   index O(1) by design), and release behavior is the ratified S1c fail-safe: debug/CI
+   hard assert (the referee); release logs loudly + self-brackets, so the journal
+   stays complete and the app survives. Both active ports mirror all three semantics.
 5. **Retention/compaction decoupled from `MAX_UNDO`** — the undo *checkpoint* stack stays
    capped at 100, but journal retention (for versioning) is a separate policy; design the
    truncation (drop old ops, keep a coalesced baseline) identically in all apps from the

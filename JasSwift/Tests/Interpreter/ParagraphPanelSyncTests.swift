@@ -13,7 +13,7 @@ import Testing
 @Test func paragraphPanelLiveOverridesNonTextSelected() {
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [rect])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [rect])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -27,7 +27,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 16, width: 0, height: 0))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -40,7 +40,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hello",
                                   fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -53,7 +53,7 @@ import Testing
     let model = Model()
     let tp = Element.textPath(TextPath(d: [], content: "path",
                                         fontFamily: "Helvetica", fontSize: 14))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [tp])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [tp])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -70,7 +70,7 @@ import Testing
                                   fontSize: 16, width: 200, height: 100))
     let point = Element.text(Text(x: 0, y: 0, content: "point",
                                    fontSize: 16, width: 0, height: 0))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area, point])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area, point])],
                               selectedLayer: 0,
                               selection: [
                                 ElementSelection(path: [0, 0]),
@@ -99,7 +99,7 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [wrapper, content],
         fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -122,7 +122,7 @@ import Testing
     let content = Tspan(id: 1, content: "1. item")
     let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, content],
                                   fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -137,7 +137,7 @@ import Testing
     let model = Model()
     let area = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -165,7 +165,7 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -186,7 +186,7 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -205,7 +205,7 @@ import Testing
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [w1, c1, w2, c2],
         fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)
@@ -221,7 +221,7 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     let area = Element.text(Text(
         x: 0, y: 0, tspans: [wrapper, body],
         fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
 }
@@ -371,7 +371,7 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     let body = Tspan(id: 1, content: "hi")
     let area = Element.text(Text(x: 0, y: 0, tspans: [wrapper, body],
                                   fontSize: 16, width: 200, height: 100))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [area])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [area])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = paragraphPanelLiveOverrides(model: model)

@@ -477,7 +477,7 @@ public class Controller {
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-        model.setDocumentUnbracketed(doc.replacing(selection: finalSel))
+        model.setDocumentUnbracketed(doc.replacing(selection: finalSel), intent: .selection)
     }
 
     /// Recursive selection with customizable leaf handling. Used by
@@ -510,7 +510,7 @@ public class Controller {
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-        model.setDocumentUnbracketed(doc.replacing(selection: finalSel))
+        model.setDocumentUnbracketed(doc.replacing(selection: finalSel), intent: .selection)
     }
 
     // MARK: - Public selection methods
@@ -557,7 +557,7 @@ public class Controller {
 
     public func setSelection(_ selection: Selection) {
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-        model.setDocumentUnbracketed(model.document.replacing(selection: selection))
+        model.setDocumentUnbracketed(model.document.replacing(selection: selection), intent: .selection)
     }
 
     public func selectElement(_ path: ElementPath) {
@@ -575,20 +575,20 @@ public class Controller {
                     selection.insert(ElementSelection.all(parentPath + [i]))
                 }
                 // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-                model.setDocumentUnbracketed(doc.replacing(selection: selection))
+                model.setDocumentUnbracketed(doc.replacing(selection: selection), intent: .selection)
                 return
             }
         }
         let _ = elem
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-        model.setDocumentUnbracketed(doc.replacing(selection: [ElementSelection.all(path)]))
+        model.setDocumentUnbracketed(doc.replacing(selection: [ElementSelection.all(path)]), intent: .selection)
     }
 
     public func selectControlPoint(path: ElementPath, index: Int) {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let es = ElementSelection.partial(path, [index])
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
-        model.setDocumentUnbracketed(model.document.replacing(selection: [es]))
+        model.setDocumentUnbracketed(model.document.replacing(selection: [es]), intent: .selection)
     }
 
     public func movePathHandle(_ path: ElementPath, anchorIdx: Int,
@@ -1328,7 +1328,7 @@ public class Controller {
     /// checkpoints. Mirrors the Rust `Controller::set_selection_fill_live`.
     public func setSelectionFillLive(_ fill: Fill?) {
         if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(fillApplied(fill))
+        model.setDocumentUnbracketed(fillApplied(fill), intent: .liveDrag)
     }
 
     /// Build the document with `stroke` applied to every selected element,
@@ -1356,7 +1356,7 @@ public class Controller {
     /// `Controller::set_selection_stroke_live`.
     public func setSelectionStrokeLive(_ stroke: Stroke?) {
         if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(strokeApplied(stroke))
+        model.setDocumentUnbracketed(strokeApplied(stroke), intent: .liveDrag)
     }
 
     /// Set strokeBrush on every selected element (paths only). Used

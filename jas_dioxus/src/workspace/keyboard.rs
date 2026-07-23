@@ -195,11 +195,19 @@ pub(crate) fn make_keydown_handler(
                 evt.prevent_default();
                 if mods.shift() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.redo(); }
+                        if let Some(tab) = st.tab_mut() {
+                            // Recorder: history nav segments an open
+                            // gesture case (pre-nav doc is the oracle).
+                            crate::recorder::hooks::history_nav(&tab.model);
+                            tab.model.redo();
+                        }
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.undo(); }
+                        if let Some(tab) = st.tab_mut() {
+                            crate::recorder::hooks::history_nav(&tab.model);
+                            tab.model.undo();
+                        }
                     }));
                 }
             }
@@ -567,6 +575,10 @@ pub(crate) fn make_keydown_handler(
                     mods.alt(),
                     false,
                 );
+                // Recorder seam hook (dormant unless armed): the KEY
+                // seam captures the normalized chord at the resolution
+                // point, whatever it resolves to (incl. null).
+                crate::recorder::hooks::key_event(&chord);
                 if let Some(resolved) = crate::workspace::resolve_key::resolve_key(&chord) {
                     if resolved.action == "select_tool" {
                         let params = resolved.params.clone();

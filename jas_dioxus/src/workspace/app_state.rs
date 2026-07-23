@@ -3623,7 +3623,7 @@ mod align_panel_state_tests {
             .map(ElementSelection::all)
             .collect();
         let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         // These tests pass screen coordinates equal to document
         // coordinates, so pin an identity view transform. The document
         // write otherwise applies fit-to-artboard centering (a non-zero
@@ -3990,7 +3990,7 @@ mod ensure_paragraph_wrapper_tests {
             selection: vec![ElementSelection::all(vec![0, 0])],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         // Default panel state has align_left = true — matches the
         // post-click steady state. The apply must still produce a
         // segment covering every char regardless.
@@ -4057,7 +4057,7 @@ mod ensure_paragraph_wrapper_tests {
             selection: vec![ElementSelection::all(vec![0, 0])],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
 
         // Mimic the dispatch sequence the toggle handler runs for a
         // click on justify_left:
@@ -4126,7 +4126,7 @@ mod oplog_bracket_tests {
             selection: selection.into_iter().map(ElementSelection::all).collect(),
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         st
     }
 
@@ -4261,7 +4261,7 @@ mod character_panel_apply_tests {
             },
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         st
     }
 
@@ -4711,7 +4711,7 @@ mod stroke_panel_apply_tests {
             },
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         st
     }
 

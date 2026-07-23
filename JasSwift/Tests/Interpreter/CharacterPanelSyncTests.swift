@@ -13,7 +13,7 @@ import Testing
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
     let layer = Layer(children: [rect])
-    model.setDocumentUnbracketed(Document(layers: [layer],
+    model.setDocumentForTest(Document(layers: [layer],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     #expect(characterPanelLiveOverrides(model: model) == nil)
@@ -33,7 +33,7 @@ import Testing
         horizontalScale: "120", verticalScale: "110",
         kerning: "0.02em"))
     let layer = Layer(children: [text])
-    model.setDocumentUnbracketed(Document(layers: [layer],
+    model.setDocumentForTest(Document(layers: [layer],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
 
@@ -67,7 +67,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 20, lineHeight: ""))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = characterPanelLiveOverrides(model: model)!
@@ -79,7 +79,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 20, lineHeight: ""))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     #expect(characterElementHasAutoLeading(model: model) == true)
@@ -90,7 +90,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 20, lineHeight: "30pt"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     #expect(characterElementHasAutoLeading(model: model) == false)
@@ -105,7 +105,7 @@ import Testing
     // Rect / other non-text element → false.
     let model = Model()
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [rect])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [rect])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     #expect(characterElementHasAutoLeading(model: model) == false)
@@ -115,7 +115,7 @@ import Testing
     let model = Model()
     let tp = Element.textPath(TextPath(d: [], content: "x", fontSize: 20,
                                         lineHeight: ""))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [tp])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [tp])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     #expect(characterElementHasAutoLeading(model: model) == true)
@@ -133,7 +133,7 @@ import Testing
     // clear, line_height should round-trip back to empty.
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 20, lineHeight: "30pt"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     // Seed the production-id panel with a font_size and *no* leading
@@ -169,7 +169,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 20, lineHeight: "30pt"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     model.stateStore.initPanel("character_panel_content", defaults: [
@@ -202,7 +202,7 @@ import Testing
         d: [], content: "path",
         fontFamily: "Courier", fontSize: 14,
         fontVariant: "small-caps"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [tp])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [tp])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = characterPanelLiveOverrides(model: model)!
@@ -217,7 +217,7 @@ import Testing
     // applyCharacterPanelToSelection writes to selected text.
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hello", fontFamily: "Helvetica"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     model.stateStore.initPanel("character_panel_content",
@@ -235,7 +235,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontSize: 12, kerning: "Optical"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = characterPanelLiveOverrides(model: model)!
@@ -246,7 +246,7 @@ import Testing
     // Empty element attribute → "Auto" in the panel (spec default).
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi", fontSize: 12, kerning: ""))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let o = characterPanelLiveOverrides(model: model)!
@@ -256,7 +256,7 @@ import Testing
 @Test func applyCharacterPanelKerningNamedModesPassThrough() {
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     // Auto / "" / "0" all produce an empty element attribute.
@@ -297,7 +297,7 @@ import Testing
     // panel.language should update the selected element's xmlLang.
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi", xmlLang: ""))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     model.stateStore.initPanel("character_panel_content", defaults: [
@@ -329,7 +329,7 @@ import Testing
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontFamily: "Helvetica", fontSize: 12))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     model.stateStore.initPanel("character_panel_content", defaults: [
@@ -423,7 +423,7 @@ import Testing
         x: 0, y: 0, content: "hello",
         fontFamily: "sans-serif", fontSize: 16,
         fontWeight: "normal", fontStyle: "normal"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     // Install an active session with a bare caret at char 3.
@@ -459,7 +459,7 @@ import Testing
         x: 0, y: 0, content: "hello",
         fontFamily: "sans-serif", fontSize: 16,
         fontWeight: "normal", fontStyle: "normal"))
-    model.setDocumentUnbracketed(Document(layers: [Layer(children: [text])],
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
     let session = TextEditSession(path: [0, 0], target: .text,

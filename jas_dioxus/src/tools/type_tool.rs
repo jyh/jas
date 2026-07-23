@@ -913,7 +913,7 @@ mod tests {
             knockout_group: false,
             common: CommonProps { name: Some(String::new()), ..Default::default() },
         };
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         model
     }
 

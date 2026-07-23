@@ -67,12 +67,20 @@ pub(crate) fn MenuBarView(
                 }
                 "undo" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.undo(); }
+                        if let Some(tab) = st.tab_mut() {
+                            // Recorder: history nav segments an open
+                            // gesture case (pre-nav doc is the oracle).
+                            crate::recorder::hooks::history_nav(&tab.model);
+                            tab.model.undo();
+                        }
                     }));
                 }
                 "redo" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { tab.model.redo(); }
+                        if let Some(tab) = st.tab_mut() {
+                            crate::recorder::hooks::history_nav(&tab.model);
+                            tab.model.redo();
+                        }
                     }));
                 }
                 "cut" => {
@@ -1319,7 +1327,7 @@ mod tests {
             ],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
 
         let ctx = build_menu_ctx(&st);
         let eval = |e: &str| crate::interpreter::expr::eval(e, &ctx).to_bool();

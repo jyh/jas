@@ -3546,7 +3546,7 @@ mod tests {
         let mut model = model_with_selected_zigzag_path();
         let mut doc = model.document().clone();
         doc.selection.clear();
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         let original_len = {
             if let Element::Path(pe) =
                 &*model.document().layers[0].children().unwrap()[0]

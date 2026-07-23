@@ -13,7 +13,7 @@ use super::expr_types::Value;
 use super::state_store::StateStore;
 use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
-use crate::document::model::Model;
+use crate::document::model::{Model, NonUndoableIntent};
 use crate::algorithms::fit_curve::fit_curve;
 use crate::geometry::element::{
     Color, CommonProps, Element, EllipseElem, Fill, LineElem, PathCommand, PathElem,
@@ -3279,7 +3279,7 @@ fn artboard_translate_from_preview(
         }
     }
 
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
 }
 
 /// True iff `inner` (an element's axis-aligned bounding box) is
@@ -3873,7 +3873,7 @@ fn artboard_resize_apply(
         ab.width = nw;
         ab.height = nh;
     }
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
 }
 
 /// Drag-to-resize commit. Re-applies the resize with integer-pt
@@ -5827,7 +5827,7 @@ fn scale_apply(
     let paths = op_apply_selection_paths(model);
     let new_doc = compose_matrix_over_paths(
         model.document(), &paths, &matrix, stroke_factor, corners);
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::PreviewReapply);
 }
 
 /// Scale apply — the JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves
@@ -5889,7 +5889,7 @@ fn rotate_apply(
     let matrix = transform_apply::rotate_matrix(theta_deg, rx, ry);
     let paths = op_apply_selection_paths(model);
     let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::PreviewReapply);
 }
 
 /// Rotate apply — JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves the
@@ -5942,7 +5942,7 @@ fn shear_apply(
     let matrix = transform_apply::shear_matrix(angle_deg, axis, axis_angle_deg, rx, ry);
     let paths = op_apply_selection_paths(model);
     let new_doc = compose_matrix_over_paths(model.document(), &paths, &matrix, None, None);
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::PreviewReapply);
 }
 
 /// Shear apply — JOURNALED (CONFIRM) path (OP_LOG.md §9 Phase P7). Resolves the

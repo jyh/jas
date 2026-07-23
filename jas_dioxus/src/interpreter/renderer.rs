@@ -547,6 +547,10 @@ pub(crate) fn cycle_element_visibility_at(
 }
 
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    // Recorder seam hook (Arc 1 S2, dormant unless armed): records
+    // depth-0 dispatches on the action seam / segments an open gesture
+    // case. RAII so every early return below unwinds the depth.
+    let _recorder_guard = crate::recorder::hooks::ActionGuard::enter(action, params, st);
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
     // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md
@@ -9142,7 +9146,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         .map(ElementSelection::all)
                                         .collect();
                                 }
-                                tab.model.set_document_unbracketed(doc);
+                                tab.model.set_document_unbracketed(
+                                    doc,
+                                    crate::document::model::NonUndoableIntent::Selection,
+                                );
                             }
                             sel_rev += 1;
                         });
@@ -10582,7 +10589,7 @@ mod tests {
         }).collect();
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = doc_layers;
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         st
     }
 
@@ -10891,7 +10898,7 @@ mod tests {
             Artboard::default_with_id("ab1".into()),
             Artboard::default_with_id("ab2".into()),
         ];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         st
     }
 
@@ -11107,7 +11114,7 @@ mod tests {
                 ab.y = 20.0;
                 ab.width = 333.0;
             }
-            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+            st.tabs[st.active_tab].model.set_document_for_test(d);
         }
         // Snapshot the pre-edit document AFTER the setup write, so replay starts
         // from the same baseline the live edit does.
@@ -11293,7 +11300,7 @@ mod tests {
             use crate::document::document::ElementSelection;
             let mut d = st.tabs[st.active_tab].model.document().clone();
             d.selection = vec![ElementSelection::all(vec![1])];
-            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+            st.tabs[st.active_tab].model.set_document_for_test(d);
         }
         let pre_doc = st.tabs[st.active_tab].model.document().clone();
         let before = st.tabs[st.active_tab].model.journal().len();
@@ -11339,7 +11346,7 @@ mod tests {
             use crate::document::document::ElementSelection;
             let mut d = st.tabs[st.active_tab].model.document().clone();
             d.selection = vec![ElementSelection::all(vec![1])];
-            st.tabs[st.active_tab].model.set_document_unbracketed(d);
+            st.tabs[st.active_tab].model.set_document_for_test(d);
         }
         let pre_doc = st.tabs[st.active_tab].model.document().clone();
         let before = st.tabs[st.active_tab].model.journal().len();
@@ -11534,7 +11541,7 @@ mod tests {
         {
             let mut new_doc = st.tabs[st.active_tab].model.document().clone();
             new_doc.layers = vec![mk_layer("A"), group, mk_layer("B")];
-            st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+            st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         }
         // Select the group (path [1]).
         st.layers_panel_selection = vec![vec![1]];
@@ -11659,7 +11666,7 @@ mod tests {
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = vec![layer_a, group, layer_b];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         st.layers_panel_selection = vec![vec![1]];
         let params = serde_json::Map::new();
         dispatch_action("flatten_artwork", &params, &mut st);
@@ -12016,7 +12023,7 @@ mod tests {
             layer.children = vec![std::rc::Rc::new(text_with_tspans)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
     }
 
     #[test]
@@ -12121,7 +12128,7 @@ mod tests {
             layer.children = vec![std::rc::Rc::new(r)];
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
     }
 
     // ── Part B.2: Properties panel field editing ──────────────────────
@@ -12200,7 +12207,7 @@ mod tests {
             }
             nd.selection = vec![ElementSelection::all(vec![0, 0]),
                                 ElementSelection::all(vec![0, 1])];
-            st.tabs[st.active_tab].model.set_document_unbracketed(nd);
+            st.tabs[st.active_tab].model.set_document_for_test(nd);
         }
         // Set W=600 -> group scales 2x about the bbox top-left (x only).
         apply_properties_panel_field(&mut st, "prop_w", &serde_json::json!(600.0));
@@ -12270,7 +12277,7 @@ mod tests {
             }
             nd.selection = vec![ElementSelection::all(vec![0, 0]),
                                 ElementSelection::all(vec![0, 1])];
-            st.tabs[st.active_tab].model.set_document_unbracketed(nd);
+            st.tabs[st.active_tab].model.set_document_for_test(nd);
         }
         apply_properties_panel_field(&mut st, "prop_shear", &serde_json::json!(45.0));
         let (x, _, w, h) = crate::canvas::render::selection_evaluated_bounds(
@@ -12439,7 +12446,7 @@ mod tests {
             Element::Text(new_t)
         } else { panic!() };
         let new_doc = doc.replace_element(&path, new_elem);
-        st.tabs[st.active_tab].model.set_document_unbracketed(new_doc);
+        st.tabs[st.active_tab].model.set_document_for_test(new_doc);
         st.sync_paragraph_panel_from_selection();
         assert_eq!(st.paragraph_panel.left_indent, 36.0);
         assert!(st.paragraph_panel.justify_right);
@@ -12622,7 +12629,7 @@ mod tests {
             ElementSelection::all(vec![0, 1]),
             ElementSelection::all(vec![0, 2]),
         ];
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         let view = build_active_document_view(&st);
         assert_eq!(view["has_selection"], serde_json::json!(true));
         assert_eq!(view["selection_count"], serde_json::json!(3));
@@ -12636,7 +12643,7 @@ mod tests {
             ElementSelection::all(vec![0]),
             ElementSelection::all(vec![0, 2]),
         ];
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         let view = build_active_document_view(&st);
         let expected = serde_json::json!([
             {"__path__": [0]},
@@ -12864,7 +12871,7 @@ mod tests {
                 a
             })
             .collect();
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         st
     }
 

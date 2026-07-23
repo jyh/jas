@@ -6,6 +6,7 @@ mod document;
 mod geometry;
 mod interpreter;
 mod panels;
+mod recorder;
 mod tools;
 mod workspace;
 

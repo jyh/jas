@@ -52,6 +52,52 @@ pub(crate) fn advance_next_untitled_past(existing: &[String]) {
     );
 }
 
+/// Why a write is deliberately NOT undoable — the required classification of
+/// every [`Model::set_document_unbracketed`] call (Arc 1 S1, census-frozen
+/// 2026-07-23). Mirrored by Swift `NonUndoableIntent` in `Model.swift`.
+///
+/// Census summary (production sites at freeze; both active ports):
+/// - `Selection` — 10 Rust / 9 Swift sites: selection-only writes. The
+///   `Controller` select family (`select_all`, `set_selection`,
+///   `add_to_selection`, `toggle_selection`, `select_element`,
+///   `select_control_point`, `select_flat`, `select_recursive`), canvas
+///   click-select in `renderer.rs`, and (Swift) layers-panel row select +
+///   tool-change selection restore.
+/// - `PreviewReapply` — 3 Rust / 3 Swift sites: the dialog-preview transform
+///   applies (`scale_apply` / `rotate_apply` / `shear_apply` in
+///   `effects.rs`), written out-of-band off the preview snapshot; only the
+///   CONFIRM path journals (OP_LOG.md §8.4).
+/// - `LiveDrag` — 4 Rust / 4 Swift sites: per-tick writes inside a drag —
+///   artboard move/resize live-drag (`artboard_translate_from_preview` /
+///   `artboard_resize_apply`, idempotent restore+re-apply per mousemove) and
+///   the per-tick color apply during a picker drag
+///   (`set_selection_fill_live` / `set_selection_stroke_live`); undo is
+///   captured once at the gesture boundary.
+/// - `TestOnly` — test-fixture seeding (46 Rust / 64 Swift test-file sites at
+///   freeze, routed via the `#[cfg(test)]` [`Model::set_document_for_test`]
+///   helper); production code can never pass it (debug-asserted).
+///
+/// NOT variants, per the census: `ViewState` (zero production view-state
+/// writes go through this channel in either port — view state lives outside
+/// the `Document`), and `HistoryNav` (undo/redo write via their own
+/// paired-index path here and via the `didSet` chokepoint in Swift; neither
+/// port routes history navigation through this channel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonUndoableIntent {
+    /// The new document differs from the old ONLY in selection state
+    /// (debug-validated in [`Model::set_document_unbracketed`]).
+    Selection,
+    /// Dialog-preview re-apply off the captured preview snapshot; the
+    /// CONFIRM path journals separately.
+    PreviewReapply,
+    /// Per-tick write inside a drag gesture; undo is captured once at the
+    /// gesture boundary.
+    LiveDrag,
+    /// Test-fixture seeding. Unreachable from production: debug-asserted
+    /// against `cfg!(test)`.
+    TestOnly,
+}
+
 /// The target that drawing tools operate on. The default is the
 /// document's normal content; mask-editing mode switches the target
 /// to a specific element's mask subtree so new shapes land inside
@@ -86,6 +132,24 @@ pub struct Version {
     pub journal_head: usize,
     pub document: Document,
     pub id_index: IdIndex,
+}
+
+/// True iff `new` differs from `old` in AT MOST the `selection` field — the
+/// debug-only validation behind [`NonUndoableIntent::Selection`]. `Document`
+/// has no derived `PartialEq`, so every non-selection field is compared
+/// explicitly; `selected_layer` (the active-layer cursor) is deliberately
+/// NOT aligned away — no production Selection site writes it, and a future
+/// site that does should surface here for review. Only ever CALLED from a
+/// `debug_assert!` (debug/CI builds); compiled unconditionally because
+/// `debug_assert!` still type-checks its condition in release.
+fn differs_only_in_selection(old: &Document, new: &Document) -> bool {
+    old.layers == new.layers
+        && old.symbols == new.symbols
+        && old.selected_layer == new.selected_layer
+        && old.artboards == new.artboards
+        && old.artboard_options == new.artboard_options
+        && old.document_setup == new.document_setup
+        && old.print_preferences == new.print_preferences
 }
 
 /// Holds an immutable Document with undo/redo support.
@@ -318,8 +382,20 @@ impl Model {
     /// `debug_assert!(self.in_txn)` below is LIVE (OP_LOG.md Increment 1, enforced
     /// chokepoint): any undoable edit that skipped the transaction bracket fails
     /// the test suite, so the journal is complete by construction. Sanctioned
-    /// non-undoable writes use [`set_document_unbracketed`] instead, which never
-    /// asserts; self-bracketing mutators use [`edit_document`].
+    /// non-undoable writes use [`set_document_unbracketed`] instead (stating an
+    /// intent; it never asserts on the bracket); self-bracketing mutators use
+    /// [`edit_document`].
+    ///
+    /// Bracket-violation semantics (Arc 1 S1c, ratified 2026-07-22):
+    /// - debug/CI: the `debug_assert!` is the referee — a stray un-bracketed
+    ///   undoable write panics and fails the suite.
+    /// - release (`debug_assert!` stripped): the failure guarded here is a
+    ///   MISSING JOURNAL/UNDO CHECKPOINT, not byte corruption — the write
+    ///   itself executes correctly either way, and a release panic in wasm is
+    ///   a frozen tab. So the fall-through below logs loudly and
+    ///   self-brackets the stray write ([`edit_document`] semantics): the
+    ///   journal stays complete and the app survives. Swift `setDocument`
+    ///   mirrors both halves.
     pub fn set_document(&mut self, doc: Document) {
         debug_assert!(
             self.in_txn,
@@ -328,6 +404,20 @@ impl Model {
              non-undoable writes (selection, preview, live-drag, test setup) use \
              set_document_unbracketed.",
         );
+        #[cfg(not(debug_assertions))]
+        if !self.in_txn {
+            // Release fail-safe (S1c): log loudly, then self-bracket so the
+            // stray write still lands as a complete one-step transaction.
+            let msg = "jas: set_document called outside a transaction; \
+                       self-bracketing the stray write (journal-complete \
+                       fail-safe, see model.rs set_document)";
+            #[cfg(all(target_arch = "wasm32", feature = "web"))]
+            web_sys::console::error_1(&msg.into());
+            #[cfg(not(all(target_arch = "wasm32", feature = "web")))]
+            eprintln!("{msg}");
+            self.edit_document(doc);
+            return;
+        }
         self.write_document(doc);
     }
 
@@ -352,19 +442,64 @@ impl Model {
     }
 
     /// Committing write for sanctioned NON-undoable mutations — selection-only
-    /// and pure view-state changes, dialog-preview re-apply, and live drag
-    /// (OP_LOG.md §7/§8). Same effect as [`set_document`] but the distinct name
-    /// is what lets the live `in_txn` guard in [`set_document`] tell "deliberately
-    /// not undoable" from "forgot to open a transaction": this path never asserts.
-    /// ~53 call sites route the non-undoable writes here.
-    pub fn set_document_unbracketed(&mut self, doc: Document) {
+    /// changes, dialog-preview re-apply, and live drag (OP_LOG.md §7/§8). Same
+    /// effect as [`set_document`] but the distinct name is what lets the live
+    /// `in_txn` guard in [`set_document`] tell "deliberately not undoable" from
+    /// "forgot to open a transaction": this path never asserts on `in_txn`.
+    ///
+    /// Every caller states WHY the write is deliberately not undoable via
+    /// `intent` (see [`NonUndoableIntent`] for the frozen variant list and the
+    /// call-site census). Intents with a cheap invariant get debug-only teeth:
+    /// `TestOnly` is unreachable from production builds, and `Selection`
+    /// validates that the write really is selection-only. Both checks are
+    /// debug/CI-only (never promoted to release — the O(document) compare
+    /// shares the cost class of the existing debug id-index-rebuild gate).
+    pub fn set_document_unbracketed(&mut self, doc: Document, intent: NonUndoableIntent) {
+        match intent {
+            NonUndoableIntent::TestOnly => {
+                debug_assert!(
+                    cfg!(test),
+                    "NonUndoableIntent::TestOnly passed outside a test build: \
+                     production writes must use Selection / PreviewReapply / \
+                     LiveDrag (test code uses set_document_for_test).",
+                );
+            }
+            NonUndoableIntent::Selection => {
+                // Debug-only teeth: a Selection-intent write may change ONLY
+                // the `selection` field. Document has no derived PartialEq, so
+                // compare every other field explicitly (all are PartialEq).
+                debug_assert!(
+                    differs_only_in_selection(&self.document, &doc),
+                    "NonUndoableIntent::Selection write differs from the old \
+                     document outside selection state: reclassify the intent \
+                     (or bracket the edit) instead of widening Selection.",
+                );
+            }
+            NonUndoableIntent::PreviewReapply | NonUndoableIntent::LiveDrag => {}
+        }
         self.write_document(doc);
     }
 
-    /// The single committing write to `self.document`: incrementally update the
-    /// paired index (O(changed)), overwrite, gate `id_index == rebuild`, bump the
-    /// generation. Both [`set_document`] and [`set_document_unbracketed`] funnel
-    /// here so there is exactly one place document content is committed.
+    /// Test-fixture seeding write: the `#[cfg(test)]`-only front door to the
+    /// unbracketed channel, so the ~46 test-setup call sites carry no intent
+    /// churn and production code can never reach the `TestOnly` intent (the
+    /// helper does not exist outside test builds; the intent itself is
+    /// additionally debug-asserted against `cfg!(test)`).
+    #[cfg(test)]
+    pub fn set_document_for_test(&mut self, doc: Document) {
+        self.set_document_unbracketed(doc, NonUndoableIntent::TestOnly);
+    }
+
+    /// The committing write for every NON-HISTORY-NAV document mutation:
+    /// incrementally update the paired index (O(changed)), overwrite, gate
+    /// `id_index == rebuild`, bump the generation. [`set_document`],
+    /// [`edit_document`], [`set_document_unbracketed`], and
+    /// [`restore_preview_snapshot`] all funnel here. The invariant is "all
+    /// non-history-nav writes funnel through `write_document`" — NOT "exactly
+    /// one place writes `self.document`": [`undo`] / [`redo`] deliberately
+    /// bypass this funnel because they restore the SNAPSHOT-CARRIED paired
+    /// index in O(1) instead of recomputing it (and [`abort_txn`] rolls back
+    /// the same way).
     fn write_document(&mut self, doc: Document) {
         // Incrementally bring the index from the OLD document to the new one
         // (O(changed) via CoW `Rc::ptr_eq` diffing), instead of a full rebuild.
@@ -377,7 +512,7 @@ impl Model {
         self.document = doc;
         debug_assert!(
             self.id_index == rebuild_id_index(&self.document),
-            "id index diverged from rebuild after set_document",
+            "id index diverged from rebuild after write_document",
         );
         self.generation += 1;
     }
@@ -394,23 +529,11 @@ impl Model {
     /// Restore the preview snapshot if present. The captured document
     /// replaces the current one (no undo entry is pushed); the snapshot
     /// is left in place so subsequent restore calls remain idempotent.
-    /// No-op when no snapshot is captured.
+    /// No-op when no snapshot is captured. Funnels through
+    /// [`write_document`] like every other non-history-nav write.
     pub fn restore_preview_snapshot(&mut self) {
         if let Some(doc) = self.preview_doc_snapshot.clone() {
-            // Incremental update from the current document to the restored
-            // snapshot (same O(changed) diff as `set_document`); capture the
-            // old document before overwriting.
-            self.id_index = incremental_update_index(
-                std::mem::take(&mut self.id_index),
-                &self.document, // old (current)
-                &doc,           // new (restored snapshot)
-            );
-            self.document = doc;
-            debug_assert!(
-                self.id_index == rebuild_id_index(&self.document),
-                "id index diverged from rebuild after restore_preview_snapshot",
-            );
-            self.generation += 1;
+            self.write_document(doc);
         }
     }
 
@@ -1175,11 +1298,15 @@ mod tests {
         // transaction, so it does NOT mark the document modified. This is the
         // observable flip from the old generation/identity semantics, and the
         // correct behavior — selecting something should not dirty the file.
+        // Exercises the real channel (not the test helper) deliberately.
         let mut model = Model::default();
-        model.set_document_unbracketed(Document {
-            layers: vec![make_layer("L")],
-            ..Document::default()
-        });
+        model.set_document_unbracketed(
+            Document {
+                layers: vec![make_layer("L")],
+                ..Document::default()
+            },
+            NonUndoableIntent::TestOnly,
+        );
         assert!(!model.is_modified());
     }
 
@@ -1280,14 +1407,14 @@ mod tests {
         // set_document refreshes the index incrementally.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("a")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert!(model.id_index().get("a").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // A second clone -> mutate -> set_document keeps the index consistent.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("b")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert!(model.id_index().get("b").is_some());
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
     }
@@ -1381,7 +1508,7 @@ mod tests {
         let mut model = Model::default();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("ins")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "ins"), "inserted target resolves");
     }
@@ -1391,13 +1518,13 @@ mod tests {
         let mut model = Model::default();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("gm")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "gm"));
         // A second edit (delete) through set_document also stays consistent.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().clear();
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "gm"), "deleted target no longer resolves");
     }
@@ -1416,7 +1543,7 @@ mod tests {
             common: CommonProps { id: Some("g".into()), ..Default::default() },
         });
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(g));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // Replace the group wholesale via a CoW edit.
@@ -1427,7 +1554,7 @@ mod tests {
             common: CommonProps { id: Some("g2".into()), ..Default::default() },
         });
         doc2.layers[0].children_mut().unwrap()[0] = std::rc::Rc::new(g2);
-        model.set_document_unbracketed(doc2);
+        model.set_document_for_test(doc2);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "c"));
         assert!(!resolves(&model, "a") && !resolves(&model, "b"), "old subtree gone");
@@ -1441,7 +1568,7 @@ mod tests {
         for id in ["d1", "d2", "d3"] {
             doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect(id)));
         }
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
 
         // Select d1 and d3 (paths [0,0] and [0,2]) and delete them together.
@@ -1451,7 +1578,7 @@ mod tests {
             ElementSelection::all(vec![0, 2]),
         ];
         let after = doc2.delete_selection();
-        model.set_document_unbracketed(after);
+        model.set_document_for_test(after);
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(!resolves(&model, "d1") && !resolves(&model, "d3"), "both deleted");
         assert!(resolves(&model, "d2"), "untouched sibling survives");
@@ -1464,7 +1591,7 @@ mod tests {
         // Place an ided rect, then promote it to a master.
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("sym")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
 
         Controller::make_symbol(&mut model, &vec![0, 0], "sym", "inst1");
         assert_eq!(
@@ -1502,13 +1629,44 @@ mod tests {
     }
 
     #[test]
+    fn restore_preview_snapshot_funnels_through_write_document() {
+        // Funneling invariant (Arc 1 S1): restore_preview_snapshot routes
+        // through the single non-history-nav write funnel. Capture, mutate,
+        // restore -> the generation bumped, the carried index equals a fresh
+        // rebuild, and the document byte-equals the captured snapshot.
+        let mut model = Model::default();
+        model.capture_preview_snapshot();
+        let snap_json = document_to_test_json(model.document());
+        let snap_layers = model.document().layers.clone();
+        let snap_symbols = model.document().symbols.clone();
+
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("pvf")));
+        model.set_document_for_test(doc);
+        let gen_before_restore = model.generation();
+
+        model.restore_preview_snapshot();
+        assert!(model.generation() > gen_before_restore, "restore bumps the generation");
+        assert_eq!(
+            model.id_index(), &rebuild_id_index(model.document()),
+            "carried index equals a fresh rebuild after restore",
+        );
+        assert_eq!(
+            document_to_test_json(model.document()), snap_json,
+            "restored document byte-equals the captured snapshot",
+        );
+        assert_eq!(model.document().layers, snap_layers);
+        assert_eq!(model.document().symbols, snap_symbols);
+    }
+
+    #[test]
     fn incremental_restore_preview_snapshot_matches_rebuild() {
         let mut model = Model::default();
         // Capture a baseline, edit, then restore the snapshot.
         model.capture_preview_snapshot();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("pv")));
-        model.set_document_unbracketed(doc);
+        model.set_document_for_test(doc);
         assert!(resolves(&model, "pv"));
 
         model.restore_preview_snapshot();
@@ -1648,13 +1806,56 @@ mod tests {
         let g_b = b.generation();
 
         a.with_txn(|m| m.set_document(empty_doc()));
-        b.set_document_unbracketed(empty_doc());
+        // Exercises the real channel (not the test helper) deliberately.
+        b.set_document_unbracketed(empty_doc(), NonUndoableIntent::TestOnly);
 
         assert_eq!(a.document().layers.len(), b.document().layers.len());
         assert_eq!(a.generation() - g_a, b.generation() - g_b, "both bump generation by one");
         assert_eq!(b.id_index(), &rebuild_id_index(b.document()));
         assert!(!b.can_undo(), "unbracketed write pushes no checkpoint");
         assert!(a.can_undo(), "bracketed write pushes a checkpoint");
+    }
+
+    #[test]
+    fn unbracketed_write_never_journals_and_never_advances_the_cursor() {
+        // Rust mirror of Swift's `setDocumentUnbracketedNeverAsserts` pin
+        // (WriteChokepointTests.swift): an unbracketed write never journals,
+        // never advances journal_head, and leaves undo unavailable — the
+        // property that lets the live guard tell "deliberately not undoable"
+        // from "forgot a transaction".
+        let mut model = Model::default();
+        let head = model.journal_head();
+        let len = model.journal().len();
+        model.set_document_unbracketed(empty_doc(), NonUndoableIntent::TestOnly);
+        assert_eq!(model.document().layers.len(), 0, "the write landed");
+        assert_eq!(model.journal().len(), len, "never journals");
+        assert_eq!(model.journal_head(), head, "never advances journal_head");
+        assert!(!model.can_undo(), "leaves undo unavailable");
+        assert!(!model.is_modified(), "moves no transaction, so not modified");
+    }
+
+    #[test]
+    fn selection_intent_allows_a_selection_only_write() {
+        use crate::document::document::ElementSelection;
+        let mut model = Model::default();
+        let mut doc = model.document().clone();
+        doc.selection = vec![ElementSelection::all(vec![0])];
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
+        assert_eq!(model.document().selection.len(), 1);
+        assert!(!model.can_undo());
+    }
+
+    #[test]
+    #[should_panic(expected = "outside selection state")]
+    fn selection_intent_with_content_change_panics() {
+        // The Selection teeth (Arc 1 S1): a Selection-intent write that also
+        // changes document content trips the debug-only validation, so a
+        // misclassified call site fails the suite instead of silently hiding
+        // an unjournaled content edit behind the selection channel.
+        let mut model = Model::default();
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("sneak")));
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
     }
 
     // --- Transaction journal (OP_LOG.md Increment 2, sub-step 2.1) ---------

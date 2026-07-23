@@ -1,0 +1,256 @@
+{
+  "_doc": [
+    "Corpus-completeness manifest (Arc 1 S4). One row per conformance-corpus",
+    "family: every test_fixtures/ subdirectory plus every workspace/tests/",
+    "entry. scripts/check_corpus_manifest.py enforces it in CI (the",
+    "workspace-json-fresh lane): required consumers present, active-port",
+    "symmetry where declared, no unknown families, no orphaned fixtures.",
+    "kind: source = hand-authored inputs; compiled = generated from a source",
+    "corpus or a canonical generator; fixtures = driver cases + pinned",
+    "goldens. required_consumers is the BLOCKING set (POLICY.md #1: active",
+    "ports rust+swift, the reference interpreter, and the scripts/ gates;",
+    "the frozen OCaml/Python-Qt ports run at the five-port-parity tag and",
+    "are deliberately untracked here). port_symmetry: the rust and swift",
+    "claimed sets (after the transitive data-reference closure) must be",
+    "identical for the family. claim_style is documentation of HOW each",
+    "consumer registers fixtures — the checker's extraction rules implement",
+    "exactly these conventions."
+  ],
+  "families": {
+    "test_fixtures/actions": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "name-list (ACTION_FIXTURES in src/cross_language_test.rs) + data references",
+        "swift": "name-list (actionFixtures in CrossLanguageTests.swift) + data references"
+      },
+      "notes": "The ACTION-seam corpus (dispatch_action / dispatchYamlAction). Goldens (*_expected.json) and setup SVGs are claimed transitively via expected_json/setup_svg data references. Second branches of the toggle_all_layers_* actions (all-invisible->preview, all-outline->preview, all-locked->unlock) were reference-only pins (workspace/tests/phase3/) until S4 added the *_all_* port-side fixtures; the remaining phase3 panel-state-driven scenarios stay reference-only pending a port-side panel-seeding mechanism (a named future decision)."
+    },
+    "test_fixtures/algorithms": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift", "scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "rust": "path literals (cross_language_test.rs + module-scattered tests, e.g. geometry/tspan.rs)",
+        "swift": "path literals (AlignFixtureTests full paths; TspanPrimitivesTests loadFixture)",
+        "scripts": "ALGORITHMS dict in cross_language_algorithms.py (name -> algorithms/<name>.json)"
+      },
+      "notes": "Port symmetry is deliberately NOT machine-checked per registration list here: the 14-algorithm matrix is gated across both active ports by scripts/cross_language_algorithms.py (each port's roundtrip binary runs every fixture), while the in-port unit registrations legitimately differ (Rust natively gates the pane/panel/menu vectors; Swift natively gates align + the tspan primitives)."
+    },
+    "test_fixtures/artboards": {
+      "kind": "fixtures",
+      "required_consumers": ["reference"],
+      "port_symmetry": false,
+      "claim_style": {
+        "reference": "os.path.join segments (test_artboards_effects.py)"
+      },
+      "notes": "Reference-only BY DESIGN: the default-seeded artboard scenario drives interpreter panel/effect state that the ports cannot seed headlessly today; port-side panel-seeding is a named future decision. The ports gate artboard DOCUMENT semantics via the operations corpus (artboard_*.json) instead."
+    },
+    "test_fixtures/concept_constraints": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (tests/cross_language_test.rs)",
+        "swift": "path literal (CrossLanguageTests.swift)",
+        "reference": "os.path.join segments (test_concept_constraints.py)",
+        "scripts": "compile/check freshness pair (compile_concept_constraints_corpus.py)"
+      },
+      "notes": "conformance.json compiled from workspace/tests/concept_constraints.yaml; the check_*.sh freshness gate recompiles and byte-compares."
+    },
+    "test_fixtures/concept_fitters": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (tests/cross_language_test.rs)",
+        "swift": "path literal (CrossLanguageTests.swift)",
+        "reference": "os.path.join segments (test_concept_fitters.py)",
+        "scripts": "compile/check freshness pair (compile_concept_fitters_corpus.py)"
+      },
+      "notes": "conformance.json compiled from workspace/tests/concept_fitters.yaml."
+    },
+    "test_fixtures/concept_operations": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (tests/cross_language_test.rs)",
+        "swift": "path literal (CrossLanguageTests.swift)",
+        "reference": "os.path.join segments (test_concept_operations.py)",
+        "scripts": "compile/check freshness pair (compile_concept_operations_corpus.py)"
+      },
+      "notes": "conformance.json compiled from workspace/tests/concept_operations.yaml."
+    },
+    "test_fixtures/concepts": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (tests/cross_language_test.rs)",
+        "swift": "path literal (CrossLanguageTests.swift)",
+        "reference": "os.path.join segments (test_concepts.py)",
+        "scripts": "compile/check freshness pair (compile_concept_corpus.py)"
+      },
+      "notes": "conformance.json compiled from workspace/concepts/*.yaml + workspace/tests/concepts.yaml."
+    },
+    "test_fixtures/expected": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "rust": "name-lists (json/binary/svg round-trip arrays) + assert_svg_parse helper calls + path literals",
+        "swift": "name-lists (jsonRoundtripAllExpected / binaryRoundtripAllExpected / binaryReadPythonFixtures) + assertSvgParse/assertWorkspaceFixture helper calls + path literals",
+        "scripts": "commutativity FIXTURE_NAMES + _golden() calls + structural-golden checkers (check_menu_structure.py, check_toolbar_structure.py)"
+      },
+      "notes": "Rust-authored canonical goldens (parse/roundtrip expectations, .bin byte pins, dependency-index and workspace-layout goldens, structural goldens). Port symmetry is hand-maintained per name-list (the S5-symmetrized json/binary/svg arrays) rather than machine-checked: a per-file symmetry rule would false-red the legitimately single-consumer members (menu_structure.json and toolbar_structure.json are scripts-only structural goldens; dup_id_import.json is parse-only). Orphan detection here is REAL (no glob claims this directory)."
+    },
+    "test_fixtures/expressions": {
+      "kind": "compiled",
+      "required_consumers": ["rust", "swift", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (tests/cross_language_test.rs)",
+        "swift": "path literal (CrossLanguageTests.swift)",
+        "scripts": "compile/check freshness pair (compile_expr_corpus.py / check_expr_corpus.sh)"
+      },
+      "notes": "conformance.json compiled from workspace/tests/expressions.yaml. The reference gates the SOURCE yaml directly (test_expr.py), not this compiled artifact — so 'reference' is intentionally not required here but IS required on the workspace/tests/expressions.yaml row."
+    },
+    "test_fixtures/gestures": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "name-list (GESTURE_FIXTURES) + data references",
+        "swift": "name-list (gestureFixtures) + data references"
+      },
+      "notes": "The canvas-tool-seam corpus (press/move/release through YamlTool). Goldens and setup SVGs claimed transitively."
+    },
+    "test_fixtures/keys": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "name-list (KEY_FIXTURES) + data references",
+        "swift": "name-list (keyFixtures) + data references"
+      },
+      "notes": "The key->action resolution corpus; goldens claimed transitively via expected_json."
+    },
+    "test_fixtures/operations": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literals (run_operation_fixture calls + txn/drag_coalesce/recorded literals) + data references",
+        "swift": "runOperationFixture helper calls + path literals + data references"
+      },
+      "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
+    },
+    "test_fixtures/production_capture": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literals (production_capture/eye_demo*.json) + data references",
+        "swift": "path literals + data references"
+      },
+      "notes": "The production run_effects capture pins (OP_LOG.md section 9, 3b-B). Journal/document/re-derivation goldens are claimed transitively via the root-relative expected_*_json fields."
+    },
+    "test_fixtures/svg": {
+      "kind": "source",
+      "required_consumers": ["rust", "swift", "scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "rust": "DIRECTORY GLOB (tests/cross_language_test.rs json_roundtrip_all_fixtures reads every svg/*.svg) + name-lists + data references",
+        "swift": "name-lists (svgRoundtripAllFixtures) + assertSvgParse calls + data references",
+        "scripts": "commutativity FIXTURE_NAMES"
+      },
+      "notes": "Hand-authored SVG inputs. Rust's roundtrip test GLOBS the whole directory, so this family's orphan detection is VACUOUS by construction: any stray .svg is auto-exercised by the glob and can never be flagged orphaned here. Deletions must rely on the sibling expected/ family's REAL orphan signal (that is exactly how named_elements.svg was caught: its expected/named_elements.json partner was orphaned) plus review. Port symmetry not machine-checked: Swift's parse/roundtrip name lists are hand-symmetrized with Rust's (S5), while setup SVGs are shared via data references."
+    },
+    "test_fixtures/workspace_operations": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literals (run_workspace_operation_fixture calls) + data references",
+        "swift": "runWorkspaceOperationFixture helper calls + data references"
+      },
+      "notes": "The layout-op corpus (panel/pane vocabulary). Per-case goldens claimed transitively via expected_json; layout setups live in expected/ (the setup field) and are claimed transitively there."
+    },
+    "workspace/tests/concept_constraints.yaml": {
+      "kind": "source",
+      "required_consumers": ["scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "scripts": "compile source (compile_concept_constraints_corpus.py + check_concept_constraints_corpus.sh)"
+      },
+      "notes": "Human-authored source; its compiled conformance.json is the artifact the ports and the reference gate."
+    },
+    "workspace/tests/concept_fitters.yaml": {
+      "kind": "source",
+      "required_consumers": ["scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "scripts": "compile source (compile_concept_fitters_corpus.py + check_concept_fitters_corpus.sh)"
+      },
+      "notes": "Human-authored source; compiled artifact gated downstream."
+    },
+    "workspace/tests/concept_operations.yaml": {
+      "kind": "source",
+      "required_consumers": ["scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "scripts": "compile source (compile_concept_operations_corpus.py + check_concept_operations_corpus.sh)"
+      },
+      "notes": "Human-authored source; compiled artifact gated downstream."
+    },
+    "workspace/tests/concepts.yaml": {
+      "kind": "source",
+      "required_consumers": ["scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "scripts": "compile source (compile_concept_corpus.py + check_concept_corpus.sh)"
+      },
+      "notes": "Human-authored source; compiled artifact gated downstream."
+    },
+    "workspace/tests/expressions.yaml": {
+      "kind": "source",
+      "required_consumers": ["reference", "scripts"],
+      "port_symmetry": false,
+      "claim_style": {
+        "reference": "os.path.join segments (test_expr.py runs the yaml directly)",
+        "scripts": "compile source (compile_expr_corpus.py + check_expr_corpus.sh)"
+      },
+      "notes": "The expression-language corpus source. The reference interpreter is the executable spec and runs the yaml directly; the ports run the compiled test_fixtures/expressions/conformance.json."
+    },
+    "workspace/tests/gradient_primitives.yaml": {
+      "kind": "source",
+      "required_consumers": ["reference"],
+      "port_symmetry": false,
+      "claim_style": {
+        "reference": "os.path.join segments (test_gradient_primitives.py)"
+      },
+      "notes": "The gradient_tile / gradient_slider widget-primitive exercise fixture. Until S4 its only consumer was the NON-GATING flask reference renderer (jas_flask/tests/test_renderer.py) — i.e. no blocking consumer at all; test_gradient_primitives.py now structurally validates every gradient/stop and evaluates what the reference evaluator covers. Widget RENDERING of gradient_tile/gradient_slider remains unvalidated by any blocking consumer (the reference interpreter has no renderer) — an honest, known limit."
+    },
+    "workspace/tests/phase3": {
+      "kind": "source",
+      "required_consumers": ["reference"],
+      "port_symmetry": false,
+      "claim_style": {
+        "reference": "DIRECTORY GLOB (test_phase3_fixtures.py globs *.yaml)"
+      },
+      "notes": "Reference-only layer-action scenarios. The glob is a DIRECTORY-level claim: orphan detection inside it is VACUOUS (any stray yaml is silently exercised, none can be flagged), and the consumer itself silently passes when the directory is missing — the corpus gate independently asserts the directory exists and is non-empty. Coverage honesty: the toggle_all_layers_* second branches pinned here were reference-only until S4 added port-side actions fixtures (toggle_all_layers_*_all_*.json); the panel-state-driven scenarios (delete_layer_selection_two_layers, duplicate_layer_selection_one_layer, new_layer_with_selection) REMAIN reference-only pending a port-side panel-seeding mechanism — a named future decision."
+    },
+    "workspace/tests/set_effect": {
+      "kind": "source",
+      "required_consumers": ["reference"],
+      "port_symmetry": false,
+      "claim_style": {
+        "reference": "DIRECTORY GLOB (test_set_effect.py globs *.yaml)"
+      },
+      "notes": "Reference-only BY DESIGN: the set-effect matrix pins the interpreter's `set:` semantics (typing, nullability, shadowing, panel routing) at the spec level; the ports exercise set: through the panel/action corpora rather than this matrix. Glob claim — orphan detection vacuous, directory-existence asserted by the gate."
+    }
+  },
+  "known_gaps": []
+}

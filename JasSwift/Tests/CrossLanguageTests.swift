@@ -422,7 +422,7 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
             dy: op["dy"]!.value as! Double)
     case "delete_selection":
         let newDoc = model.document.deleteSelection()
-        model.setDocumentUnbracketed(newDoc)
+        model.setDocumentForTest(newDoc)
     case "snapshot":
         model.snapshot()
     case "undo":
@@ -610,6 +610,16 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("controller_ops.json")
 }
 
+/// Tspan character-attribute writes (TSPAN.md "Character attribute writes"):
+/// `set_character_attribute` over a mid-word range, the whole range, and a
+/// merge-inducing write, each byte-matching the Rust-authored golden and
+/// replaying through the checkpoint_equivalence gate. Rust registered
+/// tspan_ops.json long before this port grew the arm — exactly the gap the
+/// S4 corpus gate's port-symmetry rule exists to catch.
+@Test func operationTspanOps() throws {
+    try runOperationFixture("tspan_ops.json")
+}
+
 /// Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol, place_instance,
 /// detach, redefine. Each setup parses through the P1 SVG <defs> codec, runs
 /// the op, and pins the canonical JSON all apps must reproduce.
@@ -628,8 +638,11 @@ private func recordedCanonicalDocument() -> Document {
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
 // the ORACLE: each replays through the Swift `opApply` and byte-matches its
 // golden (documentToTestJson), exactly as the pre-existing operations fixtures
-// do, plus the checkpoint_equivalence replay gate. Mirrors the Rust
-// cross_language_test.rs registrations.
+// do, plus the checkpoint_equivalence replay gate. The claim that this file's
+// operations registrations match Rust's is no longer aspirational comment-ware:
+// scripts/check_corpus_manifest.py (the S4 corpus gate, run in CI) enforces
+// Rust/Swift registration symmetry for the operations family — it is what
+// caught tspan_ops.json registered in Rust only.
 
 // P1 — print-config setters (8 verbs). The single source fixture
 // print_config_setters.json carries 5 sub-cases (document_setup,
@@ -2323,6 +2336,11 @@ private let gestureFixtures = [
     // bridged the live tool used fit_error=0 (no smoothing) and dropped
     // the fill. See PAINTBRUSH_TOOL.md.
     "paintbrush_paint_fill.json",
+    "recorded_rect.json",
+    "recorded_rect_panzoom.json",
+    "recorded_blob_dot.json",
+    "recorded_blob_merge.json",
+    "recorded_blob_separate.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -2331,32 +2349,34 @@ private let gestureFixtures = [
 /// SAME path the live canvas uses, NOT a test-only store poke.
 ///
 /// `fill_color` / `stroke_color` map onto the model's default fill / stroke
-/// (where the Color panel writes them); the blob-brush tip params and stroke
-/// brush slug/overrides ride `model.stateStore` (where the Brushes / blob
-/// options panels write them). Only the allowlisted bridged keys are honored.
-/// Mirrors Rust's `tool.sync_global_state(app_state)` precondition in
-/// `run_gesture_model`.
+/// (where the Color panel writes them) by the exact INVERSE of the
+/// production bridge: `syncAppState` publishes `defaultFill ?? "#ffffff"`,
+/// so a fixture value of `"#ffffff"` means "the nil-fallback" and stages
+/// NOTHING — staging it as a real white defaultFill would make fall-through
+/// commits (rect.yaml's deliberate fill/stroke omission) diverge from the
+/// live app, which the S2 recorder pilot caught byte-for-byte. (A recording
+/// made after genuinely picking white is refused by the record-stop
+/// fidelity check on the Rust side, so the sentinel is unambiguous in the
+/// corpus.) The remaining bridged keys ride `model.stateStore` (where the
+/// Brushes / blob / wand options panels write them); the allowlist is the
+/// production `bridgedStateKeys` set. Mirrors Rust's
+/// `tool.sync_global_state(app_state)` precondition in `run_gesture_model`.
 private func applyGestureAppState(_ appState: [String: Any], to model: Model) {
     for (k, v) in appState {
         switch k {
         case "fill_color":
-            if let hex = v as? String, let c = Color.fromHex(hex) {
+            if let hex = v as? String, hex != "#ffffff", let c = Color.fromHex(hex) {
                 model.defaultFill = Fill(color: c)
             }
         case "stroke_color":
-            if let hex = v as? String, let c = Color.fromHex(hex) {
+            if let hex = v as? String, hex != "#ffffff", let c = Color.fromHex(hex) {
                 model.defaultStroke = Stroke(color: c)
             }
-        case "stroke_brush", "stroke_brush_overrides",
-             "blob_brush_size", "blob_brush_angle", "blob_brush_roundness",
-             "blob_brush_fidelity", "blob_brush_keep_selected",
-             "blob_brush_merge_only_with_selection",
-             "paintbrush_fidelity", "paintbrush_fill_new_strokes",
-             "paintbrush_keep_selected", "paintbrush_edit_selected_paths",
-             "paintbrush_edit_within":
-            model.stateStore.set(k, v)
         default:
-            break // non-bridged keys are ignored (allowlist)
+            if bridgedStateKeys.contains(k), !(v is NSNull) {
+                model.stateStore.set(k, v)
+            }
+            // non-bridged keys are ignored (allowlist)
         }
     }
 }
@@ -2635,6 +2655,15 @@ private let actionFixtures = [
     "toggle_all_layers_visibility.json",
     "toggle_all_layers_lock.json",
     "toggle_all_layers_outline.json",
+    // S4 second-branch coverage: the toggle_all_layers_* verbs branch on the
+    // current uniform state (any-visible->invisible vs all-invisible->preview,
+    // etc.). SVG does not serialize visibility/lock, so each fixture reaches
+    // the second branch by dispatching the SAME verb twice on the production
+    // path. Mirrors the Rust ACTION_FIXTURES additions (symmetry enforced by
+    // scripts/check_corpus_manifest.py).
+    "toggle_all_layers_visibility_all_invisible.json",
+    "toggle_all_layers_lock_all_locked.json",
+    "toggle_all_layers_outline_all_outline.json",
     "new_layer.json",
     "make_compound_shape.json",
     "align.json",
