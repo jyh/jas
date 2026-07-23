@@ -1319,7 +1319,7 @@ mod tests {
             ],
             ..Document::default()
         };
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
 
         let ctx = build_menu_ctx(&st);
         let eval = |e: &str| crate::interpreter::expr::eval(e, &ctx).to_bool();

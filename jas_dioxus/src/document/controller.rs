@@ -9,7 +9,7 @@ use std::rc::Rc;
 use crate::document::document::{
     Document, ElementPath, ElementSelection, Selection, SelectionKind, SortedCps,
 };
-use crate::document::model::Model;
+use crate::document::model::{Model, NonUndoableIntent};
 use crate::geometry::element::{
     control_point_count, control_points, move_control_points,
     move_path_handle, with_fill, with_stroke, with_width_points,
@@ -726,14 +726,14 @@ impl Controller {
         }
         let mut new_doc = doc;
         new_doc.selection = entries;
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
     }
 
     /// Set the document selection directly.
     pub fn set_selection(model: &mut Model, selection: Selection) {
         let mut doc = model.document().clone();
         doc.selection = selection;
-        model.set_document_unbracketed(doc);
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
     }
 
     /// Clear the document selection. Shorthand for `set_selection(model, vec![])`.
@@ -753,7 +753,7 @@ impl Controller {
         sel.push(ElementSelection::all(path.clone()));
         let mut new_doc = doc;
         new_doc.selection = sel;
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
     }
 
     /// Toggle a path in or out of the selection. If present, removes the
@@ -769,7 +769,7 @@ impl Controller {
         }
         let mut new_doc = doc;
         new_doc.selection = sel;
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
     }
 
     /// Select an element by path.
@@ -804,20 +804,20 @@ impl Controller {
                     }
                     let mut new_doc = doc;
                     new_doc.selection = entries;
-                    model.set_document_unbracketed(new_doc);
+                    model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
                     return;
                 }
         }
         let mut new_doc = doc;
         new_doc.selection = vec![ElementSelection::all(path.clone())];
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
     }
 
     /// Select a single control point on an element.
     pub fn select_control_point(model: &mut Model, path: &ElementPath, index: usize) {
         let mut doc = model.document().clone();
         doc.selection = vec![ElementSelection::partial(path.clone(), [index])];
-        model.set_document_unbracketed(doc);
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
     }
 
     /// Move all selected control points by (dx, dy).
@@ -897,7 +897,7 @@ impl Controller {
     /// `set_active_color`, so the drag must not push checkpoints.
     pub fn set_selection_fill_live(model: &mut Model, fill: Option<Fill>) {
         let new_doc = Self::fill_applied(model.document(), fill);
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
     }
 
     /// Set the stroke of all selected elements (undoable, self-bracketing).
@@ -910,7 +910,7 @@ impl Controller {
     /// `set_selection_fill_live`).
     pub fn set_selection_stroke_live(model: &mut Model, stroke: Option<Stroke>) {
         let new_doc = Self::stroke_applied(model.document(), stroke);
-        model.set_document_unbracketed(new_doc);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
     }
 
     /// Set the `fill_gradient` field of every selected element to the
@@ -2287,7 +2287,7 @@ fn select_flat(
     };
     let mut new_doc = doc;
     new_doc.selection = new_sel;
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
 }
 
 /// Recursive selection: traverse the full element tree, calling
@@ -2341,7 +2341,7 @@ fn select_recursive(
     };
     let mut new_doc = doc;
     new_doc.selection = new_sel;
-    model.set_document_unbracketed(new_doc);
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
 }
 
 /// Combine two selections by XOR-ing per-element CP membership.
@@ -3794,7 +3794,7 @@ mod tests {
         master.common_mut().id = Some("m1".into());
         let mut seed = model.document().clone();
         seed.symbols.push(master);
-        model.set_document_unbracketed(seed);
+        model.set_document_for_test(seed);
 
         Controller::place_instance(&mut model, "m1", "i2");
         let doc = model.document();
@@ -4083,7 +4083,7 @@ mod tests {
             model.document().get_element(&vec![0, 0]).unwrap(),
             red.clone(),
         );
-        model.set_document_unbracketed(model.document().replace_element(&vec![0, 0], new_ref));
+        model.set_document_for_test(model.document().replace_element(&vec![0, 0], new_ref));
         Controller::detach(&mut model, &vec![0, 0]);
         if let Element::Rect(r) = model.document().get_element(&vec![0, 0]).unwrap() {
             assert_eq!(r.fill, red);
@@ -4565,7 +4565,7 @@ mod tests {
             new_elem.common_mut().mask = None;
             new_doc = new_doc.replace_element(&first_path, new_elem);
         }
-        model.set_document_unbracketed(new_doc);
+        model.set_document_for_test(new_doc);
         assert!(first_mask(model.document()).is_none());
         assert!(!selection_has_mask(model.document()),
                 "mixed selection counts as no-mask");

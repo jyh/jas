@@ -1159,7 +1159,7 @@ mod tests {
             st.tabs.push(TabState::new());
             st.active_tab = 0;
         }
-        st.tabs[st.active_tab].model.set_document_unbracketed(doc);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
         st
     }
 
