@@ -44,7 +44,8 @@
           {
             "op": "wrap_in_layer",
             "paths": 7,
-            "name": "Layer 1"
+            "name": "Layer 1",
+            "expected_error": "BadParamType"
           }
         ]
       }

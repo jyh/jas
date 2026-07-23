@@ -82,8 +82,8 @@
       {
         "name": "print_options_confirm",
         "ops": [
-          { "op": "set_document_setup_field", "field": "bleed_top", "value": true },
-          { "op": "set_print_preferences_field", "field": "printer_name", "value": 7 },
+          { "op": "set_document_setup_field", "field": "bleed_top", "value": true, "expected_error": "BadParamType" },
+          { "op": "set_print_preferences_field", "field": "printer_name", "value": 7, "expected_error": "BadParamType" },
           { "op": "set_document_setup_field", "field": "bleed_left", "value": 4 }
         ]
       }

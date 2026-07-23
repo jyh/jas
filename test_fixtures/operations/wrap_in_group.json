@@ -41,7 +41,8 @@
         "ops": [
           {
             "op": "wrap_in_group",
-            "paths": "not-an-array"
+            "paths": "not-an-array",
+            "expected_error": "BadParamType"
           }
         ]
       }

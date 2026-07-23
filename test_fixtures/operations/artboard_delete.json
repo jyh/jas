@@ -19,7 +19,7 @@
       {
         "name": "delete_artboard_from_dialog",
         "ops": [
-          { "op": "delete_artboard_by_id", "id": "nope" }
+          { "op": "delete_artboard_by_id", "id": "nope", "expected_error": "MissingTarget" }
         ]
       }
     ],

@@ -65,7 +65,7 @@
       {
         "name": "new_layer",
         "ops": [
-          { "op": "insert_at", "parent_path": [], "index": 1 }
+          { "op": "insert_at", "parent_path": [], "index": 1, "expected_error": "MissingParam" }
         ]
       }
     ],

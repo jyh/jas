@@ -24,7 +24,8 @@
         "ops": [
           {
             "op": "unpack_group_at",
-            "path": [0, 0]
+            "path": [0, 0],
+            "expected_error": "MissingTarget"
           }
         ]
       }
@@ -40,7 +41,8 @@
         "ops": [
           {
             "op": "unpack_group_at",
-            "path": [0, 5]
+            "path": [0, 5],
+            "expected_error": "MissingTarget"
           }
         ]
       }
@@ -56,7 +58,8 @@
         "ops": [
           {
             "op": "unpack_group_at",
-            "path": "nope"
+            "path": "nope",
+            "expected_error": "BadParamType"
           }
         ]
       }

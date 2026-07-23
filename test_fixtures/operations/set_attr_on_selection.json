@@ -33,7 +33,7 @@
     "setup_svg": "path_with_id.svg",
     "ops": [
       {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
-      {"op": "set_attr_on_selection", "attr": "fill", "value": "red"}
+      {"op": "set_attr_on_selection", "attr": "fill", "value": "red", "expected_error": "BadParamType"}
     ],
     "expected_json": "set_attr_on_selection_unknown_attr_skips_expected.json"
   },
@@ -42,7 +42,7 @@
     "setup_svg": "path_with_id.svg",
     "ops": [
       {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
-      {"op": "set_attr_on_selection", "attr": "stroke_brush"}
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "expected_error": "MissingParam"}
     ],
     "expected_json": "set_attr_on_selection_missing_value_skips_expected.json"
   }
