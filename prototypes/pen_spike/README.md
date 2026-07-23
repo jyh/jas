@@ -84,7 +84,8 @@ type constants** live in `UI::Controls`.
 ## How the Captain runs it — the next VM desk-sitting
 
 Two commands, at an **interactive** Windows session (not over ssh — window
-creation needs a desktop). Build first (see below), then:
+creation needs a desktop). Build first (see below), then, from
+`C:\Users\jyh\projects\claude\jas\prototypes\pen_spike`:
 
 ```bat
 :: 1. Truth-check the input hardware. With the Wacom attached you should see a
@@ -149,11 +150,15 @@ sufficient, for the sub-20 ms goal.
 The `arc2-prototypes` branch is not pushed, so sources are transferred, not
 `git clone`d — the repo copy stays authoritative.
 
+VM build trees mirror the Mac layout under
+`C:\Users\jyh\projects\claude\jas\prototypes\` (this rig at
+`...\prototypes\pen_spike`, the GPU smoke at `...\prototypes\wgpu_smoke`).
+
 ```bash
 # From the Mac repo (prototypes/):
 tar -cf - -C pen_spike Cargo.toml src | \
-  ssh -o BatchMode=yes win-vm 'tar -xf - -C ~/pen_spike_build && \
-  cd ~/pen_spike_build && cargo build --release'
+  ssh -o BatchMode=yes win-vm 'tar -xf - -C ~/projects/claude/jas/prototypes/pen_spike && \
+  cd ~/projects/claude/jas/prototypes/pen_spike && cargo build --release'
 ```
 
 ## CLI
