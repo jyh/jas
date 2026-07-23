@@ -3265,6 +3265,30 @@ mod tests {
         assert_eq!(t.tspans[3].rotate, Some(90.0));
     }
 
+    /// TSPAN.md specifies nested-tspan flattening on import (unimplemented
+    /// in the active ports); leading-whitespace-in-tspan also diverges
+    /// (Rust trims, Swift preserves) and is corpus-unexercised;
+    /// implementation deferred to the Paragraph-panel phase.
+    ///
+    /// This probe pins CURRENT behavior, not the spec: the Rust parser
+    /// reads only the direct character data of the outer <tspan> and DROPS
+    /// the nested <tspan>'s content ("b"), yielding one tspan "a". Swift's
+    /// mirror probe (SvgTests.swift `nestedTspanCurrentBehaviorProbe`)
+    /// observes "ab" — the active ports diverge on nested-tspan input
+    /// today, which is why no cross-language fixture carries one.
+    #[test]
+    fn nested_tspan_current_behavior_probe() {
+        let svg = r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text y="20" font-size="10"><tspan>a<tspan>b</tspan></tspan></text></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(
+            t.tspans[0].content, "a",
+            "current Rust behavior: the nested tspan's content is dropped"
+        );
+    }
+
     #[test]
     fn svg_phase1b1_attrs_round_trip_through_document() {
         // Phase 1b1: a wrapper tspan carrying the 5 remaining
