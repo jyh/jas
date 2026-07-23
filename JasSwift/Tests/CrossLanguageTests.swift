@@ -70,6 +70,10 @@ private func assertSvgRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // handling round-trip through the SVG codec. Mirrors the Rust
+        // svg_roundtrip_all_fixtures registration.
+        "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
         // REFERENCE_GRAPH.md Phase 2a: live element SVG codec. A reference
         // round-trips as <use href="#id">; a compound as
         // <g data-jas-live="compound_shape" data-jas-operation="...">.
@@ -99,6 +103,9 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParsePathAllCommands() { assertSvgParse("path_all_commands") }
 @Test func svgParseTextBasic() { assertSvgParse("text_basic") }
 @Test func svgParseTextPathBasic() { assertSvgParse("text_path_basic") }
+@Test func svgParseTextWithTspans() { assertSvgParse("text_with_tspans") }
+@Test func svgParseTextXmlSpacePreserve() { assertSvgParse("text_xml_space_preserve") }
+@Test func svgParseTextPathWithTspans() { assertSvgParse("text_path_with_tspans") }
 @Test func svgParseGroupNested() { assertSvgParse("group_nested") }
 @Test func svgParseTransformTranslate() { assertSvgParse("transform_translate") }
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
@@ -254,6 +261,10 @@ private func assertJsonRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // content round-trip through test_json. Mirrors the Rust
+        // json_roundtrip_all_expected registration.
+        "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
         "element_ids",
         // REFERENCE_GRAPH.md Phase 1a: live element codec (compound now
         // emits `operation`; reference emits kind+target). live_compound_id
@@ -294,6 +305,11 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // content round-trip through the binary codec (self-roundtrip only;
+        // no Python-generated .bin exists for these). Mirrors the Rust
+        // binary_roundtrip_all_expected registration.
+        "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
         // Live elements round-trip through binary (REFERENCE_GRAPH.md Phase 2b).
         // live_compound_id additionally carries the compound's own id (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",

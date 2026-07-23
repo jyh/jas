@@ -84,6 +84,10 @@ mod tests {
             "circle_basic", "ellipse_basic",
             "polyline_basic", "polygon_basic", "path_all_commands",
             "text_basic", "text_path_basic",
+            // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+            // content round-trip through test_json. Mirrors the Swift
+            // jsonRoundtripAllExpected registration.
+            "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             // Stable identity: elements carrying an `id` must survive the
@@ -123,7 +127,11 @@ mod tests {
             "circle_basic", "ellipse_basic",
             "polyline_basic", "polygon_basic", "path_all_commands",
             "text_basic", "text_path_basic",
-            "text_with_tspans", "text_path_with_tspans",
+            // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+            // content round-trip through the binary codec (self-roundtrip
+            // only; no Python-generated .bin exists for these). Mirrors the
+            // Swift binaryRoundtripAllExpected registration.
+            "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             // Stable identity (binary v2): id+name round-trip generically.
