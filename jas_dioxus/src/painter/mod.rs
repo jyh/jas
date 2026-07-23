@@ -1,12 +1,20 @@
-//! The `Painter` seam — PH1 DE-RISKING SPIKE (not production).
+//! The `Painter` seam — the ratified Painter contract v2 foundation (PH1).
 //!
-//! This module is EVIDENCE for the Monday 7/27 council that will ratify (or
-//! amend) the Painter contract v2 (`project_painter_contract_draft.md`). It is
-//! a working prototype: the immediate-mode trait, three test impls, a proof
-//! test, and a scene-build bench. It is deliberately NOT wired into
-//! `canvas/render.rs` — the FLIP (D1 v2: immediate trait, not a retained IR)
-//! is not yet ratified, so production conversion is forbidden until the council
-//! word. Everything here is reworkable if the council changes the fork.
+//! The Painter contract v2 (`project_painter_contract_draft.md`) is RATIFIED +
+//! FROZEN (JYH council 2026-07-23): the FLIP (D1 v2: an immediate-mode trait,
+//! not a retained IR) is ratified, and amendments A1-A5 are folded into the
+//! vocabulary below (see the per-method notes flagged `RATIFIED 2026-07-23`).
+//! This module is the PH1 foundation the de-risking spike proved: the
+//! immediate-mode trait, three impls, a proof test, and a scene-build bench.
+//!
+//! PH1 begins converting `canvas/render.rs` to emit through this seam. The
+//! conversion is a mechanical 1:1 rewrite of today's `ctx.*` call sequences
+//! (R4 display-list-equivalence discipline), routed BY CAPABILITY: an element
+//! that needs a PH3/PH4 feature — an opacity mask, placed-glyph/type-on-path
+//! text, or a freeform gradient — stays on the legacy raw-ctx path unchanged
+//! until its phase lands. `Canvas2dPainter`'s mask/PlacedGlyphs bodies remain
+//! `unimplemented!()` and must never be reached in production (the legacy
+//! route guards them).
 //!
 //! # What the trait is
 //!
@@ -59,9 +67,11 @@
 //!   children. We do NOT activate dead group-level blend behavior.
 //!
 //! See `SPIKE_FINDINGS.md` in this directory for the ergonomics verdict, the
-//! R7 float-law decision, the R10 first number, and the contract amendments the
-//! spike surfaced (notably A1: FastRun needs a baseline anchor; A2: `ellipse_arc`
-//! must split into fill/stroke to mirror the path convention).
+//! R7 float-law decision, the R10 first number, and the "PH1 status" note
+//! recording the now-ratified amendments A1-A5 (A1: FastRun carries a baseline
+//! anchor; A2: `ellipse_arc` splits into fill/stroke; A3: fills carry a
+//! winding; A4: paint-time alpha is an explicit per-paint parameter; A5: clip
+//! stays path-only and the seam carries no freeform-gradient policy).
 
 pub mod recording;
 pub mod scene;
@@ -227,11 +237,11 @@ pub struct PlacedGlyph {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextRun {
     /// The byte-preserving fast path: one `ctx.fill_text` with native
-    /// `letterSpacing`. AMENDMENT A1 (spike-surfaced): the contract sketch
+    /// `letterSpacing`. AMENDMENT A1 (RATIFIED 2026-07-23): the contract sketch
     /// `{font,size,text,letter_spacing}` omits a POSITION, but today a text
     /// element lowers to N FastRuns (one per wrapped line), each at its own
     /// `(x, baseline)`. A baseline anchor `(x, y)` is therefore mandatory —
-    /// added here.
+    /// carried here.
     FastRun {
         font: String,
         size: f64,
@@ -267,9 +277,11 @@ pub enum TextRun {
 /// [`push_state`]: Painter::push_state
 pub trait Painter {
     /// Fill a path. `winding` is `EvenOdd` for boolean-op output that carries
-    /// holes. `paint_alpha` is the pinned paint-time `globalAlpha` multiply
-    /// (today's `fill_op`); the effective alpha is
-    /// `(product of open group alphas) * paint_alpha`.
+    /// holes (AMENDMENT A3, RATIFIED 2026-07-23: fills carry a winding, not
+    /// only `clip`). `paint_alpha` is the pinned paint-time `globalAlpha`
+    /// multiply (today's `fill_op`) — AMENDMENT A4 (RATIFIED 2026-07-23) makes
+    /// it an explicit per-paint PARAMETER, not trait state; the effective alpha
+    /// is `(product of open group alphas) * paint_alpha`.
     fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64);
 
     /// Stroke a path. `paint_alpha` = today's `stroke_op`.
@@ -281,11 +293,12 @@ pub trait Painter {
     /// Stroke an axis-aligned rectangle.
     fn stroke_rect(&mut self, rect: Rect, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64);
 
-    /// Fill an ellipse arc (the missing-circle primitive). AMENDMENT A2: the
-    /// contract's single `ellipse_arc` is split into fill/stroke here, to
-    /// mirror `fill_path`/`stroke_path` and support fill-THEN-stroke of the
-    /// SAME circle (today's Circle/Ellipse elements do exactly that) without a
-    /// stateful path builder across the immediate seam.
+    /// Fill an ellipse arc (the missing-circle primitive). AMENDMENT A2
+    /// (RATIFIED 2026-07-23): the contract's single `ellipse_arc` is split into
+    /// fill/stroke here, to mirror `fill_path`/`stroke_path` and support
+    /// fill-THEN-stroke of the SAME circle (today's Circle/Ellipse elements do
+    /// exactly that) without a stateful path builder across the immediate seam.
+    /// `winding` per AMENDMENT A3 (RATIFIED 2026-07-23).
     fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, paint_alpha: f64);
 
     /// Stroke an ellipse arc.
@@ -296,6 +309,15 @@ pub trait Painter {
     /// state, exactly like the canvas). `EvenOdd` is first-class — the
     /// outside-stroke trick (a huge rect + the shape, clipped even-odd) is
     /// expressed by the CALLER building that compound path.
+    ///
+    /// AMENDMENT A5 — INVARIANT (RATIFIED 2026-07-23): `clip` is PATH-ONLY.
+    /// There is no ellipse-clip entry (an elliptical clip region is a
+    /// caller-built compound path, same as the outside-stroke trick), and the
+    /// seam carries NO freeform-gradient policy: freeform gradients are a
+    /// build-time lowering concern that never crosses this seam (today they
+    /// render as unpainted / `None`, and the capability router keeps such
+    /// elements on the legacy path). Nothing about clipping or gradient
+    /// freeform-ness is expressible here beyond a path + winding — by design.
     fn clip(&mut self, path: &[PathCommand], winding: FillRule);
 
     /// Save drawing state and concatenate `transform` onto the CTM

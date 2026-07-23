@@ -199,3 +199,43 @@ concern. Named as a residual, not a gap.
    A4 (state vs param) and confirm A5 (clip stays path-only).
 4. R8 luma choice and R10's reference fixture are unaffected by this spike (both
    deferred); the R10 mechanism is proven, the fixture is not yet built.
+
+---
+
+## PH1 status (RATIFIED + FROZEN 2026-07-23; updated as PH1 lands)
+
+The Monday-brief asks above were RATIFIED by the JYH council 2026-07-23: the
+FLIP is ratified, R7's doc-space 4-decimal round-half-even float law is ratified
+(coupled to D2), R8 accepts the documented BT.709/BT.601 luma difference under
+the PH6 perceptual gate, and the v2 freeze is ratified **with amendments A1-A5
+folded in**. The contract is now FROZEN: a discovered flaw goes back to a Fable
+design block, not a mid-execution patch.
+
+**A1-A5 are folded and consistent** across the trait (`mod.rs`), all three impls
+(`recording.rs`, `canvas2d.rs`, `sink.rs`), the shared scene builders
+(`scene.rs`), and the committed golden (`testdata/scene_golden.json`). The spike
+had already shaped the trait to the amendments while surfacing them, so folding
+them was a confirm-and-document pass: re-running the ignored regen tool
+(`cargo test regenerate_proof_golden -- --ignored`) leaves the golden
+BYTE-IDENTICAL — no A1-A5 golden churn. Per-method ratification is flagged
+in the `mod.rs` doc comments (`RATIFIED 2026-07-23`), and the A5 invariant
+(clip is path-only; the seam carries no freeform-gradient policy) is stated as a
+code comment on `Painter::clip`.
+
+**PH2 — the R4 gate.** A set of reference documents covering only the
+PH1-expressible surface (filled/stroked rects, circles/ellipses fill-then-stroke,
+lines, bezier/quad paths, polygons; solid + linear/radial gradient brushes;
+dashed strokes; stroke alignment; nested groups with non-isolated alpha;
+fast-path text) render through a `&mut dyn Painter` element renderer via
+`RecordingPainter` and are locked against committed goldens under `testdata/`.
+These goldens are the behavior-lock the production conversion lands behind.
+Deliberately EXCLUDED (their phases own them): opacity masks (PH4),
+type-on-path / placed-glyph text (PH3), freeform gradients (build-time lowering).
+
+**PH3 — production conversion (capability-routed, Zeno-partial by design).**
+`render.rs` grows a Painter-emitting path for the element renderer; an element
+needing a PH3/PH4 feature (opacity mask, type-on-path/placed glyphs, freeform
+gradient) stays on the legacy raw-ctx path unchanged. `Canvas2dPainter`'s
+mask/PlacedGlyphs bodies stay `unimplemented!()` and are guarded so they can
+never be reached in production. See the "notes for conductor" in the PH1 wave
+report for exactly which element kinds converted vs stayed legacy.
