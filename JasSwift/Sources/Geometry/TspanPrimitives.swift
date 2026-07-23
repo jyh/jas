@@ -434,6 +434,46 @@ private func mergeFields(_ t: Tspan,
         xmlLang: pick(xmlLang, t.xmlLang))
 }
 
+// MARK: - single-attribute character writes
+
+/// Set ONE snake_case character attribute override (`font_family` /
+/// `font_size` / `font_weight` / `font_style`) on a tspan, preserving every
+/// other field. `font_size` parses its value as a number and leaves the
+/// tspan unchanged when unparsable; unsupported attribute names are
+/// silently ignored. Mirrors Rust `apply_attr_to_tspan` (controller.rs),
+/// the `set_character_attribute` op's per-tspan write.
+public func tspanSettingCharacterAttribute(
+    _ t: Tspan, _ attribute: String, _ value: String
+) -> Tspan {
+    switch attribute {
+    case "font_family": return mergeFields(t, fontFamily: value)
+    case "font_size":
+        guard let v = Double(value) else { return t }
+        return mergeFields(t, fontSize: v)
+    case "font_weight": return mergeFields(t, fontWeight: value)
+    case "font_style": return mergeFields(t, fontStyle: value)
+    default: return t
+    }
+}
+
+/// Clear ONE snake_case character attribute override on a tspan (back to
+/// inherit), preserving every other field. The identity-omission half of
+/// the `set_character_attribute` write (TSPAN.md step 3): an override that
+/// equals the parent's effective value is dropped so merge can collapse
+/// neighbours. Unsupported attribute names are silently ignored. Mirrors
+/// Rust `omit_text_identity` / `omit_textpath_identity`'s clearing writes.
+public func tspanClearingCharacterAttribute(
+    _ t: Tspan, _ attribute: String
+) -> Tspan {
+    switch attribute {
+    case "font_family": return mergeFields(t, fontFamily: nil)
+    case "font_size": return mergeFields(t, fontSize: nil)
+    case "font_weight": return mergeFields(t, fontWeight: nil)
+    case "font_style": return mergeFields(t, fontStyle: nil)
+    default: return t
+    }
+}
+
 private func _stripTags(_ s: String) -> String {
     var out = ""
     var inTag = false

@@ -860,6 +860,80 @@ func applyUnpackGroupAt(_ model: Model, _ path: ElementPath) -> (Bool, [String])
     return (true, targets)
 }
 
+// MARK: - set_character_attribute (TSPAN.md "Character attribute writes")
+
+/// Drop the tspan's override for `attribute` when it equals the parent
+/// element's effective value (identity omission, TSPAN.md step 3), so the
+/// subsequent merge can collapse adjacent-equal tspans. ONLY the written
+/// attribute is omission-checked — mirrors Rust `omit_text_identity` /
+/// `omit_textpath_identity` exactly (per-attribute, exact equality).
+private func omitCharacterAttributeIdentity(
+    _ t: Tspan, _ attribute: String,
+    fontFamily: String, fontSize: Double, fontWeight: String, fontStyle: String
+) -> Tspan {
+    switch attribute {
+    case "font_family" where t.fontFamily == fontFamily,
+         "font_size" where t.fontSize == fontSize,
+         "font_weight" where t.fontWeight == fontWeight,
+         "font_style" where t.fontStyle == fontStyle:
+        return tspanClearingCharacterAttribute(t, attribute)
+    default:
+        return t
+    }
+}
+
+/// Apply the TSPAN.md "Character attribute writes" algorithm to the text
+/// element at `path` over the character range `[charStart, charEnd)`:
+/// splitTspanRange → set the attribute on every targeted tspan → identity
+/// omission (drop overrides equal to the parent's effective value) →
+/// mergeTspans. Attribute names are snake_case (`font_family` /
+/// `font_size` / `font_weight` / `font_style`); unsupported names are
+/// silently ignored per-tspan. A missing element or a non-Text/TextPath
+/// target is a benign no-op (never an error) — mirrors Rust
+/// `Controller::set_character_attribute` exactly.
+private func applySetCharacterAttribute(
+    _ model: Model, _ path: ElementPath,
+    _ charStart: Int, _ charEnd: Int,
+    _ attribute: String, _ value: String
+) {
+    let doc = model.document
+    guard let elem = doc.tryGetElement(path) else { return }
+
+    func rewrite(_ tspans: [Tspan],
+                 fontFamily: String, fontSize: Double,
+                 fontWeight: String, fontStyle: String) -> [Tspan] {
+        var (split, first, last) = splitTspanRange(
+            tspans, charStart: charStart, charEnd: charEnd)
+        if let f = first, let l = last {
+            for i in f...l {
+                split[i] = tspanSettingCharacterAttribute(split[i], attribute, value)
+            }
+            for i in f...l {
+                split[i] = omitCharacterAttributeIdentity(
+                    split[i], attribute,
+                    fontFamily: fontFamily, fontSize: fontSize,
+                    fontWeight: fontWeight, fontStyle: fontStyle)
+            }
+        }
+        return mergeTspans(split)
+    }
+
+    let newElem: Element
+    switch elem {
+    case .text(let t):
+        newElem = .text(t.withTspans(rewrite(
+            t.tspans, fontFamily: t.fontFamily, fontSize: t.fontSize,
+            fontWeight: t.fontWeight, fontStyle: t.fontStyle)))
+    case .textPath(let tp):
+        newElem = .textPath(tp.withTspans(rewrite(
+            tp.tspans, fontFamily: tp.fontFamily, fontSize: tp.fontSize,
+            fontWeight: tp.fontWeight, fontStyle: tp.fontStyle)))
+    default:
+        return
+    }
+    model.editDocument(doc.replaceElement(path, with: newElem))
+}
+
 // MARK: - set_attr_on_selection (OP_LOG.md §9 Phase P6)
 
 /// Apply one `set_attr_on_selection` brush attribute. `attr` selects the
@@ -1345,6 +1419,18 @@ public func opApply(
         controller.hideSelection()
     case "show_all":
         controller.showAll()
+    // Tspan character-attribute write (TSPAN.md). char_start/char_end default
+    // to 0 (an empty range no-ops inside the helper); a missing/non-text
+    // target is a benign no-op. Mirrors the Rust arm exactly.
+    case "set_character_attribute":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let attribute = strField(op, "attribute") else {
+            return reqErr(op, "attribute")
+        }
+        guard let value = strField(op, "value") else { return reqErr(op, "value") }
+        applySetCharacterAttribute(
+            model, path, uintField(op, "char_start"), uintField(op, "char_end"),
+            attribute, value)
     // set_attr_on_selection (OP_LOG.md §9 Phase P6). A Model-runner verb, routed
     // through the SHARED helper so production and replay run the SAME Controller
     // mutator. An absent `value` key SKIPS; an empty `value` string maps to a
