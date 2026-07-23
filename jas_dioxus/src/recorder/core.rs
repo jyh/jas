@@ -171,6 +171,11 @@ pub struct Recorder {
     // Gesture seam.
     open_case: Option<GestureCase>,
     gesture_cases: Vec<GestureCase>,
+    /// True between a recorded press and its release. The live canvas
+    /// streams HOVER moves continuously; the corpus only carries
+    /// gesture traffic, so moves (and strays) outside a
+    /// press..release window are not recorded.
+    gesture_in_flight: bool,
     // Action seam (one case per recording in v1).
     action_setup: Option<Setup>,
     action_steps: Vec<ActionStep>,
@@ -198,6 +203,7 @@ impl Recorder {
             family: family.to_string(),
             open_case: None,
             gesture_cases: Vec::new(),
+            gesture_in_flight: false,
             action_setup,
             action_steps: Vec::new(),
             key_cases: Vec::new(),
@@ -236,20 +242,40 @@ impl Recorder {
         if self.seam != Seam::Gesture {
             return;
         }
-        // Segmentation: tool switch or app-state change ends the case.
-        let needs_new_case = match &self.open_case {
-            None => true,
-            Some(c) => c.tool != tool_id || &c.app_state != app_state,
-        };
-        if needs_new_case {
-            self.close_open_case(model);
-            self.open_case = Some(GestureCase {
-                tool: tool_id.to_string(),
-                setup: capture_setup(model),
-                app_state: app_state.clone(),
-                events: Vec::new(),
-                live_end_json: None,
-            });
+        // Hover filtering: the live canvas streams mousemove
+        // continuously; the corpus carries only gesture traffic. Moves
+        // and releases outside a press..release window are ignored, and
+        // a case can only BEGIN (and segment) on a press.
+        match kind {
+            "press" => {
+                // Segmentation: tool switch or app-state change ends the
+                // case (close_open_case also clears any stale in-flight
+                // state, so the flag is set AFTER segmentation).
+                let needs_new_case = match &self.open_case {
+                    None => true,
+                    Some(c) => c.tool != tool_id || &c.app_state != app_state,
+                };
+                if needs_new_case {
+                    self.close_open_case(model);
+                    self.open_case = Some(GestureCase {
+                        tool: tool_id.to_string(),
+                        setup: capture_setup(model),
+                        app_state: app_state.clone(),
+                        events: Vec::new(),
+                        live_end_json: None,
+                    });
+                }
+                self.gesture_in_flight = true;
+            }
+            "move" | "release" => {
+                if !self.gesture_in_flight || self.open_case.is_none() {
+                    return;
+                }
+                if kind == "release" {
+                    self.gesture_in_flight = false;
+                }
+            }
+            _ => return,
         }
         let (doc_x, doc_y) = screen_to_doc(model, x, y);
         if let Some(c) = self.open_case.as_mut() {
@@ -301,19 +327,29 @@ impl Recorder {
         });
     }
 
-    /// History navigation (undo/redo) observed — segmentation for the
-    /// gesture seam (the document jumps outside the pointer seam).
-    pub fn note_history_nav(&mut self, model: &Model) {
+    /// External segmentation boundary: the document is about to change
+    /// (or has changed) outside the recorded seam — history navigation,
+    /// a native (non-YAML) tool taking pointer traffic, etc. Gesture
+    /// seam: close the open case at this boundary.
+    pub fn segment(&mut self, model: &Model) {
         if self.seam == Seam::Gesture {
             self.close_open_case(model);
         }
     }
 
+    /// History navigation (undo/redo) observed — a segmentation
+    /// boundary (the document jumps outside the pointer seam).
+    pub fn note_history_nav(&mut self, model: &Model) {
+        self.segment(model);
+    }
+
     /// Close the open gesture case, stamping its fidelity oracle (the
     /// live document's canonical test-JSON at this boundary). Cases
     /// with no events are dropped (an armed recorder that saw no
-    /// pointer traffic emits nothing).
+    /// pointer traffic emits nothing). Any in-flight gesture is
+    /// abandoned with the case (its release will not be recorded).
     fn close_open_case(&mut self, model: &Model) {
+        self.gesture_in_flight = false;
         if let Some(mut c) = self.open_case.take() {
             if c.events.is_empty() {
                 return;
@@ -672,6 +708,50 @@ mod tests {
         r.record_pointer_event("press", 3.0, 3.0, false, false, false, "rect", &st, &model);
         let env = r.finish(&model);
         assert_eq!(env["cases"].as_array().unwrap().len(), 2);
+    }
+
+    /// Hover filtering: moves outside a press..release window are not
+    /// recorded (the live canvas streams hover mousemoves continuously;
+    /// the corpus carries gesture traffic only), and a case never
+    /// begins on a hover move or stray release.
+    #[test]
+    fn hover_moves_outside_gesture_are_not_recorded() {
+        let model = test_model();
+        let mut r = Recorder::new(Seam::Gesture, "hov", &model);
+        let st = empty_state();
+        // Hover traffic before any press: ignored entirely.
+        r.record_pointer_event("move", 5.0, 5.0, false, false, false, "rect", &st, &model);
+        r.record_pointer_event("release", 6.0, 6.0, false, false, false, "rect", &st, &model);
+        // A real gesture.
+        r.record_pointer_event("press", 1.0, 1.0, false, false, false, "rect", &st, &model);
+        r.record_pointer_event("move", 2.0, 2.0, false, false, true, "rect", &st, &model);
+        r.record_pointer_event("release", 3.0, 3.0, false, false, false, "rect", &st, &model);
+        // Hover traffic after the release: ignored.
+        r.record_pointer_event("move", 9.0, 9.0, false, false, false, "rect", &st, &model);
+        let env = r.finish(&model);
+        let cases = env["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 1);
+        let events = cases[0]["events"].as_array().unwrap();
+        assert_eq!(events.len(), 3, "only the press..release window is recorded");
+        assert_eq!(events[0]["kind"], json!("press"));
+        assert_eq!(events[2]["kind"], json!("release"));
+    }
+
+    /// Two gestures with the same tool and app state stay in ONE case
+    /// (segmentation triggers only on press with a changed context).
+    #[test]
+    fn same_tool_gestures_share_a_case() {
+        let model = test_model();
+        let mut r = Recorder::new(Seam::Gesture, "two", &model);
+        let st = empty_state();
+        r.record_pointer_event("press", 1.0, 1.0, false, false, false, "blob_brush", &st, &model);
+        r.record_pointer_event("release", 2.0, 2.0, false, false, false, "blob_brush", &st, &model);
+        r.record_pointer_event("press", 3.0, 3.0, false, false, false, "blob_brush", &st, &model);
+        r.record_pointer_event("release", 4.0, 4.0, false, false, false, "blob_brush", &st, &model);
+        let env = r.finish(&model);
+        let cases = env["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0]["events"].as_array().unwrap().len(), 4);
     }
 
     /// An armed recorder that saw no pointer traffic emits no cases.

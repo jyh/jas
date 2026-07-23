@@ -547,6 +547,10 @@ pub(crate) fn cycle_element_visibility_at(
 }
 
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    // Recorder seam hook (Arc 1 S2, dormant unless armed): records
+    // depth-0 dispatches on the action seam / segments an open gesture
+    // case. RAII so every early return below unwinds the depth.
+    let _recorder_guard = crate::recorder::hooks::ActionGuard::enter(action, params, st);
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
     // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md

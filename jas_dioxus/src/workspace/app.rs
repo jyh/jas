@@ -220,6 +220,24 @@ pub fn App() -> Element {
     });
 
     let app = use_hook(|| Rc::new(RefCell::new(AppState::new())));
+
+    // Recorder activation surface (Arc 1 S2): install the
+    // window.jas_record_* API and honor ?record=<seam>:<family>.
+    // Dormant unless armed; see RECORDER.md.
+    {
+        let app_rec = app.clone();
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                crate::recorder::hooks::install(app_rec.clone());
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = &app_rec;
+            }
+        });
+    }
+
     let mut revision = use_signal(|| 0u64);
     let mut layout_revision = use_signal(|| 0u64);
     // Drag-frame signal — bumped by tool mousemove handlers that only
@@ -488,6 +506,12 @@ pub fn App() -> Element {
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        // Recorder seam hook (dormant unless armed):
+                        // BEFORE dispatch, so the screen->doc capture
+                        // uses the view AT this event.
+                        crate::recorder::hooks::pointer_event(
+                            "press", cx, cy, shift, alt, false, kind, &app_state, &tab.model,
+                        );
                         tool.sync_global_state(&app_state);
                         tool.on_press(&mut tab.model, cx, cy, shift, alt);
                         tool.drain_pending_panel_writes()
@@ -527,6 +551,9 @@ pub fn App() -> Element {
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        crate::recorder::hooks::pointer_event(
+                            "move", cx, cy, shift, alt, dragging, kind, &app_state, &tab.model,
+                        );
                         tool.sync_global_state(&app_state);
                         tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
                         tool.drain_pending_panel_writes()
@@ -552,6 +579,9 @@ pub fn App() -> Element {
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        crate::recorder::hooks::pointer_event(
+                            "release", cx, cy, shift, alt, false, kind, &app_state, &tab.model,
+                        );
                         tool.sync_global_state(&app_state);
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
                         tool.drain_pending_panel_writes()

@@ -31,3 +31,6 @@
 //! fidelity check, the ingest flow, and the v1 boundaries.
 
 pub mod core;
+pub mod fidelity;
+pub mod hooks;
+pub mod replay;
