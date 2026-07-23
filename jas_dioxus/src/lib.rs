@@ -9,6 +9,8 @@ pub mod geometry;
 #[cfg(feature = "web")]
 pub mod panels;
 #[cfg(feature = "web")]
+pub mod recorder;
+#[cfg(feature = "web")]
 pub mod tools;
 #[cfg(feature = "web")]
 pub mod workspace;
