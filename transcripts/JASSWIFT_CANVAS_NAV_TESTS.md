@@ -78,6 +78,49 @@ feel, live enabled/disabled rendering, and visual correctness of the paint.
       Expect: The canvas pans by a comparable amount per notch; direction matches the trackpad.
       — last: —
 
+- [ ] **SWNAV-008** [pending-smoke] Composed pan-during-pinch (pinch while sliding).
+      This is the upgrade banked at SWNAV-006 (JYH 2026-07-23): gesture-begin
+      pan-OR-zoom exclusivity graded acceptable; this verifies the composed path.
+      The `magnify` handler now routes through the composed `.zoomPan` intent
+      (`CanvasNavMath.zoomAboutWithPan`), folding any pointer translation during
+      the pinch into a concurrent pan in one atomic frame.
+      Setup: A trackpad. A distinctive point (e.g. a shape corner) on the canvas.
+      Do (A — cursor-anchored zoom still glued): rest the cursor on the point and
+      pinch open/closed WITHOUT moving the cursor.
+      Expect: identical to SWNAV-004 — the point stays under the cursor; zoom is
+      smooth; no drift toward center. (Pointer static ⇒ pan delta 0 ⇒ byte-identical
+      to the prior zoom-about-cursor path.)
+      Do (B — pinch while sliding the cursor): pinch open while also gliding the
+      cursor across the canvas mid-gesture.
+      Expect: the content zooms AND slides with the cursor together — no lurch, no
+      snap-back to a fixed anchor when the cursor moves.
+      Do (C — diagnostic: two-finger scroll interleaved with pinch): start a pinch,
+      and mid-pinch add a two-finger translation (slide both fingers together while
+      still pinching).
+      Observe + record: whether the canvas ALSO pans during the pinch.
+        • If it pans → the OS is delivering `scrollWheel` during the magnify
+          sequence; the existing independent `scrollWheel` pan handler already
+          composes with the zoom (no code change needed — confirm it feels fluid).
+        • If it does NOT pan → `scrollWheel` is suppressed during magnify on this
+          hardware; scroll-interleaved pan is unreachable in AppKit and the
+          pointer-translation path (B) is the only in-gesture pan source. This is
+          the recorded residual, not a regression.
+      Pass if: A matches SWNAV-004 exactly, B slides-with-cursor, and C's outcome
+      is recorded (either behavior is acceptable — C is a hardware characterization,
+      not a pass/fail gate).
+      — last: — (pending real-trackpad smoke)
+
+Residual (SWNAV-008, recorded): pan-during-pinch has two possible in-gesture pan
+sources, and each has a hardware-dependent ceiling. (1) Pointer translation:
+`magnify`'s `NSEvent.locationInWindow` is the POINTER, not the two-finger
+centroid — a stationary in-place pinch reports zero translation, so path (B)
+only contributes when the cursor genuinely moves mid-gesture. (2) Interleaved
+`scrollWheel`: whether AppKit delivers scroll frames during a magnify sequence
+is OS/hardware dependent; where it does, the current independent handlers already
+compose. The composed `.zoomPan` seam is in place and correct for both (and is
+the exact shape a future UIKit pinch recognizer emits: scale + centroid
+translation in one `.changed`); the ceiling is AppKit event delivery, not the math.
+
 ---
 
 ## Session B — canvas context menu

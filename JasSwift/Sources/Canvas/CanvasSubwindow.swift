@@ -3562,21 +3562,70 @@ class CanvasNSView: NSView {
             model.zoomLevel = z
             model.viewOffsetX = ox
             model.viewOffsetY = oy
+        case let .zoomPan(factor, ax, ay, pdx, pdy):
+            // Composed pinch-while-sliding (SWNAV-008): zoom about the anchor
+            // AND apply a concurrent screen-pixel pan in one atomic write, so
+            // the two never fight or double-invalidate. Shares the exact clamp
+            // + anchor math the SH-2 zoom uses; a zero pan delta is identical to
+            // .zoomAbout (SWNAV-004 preserved).
+            let minZoom = readPrefNumber("min_zoom", default: 0.1)
+            let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+            let (z, ox, oy) = CanvasNavMath.zoomAboutWithPan(
+                zoom: model.zoomLevel,
+                offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+                factor: factor, anchorX: ax, anchorY: ay,
+                panDX: pdx, panDY: pdy,
+                minZoom: minZoom, maxZoom: maxZoom)
+            model.zoomLevel = z
+            model.viewOffsetX = ox
+            model.viewOffsetY = oy
         }
         needsDisplay = true
     }
 
-    /// Pinch (magnify) → zoom about the cursor (SH-2). A thin AppKit adapter:
+    /// Pointer location at the previous magnify frame, in viewport-local
+    /// pixels. `nil` outside a magnify gesture. Used to fold any pointer
+    /// translation during a pinch into a concurrent pan (SWNAV-008); reset at
+    /// each gesture start so the first frame never pans, cleared at gesture end.
+    private var lastMagnifyLocation: NSPoint?
+
+    /// Pinch (magnify) → zoom about the cursor, composing any concurrent
+    /// pointer translation as a pan (SH-2 + SWNAV-008). A thin AppKit adapter:
     /// AppKit's `event.magnification` is an incremental fractional delta, so
     /// the multiplicative factor is `1 + magnification`. The anchor is the
     /// cursor position in viewport-local pixels, so the document point under
-    /// the fingers stays fixed as the user pinches. Routes through the shared
-    /// zoom write path, which clamps to the app's zoom bounds.
+    /// the fingers stays fixed as the user pinches. If the pointer also moves
+    /// between frames, that screen-pixel delta rides along as a pan so
+    /// pinch-while-sliding composes in one atomic write (like Figma / native
+    /// Preview) instead of resolving to zoom-only. On a stationary trackpad
+    /// pinch the pointer does not move, so `panDX/panDY` are 0 and this is
+    /// byte-identical to the prior zoom-about-cursor path (SWNAV-004 preserved).
+    /// Routes through the shared composed write path, which clamps to the app's
+    /// zoom bounds.
+    ///
+    /// NOTE (SWNAV-008 residual): AppKit reports the *pointer* location here,
+    /// not the two-finger centroid — the pointer is stationary during an
+    /// in-place trackpad pinch, so this composition only contributes when the
+    /// cursor genuinely moves mid-gesture. Interleaving a two-finger *scroll*
+    /// with a pinch (the other pan-during-pinch source) depends on whether the
+    /// OS delivers `scrollWheel` during a magnify sequence — hardware/OS
+    /// dependent, and left to the manual smoke to characterize.
     override func magnify(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
         let factor = 1.0 + Double(event.magnification)
-        applyNavIntent(.zoomAbout(factor: factor,
-                                  anchorX: Double(pt.x), anchorY: Double(pt.y)))
+        // Fresh gesture (or a missed prior end): drop the stale tracker so the
+        // first frame seeds without panning.
+        if event.phase.contains(.began) { lastMagnifyLocation = nil }
+        let panDX = lastMagnifyLocation.map { Double(pt.x - $0.x) } ?? 0
+        let panDY = lastMagnifyLocation.map { Double(pt.y - $0.y) } ?? 0
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            lastMagnifyLocation = nil
+        } else {
+            lastMagnifyLocation = pt
+        }
+        applyNavIntent(.zoomPan(factor: factor,
+                                anchorX: Double(pt.x), anchorY: Double(pt.y),
+                                panDX: panDX, panDY: panDY))
     }
 
     // MARK: - Canvas context menu (SH-3)
