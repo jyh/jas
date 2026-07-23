@@ -139,8 +139,9 @@ pub struct Version {
 /// has no derived `PartialEq`, so every non-selection field is compared
 /// explicitly; `selected_layer` (the active-layer cursor) is deliberately
 /// NOT aligned away — no production Selection site writes it, and a future
-/// site that does should surface here for review. Debug/CI builds only.
-#[cfg(debug_assertions)]
+/// site that does should surface here for review. Only ever CALLED from a
+/// `debug_assert!` (debug/CI builds); compiled unconditionally because
+/// `debug_assert!` still type-checks its condition in release.
 fn differs_only_in_selection(old: &Document, new: &Document) -> bool {
     old.layers == new.layers
         && old.symbols == new.symbols
@@ -384,6 +385,17 @@ impl Model {
     /// non-undoable writes use [`set_document_unbracketed`] instead (stating an
     /// intent; it never asserts on the bracket); self-bracketing mutators use
     /// [`edit_document`].
+    ///
+    /// Bracket-violation semantics (Arc 1 S1c, ratified 2026-07-22):
+    /// - debug/CI: the `debug_assert!` is the referee — a stray un-bracketed
+    ///   undoable write panics and fails the suite.
+    /// - release (`debug_assert!` stripped): the failure guarded here is a
+    ///   MISSING JOURNAL/UNDO CHECKPOINT, not byte corruption — the write
+    ///   itself executes correctly either way, and a release panic in wasm is
+    ///   a frozen tab. So the fall-through below logs loudly and
+    ///   self-brackets the stray write ([`edit_document`] semantics): the
+    ///   journal stays complete and the app survives. Swift `setDocument`
+    ///   mirrors both halves.
     pub fn set_document(&mut self, doc: Document) {
         debug_assert!(
             self.in_txn,
@@ -392,6 +404,20 @@ impl Model {
              non-undoable writes (selection, preview, live-drag, test setup) use \
              set_document_unbracketed.",
         );
+        #[cfg(not(debug_assertions))]
+        if !self.in_txn {
+            // Release fail-safe (S1c): log loudly, then self-bracket so the
+            // stray write still lands as a complete one-step transaction.
+            let msg = "jas: set_document called outside a transaction; \
+                       self-bracketing the stray write (journal-complete \
+                       fail-safe, see model.rs set_document)";
+            #[cfg(all(target_arch = "wasm32", feature = "web"))]
+            web_sys::console::error_1(&msg.into());
+            #[cfg(not(all(target_arch = "wasm32", feature = "web")))]
+            eprintln!("{msg}");
+            self.edit_document(doc);
+            return;
+        }
         self.write_document(doc);
     }
 
