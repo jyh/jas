@@ -18,7 +18,10 @@
 //!       the model's live view AT THAT EVENT (mid-gesture pan/zoom safe);
 //!       fixture event x/y are doc coords under an identity view, exactly
 //!       the corpus convention;
-//!   (b) floats are canonicalized to the corpus format (4-decimal round);
+//!   (b) floats are canonicalized to the corpus event format — serde's
+//!       shortest round-trip representation, BIT-EXACT under replay
+//!       (rounding would not commute with the goldens' own 4-decimal
+//!       rounding of derived geometry; the pan/zoom pilot proved it);
 //!   (c) the recorder mints NO ids (draw commits mint none; op ids ride
 //!       value-in-op).
 //!

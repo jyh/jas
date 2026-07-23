@@ -833,6 +833,7 @@ mod tests {
         // and dropped the fill. See PAINTBRUSH_TOOL.md.
         "paintbrush_paint_fill.json",
         "recorded_rect.json",
+        "recorded_rect_panzoom.json",
     ];
 
     /// Run a gesture fixture and return the resulting Model. Resolves

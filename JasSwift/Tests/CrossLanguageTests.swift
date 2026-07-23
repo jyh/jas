@@ -2337,6 +2337,7 @@ private let gestureFixtures = [
     // the fill. See PAINTBRUSH_TOOL.md.
     "paintbrush_paint_fill.json",
     "recorded_rect.json",
+    "recorded_rect_panzoom.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the

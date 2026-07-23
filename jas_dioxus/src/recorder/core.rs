@@ -45,13 +45,6 @@ impl Seam {
     }
 }
 
-/// Corpus float canonicalization: round to 4 decimals (the same rule the
-/// canonical test-JSON serializers use), so recorded event coordinates
-/// carry no sub-precision float noise.
-pub fn canon4(v: f64) -> f64 {
-    (v * 10000.0).round() / 10000.0
-}
-
 /// Convert a screen-space canvas point to document space using the
 /// model's LIVE view — the same math as `pointer_event_payload` in
 /// `yaml_tool.rs` (the production conversion every tool applies).
@@ -279,10 +272,18 @@ impl Recorder {
         }
         let (doc_x, doc_y) = screen_to_doc(model, x, y);
         if let Some(c) = self.open_case.as_mut() {
+            // Determinism law (b): coordinates are kept BIT-EXACT and
+            // serialized in serde_json's shortest round-trip form — the
+            // canonical float format for fixture events. Rounding here
+            // (e.g. to the goldens' 4 decimals) would NOT commute with
+            // the canonical doc-JSON's own rounding of derived geometry
+            // and the fidelity check would refuse the recording (the
+            // pan/zoom pilot caught exactly that: a committed height of
+            // 34.7222 live vs 34.7223 replayed-from-rounded-events).
             c.events.push(PointerEvent {
                 kind: kind.to_string(),
-                doc_x: canon4(doc_x),
-                doc_y: canon4(doc_y),
+                doc_x,
+                doc_y,
                 shift,
                 alt,
                 // `dragging` is only meaningful on move events; press /
@@ -622,9 +623,11 @@ mod tests {
         assert!(events[2].get("dragging").is_none());
     }
 
-    /// Determinism law (b): coordinates are canonicalized to 4 decimals.
+    /// Determinism law (b): coordinates stay BIT-EXACT through the
+    /// envelope (serde's shortest round-trip float form), so replaying
+    /// the fixture reproduces the live tool arithmetic exactly.
     #[test]
-    fn pointer_coords_canonicalized_to_4_decimals() {
+    fn pointer_coords_bit_exact() {
         let mut model = test_model();
         model.zoom_level = 3.0;
         let mut r = Recorder::new(Seam::Gesture, "canon", &model);
@@ -632,10 +635,12 @@ mod tests {
             "press", 10.0, 20.0, false, false, false, "rect", &empty_state(), &model,
         );
         let env = r.finish(&model);
+        // Round-trip through the emitted JSON text, exactly as the
+        // ingest/replay path will.
+        let env: Value = serde_json::from_str(&env.to_string()).unwrap();
         let ev = &env["cases"][0]["events"][0];
-        // 10/3 = 3.3333... -> 3.3333 exactly.
-        assert_eq!(ev["x"].as_f64().unwrap(), 3.3333);
-        assert_eq!(ev["y"].as_f64().unwrap(), 6.6667);
+        assert_eq!(ev["x"].as_f64().unwrap(), 10.0 / 3.0);
+        assert_eq!(ev["y"].as_f64().unwrap(), 20.0 / 3.0);
     }
 
     /// Segmentation law: a tool switch ends the case and starts a new
