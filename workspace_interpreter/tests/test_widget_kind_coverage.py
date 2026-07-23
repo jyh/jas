@@ -16,6 +16,10 @@ gains `type:` validation.
 `color.yaml` `h: {type: number, default: 0}`). Those live under `state:`, never
 under `content:`, so walking only the content tree excludes them — `number` is a
 valid *data type* there and an invalid *widget kind* in content.
+
+This gate validates the live workspace bundle, so it lives with the reference
+interpreter's tests (it was relocated here from `jas/panels/` when the Qt app's
+lane was pinned to the `five-port-parity` tag — a bundle gate must track HEAD).
 """
 
 import json
