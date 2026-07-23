@@ -36,6 +36,53 @@ import CoreGraphics
     #expect(parseOverlayColor("banana") == nil)
 }
 
+// MARK: - Named CSS colors in overlay styles (pencil / paintbrush parity)
+//
+// The pencil and paintbrush freehand-preview specs style their
+// `buffer_polyline` overlay with `stroke: black` — a CSS named color.
+// `parseOverlayColor` must resolve it; otherwise the stroke is nil and
+// `drawBufferPolylineOverlay` skips the whole preview, so nothing is
+// visible mid-drag and the stroke only appears on mouseup. Rust renders
+// these because it hands the raw "black" string to the browser canvas
+// (`set_stroke_style_str`), which understands named colors; Swift
+// converts to a CGColor eagerly and so must resolve the name itself.
+// Shape tools use `rgba()` / `#hex`, which always parsed — which is why
+// the smoke saw shape previews draw and the pencil preview blank. This
+// is a color-parser parity gap, NOT an SH-5 repaint regression (the
+// pencil requests a repaint per drag event exactly as the shapes do).
+
+@Test func parseOverlayColorNamedBlack() {
+    let c = parseOverlayColor("black")
+    #expect(c != nil, "named color 'black' must resolve or the preview draws nothing")
+    if let comp = c?.components {
+        #expect(abs(comp[0]) < 1e-6)
+        #expect(abs(comp[1]) < 1e-6)
+        #expect(abs(comp[2]) < 1e-6)
+        #expect(abs(comp[3] - 1) < 1e-6)
+    }
+}
+
+@Test func parseOverlayColorNamedWhite() {
+    let c = parseOverlayColor("white")
+    #expect(c != nil)
+    if let comp = c?.components {
+        #expect(abs(comp[0] - 1) < 1e-6)
+        #expect(abs(comp[1] - 1) < 1e-6)
+        #expect(abs(comp[2] - 1) < 1e-6)
+    }
+}
+
+@Test func parseOverlayColorNamedIsCaseInsensitive() {
+    #expect(parseOverlayColor("Black") != nil)
+}
+
+@Test func parseOverlayStyleNamedStrokeResolves() {
+    // The exact style string the pencil / paintbrush specs carry.
+    let s = parseOverlayStyle("stroke: black; stroke-width: 1;")
+    #expect(s.stroke != nil, "named-color stroke must resolve or the preview is blank")
+    #expect(s.strokeWidth == 1)
+}
+
 // MARK: - parseOverlayStyle
 
 @Test func parseOverlayStyleDashArray() {
@@ -116,6 +163,61 @@ private func makeCtxFor(_ model: Model) -> ToolContext {
     let bmp = makeBitmapContext()
     // Should not crash.
     tool.drawOverlay(ctx, bmp)
+}
+
+/// Count pixels that received any ink (alpha > 0) in a
+/// transparent-backed context.
+private func inkPixelCount(_ ctx: CGContext, _ size: Int) -> Int {
+    guard let data = ctx.data else { return 0 }
+    let ptr = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
+    var n = 0
+    for i in stride(from: 0, to: size * size * 4, by: 4) where ptr[i + 3] > 0 { n += 1 }
+    return n
+}
+
+private func loadTool(_ id: String) -> YamlTool? {
+    guard let ws = WorkspaceData.load(),
+          let tools = ws.data["tools"] as? [String: Any],
+          let spec = tools[id] as? [String: Any] else { return nil }
+    return YamlTool.fromWorkspaceTool(spec)
+}
+
+@Test func pencilBufferPolylineOverlayDrawsInkMidDrag() throws {
+    // End-to-end regression: a pencil drag must render a visible preview
+    // polyline BEFORE mouseup. The `stroke: black` named-color gap left
+    // this overlay resolving to a nil stroke → zero ink drawn.
+    let tool = try #require(loadTool("pencil"))
+    let model = Model(document: Document(
+        layers: [Layer(children: [])], selectedLayer: 0, selection: []))
+    let ctx = makeCtxFor(model)
+    let size = 128
+    tool.onPress(ctx, x: 10, y: 10, shift: false, alt: false)
+    for i in 1...10 {
+        tool.onMove(ctx, x: Double(10 + i * 10), y: Double(10 + i * 8),
+                    shift: false, alt: false, dragging: true)
+    }
+    let bmp = makeBitmapContext(size)
+    tool.drawOverlay(ctx, bmp)
+    #expect(inkPixelCount(bmp, size) > 0,
+            "pencil preview polyline must draw ink mid-drag (stroke: black)")
+}
+
+@Test func paintbrushBufferPolylineOverlayDrawsInkMidDrag() throws {
+    // Same named-color gap affects the paintbrush preview.
+    let tool = try #require(loadTool("paintbrush"))
+    let model = Model(document: Document(
+        layers: [Layer(children: [])], selectedLayer: 0, selection: []))
+    let ctx = makeCtxFor(model)
+    let size = 128
+    tool.onPress(ctx, x: 10, y: 10, shift: false, alt: false)
+    for i in 1...10 {
+        tool.onMove(ctx, x: Double(10 + i * 10), y: Double(10 + i * 8),
+                    shift: false, alt: false, dragging: true)
+    }
+    let bmp = makeBitmapContext(size)
+    tool.drawOverlay(ctx, bmp)
+    #expect(inkPixelCount(bmp, size) > 0,
+            "paintbrush preview polyline must draw ink mid-drag (stroke: black)")
 }
 
 @Test func yamlToolDrawOverlayStarShape() {

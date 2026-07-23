@@ -685,6 +685,16 @@ private let namedColors: [String: (Int, Int, Int)] = [
     "darkblue": (0, 0, 139), "darkgreen": (0, 100, 0), "darkred": (139, 0, 0),
 ]
 
+/// SVG/CSS named-color lookup, shared with the overlay-style color parser
+/// (`parseOverlayColor` in YamlTool.swift) so an overlay's `stroke`/`fill`
+/// resolves the same named colors an element fill does. Returns nil for an
+/// unknown name. The `namedColors` map above is the single source of truth.
+func svgNamedColor(_ name: String) -> Color? {
+    guard let (r, g, b) = namedColors[name.trimmingCharacters(in: .whitespaces).lowercased()]
+    else { return nil }
+    return Color(r: Double(r) / 255.0, g: Double(g) / 255.0, b: Double(b) / 255.0)
+}
+
 private func parseColor(_ s: String) -> Color? {
     let s = s.trimmingCharacters(in: .whitespaces)
     if s == "none" { return nil }

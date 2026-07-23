@@ -538,6 +538,15 @@ func parseOverlayColor(_ s: String) -> CGColor? {
         let a: Double = parts.count >= 4 ? (Double(parts[3]) ?? 1) : 1
         return CGColor(red: r / 255, green: g / 255, blue: b / 255, alpha: a)
     }
+    // CSS named colors (e.g. the pencil / paintbrush preview specs' `stroke:
+    // black`). Rust renders these for free — it hands the raw string to the
+    // browser canvas, which understands named colors — so Swift must resolve
+    // them too or those overlays paint nothing. Reuses the shared SVG
+    // named-color map so overlay and element colors agree.
+    if let c = svgNamedColor(t) {
+        let (r, g, b, a) = c.toRgba()
+        return CGColor(red: r, green: g, blue: b, alpha: a)
+    }
     return nil
 }
 
