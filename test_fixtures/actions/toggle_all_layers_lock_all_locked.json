@@ -1,0 +1,11 @@
+[
+  {
+    "name": "toggle_all_layers_lock_all_locked_to_unlocked",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {"action": "toggle_all_layers_lock", "params": {}},
+      {"action": "toggle_all_layers_lock", "params": {}}
+    ],
+    "expected_json": "toggle_all_layers_lock_all_locked_expected.json"
+  }
+]

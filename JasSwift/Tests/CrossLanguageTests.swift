@@ -610,6 +610,16 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("controller_ops.json")
 }
 
+/// Tspan character-attribute writes (TSPAN.md "Character attribute writes"):
+/// `set_character_attribute` over a mid-word range, the whole range, and a
+/// merge-inducing write, each byte-matching the Rust-authored golden and
+/// replaying through the checkpoint_equivalence gate. Rust registered
+/// tspan_ops.json long before this port grew the arm — exactly the gap the
+/// S4 corpus gate's port-symmetry rule exists to catch.
+@Test func operationTspanOps() throws {
+    try runOperationFixture("tspan_ops.json")
+}
+
 /// Symbols P2 operation fixtures (SYMBOLS.md §7): make_symbol, place_instance,
 /// detach, redefine. Each setup parses through the P1 SVG <defs> codec, runs
 /// the op, and pins the canonical JSON all apps must reproduce.
@@ -628,8 +638,11 @@ private func recordedCanonicalDocument() -> Document {
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
 // the ORACLE: each replays through the Swift `opApply` and byte-matches its
 // golden (documentToTestJson), exactly as the pre-existing operations fixtures
-// do, plus the checkpoint_equivalence replay gate. Mirrors the Rust
-// cross_language_test.rs registrations.
+// do, plus the checkpoint_equivalence replay gate. The claim that this file's
+// operations registrations match Rust's is no longer aspirational comment-ware:
+// scripts/check_corpus_manifest.py (the S4 corpus gate, run in CI) enforces
+// Rust/Swift registration symmetry for the operations family — it is what
+// caught tspan_ops.json registered in Rust only.
 
 // P1 — print-config setters (8 verbs). The single source fixture
 // print_config_setters.json carries 5 sub-cases (document_setup,
@@ -2635,6 +2648,15 @@ private let actionFixtures = [
     "toggle_all_layers_visibility.json",
     "toggle_all_layers_lock.json",
     "toggle_all_layers_outline.json",
+    // S4 second-branch coverage: the toggle_all_layers_* verbs branch on the
+    // current uniform state (any-visible->invisible vs all-invisible->preview,
+    // etc.). SVG does not serialize visibility/lock, so each fixture reaches
+    // the second branch by dispatching the SAME verb twice on the production
+    // path. Mirrors the Rust ACTION_FIXTURES additions (symmetry enforced by
+    // scripts/check_corpus_manifest.py).
+    "toggle_all_layers_visibility_all_invisible.json",
+    "toggle_all_layers_lock_all_locked.json",
+    "toggle_all_layers_outline_all_outline.json",
     "new_layer.json",
     "make_compound_shape.json",
     "align.json",
