@@ -1,5 +1,7 @@
 # Manual Test Suite — Per-Component Procedure
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 Guide for designing a manual test suite for any UI component (panel, dialog,
 menubar, layout system, theming, shortcuts). Manual tests cover what auto-tests
 can't: widget rendering, typeahead, focus/tab order, menu interaction,

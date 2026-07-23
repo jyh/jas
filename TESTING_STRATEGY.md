@@ -224,8 +224,12 @@ corpus, with Flask getting a downstream reshape, because interactive features ne
 native document model Flask lacks. Replacement: **author the generic spec and its
 cross-language conformance corpus first (language-agnostic, golden-pinned); the native
 apps implement against it; Flask consumes it for visual reference; interactive behavior
-lands in the native apps.** Native propagation order is unchanged: Rust → Swift → OCaml →
-Python. (Reflected in `CLAUDE.md`.)
+lands in the native apps.** Native propagation order since the `five-port-parity`
+freeze (`POLICY.md` §1): Rust → Swift. The frozen ports (OCaml, Python Qt) receive no
+propagation; their suites run as tag-pinned CI canaries. "Gated in all 4 apps"
+statements throughout this document remain true as of the tag; the blocking gate
+scope going forward is Rust + Swift + the `workspace_interpreter/` reference.
+(Reflected in `CLAUDE.md`.)
 
 ---
 

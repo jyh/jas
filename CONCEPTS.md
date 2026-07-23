@@ -1,5 +1,7 @@
 # Concept Packs — domains as declarative data
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 **Status:** increments 1–2 + 3a + 3b built — the generator engine + format + cross-language gate
 (`regular_polygon`, `spiral`, `star`, `gear`, the §6.3 flagship), the `floor`/`mod` parity
 primitives, the concept **registry**, the **`LiveVariant::Generated` document arm** (model + eval

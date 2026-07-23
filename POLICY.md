@@ -1,25 +1,42 @@
 # Project Policies
 
-Authoritative policy document for the five-app jas codebase. When
-contributors, reviewers, AI agents, or CI automation apply a policy,
-they cite this file.
+Authoritative policy document for the jas codebase (two active native
+ports, a live Python reference interpreter, and two ports frozen at
+the `five-port-parity` tag — see §1). When contributors, reviewers,
+AI agents, or CI automation apply a policy, they cite this file.
 
 Per-developer configs (like `.claude/CLAUDE.md`) may reference this
 document; they should not restate it.
 
 ---
 
-## 1. App equivalence
+## 1. App equivalence and port status
 
-The five apps — `jas` (Python/Qt), `jas_ocaml` (OCaml/GTK),
-`jas_dioxus` (Rust/Dioxus), `JasSwift` (Swift/AppKit), and `jas_flask`
-(Python/Flask) — are intended to be **behaviorally identical** from
-the user's perspective, modulo platform approximations documented in
-`NATIVE_BOUNDARY.md`.
+**Port status (as of 2026-07-22, tag `five-port-parity`):**
 
-Cross-language test fixtures in `workspace/tests/` encode this
-invariant; every interpreter must produce identical output for the
-same input.
+| Component | Status | CI |
+|---|---|---|
+| `jas_dioxus` (Rust/Dioxus) | **Active** | blocking |
+| `JasSwift` (Swift/AppKit) | **Active** | blocking |
+| `workspace_interpreter/` (Python reference interpreter) | **Live reference** | blocking |
+| `jas_ocaml` (OCaml/GTK) | **Frozen at the tag** | tag-pinned canary, non-blocking |
+| `jas` (Python/Qt) | **Frozen at the tag** | tag-pinned canary, non-blocking |
+| `jas_flask` (Python/Flask) | Non-gating reference renderer | non-blocking |
+
+The four native apps were built as behaviorally identical peers of one
+spec, and all four were at full parity at the `five-port-parity` tag.
+From that point, active development continues in the Rust and Swift
+ports; the OCaml port and the Python Qt app are preserved exactly as
+tagged, with CI canary lanes that check out the tag (sources, fixtures,
+and bundle together) so they can only fail on toolchain drift. Frozen
+ports receive no new features; toolchain or security fixes only.
+
+The **active** apps are **behaviorally identical** from the user's
+perspective, modulo platform approximations documented in
+`NATIVE_BOUNDARY.md`. Cross-language test fixtures in
+`workspace/tests/` encode this invariant; every active interpreter must
+produce identical output for the same input, and the Python reference
+interpreter remains the executable definition of the spec's semantics.
 
 ---
 
@@ -71,41 +88,44 @@ preferred ordering.
 
 ### Adding a new feature
 
-**Spec + conformance corpus → Rust → Swift → OCaml → Python.**
+**Spec + conformance corpus → Rust → Swift.**
 
 Author the generic spec (`workspace/*.yaml`) and its golden-pinned,
 language-agnostic conformance corpus first, then propagate to the
-most-developed native runtime (Rust), then Swift, then OCaml, then Python
-(least trafficked). Flask consumes the spec for visual reference only and is
-not a propagation step.
+most-developed native runtime (Rust), then Swift. The frozen ports
+(§1) receive no feature propagation; Flask consumes the spec for
+visual reference only and is not a propagation step. (The pre-freeze
+order continued → OCaml → Python.)
 
 ### Removing native code in favor of YAML dispatch
 
 **Pick the app where deletion is mechanically easiest first.**
 
-For panel menus and tool dispatchers, this is usually OCaml
-(monolithic files) or Python (partial migration already exists); Swift
-and Rust have per-panel / per-tool native files and are done later.
-
-Rationale: first port has the most unknowns. Easier app validates the
-pattern; later apps benefit from lessons learned.
+Post-freeze this shape applies to the active apps only (no work, not
+even deletions, lands in the frozen ports). Rationale: first port has
+the most unknowns; the easier app validates the pattern.
 
 ### Cross-cutting bug fix
 
 **Start where the bug was found** (the test fixture and repro live
-there), then apply to all others in parallel — the fix is proven.
+there), then apply to the other active app — the fix is proven. A
+frozen-port canary failure is a toolchain event, not a propagation
+target.
 
 ### Schema / interpreter change
 
 **Conformance corpus first** to pin the behavior (the Python reference
-interpreter in `workspace_interpreter/` is the golden), then the natives in
-any order — the shared fixture keeps all apps aligned.
+interpreter in `workspace_interpreter/` is the golden), then the active
+natives (Rust, Swift) in any order — the shared fixture keeps them
+aligned.
 
 ---
 
 ## 4. Test-first development
 
-Write tests before writing code. Applies to all 5 apps.
+Write tests before writing code. Applies to all active surfaces (the
+Rust and Swift apps, the reference interpreter, and the shared
+spec/corpus).
 
 Cross-language invariants go in `workspace/tests/` as YAML fixtures.
 Language-specific unit tests go in each app's test directory.
@@ -148,9 +168,10 @@ Each suggestion should be ready for a deep dive.
 
 ### OCaml: interface files required
 
-In `jas_ocaml`, new `.ml` files require an accompanying `.mli`. When
-making a substantive edit to an existing `.ml` that lacks one, add a
-minimal `.mli` as part of the change.
+(`jas_ocaml` is frozen per §1, so this rule now applies only to
+toolchain-maintenance edits.) New `.ml` files require an accompanying
+`.mli`. When making a substantive edit to an existing `.ml` that lacks
+one, add a minimal `.mli` as part of the change.
 
 Exception: concrete tool implementations in `lib/tools/*.ml` conform
 to a shared interface and go through `tool_factory.ml`; they don't

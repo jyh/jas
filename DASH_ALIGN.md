@@ -1,5 +1,7 @@
 # Dash Alignment
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 ## Motivation
 
 Dashed strokes laid out by raw `stroke-dasharray` semantics — pattern

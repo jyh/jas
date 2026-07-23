@@ -1708,7 +1708,10 @@ map(range(0, n), fun i ->
 
 Every function above is pinned across all five interpreters by the conformance
 corpus (`workspace/tests/expressions.yaml`; see "Expression Conformance Tests"
-below).
+below) as of the `five-port-parity` tag. Post-freeze additions to the
+expression language are pinned across the active interpreters (Rust, Swift)
+plus the `workspace_interpreter/` reference; the frozen ports hold the
+tag-pinned corpus (`POLICY.md` §1).
 
 #### Comparison Operators
 

@@ -1,5 +1,7 @@
 # Unit-aware Length Inputs
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 ## Motivation
 
 Numeric panel fields that hold **lengths** — stroke weight, dash and gap

@@ -3,6 +3,12 @@
 This document describes the cross-language behavioral equivalence testing
 strategy for the four JAS implementations.
 
+> **Scope since the `five-port-parity` freeze (`POLICY.md` §1):** the
+> blocking differential gate binds the active ports (Rust, Swift) plus the
+> `workspace_interpreter/` reference. The OCaml and Python-Qt equivalence
+> described below is preserved at the tag via tag-pinned CI canary lanes;
+> "all four" statements hold as of that tag.
+
 ---
 
 ## Goal
