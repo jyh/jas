@@ -1266,6 +1266,77 @@ fn num_field(op: &serde_json::Value, key: &str) -> f64 {
     op.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
 }
 
+// ── The op-error channel (Arc 1 S3) ─────────────────────────────────────────
+//
+// `op_apply` SIGNALS a rejected op without changing document behavior: the
+// silent-skip DOCUMENT semantics are golden-pinned spec (every skip below
+// mutates nothing and journals nothing, exactly as before), but the dispatcher
+// now reports WHY an op was skipped. The invariant: an op Errs exactly when the
+// dispatcher rejects it for a FAULT before `record_op` — a malformed envelope,
+// an unknown verb, a missing/mistyped required param, or an addressed target
+// that does not exist. Benign no-ops (empty-selection delete, identity
+// transforms, move-up-at-top, empty wrap paths) and by-design defaults (missing
+// numerics → 0.0, missing index → 0, missing name → "", dangling reference ids,
+// field-level type-mismatch skips inside `create_artboard.fields`) stay `Ok` —
+// they are fully processed ops whose effect is legitimately nothing. Journals
+// only ever contain succeeded ops, so replaying a journal must never Err (the
+// fixture runner asserts this, strengthening the checkpoint_equivalence gate).
+//
+// The five classes are FROZEN (the cross-language taxonomy; fixtures assert the
+// bare class name via per-op `expected_error` fields). Detail payloads (the
+// param name / verb / target id) are Display-only diagnostics, never asserted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpError {
+    /// The op envelope has no string `"op"` verb (or is not an object).
+    MalformedEnvelope,
+    /// The verb is not in the dispatch vocabulary.
+    UnknownVerb { name: String },
+    /// A required param is absent from the op object.
+    MissingParam { name: &'static str },
+    /// A required param is present but has the wrong type / an unaccepted value.
+    BadParamType { name: &'static str },
+    /// The op addresses a target (id or path) that does not exist.
+    MissingTarget { id: String },
+}
+
+impl OpError {
+    /// The bare class name — the cross-language `expected_error` contract
+    /// (fixtures assert exactly this string; detail payloads are diagnostics).
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            OpError::MalformedEnvelope => "MalformedEnvelope",
+            OpError::UnknownVerb { .. } => "UnknownVerb",
+            OpError::MissingParam { .. } => "MissingParam",
+            OpError::BadParamType { .. } => "BadParamType",
+            OpError::MissingTarget { .. } => "MissingTarget",
+        }
+    }
+}
+
+impl std::fmt::Display for OpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpError::MalformedEnvelope => write!(f, "MalformedEnvelope"),
+            OpError::UnknownVerb { name } => write!(f, "UnknownVerb({name})"),
+            OpError::MissingParam { name } => write!(f, "MissingParam({name})"),
+            OpError::BadParamType { name } => write!(f, "BadParamType({name})"),
+            OpError::MissingTarget { id } => write!(f, "MissingTarget({id})"),
+        }
+    }
+}
+
+/// Classify a failed required-param read: absent key ⇒ `MissingParam`,
+/// present-but-unparsable (wrong type / unaccepted value) ⇒ `BadParamType`.
+/// The parse helpers (`parse_path` / `str_field` / `parse_element` / …) merge
+/// both cases into `None`/failure; this splits them for the error channel.
+fn req_err(op: &serde_json::Value, name: &'static str) -> OpError {
+    if op.get(name).is_none() {
+        OpError::MissingParam { name }
+    } else {
+        OpError::BadParamType { name }
+    }
+}
+
 /// Production-routing convenience (OP_LOG.md §9), NOT a dispatch arm: journal a
 /// native no-orphan Delete/Cut gesture (the `menu_bar.rs` / `keyboard.rs` fast
 /// paths) as a real `delete_selection` op, so the gesture is captured for
@@ -1273,10 +1344,13 @@ fn num_field(op: &serde_json::Value, key: &str) -> f64 {
 /// ONE named transaction (one undo step) and routes through `op_apply` — the
 /// same path the YAML orphan-confirm action and the sibling apps use. Pass the
 /// gesture verb as `txn_name` (e.g. `delete_selection` / `cut_selection`).
+/// The op result is discarded: `delete_selection` has no Err path (an
+/// empty-selection delete is a benign Ok no-op by the S3 taxonomy), so there
+/// is nothing to propagate to the gesture caller.
 pub fn journal_delete_selection(model: &mut Model, txn_name: &str) {
     model.with_txn(|m| {
         m.name_txn(txn_name);
-        op_apply(m, &serde_json::json!({ "op": "delete_selection" }));
+        let _ = op_apply(m, &serde_json::json!({ "op": "delete_selection" }));
     });
 }
 
@@ -1286,10 +1360,18 @@ pub fn journal_delete_selection(model: &mut Model, txn_name: &str) {
 /// transaction boundary / journal cursor and are NOT primitive ops, so they
 /// early-return WITHOUT being journaled. `record_op` is a no-op when no
 /// transaction is open, so this is safe to call unconditionally.
-pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
+///
+/// Returns `Err(OpError)` exactly when the op was rejected for a fault before
+/// `record_op` (Arc 1 S3 — a SIGNAL, not a behavior change: every Err path
+/// mutates nothing and journals nothing, byte-identical to the prior silent
+/// skip). Benign no-ops and by-design defaults return `Ok(())` — see the
+/// `OpError` doc for the frozen taxonomy. Production callers discard the
+/// result (`let _ =`); the fixture runners assert it against the per-op
+/// `expected_error` fields, and journal replay asserts every op is Ok.
+pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError> {
     let Some(name) = op["op"].as_str() else {
         // A primitive op with no verb is malformed; skip it (never panic).
-        return;
+        return Err(OpError::MalformedEnvelope);
     };
     // History-navigation ops (OP_LOG.md §5): they manage transaction
     // boundaries / the journal cursor and are NOT primitive ops, so they
@@ -1301,15 +1383,15 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         "snapshot" => {
             model.commit_txn();
             model.begin_txn();
-            return;
+            return Ok(());
         }
         "undo" => {
             model.undo();
-            return;
+            return Ok(());
         }
         "redo" => {
             model.redo();
-            return;
+            return Ok(());
         }
         _ => {}
     }
@@ -1398,19 +1480,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             Controller::copy_selection(model, num_field(op, "dx"), num_field(op, "dy"));
         }
         "assign_id" => {
-            let (Some(path), Some(id)) = (parse_path(op.get("path")), str_field(op, "id"))
-            else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(id) = str_field(op, "id") else {
+                return Err(req_err(op, "id"));
             };
             Controller::assign_id(model, &path, id);
         }
         "create_reference" => {
-            let (Some(target_path), Some(target_id), Some(ref_id)) = (
-                parse_path(op.get("target_path")),
-                str_field(op, "target_id"),
-                str_field(op, "ref_id"),
-            ) else {
-                return;
+            let Some(target_path) = parse_path(op.get("target_path")) else {
+                return Err(req_err(op, "target_path"));
+            };
+            let Some(target_id) = str_field(op, "target_id") else {
+                return Err(req_err(op, "target_id"));
+            };
+            let Some(ref_id) = str_field(op, "ref_id") else {
+                return Err(req_err(op, "ref_id"));
             };
             Controller::create_reference(model, &target_path, target_id, ref_id);
         }
@@ -1418,20 +1504,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // paths are read literally from the fixture payload, exactly like
         // the create_reference arm.
         "make_symbol" => {
-            let (Some(path), Some(master_id), Some(ref_id)) = (
-                parse_path(op.get("path")),
-                str_field(op, "master_id"),
-                str_field(op, "ref_id"),
-            ) else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(master_id) = str_field(op, "master_id") else {
+                return Err(req_err(op, "master_id"));
+            };
+            let Some(ref_id) = str_field(op, "ref_id") else {
+                return Err(req_err(op, "ref_id"));
             };
             Controller::make_symbol(model, &path, master_id, ref_id);
         }
         "place_instance" => {
-            let (Some(master_id), Some(ref_id)) =
-                (str_field(op, "master_id"), str_field(op, "ref_id"))
-            else {
-                return;
+            let Some(master_id) = str_field(op, "master_id") else {
+                return Err(req_err(op, "master_id"));
+            };
+            let Some(ref_id) = str_field(op, "ref_id") else {
+                return Err(req_err(op, "ref_id"));
             };
             Controller::place_instance(model, master_id, ref_id);
         }
@@ -1445,10 +1534,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // exact Generated instance the live edit produced. A malformed payload
         // SKIPS (never panics, never journals).
         "place_concept_instance" => {
-            let (Some(concept_id), Some(elem_id)) =
-                (str_field(op, "concept_id"), str_field(op, "elem_id"))
-            else {
-                return;
+            let Some(concept_id) = str_field(op, "concept_id") else {
+                return Err(req_err(op, "concept_id"));
+            };
+            let Some(elem_id) = str_field(op, "elem_id") else {
+                return Err(req_err(op, "elem_id"));
             };
             let params = op
                 .get("params")
@@ -1457,9 +1547,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             Controller::place_concept_instance(model, concept_id, params, elem_id);
         }
         "set_concept_param" => {
-            let (Some(path), Some(name)) = (parse_path(op.get("path")), str_field(op, "name"))
-            else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(name) = str_field(op, "name") else {
+                return Err(req_err(op, "name"));
             };
             let value = num_field(op, "value");
             Controller::set_concept_param(model, &path, name, value);
@@ -1472,10 +1564,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // empty/non-object `changes`, so nothing journals).
         "apply_concept_operation" => {
             let Some(path) = parse_path(op.get("path")) else {
-                return;
+                return Err(req_err(op, "path"));
             };
             let Some(changes) = op.get("changes") else {
-                return;
+                return Err(OpError::MissingParam { name: "changes" });
             };
             Controller::apply_concept_operation(model, &path, changes);
         }
@@ -1484,10 +1576,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // ran at production time, so replay just rebuilds the element. The
         // `transform` is the 6-element matrix `[a,b,c,d,e,f]` (default identity).
         "promote_to_concept" => {
-            let (Some(path), Some(concept_id)) =
-                (parse_path(op.get("path")), str_field(op, "concept_id"))
-            else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(concept_id) = str_field(op, "concept_id") else {
+                return Err(req_err(op, "concept_id"));
             };
             let params = op
                 .get("params")
@@ -1498,23 +1591,25 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {
-                return;
+                return Err(req_err(op, "path"));
             };
             Controller::detach(model, &path);
         }
         "redefine" => {
-            let (Some(master_id), Some(path), Some(ref_id)) = (
-                str_field(op, "master_id"),
-                parse_path(op.get("path")),
-                str_field(op, "ref_id"),
-            ) else {
-                return;
+            let Some(master_id) = str_field(op, "master_id") else {
+                return Err(req_err(op, "master_id"));
+            };
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(ref_id) = str_field(op, "ref_id") else {
+                return Err(req_err(op, "ref_id"));
             };
             Controller::redefine(model, master_id, &path, ref_id);
         }
         "delete_symbol" => {
             let Some(master_id) = str_field(op, "master_id") else {
-                return;
+                return Err(req_err(op, "master_id"));
             };
             Controller::delete_symbol(model, master_id);
         }
@@ -1523,11 +1618,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // matrix shape parsed elsewhere) and applied verbatim.
         "set_instance_transform" => {
             let Some(path) = parse_path(op.get("path")) else {
-                return;
+                return Err(req_err(op, "path"));
             };
             let t = &op["transform"];
             if !t.is_object() {
-                return;
+                return Err(req_err(op, "transform"));
             }
             let transform = crate::geometry::element::Transform {
                 a: num_field(t, "a"),
@@ -1553,33 +1648,40 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // pre-deletion selection ids).
         "delete_at" => {
             let Some(path) = parse_path(op.get("path")) else {
-                return;
+                return Err(req_err(op, "path"));
             };
             let (changed, t) = apply_delete_element_at(model, &path);
             if !changed {
-                return;
+                // The path resolves to no element — the addressed target is
+                // missing (distinct from the benign empty-selection delete).
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
             targets = t;
         }
         "delete_selection" => {
             let (changed, t) = apply_delete_selection(model);
             if !changed {
-                return;
+                // Benign no-op: an empty-selection delete is Ok by the S3
+                // taxonomy (the operand set is legitimately empty).
+                return Ok(());
             }
             targets = t;
         }
         "insert_after" => {
-            let (Some(path), Some(element)) = (parse_path(op.get("path")), parse_element(op))
-            else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(element) = parse_element(op) else {
+                return Err(req_err(op, "element"));
             };
             targets = apply_insert_element_after(model, &path, element);
         }
         "insert_at" => {
-            let (Some(parent_path), Some(element)) =
-                (parse_path(op.get("parent_path")), parse_element(op))
-            else {
-                return;
+            let Some(parent_path) = parse_path(op.get("parent_path")) else {
+                return Err(req_err(op, "parent_path"));
+            };
+            let Some(element) = parse_element(op) else {
+                return Err(req_err(op, "element"));
             };
             // A missing/malformed index defaults to 0 (the renderer's contract:
             // index is a resolved usize; out-of-range clamps in the helper).
@@ -1600,24 +1702,29 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // plus the container id when assigned.
         "wrap_in_group" => {
             let Some(paths) = parse_path_list(op.get("paths")) else {
-                return;
+                return Err(req_err(op, "paths"));
             };
             if paths.is_empty() {
-                return;
+                // Benign no-op: an empty paths list is Ok by the S3 taxonomy
+                // (like an empty-selection delete).
+                return Ok(());
             }
             let id = str_field(op, "id");
             let (changed, t) = apply_wrap_in_group(model, &paths, id);
             if !changed {
-                return;
+                // Non-empty paths but no source element resolved (or the
+                // topmost path is empty) — the addressed targets are missing.
+                return Err(OpError::MissingTarget { id: format!("{paths:?}") });
             }
             targets = t;
         }
         "wrap_in_layer" => {
             let Some(paths) = parse_path_list(op.get("paths")) else {
-                return;
+                return Err(req_err(op, "paths"));
             };
             if paths.is_empty() {
-                return;
+                // Benign no-op (see wrap_in_group).
+                return Ok(());
             }
             // The name is a RESOLVED literal; a missing name defaults to "" (the
             // renderer always supplies the resolved next_layer_name).
@@ -1625,17 +1732,19 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let id = str_field(op, "id");
             let (changed, t) = apply_wrap_in_layer(model, &paths, &name, id);
             if !changed {
-                return;
+                return Err(OpError::MissingTarget { id: format!("{paths:?}") });
             }
             targets = t;
         }
         "unpack_group_at" => {
             let Some(path) = parse_path(op.get("path")) else {
-                return;
+                return Err(req_err(op, "path"));
             };
             let (changed, t) = apply_unpack_group_at(model, &path);
             if !changed {
-                return;
+                // No Group at the path (absent element or a non-Group) — the
+                // addressed target is missing.
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
             targets = t;
         }
@@ -1652,12 +1761,14 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             Controller::show_all(model);
         }
         "set_character_attribute" => {
-            let (Some(path), Some(attribute), Some(value)) = (
-                parse_path(op.get("path")),
-                str_field(op, "attribute"),
-                str_field(op, "value"),
-            ) else {
-                return;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(attribute) = str_field(op, "attribute") else {
+                return Err(req_err(op, "attribute"));
+            };
+            let Some(value) = str_field(op, "value") else {
+                return Err(req_err(op, "value"));
             };
             let char_start = op.get("char_start").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let char_end = op.get("char_end").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -1675,12 +1786,19 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // targets = pre-mutation selection ids.
         "set_attr_on_selection" => {
             let Some(attr) = str_field(op, "attr") else {
-                return;
+                return Err(req_err(op, "attr"));
             };
+            // An unsupported attribute is a param whose value is outside the
+            // accepted domain — BadParamType (classified here so the helper's
+            // merged `changed=false` can stay the benign ineffective-edit Ok
+            // below). Behavior-identical: the helper skips the same way.
+            if attr != "stroke_brush" && attr != "stroke_brush_overrides" {
+                return Err(OpError::BadParamType { name: "attr" });
+            }
             // A missing `value` key is a hard skip (no silent clear). When
             // present, an empty string clears (None); a non-empty string sets.
             let Some(value_field) = op.get("value") else {
-                return;
+                return Err(OpError::MissingParam { name: "value" });
             };
             let value = value_field
                 .as_str()
@@ -1689,7 +1807,9 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let attr = attr.to_string();
             let (changed, t) = apply_set_attr_on_selection(model, &attr, value);
             if !changed {
-                return;
+                // Benign no-op: the write left every selected element
+                // unchanged (or the selection is empty) — Ok by the taxonomy.
+                return Ok(());
             }
             targets = t;
         }
@@ -1718,7 +1838,8 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let scale_corners = op.get("scale_corners").and_then(|v| v.as_bool()).unwrap_or(false);
             let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners);
             if !changed {
-                return;
+                // Benign no-op: an identity transform is Ok by the S3 taxonomy.
+                return Ok(());
             }
             targets = t;
         }
@@ -1728,7 +1849,8 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let ry = num_field(op, "ry");
             let (changed, t) = apply_rotate(model, angle, rx, ry);
             if !changed {
-                return;
+                // Benign no-op: a zero-angle rotation is Ok by the S3 taxonomy.
+                return Ok(());
             }
             targets = t;
         }
@@ -1742,7 +1864,8 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let ry = num_field(op, "ry");
             let (changed, t) = apply_shear(model, angle, &axis, axis_angle, rx, ry);
             if !changed {
-                return;
+                // Benign no-op: a zero-angle shear is Ok by the S3 taxonomy.
+                return Ok(());
             }
             targets = t;
         }
@@ -1774,10 +1897,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // checkpoint_equivalence gate compares documents, not metadata.
         v if PRINT_CONFIG_VERBS.contains(&v) => {
             let Some(field) = str_field(op, "field") else {
-                return;
+                return Err(req_err(op, "field"));
             };
             let Some(value) = op.get("value") else {
-                return;
+                return Err(OpError::MissingParam { name: "value" });
             };
             // `index` is read defensively (only set_output_ink_field uses it);
             // a missing/malformed index defaults to 0, which the helper's
@@ -1788,10 +1911,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let field = field.to_string();
             let value = value.clone();
             if !apply_print_config_field(model, v, &field, &value, index) {
-                // Type-mismatch / unknown-field skip: nothing mutated, so
-                // journal nothing (an empty op would replay to no change and
-                // only add noise).
-                return;
+                // Type-mismatch / unknown-field / out-of-range-ink-index skip:
+                // nothing mutated, so journal nothing. The helper merges the
+                // three; the class is BadParamType (the field/value pair did
+                // not apply) with `value` as the best-effort detail name.
+                return Err(OpError::BadParamType { name: "value" });
             }
         }
         // Artboard doc.* setters (OP_LOG.md §9 Phase P2). Each carries RESOLVED
@@ -1800,56 +1924,73 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         // nothing. `targets` carries the written artboard id(s); the
         // document-global options setter keeps it empty.
         "set_artboard_field" => {
-            let (Some(id), Some(field)) = (str_field(op, "id"), str_field(op, "field")) else {
-                return;
+            let Some(id) = str_field(op, "id") else {
+                return Err(req_err(op, "id"));
+            };
+            let Some(field) = str_field(op, "field") else {
+                return Err(req_err(op, "field"));
             };
             let Some(value) = op.get("value") else {
-                return;
+                return Err(OpError::MissingParam { name: "value" });
             };
             let id = id.to_string();
             let field = field.to_string();
             let value = value.clone();
+            // Split the helper's merged `false` for the error channel: a
+            // missing artboard is MissingTarget; an existing artboard with a
+            // field/value that did not apply is BadParamType. The existence
+            // pre-check reads the same document the helper clones, so the
+            // behavior (skip, journal nothing) is unchanged.
+            if !model.document().artboards.iter().any(|a| a.id == id) {
+                return Err(OpError::MissingTarget { id });
+            }
             if !apply_set_artboard_field(model, &id, &field, &value) {
-                return;
+                return Err(OpError::BadParamType { name: "value" });
             }
             targets = vec![id];
         }
         "set_artboard_options_field" => {
             let Some(field) = str_field(op, "field") else {
-                return;
+                return Err(req_err(op, "field"));
             };
             let Some(value) = op.get("value") else {
-                return;
+                return Err(OpError::MissingParam { name: "value" });
             };
             let field = field.to_string();
             let value = value.clone();
             if !apply_set_artboard_options_field(model, &field, &value) {
-                return;
+                // Non-bool value / unknown field (the helper merges both) —
+                // BadParamType with `value` as the best-effort detail name.
+                return Err(OpError::BadParamType { name: "value" });
             }
             // Document-global config ⇒ empty targets (the gate compares
             // documents, not metadata).
         }
         "delete_artboard_by_id" => {
             let Some(id) = str_field(op, "id") else {
-                return;
+                return Err(req_err(op, "id"));
             };
             let id = id.to_string();
             if !apply_delete_artboard_by_id(model, &id) {
-                return;
+                // No artboard with this id — the addressed target is missing.
+                return Err(OpError::MissingTarget { id });
             }
             targets = vec![id];
         }
         "move_artboards_up" => {
             let ids = str_list_field(op, "ids");
             if !apply_move_artboards_up(model, &ids) {
-                return;
+                // Benign no-op: move-up-at-top (or ids that select nothing)
+                // is Ok by the S3 taxonomy.
+                return Ok(());
             }
             targets = ids;
         }
         "move_artboards_down" => {
             let ids = str_list_field(op, "ids");
             if !apply_move_artboards_down(model, &ids) {
-                return;
+                // Benign no-op (see move_artboards_up).
+                return Ok(());
             }
             targets = ids;
         }
@@ -1863,9 +2004,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         "create_artboard" => {
             // A missing/empty id is a malformed payload — skip rather than mint
             // (this arm must NEVER mint). The harness + production always supply
-            // the literal minted id.
+            // the literal minted id. An absent id is MissingParam; a present
+            // non-string / empty id is BadParamType (req_err splits them).
             let Some(id) = str_field(op, "id").filter(|s| !s.is_empty()) else {
-                return;
+                return Err(req_err(op, "id"));
             };
             let id = id.to_string();
             // `fields` is an optional RESOLVED override object; absent ⇒ defaults.
@@ -1877,11 +2019,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             // Both the source id and the (already-minted) new_id are required
             // literals; either missing ⇒ skip (never mint). A missing source
             // artboard is a no-op that journals nothing.
-            let (Some(source_id), Some(new_id)) = (
-                str_field(op, "id").filter(|s| !s.is_empty()),
-                str_field(op, "new_id").filter(|s| !s.is_empty()),
-            ) else {
-                return;
+            let Some(source_id) = str_field(op, "id").filter(|s| !s.is_empty()) else {
+                return Err(req_err(op, "id"));
+            };
+            let Some(new_id) = str_field(op, "new_id").filter(|s| !s.is_empty()) else {
+                return Err(req_err(op, "new_id"));
             };
             let source_id = source_id.to_string();
             let new_id = new_id.to_string();
@@ -1891,14 +2033,16 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
             let ox = num_field(op, "offset_x");
             let oy = num_field(op, "offset_y");
             if !apply_duplicate_artboard(model, &source_id, &new_id, &name, ox, oy) {
-                return;
+                // No artboard with the source id — the addressed target is
+                // missing.
+                return Err(OpError::MissingTarget { id: source_id });
             }
             targets = vec![new_id];
         }
         // Unknown verb: a malformed/unsupported production payload is skipped
         // rather than panicking. (The harness corpus only carries known verbs,
         // so this never fires under test — the byte-gate would catch a typo.)
-        _ => return,
+        _ => return Err(OpError::UnknownVerb { name: name.to_string() }),
     }
     // Capture the op into the open transaction so the journal replays to
     // the same document — the checkpoint_equivalence gate (OP_LOG.md §5-6).
@@ -1910,4 +2054,5 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) {
         params: op.clone(),
         targets,
     });
+    Ok(())
 }

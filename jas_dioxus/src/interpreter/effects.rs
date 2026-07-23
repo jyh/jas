@@ -780,7 +780,7 @@ fn run_doc_effect(
                     let op = serde_json::json!({
                         "op": "move_selection", "dx": dx, "dy": dy,
                     });
-                    crate::document::op_apply::op_apply(model, &op);
+                    let _ = crate::document::op_apply::op_apply(model, &op);
                 }
             }
         }
@@ -942,7 +942,7 @@ fn run_doc_effect(
                     "attr": attr,
                     "value": resolved,
                 });
-                crate::document::op_apply::op_apply(model, &op);
+                let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.copy_selection" => {
@@ -957,7 +957,7 @@ fn run_doc_effect(
                 let op = serde_json::json!({
                     "op": "copy_selection", "dx": dx, "dy": dy,
                 });
-                crate::document::op_apply::op_apply(model, &op);
+                let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.add_element" => {
@@ -1009,7 +1009,7 @@ fn run_doc_effect(
                     "x": rx, "y": ry, "width": rw, "height": rh,
                     "extend": additive,
                 });
-                crate::document::op_apply::op_apply(model, &op);
+                let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
         "doc.add_path_from_anchor_buffer" => {
@@ -5851,7 +5851,7 @@ fn scale_apply_journaled(
     }
     if copy {
         let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
-        crate::document::op_apply::op_apply(model, &op);
+        let _ = crate::document::op_apply::op_apply(model, &op);
     }
     // Resolve the reference point + flags AFTER the copy (so the reference point
     // resolves against the now-selected duplicates, matching the preview path,
@@ -5863,7 +5863,7 @@ fn scale_apply_journaled(
         "sx": sx, "sy": sy, "rx": rx, "ry": ry,
         "scale_strokes": scale_strokes, "scale_corners": scale_corners,
     });
-    crate::document::op_apply::op_apply(model, &op);
+    let _ = crate::document::op_apply::op_apply(model, &op);
 }
 
 /// Rotate apply — OUT-OF-BAND (PREVIEW / live-drag) path. Rigid (no stroke/corner
@@ -5907,13 +5907,13 @@ fn rotate_apply_journaled(
     }
     if copy {
         let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
-        crate::document::op_apply::op_apply(model, &op);
+        let _ = crate::document::op_apply::op_apply(model, &op);
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let op = serde_json::json!({
         "op": "rotate_transform", "angle": theta_deg, "rx": rx, "ry": ry,
     });
-    crate::document::op_apply::op_apply(model, &op);
+    let _ = crate::document::op_apply::op_apply(model, &op);
 }
 
 /// Shear apply — OUT-OF-BAND (PREVIEW / live-drag) path. Pure shear (det 1)
@@ -5962,7 +5962,7 @@ fn shear_apply_journaled(
     }
     if copy {
         let op = serde_json::json!({ "op": "copy_selection", "dx": 0.0, "dy": 0.0 });
-        crate::document::op_apply::op_apply(model, &op);
+        let _ = crate::document::op_apply::op_apply(model, &op);
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let op = serde_json::json!({
@@ -5970,7 +5970,7 @@ fn shear_apply_journaled(
         "angle": angle_deg, "axis": axis, "axis_angle": axis_angle_deg,
         "rx": rx, "ry": ry,
     });
-    crate::document::op_apply::op_apply(model, &op);
+    let _ = crate::document::op_apply::op_apply(model, &op);
 }
 
 /// The resolved selection path list (selection order). Twin of
@@ -9300,7 +9300,8 @@ mod tests {
             crate::geometry::test_json::document_to_test_json(model.document());
         let mut replay = eye_model();
         for op in &txn.ops {
-            crate::document::op_apply::op_apply(&mut replay, &op.params);
+            crate::document::op_apply::op_apply(&mut replay, &op.params)
+                    .expect("journal replay: journals only contain succeeded ops");
         }
         let replay_json =
             crate::geometry::test_json::document_to_test_json(replay.document());
@@ -9479,7 +9480,8 @@ mod tests {
         crate::document::op_apply::op_apply(
             &mut model,
             &serde_json::json!({"op": "move_selection", "dx": 3, "dy": 11}),
-        );
+        )
+        .expect("known-good move_selection op must apply Ok");
         // The eye is layers[0].children[0]. Its source bbox (after px→pt 0.75
         // scaling: x=0,y=0,w=10,h=10 px → 0,0,7.5,7.5 pt) shifts by exactly
         // (dx, dy) = (3, 11).
@@ -9584,7 +9586,8 @@ mod tests {
             crate::geometry::test_json::document_to_test_json(model.document());
         let mut replay = brush_path_model();
         for op in &txn.ops {
-            crate::document::op_apply::op_apply(&mut replay, &op.params);
+            crate::document::op_apply::op_apply(&mut replay, &op.params)
+                    .expect("journal replay: journals only contain succeeded ops");
         }
         let replay_json =
             crate::geometry::test_json::document_to_test_json(replay.document());

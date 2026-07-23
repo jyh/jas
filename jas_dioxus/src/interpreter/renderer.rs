@@ -768,7 +768,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     });
                     tab.model.with_txn(|m| {
                         m.name_txn("place_concept_instance");
-                        crate::document::op_apply::op_apply(m, &op);
+                        let _ = crate::document::op_apply::op_apply(m, &op);
                     });
                 }
                 return Vec::new();
@@ -812,7 +812,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                         });
                         tab.model.with_txn(|m| {
                             m.name_txn("set_concept_param");
-                            crate::document::op_apply::op_apply(m, &op);
+                            let _ = crate::document::op_apply::op_apply(m, &op);
                         });
                     }
                 }
@@ -884,7 +884,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                             });
                             tab.model.with_txn(|m| {
                                 m.name_txn("apply_concept_operation");
-                                crate::document::op_apply::op_apply(m, &op);
+                                let _ = crate::document::op_apply::op_apply(m, &op);
                             });
                         }
                     }
@@ -1001,7 +1001,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     });
                     tab.model.with_txn(|m| {
                         m.name_txn("promote_to_concept");
-                        crate::document::op_apply::op_apply(m, &op);
+                        let _ = crate::document::op_apply::op_apply(m, &op);
                     });
                 }
                 return Vec::new();
@@ -3133,7 +3133,7 @@ fn run_yaml_effect(
             "id": id.clone(),
             "fields": serde_json::Value::Object(fields),
         });
-        crate::document::op_apply::op_apply(&mut tab.model, &op);
+        let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         if let Some(as_n) = as_name {
             if let Some(map) = eval_ctx.as_object_mut() {
                 map.insert(as_n, serde_json::json!(id));
@@ -3156,7 +3156,7 @@ fn run_yaml_effect(
         };
         let op = serde_json::json!({ "op": "delete_artboard_by_id", "id": target });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3226,7 +3226,7 @@ fn run_yaml_effect(
             "offset_x": ox,
             "offset_y": oy,
         });
-        crate::document::op_apply::op_apply(&mut tab.model, &op);
+        let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         return deferred;
     }
 
@@ -3262,7 +3262,7 @@ fn run_yaml_effect(
             "value": value_json,
         });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3287,7 +3287,7 @@ fn run_yaml_effect(
             "value": value_json,
         });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3364,7 +3364,7 @@ fn run_yaml_effect(
                     op["index"] = serde_json::json!(index);
                 }
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    crate::document::op_apply::op_apply(&mut tab.model, &op);
+                    let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
                 return deferred;
             }
@@ -3381,7 +3381,7 @@ fn run_yaml_effect(
         let ids = extract_id_list(&val);
         let op = serde_json::json!({ "op": "move_artboards_up", "ids": ids });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3393,7 +3393,7 @@ fn run_yaml_effect(
         let ids = extract_id_list(&val);
         let op = serde_json::json!({ "op": "move_artboards_down", "ids": ids });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3452,7 +3452,7 @@ fn run_yaml_effect(
             };
             let op = serde_json::json!({ "op": "delete_at", "path": indices });
             if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                crate::document::op_apply::op_apply(&mut tab.model, &op);
+                let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
             }
             if let Some(name) = as_name {
                 if let Some(map) = eval_ctx.as_object_mut() {
@@ -3508,7 +3508,7 @@ fn run_yaml_effect(
     if eff.get("doc.delete_selection").is_some() {
         let op = serde_json::json!({ "op": "delete_selection" });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3559,7 +3559,7 @@ fn run_yaml_effect(
                     "element": element_json,
                 });
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    crate::document::op_apply::op_apply(&mut tab.model, &op);
+                    let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
             }
         }
@@ -3582,7 +3582,7 @@ fn run_yaml_effect(
         };
         let op = serde_json::json!({ "op": "unpack_group_at", "path": indices });
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3626,7 +3626,7 @@ fn run_yaml_effect(
             op["id"] = serde_json::Value::String(id);
         }
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3659,7 +3659,7 @@ fn run_yaml_effect(
             op["id"] = serde_json::Value::String(id);
         }
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            crate::document::op_apply::op_apply(&mut tab.model, &op);
+            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
         }
         return deferred;
     }
@@ -3699,7 +3699,7 @@ fn run_yaml_effect(
                     "element": element_json,
                 });
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    crate::document::op_apply::op_apply(&mut tab.model, &op);
+                    let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
             }
         }
@@ -10855,7 +10855,8 @@ mod tests {
         let mut replay = crate::document::model::Model::new(pre_doc, None);
         for t in model.journal() {
             for o in &t.ops {
-                crate::document::op_apply::op_apply(&mut replay, &o.params);
+                crate::document::op_apply::op_apply(&mut replay, &o.params)
+                    .expect("journal replay: journals only contain succeeded ops");
             }
         }
         let replay_doc = document_to_test_json(replay.document());
@@ -10906,7 +10907,8 @@ mod tests {
         let mut replay = crate::document::model::Model::new(pre_doc, None);
         for t in model.journal() {
             for o in &t.ops {
-                crate::document::op_apply::op_apply(&mut replay, &o.params);
+                crate::document::op_apply::op_apply(&mut replay, &o.params)
+                    .expect("journal replay: journals only contain succeeded ops");
             }
         }
         let replay_doc = document_to_test_json(replay.document());

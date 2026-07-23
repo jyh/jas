@@ -511,7 +511,8 @@ mod tests {
     impl OpWorld for DocumentOps {
         type State = Model;
         fn apply(model: &mut Model, op: &serde_json::Value) -> Vec<String> {
-            crate::document::op_apply::op_apply(model, op);
+            let result = crate::document::op_apply::op_apply(model, op);
+            assert_op_result(op, result);
             Vec::new()
         }
         fn to_test_json(model: &Model) -> String {
@@ -540,13 +541,41 @@ mod tests {
         W::to_test_json(state)
     }
 
+    /// The S3 error-channel contract, asserted on every fixture op the harness
+    /// dispatches: an op carrying `expected_error` (the bare class name, e.g.
+    /// `"MissingTarget"`) must Err with exactly that class; an op without it
+    /// must be Ok. Detail payloads (param names / ids) are diagnostics only —
+    /// the cross-language assertion is the class name string.
+    fn assert_op_result(
+        op: &serde_json::Value,
+        result: Result<(), crate::document::op_apply::OpError>,
+    ) {
+        let verb = op["op"].as_str().unwrap_or("<no-verb>");
+        match op.get("expected_error").and_then(|v| v.as_str()) {
+            Some(expected) => match result {
+                Err(e) => assert_eq!(
+                    e.class_name(),
+                    expected,
+                    "op '{verb}': expected error class {expected}, got {e}"
+                ),
+                Ok(()) => panic!("op '{verb}': expected error class {expected}, got Ok"),
+            },
+            None => {
+                if let Err(e) = result {
+                    panic!("op '{verb}' unexpectedly errored: {e}");
+                }
+            }
+        }
+    }
+
     /// Thin harness shim over the production dispatcher (OP_LOG.md §9,
     /// Increment 3b-B): both the `#[cfg(test)]` cross-language harness and the
     /// production effect path go through the SAME `op_apply` module and the SAME
     /// `record_op` site, so this lift is behavior-preserving (the operations
     /// fixtures stay byte-green) and `targets` is recorded identically on both
     /// paths. Promoting the dispatcher out of `#[cfg(test)]` also hardened its
-    /// param parsing so production input can't panic.
+    /// param parsing so production input can't panic. The envelope additionally
+    /// asserts the S3 error-channel contract per op (`assert_op_result`).
     fn apply_op(model: &mut Model, op: &serde_json::Value) {
         // Route through the shared `OpWorld` envelope so the document dispatch
         // path and the unified runner are the SAME code (DocumentOps::apply
@@ -627,7 +656,18 @@ mod tests {
         let mut model = Model::new(doc, None);
         for txn in &journal[0..head] {
             for op in &txn.ops {
-                apply_op(&mut model, &op.params);
+                // S3 strengthening: journals only ever contain succeeded ops,
+                // so every replayed op must be Ok (an Err here means an op that
+                // was rejected at apply time somehow reached record_op — a
+                // broken Err⇔skipped-before-record_op invariant).
+                crate::document::op_apply::op_apply(&mut model, &op.params)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "journal replay: op '{}' errored ({e}) — journals \
+                             only contain succeeded ops",
+                            op.op
+                        )
+                    });
             }
         }
         <DocumentOps as OpWorld>::to_test_json(&model)
@@ -1859,7 +1899,8 @@ mod tests {
         let doc_a = svg_to_document(&setup);
         let mut model_a = Model::new(doc_a, None);
         model_a.begin_txn();
-        crate::document::op_apply::op_apply(&mut model_a, &op);
+        crate::document::op_apply::op_apply(&mut model_a, &op)
+            .expect("known-good select_rect op must apply Ok");
         model_a.commit_txn();
         let direct = document_to_test_json(model_a.document());
 
@@ -2209,7 +2250,8 @@ mod tests {
         let mut replay = production_model(&fx);
         for txn in model.journal() {
             for op in &txn.ops {
-                crate::document::op_apply::op_apply(&mut replay, &op.params);
+                crate::document::op_apply::op_apply(&mut replay, &op.params)
+                    .expect("journal replay: journals only contain succeeded ops");
             }
         }
         let replay_doc = document_to_test_json(replay.document());
@@ -2279,7 +2321,8 @@ mod tests {
             let mut replay = production_model(&fx);
             for txn in model.journal() {
                 for op in &txn.ops {
-                    crate::document::op_apply::op_apply(&mut replay, &op.params);
+                    crate::document::op_apply::op_apply(&mut replay, &op.params)
+                    .expect("journal replay: journals only contain succeeded ops");
                 }
             }
             let doc = document_to_test_json(replay.document());
@@ -3347,7 +3390,8 @@ mod tests {
         let mut model = Model::new(doc, None);
         for txn in &live.journal()[0..live.journal_head()] {
             for op in &txn.ops {
-                crate::document::op_apply::op_apply(&mut model, &op.params);
+                crate::document::op_apply::op_apply(&mut model, &op.params)
+                    .expect("journal replay: journals only contain succeeded ops");
             }
         }
         model
@@ -3529,7 +3573,8 @@ mod tests {
         crate::document::op_apply::op_apply(&mut model, &serde_json::json!({
             "op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96,
             "extend": false,
-        }));
+        }))
+        .expect("known-good select_rect op must apply Ok");
         model.commit_txn();
         model
     }
