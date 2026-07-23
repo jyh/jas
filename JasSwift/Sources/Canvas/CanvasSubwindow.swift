@@ -3719,6 +3719,11 @@ struct CanvasRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> CanvasNSView {
         let view = CanvasNSView()
+        // macOS 14+ defaults clipsToBounds to false, so an unclipped canvas
+        // paints doc-space content (artboard fill, viewport-straddling
+        // elements) OVER sibling views — seen live as the canvas obscuring
+        // the dock panels. A canvas never legitimately draws outside itself.
+        view.clipsToBounds = true
         view.document = document
         view.controller = controller
         view.currentTool = currentTool

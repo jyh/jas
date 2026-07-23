@@ -181,3 +181,18 @@ feel, live enabled/disabled rendering, and visual correctness of the paint.
   perf item once its ink bounds are proven.
 - **Theme-aware canvas** — if the canvas body ever reads appearance colors, add
   a theme id to `CanvasRenderSignature` and re-verify SWREN-006.
+
+## Session log
+
+- **2026-07-23 (JYH, trackpad + mouse):** Sessions A/B/C PASS.
+  SWNAV-001..005, -007 clean; SWNAV-006 pass-with-note — trackpad
+  gestures resolve to pan OR zoom at gesture-begin (standard AppKit
+  idiom); interleaved pan-during-pinch banked as polish. Session B all
+  green (an early "missing Delete" report was the menu-BAR Edit menu,
+  which has no Delete row by shared menubar.yaml design — the context
+  menu was to spec all along). Session C surfaced the one real catch:
+  the canvas painted OVER the dock panels — macOS 14+ defaults
+  clipsToBounds to false and the canvas never clipped; masked
+  previously by whole-canvas repaints, unmasked by SH-5's scoped
+  invalidation. Fixed (clipsToBounds = true in makeNSView), re-verified
+  live same session. Wacom quick-pass deferred to a future session.
