@@ -1,0 +1,1248 @@
+{
+  "actions": {
+    "add_used_colors": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_bottom": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_horizontal_center": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_left": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_right": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_top": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "align_vertical_center": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "apply_artboard_preset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "apply_brush_changes_to_strokes": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "apply_brush_to_selection": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_attr_on_selection",
+        "doc.snapshot"
+      ]
+    },
+    "apply_concept_operation": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "artboard_options_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_artboard_field",
+        "doc.set_artboard_options_field"
+      ]
+    },
+    "artboards_panel_select": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "artboards_select_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "blob_brush_tool_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "blob_brush_tool_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_crop": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_divide": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_exclude": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_exclude_compound": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_intersection": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_intersection_compound": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_merge": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_subtract_back": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_subtract_front": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_subtract_front_compound": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_trim": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_union": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "boolean_union_compound": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "brush_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "cancel_artboard_rename": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "cancel_rename": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "close_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "close_tab": {
+      "class": "ui-state",
+      "dispatches": [
+        "remove_tab"
+      ],
+      "doc_verbs": []
+    },
+    "close_without_saving": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "collapse_dock": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "collect_in_new_layer": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.wrap_in_layer"
+      ]
+    },
+    "complement_active_color": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "concepts_panel_select": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "confirm_artboard_rename": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_artboard_field"
+      ]
+    },
+    "confirm_rename": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "convert_to_artboards": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "copy": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "cut": {
+      "class": "ui-state",
+      "dispatches": [
+        "copy",
+        "delete_selection"
+      ],
+      "doc_verbs": []
+    },
+    "cut_orphan_confirm_ok": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "cycle_element_visibility": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_artboard_from_dialog": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_artboard_by_id"
+      ]
+    },
+    "delete_artboards": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_artboard_by_id"
+      ]
+    },
+    "delete_brush": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_empty_artboards": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_layer_orphan_confirm_ok": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_at"
+      ]
+    },
+    "delete_layer_selection": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_at"
+      ]
+    },
+    "delete_orphan_confirm_ok": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_selection": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_swatch": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_symbol_action": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_symbol_orphan_confirm_ok": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "delete_workspace": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "dismiss_dialog": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_bottom": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_horizontal_center": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_horizontal_spacing": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_left": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_right": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_top": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_vertical_center": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "distribute_vertical_spacing": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "document_setup_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_document_setup_field"
+      ]
+    },
+    "document_setup_toggle_bleed_uniform": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "duplicate_artboards": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.duplicate_artboard"
+      ]
+    },
+    "duplicate_brush": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "duplicate_layer_selection": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.clone_at",
+        "doc.insert_after"
+      ]
+    },
+    "duplicate_swatch": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "enter_isolation_mode": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "exit_isolation_mode": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "exit_isolation_to_level": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "expand_compound_shape": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "expand_dock": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "export_to_pdf": {
+      "class": "native-intercept",
+      "doc_verbs": [],
+      "note": "declared in native_intercepts; no actions-map entry -- handled natively"
+    },
+    "eyedropper_tool_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "eyedropper_tool_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "fit_active_artboard": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.fit_rect"
+      ]
+    },
+    "fit_all_artboards": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.fit_all_artboards"
+      ]
+    },
+    "fit_in_window": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.fit_elements"
+      ]
+    },
+    "flatten_artwork": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.unpack_group_at"
+      ]
+    },
+    "flip_stroke_profile": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "group": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "hide_selection": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "invert_active_color": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layer_options_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.create_layer",
+        "doc.insert_at",
+        "doc.set"
+      ]
+    },
+    "layers_element_select": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_nav_down": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_nav_left": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_nav_right": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_nav_up": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_panel_select": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "layers_select_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "lock": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "make_compound_shape": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "make_instance": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "maximize_canvas": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "move_artboard_down": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.move_artboards_down"
+      ]
+    },
+    "move_artboard_up": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.move_artboards_up"
+      ]
+    },
+    "new_artboard": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.create_artboard"
+      ]
+    },
+    "new_document": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "new_group": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.wrap_in_group"
+      ]
+    },
+    "new_layer": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.create_layer",
+        "doc.insert_at"
+      ]
+    },
+    "new_swatch": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "new_symbol": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "noop": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_artboard_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_boolean_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_brush_libraries_menu": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_brush_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_color_picker": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_document_setup": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_file": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_layer_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_paragraph_hyphenation": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_paragraph_justification": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_print_dialog": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "open_swatch_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paintbrush_tool_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paintbrush_tool_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paragraph_hyphenation_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paragraph_justification_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paste": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "paste_in_place": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "place_concept_instance": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "place_instance": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "print_dialog_done": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_advanced_field",
+        "doc.set_color_management_field",
+        "doc.set_graphics_field",
+        "doc.set_marks_and_bleed_field",
+        "doc.set_output_field",
+        "doc.set_output_ink_field",
+        "doc.set_print_preferences_field"
+      ]
+    },
+    "print_dialog_print": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_advanced_field",
+        "doc.set_color_management_field",
+        "doc.set_graphics_field",
+        "doc.set_marks_and_bleed_field",
+        "doc.set_output_field",
+        "doc.set_output_ink_field",
+        "doc.set_print_preferences_field"
+      ]
+    },
+    "promote_to_concept": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "quit": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "rearrange_artboards": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "redo": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "release_compound_shape": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "remove_brush_from_selection": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_attr_on_selection",
+        "doc.snapshot"
+      ]
+    },
+    "remove_tab": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "rename_artboard": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "rename_element": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "repeat_boolean_operation": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_align_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_artboards_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_boolean_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_fill_stroke": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_magic_wand_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_paragraph_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_stroke_profile": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "reset_workspace": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "restore_canvas": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "revert": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "revert_workspace": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "rotate_options_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.preview.clear",
+        "doc.preview.restore",
+        "doc.rotate.apply"
+      ],
+      "journal_param_sites": {
+        "doc.rotate.apply": [
+          true
+        ]
+      }
+    },
+    "rotate_options_preview": {
+      "class": "preview",
+      "doc_verbs": [
+        "doc.preview.restore",
+        "doc.rotate.apply"
+      ],
+      "journal_param_sites": {
+        "doc.rotate.apply": [
+          false
+        ]
+      }
+    },
+    "rotate_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save": {
+      "class": "ui-state",
+      "dispatches": [
+        "save_as"
+      ],
+      "doc_verbs": []
+    },
+    "save_all_and_close": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_and_close": {
+      "class": "ui-state",
+      "dispatches": [
+        "save"
+      ],
+      "doc_verbs": []
+    },
+    "save_appearance_as": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_appearance_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_as": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_brush_library": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_swatch_library": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_swatch_library_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_workspace_as": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "save_workspace_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "scale_options_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.preview.clear",
+        "doc.preview.restore",
+        "doc.scale.apply"
+      ],
+      "journal_param_sites": {
+        "doc.scale.apply": [
+          true
+        ]
+      }
+    },
+    "scale_options_preview": {
+      "class": "preview",
+      "doc_verbs": [
+        "doc.preview.restore",
+        "doc.scale.apply"
+      ],
+      "journal_param_sites": {
+        "doc.scale.apply": [
+          false
+        ]
+      }
+    },
+    "scale_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "scroll_to_selected": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "select_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "select_all_unused_brushes": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "select_all_unused_swatches": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "select_tool": {
+      "class": "tool-lifecycle",
+      "doc_verbs": []
+    },
+    "set_active_color": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_active_color_none": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_align_to": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_arrow_align": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_artboard_fill_preset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_artboard_reference_point": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_brush_thumbnail_size": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_brush_view_mode": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_color_panel_mode": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_concept_param": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_fill_none": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_fill_type_gradient": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_fill_type_solid": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_layers_search": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_stroke_align": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_stroke_cap": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_stroke_join": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_stroke_none": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_stroke_profile": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "set_swatch_thumbnail_size": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "shear_options_confirm": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.preview.clear",
+        "doc.preview.restore",
+        "doc.shear.apply"
+      ],
+      "journal_param_sites": {
+        "doc.shear.apply": [
+          true
+        ]
+      }
+    },
+    "shear_options_preview": {
+      "class": "preview",
+      "doc_verbs": [
+        "doc.preview.restore",
+        "doc.shear.apply"
+      ],
+      "journal_param_sites": {
+        "doc.shear.apply": [
+          false
+        ]
+      }
+    },
+    "shear_options_reset": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "show_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "show_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "solo_element_visibility": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "sort_brushes_by_name": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "sort_swatches_by_name": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "swap_arrowheads": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "swap_fill_stroke": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "swatch_options_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "switch_appearance": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "switch_workspace": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "symbols_panel_select": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "tile_panes": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_all_layers_lock": {
+      "class": "doc-direct",
+      "doc_verbs": [
+        "doc.set"
+      ]
+    },
+    "toggle_all_layers_outline": {
+      "class": "doc-direct",
+      "doc_verbs": [
+        "doc.set"
+      ]
+    },
+    "toggle_all_layers_visibility": {
+      "class": "doc-direct",
+      "doc_verbs": [
+        "doc.set"
+      ]
+    },
+    "toggle_artboard_chain_link": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_artboard_orientation": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_brush_category": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_brush_library_persistent": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_canvas_maximize": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_dashed_line": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_dock_collapse": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_element_lock": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_element_twirl": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_fill_on_top": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_hanging_punctuation": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_layers_type_filter": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_link_arrowhead_scale": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_pane": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_use_preview_bounds": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "undo": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "ungroup": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "ungroup_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "unlock_all": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "zoom_in": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.apply"
+      ]
+    },
+    "zoom_out": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.apply"
+      ]
+    },
+    "zoom_to_actual_size": {
+      "class": "view",
+      "doc_verbs": [
+        "doc.zoom.set"
+      ]
+    }
+  },
+  "generated_from": "workspace/workspace.json",
+  "generator": "scripts/gen_intent_map.py",
+  "scope_note": "ACTION seam (dispatch_action) ONLY. 45 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
+  "summary": {
+    "action_seam_doc_verbs": [
+      "doc.clone_at",
+      "doc.create_artboard",
+      "doc.create_layer",
+      "doc.delete_artboard_by_id",
+      "doc.delete_at",
+      "doc.duplicate_artboard",
+      "doc.insert_after",
+      "doc.insert_at",
+      "doc.move_artboards_down",
+      "doc.move_artboards_up",
+      "doc.preview.clear",
+      "doc.preview.restore",
+      "doc.rotate.apply",
+      "doc.scale.apply",
+      "doc.set",
+      "doc.set_advanced_field",
+      "doc.set_artboard_field",
+      "doc.set_artboard_options_field",
+      "doc.set_attr_on_selection",
+      "doc.set_color_management_field",
+      "doc.set_document_setup_field",
+      "doc.set_graphics_field",
+      "doc.set_marks_and_bleed_field",
+      "doc.set_output_field",
+      "doc.set_output_ink_field",
+      "doc.set_print_preferences_field",
+      "doc.shear.apply",
+      "doc.snapshot",
+      "doc.unpack_group_at",
+      "doc.wrap_in_group",
+      "doc.wrap_in_layer",
+      "doc.zoom.apply",
+      "doc.zoom.fit_all_artboards",
+      "doc.zoom.fit_elements",
+      "doc.zoom.fit_rect",
+      "doc.zoom.set"
+    ],
+    "by_class": {
+      "doc-direct": 3,
+      "journaling": 24,
+      "native-intercept": 1,
+      "preview": 3,
+      "tool-lifecycle": 1,
+      "ui-state": 199,
+      "view": 6
+    },
+    "doc_verbs_outside_action_seam": [
+      "doc.add_element",
+      "doc.add_path_from_anchor_buffer",
+      "doc.add_path_from_buffer",
+      "doc.artboard.create_commit",
+      "doc.artboard.delete_panel_selected",
+      "doc.artboard.duplicate_apply",
+      "doc.artboard.duplicate_commit",
+      "doc.artboard.duplicate_init",
+      "doc.artboard.move_apply",
+      "doc.artboard.move_commit",
+      "doc.artboard.probe_hit",
+      "doc.artboard.probe_hover",
+      "doc.artboard.resize_apply",
+      "doc.artboard.resize_commit",
+      "doc.blob_brush.commit_erasing",
+      "doc.blob_brush.commit_painting",
+      "doc.blob_brush.sweep_sample",
+      "doc.clear_selection",
+      "doc.copy_selection",
+      "doc.eyedropper.apply_loaded",
+      "doc.eyedropper.sample",
+      "doc.magic_wand.apply",
+      "doc.move_path_handle",
+      "doc.paintbrush.edit_commit",
+      "doc.paintbrush.edit_start",
+      "doc.pan.apply",
+      "doc.partial_select_in_rect",
+      "doc.path.commit_anchor_edit",
+      "doc.path.commit_partial_marquee",
+      "doc.path.delete_anchor_near",
+      "doc.path.erase_at_rect",
+      "doc.path.insert_anchor_on_segment_near",
+      "doc.path.probe_anchor_hit",
+      "doc.path.probe_partial_hit",
+      "doc.path.smooth_at_cursor",
+      "doc.preview.capture",
+      "doc.select_in_rect",
+      "doc.select_polygon_from_buffer",
+      "doc.set_selection",
+      "doc.snapshot.restore",
+      "doc.toggle_selection",
+      "doc.translate_selection",
+      "doc.zoom.fit_marquee",
+      "doc.zoom.scrubby",
+      "doc.zoom.set_full"
+    ],
+    "journaling_actions": 24,
+    "native_intercepts": [
+      "export_to_pdf"
+    ],
+    "total_actions": 236,
+    "verb_table": {
+      "always": [
+        "doc.copy_selection",
+        "doc.create_artboard",
+        "doc.delete_artboard_by_id",
+        "doc.delete_at",
+        "doc.delete_selection",
+        "doc.duplicate_artboard",
+        "doc.insert_after",
+        "doc.insert_at",
+        "doc.move_artboards_down",
+        "doc.move_artboards_up",
+        "doc.select_in_rect",
+        "doc.set_advanced_field",
+        "doc.set_artboard_field",
+        "doc.set_artboard_options_field",
+        "doc.set_attr_on_selection",
+        "doc.set_color_management_field",
+        "doc.set_document_setup_field",
+        "doc.set_graphics_field",
+        "doc.set_marks_and_bleed_field",
+        "doc.set_output_field",
+        "doc.set_output_ink_field",
+        "doc.set_print_preferences_field",
+        "doc.translate_selection",
+        "doc.unpack_group_at",
+        "doc.wrap_in_group",
+        "doc.wrap_in_layer"
+      ],
+      "never": [
+        "doc.clone_at",
+        "doc.create_layer",
+        "doc.preview.clear",
+        "doc.preview.restore",
+        "doc.set",
+        "doc.snapshot",
+        "doc.zoom.apply",
+        "doc.zoom.fit_all_artboards",
+        "doc.zoom.fit_elements",
+        "doc.zoom.fit_rect",
+        "doc.zoom.set"
+      ],
+      "param_gated": [
+        "doc.rotate.apply",
+        "doc.scale.apply",
+        "doc.shear.apply"
+      ]
+    }
+  }
+}
