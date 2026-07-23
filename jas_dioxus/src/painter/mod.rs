@@ -1,0 +1,327 @@
+//! The `Painter` seam — PH1 DE-RISKING SPIKE (not production).
+//!
+//! This module is EVIDENCE for the Monday 7/27 council that will ratify (or
+//! amend) the Painter contract v2 (`project_painter_contract_draft.md`). It is
+//! a working prototype: the immediate-mode trait, three test impls, a proof
+//! test, and a scene-build bench. It is deliberately NOT wired into
+//! `canvas/render.rs` — the FLIP (D1 v2: immediate trait, not a retained IR)
+//! is not yet ratified, so production conversion is forbidden until the council
+//! word. Everything here is reworkable if the council changes the fork.
+//!
+//! # What the trait is
+//!
+//! `Painter` is an **immediate-mode** drawing seam: the caller issues a call
+//! per drawing action and the impl acts on it right then. There is no retained
+//! scene graph exposed across the seam. Three impls prove the shape:
+//!
+//! - [`Canvas2dPainter`](canvas2d::Canvas2dPainter) (feature = "web"): a thin
+//!   1:1 mapping onto `web_sys::CanvasRenderingContext2d`. Compile-checked
+//!   natively (web-sys bindings compile on any target); never RUN outside a
+//!   browser and never wired into `render.rs` in this spike.
+//! - [`RecordingPainter`](recording::RecordingPainter): materializes each call
+//!   into a `Command` and serializes to canonical JSON — the
+//!   display-list-equivalence goldens (R4) live where their only consumer lives
+//!   (tests). No per-frame production tax.
+//! - [`NoOpPainter`](sink::NoOpPainter): a do-nothing sink, for the R10 bench
+//!   (measures scene-BUILD cost with rendering subtracted out).
+//!
+//! # Design decisions the council is ratifying (the signatures ARE the seam)
+//!
+//! - **Typed styles cross the seam (R3).** No CSS strings, no doc-model
+//!   `Gradient`. [`Brush`] carries resolved gradient ENDPOINTS + stops; the
+//!   `bbox`/`angle`/`aspect_ratio`/freeform math from today's
+//!   `make_canvas_gradient` moves to BUILD time (the call site). The Painter
+//!   never sees jas gradient semantics — only geometry + color. CSS strings
+//!   exist only inside `Canvas2dPainter`.
+//!
+//! - **Paint-time alpha is a pinned, EXPLICIT parameter (`paint_alpha`).**
+//!   Today's `fill_op`/`stroke_op` are a `globalAlpha` multiply applied right
+//!   before each paint; the contract PINS this (never baked into brush color,
+//!   to preserve the browser's exact compositing arithmetic). Making it an
+//!   explicit arg to every paint method makes the pin visible and testable.
+//!
+//! - **Group alpha COMPOUNDS non-isolated ([`Painter::push_group`]).** Each
+//!   element/group opacity multiplies into ALL descendants per-primitive, so
+//!   overlaps within a group compound — exactly today's browser behavior (one
+//!   flat `globalAlpha`, no offscreen isolation; incl. the 0.15 layers-dim
+//!   pass). The effective paint alpha at any primitive is
+//!   `(product of open group alphas) * paint_alpha`. The impl tracks the
+//!   product internally; NOTHING reads it back off the context (D3: the
+//!   group-alpha getter dies). `VelloPainter` (PH5) will EMULATE this
+//!   per-primitive rather than use a `push_layer` (a push_layer would isolate
+//!   and stop overlaps compounding — the wrong semantics).
+//!
+//! - **Group blend is inert by construction.** `push_group` carries a
+//!   [`BlendMode`] so the mechanical rewrite of today's per-element
+//!   `set_global_composite_operation` has somewhere to land, but a nested
+//!   `push_group` resets it and leaf primitives inherit the innermost group's
+//!   blend — matching today, where a Group's own mode is overridden by its
+//!   children. We do NOT activate dead group-level blend behavior.
+//!
+//! See `SPIKE_FINDINGS.md` in this directory for the ergonomics verdict, the
+//! R7 float-law decision, the R10 first number, and the contract amendments the
+//! spike surfaced (notably A1: FastRun needs a baseline anchor; A2: `ellipse_arc`
+//! must split into fill/stroke to mirror the path convention).
+
+pub mod recording;
+pub mod scene;
+pub mod sink;
+
+#[cfg(feature = "web")]
+pub mod canvas2d;
+
+#[cfg(test)]
+mod tests;
+
+// The Path IR is REUSED, not reinvented (contract D5). Styles reuse the
+// existing typed enums so the seam speaks the document's own vocabulary.
+pub use crate::geometry::element::{
+    BlendMode, Color, FillRule, LineCap, LineJoin, PathCommand, Transform,
+};
+
+// ---------------------------------------------------------------------------
+// Typed geometry helpers
+// ---------------------------------------------------------------------------
+
+/// An axis-aligned rectangle, `(x, y)` top-left with size `w × h`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// A (possibly partial) ellipse arc — the refuter's missing-circle fix.
+///
+/// Maps 1:1 onto `ctx.ellipse(cx, cy, rx, ry, rotation, start, end, ccw)`; a
+/// circle is the `rx == ry, rotation == 0` case (today's `ctx.arc`). A FULL
+/// ellipse uses `start = 0.0, end = TAU`. Partial arcs serve offset_path round
+/// joins and overlay handles. Angles are in RADIANS.
+///
+/// Why this can't be a `PathCommand`: SVG's elliptical-arc command (`A`, our
+/// [`PathCommand::ArcTo`]) degenerates when start == end, so it cannot draw a
+/// full 360° circle in one command — the exact gap the v1 vocabulary hit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EllipseArc {
+    pub cx: f64,
+    pub cy: f64,
+    pub rx: f64,
+    pub ry: f64,
+    /// X-axis rotation, radians.
+    pub rotation: f64,
+    /// Start angle, radians.
+    pub start: f64,
+    /// End angle, radians.
+    pub end: f64,
+    /// Counter-clockwise sweep.
+    pub ccw: bool,
+}
+
+impl EllipseArc {
+    /// A full circle centered at `(cx, cy)` with radius `r` — today's
+    /// `ctx.arc(cx, cy, r, 0, TAU)` for a `Circle` element.
+    pub fn circle(cx: f64, cy: f64, r: f64) -> Self {
+        Self { cx, cy, rx: r, ry: r, rotation: 0.0, start: 0.0, end: std::f64::consts::TAU, ccw: false }
+    }
+
+    /// A full (axis-aligned) ellipse — today's `ctx.ellipse(...0, 0, TAU)`.
+    pub fn ellipse(cx: f64, cy: f64, rx: f64, ry: f64) -> Self {
+        Self { cx, cy, rx, ry, rotation: 0.0, start: 0.0, end: std::f64::consts::TAU, ccw: false }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Typed paint styles (R3 — typed across the seam, CSS lives only in Canvas2d)
+// ---------------------------------------------------------------------------
+
+/// A single gradient color stop. `offset` is 0..1 along the gradient; the
+/// stop's opacity is BAKED into `color`'s alpha at build time (today's
+/// `make_canvas_gradient` folds per-stop `opacity` into the stop color).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColorStop {
+    pub offset: f64,
+    pub color: Color,
+}
+
+/// A linear gradient in the CURRENT coordinate space — endpoints already
+/// resolved from the element bbox + angle at build time (the Painter never
+/// sees `angle`/`aspect_ratio`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinearGradient {
+    pub x0: f64,
+    pub y0: f64,
+    pub x1: f64,
+    pub y1: f64,
+    pub stops: Vec<ColorStop>,
+}
+
+/// A radial gradient as two circles (inner `r0` → outer `r1`) — the full
+/// `ctx.create_radial_gradient(x0,y0,r0, x1,y1,r1)` form. Today's code uses the
+/// concentric `r0 = 0` case; the general form is here so the seam never has to
+/// widen later.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RadialGradient {
+    pub x0: f64,
+    pub y0: f64,
+    pub r0: f64,
+    pub x1: f64,
+    pub y1: f64,
+    pub r1: f64,
+    pub stops: Vec<ColorStop>,
+}
+
+/// The paint source for a fill or a stroke.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Brush {
+    Solid(Color),
+    Linear(LinearGradient),
+    Radial(RadialGradient),
+}
+
+/// Stroke geometry. `dash` is the pattern (empty = solid); there is NO dash
+/// offset — the contract verified it is unused. Stroke ALIGN is intentionally
+/// absent: inside/outside alignment lowers to a build-time clip at the call
+/// site (as today), so it never crosses the seam.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrokeStyle {
+    pub width: f64,
+    pub cap: LineCap,
+    pub join: LineJoin,
+    pub miter: f64,
+    pub dash: Vec<f64>,
+}
+
+// ---------------------------------------------------------------------------
+// Mask + text
+// ---------------------------------------------------------------------------
+
+/// A mask layer's compositing law. The jas asymmetry is carried BY
+/// CONSTRUCTION: `LuminanceClipIn` reads the mask's luminance; the other two
+/// read raw alpha. (Masks are DEFERRED in this spike — the enum is defined and
+/// recorded so the vocabulary is complete, but no impl renders one and the
+/// proof test does not exercise it. PH4 owns the scratch pipeline.)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Mask {
+    /// Keep where the mask is bright (luminance mask). Browser uses BT.601;
+    /// vello's native luminance is BT.709 — the R8 ratification point.
+    LuminanceClipIn,
+    /// Cut out where the mask is opaque (raw alpha).
+    AlphaClipOut,
+    /// Reveal outside the mask's bounding box (raw alpha), `bbox` given.
+    AlphaRevealOutsideBbox { bbox: Rect },
+}
+
+/// A single placed glyph (PlacedGlyphs mode). `glyph_id` is resolved at BUILD
+/// time by a shaping stage (skrifa cmap — NET-NEW work named for PH3); vello
+/// never receives raw text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacedGlyph {
+    pub glyph_id: u32,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// A text run, in one of two modes. Text rides PH1 because it interleaves in
+/// z-order with other primitives (the v1 PH1/PH3 inversion is repaired).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextRun {
+    /// The byte-preserving fast path: one `ctx.fill_text` with native
+    /// `letterSpacing`. AMENDMENT A1 (spike-surfaced): the contract sketch
+    /// `{font,size,text,letter_spacing}` omits a POSITION, but today a text
+    /// element lowers to N FastRuns (one per wrapped line), each at its own
+    /// `(x, baseline)`. A baseline anchor `(x, y)` is therefore mandatory —
+    /// added here.
+    FastRun {
+        font: String,
+        size: f64,
+        text: String,
+        letter_spacing: f64,
+        /// Baseline origin x.
+        x: f64,
+        /// Baseline origin y.
+        y: f64,
+    },
+    /// Pre-shaped glyphs at explicit positions (per-glyph transform lowers to N
+    /// single-glyph runs in vello).
+    PlacedGlyphs {
+        font: String,
+        size: f64,
+        glyphs: Vec<PlacedGlyph>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// The trait
+// ---------------------------------------------------------------------------
+
+/// The immediate-mode drawing seam. ~14 methods; the D5 v2 vocabulary with the
+/// refuter repairs absorbed. See the module docs for the semantic pins.
+///
+/// Coordinate convention: every method takes coordinates in the CURRENT
+/// coordinate space, i.e. after the transforms pushed via [`push_state`]. The
+/// driver owns the view transform (D2) and pushes it as a matrix, so PAINT-op
+/// coordinates stay in document space — the property that makes R7's float law
+/// stable (see `SPIKE_FINDINGS.md`).
+///
+/// [`push_state`]: Painter::push_state
+pub trait Painter {
+    /// Fill a path. `winding` is `EvenOdd` for boolean-op output that carries
+    /// holes. `paint_alpha` is the pinned paint-time `globalAlpha` multiply
+    /// (today's `fill_op`); the effective alpha is
+    /// `(product of open group alphas) * paint_alpha`.
+    fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64);
+
+    /// Stroke a path. `paint_alpha` = today's `stroke_op`.
+    fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64);
+
+    /// Fill an axis-aligned rectangle.
+    fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64);
+
+    /// Stroke an axis-aligned rectangle.
+    fn stroke_rect(&mut self, rect: Rect, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64);
+
+    /// Fill an ellipse arc (the missing-circle primitive). AMENDMENT A2: the
+    /// contract's single `ellipse_arc` is split into fill/stroke here, to
+    /// mirror `fill_path`/`stroke_path` and support fill-THEN-stroke of the
+    /// SAME circle (today's Circle/Ellipse elements do exactly that) without a
+    /// stateful path builder across the immediate seam.
+    fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, paint_alpha: f64);
+
+    /// Stroke an ellipse arc.
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64);
+
+    /// Intersect the clip region with `path` under `winding`. Undone by the
+    /// enclosing [`pop_state`](Painter::pop_state) (clip is part of saved
+    /// state, exactly like the canvas). `EvenOdd` is first-class — the
+    /// outside-stroke trick (a huge rect + the shape, clipped even-odd) is
+    /// expressed by the CALLER building that compound path.
+    fn clip(&mut self, path: &[PathCommand], winding: FillRule);
+
+    /// Save drawing state and concatenate `transform` onto the CTM
+    /// (`ctx.save()` then `ctx.transform(...)`). Alpha, clip, and composite op
+    /// are all part of the saved state.
+    fn push_state(&mut self, transform: Transform);
+
+    /// Restore the state saved by the matching [`push_state`](Painter::push_state).
+    fn pop_state(&mut self);
+
+    /// Open a NON-ISOLATED group: `alpha` compounds (multiplies) into every
+    /// descendant primitive; `blend` is set but inert under nesting (see module
+    /// docs). No offscreen is allocated.
+    fn push_group(&mut self, alpha: f64, blend: BlendMode);
+
+    /// Close the group opened by the matching [`push_group`](Painter::push_group).
+    fn pop_group(&mut self);
+
+    /// Open a mask layer (DEFERRED — recorded, not rendered, in this spike).
+    fn push_mask_layer(&mut self, mask: Mask);
+
+    /// Close the mask layer opened by the matching
+    /// [`push_mask_layer`](Painter::push_mask_layer).
+    fn pop_mask_layer(&mut self);
+
+    /// Draw a text run (see [`TextRun`]). Interleaves in z-order with the other
+    /// primitives — text is a PH1 op, not a separate pass.
+    fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64);
+}

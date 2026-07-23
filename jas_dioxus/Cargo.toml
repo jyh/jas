@@ -29,6 +29,14 @@ name = "corpus_replay"
 path = "src/bin/corpus_replay.rs"
 required-features = ["web"]
 
+# R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
+# sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
+# run with `cargo bench --bench painter_build`.
+[[bench]]
+name = "painter_build"
+path = "benches/painter_build.rs"
+harness = false
+
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger", "dep:console_error_panic_hook"]
