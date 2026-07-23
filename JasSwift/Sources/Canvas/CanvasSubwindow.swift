@@ -2593,6 +2593,39 @@ class CanvasNSView: NSView {
     // Blink timer that drives caret animation while a tool is editing.
     private var blinkTimer: Timer?
 
+    /// Fingerprint of the state the last `draw` rendered. `updateNSView` uses it
+    /// to repaint only when canvas-relevant state changed (SH-5). `nil` forces
+    /// the first repaint. Interactive paths (gestures, tool overlays) invalidate
+    /// directly via `needsDisplay`, independent of this gate.
+    private var lastRenderSignature: CanvasRenderSignature?
+
+    /// Recompute the render fingerprint from the current model / tool / chrome.
+    /// `nil` when no model is attached (a detached view — always repaint).
+    func currentRenderSignature() -> CanvasRenderSignature? {
+        guard let model = controller?.model else { return nil }
+        return CanvasRenderSignature(
+            model: model,
+            tool: onToolRead?() ?? currentTool,
+            artboardsPanelSelection: artboardsPanelSelection)
+    }
+
+    /// Invalidate the canvas only if canvas-relevant state changed since the last
+    /// render. A `nil` signature (no model) falls back to an unconditional
+    /// repaint. Returns whether a repaint was requested (for tests).
+    @discardableResult
+    func repaintIfRenderStateChanged() -> Bool {
+        guard let sig = currentRenderSignature() else {
+            needsDisplay = true
+            return true
+        }
+        if sig != lastRenderSignature {
+            lastRenderSignature = sig
+            needsDisplay = true
+            return true
+        }
+        return false
+    }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
@@ -3026,6 +3059,10 @@ class CanvasNSView: NSView {
         if let toolCtx = toolContext {
             activeTool.drawOverlay(toolCtx, ctx)
         }
+        // SH-5: record what this paint rendered so the next updateNSView can
+        // skip a redundant repaint. Also refreshes the fingerprint after direct
+        // (gesture / tool-overlay) invalidations that bypass updateNSView.
+        lastRenderSignature = currentRenderSignature()
     }
 
     // MARK: - Hit tests
@@ -3698,6 +3735,15 @@ struct CanvasRepresentable: NSViewRepresentable {
         nsView.onToolRead = { [self] in self.currentTool }
         nsView.onToolChange = { [self] tool in self.currentTool = tool }
         nsView.onFocus = onFocus
-        nsView.needsDisplay = true
+        // SH-5: repaint only when canvas-relevant state changed. SwiftUI re-runs
+        // updateNSView for any observed @Published churn (panel state, recent
+        // colors, hover, …); most does not touch the canvas, and unconditionally
+        // forcing needsDisplay = true made every such churn a whole-canvas
+        // repaint. The signature gate keeps every legitimate trigger (document
+        // edits, selection, view transform, tool, isolation, key object) while
+        // dropping the redundant paints. Correctness over cleverness: it is a
+        // full invalidation when something did change — no partial invalidRect,
+        // since a document edit can touch anywhere.
+        nsView.repaintIfRenderStateChanged()
     }
 }
