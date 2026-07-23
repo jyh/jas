@@ -38,12 +38,16 @@ import tempfile
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures")
 
-# SVG fixtures to test (excluding text-based ones that need QApplication
-# for Python's document_to_svg).
+# SVG fixtures to test. The text fixtures were historically excluded
+# because the Python port's document_to_svg needed a QApplication; that
+# port is frozen at the five-port-parity tag, so the exclusion is moot
+# for the active-port gate. Their genuinely new coverage here is the
+# cross-emit cells (Rust-emitted SVG parsed by Swift and vice versa).
 FIXTURE_NAMES = [
     "line_basic", "rect_basic", "rect_with_stroke",
     "circle_basic", "ellipse_basic",
     "polyline_basic", "polygon_basic", "path_all_commands",
+    "text_basic", "text_path_basic",
     "group_nested", "transform_translate", "transform_rotate",
     "multi_layer",
 ]
