@@ -464,10 +464,16 @@ impl Model {
         self.set_document_unbracketed(doc, NonUndoableIntent::TestOnly);
     }
 
-    /// The single committing write to `self.document`: incrementally update the
-    /// paired index (O(changed)), overwrite, gate `id_index == rebuild`, bump the
-    /// generation. Both [`set_document`] and [`set_document_unbracketed`] funnel
-    /// here so there is exactly one place document content is committed.
+    /// The committing write for every NON-HISTORY-NAV document mutation:
+    /// incrementally update the paired index (O(changed)), overwrite, gate
+    /// `id_index == rebuild`, bump the generation. [`set_document`],
+    /// [`edit_document`], [`set_document_unbracketed`], and
+    /// [`restore_preview_snapshot`] all funnel here. The invariant is "all
+    /// non-history-nav writes funnel through `write_document`" — NOT "exactly
+    /// one place writes `self.document`": [`undo`] / [`redo`] deliberately
+    /// bypass this funnel because they restore the SNAPSHOT-CARRIED paired
+    /// index in O(1) instead of recomputing it (and [`abort_txn`] rolls back
+    /// the same way).
     fn write_document(&mut self, doc: Document) {
         // Incrementally bring the index from the OLD document to the new one
         // (O(changed) via CoW `Rc::ptr_eq` diffing), instead of a full rebuild.
@@ -480,7 +486,7 @@ impl Model {
         self.document = doc;
         debug_assert!(
             self.id_index == rebuild_id_index(&self.document),
-            "id index diverged from rebuild after set_document",
+            "id index diverged from rebuild after write_document",
         );
         self.generation += 1;
     }
@@ -497,23 +503,11 @@ impl Model {
     /// Restore the preview snapshot if present. The captured document
     /// replaces the current one (no undo entry is pushed); the snapshot
     /// is left in place so subsequent restore calls remain idempotent.
-    /// No-op when no snapshot is captured.
+    /// No-op when no snapshot is captured. Funnels through
+    /// [`write_document`] like every other non-history-nav write.
     pub fn restore_preview_snapshot(&mut self) {
         if let Some(doc) = self.preview_doc_snapshot.clone() {
-            // Incremental update from the current document to the restored
-            // snapshot (same O(changed) diff as `set_document`); capture the
-            // old document before overwriting.
-            self.id_index = incremental_update_index(
-                std::mem::take(&mut self.id_index),
-                &self.document, // old (current)
-                &doc,           // new (restored snapshot)
-            );
-            self.document = doc;
-            debug_assert!(
-                self.id_index == rebuild_id_index(&self.document),
-                "id index diverged from rebuild after restore_preview_snapshot",
-            );
-            self.generation += 1;
+            self.write_document(doc);
         }
     }
 
@@ -1606,6 +1600,37 @@ mod tests {
         model.redo();
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "u1"), "redo restores the target");
+    }
+
+    #[test]
+    fn restore_preview_snapshot_funnels_through_write_document() {
+        // Funneling invariant (Arc 1 S1): restore_preview_snapshot routes
+        // through the single non-history-nav write funnel. Capture, mutate,
+        // restore -> the generation bumped, the carried index equals a fresh
+        // rebuild, and the document byte-equals the captured snapshot.
+        let mut model = Model::default();
+        model.capture_preview_snapshot();
+        let snap_json = document_to_test_json(model.document());
+        let snap_layers = model.document().layers.clone();
+        let snap_symbols = model.document().symbols.clone();
+
+        let mut doc = model.document().clone();
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("pvf")));
+        model.set_document_for_test(doc);
+        let gen_before_restore = model.generation();
+
+        model.restore_preview_snapshot();
+        assert!(model.generation() > gen_before_restore, "restore bumps the generation");
+        assert_eq!(
+            model.id_index(), &rebuild_id_index(model.document()),
+            "carried index equals a fresh rebuild after restore",
+        );
+        assert_eq!(
+            document_to_test_json(model.document()), snap_json,
+            "restored document byte-equals the captured snapshot",
+        );
+        assert_eq!(model.document().layers, snap_layers);
+        assert_eq!(model.document().symbols, snap_symbols);
     }
 
     #[test]
