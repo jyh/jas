@@ -27,6 +27,10 @@ enum CanvasNavIntent: Equatable {
     /// right, a positive `dy` moves it down (the view is y-flipped, so a
     /// larger `view_offset_y` lowers content on screen).
     case pan(dx: Double, dy: Double)
+    /// Zoom by a multiplicative `factor` about `(anchorX, anchorY)` given in
+    /// viewport-local pixels. The document point under the anchor stays under
+    /// the anchor; the zoom clamps to the app's `[min_zoom, max_zoom]`.
+    case zoomAbout(factor: Double, anchorX: Double, anchorY: Double)
 }
 
 /// Pure view-state math shared by the navigation gestures and the existing
@@ -40,6 +44,24 @@ enum CanvasNavMath {
     static func pan(offsetX: Double, offsetY: Double,
                     dx: Double, dy: Double) -> (Double, Double) {
         (offsetX + dx, offsetY + dy)
+    }
+
+    /// Zoom about a viewport-pixel anchor. Returns `(zoom', offsetX', offsetY')`.
+    /// The document point under the anchor is invariant across the zoom; `zoom'`
+    /// is clamped to `[minZoom, maxZoom]` and the pan recompute uses the
+    /// POST-clamp zoom so the anchor stays glued to its screen position even at
+    /// a clamp boundary. Byte-identical to the Zoom tool's `doc.zoom.apply`
+    /// (and the keyboard `applyZoomAnchored`) anchor math.
+    static func zoomAbout(zoom: Double, offsetX: Double, offsetY: Double,
+                          factor: Double, anchorX: Double, anchorY: Double,
+                          minZoom: Double, maxZoom: Double)
+        -> (zoom: Double, offsetX: Double, offsetY: Double) {
+        // Document coordinate currently under the anchor.
+        let docAx = (anchorX - offsetX) / zoom
+        let docAy = (anchorY - offsetY) / zoom
+        let zNew = min(max(zoom * factor, minZoom), maxZoom)
+        // Solve for the offset that keeps (docAx, docAy) under the anchor.
+        return (zNew, anchorX - docAx * zNew, anchorY - docAy * zNew)
     }
 }
 

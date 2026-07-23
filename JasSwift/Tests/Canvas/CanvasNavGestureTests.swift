@@ -66,3 +66,62 @@ import Foundation
     #expect(ox == 210)
     #expect(oy == 97)
 }
+
+// MARK: - SH-2 zoom-about-point (pinch) math
+
+/// The screen position of a document point under the current view transform:
+/// screen = doc * zoom + offset. Used to assert the anchor invariant.
+private func screenOf(docX: Double, docY: Double,
+                      zoom: Double, offX: Double, offY: Double) -> (Double, Double) {
+    (docX * zoom + offX, docY * zoom + offY)
+}
+
+@Test func navZoomKeepsAnchorPointFixed() {
+    // The document point currently under the anchor must map back to the same
+    // screen anchor after the zoom — the standard pinch expectation.
+    let z0 = 1.5, ox0 = 40.0, oy0 = 90.0
+    let ax = 300.0, ay = 220.0
+    // Document coordinate under the anchor before zooming.
+    let docX = (ax - ox0) / z0
+    let docY = (ay - oy0) / z0
+    let (z1, ox1, oy1) = CanvasNavMath.zoomAbout(
+        zoom: z0, offsetX: ox0, offsetY: oy0,
+        factor: 1.3, anchorX: ax, anchorY: ay, minZoom: 0.1, maxZoom: 64.0)
+    let (sx, sy) = screenOf(docX: docX, docY: docY, zoom: z1, offX: ox1, offY: oy1)
+    #expect(abs(sx - ax) < 1e-9)
+    #expect(abs(sy - ay) < 1e-9)
+    #expect(z1 == z0 * 1.3)
+}
+
+@Test func navZoomClampsToMaxAndKeepsAnchorGlued() {
+    // Past the max-zoom clamp the anchor still stays glued (pan recompute uses
+    // the POST-clamp zoom), and zoom does not exceed the bound.
+    let z0 = 40.0, ox0 = 10.0, oy0 = 20.0
+    let ax = 150.0, ay = 175.0
+    let docX = (ax - ox0) / z0
+    let docY = (ay - oy0) / z0
+    let (z1, ox1, oy1) = CanvasNavMath.zoomAbout(
+        zoom: z0, offsetX: ox0, offsetY: oy0,
+        factor: 4.0, anchorX: ax, anchorY: ay, minZoom: 0.1, maxZoom: 64.0)
+    #expect(z1 == 64.0)  // 40 * 4 clamped down to 64
+    let (sx, sy) = screenOf(docX: docX, docY: docY, zoom: z1, offX: ox1, offY: oy1)
+    #expect(abs(sx - ax) < 1e-9)
+    #expect(abs(sy - ay) < 1e-9)
+}
+
+@Test func navZoomClampsToMinZoom() {
+    let (z1, _, _) = CanvasNavMath.zoomAbout(
+        zoom: 0.2, offsetX: 0, offsetY: 0,
+        factor: 0.1, anchorX: 100, anchorY: 100, minZoom: 0.1, maxZoom: 64.0)
+    #expect(z1 == 0.1)  // 0.2 * 0.1 = 0.02 clamped up to 0.1
+}
+
+@Test func navPinchFactorIsOnePlusMagnification() {
+    // Documents the magnify(with:) adapter contract: AppKit magnification is a
+    // fractional delta, so factor = 1 + magnification. A +0.25 pinch zooms in
+    // 1.25x about the anchor.
+    let (z1, _, _) = CanvasNavMath.zoomAbout(
+        zoom: 2.0, offsetX: 0, offsetY: 0,
+        factor: 1.0 + 0.25, anchorX: 50, anchorY: 50, minZoom: 0.1, maxZoom: 64.0)
+    #expect(z1 == 2.5)
+}

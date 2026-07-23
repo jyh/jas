@@ -3351,15 +3351,16 @@ class CanvasNSView: NSView {
         model: Model, factor: Double, ax: Double, ay: Double,
         minZoom: Double, maxZoom: Double
     ) {
-        let z = model.zoomLevel
-        let px = model.viewOffsetX
-        let py = model.viewOffsetY
-        let docAx = (ax - px) / z
-        let docAy = (ay - py) / z
-        let zNew = min(max(z * factor, minZoom), maxZoom)
-        model.zoomLevel = zNew
-        model.viewOffsetX = ax - docAx * zNew
-        model.viewOffsetY = ay - docAy * zNew
+        // Shares the exact anchor math the pinch-zoom gesture uses
+        // (CanvasNavMath.zoomAbout), which mirrors doc.zoom.apply.
+        let (z, ox, oy) = CanvasNavMath.zoomAbout(
+            zoom: model.zoomLevel,
+            offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+            factor: factor, anchorX: ax, anchorY: ay,
+            minZoom: minZoom, maxZoom: maxZoom)
+        model.zoomLevel = z
+        model.viewOffsetX = ox
+        model.viewOffsetY = oy
     }
 
     /// Switch the active tool from a keyboard-initiated change (shortcut,
@@ -3450,8 +3451,32 @@ class CanvasNSView: NSView {
                 dx: dx, dy: dy)
             model.viewOffsetX = ox
             model.viewOffsetY = oy
+        case let .zoomAbout(factor, ax, ay):
+            let minZoom = readPrefNumber("min_zoom", default: 0.1)
+            let maxZoom = readPrefNumber("max_zoom", default: 64.0)
+            let (z, ox, oy) = CanvasNavMath.zoomAbout(
+                zoom: model.zoomLevel,
+                offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+                factor: factor, anchorX: ax, anchorY: ay,
+                minZoom: minZoom, maxZoom: maxZoom)
+            model.zoomLevel = z
+            model.viewOffsetX = ox
+            model.viewOffsetY = oy
         }
         needsDisplay = true
+    }
+
+    /// Pinch (magnify) → zoom about the cursor (SH-2). A thin AppKit adapter:
+    /// AppKit's `event.magnification` is an incremental fractional delta, so
+    /// the multiplicative factor is `1 + magnification`. The anchor is the
+    /// cursor position in viewport-local pixels, so the document point under
+    /// the fingers stays fixed as the user pinches. Routes through the shared
+    /// zoom write path, which clamps to the app's zoom bounds.
+    override func magnify(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        let factor = 1.0 + Double(event.magnification)
+        applyNavIntent(.zoomAbout(factor: factor,
+                                  anchorX: Double(pt.x), anchorY: Double(pt.y)))
     }
 
     /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's
