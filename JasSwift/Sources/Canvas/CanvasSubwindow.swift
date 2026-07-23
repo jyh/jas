@@ -3641,8 +3641,6 @@ class CanvasNSView: NSView {
         guard let model = controller?.model else { return nil }
         let hasSelection = !model.document.selection.isEmpty
         let hasTab = true  // a canvas with a model is an open tab (tab_count > 0)
-        let menu = NSMenu()
-        menu.autoenablesItems = false  // enabled state is set explicitly below
         let selectors: [CanvasContextMenu.Item: Selector] = [
             .cut:       #selector(contextCut(_:)),
             .copy:      #selector(contextCopy(_:)),
@@ -3650,18 +3648,79 @@ class CanvasNSView: NSView {
             .delete:    #selector(contextDelete(_:)),
             .selectAll: #selector(contextSelectAll(_:)),
         ]
+        return CanvasNSView.buildContextMenu(
+            hasSelection: hasSelection, hasTab: hasTab,
+            target: self, selectors: selectors)
+    }
+
+    /// Stable identifier stamped on EVERY item this view builds for its canvas
+    /// context menu (verbs and separators alike). Lets `willOpenMenu` — which
+    /// runs after AppKit has appended its automatic extras — tell OUR items
+    /// apart from the macOS-injected ones WITHOUT matching localized titles.
+    static let contextMenuItemIdentifier =
+        NSUserInterfaceItemIdentifier("jas.canvas.contextMenu.item")
+
+    /// Build the canvas context menu from the `CanvasContextMenu` data model.
+    /// Extracted from `menu(for:)` so the item set / order / titles / enabled
+    /// predicates AND the system-suppression flags are unit-testable without a
+    /// live NSEvent. Every action is an EXISTING verb; no new dispatch channel.
+    ///
+    /// System-injected extras are suppressed via the SUPPORTED, title-independent
+    /// opt-outs: `allowsContextMenuPlugIns = false` (no third-party contextual
+    /// plug-ins) and, on macOS 15.2+, `automaticallyInsertsWritingToolsItems =
+    /// false` (no auto Writing Tools rows). Anything the OS still appends at
+    /// display time (AutoFill / Start Dictation / Emoji & Symbols) is swept in
+    /// `willOpenMenu` by identifier — see `stripInjectedContextMenuItems`.
+    static func buildContextMenu(
+        hasSelection: Bool, hasTab: Bool,
+        target: AnyObject?, selectors: [CanvasContextMenu.Item: Selector]
+    ) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false  // enabled state is set explicitly below
+        menu.allowsContextMenuPlugIns = false
+        if #available(macOS 15.2, *) {
+            menu.automaticallyInsertsWritingToolsItems = false
+        }
         for item in CanvasContextMenu.Item.allCases {
             if CanvasContextMenu.separatorBefore(item) {
-                menu.addItem(.separator())
+                let sep = NSMenuItem.separator()
+                sep.identifier = contextMenuItemIdentifier
+                menu.addItem(sep)
             }
             let mi = NSMenuItem(title: CanvasContextMenu.title(item),
                                 action: selectors[item], keyEquivalent: "")
-            mi.target = self
+            mi.target = target
+            mi.identifier = contextMenuItemIdentifier
             mi.isEnabled = CanvasContextMenu.isEnabled(
                 item, hasSelection: hasSelection, hasTab: hasTab)
             menu.addItem(mi)
         }
         return menu
+    }
+
+    /// Remove any item NOT stamped with `contextMenuItemIdentifier` — i.e. the
+    /// macOS-injected extras (Writing Tools / AutoFill / Start Dictation / Emoji
+    /// & Symbols) AppKit appends to a first-responder view's context menu. The
+    /// spec is exactly the five house verbs + their two dividers, so "keep ours,
+    /// drop everything else" is both correct and future-proof against new OS
+    /// additions. Title-independent by construction. Kept as a pure static so
+    /// the rule is unit-testable without presenting a live menu.
+    static func stripInjectedContextMenuItems(from menu: NSMenu) {
+        // menu.items returns a snapshot copy, so removing from the live menu
+        // while iterating it is safe.
+        for item in menu.items where item.identifier != contextMenuItemIdentifier {
+            menu.removeItem(item)
+        }
+    }
+
+    /// Belt-and-suspenders to the declarative opt-outs in `buildContextMenu`:
+    /// `willOpenMenu` runs after AppKit has populated any automatic items, so it
+    /// is the sanctioned point to strip whatever the OS still appended. Scoped to
+    /// THIS view's context menu — the SwiftUI menu-BAR Edit menu is a separate
+    /// NSMenu that never routes through here, so it is unaffected.
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        CanvasNSView.stripInjectedContextMenuItems(from: menu)
+        super.willOpenMenu(menu, with: event)
     }
 
     @objc private func contextCut(_ sender: Any?) {

@@ -127,9 +127,21 @@ translation in one `.changed`); the ceiling is AppKit event delivery, not the ma
 
 **P0**
 
-- [ ] **SWCTX-001** [wired] Right-click / two-finger tap opens the edit menu.
+- [ ] **SWCTX-001** [wired] Right-click / two-finger tap opens the edit menu — and ONLY it.
       Do: Right-click (or two-finger tap) on the canvas.
-      Expect: A menu appears with Cut, Copy, Paste, a divider, Delete, a divider, Select All — titles exactly as written.
+      Expect: A menu appears with Cut, Copy, Paste, a divider, Delete, a divider,
+      Select All — titles exactly as written, and NOTHING ELSE. Specifically NO
+      macOS-injected extras: no "Writing Tools", no "AutoFill", no "Start
+      Dictation", no "Emoji & Symbols", no trailing system divider.
+      Suppression (supported APIs, title-independent): the builder sets
+      `allowsContextMenuPlugIns = false` and (15.2+)
+      `automaticallyInsertsWritingToolsItems = false`; `willOpenMenu` then sweeps
+      any remaining OS-appended rows by identifier (`stripInjectedContextMenuItems`,
+      unit-tested). If any system item still shows on a future macOS, record which
+      one here — that names the exact residual to chase.
+      Also verify: the menu-BAR Edit menu (Cmd-drag to it) is UNCHANGED — it is a
+      separate SwiftUI-commands NSMenu that never routes through the canvas
+      `willOpenMenu`, so the suppression must not alter it.
       — last: —
 
 - [ ] **SWCTX-002** [wired] Enabled states mirror the Edit menu (no selection).
