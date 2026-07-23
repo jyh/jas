@@ -1,0 +1,23 @@
+[package]
+name = "scaling_rig"
+version = "0.1.0"
+edition = "2021"
+description = "Arc 2 prototype #1: wgpu/Vello scaling rig — does the path hold 60fps at 100k jas-shaped elements with a graceful curve to 1M?"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[dependencies]
+vello = "0.9"
+# Must match the wgpu that vello 0.9 pins (29.0.4) so Device/Queue/Surface types unify.
+wgpu = "29"
+winit = "0.30"
+pollster = "0.4"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+env_logger = "0.11"
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
