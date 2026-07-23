@@ -1,0 +1,436 @@
+//! The R4 display-list-equivalence gate for the PH1 element surface.
+//!
+//! A small set of REFERENCE DOCUMENTS — built in code from the document model —
+//! render through [`emit_element`](super::emit_element) into a
+//! [`RecordingPainter`], and each is asserted against a committed golden under
+//! `testdata/ref_*.json`. These goldens are the behavior-lock the production
+//! conversion lands behind (contract R4). Floats obey the R7 doc-space
+//! 4-decimal round-half-even law; the whole frame rides ONE view transform
+//! pushed as a matrix (D2), so paint coordinates stay in document space.
+//!
+//! Regenerate after a deliberate reference-doc change:
+//! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
+
+use super::{element_needs_legacy, emit_element, line_painter_inputs};
+use crate::geometry::element::{
+    Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
+    GradientStop, GradientType, GroupElem, LineElem, PathCommand, PathElem, PolygonElem,
+    PolylineElem, RectElem, Stroke, StrokeAlign, Transform,
+};
+use crate::painter::recording::RecordingPainter;
+use crate::painter::Painter;
+use std::rc::Rc;
+
+// ---------------------------------------------------------------------------
+// Small constructors (keep the reference docs readable)
+// ---------------------------------------------------------------------------
+
+fn common() -> CommonProps {
+    CommonProps::default()
+}
+
+fn common_alpha(opacity: f64) -> CommonProps {
+    CommonProps { opacity, ..CommonProps::default() }
+}
+
+fn fill(color: Color) -> Option<Fill> {
+    Some(Fill { color, opacity: 1.0 })
+}
+
+fn fill_op(color: Color, opacity: f64) -> Option<Fill> {
+    Some(Fill { color, opacity })
+}
+
+fn stroke(color: Color, width: f64) -> Stroke {
+    Stroke::new(color, width)
+}
+
+fn stroke_aligned(color: Color, width: f64, align: StrokeAlign) -> Stroke {
+    let mut s = Stroke::new(color, width);
+    s.align = align;
+    s
+}
+
+fn linear_grad(angle: f64) -> Box<Gradient> {
+    Box::new(Gradient {
+        gtype: GradientType::Linear,
+        angle,
+        aspect_ratio: 100.0,
+        stops: vec![
+            GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+            GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 80.0, location: 100.0, midpoint_to_next: 50.0 },
+        ],
+        ..Gradient::default()
+    })
+}
+
+fn radial_grad() -> Box<Gradient> {
+    Box::new(Gradient {
+        gtype: GradientType::Radial,
+        angle: 0.0,
+        aspect_ratio: 100.0,
+        stops: vec![
+            GradientStop { color: Color::WHITE, opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+            GradientStop { color: Color::BLACK, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+        ],
+        ..Gradient::default()
+    })
+}
+
+fn rect(x: f64, y: f64, w: f64, h: f64, f: Option<Fill>, s: Option<Stroke>) -> Element {
+    Element::Rect(RectElem {
+        x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+        fill: f, stroke: s, common: common(),
+        fill_gradient: None, stroke_gradient: None,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Reference documents
+// ---------------------------------------------------------------------------
+
+/// Filled + stroked rects (plain and rounded), a circle and an ellipse
+/// (fill-then-stroke), and a line.
+fn ref_shapes() -> Vec<Element> {
+    let blue = Color::rgb(0.2, 0.4, 0.8);
+    let red = Color::rgb(0.9, 0.3, 0.1);
+    vec![
+        rect(10.0, 20.0, 100.0, 60.0, fill(blue), Some(stroke(Color::BLACK, 2.0))),
+        Element::Rect(RectElem {
+            x: 130.0, y: 20.0, width: 80.0, height: 50.0, rx: 12.0, ry: 8.0,
+            fill: fill_op(red, 0.75), stroke: Some(stroke(Color::BLACK, 3.0)),
+            common: common(), fill_gradient: None, stroke_gradient: None,
+        }),
+        Element::Circle(CircleElem {
+            cx: 260.0, cy: 60.0, r: 40.0,
+            fill: fill(red), stroke: Some(stroke(Color::BLACK, 2.0)),
+            common: common(), fill_gradient: None, stroke_gradient: None,
+        }),
+        Element::Ellipse(EllipseElem {
+            cx: 380.0, cy: 60.0, rx: 50.0, ry: 30.0,
+            fill: fill(blue), stroke: Some(stroke(Color::rgb(0.1, 0.1, 0.1), 1.5)),
+            common: common(), fill_gradient: None, stroke_gradient: None,
+        }),
+        Element::Line(LineElem {
+            x1: 20.0, y1: 120.0, x2: 200.0, y2: 160.0,
+            stroke: Some(stroke(Color::rgb(0.0, 0.5, 0.0), 4.0)),
+            width_points: vec![], common: common(), stroke_gradient: None,
+        }),
+    ]
+}
+
+/// A bezier path, a quad path, a polygon (fill+stroke), and a polyline.
+fn ref_paths() -> Vec<Element> {
+    let green = Color::rgb(0.2, 0.6, 0.3);
+    let bezier = PathElem {
+        d: vec![
+            PathCommand::MoveTo { x: 20.0, y: 200.0 },
+            PathCommand::CurveTo { x1: 60.0, y1: 120.0, x2: 140.0, y2: 280.0, x: 180.0, y: 200.0 },
+            PathCommand::ClosePath,
+        ],
+        fill: fill(green),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(),
+        ..PathElem::default()
+    };
+    let quad = PathElem {
+        d: vec![
+            PathCommand::MoveTo { x: 220.0, y: 200.0 },
+            PathCommand::QuadTo { x1: 260.0, y1: 140.0, x: 300.0, y: 200.0 },
+        ],
+        fill: None,
+        stroke: Some(stroke(Color::rgb(0.5, 0.0, 0.5), 3.0)),
+        common: common(),
+        ..PathElem::default()
+    };
+    let polygon = Element::Polygon(PolygonElem {
+        points: vec![(340.0, 180.0), (400.0, 180.0), (380.0, 240.0), (350.0, 230.0)],
+        fill: fill_op(green, 0.6),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    let polyline = Element::Polyline(PolylineElem {
+        points: vec![(420.0, 200.0), (450.0, 160.0), (480.0, 210.0), (510.0, 170.0)],
+        fill: None,
+        stroke: Some(stroke(Color::rgb(0.8, 0.4, 0.0), 2.5)),
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    vec![Element::Path(bezier), Element::Path(quad), polygon, polyline]
+}
+
+/// Solid vs linear/radial gradient brushes (resolved endpoints cross the seam).
+fn ref_gradients() -> Vec<Element> {
+    vec![
+        Element::Rect(RectElem {
+            x: 10.0, y: 10.0, width: 120.0, height: 80.0, rx: 0.0, ry: 0.0,
+            fill: fill(Color::WHITE), stroke: None,
+            common: common(), fill_gradient: Some(linear_grad(30.0)), stroke_gradient: None,
+        }),
+        Element::Circle(CircleElem {
+            cx: 220.0, cy: 60.0, r: 50.0,
+            fill: fill(Color::WHITE), stroke: None,
+            common: common(), fill_gradient: Some(radial_grad()), stroke_gradient: None,
+        }),
+        Element::Rect(RectElem {
+            x: 300.0, y: 10.0, width: 120.0, height: 80.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(stroke(Color::BLACK, 6.0)),
+            common: common(), fill_gradient: None, stroke_gradient: Some(linear_grad(90.0)),
+        }),
+    ]
+}
+
+/// A dashed line and inside/outside stroke alignment (build-time clip lowering).
+fn ref_stroke_styles() -> Vec<Element> {
+    let mut dashed = stroke(Color::rgb(0.1, 0.1, 0.1), 3.0);
+    dashed.dash_pattern[0] = 8.0;
+    dashed.dash_pattern[1] = 4.0;
+    dashed.dash_len = 2;
+    let dashed_line = Element::Line(LineElem {
+        x1: 20.0, y1: 20.0, x2: 200.0, y2: 20.0,
+        stroke: Some(dashed), width_points: vec![], common: common(), stroke_gradient: None,
+    });
+    let inside = PathElem {
+        d: super::rounded_rect_path(40.0, 60.0, 80.0, 50.0, 0.0, 0.0),
+        fill: fill(Color::rgb(0.7, 0.7, 0.9)),
+        stroke: Some(stroke_aligned(Color::BLACK, 6.0, StrokeAlign::Inside)),
+        common: common(),
+        ..PathElem::default()
+    };
+    let outside = PathElem {
+        d: super::rounded_rect_path(160.0, 60.0, 80.0, 50.0, 0.0, 0.0),
+        fill: fill(Color::rgb(0.9, 0.7, 0.7)),
+        stroke: Some(stroke_aligned(Color::BLACK, 6.0, StrokeAlign::Outside)),
+        common: common(),
+        ..PathElem::default()
+    };
+    vec![dashed_line, Element::Path(inside), Element::Path(outside)]
+}
+
+/// Nested groups with non-isolated alpha: an outer group at 0.5 wrapping an
+/// inner group at 0.8 wrapping two OVERLAPPING filled rects — the overlaps
+/// compound because the alpha folds per-primitive (contract PIN). A transform
+/// on the outer group rides one matrix (D2).
+fn ref_groups() -> Vec<Element> {
+    let red = Color::rgb(0.9, 0.2, 0.2);
+    let blue = Color::rgb(0.2, 0.2, 0.9);
+    let inner = Element::Group(GroupElem {
+        children: vec![
+            Rc::new(rect(30.0, 30.0, 60.0, 60.0, fill(red), None)),
+            Rc::new(rect(60.0, 60.0, 60.0, 60.0, fill(blue), None)),
+        ],
+        common: common_alpha(0.8),
+        isolated_blending: false,
+        knockout_group: false,
+    });
+    let outer = Element::Group(GroupElem {
+        children: vec![Rc::new(inner)],
+        common: CommonProps {
+            opacity: 0.5,
+            transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 200.0, f: 10.0 }),
+            ..CommonProps::default()
+        },
+        isolated_blending: false,
+        knockout_group: false,
+    });
+    vec![outer]
+}
+
+// ---------------------------------------------------------------------------
+// The render harness + golden machinery
+// ---------------------------------------------------------------------------
+
+/// Render a reference document under one view transform (D2) and return its
+/// canonical JSON.
+fn render_doc(elems: &[Element]) -> String {
+    let mut rec = RecordingPainter::new();
+    // The driver owns the view transform and pushes it as ONE matrix (D2).
+    rec.push_state(Transform { a: 1.5, b: 0.0, c: 0.0, d: 1.5, e: 20.0, f: 10.0 });
+    for e in elems {
+        // The capability router keeps legacy-only elements off the seam.
+        if !element_needs_legacy(e) {
+            emit_element(&mut rec, e, 1.0);
+        }
+    }
+    rec.pop_state();
+    let mut json = rec.to_canonical_json();
+    json.push('\n');
+    json
+}
+
+/// Each `(name, builder)` pair — one golden file per reference document.
+fn reference_docs() -> Vec<(&'static str, Vec<Element>)> {
+    vec![
+        ("ref_shapes", ref_shapes()),
+        ("ref_paths", ref_paths()),
+        ("ref_gradients", ref_gradients()),
+        ("ref_stroke_styles", ref_stroke_styles()),
+        ("ref_groups", ref_groups()),
+    ]
+}
+
+fn golden_path(name: &str) -> String {
+    format!("{}/src/painter/testdata/{}.json", env!("CARGO_MANIFEST_DIR"), name)
+}
+
+/// The Painter op the production `render.rs` Line arm emits for the fixed
+/// convertible line below, recorded canonically. Shared by the gate test and
+/// the regenerator so they cannot drift.
+fn render_line_convert() -> String {
+    let e = LineElem {
+        x1: 12.0, y1: 18.0, x2: 140.0, y2: 90.0,
+        stroke: Some(stroke(Color::rgb(0.0, 0.5, 0.0), 4.0)),
+        width_points: vec![],
+        common: common(),
+        stroke_gradient: None,
+    };
+    let lp = line_painter_inputs(&e).expect("convertible");
+    let base_alpha = 1.0_f64;
+    let mut rec = RecordingPainter::new();
+    rec.stroke_path(&lp.path, &lp.brush, &lp.stroke, base_alpha * lp.stroke_op);
+    let mut json = rec.to_canonical_json();
+    json.push('\n');
+    json
+}
+
+/// ON-DEMAND regenerator — rewrites every committed golden. Ignored so it never
+/// runs in normal CI.
+#[test]
+#[ignore = "regeneration tool, not a gate"]
+fn regenerate_reference_goldens() {
+    for (name, doc) in reference_docs() {
+        let json = render_doc(&doc);
+        let path = golden_path(name);
+        std::fs::write(&path, json).expect("write golden");
+        eprintln!("wrote {path}");
+    }
+    let path = golden_path("ref_line_convert");
+    std::fs::write(&path, render_line_convert()).expect("write line-convert golden");
+    eprintln!("wrote {path}");
+}
+
+/// Every reference document serializes to exactly its committed golden.
+#[test]
+fn reference_docs_match_goldens() {
+    for (name, doc) in reference_docs() {
+        let json = render_doc(&doc);
+        let golden = std::fs::read_to_string(golden_path(name))
+            .unwrap_or_else(|_| panic!("missing golden {name}; run regenerate_reference_goldens"));
+        assert_eq!(
+            json.trim(),
+            golden.trim(),
+            "reference doc {name} diverged from its committed golden.\n--- got ---\n{json}\n--- end ---"
+        );
+    }
+}
+
+/// The render is deterministic (no emitter nondeterminism).
+#[test]
+fn reference_docs_are_deterministic() {
+    for (name, doc) in reference_docs() {
+        assert_eq!(render_doc(&doc), render_doc(&doc), "{name} nondeterministic");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Capability router + the byte-identical Line helper
+// ---------------------------------------------------------------------------
+
+#[test]
+fn masked_element_needs_legacy() {
+    use crate::geometry::element::Mask;
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    assert!(!element_needs_legacy(&r), "plain rect converts");
+    if let Element::Rect(e) = &mut r {
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            clip: false,
+            invert: false,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }));
+    }
+    assert!(element_needs_legacy(&r), "an active mask forces the legacy path");
+}
+
+#[test]
+fn freeform_gradient_needs_legacy() {
+    let mut e = RectElem {
+        x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: fill(Color::WHITE), stroke: None,
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    e.fill_gradient = Some(Box::new(Gradient { gtype: GradientType::Freeform, ..Gradient::default() }));
+    assert!(element_needs_legacy(&Element::Rect(e)), "freeform gradient stays legacy");
+}
+
+#[test]
+fn groups_and_shapes_do_not_need_legacy() {
+    // Sanity: nested groups and plain shapes route through the seam.
+    for (_name, doc) in reference_docs() {
+        for e in &doc {
+            assert!(!element_needs_legacy(e), "reference-doc element should convert");
+        }
+    }
+}
+
+#[test]
+fn plain_line_is_painter_convertible() {
+    let e = LineElem {
+        x1: 5.0, y1: 6.0, x2: 100.0, y2: 40.0,
+        stroke: Some(stroke(Color::rgb(0.0, 0.5, 0.0), 3.0)),
+        width_points: vec![],
+        common: common(),
+        stroke_gradient: None,
+    };
+    let lp = line_painter_inputs(&e).expect("plain solid center line converts");
+    assert_eq!(lp.path.len(), 2);
+    assert_eq!(lp.stroke.width, 3.0);
+    assert_eq!(lp.stroke_op, 1.0);
+    assert!(matches!(lp.brush, crate::painter::Brush::Solid(_)));
+}
+
+#[test]
+fn arrowed_line_is_not_convertible() {
+    let mut s = stroke(Color::BLACK, 2.0);
+    s.end_arrow = Arrowhead::SimpleArrow;
+    let e = LineElem {
+        x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
+        stroke: Some(s), width_points: vec![], common: common(), stroke_gradient: None,
+    };
+    assert!(line_painter_inputs(&e).is_none(), "an arrowhead forces legacy");
+}
+
+#[test]
+fn gradient_or_aligned_line_is_not_convertible() {
+    // Inside alignment → legacy.
+    let e1 = LineElem {
+        x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
+        stroke: Some(stroke_aligned(Color::BLACK, 2.0, StrokeAlign::Inside)),
+        width_points: vec![], common: common(), stroke_gradient: None,
+    };
+    assert!(line_painter_inputs(&e1).is_none(), "inside align forces legacy");
+    // Stroke gradient → legacy.
+    let e2 = LineElem {
+        x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0,
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        width_points: vec![], common: common(), stroke_gradient: Some(linear_grad(0.0)),
+    };
+    assert!(line_painter_inputs(&e2).is_none(), "stroke gradient forces legacy");
+}
+
+/// The convertible-line Painter op is byte-stable: recording the same line's
+/// `stroke_path` yields the committed golden `ref_line_convert.json`. This is
+/// the PH3 gate — it locks the exact Painter op the production `render.rs` Line
+/// arm emits (with `paint_alpha = base_alpha * stroke_op`; here base_alpha 1.0).
+#[test]
+fn convertible_line_op_matches_golden() {
+    let json = render_line_convert();
+    let golden = std::fs::read_to_string(golden_path("ref_line_convert"))
+        .unwrap_or_else(|_| panic!("missing ref_line_convert golden; run regenerate_reference_goldens"));
+    assert_eq!(json.trim(), golden.trim(), "converted line op diverged from golden");
+}
