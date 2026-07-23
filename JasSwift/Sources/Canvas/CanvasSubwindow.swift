@@ -261,6 +261,37 @@ private func applyTransform(_ ctx: CGContext, _ t: Transform?) {
     ctx.concatenate(CGAffineTransform(a: t.a, b: t.b, c: t.c, d: t.d, tx: t.e, ty: t.f))
 }
 
+// MARK: - SH-4 document-render culling state
+//
+// Per-paint context for the dirty-rect / viewport cull, installed by `draw(_:)`
+// around the Layer-3 document pass only (chrome / overlays / carets draw in
+// other passes and are never culled). Mirrors the existing per-paint globals
+// (`_currentRefResolver`, recompute-cache generation): `draw` is a free-function
+// pipeline, so this shared state is cleaner than threading a param through every
+// recursive `drawElement` call site. `_cullDirtyDoc == nil` disables culling.
+private var _cullDirtyDoc: CGRect? = nil
+/// Inverse of the doc→device CTM captured right after `draw` applies the view
+/// transform. Used to convert an element's local→device matrix (from `ctx.ctm`,
+/// which folds in the backing scale) back into backing-scale-free doc space.
+private var _cullDocToDeviceInv: CGAffineTransform = .identity
+
+func setCanvasCull(dirtyDoc: CGRect?, docToDevice: CGAffineTransform) {
+    _cullDirtyDoc = dirtyDoc
+    _cullDocToDeviceInv = docToDevice.inverted()
+}
+
+/// Element kinds safe to cull: simple filled/stroked geometry whose `.bounds`
+/// (geometry + half-stroke) is a reliable superset of its ink. Lines (arrowheads
+/// past the endpoints), text, textPath, live elements (evaluated / effectful
+/// geometry), and containers (group / layer — culled via their children, never
+/// as a whole) are drawn unconditionally. "When in doubt, draw it."
+private func isCullableLeaf(_ e: Element) -> Bool {
+    switch e {
+    case .rect, .circle, .ellipse, .polyline, .polygon, .path: return true
+    default: return false
+    }
+}
+
 /// The geometric-mean scale of a 2x3 affine — `sqrt(|det|)` of the linear part
 /// (`a*d - b*c`). 1.0 for `nil` or a degenerate (det 0) transform. The
 /// per-transform building block of `selectionOutlineScale` and the
@@ -1125,6 +1156,23 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
     // it. The accumulated `elemScale` is threaded to group/layer children
     // below. Mirrors the Python `_counter_scaled_element` element-copy.
     let (elem, elemScale) = counterScaledElement(inElem, elementScale: elementScale)
+    // SH-4 cull: skip cullable leaf elements whose POST-transform doc extent
+    // cannot touch the dirty region. `ctx.ctm` here maps this element's parent
+    // space → device; compose the element's own transform, then strip the
+    // doc→device (backing-scale-carrying) part to land in doc space, where the
+    // dirty rect lives. Conservative margin absorbs stroke / miter / AA bleed.
+    if let dirty = _cullDirtyDoc, isCullableLeaf(inElem) {
+        let own: CGAffineTransform = inElem.transform.map {
+            CGAffineTransform(a: $0.a, b: $0.b, c: $0.c, d: $0.d, tx: $0.e, ty: $0.f)
+        } ?? .identity
+        let localToDoc = own.concatenating(ctx.ctm).concatenating(_cullDocToDeviceInv)
+        let strokeW = inElem.stroke?.width ?? 0
+        let margin = CGFloat(64.0 + strokeW * 4.0)
+        if !CanvasCull.mayDraw(bounds: inElem.bounds, localToDoc: localToDoc,
+                               dirtyDoc: dirty, margin: margin) {
+            return
+        }
+    }
     ctx.saveGState()
     ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
@@ -2886,6 +2934,28 @@ class CanvasNSView: NSView {
             ctx.scaleBy(x: CGFloat(model.zoomLevel),
                         y: CGFloat(model.zoomLevel))
         }
+        // SH-4: capture the doc→device CTM (with backing scale) now, while the
+        // context is at pure doc space, and convert the incoming dirtyRect
+        // (view points) into doc space. `draw` already fills the whole `bounds`
+        // background, but the Layer-3 document pass below skips elements whose
+        // doc extent misses this rect — respecting a partial dirtyRect (a) and,
+        // when the dirtyRect is the full bounds, culling to the visible viewport
+        // (b). Disabled (nil) when no model / degenerate zoom.
+        let docToDevice = ctx.ctm
+        var cullDirtyDoc: CGRect? = nil
+        if let model = controller?.model, model.zoomLevel != 0 {
+            // Screen(view-point) → doc with the SAME formula the tools use
+            // (mouseDown: doc = (view - offset) / zoom) — no transform-composition
+            // convention to get wrong.
+            let z = model.zoomLevel
+            let ox = model.viewOffsetX, oy = model.viewOffsetY
+            let x0 = (Double(dirtyRect.minX) - ox) / z
+            let y0 = (Double(dirtyRect.minY) - oy) / z
+            let x1 = (Double(dirtyRect.maxX) - ox) / z
+            let y1 = (Double(dirtyRect.maxY) - oy) / z
+            cullDirtyDoc = CGRect(x: min(x0, x1), y: min(y0, y1),
+                                  width: abs(x1 - x0), height: abs(y1 - y0))
+        }
         // Install the reference resolver so live by-id references resolve and
         // display (REFERENCE_GRAPH.md §2.4 Phase 4b). Reads the Model's
         // already-built persistent id->element index (an O(log n)-lookup map
@@ -2913,6 +2983,8 @@ class CanvasNSView: NSView {
         // (OPACITY.md §Preview interactions), render only the mask
         // subtree of the isolated element — everything else on the
         // canvas is hidden until the user exits isolation.
+        // Culling is active only across this pass; cleared immediately after.
+        setCanvasCull(dirtyDoc: cullDirtyDoc, docToDevice: docToDevice)
         let isolationPath = controller?.model.maskIsolationPath
         if let path = isolationPath,
            let mask = document.getElement(path).mask {
@@ -2922,6 +2994,7 @@ class CanvasNSView: NSView {
                 drawElement(ctx, .layer(layer))
             }
         }
+        setCanvasCull(dirtyDoc: nil, docToDevice: .identity)
         // Layer 4: fade overlay (dims regions outside any artboard).
         drawFadeOverlay(ctx, document, bounds: bounds)
         // Layer 5: artboard borders.
