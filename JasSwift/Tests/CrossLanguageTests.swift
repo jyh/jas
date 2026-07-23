@@ -2336,6 +2336,7 @@ private let gestureFixtures = [
     // bridged the live tool used fit_error=0 (no smoothing) and dropped
     // the fill. See PAINTBRUSH_TOOL.md.
     "paintbrush_paint_fill.json",
+    "recorded_rect.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -2344,32 +2345,34 @@ private let gestureFixtures = [
 /// SAME path the live canvas uses, NOT a test-only store poke.
 ///
 /// `fill_color` / `stroke_color` map onto the model's default fill / stroke
-/// (where the Color panel writes them); the blob-brush tip params and stroke
-/// brush slug/overrides ride `model.stateStore` (where the Brushes / blob
-/// options panels write them). Only the allowlisted bridged keys are honored.
-/// Mirrors Rust's `tool.sync_global_state(app_state)` precondition in
-/// `run_gesture_model`.
+/// (where the Color panel writes them) by the exact INVERSE of the
+/// production bridge: `syncAppState` publishes `defaultFill ?? "#ffffff"`,
+/// so a fixture value of `"#ffffff"` means "the nil-fallback" and stages
+/// NOTHING — staging it as a real white defaultFill would make fall-through
+/// commits (rect.yaml's deliberate fill/stroke omission) diverge from the
+/// live app, which the S2 recorder pilot caught byte-for-byte. (A recording
+/// made after genuinely picking white is refused by the record-stop
+/// fidelity check on the Rust side, so the sentinel is unambiguous in the
+/// corpus.) The remaining bridged keys ride `model.stateStore` (where the
+/// Brushes / blob / wand options panels write them); the allowlist is the
+/// production `bridgedStateKeys` set. Mirrors Rust's
+/// `tool.sync_global_state(app_state)` precondition in `run_gesture_model`.
 private func applyGestureAppState(_ appState: [String: Any], to model: Model) {
     for (k, v) in appState {
         switch k {
         case "fill_color":
-            if let hex = v as? String, let c = Color.fromHex(hex) {
+            if let hex = v as? String, hex != "#ffffff", let c = Color.fromHex(hex) {
                 model.defaultFill = Fill(color: c)
             }
         case "stroke_color":
-            if let hex = v as? String, let c = Color.fromHex(hex) {
+            if let hex = v as? String, hex != "#ffffff", let c = Color.fromHex(hex) {
                 model.defaultStroke = Stroke(color: c)
             }
-        case "stroke_brush", "stroke_brush_overrides",
-             "blob_brush_size", "blob_brush_angle", "blob_brush_roundness",
-             "blob_brush_fidelity", "blob_brush_keep_selected",
-             "blob_brush_merge_only_with_selection",
-             "paintbrush_fidelity", "paintbrush_fill_new_strokes",
-             "paintbrush_keep_selected", "paintbrush_edit_selected_paths",
-             "paintbrush_edit_within":
-            model.stateStore.set(k, v)
         default:
-            break // non-bridged keys are ignored (allowlist)
+            if bridgedStateKeys.contains(k), !(v is NSNull) {
+                model.stateStore.set(k, v)
+            }
+            // non-bridged keys are ignored (allowlist)
         }
     }
 }

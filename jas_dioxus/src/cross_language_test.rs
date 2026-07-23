@@ -832,6 +832,7 @@ mod tests {
         // keys were bridged the live tool used fit_error=0 (no smoothing)
         // and dropped the fill. See PAINTBRUSH_TOOL.md.
         "paintbrush_paint_fill.json",
+        "recorded_rect.json",
     ];
 
     /// Run a gesture fixture and return the resulting Model. Resolves
