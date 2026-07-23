@@ -3108,17 +3108,7 @@ class CanvasNSView: NSView {
         }
         switch chars {
         case "\u{7F}", "\u{F728}":  // Backspace, Forward Delete
-            if let model = controller?.model, !model.document.selection.isEmpty {
-                // Reference-aware delete (warn-then-orphan): same guard as the
-                // Edit-menu Delete. Empty orphan set -> delete as today.
-                let doc = model.document
-                let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
-                if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-                    return
-                }
-                // Undoable: editDocument self-brackets one undo step.
-                model.editDocument(doc.deleteSelection())
-            }
+            performDeleteSelection()
         case "\u{1B}":  // Escape
             // OPACITY.md §Preview interactions: Escape exits mask-isolation
             // first (if active); then mask-editing back to content-mode.
@@ -3477,6 +3467,80 @@ class CanvasNSView: NSView {
         let factor = 1.0 + Double(event.magnification)
         applyNavIntent(.zoomAbout(factor: factor,
                                   anchorX: Double(pt.x), anchorY: Double(pt.y)))
+    }
+
+    // MARK: - Canvas context menu (SH-3)
+
+    /// Right-click / two-finger-tap on the canvas → a thin AppKit edit menu of
+    /// EXISTING verbs. Item set, titles, and enabled predicates come from the
+    /// data-described ``CanvasContextMenu`` (which mirrors the menubar.yaml Edit
+    /// predicates); each item dispatches through the SAME path the main menu /
+    /// keyboard use — cut/copy/paste share ``EditClipboard`` with the Edit menu,
+    /// Delete mirrors the canvas keyboard Delete, Select All calls
+    /// ``MenuActions.selectAll``. No new verbs, no new dispatch channel.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let model = controller?.model else { return nil }
+        let hasSelection = !model.document.selection.isEmpty
+        let hasTab = true  // a canvas with a model is an open tab (tab_count > 0)
+        let menu = NSMenu()
+        menu.autoenablesItems = false  // enabled state is set explicitly below
+        let selectors: [CanvasContextMenu.Item: Selector] = [
+            .cut:       #selector(contextCut(_:)),
+            .copy:      #selector(contextCopy(_:)),
+            .paste:     #selector(contextPaste(_:)),
+            .delete:    #selector(contextDelete(_:)),
+            .selectAll: #selector(contextSelectAll(_:)),
+        ]
+        for item in CanvasContextMenu.Item.allCases {
+            if CanvasContextMenu.separatorBefore(item) {
+                menu.addItem(.separator())
+            }
+            let mi = NSMenuItem(title: CanvasContextMenu.title(item),
+                                action: selectors[item], keyEquivalent: "")
+            mi.target = self
+            mi.isEnabled = CanvasContextMenu.isEnabled(
+                item, hasSelection: hasSelection, hasTab: hasTab)
+            menu.addItem(mi)
+        }
+        return menu
+    }
+
+    @objc private func contextCut(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.cutSelection(model, confirmOrphaning: JasCommands.confirmOrphaningCut)
+    }
+
+    @objc private func contextCopy(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.copySelection(model)
+    }
+
+    @objc private func contextPaste(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        EditClipboard.pasteClipboard(model, offset: pasteOffset)
+    }
+
+    @objc private func contextDelete(_ sender: Any?) {
+        performDeleteSelection()
+    }
+
+    @objc private func contextSelectAll(_ sender: Any?) {
+        guard let model = controller?.model else { return }
+        MenuActions.selectAll(model)
+    }
+
+    /// Delete the current selection with the reference-aware warn-then-orphan
+    /// guard — the canvas's single Delete path, shared by the keyboard Delete /
+    /// Backspace and the context-menu Delete so they behave identically.
+    private func performDeleteSelection() {
+        guard let model = controller?.model, !model.document.selection.isEmpty else { return }
+        let doc = model.document
+        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
+        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
+            return
+        }
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(doc.deleteSelection())
     }
 
     /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's
