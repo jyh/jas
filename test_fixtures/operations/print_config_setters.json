@@ -11,7 +11,7 @@
           { "op": "set_document_setup_field", "field": "grid_size", "value": 25 },
           { "op": "set_document_setup_field", "field": "grid_color", "value": "#abcdef" },
           { "op": "set_document_setup_field", "field": "simulate_colored_paper", "value": true },
-          { "op": "set_document_setup_field", "field": "transparency_flattener_preset", "value": "high" }
+          { "op": "set_document_setup_field", "field": "transparency_flattener_preset", "value": "medium_resolution" }
         ]
       }
     ],
@@ -69,7 +69,7 @@
           { "op": "set_marks_and_bleed_field", "field": "trim_marks", "value": true },
           { "op": "set_marks_and_bleed_field", "field": "mark_offset", "value": 12 },
           { "op": "set_advanced_field", "field": "print_as_bitmap", "value": true },
-          { "op": "set_advanced_field", "field": "overprint_flattener_preset", "value": "low" }
+          { "op": "set_advanced_field", "field": "overprint_flattener_preset", "value": "medium_resolution" }
         ]
       }
     ],

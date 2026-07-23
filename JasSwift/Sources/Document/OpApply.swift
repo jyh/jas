@@ -990,6 +990,66 @@ func applyShear(
     return (true, targets)
 }
 
+// MARK: - The op-error channel (Arc 1 S3)
+//
+// `opApply` SIGNALS a rejected op without changing document behavior: the
+// silent-skip DOCUMENT semantics are golden-pinned spec (every skip mutates
+// nothing and journals nothing, exactly as before), but the dispatcher now
+// reports WHY an op was skipped. The invariant: an op errs exactly when the
+// dispatcher rejects it for a FAULT before `recordOp` — a malformed envelope,
+// an unknown verb, a missing/mistyped required param, or an addressed target
+// that does not exist. Benign no-ops (empty-selection delete, identity
+// transforms, move-up-at-top, empty wrap paths) and by-design defaults stay
+// nil (success) — they are fully processed ops whose effect is legitimately
+// nothing. Journals only ever contain succeeded ops, so replaying a journal
+// must never err (the fixture runner asserts this). Mirrors Rust `OpError`.
+//
+// The five classes are FROZEN (the cross-language taxonomy; fixtures assert
+// the bare class name via per-op `expected_error` fields). Detail payloads
+// (param name / verb / target id) are description-only diagnostics.
+public enum OpApplyError: Equatable, CustomStringConvertible {
+    /// The op envelope has no string `"op"` verb.
+    case malformedEnvelope
+    /// The verb is not in the dispatch vocabulary.
+    case unknownVerb(name: String)
+    /// A required param is absent from the op object.
+    case missingParam(name: String)
+    /// A required param is present but has the wrong type / an unaccepted value.
+    case badParamType(name: String)
+    /// The op addresses a target (id or path) that does not exist.
+    case missingTarget(id: String)
+
+    /// The bare class name — the cross-language `expected_error` contract
+    /// (fixtures assert exactly this string). Mirrors Rust `class_name()`.
+    public var className: String {
+        switch self {
+        case .malformedEnvelope: return "MalformedEnvelope"
+        case .unknownVerb: return "UnknownVerb"
+        case .missingParam: return "MissingParam"
+        case .badParamType: return "BadParamType"
+        case .missingTarget: return "MissingTarget"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .malformedEnvelope: return "MalformedEnvelope"
+        case .unknownVerb(let name): return "UnknownVerb(\(name))"
+        case .missingParam(let name): return "MissingParam(\(name))"
+        case .badParamType(let name): return "BadParamType(\(name))"
+        case .missingTarget(let id): return "MissingTarget(\(id))"
+        }
+    }
+}
+
+/// Classify a failed required-param read: absent key ⇒ `missingParam`,
+/// present-but-unparsable (wrong type / unaccepted value) ⇒ `badParamType`.
+/// The parse helpers (`parsePath` / `strField` / `parseSerdeElement` / …)
+/// merge both cases into nil; this splits them. Mirrors Rust `req_err`.
+private func reqErr(_ op: [String: Any], _ name: String) -> OpApplyError {
+    op[name] == nil ? .missingParam(name: name) : .badParamType(name: name)
+}
+
 /// The single op dispatcher (OP_LOG.md §4). Applies one primitive op to the
 /// model (via `controller`) and records it into the open transaction (the
 /// `checkpoint_equivalence` gate, §5-6). History-navigation ops
@@ -997,10 +1057,22 @@ func applyShear(
 /// and are NOT primitive ops, so they return WITHOUT being journaled. `recordOp`
 /// is a no-op when no transaction is open, so this is safe to call
 /// unconditionally. Mirrors Rust `op_apply`.
-public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any]) {
+///
+/// Returns the `OpApplyError` exactly when the op was rejected for a fault
+/// before `recordOp` (Arc 1 S3 — a SIGNAL, not a behavior change: every error
+/// path mutates nothing and journals nothing, byte-identical to the prior
+/// silent skip); nil on success, including the benign no-ops. Deliberately an
+/// Optional return, NOT `throws`: all production call sites are statement-
+/// position and stay compile-safe under `@discardableResult`; the fixture
+/// runners assert the result against per-op `expected_error` fields, and
+/// journal replay asserts nil.
+@discardableResult
+public func opApply(
+    _ model: Model, _ controller: Controller, _ op: [String: Any]
+) -> OpApplyError? {
     guard let name = op["op"] as? String else {
         // A primitive op with no verb is malformed; skip it (never crash).
-        return
+        return .malformedEnvelope
     }
     // History-navigation ops (OP_LOG.md §5): they manage transaction boundaries
     // / the journal cursor and are NOT primitive ops, so they are never
@@ -1010,13 +1082,13 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     case "snapshot":
         model.commitTxn()
         model.beginTxn()
-        return
+        return nil
     case "undo":
         model.undo()
-        return
+        return nil
     case "redo":
         model.redo()
-        return
+        return nil
     default:
         break
     }
@@ -1096,23 +1168,26 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     case "copy_selection":
         controller.copySelection(dx: numField(op, "dx"), dy: numField(op, "dy"))
     case "assign_id":
-        guard let path = parsePath(op["path"]), let id = strField(op, "id") else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let id = strField(op, "id") else { return reqErr(op, "id") }
         controller.assignId(path, id: id)
     case "create_reference":
-        guard let targetPath = parsePath(op["target_path"]),
-              let targetId = strField(op, "target_id"),
-              let refId = strField(op, "ref_id") else { return }
+        guard let targetPath = parsePath(op["target_path"]) else {
+            return reqErr(op, "target_path")
+        }
+        guard let targetId = strField(op, "target_id") else { return reqErr(op, "target_id") }
+        guard let refId = strField(op, "ref_id") else { return reqErr(op, "ref_id") }
         controller.createReference(targetPath, targetId: targetId, refId: refId)
     // Symbols P2 operations (SYMBOLS.md §7). Value-in-op: the ids and paths are
     // read literally from the payload, exactly like the create_reference arm.
     case "make_symbol":
-        guard let path = parsePath(op["path"]),
-              let masterId = strField(op, "master_id"),
-              let refId = strField(op, "ref_id") else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let masterId = strField(op, "master_id") else { return reqErr(op, "master_id") }
+        guard let refId = strField(op, "ref_id") else { return reqErr(op, "ref_id") }
         controller.makeSymbol(path, masterId: masterId, refId: refId)
     case "place_instance":
-        guard let masterId = strField(op, "master_id"),
-              let refId = strField(op, "ref_id") else { return }
+        guard let masterId = strField(op, "master_id") else { return reqErr(op, "master_id") }
+        guard let refId = strField(op, "ref_id") else { return reqErr(op, "ref_id") }
         controller.placeInstance(masterId: masterId, refId: refId)
     // ── Concept-pack ops (CONCEPTS.md §6-7) ──
     // The two verbs the Concepts panel emits, given journal-replay arms so a
@@ -1124,14 +1199,14 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // exact Generated instance the live edit produced. A malformed payload SKIPS
     // (never crashes, never journals).
     case "place_concept_instance":
-        guard let conceptId = strField(op, "concept_id"),
-              let elemId = strField(op, "elem_id") else { return }
+        guard let conceptId = strField(op, "concept_id") else { return reqErr(op, "concept_id") }
+        guard let elemId = strField(op, "elem_id") else { return reqErr(op, "elem_id") }
         let params = (op["params"] as? [String: Any]) ?? [:]
         controller.placeConceptInstance(
             conceptId: conceptId, params: params, elemId: elemId)
     case "set_concept_param":
-        guard let path = parsePath(op["path"]),
-              let pname = strField(op, "name") else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let pname = strField(op, "name") else { return reqErr(op, "name") }
         controller.setConceptParam(path, name: pname, value: numField(op, "value"))
     // Apply a concept operation (CONCEPTS.md §9). `op_id` rides as journal
     // metadata (the semantic verb); `changes` is the production-RESOLVED param
@@ -1140,8 +1215,10 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // malformed / missing payload SKIPS (the controller no-ops on an empty /
     // non-object `changes`, so nothing journals).
     case "apply_concept_operation":
-        guard let path = parsePath(op["path"]),
-              let changes = op["changes"] as? [String: Any] else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let changes = op["changes"] as? [String: Any] else {
+            return reqErr(op, "changes")
+        }
         controller.applyConceptOperation(path, changes: changes)
     // Promote a raw shape to a Generated concept instance (CONCEPTS.md §10 — the
     // fitter / `promote`). Every operand is value-in-op: the detection ran at
@@ -1150,28 +1227,30 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // empty. A malformed / missing path or concept_id SKIPS (never crashes, never
     // journals). Mirrors the Rust `promote_to_concept` arm.
     case "promote_to_concept":
-        guard let path = parsePath(op["path"]),
-              let conceptId = strField(op, "concept_id") else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let conceptId = strField(op, "concept_id") else { return reqErr(op, "concept_id") }
         let params = (op["params"] as? [String: Any]) ?? [:]
         let transform = parseTransform(op["transform"])
         controller.promoteToConcept(
             path, conceptId: conceptId, params: params, transform: transform)
     case "detach":
-        guard let path = parsePath(op["path"]) else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
         controller.detach(path)
     case "redefine":
-        guard let masterId = strField(op, "master_id"),
-              let path = parsePath(op["path"]),
-              let refId = strField(op, "ref_id") else { return }
+        guard let masterId = strField(op, "master_id") else { return reqErr(op, "master_id") }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let refId = strField(op, "ref_id") else { return reqErr(op, "ref_id") }
         controller.redefine(masterId: masterId, path, refId: refId)
     case "delete_symbol":
-        guard let masterId = strField(op, "master_id") else { return }
+        guard let masterId = strField(op, "master_id") else { return reqErr(op, "master_id") }
         controller.deleteSymbol(masterId: masterId)
     // Symbols P4 (SYMBOLS.md §4 / Fork F2). Value-in-op: the instance transform
     // is carried in the payload as {a,b,c,d,e,f} and applied verbatim.
     case "set_instance_transform":
-        guard let path = parsePath(op["path"]),
-              let t = op["transform"] as? [String: Any] else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let t = op["transform"] as? [String: Any] else {
+            return reqErr(op, "transform")
+        }
         let transform = Transform(
             a: numField(t, "a"), b: numField(t, "b"), c: numField(t, "c"),
             d: numField(t, "d"), e: numField(t, "e"), f: numField(t, "f"))
@@ -1184,21 +1263,38 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // non-Element value SKIPS). A no-op edit (absent delete path / empty
     // selection) journals nothing.
     case "delete_at":
-        guard let path = parsePath(op["path"]), !path.isEmpty else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        // An empty path addresses no element (mirrors Rust, where getElement
+        // on [] resolves nothing) — the addressed target is missing.
+        guard !path.isEmpty else { return .missingTarget(id: "[]") }
         let (changed, t) = applyDeleteElementAt(model, path)
-        if !changed { return }
+        if !changed {
+            // The path resolves to no element — the addressed target is
+            // missing (distinct from the benign empty-selection delete).
+            return .missingTarget(id: String(describing: path))
+        }
         targets = t
     case "delete_selection":
         let (changed, t) = applyDeleteSelection(model)
-        if !changed { return }
+        if !changed {
+            // Benign no-op: an empty-selection delete succeeds by the S3
+            // taxonomy (the operand set is legitimately empty).
+            return nil
+        }
         targets = t
     case "insert_after":
-        guard let path = parsePath(op["path"]), !path.isEmpty,
-              let element = parseSerdeElement(op) else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        // Swift skips an empty-path insert_after (the top level is [Layer]);
+        // classified as a missing target. (Rust journals it as a document-layer
+        // no-op — an out-of-corpus divergence predating the error channel.)
+        guard !path.isEmpty else { return .missingTarget(id: "[]") }
+        guard let element = parseSerdeElement(op) else { return reqErr(op, "element") }
         targets = applyInsertElementAfter(model, path, element)
     case "insert_at":
-        guard let parentPath = parsePath(op["parent_path"]),
-              let element = parseSerdeElement(op) else { return }
+        guard let parentPath = parsePath(op["parent_path"]) else {
+            return reqErr(op, "parent_path")
+        }
+        guard let element = parseSerdeElement(op) else { return reqErr(op, "element") }
         let index = uintField(op, "index")
         targets = applyInsertElementAt(model, parentPath, index, element)
     // Group/layer wrapping verbs (OP_LOG.md §9 Phase P5). Each is a MULTI-STEP
@@ -1207,22 +1303,39 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // empty list is a no-op). `wrap_in_layer` carries the RESOLVED name LITERAL.
     // An optional value-in-op `id` assigns the container id.
     case "wrap_in_group":
-        guard let paths = parsePathList(op["paths"]) else { return }
-        if paths.isEmpty { return }
+        guard let paths = parsePathList(op["paths"]) else { return reqErr(op, "paths") }
+        if paths.isEmpty {
+            // Benign no-op: an empty paths list succeeds by the S3 taxonomy
+            // (like an empty-selection delete).
+            return nil
+        }
         let (changed, t) = applyWrapInGroup(model, paths, strField(op, "id"))
-        if !changed { return }
+        if !changed {
+            // Non-empty paths but no source element resolved — the addressed
+            // targets are missing.
+            return .missingTarget(id: String(describing: paths))
+        }
         targets = t
     case "wrap_in_layer":
-        guard let paths = parsePathList(op["paths"]) else { return }
-        if paths.isEmpty { return }
+        guard let paths = parsePathList(op["paths"]) else { return reqErr(op, "paths") }
+        if paths.isEmpty {
+            // Benign no-op (see wrap_in_group).
+            return nil
+        }
         let nm = strField(op, "name") ?? ""
         let (changed, t) = applyWrapInLayer(model, paths, nm, strField(op, "id"))
-        if !changed { return }
+        if !changed {
+            return .missingTarget(id: String(describing: paths))
+        }
         targets = t
     case "unpack_group_at":
-        guard let path = parsePath(op["path"]) else { return }
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
         let (changed, t) = applyUnpackGroupAt(model, path)
-        if !changed { return }
+        if !changed {
+            // No Group at the path (absent element or a non-Group) — the
+            // addressed target is missing.
+            return .missingTarget(id: String(describing: path))
+        }
         targets = t
     case "lock_selection":
         controller.lockSelection()
@@ -1237,13 +1350,24 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // mutator. An absent `value` key SKIPS; an empty `value` string maps to a
     // CLEAR (nil). An unknown attr or an ineffective edit records nothing.
     case "set_attr_on_selection":
-        guard let attr = strField(op, "attr") else { return }
+        guard let attr = strField(op, "attr") else { return reqErr(op, "attr") }
+        // An unsupported attribute is a param whose value is outside the
+        // accepted domain — badParamType (classified here so the helper's
+        // merged `changed == false` can stay the benign ineffective-edit
+        // success below). Behavior-identical: the helper skips the same way.
+        if attr != "stroke_brush" && attr != "stroke_brush_overrides" {
+            return .badParamType(name: "attr")
+        }
         // A missing `value` key is a hard skip (no silent clear). When present,
         // an empty string clears (nil); a non-empty string sets.
-        guard op.keys.contains("value") else { return }
+        guard op.keys.contains("value") else { return .missingParam(name: "value") }
         let value = (op["value"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let (changed, t) = applySetAttrOnSelection(model, controller, attr, value)
-        if !changed { return }
+        if !changed {
+            // Benign no-op: the write left every selected element unchanged
+            // (or the selection is empty) — success by the taxonomy.
+            return nil
+        }
         targets = t
     // Transform trio (OP_LOG.md §9 Phase P7). scale_transform / rotate_transform
     // / shear_transform journal the CONFIRM apply through the SHARED helpers, so
@@ -1257,13 +1381,19 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
             rx: numField(op, "rx"), ry: numField(op, "ry"),
             scaleStrokes: boolField(op, "scale_strokes", true),
             scaleCorners: boolField(op, "scale_corners", false))
-        if !changed { return }
+        if !changed {
+            // Benign no-op: an identity transform succeeds by the S3 taxonomy.
+            return nil
+        }
         targets = t
     case "rotate_transform":
         let (changed, t) = applyRotate(
             model, thetaDeg: numField(op, "angle"),
             rx: numField(op, "rx"), ry: numField(op, "ry"))
-        if !changed { return }
+        if !changed {
+            // Benign no-op: a zero-angle rotation succeeds by the S3 taxonomy.
+            return nil
+        }
         targets = t
     case "shear_transform":
         let (changed, t) = applyShear(
@@ -1271,7 +1401,10 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
             axis: strField(op, "axis") ?? "horizontal",
             axisAngleDeg: numField(op, "axis_angle"),
             rx: numField(op, "rx"), ry: numField(op, "ry"))
-        if !changed { return }
+        if !changed {
+            // Benign no-op: a zero-angle shear succeeds by the S3 taxonomy.
+            return nil
+        }
         targets = t
     // Boolean ops (OP_LOG.md §9): the destructive boolean combines the ≥2
     // selected sibling paths; `simplify` refits the (now-selected) output. Both
@@ -1286,55 +1419,96 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // dialog handlers. A type-mismatch skip mutates nothing AND records nothing.
     // targets stays EMPTY (document-global config).
     case let v where PRINT_CONFIG_VERBS.contains(v):
-        guard let field = strField(op, "field") else { return }
-        guard op.keys.contains("value"), let val = jsonToValue(op["value"]) else { return }
+        guard let field = strField(op, "field") else { return reqErr(op, "field") }
+        guard op.keys.contains("value") else { return .missingParam(name: "value") }
+        guard let val = jsonToValue(op["value"]) else { return .badParamType(name: "value") }
         let index = uintField(op, "index")
-        if !applyPrintConfigField(model, verb: v, field: field, val: val, index: index) { return }
+        if !applyPrintConfigField(model, verb: v, field: field, val: val, index: index) {
+            // Type-mismatch / unknown-field / out-of-range-ink-index skip: the
+            // helper merges the three; the class is badParamType (the
+            // field/value pair did not apply), matching Rust.
+            return .badParamType(name: "value")
+        }
     // Artboard doc.* setters (OP_LOG.md §9 Phase P2). Each carries RESOLVED
     // literals; the helper skips on a malformed payload / type mismatch / missing
     // id / no-op edit, in which case we journal nothing. targets carries the
     // written artboard id(s).
     case "set_artboard_field":
-        guard let id = strField(op, "id"), let field = strField(op, "field") else { return }
-        guard op.keys.contains("value"), let val = jsonToValue(op["value"]) else { return }
-        if !applySetArtboardField(model, id: id, field: field, val: val) { return }
+        guard let id = strField(op, "id") else { return reqErr(op, "id") }
+        guard let field = strField(op, "field") else { return reqErr(op, "field") }
+        guard op.keys.contains("value") else { return .missingParam(name: "value") }
+        guard let val = jsonToValue(op["value"]) else { return .badParamType(name: "value") }
+        // Split the helper's merged `false` for the error channel: a missing
+        // artboard is missingTarget; an existing artboard with a field/value
+        // that did not apply is badParamType. The existence pre-check reads
+        // the same artboard list the helper does, so the behavior (skip,
+        // journal nothing) is unchanged. Mirrors Rust.
+        guard model.document.artboards.contains(where: { $0.id == id }) else {
+            return .missingTarget(id: id)
+        }
+        if !applySetArtboardField(model, id: id, field: field, val: val) {
+            return .badParamType(name: "value")
+        }
         targets = [id]
     case "set_artboard_options_field":
-        guard let field = strField(op, "field") else { return }
-        guard op.keys.contains("value"), let val = jsonToValue(op["value"]) else { return }
-        if !applySetArtboardOptionsField(model, field: field, val: val) { return }
+        guard let field = strField(op, "field") else { return reqErr(op, "field") }
+        guard op.keys.contains("value") else { return .missingParam(name: "value") }
+        guard let val = jsonToValue(op["value"]) else { return .badParamType(name: "value") }
+        if !applySetArtboardOptionsField(model, field: field, val: val) {
+            // Non-bool value / unknown field (the helper merges both).
+            return .badParamType(name: "value")
+        }
     case "delete_artboard_by_id":
-        guard let id = strField(op, "id") else { return }
-        if !applyDeleteArtboardById(model, id: id) { return }
+        guard let id = strField(op, "id") else { return reqErr(op, "id") }
+        if !applyDeleteArtboardById(model, id: id) {
+            // No artboard with this id — the addressed target is missing.
+            return .missingTarget(id: id)
+        }
         targets = [id]
     case "move_artboards_up":
         let ids = strListField(op, "ids")
-        if !applyMoveArtboardsUp(model, ids) { return }
+        if !applyMoveArtboardsUp(model, ids) {
+            // Benign no-op: move-up-at-top (or ids that select nothing)
+            // succeeds by the S3 taxonomy.
+            return nil
+        }
         targets = ids
     case "move_artboards_down":
         let ids = strListField(op, "ids")
-        if !applyMoveArtboardsDown(model, ids) { return }
+        if !applyMoveArtboardsDown(model, ids) {
+            // Benign no-op (see move_artboards_up).
+            return nil
+        }
         targets = ids
     // Artboard id-minting verbs (OP_LOG.md §9 Phase P3). VALUE-IN-OP: the id was
     // minted ONCE at production capture time and recorded as a LITERAL; this arm
     // reads it VERBATIM and NEVER mints. targets carry the new id.
     case "create_artboard":
-        guard let id = strField(op, "id"), !id.isEmpty else { return }
+        // A missing id is missingParam; a present non-string / empty id is
+        // badParamType (reqErr splits them). This arm must NEVER mint.
+        guard let id = strField(op, "id"), !id.isEmpty else { return reqErr(op, "id") }
         let fields = op["fields"] as? [String: Any]
         applyCreateArtboard(model, id: id, fields: fields)
         targets = [id]
     case "duplicate_artboard":
-        guard let sourceId = strField(op, "id"), !sourceId.isEmpty,
-              let newId = strField(op, "new_id"), !newId.isEmpty else { return }
+        guard let sourceId = strField(op, "id"), !sourceId.isEmpty else {
+            return reqErr(op, "id")
+        }
+        guard let newId = strField(op, "new_id"), !newId.isEmpty else {
+            return reqErr(op, "new_id")
+        }
         let name = strField(op, "name") ?? ""
         if !applyDuplicateArtboard(model, sourceId: sourceId, newId: newId, name: name,
-                                   ox: numField(op, "offset_x"), oy: numField(op, "offset_y")) { return }
+                                   ox: numField(op, "offset_x"), oy: numField(op, "offset_y")) {
+            // No artboard with the source id — the addressed target is missing.
+            return .missingTarget(id: sourceId)
+        }
         targets = [newId]
     // Unknown verb: a malformed/unsupported production payload is skipped rather
     // than crashing. (The harness corpus only carries known verbs, so this never
     // fires under test — the byte-gate would catch a typo.)
     default:
-        return
+        return .unknownVerb(name: name)
     }
     // Capture the op into the open transaction so the journal replays to the same
     // document — the checkpoint_equivalence gate (OP_LOG.md §5-6). `targets`
@@ -1343,4 +1517,5 @@ public func opApply(_ model: Model, _ controller: Controller, _ op: [String: Any
     // carries the full op dict verbatim (verb included), matching the harness
     // recordOp site; the journal serializer strips the redundant "op" key.
     model.recordOp(PrimitiveOp(op: name, params: op, targets: targets))
+    return nil
 }
