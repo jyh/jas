@@ -2338,6 +2338,9 @@ private let gestureFixtures = [
     "paintbrush_paint_fill.json",
     "recorded_rect.json",
     "recorded_rect_panzoom.json",
+    "recorded_blob_dot.json",
+    "recorded_blob_merge.json",
+    "recorded_blob_separate.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the

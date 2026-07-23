@@ -1,0 +1,46 @@
+[
+  {
+    "name": "recorded_blob_dot_1",
+    "setup_svg": "recorded_blob_dot_1_setup.svg",
+    "tool": "blob_brush",
+    "app_state": {
+      "blob_brush_angle": 0,
+      "blob_brush_fidelity": 3,
+      "blob_brush_keep_selected": false,
+      "blob_brush_merge_only_with_selection": false,
+      "blob_brush_roundness": 100,
+      "blob_brush_size": 10,
+      "fill_color": "#ffffff",
+      "magic_wand_blending_mode": false,
+      "magic_wand_fill_color": true,
+      "magic_wand_fill_tolerance": 32,
+      "magic_wand_opacity": true,
+      "magic_wand_opacity_tolerance": 5,
+      "magic_wand_stroke_color": true,
+      "magic_wand_stroke_tolerance": 32,
+      "magic_wand_stroke_weight": true,
+      "magic_wand_stroke_weight_tolerance": 5.0,
+      "paintbrush_edit_selected_paths": true,
+      "paintbrush_edit_within": 12,
+      "paintbrush_fidelity": 3,
+      "paintbrush_fill_new_strokes": false,
+      "paintbrush_keep_selected": true,
+      "stroke_brush": null,
+      "stroke_brush_overrides": null,
+      "stroke_color": "#000000"
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 113.0,
+        "y": 291.5
+      },
+      {
+        "kind": "release",
+        "x": 113.0,
+        "y": 291.5
+      }
+    ],
+    "expected_json": "recorded_blob_dot_1_expected.json"
+  }
+]

@@ -834,6 +834,9 @@ mod tests {
         "paintbrush_paint_fill.json",
         "recorded_rect.json",
         "recorded_rect_panzoom.json",
+        "recorded_blob_dot.json",
+        "recorded_blob_merge.json",
+        "recorded_blob_separate.json",
     ];
 
     /// Run a gesture fixture and return the resulting Model. Resolves
