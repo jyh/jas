@@ -3432,6 +3432,41 @@ class CanvasNSView: NSView {
         ensureBlinkTimer()
     }
 
+    // MARK: - Navigation gestures (scroll pan / pinch zoom)
+
+    /// Apply an abstract canvas navigation intent through the SAME Model
+    /// view-state channel the Hand and Zoom tools use — `doc.pan.apply` writes
+    /// `view_offset_x/y`; `doc.zoom.apply` writes `zoom_level` + offsets. No
+    /// new mutation channel: this mirrors those exact writes so a gesture and
+    /// the equivalent tool drag land the view in the identical place. View
+    /// state is per-tab and non-undoable, so — like the tool effects — these
+    /// are bare `@Published` field writes, not bracketed ops.
+    func applyNavIntent(_ intent: CanvasNavIntent) {
+        guard let model = controller?.model else { return }
+        switch intent {
+        case let .pan(dx, dy):
+            let (ox, oy) = CanvasNavMath.pan(
+                offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
+                dx: dx, dy: dy)
+            model.viewOffsetX = ox
+            model.viewOffsetY = oy
+        }
+        needsDisplay = true
+    }
+
+    /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's
+    /// scrolling deltas, translate to an abstract pan intent, and route it
+    /// through the shared pan write path. Momentum "just works" — AppKit
+    /// delivers momentum frames as further scrollWheel events and we apply
+    /// each delta as it arrives.
+    override func scrollWheel(with event: NSEvent) {
+        let intent = CanvasNavAdapter.panIntent(
+            scrollingDeltaX: Double(event.scrollingDeltaX),
+            scrollingDeltaY: Double(event.scrollingDeltaY),
+            hasPreciseScrollingDeltas: event.hasPreciseScrollingDeltas)
+        applyNavIntent(intent)
+    }
+
     override func mouseMoved(with event: NSEvent) {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
