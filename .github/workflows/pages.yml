@@ -60,6 +60,45 @@ jobs:
         working-directory: jas_dioxus
         run: dx build --release --web --base-path jas
 
+      # Post-build injection: dx owns index.html during the build, so the
+      # social-preview tags are spliced in afterwards, anchored on the
+      # literal </head>. The preview image ships under an UNHASHED root
+      # name so the absolute og:image URL stays stable across deploys.
+      - name: Inject social meta + preview image
+        working-directory: jas_dioxus
+        run: |
+          cp assets/og-preview.png target/dx/jas_dioxus/release/web/public/og-preview.png
+          python3 - <<'EOF'
+          import pathlib
+          import sys
+
+          index = pathlib.Path("target/dx/jas_dioxus/release/web/public/index.html")
+          html = index.read_text(encoding="utf-8")
+          if "</head>" not in html:
+              sys.exit("inject: no </head> anchor in index.html")
+          title = "Jas — a vector illustration application in your browser"
+          desc = (
+              "A free in-browser vector editor built as parallel "
+              "implementations of one executable spec, with cross-language "
+              "differential testing."
+          )
+          url = "https://jyh.github.io/jas/"
+          image = "https://jyh.github.io/jas/og-preview.png"
+          tags = "\n".join([
+              f'<meta property="og:title" content="{title}">',
+              f'<meta property="og:description" content="{desc}">',
+              f'<meta property="og:url" content="{url}">',
+              f'<meta property="og:image" content="{image}">',
+              '<meta property="og:type" content="website">',
+              '<meta name="twitter:card" content="summary_large_image">',
+              f'<meta name="twitter:title" content="{title}">',
+              f'<meta name="twitter:description" content="{desc}">',
+              f'<meta name="twitter:image" content="{image}">',
+          ]) + "\n"
+          index.write_text(html.replace("</head>", tags + "</head>", 1), encoding="utf-8")
+          print("inject: social meta written before </head>")
+          EOF
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

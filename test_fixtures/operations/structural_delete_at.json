@@ -32,7 +32,7 @@
       {
         "name": "delete_layer_selection",
         "ops": [
-          { "op": "delete_at" }
+          { "op": "delete_at", "expected_error": "MissingParam" }
         ]
       }
     ],

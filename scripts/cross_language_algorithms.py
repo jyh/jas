@@ -269,7 +269,13 @@ def main():
         fixture_path = os.path.join(FIXTURES_DIR, f"{algo}.json")
 
         if not os.path.exists(fixture_path):
-            print(f"  SKIP: {algo} (fixture not found)")
+            # A missing fixture is a hard error, not a skip: every algorithm in
+            # ALGORITHMS must have its fixture on disk, or the gate would go
+            # silently vacuous for that algorithm (S3 rider). Known per-language
+            # exclusions belong in SKIP_LANG_ALGO, never here.
+            print(f"  ERROR: {algo}: fixture not found: {fixture_path}",
+                  file=sys.stderr)
+            errors += 1
             continue
 
         # Run reference language

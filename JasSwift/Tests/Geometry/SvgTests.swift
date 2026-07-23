@@ -1007,6 +1007,33 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(t.tspans[3].rotate == 90.0)
 }
 
+/// TSPAN.md specifies nested-tspan flattening on import (unimplemented in
+/// the active ports); leading-whitespace-in-tspan also diverges (Rust
+/// trims, Swift preserves) and is corpus-unexercised; implementation
+/// deferred to the Paragraph-panel phase.
+///
+/// This probe pins CURRENT behavior, not the spec: the Swift parser reads
+/// the outer <tspan>'s stringValue, which CONCATENATES the nested
+/// <tspan>'s content, yielding one tspan "ab". Rust's mirror probe
+/// (svg.rs `nested_tspan_current_behavior_probe`) observes "a" — the
+/// active ports diverge on nested-tspan input today, which is why no
+/// cross-language fixture carries one.
+@Test func nestedTspanCurrentBehaviorProbe() {
+    let svg = """
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+<text y="20" font-size="10"><tspan>a<tspan>b</tspan></tspan></text>
+</svg>
+"""
+    let doc = svgToDocument(svg)
+    guard case .text(let t) = doc.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.tspans.count == 1)
+    #expect(t.tspans[0].content == "ab",
+            "current Swift behavior: the nested tspan's content concatenates via stringValue")
+}
+
 @Test func svgPerGlyphTspanRotateFullRoundtrip() {
     var doc = Document(layers: [Layer(children: [
         .text(emptyTextElem(x: 10, y: 20, width: 0, height: 0))

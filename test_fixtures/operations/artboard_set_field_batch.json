@@ -30,11 +30,11 @@
       {
         "name": "artboard_options_confirm",
         "ops": [
-          { "op": "set_artboard_field", "id": "ab1", "field": "x",     "value": true },
-          { "op": "set_artboard_field", "id": "ab1", "field": "name",  "value": 7 },
-          { "op": "set_artboard_field", "id": "missing", "field": "x",  "value": 50 },
+          { "op": "set_artboard_field", "id": "ab1", "field": "x",     "value": true, "expected_error": "BadParamType" },
+          { "op": "set_artboard_field", "id": "ab1", "field": "name",  "value": 7, "expected_error": "BadParamType" },
+          { "op": "set_artboard_field", "id": "missing", "field": "x",  "value": 50, "expected_error": "MissingTarget" },
           { "op": "set_artboard_field", "id": "ab1", "field": "width", "value": 250 },
-          { "op": "set_artboard_options_field", "field": "fade_region_outside_artboard", "value": "yes" }
+          { "op": "set_artboard_options_field", "field": "fade_region_outside_artboard", "value": "yes", "expected_error": "BadParamType" }
         ]
       }
     ],

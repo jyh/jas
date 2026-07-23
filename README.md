@@ -6,7 +6,8 @@
 ### ✨ [**Try it on the web → jyh.github.io/jas**](https://jyh.github.io/jas/)
 
 No install — the full editor (the Rust/Dioxus port compiled to WebAssembly)
-runs entirely in your browser. ~2 MB download, no server, nothing tracked.
+runs entirely in your browser. ~2 MB download, no accounts, no analytics,
+no third-party requests; static hosting on GitHub Pages.
 
 Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **four parallel, behaviourally-identical native implementations** — Rust, Swift, OCaml, and Python — plus a thin Flask web reference renderer, all driven from one shared executable YAML specification. Cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. As of the `five-port-parity` tag (2026-07-22), active development continues in the **Rust and Swift** ports; the OCaml and Python-Qt ports are preserved at that tag as the N-version study concluded, verified by tag-pinned CI canaries (see `POLICY.md` §1). New features land in Rust, get tuned, then propagate to Swift with matching tests.
 

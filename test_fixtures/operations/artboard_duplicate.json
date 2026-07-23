@@ -52,7 +52,8 @@
             "new_id": "abFF",
             "name": "Artboard 1",
             "offset_x": 20.0,
-            "offset_y": 20.0
+            "offset_y": 20.0,
+            "expected_error": "MissingTarget"
           }
         ]
       }

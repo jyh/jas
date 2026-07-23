@@ -70,6 +70,10 @@ private func assertSvgRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // handling round-trip through the SVG codec. Mirrors the Rust
+        // svg_roundtrip_all_fixtures registration.
+        "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
         // REFERENCE_GRAPH.md Phase 2a: live element SVG codec. A reference
         // round-trips as <use href="#id">; a compound as
         // <g data-jas-live="compound_shape" data-jas-operation="...">.
@@ -99,6 +103,9 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParsePathAllCommands() { assertSvgParse("path_all_commands") }
 @Test func svgParseTextBasic() { assertSvgParse("text_basic") }
 @Test func svgParseTextPathBasic() { assertSvgParse("text_path_basic") }
+@Test func svgParseTextWithTspans() { assertSvgParse("text_with_tspans") }
+@Test func svgParseTextXmlSpacePreserve() { assertSvgParse("text_xml_space_preserve") }
+@Test func svgParseTextPathWithTspans() { assertSvgParse("text_path_with_tspans") }
 @Test func svgParseGroupNested() { assertSvgParse("group_nested") }
 @Test func svgParseTransformTranslate() { assertSvgParse("transform_translate") }
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
@@ -254,6 +261,10 @@ private func assertJsonRoundtrip(_ name: String) {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // content round-trip through test_json. Mirrors the Rust
+        // json_roundtrip_all_expected registration.
+        "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
         "element_ids",
         // REFERENCE_GRAPH.md Phase 1a: live element codec (compound now
         // emits `operation`; reference emits kind+target). live_compound_id
@@ -294,6 +305,11 @@ private func readFixtureData(_ path: String) -> Data {
         "text_basic", "text_path_basic",
         "group_nested", "transform_translate", "transform_rotate",
         "multi_layer", "complex_document", "element_ids",
+        // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
+        // content round-trip through the binary codec (self-roundtrip only;
+        // no Python-generated .bin exists for these). Mirrors the Rust
+        // binary_roundtrip_all_expected registration.
+        "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
         // Live elements round-trip through binary (REFERENCE_GRAPH.md Phase 2b).
         // live_compound_id additionally carries the compound's own id (§4).
         "live_reference_roundtrip", "live_compound_roundtrip",
@@ -434,7 +450,27 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
 /// separately. The legacy `snapshot` op (history navigation) maps to `opApply`'s
 /// commit-then-begin, matching Rust.
 private func applyFixtureOp(_ model: Model, _ controller: Controller, _ op: [String: Any]) {
-    opApply(model, controller, op)
+    assertOpResult(op, opApply(model, controller, op))
+}
+
+/// The S3 error-channel contract, asserted on every fixture op the harness
+/// dispatches: an op carrying `expected_error` (the bare class name, e.g.
+/// `"MissingTarget"`) must err with exactly that class; an op without it must
+/// succeed (nil). Detail payloads (param names / ids) are diagnostics only —
+/// the cross-language assertion is the class name string. Mirrors Rust's
+/// `assert_op_result`.
+private func assertOpResult(_ op: [String: Any], _ result: OpApplyError?) {
+    let verb = (op["op"] as? String) ?? "<no-verb>"
+    if let expected = op["expected_error"] as? String {
+        if let err = result {
+            #expect(err.className == expected,
+                "op '\(verb)': expected error class \(expected), got \(err)")
+        } else {
+            Issue.record("op '\(verb)': expected error class \(expected), got success")
+        }
+    } else if let err = result {
+        Issue.record("op '\(verb)' unexpectedly errored: \(err)")
+    }
 }
 
 /// checkpoint_equivalence gate (OP_LOG.md §6): replay the committed-and-applied
@@ -449,7 +485,13 @@ private func replayJournal(_ svg: String, _ journal: [Transaction], _ head: Int)
     let controller = Controller(model: model)
     for txn in journal[0..<head] {
         for op in txn.ops {
-            applyFixtureOp(model, controller, op.params)
+            // S3 strengthening: journals only ever contain succeeded ops, so
+            // every replayed op must succeed (an error here means an op that
+            // was rejected at apply time somehow reached recordOp — a broken
+            // err ⇔ skipped-before-recordOp invariant).
+            let result = opApply(model, controller, op.params)
+            #expect(result == nil,
+                "journal replay: op '\(op.op)' errored (\(String(describing: result))) — journals only contain succeeded ops")
         }
     }
     return documentToTestJson(model.document)
@@ -1201,7 +1243,10 @@ private func runProductionBatchFixture(_ fixturePath: String) {
     let replayController = Controller(model: replay)
     for txn in model.journal {
         for op in txn.ops {
-            opApply(replay, replayController, op.params)
+            // S3: journals only contain succeeded ops, so replay must succeed.
+            let result = opApply(replay, replayController, op.params)
+            #expect(result == nil,
+                "journal replay: op '\(op.op)' errored (\(String(describing: result)))")
         }
     }
     let replayDoc = documentToTestJson(replay.document)

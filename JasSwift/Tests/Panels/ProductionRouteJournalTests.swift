@@ -36,7 +36,10 @@ private func assertCheckpointEquivalence(_ model: Model, preDoc: Document) {
         for o in t.ops {
             var op = o.params
             op["op"] = o.op
-            opApply(replay, controller, op)
+            // S3: journals only contain succeeded ops, so replay must succeed.
+            let result = opApply(replay, controller, op)
+            #expect(result == nil,
+                "journal replay: op '\(o.op)' errored (\(String(describing: result)))")
         }
     }
     let replayDoc = documentToTestJson(replay.document)

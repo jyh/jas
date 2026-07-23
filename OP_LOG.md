@@ -457,3 +457,49 @@ four `apply_op` dispatchers. Pins, write-tests-first, in order:
 - **Layout-op unification** (Fork 5) — the shared `Op` trait spanning document ops and
   `apply_workspace_op` is committed-in-principle but unscheduled; keep it tracked so a
   third vocabulary does not entrench.
+
+---
+
+## 13. Wave-1 addenda (Arc 1, 2026-07-22)
+
+**Op-error channel (S3).** `op_apply` / `opApply` return a typed
+rejection — Rust `Result<(), OpError>`, Swift `@discardableResult
+OpApplyError?` (Optional, deliberately NOT `throws`) — with five frozen
+classes: `MalformedEnvelope`, `UnknownVerb`, `MissingParam`,
+`BadParamType`, `MissingTarget`. The channel is a SIGNAL, not a behavior
+change: every Err path mutates nothing and journals nothing,
+byte-identical to the prior silent skip; begin_txn-before-arm,
+skip-before-record_op, and commit_txn's no-net-change drop are preserved
+exactly. Invariant: an op Errs exactly when the dispatcher rejects it for
+a FAULT before `record_op`; benign no-ops (empty-selection delete,
+identity transforms, move-up-at-top, empty wrap paths, ineffective attr
+writes) and by-design defaults (missing numerics→0.0, missing index→0,
+missing name→"", dangling reference ids, field-level type-mismatch skips
+inside `create_artboard.fields`) stay Ok. Negative fixtures carry per-op
+`expected_error` fields (the bare class name) inside the offending op
+objects; the runners assert the class on annotated ops and success on all
+others, and journal replay asserts every replayed op succeeds — journals
+only ever contain succeeded ops, so the `checkpoint_equivalence` gate is
+correspondingly stronger. Out of scope by design: `layout_apply` and the
+`RecordedElem` recipe replayer deliberately keep the swallow doctrine —
+non-journaled surfaces with different economics (layout ops never enter
+the journal; a recipe replays inside a live-element cache rebuild where a
+mid-recipe abort would corrupt the cached output), so a rejected op there
+remains a silent skip.
+
+**Appendix — the reachable-intent map (S6).** The
+`actions.yaml`↔`op_apply` unification described above ("26 journaling
+verbs") now has a machine referent: `scripts/gen_intent_map.py` generates
+`intent_map.json` + `INTENT_MAP.md` from `workspace/workspace.json` — the
+authoritative enumeration the "Phase P1–P7" code comments previously
+lacked. It classifies all 236 actions at the `dispatch_action` seam (24
+journaling; verb table: 26 always-journaling + 3 journal-param-gated
+`doc.{scale,rotate,shear}.apply` classified per call site + 11 never),
+CI-gated for freshness by `scripts/check_intent_map.sh` in the
+workspace-json-fresh job. Readers wanting the list should open
+`INTENT_MAP.md`, not grep this file. Scope caveat, stated in the map
+itself: the action seam only — 45 `doc.*` effect verbs, including every
+drawing verb, are reachable solely from tool/panel/dialog YAML and are
+outside the map. (Count note: the prose "33-verb unification" above
+reflects its writing date; the seam now carries 36 `doc.*` verbs — growth
+since, not a discrepancy. The 26 journaling-verb count matches exactly.)
