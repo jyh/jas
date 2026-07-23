@@ -90,6 +90,51 @@ class TestSwapEffect:
         assert store.get("b") == "#ff0000"
 
 
+class TestStrokeDashedCheckboxToggle:
+    """Spec pin for the Stroke panel's Dashed-Line checkbox (and the
+    identically-shaped Link-scales / Flip-profile toggles). The canonical
+    authoring pattern is a paired write:
+
+        - set_panel_state: { key: <field>,  value: "not panel.<field>" }
+        - set:            { stroke_<field>: "not state.stroke_<field>" }
+
+    `set_panel_state` toggles the PANEL scope (drives the widget's
+    `checked` binding); `set` toggles the GLOBAL scope (drives the
+    apply-to-selection subscription). The two scopes are independent and
+    each read is the pre-click value, so both flip in lockstep — the
+    checkbox must toggle BOTH ways, not latch on. This is the executable
+    meaning the active ports (Rust/Swift) must conform to: their panel
+    eval-context must expose the live `state.stroke_dashed` so the
+    `not state.stroke_dashed` read is the current value, not a stale
+    default. See DASH_ALIGN.md / stroke.yaml Row 5."""
+
+    _EFFECTS = [
+        {"set_panel_state": {"key": "dashed", "value": "not panel.dashed"}},
+        {"set": {"stroke_dashed": "not state.stroke_dashed"}},
+    ]
+
+    def _store(self):
+        store = StateStore({"stroke_dashed": False})
+        store.init_panel("stroke_panel_content", {"dashed": False})
+        store.set_active_panel("stroke_panel_content")
+        return store
+
+    def test_first_click_turns_dashing_on(self):
+        store = self._store()
+        run_effects(self._EFFECTS, {}, store)
+        assert store.get_panel("stroke_panel_content", "dashed") is True
+        assert store.get("stroke_dashed") is True
+
+    def test_second_click_turns_dashing_off(self):
+        # The regression: the checkbox must be un-checkable. A second
+        # click has to clear both scopes back to False.
+        store = self._store()
+        run_effects(self._EFFECTS, {}, store)  # on
+        run_effects(self._EFFECTS, {}, store)  # off
+        assert store.get_panel("stroke_panel_content", "dashed") is False
+        assert store.get("stroke_dashed") is False
+
+
 class TestIncrementDecrement:
     def test_increment(self):
         store = StateStore({"count": 5})

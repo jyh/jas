@@ -10504,6 +10504,46 @@ mod tests {
         assert!(st.app_default_stroke.is_none());
     }
 
+    // ── Stroke panel: Dashed-Line checkbox toggles both ways ──────────
+    //
+    // Regression (DASHFIX). The checkbox fires the canonical paired
+    // toggle:
+    //   set_panel_state { dashed:        "not panel.dashed" }   (panel scope)
+    //   set            { stroke_dashed:  "not state.stroke_dashed" } (global)
+    // The `set` reads `state.stroke_dashed` from the panel eval-context.
+    // The dock builds that context via build_live_state_map ->
+    // build_panel_state_subset("stroke"). Before the fix the subset
+    // omitted stroke_dashed, so the read was `not null` == true on every
+    // click and the box latched checked (uncheckable). This test builds
+    // the context exactly as the dock does so it exercises the real
+    // subset, and clicks twice: the second click must clear `dashed`.
+    #[test]
+    fn stroke_dashed_checkbox_toggles_both_ways() {
+        use crate::workspace::dock_panel::{build_live_state_map, build_panel_state_subset};
+        let checkbox_effects = [
+            serde_json::json!({"set_panel_state": {"key": "dashed", "value": "not panel.dashed"}}),
+            serde_json::json!({"set": {"stroke_dashed": "not state.stroke_dashed"}}),
+        ];
+        // Rebuild the panel state context each click, as a re-render does.
+        let build_ctx = |st: &AppState| -> serde_json::Value {
+            let state = build_panel_state_subset("stroke", &build_live_state_map(st));
+            serde_json::json!({"state": state, "panel": {"dashed": st.stroke_panel.dashed}})
+        };
+
+        let mut st = make_state_with_colors("ffffff", "000000");
+        assert!(!st.stroke_panel.dashed, "starts undashed");
+
+        // Click 1 — turns dashing on.
+        let ctx = build_ctx(&st);
+        run_yaml_effects(&checkbox_effects, &ctx, &mut st);
+        assert!(st.stroke_panel.dashed, "first click turns dashing on");
+
+        // Click 2 — must turn dashing OFF (the checkbox is un-checkable).
+        let ctx = build_ctx(&st);
+        run_yaml_effects(&checkbox_effects, &ctx, &mut st);
+        assert!(!st.stroke_panel.dashed, "second click must turn dashing off");
+    }
+
     // ── radio widget: on_check partitioning ───────────────────
     //
     // render_radio returns a Dioxus Element (needs component context), so

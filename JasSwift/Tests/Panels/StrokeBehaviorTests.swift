@@ -279,3 +279,51 @@ private func syncModel(_ stroke: Stroke) -> Model {
     #expect((o["cap"] as? String) == "square")
     #expect((o["join"] as? String) == "round")
 }
+
+// MARK: - Dashed-Line checkbox toggles both ways (DASHFIX)
+
+/// The Dashed-Line checkbox fires the canonical paired toggle:
+///   set_panel_state { dashed:       "not panel.dashed" }   (panel scope)
+///   set            { stroke_dashed: "not state.stroke_dashed" } (global)
+/// `set_panel_state` toggles the PANEL scope (the checkbox's `checked`
+/// binding), and always toggles correctly. The bug lives in the GLOBAL
+/// `stroke_dashed` that applyStrokePanelToSelection reads: the `set`
+/// reads `state.stroke_dashed` from the panel eval-context, which the
+/// dock (DockPanelView.buildPanelCtx) seeds from the STATIC workspace
+/// defaults — that map then shadows the live store globals in
+/// StateStore.evalContext. Unless the dock overlays the live value
+/// (strokePanelStateOverrides), the read is a stale `false` on every
+/// click, the global latches to `true`, and the rendered dash sticks ON
+/// even as the checkbox visually toggles. This test rebuilds the dock's
+/// context the same way and clicks twice; BOTH scopes must clear.
+@Test func strokeDashedCheckboxTogglesBothWays() {
+    let ws = WorkspaceData.load()!
+    let store = StateStore()
+    store.set("stroke_dashed", false)
+    store.initPanel("stroke_panel_content", defaults: ["dashed": false])
+    store.setActivePanel("stroke_panel_content")
+
+    let effects: [Any] = [
+        ["set_panel_state": ["key": "dashed", "value": "not panel.dashed"]],
+        ["set": ["stroke_dashed": "not state.stroke_dashed"]],
+    ]
+    // Mirror DockPanelView.buildPanelCtx: static state defaults overlaid
+    // with the live stroke-toggle values, plus the live panel scope.
+    func dockCtx() -> [String: Any] {
+        var stateMap = ws.stateDefaults()
+        for (k, v) in strokePanelStateOverrides(store: store) { stateMap[k] = v }
+        return ["state": stateMap,
+                "panel": store.getPanelState("stroke_panel_content")]
+    }
+
+    // Click 1 — turns dashing on (both the checkbox and the applied dash).
+    runEffects(effects, ctx: dockCtx(), store: store)
+    #expect((store.getPanel("stroke_panel_content", "dashed") as? Bool) == true)
+    #expect((store.get("stroke_dashed") as? Bool) == true)
+
+    // Click 2 — must turn dashing OFF. The global key (what apply reads)
+    // is the one the bug latches on, so it is the load-bearing assertion.
+    runEffects(effects, ctx: dockCtx(), store: store)
+    #expect((store.getPanel("stroke_panel_content", "dashed") as? Bool) == false)
+    #expect((store.get("stroke_dashed") as? Bool) == false)
+}

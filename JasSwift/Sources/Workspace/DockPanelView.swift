@@ -221,7 +221,7 @@ public struct PanelGroupView: View {
     /// resolves here. When no model is present (unit tests) falls
     /// back to fresh yaml defaults.
     private func buildPanelCtx(ws: WorkspaceData, contentId: String) -> [String: Any] {
-        let stateMap = ws.stateDefaults()
+        var stateMap = ws.stateDefaults()
         let icons = ws.icons()
         let swatchLibs = ws.swatchLibraries()
         var panelMap: [String: Any]
@@ -270,6 +270,15 @@ public struct PanelGroupView: View {
         if contentId == "stroke_panel_content", let m = model {
             let overrides = strokePanelLiveOverrides(model: m)
             for (k, v) in overrides { panelMap[k] = v }
+            // Overlay the live `state.stroke_*` toggle values so the
+            // Dashed-Line / Link-scales / Flip-profile toggles'
+            // `set: { stroke_X: "not state.stroke_X" }` effects read the
+            // current value rather than the static workspace default —
+            // otherwise the box latches checked (DASHFIX). Must land after
+            // the panel is initialised (above) so the panel scope exists.
+            for (k, v) in strokePanelStateOverrides(store: m.stateStore) {
+                stateMap[k] = v
+            }
         }
         // Properties panel — X/Y/W/H reflect the selection's evaluated
         // bounding box (document space, post-transform), decision-5 Part B.1.
