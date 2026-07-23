@@ -6,10 +6,12 @@ pub mod canvas;
 mod cross_language_test;
 pub mod document;
 pub mod geometry;
-// PH1 de-risking spike — the immediate-mode Painter seam prototype. Always
-// compiled (pure-native core; the Canvas2dPainter backend is feature="web").
-// NOT wired into canvas/render.rs: the FLIP is unratified. See
-// src/painter/SPIKE_FINDINGS.md.
+// The immediate-mode Painter seam (contract v2, RATIFIED + FROZEN 2026-07-23).
+// Always compiled (pure-native core; the Canvas2dPainter backend is
+// feature="web"). PH1 wires it into canvas/render.rs for the one proven
+// byte-identical leaf paint (a plain solid center line — see
+// painter::element_render); everything else stays on the legacy raw-ctx path.
+// See src/painter/SPIKE_FINDINGS.md.
 pub mod painter;
 #[cfg(feature = "web")]
 pub mod panels;

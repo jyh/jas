@@ -1199,6 +1199,28 @@ fn draw_element_body(
 
     match elem {
         Element::Line(e) => {
+            // PH1 Painter conversion (capability-routed). A plain
+            // center-aligned, solid, arrowless line's leaf paint routes through
+            // Canvas2dPainter — BYTE-IDENTICAL to the legacy body below (see
+            // `painter::element_render::line_painter_inputs` for the exact
+            // ctx-sequence equivalence argument). The shared per-element
+            // prologue/epilogue (save · transform · global_alpha(base_alpha) ·
+            // composite · restore) stays raw ctx; only the leaf paint is
+            // rewritten. Any line needing an arrowhead / variable width /
+            // inside-outside alignment / a stroke gradient / anchor-aligned
+            // dashing, or in outline mode, falls through to the unchanged
+            // legacy path.
+            let converted = if outline {
+                false
+            } else if let Some(lp) = crate::painter::element_render::line_painter_inputs(e) {
+                use crate::painter::Painter as _;
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                painter.stroke_path(&lp.path, &lp.brush, &lp.stroke, base_alpha * lp.stroke_op);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut stroke_op, mut stroke_align) = (1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1255,6 +1277,7 @@ fn draw_element_body(
                     );
                 }
             }
+            } // end `if !converted`: the PH1 painter route handled the leaf paint
         }
         Element::Rect(e) => {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);

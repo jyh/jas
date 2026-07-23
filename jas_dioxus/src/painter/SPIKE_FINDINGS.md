@@ -233,9 +233,22 @@ Deliberately EXCLUDED (their phases own them): opacity masks (PH4),
 type-on-path / placed-glyph text (PH3), freeform gradients (build-time lowering).
 
 **PH3 — production conversion (capability-routed, Zeno-partial by design).**
-`render.rs` grows a Painter-emitting path for the element renderer; an element
-needing a PH3/PH4 feature (opacity mask, type-on-path/placed glyphs, freeform
-gradient) stays on the legacy raw-ctx path unchanged. `Canvas2dPainter`'s
-mask/PlacedGlyphs bodies stay `unimplemented!()` and are guarded so they can
-never be reached in production. See the "notes for conductor" in the PH1 wave
-report for exactly which element kinds converted vs stayed legacy.
+`render.rs`'s Line arm now routes ONE proven leaf paint through the seam: a
+plain center-aligned, solid, arrowless line (no variable width, no
+anchor-aligned dashing, not outline) emits via `Canvas2dPainter::stroke_path`,
+BYTE-IDENTICAL to the legacy body it replaces (the shared per-element
+save/transform/global_alpha/composite/restore frame stays raw ctx; only the
+leaf paint is rewritten; `stroke_path` is ordered to match render.rs's exact
+ctx sequence). Every other line, and every other element kind, stays on the
+UNCHANGED legacy raw-ctx path — the capability router
+(`element_render::element_needs_legacy`) keeps masks / type-on-path & placed-
+glyph text / freeform gradients off the seam entirely. `Canvas2dPainter`'s
+mask and PlacedGlyphs bodies are `unimplemented!()` and UNREACHABLE by
+construction (the router + the fact the conversion emits only `stroke_path`);
+the panic is the loud guard. The Painter op the Line arm emits is locked by a
+committed golden (`testdata/ref_line_convert.json`, gate
+`convertible_line_op_matches_golden`); the byte-identity of `Canvas2dPainter`
+↔ legacy render.rs is by-construction + a human GUI first-smoke (no browser in
+this harness). Trusting the converted path in the running wasm app needs that
+first-smoke: draw a plain solid center-aligned line and confirm it renders
+identically to before.

@@ -158,10 +158,16 @@ impl Painter for Canvas2dPainter<'_> {
     }
 
     fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
-        self.build_path(path);
+        // Order: style → alpha → path → stroke. This MATCHES `render.rs`'s
+        // stroke bodies (apply_stroke sets style; then set_global_alpha; then
+        // begin_path/…; then stroke), so the emitted `ctx.*` sequence is
+        // byte-identical for the PH1 Line conversion. (Path construction and
+        // style-setting are independent, so this reorder is display-list
+        // equivalent for every other caller too.)
         self.set_stroke_brush(brush);
         self.apply_stroke_style(stroke);
         self.apply_alpha(paint_alpha);
+        self.build_path(path);
         self.ctx.stroke();
     }
 
@@ -224,13 +230,16 @@ impl Painter for Canvas2dPainter<'_> {
     }
 
     fn push_mask_layer(&mut self, _mask: Mask) {
-        // DEFERRED — PH4 owns the scratch-offscreen pipeline. Present so the
-        // trait object is complete; unreachable in this spike.
-        unimplemented!("mask layers are PH4 (deferred in the PH1 spike)");
+        // DEFERRED — PH4 owns the scratch-offscreen pipeline. UNREACHABLE in
+        // production by construction: `element_render::element_needs_legacy`
+        // routes every masked element to the legacy raw-ctx path, and the PH1
+        // conversion emits only stroke_path (never a mask op). The panic is the
+        // loud guard if that invariant is ever violated.
+        unimplemented!("mask layers are PH4; masked elements must stay on the legacy path");
     }
 
     fn pop_mask_layer(&mut self) {
-        unimplemented!("mask layers are PH4 (deferred in the PH1 spike)");
+        unimplemented!("mask layers are PH4; masked elements must stay on the legacy path");
     }
 
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
@@ -245,13 +254,13 @@ impl Painter for Canvas2dPainter<'_> {
                 let _ = *letter_spacing;
                 let _ = self.ctx.fill_text(text, *x, *y);
             }
-            TextRun::PlacedGlyphs { font, size, glyphs } => {
-                self.ctx.set_font(&format!("{size}px {font}"));
-                // Canvas2d has no direct glyph-id draw; the production backend
-                // resolves glyph_id → char upstream. Stubbed as N placed runs.
-                for _g in glyphs {
-                    // per-glyph draw elided in the compile-check stub
-                }
+            TextRun::PlacedGlyphs { .. } => {
+                // DEFERRED — placed-glyph shaping (skrifa cmap) is PH3 net-new
+                // work. UNREACHABLE in production by construction: all text is
+                // routed to the legacy raw-ctx path (element_needs_legacy), and
+                // the PH1 conversion emits only stroke_path. The panic is the
+                // loud guard if that invariant is ever violated.
+                unimplemented!("PlacedGlyphs is PH3; text must stay on the legacy path");
             }
         }
     }
