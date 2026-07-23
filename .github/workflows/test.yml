@@ -23,6 +23,7 @@ jobs:
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
+      - run: python scripts/check_corpus_manifest.py --self-test && python scripts/check_corpus_manifest.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
