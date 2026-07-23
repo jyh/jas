@@ -1,5 +1,7 @@
 # Phase 0 Audit: hardcoded actions + schema gaps
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 Produced as a standalone research pass (no code changes) to feed the
 YAML-interpreter refactor planned in `PLAN.md`. Two parts:
 

@@ -1,5 +1,7 @@
 # Operation Log — the transaction spine
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 **Status:** design locked (2026-06-17); Increments 1, 2, 3a, 3b-A, 3b-B, the full
 33-verb unification, the enforced `set_document` chokepoint, per-frame drag
 coalescing, 3c-1 (id-primary flip), 3d (`OpWorld` trait + runtime layout

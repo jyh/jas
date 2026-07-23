@@ -99,41 +99,68 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cd jas_dioxus && cargo test
 
-  python:
-    name: Python tests
+  # The shared reference interpreter lives in workspace_interpreter/ — the
+  # exact modules (effects, state_store, scope, doc_primitives, loader, expr)
+  # every native app mirrors. It stays LIVE and BLOCKING under the
+  # five-port-parity freeze (POLICY.md): it is the spec's executable meaning
+  # and the corpus-authoring substrate.
+  workspace-interpreter:
+    name: Reference interpreter conformance (Python reference)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Install from requirements.txt so the CI deps cannot drift from what the
-      # app actually imports (msgpack in geometry/binary, reportlab in
-      # geometry/pdf were declared there but omitted from the hardcoded list,
-      # so binary_test / pdf_test / cross_language_test failed to collect).
+      # Install from requirements.txt so the CI deps cannot drift from what
+      # the code actually imports.
       - run: pip install -r requirements.txt
-      - run: cd jas && python -m pytest
-      # The shared reference interpreter lives in workspace_interpreter/ — the
-      # exact modules (effects, state_store, scope, doc_primitives, loader,
-      # expr) every native app mirrors. `cd jas && pytest` does not discover it,
-      # so gate the WHOLE suite explicitly, not just expr+concepts. Previously
-      # only test_expr.py + test_concepts.py ran, so ~700 reference tests
-      # (incl. the action-ref referential-integrity check) never gated CI.
-      - name: Reference interpreter conformance (Python reference)
-        run: python -m pytest workspace_interpreter/tests
+      - run: python -m pytest workspace_interpreter/tests
 
-  ocaml:
-    name: OCaml tests
+  # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
+  # lane checks out the WHOLE repo at the tag — not just fixtures — because
+  # the app imports live workspace_interpreter modules, so a HEAD checkout
+  # would mix frozen app code with an evolving interpreter. Tag-pinned, the
+  # job can only red on toolchain drift, which is exactly the canary signal;
+  # continue-on-error keeps frozen-lane noise from blocking active work
+  # (same pattern as the flask job).
+  python-canary:
+    name: Python Qt app (frozen toolchain canary)
     runs-on: macos-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: five-port-parity
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Preflight — pinned inputs present
+        run: test -f workspace/workspace.json && test -d test_fixtures/algorithms
+      - run: cd jas && python -m pytest
+
+  # jas_ocaml is FROZEN at the five-port-parity tag (POLICY.md): whole-repo
+  # tag checkout pins its sources, test_fixtures/, and workspace/workspace.json
+  # together. The preflight guards against a botched pin: several OCaml suites
+  # Alcotest.skip (or pass vacuously) when the bundle is missing, so a bad
+  # checkout would otherwise go green instead of red.
+  ocaml-canary:
+    name: OCaml (frozen toolchain canary)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: five-port-parity
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.2"
       # alcotest is the test framework the jas_ocaml test/ dune files depend on
-      # (libraries jas lablgtk3 alcotest) — it was missing from the install list
-      # so `dune test` could not build the test executables.
+      # (libraries jas lablgtk3 alcotest).
       - run: opam install --yes dune lablgtk3 xmlm yojson alcotest msgpck camlzip
+      - name: Preflight — pinned inputs present
+        run: test -f workspace/workspace.json && test -d test_fixtures/algorithms
       - run: cd jas_ocaml && opam exec -- dune test
 
   swift:
@@ -166,9 +193,13 @@ jobs:
       - run: pip install -r jas_flask/requirements.txt
       - run: cd jas_flask && python -m pytest tests/
 
+  # Blocking equivalence lane for the ACTIVE ports (Rust, Swift) per the
+  # five-port-parity freeze (POLICY.md). The frozen ports' equivalence is
+  # preserved at the tag their canary lanes check out; every driver cell here
+  # is anchored to pinned goldens, not mutual agreement.
   cross-language:
-    name: Cross-language equivalence
-    needs: [rust, python, ocaml, swift]
+    name: Cross-language equivalence (active ports)
+    needs: [rust, swift]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -179,25 +210,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: "5.2"
-      - run: pip install -r requirements.txt
-      - run: opam install --yes dune lablgtk3 xmlm yojson alcotest msgpck camlzip
       # Pre-build exactly the binaries the equivalence drivers invoke, so the
       # first driver call does not compile inside its per-command timeout
-      # (finding #25). The drivers run `swift run AlgorithmRoundtrip` (DEBUG),
-      # `cargo run --bin algorithm_roundtrip`, and `dune exec` — so the Swift
-      # build must be DEBUG (the old `swift build -c release` left the debug
-      # binary to compile on-demand, timing out `measure swift` after 60s).
+      # (finding #25). The drivers run `swift run AlgorithmRoundtrip` (DEBUG)
+      # and `cargo run --bin ...` — so the Swift build must be DEBUG (the old
+      # `swift build -c release` left the debug binary to compile on-demand,
+      # timing out `measure swift` after 60s).
       - name: Build all
         run: |
           (cd jas_dioxus && cargo build --bins)
-          (cd jas_ocaml && opam exec -- dune build)
           (cd JasSwift && swift build)
       - name: Algorithm equivalence
-        run: opam exec -- python scripts/cross_language_algorithms.py
+        run: python scripts/cross_language_algorithms.py --lang rust,swift
       - name: SVG commutativity
-        run: opam exec -- python scripts/cross_language_commutativity.py
+        run: python scripts/cross_language_commutativity.py --lang rust,swift
       - name: Workspace equivalence
-        run: opam exec -- python scripts/cross_language_workspace.py
+        run: python scripts/cross_language_workspace.py --lang rust,swift

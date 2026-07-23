@@ -239,8 +239,12 @@ def compare(strategy, ref_vec, other_vec, tol):
 
 def main():
     parser = argparse.ArgumentParser(description="Cross-language algorithm tests")
-    parser.add_argument("--lang", help="Comma-separated languages (default: all)",
-                        default=",".join(LANGUAGES.keys()))
+    parser.add_argument("--lang",
+                        help="Comma-separated languages (default: the active "
+                             "ports; ocaml/python are pinned to the "
+                             "five-port-parity tag and run in their own "
+                             "canary lane — see POLICY.md)",
+                        default="rust,swift")
     parser.add_argument("--algo", help="Single algorithm to test (default: all)")
     parser.add_argument("--verbose", action="store_true",
                         help="Print raw output on failure")

@@ -4,20 +4,25 @@ Jas is a vector illustration application with **five** parallel implementations
 sharing the same observable semantics (same element tree, state transitions, and
 algorithm results — not the same pixels):
 
-| Implementation | UI Framework | Directory      | Shape |
-|----------------|-------------|----------------|-------|
-| Python         | Qt/PySide6  | `jas/`         | native MVC |
-| OCaml          | GTK/lablgtk | `jas_ocaml/`   | native MVC |
-| Rust           | Dioxus/WASM | `jas_dioxus/`  | native MVC |
-| Swift          | AppKit      | `JasSwift/`    | native MVC |
-| Flask          | server-side | `jas_flask/`   | generic YAML reference renderer |
+| Implementation | UI Framework | Directory      | Shape | Status (POLICY.md §1) |
+|----------------|-------------|----------------|-------|-----------------------|
+| Rust           | Dioxus/WASM | `jas_dioxus/`  | native MVC | **active** |
+| Swift          | AppKit      | `JasSwift/`    | native MVC | **active** |
+| Python         | Qt/PySide6  | `jas/`         | native MVC | frozen at `five-port-parity` |
+| OCaml          | GTK/lablgtk | `jas_ocaml/`   | native MVC | frozen at `five-port-parity` |
+| Flask          | server-side | `jas_flask/`   | generic YAML reference renderer | non-gating |
 
 The **four native apps** follow the MVC pattern below, built around an
-**immutable document model**. `jas_flask` is the generic reference renderer:
-it interprets `workspace/*.yaml` server-side and does **not** carry the native
-tree-path MVC document model — it exists to pin the generic spec behavior the
-other four must match. Behavior is authored once in `workspace/*.yaml` and
-interpreted by all apps; native code is discouraged.
+**immutable document model**; all four shared these semantics in full at the
+`five-port-parity` tag (2026-07-22), from which point new behavior lands in
+the active ports (Rust, Swift) and the frozen ports interpret the bundle as
+of the tag. `jas_flask` is the generic reference renderer: it interprets
+`workspace/*.yaml` server-side and does **not** carry the native tree-path
+MVC document model — it exists to pin the generic spec behavior the native
+apps must match. Behavior is authored once in `workspace/*.yaml` and
+interpreted by the apps; native code is discouraged. The Python
+`workspace_interpreter/` remains the live executable reference for the
+spec's semantics.
 
 ---
 
@@ -487,8 +492,17 @@ canvas/
   canvas / render   # Canvas view, rendering, hit-test callbacks, tool dispatch;
                     #   render-scoped reference resolver installation
   toolbar           # Tool selection UI
+panels/             # Dock-panel bodies and panel glue over the YAML panel
+                    #   interpreter (per-panel native remnants shrinking)
+algorithms/         # Path/geometry algorithms: booleans, offset, simplify,
+                    #   brush outlines, planar map — pinned by the
+                    #   cross-language algorithm corpus
+workspace/          # Workspace layout: panes, dock/panel management,
+                    #   persistence
 interpreter/        # Generic workspace YAML interpreter: expr language, effects,
-                    #   state store, panel/widget rendering
+                    #   state store, panel/widget rendering. (The Python app
+                    #   has no in-app copy — it imports the shared
+                    #   workspace_interpreter/ directly.)
 menu/
   menubar           # Menu definitions and command dispatch
 ```

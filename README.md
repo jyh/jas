@@ -8,7 +8,7 @@
 No install — the full editor (the Rust/Dioxus port compiled to WebAssembly)
 runs entirely in your browser. ~2 MB download, no server, nothing tracked.
 
-Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **five parallel, behaviourally-identical implementations** — Rust, Swift, OCaml, Python, and a Flask web reference — all driven from one shared executable YAML specification. The four native ports are expected to behave identically; cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. New features land in one port, get tuned, then propagate to the rest with matching tests.
+Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **four parallel, behaviourally-identical native implementations** — Rust, Swift, OCaml, and Python — plus a thin Flask web reference renderer, all driven from one shared executable YAML specification. Cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. As of the `five-port-parity` tag (2026-07-22), active development continues in the **Rust and Swift** ports; the OCaml and Python-Qt ports are preserved at that tag as the N-version study concluded, verified by tag-pinned CI canaries (see `POLICY.md` §1). New features land in Rust, get tuned, then propagate to Swift with matching tests.
 
 This repository is the artifact for the paper **"Five Implementations, One Spec: AI-Paired Engineering as a Revival of N-Version Programming"** (Jason Hickey) — [read it on arXiv](https://arxiv.org/abs/2606.07828). The founding vision lives in [`transcripts/AI.md`](transcripts/AI.md) and per-feature prompt transcripts in [`transcripts/`](transcripts/). Status: actively maintained, Apache-2.0.
 
@@ -21,33 +21,36 @@ The same color panel, rendered by each implementation from the shared spec — v
 | ![Rust / Dioxus color panel](article/figures/color_panel/jas_dioxus.png) | ![Swift / AppKit color panel](article/figures/color_panel/jas_swift.png) | ![Python / Qt color panel](article/figures/color_panel/jas_python.png) | ![OCaml / GTK color panel](article/figures/color_panel/jas_ocaml.png) | ![Flask web color panel](article/figures/color_panel/jas_flask.png) |
 
 Jas is a vector graphics editor — a small, inspectable vector illustration
-application — that exists as **four parallel, behaviourally-identical
-implementations** of the same application, one per language, each tracking the
-same architecture, the same document model, the same tool set, and the same
-tests. A fifth implementation, **Flask** (`jas_flask/`), is a thin,
+application — built as **four parallel, behaviourally-identical native
+implementations** of the same application, one per language, each tracking
+the same architecture, the same document model, the same tool set, and the
+same tests. A fifth implementation, **Flask** (`jas_flask/`), is a thin,
 non-gating web reference renderer of the shared YAML/JSON artifacts — it is
 *not* a source of truth and *not* an interactive-parity target (see
 `TESTING_STRATEGY.md` §6), so it is excluded from the "behave identically"
 guarantees below.
 
-| Implementation | UI framework           | Directory      | How to run                |
-|----------------|------------------------|----------------|---------------------------|
-| Python         | Qt / PySide6           | [`jas/`](jas/)               | `cd jas && python jas_app.py` |
-| OCaml          | GTK 3 / lablgtk3       | [`jas_ocaml/`](jas_ocaml/)   | `cd jas_ocaml && ./run.sh`    |
-| Rust           | Dioxus (HTML5 canvas)  | [`jas_dioxus/`](jas_dioxus/) | `cd jas_dioxus && dx serve`   |
-| Swift          | AppKit                 | [`JasSwift/`](JasSwift/)     | `cd JasSwift && swift run`    |
-| Flask (ref.)   | Flask + JS (web)       | [`jas_flask/`](jas_flask/)   | `cd jas_flask && flask run`   |
+| Implementation | UI framework           | Directory      | Status | How to run                |
+|----------------|------------------------|----------------|--------|---------------------------|
+| Rust           | Dioxus (HTML5 canvas)  | [`jas_dioxus/`](jas_dioxus/) | **active** | `cd jas_dioxus && dx serve`   |
+| Swift          | AppKit                 | [`JasSwift/`](JasSwift/)     | **active** | `cd JasSwift && swift run`    |
+| Python         | Qt / PySide6           | [`jas/`](jas/)               | frozen at `five-port-parity` | `cd jas && python jas_app.py` |
+| OCaml          | GTK 3 / lablgtk3       | [`jas_ocaml/`](jas_ocaml/)   | frozen at `five-port-parity` | `cd jas_ocaml && ./run.sh`    |
+| Flask (ref.)   | Flask + JS (web)       | [`jas_flask/`](jas_flask/)   | reference renderer | `cd jas_flask && flask run`   |
 
-The four native apps are expected to behave identically: the same SVG round-
-trips through all of them, the same in-canvas text editor reacts to
-the same key events, the same selection tool picks the same elements
-from the same marquee. New features land in one port first (usually
-Rust), get tuned, and are then propagated to the other three with
-matching tests. Because of this, *Rust is the most complete application*.
+The four native apps behave identically as of the `five-port-parity` tag:
+the same SVG round-trips through all of them, the same in-canvas text editor
+reacts to the same key events, the same selection tool picks the same
+elements from the same marquee. The N-version study those four ports served
+is complete (see the paper); ongoing development continues in Rust and
+Swift, with the frozen ports preserved exactly as tagged and verified by
+tag-pinned CI canaries (`POLICY.md` §1). New features land in Rust first,
+get tuned, and are then propagated to Swift with matching tests. Because of
+this, *Rust is the most complete application*.
 
 ## Why four copies?
 
-Building the same program four ways is a deliberate design
+Building the same program four ways was a deliberate design
 constraint, not a historical accident. It enforces:
 
 - **A small, portable architecture** — anything that would be easy in
@@ -134,6 +137,9 @@ slightly per language but the split is identical:
 | `tools/`          | `CanvasTool` interface, `ToolContext` facade, shared constants, toolbar, and every tool implementation (selection tools, drawing tools, Pen, Pencil, Path Eraser, Smooth, Anchor Point editors, Type, Type on a Path, plus the shared `text_edit` session and `text_measure` helper) |
 | `workspace/`      | Workspace layout: pane positions and snap constraints, dock/panel management, persistence, and the working-copy save pattern |
 | `canvas/`         | Rendering via the platform 2D API, hit-testing, cursor management, and event dispatch to the active tool |
+| `panels/`         | Dock-panel bodies and panel-specific glue over the shared YAML panel interpreter             |
+| `algorithms/`     | Path/geometry algorithms (booleans, offset, simplify, brush outlines, planar map) pinned by the cross-language corpus |
+| `interpreter/`    | The YAML workspace/expression interpreter (the Python app consumes the shared `workspace_interpreter/` directly instead of an in-app copy) |
 | `menu/`           | The application menu bar and its command table                                              |
 | `assets/icons/`   | Shared PNG/SVG cursors and toolbar icons used by all four apps                               |
 
@@ -178,8 +184,10 @@ Requires macOS and a recent Swift toolchain.
 
 ## Tests
 
-Each port has its own test runner. All four suites are expected to
-pass together on every change to shared logic.
+Each port has its own test runner. On every change to shared logic the
+blocking suites are Rust, Swift, and the `workspace_interpreter/`
+reference; the frozen OCaml and Python-Qt suites run as CI canaries
+against the `five-port-parity` tag (`POLICY.md` §1).
 
 ```bash
 # Python
@@ -195,10 +203,11 @@ cd jas_dioxus && cargo test
 cd JasSwift && swift test
 ```
 
-Current counts: Rust **330**, Swift **325**, Python **393**, OCaml all
-suites passing. Tests are organized by module and run without any GUI
-dependency — they exercise the pure model, geometry, text layout,
-SVG, and tool state machines directly, so they run in milliseconds.
+Rust and Swift counts continue to grow; the Python and OCaml suites are
+pinned green at the `five-port-parity` tag. Tests are organized by
+module and run without any GUI dependency — they exercise the pure
+model, geometry, text layout, SVG, and tool state machines directly,
+so they run in milliseconds.
 
 ## License
 

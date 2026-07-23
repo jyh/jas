@@ -67,11 +67,14 @@ reversible; nothing is ever permanent).
 
 ## 3. The engineering values (non-negotiable)
 
-- **Five implementations, exactly equivalent.** `jas_flask` (the generic reference renderer),
-  `jas_dioxus` (Rust), `JasSwift` (Swift), `jas_ocaml` (OCaml), `jas` (Python). "Exactly the
-  same" means **same observable semantics** — same element tree, same state transitions, same
-  resolved widget/element properties, same algorithm results — **not same pixels** (platforms
-  render differently, and that is correct).
+- **Equivalence by spec, exactly.** Built as five implementations — `jas_flask` (the generic
+  reference renderer), `jas_dioxus` (Rust), `JasSwift` (Swift), `jas_ocaml` (OCaml), `jas`
+  (Python) — all equivalent at the `five-port-parity` tag; the live enforcement now spans the
+  active ports (Rust, Swift) plus the `workspace_interpreter/` reference, with the frozen
+  ports preserved at the tag (`POLICY.md` §1). "Exactly the same" means **same observable
+  semantics** — same element tree, same state transitions, same resolved widget/element
+  properties, same algorithm results — **not same pixels** (platforms render differently,
+  and that is correct).
 - **Minimize manual testing** — it is the most expensive part of development.
 - **A common specification** — behavior is expressed once, in `workspace/*.yaml`, and
   interpreted by all apps. Native code is discouraged.
@@ -192,7 +195,7 @@ flagship `gear` ride it — with `mod`/`floor` added to the language for the gea
 parametric concept is now data, **the gear included**. **Remaining, in dependency order:** the
 document `LiveVariant::Generated` instance arm; operations; the fitter (`promote`); and a
 **constraint representation**. **Benefit:** N domains
-cost ~one engine, propagated to five apps for free. **Downside:** the fitter and a deterministic
+cost ~one engine, propagated to the active apps for free (frozen ports hold the tag-era packs). **Downside:** the fitter and a deterministic
 (no-JS) constraint representation are still unbuilt; the generator engine is corpus-pinned, so
 each addition stays safe.
 
@@ -398,7 +401,7 @@ direct prerequisites for this vision. The most relevant:
 ## 12. Keeping this document and `ARCH.md` honest
 
 - `ARCH.md` describes the system as built; update it whenever a foundation in §5 lands (in
-  particular, when stable identity, the live graph, or the concept-pack runtime ship — and to
-  correct it to **five** implementations including `jas_flask`).
+  particular, when stable identity, the live graph, or the concept-pack runtime ship). Its
+  implementation table now carries the post-freeze port statuses (`POLICY.md` §1).
 - This document changes when the *intent* changes. Decisions made here (e.g. the keep-ready
   deferrals, artist-primacy invariants) should be cited when they constrain implementation work.

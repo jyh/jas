@@ -2,14 +2,17 @@
 
 Thank you for your interest in Jas! This project is under active
 development as a research artifact (see the paper linked in the README),
-and its development process is unusual — features land across five
-parallel implementations with cross-language differential tests. Please
-read this before opening a pull request.
+and its development process is unusual — features land in the two active
+ports (Rust `jas_dioxus/`, Swift `JasSwift/`) against a shared executable
+spec, gated by cross-language differential tests. The OCaml port and the
+Python Qt app are frozen at the `five-port-parity` tag and do not accept
+feature PRs (`POLICY.md` §1). Please read this before opening a pull
+request.
 
 ## Before you contribute
 
 **Please open an issue first** for anything beyond a trivial fix. The
-five-port parity discipline means most changes must land in multiple
+parity discipline means most changes must land in both active
 implementations with matching tests, and the maintainer coordinates that
 process. Unsolicited PRs may sit unmerged for a while — an issue
 conversation first saves everyone time.
@@ -40,7 +43,8 @@ agreement.
 
 - Match the port's existing style and module structure (see `ARCH.md`).
 - Behavior changes must come with tests, and cross-port behavior changes
-  must keep the differential harness green across all four native ports.
+  must keep the differential harness green across the active ports (Rust,
+  Swift) and the `workspace_interpreter/` reference suite.
 - The shared YAML spec (`SCHEMA.md`, `workspace/`) is the source of
   truth for behavior; spec changes are coordinated through issues.
 

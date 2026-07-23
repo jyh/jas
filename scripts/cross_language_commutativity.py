@@ -20,9 +20,16 @@ Requires:
 - Python: python jas/tools/svg_roundtrip.py (from jas/)
 
 Usage:
-    python scripts/cross_language_commutativity.py
+    python scripts/cross_language_commutativity.py [--lang rust,swift]
+
+Every (serializer, parser) cell is anchored to the fixture's pinned expected
+JSON, so a restricted language set still verifies against the shared golden,
+not merely mutual agreement. Default is the active ports (rust, swift);
+ocaml/python are pinned to the five-port-parity tag and run in their own
+canary lane (POLICY.md).
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -87,15 +94,36 @@ def run_swift(mode: str, svg_path: str) -> str:
     return result.stdout
 
 
-LANGUAGES = {
+ALL_LANGUAGES = {
     "rust": run_rust,
     "ocaml": run_ocaml,
     "swift": run_swift,
     "python": run_python,
 }
 
+# Filled from --lang in main(); module-level so the step functions see it.
+LANGUAGES: dict = {}
+
 
 def main():
+    global LANGUAGES
+    parser = argparse.ArgumentParser(
+        description="Cross-language serialize-parse commutativity test")
+    parser.add_argument("--lang",
+                        help="Comma-separated languages (default: the active "
+                             "ports; ocaml/python are pinned to the "
+                             "five-port-parity tag and run in their own "
+                             "canary lane — see POLICY.md)",
+                        default="rust,swift")
+    args = parser.parse_args()
+    selected = [l.strip() for l in args.lang.split(",") if l.strip()]
+    unknown = [l for l in selected if l not in ALL_LANGUAGES]
+    if unknown:
+        print(f"Unknown language(s): {', '.join(unknown)} "
+              f"(choose from {', '.join(ALL_LANGUAGES)})", file=sys.stderr)
+        sys.exit(2)
+    LANGUAGES = {l: ALL_LANGUAGES[l] for l in selected}
+
     passed = 0
     failed = 0
 

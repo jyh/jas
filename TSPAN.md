@@ -1,5 +1,7 @@
 # Tspan
 
+> **Scope note (2026-07-22):** open or future work described in this document is re-scoped by the `five-port-parity` freeze to the active ports (Rust, Swift) plus the `workspace_interpreter/` reference — see `POLICY.md` §1. Completed work described four- or five-wide is historical fact as of the tag.
+
 Sub-structure of a `Text` element that carries per-character-range
 formatting. Every `Text` element owns an ordered list of tspans; the
 concatenation of their contents is the text of the element. Tspans
