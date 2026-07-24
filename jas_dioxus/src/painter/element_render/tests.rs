@@ -479,6 +479,7 @@ fn record_convert(sp: &ShapePaint, base_alpha: f64) -> String {
 fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
     vec![
         ("ref_rect_convert", rect_case(), 0.9),
+        ("ref_rect_gradstroke_convert", rect_gradstroke_case(), 1.0),
         ("ref_circle_convert", circle_case(), 0.8),
         ("ref_ellipse_convert", ellipse_case(), 1.0),
         ("ref_polyline_convert", polyline_case(), 0.75),
@@ -512,6 +513,22 @@ fn path_case() -> ShapePaint {
 /// The bbox the legacy Path arm resolves gradients on (`elem.bounds()`).
 fn elem_bounds_path(e: &PathElem) -> (f64, f64, f64, f64) {
     Element::Path(e.clone()).bounds()
+}
+
+fn rect_gradstroke_case() -> ShapePaint {
+    // A wide gradient STROKE must resolve its gradient on the geometry bbox
+    // the legacy Rect arm passes; a stroke-inflated bbox (±10 here) would
+    // shift the recorded gradient endpoints and diverge from this golden.
+    let e = RectElem {
+        x: 15.0, y: 25.0, width: 120.0, height: 70.0, rx: 0.0, ry: 0.0,
+        fill: fill(Color::rgb(0.9, 0.9, 0.2)),
+        stroke: Some(stroke(Color::BLACK, 20.0)),
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: Some(linear_grad(0.0)),
+    };
+    rect_painter_inputs(&e, (e.x, e.y, e.width, e.height))
+        .expect("convertible gradient-stroke rect")
 }
 
 fn polygon_case() -> ShapePaint {
