@@ -19407,7 +19407,7 @@
                 "id": "stk_start_arrowhead_scale",
                 "type": "combo_box",
                 "summary": "Start arrowhead scale",
-                "description": "Scale of the start arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value.\n",
+                "description": "Scale of the start arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value. When the link button (chain) is active, committing this value also copies it onto the end arrowhead scale \u2014 both the panel field and the global state \u2014 so the two scales move together; when unlinked the two scales are independent.\n",
                 "min": 1,
                 "style": {
                   "flex": 1
@@ -19444,13 +19444,38 @@
                 ],
                 "bind": {
                   "value": "panel.start_arrowhead_scale"
-                }
+                },
+                "behavior": [
+                  {
+                    "event": "commit",
+                    "effects": [
+                      {
+                        "if": {
+                          "condition": "panel.link_arrowhead_scale",
+                          "then": [
+                            {
+                              "set_panel_state": {
+                                "key": "end_arrowhead_scale",
+                                "value": "panel.start_arrowhead_scale"
+                              }
+                            },
+                            {
+                              "set": {
+                                "stroke_end_arrowhead_scale": "panel.start_arrowhead_scale"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "stk_end_arrowhead_scale",
                 "type": "combo_box",
                 "summary": "End arrowhead scale",
-                "description": "Scale of the end arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value.\n",
+                "description": "Scale of the end arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value. When the link button (chain) is active, committing this value also copies it onto the start arrowhead scale \u2014 both the panel field and the global state \u2014 so the two scales move together; when unlinked the two scales are independent.\n",
                 "min": 1,
                 "style": {
                   "flex": 1
@@ -19487,7 +19512,32 @@
                 ],
                 "bind": {
                   "value": "panel.end_arrowhead_scale"
-                }
+                },
+                "behavior": [
+                  {
+                    "event": "commit",
+                    "effects": [
+                      {
+                        "if": {
+                          "condition": "panel.link_arrowhead_scale",
+                          "then": [
+                            {
+                              "set_panel_state": {
+                                "key": "start_arrowhead_scale",
+                                "value": "panel.end_arrowhead_scale"
+                              }
+                            },
+                            {
+                              "set": {
+                                "stroke_start_arrowhead_scale": "panel.end_arrowhead_scale"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "stk_link_arrowhead_scale",

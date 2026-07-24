@@ -135,6 +135,167 @@ class TestStrokeDashedCheckboxToggle:
         assert store.get("stroke_dashed") is False
 
 
+class TestLinkedArrowheadScaleMirror:
+    """Spec pin for the Stroke panel's linked arrowhead-scale mirror
+    (stroke.yaml Row 8). The two scale combo boxes carry a `commit`
+    behavior that, WHEN `panel.link_arrowhead_scale` is true, writes the
+    edited scale's value onto the OTHER scale — both the panel scope
+    (drives the widget) and the global scope (drives apply-to-selection):
+
+        - event: commit
+          effects:
+            - if:
+                condition: "panel.link_arrowhead_scale"
+                then:
+                  - set_panel_state: { key: end_arrowhead_scale,
+                                       value: "panel.start_arrowhead_scale" }
+                  - set: { stroke_end_arrowhead_scale:
+                             "panel.start_arrowhead_scale" }
+
+    The native two-way bind already wrote the EDITED scale (panel +
+    global) before the behavior runs, so the mirror reads the just-
+    committed `panel.<edited>_arrowhead_scale` and copies it across. When
+    unlinked the guard is false and the other scale is untouched — the
+    two scales stay independent (the default). This is the executable
+    meaning both active ports must conform to (Rust runs it via the
+    combo commit-behavior hook; Swift is pending — see residuals)."""
+
+    # The START combo's commit behavior effects (mirror onto END).
+    _START_MIRROR = [
+        {"if": {
+            "condition": "panel.link_arrowhead_scale",
+            "then": [
+                {"set_panel_state": {"key": "end_arrowhead_scale",
+                                     "value": "panel.start_arrowhead_scale"}},
+                {"set": {"stroke_end_arrowhead_scale":
+                         "panel.start_arrowhead_scale"}},
+            ],
+        }},
+    ]
+    # The END combo's commit behavior effects (mirror onto START).
+    _END_MIRROR = [
+        {"if": {
+            "condition": "panel.link_arrowhead_scale",
+            "then": [
+                {"set_panel_state": {"key": "start_arrowhead_scale",
+                                     "value": "panel.end_arrowhead_scale"}},
+                {"set": {"stroke_start_arrowhead_scale":
+                         "panel.end_arrowhead_scale"}},
+            ],
+        }},
+    ]
+
+    def _store(self, linked):
+        # Globals seeded at the default 100; panel scope mirrors them.
+        store = StateStore({
+            "stroke_start_arrowhead_scale": 100,
+            "stroke_end_arrowhead_scale": 100,
+        })
+        store.init_panel("stroke_panel_content", {
+            "start_arrowhead_scale": 100,
+            "end_arrowhead_scale": 100,
+            "link_arrowhead_scale": linked,
+        })
+        store.set_active_panel("stroke_panel_content")
+        return store
+
+    def _commit(self, store, field, value):
+        # Simulate the native two-way bind: the edited scale lands in
+        # both the panel and the global scope before the mirror runs.
+        store.set_panel("stroke_panel_content", field, value)
+        store.set(f"stroke_{field}", value)
+
+    def test_linked_start_edit_moves_both(self):
+        store = self._store(linked=True)
+        self._commit(store, "start_arrowhead_scale", 200)
+        run_effects(self._START_MIRROR, {}, store)
+        assert store.get_panel("stroke_panel_content", "end_arrowhead_scale") == 200
+        assert store.get("stroke_end_arrowhead_scale") == 200
+        # The edited scale is unchanged.
+        assert store.get_panel("stroke_panel_content", "start_arrowhead_scale") == 200
+        assert store.get("stroke_start_arrowhead_scale") == 200
+
+    def test_linked_end_edit_moves_both(self):
+        store = self._store(linked=True)
+        self._commit(store, "end_arrowhead_scale", 75)
+        run_effects(self._END_MIRROR, {}, store)
+        assert store.get_panel("stroke_panel_content", "start_arrowhead_scale") == 75
+        assert store.get("stroke_start_arrowhead_scale") == 75
+
+    def test_unlinked_start_edit_is_independent(self):
+        store = self._store(linked=False)
+        self._commit(store, "start_arrowhead_scale", 200)
+        run_effects(self._START_MIRROR, {}, store)
+        # The other scale stays at its own value.
+        assert store.get_panel("stroke_panel_content", "end_arrowhead_scale") == 100
+        assert store.get("stroke_end_arrowhead_scale") == 100
+
+
+class TestLinkedArrowheadScaleBundle:
+    """The mirror above is authored in the shipped bundle, not just in
+    the test — both scale combos must carry the `commit` behavior so the
+    ports actually run it. Red before the stroke.yaml edit, green after."""
+
+    def _panel(self, workspace_path):
+        from workspace_interpreter.loader import load_workspace, find_element_by_id
+        data = load_workspace(workspace_path)
+        return data["panels"]["stroke_panel_content"], find_element_by_id
+
+    def _mirror_target(self, widget):
+        # The single if-guarded then-branch's set_panel_state key names
+        # the OTHER scale the widget mirrors onto.
+        assert widget is not None
+        behavior = widget.get("behavior") or []
+        commit = [b for b in behavior if b.get("event") == "commit"]
+        assert commit, "scale combo must carry a commit behavior"
+        effects = commit[0].get("effects") or []
+        guard = effects[0]["if"]
+        assert guard["condition"] == "panel.link_arrowhead_scale"
+        then = guard["then"]
+        return then[0]["set_panel_state"]["key"]
+
+    def test_start_combo_mirrors_onto_end(self, workspace_path):
+        panel, find = self._panel(workspace_path)
+        w = find(panel, "stk_start_arrowhead_scale")
+        assert self._mirror_target(w) == "end_arrowhead_scale"
+
+    def test_end_combo_mirrors_onto_start(self, workspace_path):
+        panel, find = self._panel(workspace_path)
+        w = find(panel, "stk_end_arrowhead_scale")
+        assert self._mirror_target(w) == "start_arrowhead_scale"
+
+
+class TestStrokeSyncDoesNotClobberLinkFlag:
+    """Regression pin (LINKSCALE feature 2): the selection -> panel
+    refresh (`sync_stroke_panel_from_selection`) mirrors only the baked
+    stroke WEIGHT / cap / join into the panel. It must NOT touch the
+    UI-only `link_arrowhead_scale` flag — otherwise editing a scale
+    (which re-runs the refresh) would drop the chain highlight. The
+    reference never wrote the flag; this locks that in."""
+
+    def test_sync_leaves_link_flag_untouched(self):
+        from workspace_interpreter.effects import sync_stroke_panel_from_selection
+
+        class _Stroke:
+            width = 3.0
+            linecap = None
+            linejoin = None
+
+        class _Doc:
+            selection = []
+
+        class _Model:
+            document = _Doc()
+            default_stroke = _Stroke()
+
+        store = StateStore()
+        store.init_panel("stroke_panel_content", {"link_arrowhead_scale": True})
+        store.set_active_panel("stroke_panel_content")
+        sync_stroke_panel_from_selection(store, _Model())
+        assert store.get_panel(
+            "stroke_panel_content", "link_arrowhead_scale") is True
+
+
 class TestIncrementDecrement:
     def test_increment(self):
         store = StateStore({"count": 5})
