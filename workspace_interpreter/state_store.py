@@ -1053,3 +1053,10 @@ class StateStore:
                     if isinstance(p, (list, tuple)):
                         out.append(tuple(p))
         return out
+
+    def selection_paths(self) -> list[tuple[int, ...]]:
+        """Public accessor: the canvas selection as normalized path tuples.
+        Delegates to the document's ``selection`` list. Used by
+        selection-wide document effects (e.g. ``doc.set_attr_on_selection``)
+        that must mutate every selected element."""
+        return self._canvas_selection_paths()

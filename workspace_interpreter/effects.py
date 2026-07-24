@@ -669,6 +669,44 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_element_field(path_val.value, dotted_field, value)
         return None
 
+    # doc.set_attr_on_selection: { attr, value } — BRUSHES.md §Apply /
+    # the BRUSHAPPLY value-form law. Writes ONE attribute to EVERY
+    # canvas-selected element. The `value` is a PURE EXPRESSION in the
+    # purpose-built language — evaluated with `evaluate`, exactly like
+    # every sibling doc.* value, and NOT {{}}-text-interpolated (the
+    # moustache form is reserved for display text and constructed toggle
+    # keys). A brush id is therefore composed by string concatenation,
+    # e.g. `param.library + "/" + param.brush_slug`. A non-empty string
+    # result SETS the attribute; an empty string / null / non-string
+    # result CLEARS it (writes None) — mirroring the active ports'
+    # empty-string => clear rule. Phase 1 supports the two brush
+    # attributes only (stroke_brush, stroke_brush_overrides); an unknown
+    # attr, or a missing `value` key, is a hard skip (records nothing).
+    # Mutates the live tree in place like doc.set; the accompanying
+    # doc.snapshot effect (first in the action) provides the single undo
+    # step.
+    if "doc.set_attr_on_selection" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.set_attr_on_selection"]
+        if not isinstance(spec, dict):
+            return None
+        attr = spec.get("attr")
+        if attr not in ("stroke_brush", "stroke_brush_overrides"):
+            return None
+        if "value" not in spec:
+            return None
+        value_expr = spec.get("value")
+        eval_ctx = store.eval_context(ctx)
+        result = evaluate(str(value_expr) if value_expr is not None else "", eval_ctx)
+        resolved = (
+            result.value
+            if result.type == ValueType.STRING and result.value
+            else None
+        )
+        for path in store.selection_paths():
+            store.set_element_field(path, attr, resolved)
+        return None
+
     # foreach: { source, as } do: [...] — PHASE3 §5.3
     # Evaluates source once; each iteration runs do: in a fresh scope
     # with `as:` bound to the item. Bindings inside do: do not leak

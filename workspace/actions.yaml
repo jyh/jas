@@ -3575,11 +3575,20 @@ actions:
 
   apply_brush_to_selection:
     description: >
-      Apply a brush to every path in the canvas selection.
-      Sets stroke_brush to "<library>/<brush_slug>" on each
-      element; clears any per-element stroke_brush_overrides.
-      Single-click on a panel tile fires this action plus the
-      state.stroke_brush write in one transaction.
+      Apply a brush to every path in the canvas selection. Sets
+      stroke_brush to the composed brush id "<library>/<brush_slug>"
+      on each selected element, then clears any per-element
+      stroke_brush_overrides so the whole selection re-renders through
+      the newly applied brush. A single click on a panel tile fires
+      this action together with the state.stroke_brush write (which
+      primes the next-drawn stroke) in one undo transaction.
+
+      Value-form law: a doc.set_attr_on_selection `value:` is a PURE
+      EXPRESSION in the purpose-built language (evaluated like every
+      sibling doc.* value), NOT a {{}}-interpolated template — so the
+      brush id is composed by string concatenation, not by moustache
+      substitution. An empty / null / non-string result clears the
+      attribute.
     category: brushes
     params:
       library: { type: string }
@@ -3588,7 +3597,7 @@ actions:
       - "doc.snapshot": {}
       - "doc.set_attr_on_selection":
           attr: "stroke_brush"
-          value: '"{{param.library}}/{{param.brush_slug}}"'
+          value: 'param.library + "/" + param.brush_slug'
       - "doc.set_attr_on_selection":
           attr: "stroke_brush_overrides"
           value: "null"
