@@ -2856,6 +2856,55 @@ fn run_yaml_effects(
     run_yaml_effects_named(effects, ctx_in, st, None)
 }
 
+/// Generic hook: after a bound input widget commits its value via the
+/// native two-way write, run any `event: commit` behavior it declares.
+/// This is what makes a widget's commit do more than the bare field
+/// write — e.g. the Stroke panel's linked arrowhead-scale mirror
+/// (stroke.yaml Row 8), which copies the edited scale onto the other
+/// scale when the chain is active. Deliberately field-agnostic: the
+/// guard/effects live in the YAML (the purpose-built `if:` + set /
+/// set_panel_state effects), not in per-panel Rust.
+///
+/// `render_ctx` is the widget's render-time eval context (its `panel` /
+/// `state` scopes). The just-committed `field` / `committed` value are
+/// patched into a clone so guards and value expressions read the new
+/// value, and `event.value` is exposed for behaviors that want it. The
+/// native write already ran, so the port state is current; this only
+/// runs the extra declared effects. No-op when there is no commit
+/// behavior (the common case).
+fn run_input_commit_behavior(
+    el: &serde_json::Value,
+    field: &str,
+    committed: &serde_json::Value,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let commit_behaviors: Vec<&serde_json::Value> = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if commit_behaviors.is_empty() {
+        return;
+    }
+    let mut cs = render_ctx.clone();
+    if let serde_json::Value::Object(root) = &mut cs {
+        if let Some(serde_json::Value::Object(p)) = root.get_mut("panel") {
+            p.insert(field.to_string(), committed.clone());
+        }
+        root.insert("event".into(), serde_json::json!({ "value": committed }));
+    }
+    for b in &commit_behaviors {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            run_yaml_effects(effects, &cs, st);
+        }
+    }
+}
+
 /// `run_yaml_effects` with the owning action's name threaded in (OP_LOG.md §9).
 /// The batch owner stamps `name_txn(action)` just before `commit_txn` so every
 /// menu/keyboard/panel-dispatched undoable transaction is named — closing the
@@ -6728,6 +6777,18 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let panel_kind = rctx.panel_kind;
+    // Render-time eval context + the widget's declared `event: commit`
+    // behavior, snapshotted for the onchange closure. After the native
+    // two-way write, run_input_commit_behavior runs these (e.g. the
+    // linked arrowhead-scale mirror). No-op unless the combo declares
+    // commit behavior.
+    let ctx_snapshot = ctx.clone();
+    let has_commit_behavior = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| arr.iter().any(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit")))
+        .unwrap_or(false);
+    let el_for_commit = if has_commit_behavior { el.clone() } else { serde_json::Value::Null };
 
     rsx! {
         span {
@@ -6752,6 +6813,8 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             let f = field.clone();
                             let v = new_val.clone();
                             let app = app.clone();
+                            let ctx_snapshot = ctx_snapshot.clone();
+                            let el_for_commit = el_for_commit.clone();
                             spawn(async move {
                                 let mut st = app.borrow_mut();
                                 // Parse as number when possible (for
@@ -6782,6 +6845,14 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     // Other panels: no-op until their
                                     // per-panel state structs land.
                                     _ => {}
+                                }
+                                // Generic: run the widget's declared
+                                // `event: commit` behavior after the
+                                // native write (e.g. linked scale mirror).
+                                if !el_for_commit.is_null() {
+                                    run_input_commit_behavior(
+                                        &el_for_commit, &f, &json_val,
+                                        &ctx_snapshot, &mut st);
                                 }
                             });
                         }
@@ -10542,6 +10613,102 @@ mod tests {
         let ctx = build_ctx(&st);
         run_yaml_effects(&checkbox_effects, &ctx, &mut st);
         assert!(!st.stroke_panel.dashed, "second click must turn dashing off");
+    }
+
+    // ── Stroke panel: linked arrowhead-scale mirror ──────────────────
+    //
+    // LINKSCALE feature 1. The two scale combo boxes carry a generic
+    // `event: commit` behavior; when `panel.link_arrowhead_scale` is
+    // true, committing one scale mirrors it onto the other (panel +
+    // global). render_combo_box's onchange runs the native two-way write
+    // (set_stroke_field) then this behavior via run_input_commit_behavior;
+    // the tests target that pure helper (the closure needs component
+    // context). The shipped YAML carrying the behavior is pinned in the
+    // reference bundle test (TestLinkedArrowheadScaleBundle).
+    fn start_scale_combo() -> serde_json::Value {
+        serde_json::json!({
+            "id": "stk_start_arrowhead_scale",
+            "type": "combo_box",
+            "bind": {"value": "panel.start_arrowhead_scale"},
+            "behavior": [{"event": "commit", "effects": [
+                {"if": {"condition": "panel.link_arrowhead_scale", "then": [
+                    {"set_panel_state": {"key": "end_arrowhead_scale",
+                                         "value": "panel.start_arrowhead_scale"}},
+                    {"set": {"stroke_end_arrowhead_scale":
+                             "panel.start_arrowhead_scale"}},
+                ]}},
+            ]}],
+        })
+    }
+
+    #[test]
+    fn linked_arrowhead_scale_mirrors_when_linked() {
+        let el = start_scale_combo();
+        let mut st = make_state_with_colors("ffffff", "000000");
+        // Native two-way write already committed the edited scale.
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.link_arrowhead_scale = true;
+        let render_ctx = serde_json::json!({
+            "panel": {"link_arrowhead_scale": true,
+                      "start_arrowhead_scale": 100.0,
+                      "end_arrowhead_scale": 100.0},
+            "state": {},
+        });
+        run_input_commit_behavior(&el, "start_arrowhead_scale",
+                                  &serde_json::json!(200.0), &render_ctx, &mut st);
+        assert_eq!(st.stroke_panel.end_arrowhead_scale, 200.0,
+                   "linked: the other scale mirrors the edit");
+        // The chain highlight must survive a scale edit (feature 2).
+        assert!(st.stroke_panel.link_arrowhead_scale,
+                "the UI-only link flag is not clobbered by the mirror");
+    }
+
+    #[test]
+    fn linked_arrowhead_scale_independent_when_unlinked() {
+        let el = start_scale_combo();
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.end_arrowhead_scale = 100.0;
+        st.stroke_panel.link_arrowhead_scale = false;
+        let render_ctx = serde_json::json!({
+            "panel": {"link_arrowhead_scale": false,
+                      "start_arrowhead_scale": 100.0,
+                      "end_arrowhead_scale": 100.0},
+            "state": {},
+        });
+        run_input_commit_behavior(&el, "start_arrowhead_scale",
+                                  &serde_json::json!(200.0), &render_ctx, &mut st);
+        assert_eq!(st.stroke_panel.end_arrowhead_scale, 100.0,
+                   "unlinked: the other scale is untouched");
+    }
+
+    // ── Stroke panel: scale edit keeps the chain highlight (feature 2) ──
+    //
+    // The Rust panel refresh (build_live_panel_overrides) re-seeds the
+    // stroke panel's weight / cap / join from the selection, but the
+    // UI-only link_arrowhead_scale / profile_flipped / dash_align_anchors
+    // flags must come from panel state, never the selection — otherwise a
+    // scale edit (which re-runs the refresh) drops the highlight. Locks
+    // that the refresh reads the live panel flag.
+    #[test]
+    fn scale_edit_preserves_link_flag_in_panel_ctx() {
+        use crate::workspace::dock_panel::build_live_panel_overrides;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.stroke_panel.link_arrowhead_scale = true;
+        st.stroke_panel.profile_flipped = true;
+        st.stroke_panel.dash_align_anchors = true;
+        // Simulate a scale field edit + its apply.
+        set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
+                         &serde_json::json!(200.0));
+        st.apply_stroke_panel_to_selection();
+        let overrides = build_live_panel_overrides(&st);
+        assert_eq!(overrides.get("link_arrowhead_scale"),
+                   Some(&serde_json::Value::Bool(true)),
+                   "link highlight survives a scale edit");
+        assert_eq!(overrides.get("profile_flipped"),
+                   Some(&serde_json::Value::Bool(true)));
+        assert_eq!(overrides.get("dash_align_anchors"),
+                   Some(&serde_json::Value::Bool(true)));
     }
 
     // ── radio widget: on_check partitioning ───────────────────

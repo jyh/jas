@@ -99,7 +99,7 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
     m
 }
 
-fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
     use serde_json::Value as J;
 
