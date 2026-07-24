@@ -581,6 +581,44 @@ private func makeModelWithTwoArtboards() -> Model {
     #expect(p2.strokeBrush == nil, "undo clears the brush")
 }
 
+@Test func productionRouteSetAttrOnSelectionComposesBrushIdByConcatenation() {
+    // BRUSHAPPLY value-form law: a doc.set_attr_on_selection `value:` is a
+    // PURE EXPRESSION composed by string concatenation
+    // (`param.library + "/" + param.brush_slug`), NOT a {{}} template. A
+    // literal-{{}} template (the pre-fix actions.yaml bug) would leave the
+    // un-expanded string on the element.
+    let path = Element.path(Path(d: [.moveTo(10, 10), .lineTo(100, 60)],
+                                 stroke: Stroke(color: .black)))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [path])],
+        selectedLayer: 0,
+        selection: [ElementSelection.all([0, 0])]
+    ))
+
+    // The real apply_brush_to_selection effect list, driven through the
+    // production tool-effect registry, with the tile's params in ctx.
+    let effects: [Any] = [
+        ["doc.snapshot": [:]],
+        ["doc.set_attr_on_selection":
+            ["attr": "stroke_brush",
+             "value": "param.library + \"/\" + param.brush_slug"]],
+        ["doc.set_attr_on_selection":
+            ["attr": "stroke_brush_overrides", "value": "null"]],
+    ]
+    runEffects(effects,
+               ctx: ["param": ["library": "default_brushes",
+                               "brush_slug": "flat_10"]],
+               store: model.stateStore,
+               platformEffects: buildYamlToolEffects(model: model),
+               model: model, actionName: "apply_brush_to_selection")
+
+    guard case .path(let p) = model.document.layers[0].children[0] else {
+        Issue.record("expected path"); return
+    }
+    #expect(p.strokeBrush == "default_brushes/flat_10",
+            "the brush id is composed from the params, not the literal template")
+}
+
 @Test func productionRouteSetAttrOnSelectionClearJournalsThroughOpApply() {
     // remove_brush_from_selection sets stroke_brush -> null (CLEAR). The
     // production handler encodes a resolved-null value as the empty string;
