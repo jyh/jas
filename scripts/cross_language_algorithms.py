@@ -27,6 +27,7 @@ ALGORITHMS = {
     "measure":           ("tolerance", 1e-4),
     "element_bounds":    ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
+    "arrow_trim":        ("tolerance", 1e-4),
     "length":            ("tolerance", 1e-9),
     "hit_test":          ("exact", None),
     "boolean":           ("exact_boolean", None),

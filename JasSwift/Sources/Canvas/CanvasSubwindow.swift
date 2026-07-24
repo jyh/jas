@@ -1318,16 +1318,25 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 ctx.fillPath()
             }
         } else {
-            // Shorten path for arrowheads
+            // Arc-length-trim the path for arrowheads (see ArrowTrim). Mirrors
+            // jas_dioxus render.rs: replaces the old anchor-displacement shorten
+            // that deformed curved ends and folded them past the head at large
+            // setbacks. `strokeForDraw` butts the trimmed cut so round/projecting
+            // caps can't poke into the head base (single cap per stroke -> also
+            // butts a one-armed path's free end, an accepted simplification). An
+            // empty result is heads-only: the draw calls no-op, arrowheads still
+            // draw off v.d.
             var strokeCmds = v.d
+            var strokeForDraw = v.stroke
             if let s = v.stroke {
                 let startSb = arrowSetback(s.startArrow.name, strokeWidth: s.width, scalePct: s.startArrowScale)
                 let endSb = arrowSetback(s.endArrow.name, strokeWidth: s.width, scalePct: s.endArrowScale)
                 if startSb > 0 || endSb > 0 {
-                    strokeCmds = shortenPath(v.d, startSetback: startSb, endSetback: endSb)
+                    strokeCmds = ArrowTrim.trimPath(v.d, startSetback: startSb, endSetback: endSb)
+                    strokeForDraw = s.withLinecap(.butt)
                 }
             }
-            if !v.widthPoints.isEmpty, let s = v.stroke {
+            if !v.widthPoints.isEmpty, let s = strokeForDraw {
                 // Fill first if present
                 if v.fill != nil {
                     setFill(ctx, v.fill)
@@ -1338,7 +1347,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 renderVariableWidthPath(ctx, cmds: strokeCmds,
                                        widthPoints: v.widthPoints,
                                        strokeColor: cgColor(s.color), linecap: s.linecap)
-            } else if let s = v.stroke,
+            } else if let s = strokeForDraw,
                       s.dashAlignAnchors,
                       !s.dashPattern.isEmpty,
                       v.fillGradient == nil,
@@ -1368,12 +1377,13 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 let b = elem.bounds
                 let pbbox = CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
                 fillStrokeOrOutline(
-                    ctx, v.fill, v.stroke,
+                    ctx, v.fill, strokeForDraw,
                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                     bbox: pbbox, outline: false
                 )
             }
-            // Arrowheads
+            // Arrowheads — oriented off the ORIGINAL v.d, never the trimmed
+            // strokeCmds (see Arrowheads orientation contract).
             if let s = v.stroke {
                 let center = s.arrowAlign == .centerAtEnd
                 drawArrowheads(ctx, cmds: v.d,

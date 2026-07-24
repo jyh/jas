@@ -529,6 +529,18 @@ public struct Stroke: Equatable, Hashable {
                startArrowScale: startArrowScale, endArrowScale: endArrowScale,
                arrowAlign: arrowAlign, opacity: opacity)
     }
+
+    /// A copy of this stroke with its `linecap` replaced, preserving every
+    /// other field. Used to butt the arc-length-trimmed cut of an arrowheaded
+    /// stroke so round/projecting caps can't poke into the head base.
+    public func withLinecap(_ linecap: LineCap) -> Stroke {
+        Stroke(color: color, width: width, linecap: linecap, linejoin: linejoin,
+               miterLimit: miterLimit, align: align,
+               dashPattern: dashPattern, dashAlignAnchors: dashAlignAnchors,
+               startArrow: startArrow, endArrow: endArrow,
+               startArrowScale: startArrowScale, endArrowScale: endArrowScale,
+               arrowAlign: arrowAlign, opacity: opacity)
+    }
 }
 
 /// A width control point for variable-width stroke profiles.
