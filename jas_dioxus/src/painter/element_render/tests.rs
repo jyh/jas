@@ -11,7 +11,10 @@
 //! Regenerate after a deliberate reference-doc change:
 //! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
 
-use super::{element_needs_legacy, emit_element, line_painter_inputs};
+use super::{
+    element_needs_legacy, emit_element, emit_shape_paint, line_painter_inputs,
+    rect_painter_inputs, ConvGeom, ShapePaint,
+};
 use crate::geometry::element::{
     Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
     GradientStop, GradientType, GroupElem, LineElem, PathCommand, PathElem, PolygonElem,
@@ -310,6 +313,11 @@ fn regenerate_reference_goldens() {
     let path = golden_path("ref_line_convert");
     std::fs::write(&path, render_line_convert()).expect("write line-convert golden");
     eprintln!("wrote {path}");
+    for (name, sp, alpha) in convert_cases() {
+        let path = golden_path(name);
+        std::fs::write(&path, record_convert(&sp, alpha)).expect("write convert golden");
+        eprintln!("wrote {path}");
+    }
 }
 
 /// Every reference document serializes to exactly its committed golden.
@@ -433,4 +441,120 @@ fn convertible_line_op_matches_golden() {
     let golden = std::fs::read_to_string(golden_path("ref_line_convert"))
         .unwrap_or_else(|_| panic!("missing ref_line_convert golden; run regenerate_reference_goldens"));
     assert_eq!(json.trim(), golden.trim(), "converted line op diverged from golden");
+}
+
+// ---------------------------------------------------------------------------
+// PH2 — the multi-paint production conversion (per-kind convert goldens +
+// capability-exclusion negatives). Each convert golden records exactly the
+// Painter ops the production `render.rs` arm emits for a fixed convertible
+// element, locking the display-list-equivalent op sequence (contract R4).
+// ---------------------------------------------------------------------------
+
+fn freeform_grad() -> Box<Gradient> {
+    Box::new(Gradient { gtype: GradientType::Freeform, ..Gradient::default() })
+}
+
+fn anchor_dash(width: f64) -> Stroke {
+    let mut s = stroke(Color::BLACK, width);
+    s.dash_pattern[0] = 6.0;
+    s.dash_pattern[1] = 3.0;
+    s.dash_len = 2;
+    s.dash_align_anchors = true;
+    s
+}
+
+/// Record the Painter ops for a convertible element (as the production call
+/// site does), canonically. Shared by the gate test and the regenerator.
+fn record_convert(sp: &ShapePaint, base_alpha: f64) -> String {
+    let mut rec = RecordingPainter::new();
+    emit_shape_paint(&mut rec, sp, base_alpha);
+    let mut json = rec.to_canonical_json();
+    json.push('\n');
+    json
+}
+
+/// The convertible reference elements: `(golden name, resolved paint, base_alpha)`.
+fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
+    vec![("ref_rect_convert", rect_case(), 0.9)]
+}
+
+fn rect_case() -> ShapePaint {
+    let e = RectElem {
+        x: 15.0, y: 25.0, width: 120.0, height: 70.0, rx: 10.0, ry: 6.0,
+        fill: fill_op(Color::rgb(0.2, 0.5, 0.8), 0.85),
+        stroke: Some(stroke(Color::rgb(0.1, 0.1, 0.1), 3.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).expect("convertible rect")
+}
+
+/// Every convert case serializes to exactly its committed golden.
+#[test]
+fn convert_ops_match_goldens() {
+    for (name, sp, alpha) in convert_cases() {
+        let json = record_convert(&sp, alpha);
+        let golden = std::fs::read_to_string(golden_path(name))
+            .unwrap_or_else(|_| panic!("missing golden {name}; run regenerate_reference_goldens"));
+        assert_eq!(json.trim(), golden.trim(), "convert case {name} diverged from its golden");
+    }
+}
+
+// -- Rect --------------------------------------------------------------------
+
+fn plain_rect_elem() -> RectElem {
+    RectElem {
+        x: 15.0, y: 25.0, width: 120.0, height: 70.0, rx: 0.0, ry: 0.0,
+        fill: fill(Color::rgb(0.2, 0.5, 0.8)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    }
+}
+
+#[test]
+fn rect_plain_solid_is_convertible() {
+    let e = plain_rect_elem();
+    let sp = rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).expect("plain rect converts");
+    assert!(sp.fill.is_some(), "has a fill");
+    assert!(sp.stroke.is_some(), "has a stroke");
+    assert!(matches!(sp.geom, ConvGeom::Path(_)), "rect lowers to a path");
+}
+
+#[test]
+fn rect_freeform_gradient_not_convertible() {
+    let mut e = plain_rect_elem();
+    e.fill_gradient = Some(freeform_grad());
+    assert!(
+        rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).is_none(),
+        "freeform fill gradient stays legacy"
+    );
+    let mut e = plain_rect_elem();
+    e.stroke_gradient = Some(freeform_grad());
+    assert!(
+        rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).is_none(),
+        "freeform stroke gradient stays legacy"
+    );
+}
+
+#[test]
+fn rect_anchor_dash_not_convertible() {
+    let mut e = plain_rect_elem();
+    e.stroke = Some(anchor_dash(3.0));
+    assert!(
+        rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).is_none(),
+        "anchor-aligned dashing expands to sub-paths — stays legacy"
+    );
+}
+
+#[test]
+fn rect_regular_dash_is_convertible() {
+    // A plain (non-anchor) dash carries in the stroke style — convertible.
+    let mut s = stroke(Color::BLACK, 2.0);
+    s.dash_pattern[0] = 6.0;
+    s.dash_pattern[1] = 3.0;
+    s.dash_len = 2;
+    let mut e = plain_rect_elem();
+    e.stroke = Some(s);
+    let sp = rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).expect("regular dash converts");
+    let cs = sp.stroke.expect("stroke");
+    assert_eq!(cs.style.dash, vec![6.0, 3.0], "the dash pattern crosses the seam");
 }

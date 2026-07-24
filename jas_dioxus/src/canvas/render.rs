@@ -1280,6 +1280,24 @@ fn draw_element_body(
             } // end `if !converted`: the PH1 painter route handled the leaf paint
         }
         Element::Rect(e) => {
+            // PH2 Painter conversion (capability-routed), mirroring the Line arm.
+            // A convertible Rect's fill+stroke leaf paint routes through
+            // Canvas2dPainter — display-list-equivalent to the legacy body below
+            // (the fill/stroke reorder is pixel-identical; see the PH2 design).
+            // A freeform gradient or anchor-dash expansion (which the two-paint
+            // seam can't reproduce), and outline mode, fall through unchanged.
+            let converted = if outline {
+                false
+            } else if let Some(sp) = crate::painter::element_render::rect_painter_inputs(
+                e, (e.x, e.y, e.width, e.height),
+            ) {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1353,6 +1371,7 @@ fn draw_element_body(
                     }
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Circle(e) => {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);

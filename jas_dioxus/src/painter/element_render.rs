@@ -31,8 +31,9 @@
 //! lowering concern the seam never carries — contract A5).
 
 use crate::geometry::element::{
-    Color, Element, Fill, FillRule, Gradient, GradientType, LineElem, PathCommand, Stroke,
-    StrokeAlign, Visibility,
+    Arrowhead, CircleElem, Color, Element, EllipseElem, Fill, FillRule, Gradient, GradientType,
+    LineElem, PathCommand, PathElem, PolygonElem, PolylineElem, RectElem, Stroke, StrokeAlign,
+    Visibility,
 };
 
 use super::{
@@ -85,10 +86,37 @@ pub fn element_needs_legacy(elem: &Element) -> bool {
         return true;
     }
     // Text / type-on-path / live geometry.
-    matches!(
-        elem,
-        Element::Text(_) | Element::TextPath(_) | Element::Live(_)
-    )
+    if matches!(elem, Element::Text(_) | Element::TextPath(_) | Element::Live(_)) {
+        return true;
+    }
+    // PH2 production-routing mirror: an element whose `*_painter_inputs` would
+    // return `None` (a capability the two-paint seam can't reproduce) stays on
+    // legacy in production, so the reference goldens must exclude it too — else
+    // they would model a route production never takes.
+    match elem {
+        // RP3: an ellipse arc carries no align and can't be a clip path, so a
+        // non-center circle/ellipse stroke stays legacy.
+        Element::Circle(e) => stroke_non_center(e.stroke.as_ref()),
+        Element::Ellipse(e) => stroke_non_center(e.stroke.as_ref()),
+        // The legacy Rect arm expands anchor-aligned dashing into sub-paths.
+        Element::Rect(e) => e.stroke.as_ref().map(expands_anchor_dash).unwrap_or(false),
+        // RP2 (set stroke brush → filled outline), variable width, arrowheads,
+        // and anchor-dash expansion are all Path-arm behaviors off the seam.
+        Element::Path(e) => {
+            e.stroke_brush.is_some()
+                || !e.width_points.is_empty()
+                || e.stroke
+                    .as_ref()
+                    .map(|s| has_arrowhead(s) || expands_anchor_dash(s))
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+/// A stroke aligned inside/outside rather than centered (RP3 helper).
+fn stroke_non_center(s: Option<&Stroke>) -> bool {
+    s.map(|s| s.align != StrokeAlign::Center).unwrap_or(false)
 }
 
 /// The `Painter` inputs for a PH1-convertible [`Line`](Element::Line): its
@@ -165,6 +193,275 @@ pub fn line_painter_inputs(e: &LineElem) -> Option<LinePaint> {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-paint production conversion (PH2)
+// ---------------------------------------------------------------------------
+//
+// PH2 extends the PH1 Line pattern to the multi-paint kinds (Rect / Circle /
+// Ellipse / Polygon / Polyline / Path). Each `*_painter_inputs` mirrors
+// `line_painter_inputs`: it returns the resolved `Painter` inputs IFF the paint
+// is display-list-equivalent (contract R4) to `render.rs`'s legacy body — a fill
+// (A3 winding, A4 alpha = base·fill_op) THEN a stroke (A4 alpha = base·stroke_op)
+// — else `None`, and the caller keeps the unchanged legacy path. Circle/Ellipse
+// ride the A2 fill/stroke `ellipse_arc` split.
+//
+// A capability the legacy arm renders that the two-paint seam can't reproduce
+// EXACTLY routes to `None`: a set stroke brush (RP2, Path), variable width,
+// arrowheads (Path), anchor-aligned dashing that EXPANDS into sub-paths
+// (Rect/Path), inside/outside on an ellipse arc (RP3, Circle/Ellipse), and any
+// freeform gradient. `outline` mode is guarded at the call site, exactly as for
+// Line. RP1: a gradient (fill OR stroke) resolves its endpoints on the geometry
+// bbox the legacy arm passes — supplied by the caller, never `Element::bounds()`.
+
+/// The geometry of a convertible element: a path (Rect / Polygon / Polyline /
+/// Path) or the A2 ellipse-arc primitive (Circle / Ellipse).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConvGeom {
+    Path(Vec<PathCommand>),
+    Arc(EllipseArc),
+}
+
+/// The resolved fill of a convertible element.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConvFill {
+    pub brush: Brush,
+    pub winding: FillRule,
+    /// The fill's paint-time opacity (`Fill::opacity`, today's `fill_op`).
+    pub op: f64,
+}
+
+/// The resolved stroke of a convertible element. `style.width` is the NOMINAL
+/// width; the inside/outside 2× is applied by [`emit_shape_paint`] with the
+/// build-time clip, mirroring `render.rs`'s `apply_stroke` + `stroke_aligned`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConvStroke {
+    pub brush: Brush,
+    pub style: StrokeStyle,
+    pub align: StrokeAlign,
+    /// The stroke's paint-time opacity (`Stroke::opacity`, today's `stroke_op`).
+    pub op: f64,
+}
+
+/// The `Painter` inputs for a convertible multi-paint element. Emitted by
+/// [`emit_shape_paint`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapePaint {
+    pub geom: ConvGeom,
+    pub fill: Option<ConvFill>,
+    pub stroke: Option<ConvStroke>,
+}
+
+/// Emit a convertible element through `p`: fill THEN stroke, each at
+/// `base_alpha × paint_op` (A4). Path strokes honor `align` via the build-time
+/// clip lowering (contract A5 / `stroke_aligned`); arc strokes are Center-only
+/// by construction (RP3 keeps non-center circles/ellipses on legacy).
+pub fn emit_shape_paint(p: &mut dyn Painter, sp: &ShapePaint, base_alpha: f64) {
+    if let Some(f) = sp.fill.as_ref() {
+        match &sp.geom {
+            ConvGeom::Path(path) => p.fill_path(path, f.winding, &f.brush, base_alpha * f.op),
+            ConvGeom::Arc(arc) => p.fill_ellipse_arc(arc, f.winding, &f.brush, base_alpha * f.op),
+        }
+    }
+    if let Some(s) = sp.stroke.as_ref() {
+        let alpha = base_alpha * s.op;
+        match &sp.geom {
+            ConvGeom::Arc(arc) => p.stroke_ellipse_arc(arc, &s.brush, &s.style, alpha),
+            ConvGeom::Path(path) => {
+                emit_aligned_path_stroke(p, path, &s.brush, &s.style, s.align, alpha)
+            }
+        }
+    }
+}
+
+/// Stroke `path` honoring `align` (Center = a bare stroke; Inside/Outside = the
+/// 2× width clipped to the shape). The same lowering as the reference
+/// [`emit_path_stroke`], driven by pre-resolved production inputs.
+fn emit_aligned_path_stroke(
+    p: &mut dyn Painter,
+    path: &[PathCommand],
+    brush: &Brush,
+    style: &StrokeStyle,
+    align: StrokeAlign,
+    alpha: f64,
+) {
+    match align {
+        StrokeAlign::Center => p.stroke_path(path, brush, style, alpha),
+        StrokeAlign::Inside => {
+            p.push_state(super::Transform::IDENTITY);
+            p.clip(path, FillRule::NonZero);
+            p.stroke_path(path, brush, &doubled(style), alpha);
+            p.pop_state();
+        }
+        StrokeAlign::Outside => {
+            let mut clip_path = path.to_vec();
+            clip_path.extend_from_slice(&huge_rect_path());
+            p.push_state(super::Transform::IDENTITY);
+            p.clip(&clip_path, FillRule::EvenOdd);
+            p.stroke_path(path, brush, &doubled(style), alpha);
+            p.pop_state();
+        }
+    }
+}
+
+/// The stroke style at 2× width for the inside/outside clip lowering (the clip
+/// removes the unwanted half — `render.rs::apply_stroke`).
+fn doubled(style: &StrokeStyle) -> StrokeStyle {
+    StrokeStyle { width: style.width * 2.0, ..style.clone() }
+}
+
+/// A gradient that is present AND freeform — never crosses the seam (A5); the
+/// element stays legacy.
+fn is_freeform(grad: Option<&Gradient>) -> bool {
+    grad.map(|g| g.gtype == GradientType::Freeform).unwrap_or(false)
+}
+
+/// Anchor-aligned dashing with an active pattern: the legacy Rect/Path arms
+/// expand it into solid sub-paths via the dash renderer (not one `stroke_path`).
+fn expands_anchor_dash(s: &Stroke) -> bool {
+    s.dash_align_anchors && !s.dash_array().is_empty()
+}
+
+/// A stroke that draws an arrowhead (setback + arrowhead geometry off the seam).
+fn has_arrowhead(s: &Stroke) -> bool {
+    s.start_arrow != Arrowhead::None || s.end_arrow != Arrowhead::None
+}
+
+/// Resolve the optional fill of `(fill, grad)` into a [`ConvFill`] at `winding`.
+fn conv_fill(
+    fill: Option<&Fill>,
+    grad: Option<&Gradient>,
+    bbox: (f64, f64, f64, f64),
+    winding: FillRule,
+) -> Option<ConvFill> {
+    fill_paint(fill, grad, bbox).map(|(brush, op)| ConvFill { brush, winding, op })
+}
+
+/// Resolve the optional stroke of an element into a [`ConvStroke`]. `bbox` is the
+/// geometry box the legacy arm resolves the stroke gradient on (RP1).
+fn conv_stroke(
+    stroke: Option<&Stroke>,
+    grad: Option<&Gradient>,
+    bbox: (f64, f64, f64, f64),
+) -> Option<ConvStroke> {
+    stroke.map(|s| ConvStroke {
+        brush: stroke_brush(s, grad, bbox),
+        style: stroke_style(s, s.width),
+        align: s.align,
+        op: s.opacity,
+    })
+}
+
+/// Convertible [`Rect`](Element::Rect) inputs, or `None` (legacy). `bbox` is the
+/// geometry box `(x, y, w, h)` — the box the legacy Rect arm resolves gradients
+/// on (RP1). A plain and a rounded rect both lower to the path form (fill_path +
+/// aligned stroke_path), display-list-equivalent to the legacy `fill_rect` /
+/// `rect` bodies.
+pub fn rect_painter_inputs(e: &RectElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    if e.stroke.as_ref().map(expands_anchor_dash).unwrap_or(false) {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Path(rounded_rect_path(e.x, e.y, e.width, e.height, e.rx, e.ry)),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+/// Convertible [`Circle`](Element::Circle) inputs, or `None`. RP3: a non-center
+/// stroke stays legacy (an ellipse arc can't carry the inside/outside clip).
+pub fn circle_painter_inputs(e: &CircleElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    if stroke_non_center(e.stroke.as_ref()) {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Arc(EllipseArc::circle(e.cx, e.cy, e.r)),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+/// Convertible [`Ellipse`](Element::Ellipse) inputs, or `None`. RP3 as Circle.
+pub fn ellipse_painter_inputs(e: &EllipseElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    if stroke_non_center(e.stroke.as_ref()) {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Arc(EllipseArc::ellipse(e.cx, e.cy, e.rx, e.ry)),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+/// Convertible [`Polygon`](Element::Polygon) inputs, or `None`. An empty point
+/// list stays legacy (paints nothing either way). Inside/outside strokes ride
+/// the path clip lowering.
+pub fn polygon_painter_inputs(e: &PolygonElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if e.points.is_empty() {
+        return None;
+    }
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Path(poly_path(&e.points, true)),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+/// Convertible [`Polyline`](Element::Polyline) inputs, or `None`. Like Polygon
+/// but the path is not closed.
+pub fn polyline_painter_inputs(e: &PolylineElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if e.points.is_empty() {
+        return None;
+    }
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Path(poly_path(&e.points, false)),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+/// Convertible [`Path`](Element::Path) inputs, or `None`. `bbox` is
+/// `elem.bounds()` — the box the legacy Path arm resolves gradients on (RP1;
+/// for Path that box IS `bounds()`). RP2: a set `stroke_brush` renders a filled
+/// outline, nothing like a native stroke → legacy. Variable width, arrowheads,
+/// and anchor-dash expansion likewise stay legacy. The A3 fill winding is the
+/// element's `fill_rule` (EvenOdd for boolean-op holes).
+pub fn path_painter_inputs(e: &PathElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
+    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
+        return None;
+    }
+    if e.stroke_brush.is_some() || !e.width_points.is_empty() {
+        return None;
+    }
+    if e
+        .stroke
+        .as_ref()
+        .map(|s| has_arrowhead(s) || expands_anchor_dash(s))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some(ShapePaint {
+        geom: ConvGeom::Path(e.d.clone()),
+        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, e.fill_rule),
+        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // The reference renderer (Phase-2 gate)
 // ---------------------------------------------------------------------------
 
@@ -197,7 +494,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
         }
         Element::Line(e) => {
             if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), tuple_bounds(elem));
                 emit_path_stroke(
                     p,
                     &[
@@ -216,7 +513,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                 let path = rounded_rect_path(e.x, e.y, e.width, e.height, e.rx, e.ry);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
                 if let Some(s) = e.stroke.as_ref() {
-                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                     emit_path_stroke(p, &path, &brush, s, eff);
                 }
             } else {
@@ -228,7 +525,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                     // Center alignment lowers to stroke_rect; inside/outside
                     // would need the shape as a path for the clip lowering, so
                     // route those through the path form.
-                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                     if s.align == StrokeAlign::Center {
                         p.stroke_rect(rect, &brush, &stroke_style(s, s.width), eff * s.opacity);
                     } else {
@@ -245,7 +542,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                 p.fill_ellipse_arc(&arc, FillRule::NonZero, &brush, eff * op);
             }
             if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                 p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
             }
         }
@@ -256,7 +553,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                 p.fill_ellipse_arc(&arc, FillRule::NonZero, &brush, eff * op);
             }
             if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                 p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
             }
         }
@@ -266,7 +563,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                 let bbox = poly_bbox(&e.points);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
                 if let Some(s) = e.stroke.as_ref() {
-                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                     emit_path_stroke(p, &path, &brush, s, eff);
                 }
             }
@@ -277,7 +574,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                 let bbox = poly_bbox(&e.points);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
                 if let Some(s) = e.stroke.as_ref() {
-                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                    let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                     emit_path_stroke(p, &path, &brush, s, eff);
                 }
             }
@@ -286,7 +583,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
             let bbox = tuple_bounds(elem);
             emit_fill_path(p, &e.d, e.fill_rule, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
             if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), elem);
+                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
                 emit_path_stroke(p, &e.d, &brush, s, eff);
             }
         }
@@ -384,9 +681,14 @@ fn fill_paint(
 
 /// Resolve the stroke brush: the stroke gradient (if renderable) else the
 /// solid stroke color. Mirrors `render.rs::apply_stroke_with_gradient`.
-fn stroke_brush(s: &Stroke, grad: Option<&Gradient>, elem: &Element) -> Brush {
+///
+/// RP1: `bbox` is the GEOMETRY box the legacy arm resolves the gradient on
+/// (Rect passes `(x,y,w,h)`; Path passes `elem.bounds()`) — NOT blindly
+/// `Element::bounds()`, which inflates by half the stroke width and would land
+/// a gradient STROKE on the wrong endpoints. The caller supplies it.
+fn stroke_brush(s: &Stroke, grad: Option<&Gradient>, bbox: (f64, f64, f64, f64)) -> Brush {
     if let Some(g) = grad {
-        if let Some(brush) = resolve_gradient(g, tuple_bounds(elem)) {
+        if let Some(brush) = resolve_gradient(g, bbox) {
             return brush;
         }
     }
