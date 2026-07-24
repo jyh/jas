@@ -609,16 +609,37 @@ actions:
       - toggle: "{{param.pane}}_visible"
   toggle_panel:
     description: >
-      Show or hide a dock panel via the Window menu. When showing, the
-      panel is added to the last group of the anchored dock (dock_main),
-      the dock is made visible and expanded, and the panel is activated.
-      When hiding, the panel is removed from its group via close_panel.
-      If the group becomes empty it is removed automatically.
+      Show or hide a dock panel from the Window menu. Every Window-menu
+      panel row (Layers, Color, Swatches, Brushes, Gradient, Stroke,
+      Object properties, Character, Paragraph, Artboards, Align, Boolean,
+      Opacity, Magic Wand, Symbols, Concepts) dispatches this one action
+      with its own panel id; the row's check mark reflects whether that
+      panel is currently on screen, i.e. present in some dock group.
+
+      When the panel is NOT on screen it is shown: the primary anchored
+      dock (dock_main) is made visible (its pane is un-hidden) and
+      expanded (un-collapsed from the icon strip), the panel is appended
+      to dock_main's LAST group, and it becomes that group's active
+      (front) tab. When the panel IS on screen it is hidden: it is removed
+      from its group via the close_panel operation, and if that leaves the
+      group empty the group is removed automatically.
+
+      Dock-group mutation cannot be expressed with the declarative effect
+      vocabulary, so each active port implements this action natively
+      against its own workspace_layout dock model per the contract stated
+      in this description. Exact equivalence is the law: all ports show,
+      hide, place, and activate identically. This is the single generic
+      panel-toggle path — there are no per-panel variants.
     category: window
     params:
-      panel: { type: enum, values: [layers, color, stroke, properties, align] }
+      panel: { type: enum, values: [layers, color, swatches, brushes, gradient, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magic_wand, symbols, concepts] }
     effects:
-      - log: "toggle_panel: {{param.panel}}"
+      # Native-implemented per the description above: dock-group placement,
+      # dock visibility/expansion, and activation all happen in each port's
+      # native code, not through a declarative effect. This breadcrumb is
+      # the only declarative trace (mirrors the open_file / save_as native
+      # dialogs), NOT the behavior.
+      - log: "toggle_panel (native): {{param.panel}}"
   toggle_canvas_maximize:
     description: >
       Toggle the canvas pane between maximized (fills the entire viewport,
