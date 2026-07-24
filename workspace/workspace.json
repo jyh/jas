@@ -8493,6 +8493,15 @@
           "checked_when": "panels.brushes"
         },
         {
+          "id": "menu_gradient",
+          "label": "Gra&dient",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "gradient"
+          },
+          "checked_when": "panels.gradient"
+        },
+        {
           "id": "menu_stroke",
           "label": "&Stroke",
           "action": "toggle_panel",
