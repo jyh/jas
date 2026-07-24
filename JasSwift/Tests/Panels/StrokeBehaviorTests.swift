@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import JasLib
 
 // Cross-language SEAM BEHAVIOR tests for the Stroke panel's
@@ -326,4 +327,214 @@ private func syncModel(_ stroke: Stroke) -> Model {
     runEffects(effects, ctx: dockCtx(), store: store)
     #expect((store.getPanel("stroke_panel_content", "dashed") as? Bool) == false)
     #expect((store.get("stroke_dashed") as? Bool) == false)
+}
+
+// MARK: - LINKSCALE: linked arrowhead-scale mirror + panel/global gap
+//
+// SWIFTLINK. The two Stroke scale combos (`stk_start_arrowhead_scale` /
+// `stk_end_arrowhead_scale`) carry a generic `event: commit` behavior:
+// when `panel.link_arrowhead_scale` is true, committing one scale copies
+// it onto the OTHER scale in BOTH scopes — the panel field that drives the
+// sibling widget, and the global `stroke_<field>` that
+// applyStrokePanelToSelection reads. renderComboBox runs the native
+// two-way write (commitWidgetWrite + the panel->global gap closure
+// `mirrorStrokeScaleCommitToGlobal`) then `runInputCommitBehavior`. These
+// pins target those pure helpers (the SwiftUI closure needs component
+// context) — mirroring the Rust reference, which tests
+// `run_input_commit_behavior` directly, and the reference-interpreter
+// values in TestLinkedArrowheadScaleMirror.
+
+/// Inline copy of the shipped `stk_start_arrowhead_scale` combo (the
+/// bundle presence is gated by the reference / Rust bundle tests). Mirrors
+/// onto the end scale when the chain is active.
+private func startScaleCombo() -> [String: Any] {
+    let mirror: [[String: Any]] = [
+        ["set_panel_state": ["key": "end_arrowhead_scale",
+                             "value": "panel.start_arrowhead_scale"]],
+        ["set": ["stroke_end_arrowhead_scale": "panel.start_arrowhead_scale"]],
+    ]
+    let guardEffect: [String: Any] = ["if": [
+        "condition": "panel.link_arrowhead_scale",
+        "then": mirror,
+    ] as [String: Any]]
+    let behavior: [[String: Any]] = [[
+        "event": "commit",
+        "effects": [guardEffect],
+    ]]
+    return [
+        "id": "stk_start_arrowhead_scale",
+        "type": "combo_box",
+        "bind": ["value": "panel.start_arrowhead_scale"],
+        "behavior": behavior,
+    ]
+}
+
+/// Inline copy of the shipped `stk_end_arrowhead_scale` combo — the
+/// symmetric partner mirroring onto the start scale.
+private func endScaleCombo() -> [String: Any] {
+    let mirror: [[String: Any]] = [
+        ["set_panel_state": ["key": "start_arrowhead_scale",
+                             "value": "panel.end_arrowhead_scale"]],
+        ["set": ["stroke_start_arrowhead_scale": "panel.end_arrowhead_scale"]],
+    ]
+    let guardEffect: [String: Any] = ["if": [
+        "condition": "panel.link_arrowhead_scale",
+        "then": mirror,
+    ] as [String: Any]]
+    let behavior: [[String: Any]] = [[
+        "event": "commit",
+        "effects": [guardEffect],
+    ]]
+    return [
+        "id": "stk_end_arrowhead_scale",
+        "type": "combo_box",
+        "bind": ["value": "panel.end_arrowhead_scale"],
+        "behavior": behavior,
+    ]
+}
+
+/// Seed a Stroke panel scope (panel + mirrored globals) for the scale
+/// combos, and mark it active (set_panel_state targets the active panel).
+private func linkScaleStore(linked: Bool) -> StateStore {
+    let store = StateStore()
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": linked, "weight": 1.0,
+    ])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+    return store
+}
+
+/// Reproduce the scale combo's native two-way write: the panel scope
+/// receives the committed value AND the global `stroke_<field>` is mirrored
+/// (the gap closure the port performs before apply).
+private func commitStrokeScale(_ store: StateStore, _ field: String, _ v: Double) {
+    store.setPanel("stroke_panel_content", field, v)
+    mirrorStrokeScaleCommitToGlobal(store: store, key: field, value: v)
+}
+
+/// A render-time panel snapshot (STALE for the just-committed field): the
+/// commit hook must patch the committed value in, mirroring Rust.
+private func staleScaleCtx(linked: Bool) -> [String: Any] {
+    ["panel": [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": linked,
+    ]]
+}
+
+private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
+
+// (a) linked mirror: link on, commit start=200 -> end scale (panel AND
+// global) becomes 200.
+@Test func linkedStartScaleCommitMirrorsBothScopes() {
+    let model = Model()
+    let store = model.stateStore
+    // Re-seed model's store the same way linkScaleStore does.
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": true, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    commitStrokeScale(store, "start_arrowhead_scale", 200)
+    runInputCommitBehavior(element: startScaleCombo(),
+                           field: "start_arrowhead_scale", committed: 200.0,
+                           context: staleScaleCtx(linked: true),
+                           store: store, model: model)
+
+    // The other scale mirrors in BOTH scopes.
+    #expect(numeric(store.getPanel("stroke_panel_content", "end_arrowhead_scale")) == 200)
+    #expect(numeric(store.get("stroke_end_arrowhead_scale")) == 200)
+    // The edited scale reached the global too (gap closure, patch overrode
+    // the stale render snapshot).
+    #expect(numeric(store.get("stroke_start_arrowhead_scale")) == 200)
+}
+
+// Symmetric partner: end -> start.
+@Test func linkedEndScaleCommitMirrorsBothScopes() {
+    let model = Model()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": true, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    commitStrokeScale(store, "end_arrowhead_scale", 75)
+    runInputCommitBehavior(element: endScaleCombo(),
+                           field: "end_arrowhead_scale", committed: 75.0,
+                           context: staleScaleCtx(linked: true),
+                           store: store, model: model)
+
+    #expect(numeric(store.getPanel("stroke_panel_content", "start_arrowhead_scale")) == 75)
+    #expect(numeric(store.get("stroke_start_arrowhead_scale")) == 75)
+}
+
+// (b) link off -> independent.
+@Test func unlinkedStartScaleCommitLeavesOtherAlone() {
+    let model = Model()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": false, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    commitStrokeScale(store, "start_arrowhead_scale", 200)
+    runInputCommitBehavior(element: startScaleCombo(),
+                           field: "start_arrowhead_scale", committed: 200.0,
+                           context: staleScaleCtx(linked: false),
+                           store: store, model: model)
+
+    // The other scale is untouched in both scopes.
+    #expect(numeric(store.getPanel("stroke_panel_content", "end_arrowhead_scale")) == 100)
+    #expect(numeric(store.get("stroke_end_arrowhead_scale")) == 100)
+    // The edited scale still reaches its own global (gap closure runs
+    // regardless of the link flag).
+    #expect(numeric(store.get("stroke_start_arrowhead_scale")) == 200)
+}
+
+// (c) link-flag persistence: after a scale commit, link_arrowhead_scale
+// stays true (the mirror never clobbers the UI-only chain flag).
+@Test func scaleCommitKeepsLinkFlag() {
+    let model = Model()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": true, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+
+    commitStrokeScale(store, "start_arrowhead_scale", 200)
+    runInputCommitBehavior(element: startScaleCombo(),
+                           field: "start_arrowhead_scale", committed: 200.0,
+                           context: staleScaleCtx(linked: true),
+                           store: store, model: model)
+
+    #expect(store.getPanel("stroke_panel_content", "link_arrowhead_scale") as? Bool == true)
+}
+
+// (d) gap-closure regression: a committed scale is visible to
+// applyStrokePanelToSelection (globals fresh). WITHOUT the panel->global
+// mirror the global stays at its default 100 and the element scale never
+// changes.
+@Test func committedScaleReachesApplyToSelection() {
+    let model = strokeModelWithSelectedRect()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "weight": 1.0, "start_arrowhead_scale": 100.0,
+        "end_arrowhead_scale": 100.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    // Native combo commit of start=150 (panel bind + gap-closure global).
+    commitStrokeScale(store, "start_arrowhead_scale", 150)
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+
+    #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 150)
 }
