@@ -57,6 +57,12 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Opacity => opacity_panel::menu_items(),
         PanelKind::MagicWand => magic_wand_panel::menu_items(),
         PanelKind::Symbols => symbols_panel::menu_items(),
+        // Gradient / Concepts are rendered generically from the YAML bundle
+        // and have no native panel module, so their hamburger menu is empty
+        // (the bundle supplies any panel-menu rows). They exist as PanelKind
+        // variants purely so the dock can show/hide them by the generic
+        // toggle_panel path.
+        PanelKind::Gradient | PanelKind::Concepts => Vec::new(),
     }
 }
 
@@ -82,6 +88,8 @@ pub(crate) fn panel_dispatch(
         PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
         PanelKind::MagicWand => magic_wand_panel::dispatch(cmd, addr, state),
         PanelKind::Symbols => symbols_panel::dispatch(cmd, addr, state),
+        // No native module (YAML-rendered): no bespoke menu commands.
+        PanelKind::Gradient | PanelKind::Concepts => {}
     }
 }
 
@@ -117,6 +125,8 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
         PanelKind::Opacity => opacity_panel::is_checked(cmd, state),
         PanelKind::MagicWand => magic_wand_panel::is_checked(cmd, state),
         PanelKind::Symbols => symbols_panel::is_checked(cmd, state),
+        // No native module (YAML-rendered): no stateful checkmarks.
+        PanelKind::Gradient | PanelKind::Concepts => false,
     }
 }
 

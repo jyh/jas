@@ -108,6 +108,8 @@ fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Opacity => "opacity",
         PanelKind::MagicWand => "magic_wand",
         PanelKind::Symbols => "symbols",
+        PanelKind::Gradient => "gradient",
+        PanelKind::Concepts => "concepts",
     }
 }
 
@@ -448,6 +450,7 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "color" => PanelKind::Color,
         "swatches" => PanelKind::Swatches,
         "brushes" => PanelKind::Brushes,
+        "gradient" => PanelKind::Gradient,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         "character" => PanelKind::Character,
@@ -458,6 +461,7 @@ fn parse_panel_kind(v: &serde_json::Value) -> PanelKind {
         "opacity" => PanelKind::Opacity,
         "magic_wand" => PanelKind::MagicWand,
         "symbols" => PanelKind::Symbols,
+        "concepts" => PanelKind::Concepts,
         _ => PanelKind::Layers,
     }
 }

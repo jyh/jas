@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use super::app_state::{Act, AppHandle, AppState, TabState};
 use super::clipboard::{
-    clipboard_read_and_paste, clipboard_write, download_bytes, download_file, find_panel,
+    clipboard_read_and_paste, clipboard_write, download_bytes, download_file,
     open_file_dialog, selection_to_svg,
 };
 // SaveAsDialog import removed — workspace save-as now uses YAML dialog system
@@ -347,252 +347,22 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
-                // Window menu: panel visibility
-                "toggle_panel_layers" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Layers) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Layers) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Layers),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_color" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Color) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Color) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Color),
-                            );
-                            // Per COLOR.md §Panel initialization rule:
-                            // color_panel_mode is panel-local and
-                            // resets to its default (HSB) on each
-                            // reopen — not persisted across close.
-                            st.color_panel_mode = super::color_panel_view::ColorMode::Hsb;
-                        }
-                    }));
-                }
-                "toggle_panel_swatches" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Swatches) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Swatches) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Swatches),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_stroke" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Stroke) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Stroke) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Stroke),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_properties" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Properties) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Properties) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Properties),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_character" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Character) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Character) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Character),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_paragraph" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Paragraph) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Paragraph) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Paragraph),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_magic_wand" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::MagicWand) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::MagicWand) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::MagicWand),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_artboards" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Artboards) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Artboards) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Artboards),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_symbols" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Symbols) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Symbols) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Symbols),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_brushes" => {
-                    // Brushes is a TOGGLE-ONLY panel that is NOT in the default
-                    // layout, so "currently shown" is "in a dock group"
-                    // (`find_panel`), NOT "absent from hidden_panels"
-                    // (`is_panel_visible`, which reports a never-shown panel as
-                    // visible). Gate on actual group membership so the first
-                    // click summons the panel and a second click closes it.
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Brushes) {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_close_panel(addr),
-                            );
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Brushes),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_align" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Align) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Align) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Align),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_boolean" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Boolean) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Boolean) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Boolean),
-                            );
-                        }
-                    }));
-                }
-                "toggle_panel_opacity" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.workspace_layout.is_panel_visible(super::workspace::PanelKind::Opacity) {
-                            if let Some(addr) = find_panel(&st.workspace_layout, super::workspace::PanelKind::Opacity) {
-                                crate::workspace::layout_apply::layout_apply(
-                                    &mut st.workspace_layout,
-                                    &crate::workspace::layout_apply::op_close_panel(addr),
-                                );
-                            }
-                        } else {
-                            crate::workspace::layout_apply::layout_apply(
-                                &mut st.workspace_layout,
-                                &crate::workspace::layout_apply::op_show_panel(super::workspace::PanelKind::Opacity),
-                            );
-                        }
+                // Window menu: panel visibility. All 16 dock panels route
+                // through the ONE generic native toggle_panel path
+                // (renderer::dispatch_action), keyed by the panel-id string
+                // recovered from the cmd (`toggle_panel_<id>` -> `<id>`, the
+                // bundle snake_case name, e.g. `magic_wand`, `gradient`,
+                // `concepts`). This replaces the 15 legacy per-panel arms; see
+                // actions.yaml `toggle_panel` for the behavior contract (show /
+                // hide against the dock model; Color also resets its panel-local
+                // mode to HSB on reopen, handled inside the native path).
+                c if c.starts_with("toggle_panel_") => {
+                    let panel_id = c.strip_prefix("toggle_panel_").unwrap_or("").to_string();
+                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        let mut p = serde_json::Map::new();
+                        p.insert("panel".to_string(), serde_json::json!(panel_id));
+                        let _ = crate::interpreter::renderer::dispatch_action(
+                            "toggle_panel", &p, st);
                     }));
                 }
                 "workspace_submenu" | "appearance_submenu" => {
@@ -655,16 +425,6 @@ pub(crate) fn MenuBarView(
                     (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                         let _ = crate::interpreter::renderer::dispatch_action(
                             &action, &serde_json::Map::new(), st);
-                    }));
-                }
-                // Concepts panel toggle: not one of the legacy per-panel arms,
-                // so dispatch the generic toggle_panel action with its param.
-                "toggle_panel_concepts" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let mut p = serde_json::Map::new();
-                        p.insert("panel".to_string(), serde_json::json!("concepts"));
-                        let _ = crate::interpreter::renderer::dispatch_action(
-                            "toggle_panel", &p, st);
                     }));
                 }
                 _ => {}
@@ -1085,8 +845,7 @@ pub(crate) fn MenuBarView(
 /// - `active_document.*`: the 6 document predicates (selection, undo/redo,
 ///   modified, has_filename = filename does NOT start with "Untitled-").
 /// - `workspace.has_saved_layout`: active layout != the system "Workspace".
-/// - `panels.<id>`: is_panel_visible for the 14 Window-menu panel ids;
-///   `concepts` has no `PanelKind` in this app, so it resolves to not-visible.
+/// - `panels.<id>`: is_panel_visible for all 16 Window-menu panel ids.
 /// - `panes.<id>`: is_pane_visible for toolbar / dock.
 fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     use super::workspace::{PaneKind, PanelKind, WORKSPACE_LAYOUT_NAME};
@@ -1115,15 +874,16 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
         }),
     };
 
-    // Window-menu panel id -> PanelKind (the `panels.*` namespace). `concepts`
-    // has no PanelKind in this app, so it resolves to not-visible defensively
-    // (mirrors Python's `_menu_panel_kinds` getattr fallback).
-    let panel_kinds: [(&str, PanelKind); 14] = [
+    // Window-menu panel id -> PanelKind (the `panels.*` namespace). All 16
+    // dock panels now have a PanelKind, so each check mark tracks live
+    // `is_panel_visible` group membership (gradient / concepts included).
+    let panel_kinds: [(&str, PanelKind); 16] = [
         ("artboards", PanelKind::Artboards),
         ("layers", PanelKind::Layers),
         ("color", PanelKind::Color),
         ("swatches", PanelKind::Swatches),
         ("brushes", PanelKind::Brushes),
+        ("gradient", PanelKind::Gradient),
         ("stroke", PanelKind::Stroke),
         ("properties", PanelKind::Properties),
         ("character", PanelKind::Character),
@@ -1133,12 +893,12 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
         ("magic_wand", PanelKind::MagicWand),
         ("opacity", PanelKind::Opacity),
         ("symbols", PanelKind::Symbols),
+        ("concepts", PanelKind::Concepts),
     ];
     let mut panels = serde_json::Map::new();
     for (id, kind) in panel_kinds {
         panels.insert(id.to_string(), J::Bool(st.workspace_layout.is_panel_visible(kind)));
     }
-    panels.insert("concepts".to_string(), J::Bool(false));
 
     let mut panes = serde_json::Map::new();
     for (id, kind) in [("toolbar", PaneKind::Toolbar), ("dock", PaneKind::Dock)] {
@@ -1353,8 +1113,93 @@ mod tests {
             "panels.layers checked_when must equal is_panel_visible",
         );
         assert!(eval2("panels.layers"), "Layers checked after op_show_panel");
-        // concepts has no PanelKind -> resolves to not-visible.
-        assert!(!eval2("panels.concepts"), "concepts checked is false (no PanelKind)");
+        // concepts now HAS a PanelKind but is not in the default layout, so it
+        // is still unchecked until summoned; gradient likewise.
+        assert!(!eval2("panels.concepts"), "concepts unchecked (not in a group)");
+        assert!(!eval2("panels.gradient"), "gradient unchecked (not in a group)");
+        // Summon concepts via the generic toggle path -> now checked.
+        st.workspace_layout.show_panel_in_last_group(PanelKind::Concepts);
+        let ctx3 = build_menu_ctx(&st);
+        let eval3 = |e: &str| crate::interpreter::expr::eval(e, &ctx3).to_bool();
+        assert!(eval3("panels.concepts"), "concepts checked after summon");
+    }
+
+    // The bug (JYH live): Window > Gradient did nothing in the Rust app,
+    // because gradient/concepts had no PanelKind and no dispatch arm (concepts
+    // hit the log-stub). These tests drive the ACTUAL production path —
+    // `dispatch_action("toggle_panel", {panel})` — that the collapsed generic
+    // menu arm now routes through, for the two panels that were unreachable.
+    fn toggle_panel(st: &mut AppState, panel: &str) {
+        let mut p = serde_json::Map::new();
+        p.insert("panel".to_string(), serde_json::json!(panel));
+        let _ = crate::interpreter::renderer::dispatch_action("toggle_panel", &p, st);
+    }
+
+    fn seeded_state() -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        st
+    }
+
+    #[test]
+    fn toggle_panel_gradient_shows_in_last_group_then_hides() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = seeded_state();
+        let (_, dock) = st.workspace_layout.anchored.first().unwrap();
+        let dock_id = dock.id;
+        let last = dock.groups.len() - 1;
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Gradient));
+
+        // First toggle: SHOW -> lands in dock_main's LAST group, activated.
+        toggle_panel(&mut st, "gradient");
+        assert!(st.workspace_layout.is_panel_visible(PanelKind::Gradient));
+        let g = st.workspace_layout.dock(dock_id).unwrap();
+        assert!(
+            g.groups[last].panels.contains(&PanelKind::Gradient),
+            "gradient summoned into the LAST group of dock_main",
+        );
+        assert_eq!(
+            g.groups[last].active,
+            g.groups[last].panels.len() - 1,
+            "gradient is the active tab",
+        );
+
+        // Second toggle: HIDE.
+        toggle_panel(&mut st, "gradient");
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Gradient));
+    }
+
+    #[test]
+    fn toggle_panel_concepts_shows_then_hides() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = seeded_state();
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Concepts));
+        toggle_panel(&mut st, "concepts");
+        assert!(st.workspace_layout.is_panel_visible(PanelKind::Concepts));
+        toggle_panel(&mut st, "concepts");
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Concepts));
+    }
+
+    #[test]
+    fn toggle_off_last_panel_in_group_removes_the_group() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = seeded_state();
+        let (_, dock) = st.workspace_layout.anchored.first().unwrap();
+        let dock_id = dock.id;
+        let before = dock.groups.len();
+        // Default group 0 = [color, swatches]; both are on screen, so the
+        // first toggle of each HIDES it. Emptying the group must drop it.
+        assert!(st.workspace_layout.is_panel_visible(PanelKind::Color));
+        assert!(st.workspace_layout.is_panel_visible(PanelKind::Swatches));
+        toggle_panel(&mut st, "swatches");
+        toggle_panel(&mut st, "color");
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Color));
+        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Swatches));
+        let after = st.workspace_layout.dock(dock_id).unwrap().groups.len();
+        assert_eq!(after, before - 1, "emptied group auto-removed on toggle-off");
     }
 
     #[test]

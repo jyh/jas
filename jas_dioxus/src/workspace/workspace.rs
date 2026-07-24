@@ -57,10 +57,18 @@ pub enum PanelKind {
     Opacity,
     MagicWand,
     Symbols,
+    Gradient,
+    Concepts,
 }
 
 impl PanelKind {
-    /// All panel kinds, for iteration.
+    /// All panel kinds that seed the legacy native Window-menu all-panels
+    /// iteration. Brushes, Gradient, and Concepts are deliberately omitted:
+    /// each is a toggle-only panel that is NOT part of the default layout and
+    /// is surfaced solely through the YAML menubar's Window entry, so none of
+    /// them needs to seed this default iteration. (Mirrors the Swift
+    /// `PanelKind.all` and OCaml `all_panel_kinds`, which likewise exclude the
+    /// toggle-only panels.)
     pub const ALL: &[PanelKind] = &[
         Self::Layers,
         Self::Color,
@@ -792,6 +800,48 @@ impl WorkspaceLayout {
         // Fallback: first anchored dock's first group.
         if let Some((_, dock)) = self.anchored.first_mut() {
             if let Some(group) = dock.groups.first_mut() {
+                group.panels.push(kind);
+                group.active = group.panels.len() - 1;
+            } else {
+                dock.groups.push(PanelGroup::new(vec![kind]));
+            }
+        }
+        self.bump();
+    }
+
+    /// Show a panel per the Window-menu `toggle_panel` contract
+    /// (actions.yaml): make the primary anchored dock (`dock_main`) visible
+    /// and expanded, append the panel to that dock's LAST group, and make it
+    /// the group's active (front) tab. This is the UX-level "summon" used by
+    /// the generic panel-toggle path — distinct from the gated low-level
+    /// `show_panel` op (which restores a panel to its prior/first group and
+    /// does not touch pane visibility). Both active ports (Rust + Swift)
+    /// implement this identically; see JasSwift `showPanelInLastGroup`.
+    ///
+    /// No-op when the panel is already on screen (never a duplicate). Any
+    /// previously-recorded hidden state (closed-list membership, saved
+    /// position) is cleared, since the panel is being re-placed at the tail.
+    pub fn show_panel_in_last_group(&mut self, kind: PanelKind) {
+        // Already in some dock group? It is on screen; nothing to do.
+        if self.is_panel_visible(kind) {
+            return;
+        }
+        // Drop any stale closed-panel / saved-position record: the summon
+        // places the panel at dock_main's tail, not at its old home.
+        if let Some(pos) = self.hidden_panels.iter().position(|&k| k == kind) {
+            self.hidden_panels.remove(pos);
+        }
+        self.hidden_panel_positions.retain(|(k, _)| *k != kind);
+        // "Dock made visible": un-hide the dock pane if a pane layout exists.
+        if let Some(pl) = self.pane_layout.as_mut() {
+            pl.show_pane(PaneKind::Dock);
+        }
+        // Append to the LAST group of dock_main (the primary anchored dock),
+        // expanding the dock and that group, and activate the new tab.
+        if let Some((_, dock)) = self.anchored.first_mut() {
+            dock.collapsed = false; // expanded (not the icon strip)
+            if let Some(group) = dock.groups.last_mut() {
+                group.collapsed = false;
                 group.panels.push(kind);
                 group.active = group.panels.len() - 1;
             } else {
@@ -2021,6 +2071,54 @@ mod tests {
         let has_layers = l.dock(id).unwrap().groups.iter()
             .any(|g| g.panels.contains(&PanelKind::Layers));
         assert!(has_layers, "panel must be restored somewhere");
+    }
+
+    #[test]
+    fn show_in_last_group_lands_in_dock_main_last_group() {
+        // Brushes is toggle-only and NOT in the default layout, so summoning
+        // it exercises the fresh-show path. Per the toggle_panel contract it
+        // must land in dock_main's LAST group and become that group's active
+        // tab — NOT the first group.
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let last = l.dock(id).unwrap().groups.len() - 1;
+        assert!(!l.is_panel_visible(PanelKind::Brushes));
+        l.show_panel_in_last_group(PanelKind::Brushes);
+        let (g, pi) = panel_of(&l, id, PanelKind::Brushes);
+        assert_eq!(g, last, "summoned panel must land in dock_main's LAST group");
+        let group = &l.dock(id).unwrap().groups[last];
+        assert_eq!(group.active, pi, "summoned panel must be the active tab");
+        assert_eq!(pi, group.panels.len() - 1, "appended at the tail");
+    }
+
+    #[test]
+    fn show_in_last_group_expands_dock_and_group() {
+        // A collapsed dock / group is expanded when a panel is summoned.
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let last = l.dock(id).unwrap().groups.len() - 1;
+        l.dock_mut(id).unwrap().collapsed = true;
+        l.dock_mut(id).unwrap().groups[last].collapsed = true;
+        l.show_panel_in_last_group(PanelKind::Brushes);
+        assert!(!l.dock(id).unwrap().collapsed, "dock expanded on summon");
+        assert!(!l.dock(id).unwrap().groups[last].collapsed, "target group expanded");
+    }
+
+    #[test]
+    fn show_in_last_group_noop_when_already_visible() {
+        // Color is in the default layout (group 0). Summoning it is a no-op:
+        // no duplicate, and it stays put in group 0.
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let before = l.dock(id).unwrap().groups.iter()
+            .filter(|g| g.panels.contains(&PanelKind::Color)).count();
+        l.show_panel_in_last_group(PanelKind::Color);
+        let after = l.dock(id).unwrap().groups.iter()
+            .filter(|g| g.panels.contains(&PanelKind::Color)).count();
+        assert_eq!(before, 1);
+        assert_eq!(after, 1, "no duplicate; already-visible summon is a no-op");
+        let (g, _) = panel_of(&l, id, PanelKind::Color);
+        assert_eq!(g, 0, "Color stays in its original group");
     }
 
     #[test]

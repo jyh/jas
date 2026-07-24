@@ -173,6 +173,8 @@ pub fn panel_kind_to_content_id(kind: crate::workspace::workspace::PanelKind) ->
         PanelKind::Opacity => "opacity_panel_content",
         PanelKind::MagicWand => "magic_wand_panel_content",
         PanelKind::Symbols => "symbols_panel_content",
+        PanelKind::Gradient => "gradient_panel_content",
+        PanelKind::Concepts => "concepts_panel_content",
     }
 }
 
