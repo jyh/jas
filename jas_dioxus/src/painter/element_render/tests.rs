@@ -13,8 +13,8 @@
 
 use super::{
     circle_painter_inputs, element_needs_legacy, ellipse_painter_inputs, emit_element,
-    emit_shape_paint, line_painter_inputs, polyline_painter_inputs, rect_painter_inputs, ConvGeom,
-    ShapePaint,
+    emit_shape_paint, line_painter_inputs, polygon_painter_inputs, polyline_painter_inputs,
+    rect_painter_inputs, ConvGeom, ShapePaint,
 };
 use crate::painter::recording::Command;
 use crate::geometry::element::{
@@ -482,7 +482,18 @@ fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
         ("ref_circle_convert", circle_case(), 0.8),
         ("ref_ellipse_convert", ellipse_case(), 1.0),
         ("ref_polyline_convert", polyline_case(), 0.75),
+        ("ref_polygon_convert", polygon_case(), 0.6),
     ]
+}
+
+fn polygon_case() -> ShapePaint {
+    let e = PolygonElem {
+        points: vec![(40.0, 180.0), (100.0, 180.0), (80.0, 240.0), (50.0, 230.0)],
+        fill: fill_op(Color::rgb(0.2, 0.6, 0.3), 0.9),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    polygon_painter_inputs(&e, super::poly_bbox(&e.points)).expect("convertible polygon")
 }
 
 fn polyline_case() -> ShapePaint {
@@ -748,4 +759,41 @@ fn inside_align_stroke_uses_clip_lowering() {
         }
         other => panic!("expected a stroke_path at index 2, got {other:?}"),
     }
+}
+
+// -- Polygon -----------------------------------------------------------------
+
+fn plain_polygon_elem() -> PolygonElem {
+    PolygonElem {
+        points: vec![(40.0, 180.0), (100.0, 180.0), (80.0, 240.0), (50.0, 230.0)],
+        fill: fill(Color::rgb(0.2, 0.6, 0.3)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    }
+}
+
+#[test]
+fn polygon_closed_path_is_convertible() {
+    let e = plain_polygon_elem();
+    let sp = polygon_painter_inputs(&e, super::poly_bbox(&e.points)).expect("polygon converts");
+    if let ConvGeom::Path(p) = &sp.geom {
+        // Closed: a ClosePath command terminates the ring.
+        assert!(matches!(p.last(), Some(crate::geometry::element::PathCommand::ClosePath)));
+    } else {
+        panic!("polygon lowers to a path");
+    }
+    assert!(sp.fill.is_some() && sp.stroke.is_some());
+}
+
+#[test]
+fn polygon_empty_points_not_convertible() {
+    let e = PolygonElem { points: vec![], ..plain_polygon_elem() };
+    assert!(polygon_painter_inputs(&e, super::poly_bbox(&e.points)).is_none());
+}
+
+#[test]
+fn polygon_freeform_gradient_not_convertible() {
+    let mut e = plain_polygon_elem();
+    e.stroke_gradient = Some(freeform_grad());
+    assert!(polygon_painter_inputs(&e, super::poly_bbox(&e.points)).is_none());
 }
