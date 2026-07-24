@@ -1264,7 +1264,8 @@ fn draw_element_body(
                 ctx.line_to(lx2, ly2);
                 stroke_aligned(ctx, stroke_align);
             }
-            // Arrowheads
+            // Arrowheads — oriented off the ORIGINAL endpoints (e.x1..e.y2),
+            // never the shortened lx1..ly2 used for the stroke body.
             if !outline {
                 if let Some(s) = e.stroke.as_ref() {
                     let color = css_color(&s.color);
@@ -1646,7 +1647,10 @@ fn draw_element_body(
                     stroke_aligned(ctx, stroke_align);
                 }
             }
-            // Arrowheads
+            // Arrowheads — oriented off the ORIGINAL `e.d`, never the
+            // shortened/trimmed `stroke_cmds`. See the orientation contract on
+            // draw_arrowheads: a large setback can fold a trimmed anchor past
+            // the final control point and flip a tangent sampled off it.
             if !outline {
                 if let Some(s) = e.stroke.as_ref() {
                     let color = css_color(&s.color);

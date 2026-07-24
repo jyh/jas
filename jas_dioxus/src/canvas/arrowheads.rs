@@ -305,6 +305,14 @@ pub fn end_tangent(cmds: &[PathCommand]) -> (f64, f64, f64) {
 
 /// Draw arrowheads for a path element.
 /// `stroke_color` is used for outline shapes; filled shapes use the stroke color as fill.
+///
+/// ORIENTATION CONTRACT (see `orientation_from_original_survives_oversized_setback`):
+/// `cmds` MUST be the ORIGINAL path commands, never the shortened / arc-length-
+/// trimmed stroke path. Head position is the original endpoint and head angle is
+/// the original endpoint tangent. A large setback (e.g. arrowhead scale 200) can
+/// displace a trimmed anchor PAST the final control point, reversing the sampled
+/// tangent and flipping the head — so the head is always oriented off the path as
+/// authored, decoupled from whatever the (trimmed) stroke draws.
 pub fn draw_arrowheads(
     ctx: &CanvasRenderingContext2d,
     cmds: &[PathCommand],
@@ -390,4 +398,66 @@ fn draw_one(
         }
     }
     ctx.restore();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::{FRAC_PI_2, PI};
+
+    fn angle_diff(a: f64, b: f64) -> f64 {
+        ((a - b + PI).rem_euclid(2.0 * PI) - PI).abs()
+    }
+
+    /// Orientation contract (ARROWTRIM commit 1): the arrowhead angle is
+    /// sampled from the ORIGINAL path tangent, never from the shortened /
+    /// trimmed stroke geometry. This pins the trap the true-trim work must
+    /// not reintroduce: at a scale-200-class setback the old anchor
+    /// displacement moves the endpoint PAST the final control point, and a
+    /// tangent sampled off THAT geometry flips ~180 degrees.
+    #[test]
+    fn orientation_from_original_survives_oversized_setback() {
+        // Cubic riding the +x axis: 0,0 -> ctrl1(20,0) -> ctrl2(40,0) -> end(44,0).
+        let cmds = vec![
+            MoveTo { x: 0.0, y: 0.0 },
+            CurveTo { x1: 20.0, y1: 0.0, x2: 40.0, y2: 0.0, x: 44.0, y: 0.0 },
+        ];
+        let (ex, ey, orig) = end_tangent(&cmds);
+        assert!((ex - 44.0).abs() < 1e-9 && ey.abs() < 1e-9);
+        // True end tangent points along +x (0 rad).
+        assert!(orig.abs() < 1e-9, "true end tangent should be 0, got {orig}");
+
+        // ctrl2->endpoint distance is 4.0; a setback that exceeds it folds
+        // the endpoint back to the far side of ctrl2 under the old shorten.
+        let shortened = shorten_path(&cmds, 0.0, 12.0);
+        let (_, _, folded) = end_tangent(&shortened);
+        assert!(
+            angle_diff(folded, orig) > FRAC_PI_2,
+            "shortened-geometry tangent must flip past 90 degrees (got diff {})",
+            angle_diff(folded, orig)
+        );
+
+        // Contract: the head is oriented off the ORIGINAL path, unchanged by
+        // any setback. draw_arrowheads(&e.d, ..) at the render call sites
+        // upholds this by construction.
+        let (_, _, head_angle) = end_tangent(&cmds);
+        assert!((head_angle - orig).abs() < 1e-9);
+    }
+
+    /// The start head mirrors the contract: its angle is the original
+    /// first-segment tangent, invariant to the start setback.
+    #[test]
+    fn start_orientation_is_invariant_to_setback() {
+        let cmds = vec![
+            MoveTo { x: 0.0, y: 0.0 },
+            CurveTo { x1: 4.0, y1: 0.0, x2: 24.0, y2: 0.0, x: 44.0, y: 0.0 },
+        ];
+        let (_, _, orig) = start_tangent(&cmds);
+        let shortened = shorten_path(&cmds, 12.0, 0.0);
+        let (_, _, moved) = start_tangent(&shortened);
+        assert!(
+            angle_diff(moved, orig) > FRAC_PI_2,
+            "shortened-geometry start tangent must flip"
+        );
+    }
 }
