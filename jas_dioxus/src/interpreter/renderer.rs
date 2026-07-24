@@ -5189,27 +5189,29 @@ fn is_toolbar_tool_slot(el: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    let id = get_id(el);
-    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-    let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
+/// Resolve an icon_button's checked/highlight state from its
+/// `bind.checked` expression + `style.checked_bg`, evaluated against the
+/// render ctx. Returns `(checked, background_fragment)`.
+///
+/// ALWAYS emits a concrete `background:` (the resolved `checked_bg`, or
+/// `transparent`) so a checked→unchecked transition clears the highlight
+/// rather than leaving the prior background on a reused node (the Align-To
+/// note below).
+///
+/// Extracted (CHAINGLOW) for two reasons: (1) the identity `key` and the
+/// highlight background must be driven by the SAME freshly-evaluated
+/// `checked` — see render_icon_button's `key` — and (2) render_icon_button
+/// itself returns an Element that needs component context, so this pure
+/// helper is the headless test target for what the button DISPLAYS.
+fn icon_button_bg_style(el: &serde_json::Value, ctx: &serde_json::Value) -> (bool, String) {
+    let checked = el
+        .get("bind")
+        .and_then(|b| b.get("checked"))
+        .and_then(|v| v.as_str())
+        .map(|expr_str| expr::eval(expr_str, ctx).to_bool())
+        .unwrap_or(false);
 
-    // Evaluate bind.checked for active/highlighted state
-    let checked = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()) {
-        expr::eval(expr_str, ctx).to_bool()
-    } else {
-        false
-    };
-    // Evaluate bind.disabled to grey the button out. Used by
-    // op_link_indicator to disable while the selection has no mask.
-    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
-        expr::eval(expr_str, ctx).to_bool()
-    } else {
-        false
-    };
-
-    // Get checked_bg from style spec, resolve template expressions
+    // Resolve checked_bg from the style spec, substituting {{...}} templates.
     let checked_bg = if let Some(raw) = el.get("style").and_then(|s| s.get("checked_bg")).and_then(|v| v.as_str()) {
         let resolved = if raw.contains("{{") { expr::eval_text(raw, ctx) } else { raw.to_string() };
         if resolved.is_empty() || resolved.contains("{{") {
@@ -5229,6 +5231,25 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         format!("background:{checked_bg};")
     } else {
         "background:transparent;".to_string()
+    };
+    (checked, bg_style)
+}
+
+fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+    let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
+
+    // Evaluate bind.checked + resolve the highlight background (shared with
+    // the identity key below so both track the same fresh `checked`).
+    let (checked, bg_style) = icon_button_bg_style(el, ctx);
+    // Evaluate bind.disabled to grey the button out. Used by
+    // op_link_indicator to disable while the selection has no mask.
+    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(expr_str, ctx).to_bool()
+    } else {
+        false
     };
 
     // Resolve the icon name. Resolution order:
@@ -5504,6 +5525,19 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id_for_keydown = id.clone();
     rsx! {
         div {
+            // Identity-coupled key: remount whenever the highlight/disabled
+            // state flips so the fresh inline `background` (and greyed-out
+            // opacity) actually reach the DOM. The icon glyph rides in a
+            // child `dangerous_inner_html` node that Dioxus rewrites whole
+            // on each repaint, so the TINT always tracked state; the checked
+            // highlight lives in THIS reused root div's multi-segment `style`
+            // string and stuck at its first-enabled value across repaints
+            // (the same stale-DOM-after-repaint class LINKHILITE hit with the
+            // combo's controlled <input> — "even when it did repaint" the DOM
+            // kept its old value). build_click_handler already bumps revision
+            // in-spawn, so the missing medicine was only this key. Mirrors the
+            // `key: "{{id}}-{{value}}"` on render_number_input / render_combo_box.
+            key: "{id}-{checked}-{disabled}",
             id: "{id}",
             class: "jas-focusable",
             tabindex: "{tabindex_val}",
@@ -10859,6 +10893,69 @@ mod tests {
             "end combo (mirrored sibling) displays 200 — NOT the stale 100, got {end_disp:?}");
         assert!(chain_disp,
             "chain highlight SURVIVES the scale edit (checked binds true)");
+    }
+
+    // ── CHAINGLOW: the icon_button highlight must track on→off ────────
+    //
+    // The Stroke chain toggle (stroke.yaml stk_link_arrowhead_scale,
+    // icon_button, `bind.checked: panel.link_arrowhead_scale`) told the
+    // truth in the struct but the checked HIGHLIGHT stuck ON after the
+    // first enable while the icon TINT tracked. Two visual layers, two DOM
+    // paths: the glyph is `dangerous_inner_html` (rewritten whole each
+    // repaint → tint re-evaluates); the highlight is the `background` in the
+    // reused root div's `style` string (stale-DOM-after-repaint, the class
+    // LINKHILITE hit with the combo <input>). The interpreter layer is
+    // honest — this pin proves it by rebuilding the dock ctx exactly as
+    // build_dock_groups does and evaluating render_icon_button's REAL
+    // highlight decision (icon_button_bg_style: the same checked eval +
+    // checked_bg resolve the button renders, and the value the identity key
+    // keys on) across a full on→OFF cycle. The fix is the identity `key`
+    // that remounts the div on each `checked` flip; this locks the decision
+    // it feeds.
+    fn chain_toggle_el() -> serde_json::Value {
+        // The shipped stroke.yaml element (bind.checked only; no checked_bg
+        // → the #505050 default). Pinned in the reference bundle test.
+        serde_json::json!({
+            "id": "stk_link_arrowhead_scale",
+            "type": "icon_button",
+            "icon": "chain",
+            "bind": { "checked": "panel.link_arrowhead_scale" },
+        })
+    }
+
+    #[test]
+    fn chainglow_icon_button_highlight_tracks_on_off() {
+        let el = chain_toggle_el();
+        let chain_effects = [
+            serde_json::json!({"set_panel_state": {"key": "link_arrowhead_scale",
+                "value": "not panel.link_arrowhead_scale"}}),
+            serde_json::json!({"set": {"stroke_link_arrowhead_scale":
+                "not state.stroke_link_arrowhead_scale"}}),
+        ];
+        let mut st = make_state_with_colors("ffffff", "000000");
+
+        // ── ctx #0: initial render — chain OFF → transparent, no highlight. ──
+        let ctx0 = build_stroke_render_ctx(&st);
+        let (checked0, bg0) = icon_button_bg_style(&el, &ctx0);
+        assert!(!checked0, "chain starts unchecked");
+        assert_eq!(bg0, "background:transparent;", "no highlight when off");
+
+        // ── Click 1 (enable): the highlight must turn ON. ──
+        run_yaml_effects(&chain_effects, &ctx0, &mut st);
+        let ctx1 = build_stroke_render_ctx(&st);
+        let (checked1, bg1) = icon_button_bg_style(&el, &ctx1);
+        assert!(checked1, "checked true after first enable");
+        assert_eq!(bg1, "background:#505050;", "highlight ON after enable");
+
+        // ── Click 2 (disable): the highlight must clear — NOT stick ON
+        //    (the reported bug). The key `{id}-{checked}` flips true→false,
+        //    remounting the div so this fresh transparent background lands. ──
+        run_yaml_effects(&chain_effects, &ctx1, &mut st);
+        let ctx2 = build_stroke_render_ctx(&st);
+        let (checked2, bg2) = icon_button_bg_style(&el, &ctx2);
+        assert!(!checked2, "checked back to false after second click");
+        assert_eq!(bg2, "background:transparent;",
+            "highlight CLEARS on disable — does not stick ON");
     }
 
     // ── radio widget: on_check partitioning ───────────────────
