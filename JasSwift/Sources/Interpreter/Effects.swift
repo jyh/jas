@@ -202,6 +202,47 @@ func runEffects(
                model: model, actionName: actionName, diagnostics: &diags)
 }
 
+/// Run an input/combo widget's `event: commit` behaviors after the native
+/// two-way write. The Swift port of Rust `renderer.rs`
+/// `run_input_commit_behavior`: it patches the just-committed value into
+/// `panel.<field>` and `event.value` in the eval ctx — so effects reading
+/// `panel.<field>` see the fresh value rather than the stale render-time
+/// snapshot the panel scope was built from — then runs each commit
+/// behavior's `effects` through the shared `runEffects` engine (no parallel
+/// dispatcher). Scoped to the `commit` event, so `change`-event combos
+/// (gradient angle / aspect) are untouched, exactly like Rust. No-op when
+/// the widget declares no `commit` behavior. The caller owns the active
+/// panel (`set_panel_state` targets it) — the combo hook sets it before
+/// calling, and tests set it explicitly.
+func runInputCommitBehavior(
+    element: [String: Any],
+    field: String,
+    committed: Any?,
+    context: [String: Any],
+    store: StateStore,
+    model: Model
+) {
+    guard let behavior = element["behavior"] as? [[String: Any]] else { return }
+    let commitBehaviors = behavior.filter {
+        ($0["event"] as? String) == "commit"
+    }
+    if commitBehaviors.isEmpty { return }
+    var ctx = context
+    if var panelScope = ctx["panel"] as? [String: Any] {
+        panelScope[field] = committed
+        ctx["panel"] = panelScope
+    }
+    ctx["event"] = ["value": committed as Any] as [String: Any]
+    let platformEffects = alignPlatformEffects(model: model)
+    for entry in commitBehaviors {
+        let effects = (entry["effects"] as? [Any]) ?? []
+        if !effects.isEmpty {
+            runEffects(effects, ctx: ctx, store: store,
+                       platformEffects: platformEffects)
+        }
+    }
+}
+
 // MARK: - Internal
 
 /// Route a `set:` target to the right scope in the StateStore.

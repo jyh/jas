@@ -42,6 +42,27 @@ public func strokePanelStateOverrides(store: StateStore) -> [String: Any] {
     return out
 }
 
+/// LINKSCALE gap closure. The Stroke panel's arrowhead-scale combos
+/// (`stk_start_arrowhead_scale` / `stk_end_arrowhead_scale`) bind to
+/// `panel.<field>` ONLY, so their native two-way write lands in the panel
+/// scope alone. But `applyStrokePanelToSelection` reads the scale from the
+/// GLOBAL `stroke_<field>` (via `store.getAll()`), so a committed scale
+/// would never reach apply-to-selection. Rust has no such gap — its native
+/// two-way write (`set_stroke_field`) mutates the unified `stroke_panel`
+/// struct, where the panel field and the global are one and the same; the
+/// reference interpreter's `_commit` writes both scopes explicitly. Swift
+/// keeps panel and global as SEPARATE dicts, so the combo's panel-only
+/// native write must mirror the committed scale into the global here.
+/// No-op for non-scale keys. Runs BEFORE `notifyPanelStateChanged` so the
+/// apply pass reads the fresh value.
+public func mirrorStrokeScaleCommitToGlobal(
+    store: StateStore, key: String, value: Any?
+) {
+    guard key == "start_arrowhead_scale" || key == "end_arrowhead_scale"
+    else { return }
+    store.set("stroke_\(key)", value)
+}
+
 public func strokePanelLiveOverrides(model: Model) -> [String: Any] {
     let doc = model.document
     var stroke: Stroke? = nil
