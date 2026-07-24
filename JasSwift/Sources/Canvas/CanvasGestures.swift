@@ -31,6 +31,16 @@ enum CanvasNavIntent: Equatable {
     /// viewport-local pixels. The document point under the anchor stays under
     /// the anchor; the zoom clamps to the app's `[min_zoom, max_zoom]`.
     case zoomAbout(factor: Double, anchorX: Double, anchorY: Double)
+    /// Zoom about `(anchorX, anchorY)` AND pan by a concurrent screen-pixel
+    /// delta in one atomic frame — the "pinch while sliding" compose (SWNAV-008,
+    /// Figma / native-Preview feel). The document point under the anchor ends up
+    /// under the anchor DISPLACED by `(panDX, panDY)`; the zoom clamps as in
+    /// `zoomAbout` and the pan is unscaled by zoom (as in `pan`). This is the
+    /// iOS-ready shape: a UIKit pinch recognizer's `.changed` already carries
+    /// both a scale and a centroid translation, which map straight onto this
+    /// case. A zero pan delta reduces it to `zoomAbout` exactly.
+    case zoomPan(factor: Double, anchorX: Double, anchorY: Double,
+                 panDX: Double, panDY: Double)
 }
 
 /// Pure view-state math shared by the navigation gestures and the existing
@@ -62,6 +72,29 @@ enum CanvasNavMath {
         let zNew = min(max(zoom * factor, minZoom), maxZoom)
         // Solve for the offset that keeps (docAx, docAy) under the anchor.
         return (zNew, anchorX - docAx * zNew, anchorY - docAy * zNew)
+    }
+
+    /// Composed zoom-about-anchor + concurrent screen-pixel pan, applied as one
+    /// atomic frame (SWNAV-008). Defined as `zoomAbout` FOLLOWED BY a pure
+    /// screen-pixel `pan` — the pan is added AFTER the zoom and is NOT rescaled
+    /// by the new zoom (mirroring doc.pan.apply, whose offset is itself in
+    /// screen pixels). The net invariant: the document point under
+    /// `(anchorX, anchorY)` before the frame lands under the DISPLACED anchor
+    /// `(anchorX + panDX, anchorY + panDY)` after — the "zoom about a moving
+    /// anchor" law that gives the Figma / native-Preview pinch-while-sliding
+    /// feel. A zero pan delta collapses this to `zoomAbout` exactly, so a
+    /// stationary trackpad pinch is byte-identical to the SH-2 zoom path.
+    static func zoomAboutWithPan(zoom: Double, offsetX: Double, offsetY: Double,
+                                 factor: Double, anchorX: Double, anchorY: Double,
+                                 panDX: Double, panDY: Double,
+                                 minZoom: Double, maxZoom: Double)
+        -> (zoom: Double, offsetX: Double, offsetY: Double) {
+        let (z, ox, oy) = zoomAbout(
+            zoom: zoom, offsetX: offsetX, offsetY: offsetY,
+            factor: factor, anchorX: anchorX, anchorY: anchorY,
+            minZoom: minZoom, maxZoom: maxZoom)
+        let (ox2, oy2) = pan(offsetX: ox, offsetY: oy, dx: panDX, dy: panDY)
+        return (z, ox2, oy2)
     }
 }
 

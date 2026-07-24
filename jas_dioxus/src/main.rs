@@ -5,6 +5,7 @@ mod cross_language_test;
 mod document;
 mod geometry;
 mod interpreter;
+mod painter;
 mod panels;
 mod recorder;
 mod tools;

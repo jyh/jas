@@ -36,16 +36,19 @@ use crate::workspace::workspace::{
 use crate::workspace::pane::PaneId;
 use crate::workspace::workspace::PaneKind;
 
-/// Parse a panel-kind string to its `PanelKind`. Complete over all 13 kinds
+/// Parse a panel-kind string to its `PanelKind`. Complete over all 16 kinds
 /// (matches `test_json::parse_panel_kind`); an unknown/garbage string falls
 /// back to `Layers` so a malformed op never panics. The pre-3d-2 harness shim
 /// had a 5-kind subset; the runtime dispatcher needs the full set because the
-/// production `show_panel` handler covers every `PanelKind`.
-fn parse_panel_kind(s: &str) -> PanelKind {
+/// production `show_panel` handler covers every `PanelKind`. Public so the
+/// generic native `toggle_panel` dispatch (renderer) can resolve a bundle
+/// panel-id string to its `PanelKind`.
+pub fn parse_panel_kind(s: &str) -> PanelKind {
     match s {
         "color" => PanelKind::Color,
         "swatches" => PanelKind::Swatches,
         "brushes" => PanelKind::Brushes,
+        "gradient" => PanelKind::Gradient,
         "stroke" => PanelKind::Stroke,
         "properties" => PanelKind::Properties,
         "character" => PanelKind::Character,
@@ -56,6 +59,7 @@ fn parse_panel_kind(s: &str) -> PanelKind {
         "opacity" => PanelKind::Opacity,
         "magic_wand" => PanelKind::MagicWand,
         "symbols" => PanelKind::Symbols,
+        "concepts" => PanelKind::Concepts,
         _ => PanelKind::Layers,
     }
 }
@@ -63,13 +67,14 @@ fn parse_panel_kind(s: &str) -> PanelKind {
 /// Serialize a `PanelKind` to its canonical lowercase op string (the inverse of
 /// `parse_panel_kind`; matches `test_json::panel_kind_str`). Production
 /// `show_panel` sites use this to build the op JSON, so the round-trip is
-/// lossless across all 13 kinds.
+/// lossless across all 16 kinds.
 pub fn panel_kind_str(k: PanelKind) -> &'static str {
     match k {
         PanelKind::Layers => "layers",
         PanelKind::Color => "color",
         PanelKind::Swatches => "swatches",
         PanelKind::Brushes => "brushes",
+        PanelKind::Gradient => "gradient",
         PanelKind::Stroke => "stroke",
         PanelKind::Properties => "properties",
         PanelKind::Character => "character",
@@ -80,6 +85,7 @@ pub fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::Opacity => "opacity",
         PanelKind::MagicWand => "magic_wand",
         PanelKind::Symbols => "symbols",
+        PanelKind::Concepts => "concepts",
     }
 }
 

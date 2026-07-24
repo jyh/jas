@@ -39,14 +39,15 @@ public enum DockEdge: Hashable, Codable {
 }
 
 public enum PanelKind: Hashable, Codable {
-    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magicWand, symbols, brushes
+    case layers, color, swatches, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magicWand, symbols, brushes, gradient, concepts
 
     /// All panel kinds that seed the legacy native Window-menu list
-    /// (`panelMenuItems`). Brushes is deliberately omitted: it is a
-    /// toggle-only panel that is NOT part of the default layout and is
-    /// surfaced solely through the YAML menubar's Window>Brushes entry, so
-    /// it never needs to seed the default all-panels iteration. (Mirrors
-    /// the OCaml `all_panel_kinds`, which likewise excludes Brushes.)
+    /// (`panelMenuItems`). Brushes, Gradient, and Concepts are deliberately
+    /// omitted: each is a toggle-only panel that is NOT part of the default
+    /// layout and is surfaced solely through the YAML menubar's Window entry,
+    /// so none of them needs to seed the default all-panels iteration.
+    /// (Mirrors the Rust `PanelKind::ALL` and OCaml `all_panel_kinds`, which
+    /// likewise exclude the toggle-only panels.)
     public static let all: [PanelKind] = [
         .layers, .color, .swatches, .stroke, .properties,
         .character, .paragraph, .artboards, .align, .boolean, .opacity,
@@ -650,6 +651,39 @@ public struct WorkspaceLayout: Codable {
             } else {
                 anchored[0].1.groups[0].panels.append(kind)
                 anchored[0].1.groups[0].active = anchored[0].1.groups[0].panels.count - 1
+            }
+        }
+        bump()
+    }
+
+    /// Show a panel per the Window-menu `toggle_panel` contract
+    /// (actions.yaml): make the primary anchored dock (`dock_main`) visible
+    /// and expanded, append the panel to that dock's LAST group, and make it
+    /// the group's active (front) tab. This is the UX-level "summon" the
+    /// generic panel-toggle path uses — distinct from the gated low-level
+    /// `showPanel` op (which appends to the FIRST group and does not touch
+    /// pane visibility). Both active ports (Swift + Rust) implement this
+    /// identically; see jas_dioxus `WorkspaceLayout::show_panel_in_last_group`.
+    ///
+    /// No-op when the panel is already on screen (never a duplicate).
+    public mutating func showPanelInLastGroup(_ kind: PanelKind) {
+        guard !isPanelVisible(kind) else { return }
+        // Drop any stale closed-panel record: the summon places the panel at
+        // dock_main's tail, not at its old home.
+        hiddenPanels.removeAll { $0 == kind }
+        // "Dock made visible": un-hide the dock pane if a pane layout exists.
+        paneLayout?.showPane(.dock)
+        // Append to the LAST group of dock_main (the primary anchored dock),
+        // expanding the dock and that group, and activate the new tab.
+        if !anchored.isEmpty {
+            anchored[0].1.collapsed = false // expanded (not the icon strip)
+            if anchored[0].1.groups.isEmpty {
+                anchored[0].1.groups.append(PanelGroup(panels: [kind]))
+            } else {
+                let last = anchored[0].1.groups.count - 1
+                anchored[0].1.groups[last].collapsed = false
+                anchored[0].1.groups[last].panels.append(kind)
+                anchored[0].1.groups[last].active = anchored[0].1.groups[last].panels.count - 1
             }
         }
         bump()

@@ -551,6 +551,45 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
     // depth-0 dispatches on the action seam / segments an open gesture
     // case. RAII so every early return below unwinds the depth.
     let _recorder_guard = crate::recorder::hooks::ActionGuard::enter(action, params, st);
+
+    // Native intercept: the Window-menu panel toggle (actions.yaml
+    // `toggle_panel`). Dock-group mutation is not declaratively expressible, so
+    // this ONE generic path — keyed by the panel-id STRING — implements the
+    // action's English contract for every panel: SHOW a panel that is off
+    // screen (make dock_main visible + expanded, append to its LAST group,
+    // activate) or HIDE a panel that is on screen (close_panel + drop an empty
+    // group). It supersedes the 15 legacy per-panel `toggle_panel_<name>` menu
+    // arms; the menu bar now routes every panel row through here. The active
+    // ports (Rust + Swift) share this behavior exactly (equivalence law); the
+    // YAML `log` effect is a native breadcrumb only, so we return [] and skip
+    // it. An unknown/garbage panel id resolves to Layers via parse_panel_kind
+    // and never panics.
+    if action == "toggle_panel" {
+        if let Some(panel_id) = params.get("panel").and_then(|v| v.as_str()) {
+            let kind = crate::workspace::layout_apply::parse_panel_kind(panel_id);
+            if st.workspace_layout.is_panel_visible(kind) {
+                if let Some(addr) =
+                    crate::workspace::clipboard::find_panel(&st.workspace_layout, kind)
+                {
+                    crate::workspace::layout_apply::layout_apply(
+                        &mut st.workspace_layout,
+                        &crate::workspace::layout_apply::op_close_panel(addr),
+                    );
+                }
+            } else {
+                st.workspace_layout.show_panel_in_last_group(kind);
+                // COLOR.md §Panel initialization rule: color_panel_mode is
+                // panel-local and resets to its default (HSB) on each reopen —
+                // not persisted across close. Preserved from the legacy
+                // `toggle_panel_color` arm, now the sole per-panel show hook.
+                if kind == crate::workspace::workspace::PanelKind::Color {
+                    st.color_panel_mode = crate::workspace::color_panel_view::ColorMode::Hsb;
+                }
+            }
+        }
+        return Vec::new();
+    }
+
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
     // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md
@@ -2854,6 +2893,55 @@ fn run_yaml_effects(
     st: &mut crate::workspace::app_state::AppState,
 ) -> Vec<serde_json::Value> {
     run_yaml_effects_named(effects, ctx_in, st, None)
+}
+
+/// Generic hook: after a bound input widget commits its value via the
+/// native two-way write, run any `event: commit` behavior it declares.
+/// This is what makes a widget's commit do more than the bare field
+/// write — e.g. the Stroke panel's linked arrowhead-scale mirror
+/// (stroke.yaml Row 8), which copies the edited scale onto the other
+/// scale when the chain is active. Deliberately field-agnostic: the
+/// guard/effects live in the YAML (the purpose-built `if:` + set /
+/// set_panel_state effects), not in per-panel Rust.
+///
+/// `render_ctx` is the widget's render-time eval context (its `panel` /
+/// `state` scopes). The just-committed `field` / `committed` value are
+/// patched into a clone so guards and value expressions read the new
+/// value, and `event.value` is exposed for behaviors that want it. The
+/// native write already ran, so the port state is current; this only
+/// runs the extra declared effects. No-op when there is no commit
+/// behavior (the common case).
+fn run_input_commit_behavior(
+    el: &serde_json::Value,
+    field: &str,
+    committed: &serde_json::Value,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    let commit_behaviors: Vec<&serde_json::Value> = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if commit_behaviors.is_empty() {
+        return;
+    }
+    let mut cs = render_ctx.clone();
+    if let serde_json::Value::Object(root) = &mut cs {
+        if let Some(serde_json::Value::Object(p)) = root.get_mut("panel") {
+            p.insert(field.to_string(), committed.clone());
+        }
+        root.insert("event".into(), serde_json::json!({ "value": committed }));
+    }
+    for b in &commit_behaviors {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            run_yaml_effects(effects, &cs, st);
+        }
+    }
 }
 
 /// `run_yaml_effects` with the owning action's name threaded in (OP_LOG.md §9).
@@ -6728,11 +6816,31 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
     let panel_kind = rctx.panel_kind;
+    // Render-time eval context + the widget's declared `event: commit`
+    // behavior, snapshotted for the onchange closure. After the native
+    // two-way write, run_input_commit_behavior runs these (e.g. the
+    // linked arrowhead-scale mirror). No-op unless the combo declares
+    // commit behavior.
+    let ctx_snapshot = ctx.clone();
+    let has_commit_behavior = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| arr.iter().any(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit")))
+        .unwrap_or(false);
+    let el_for_commit = if has_commit_behavior { el.clone() } else { serde_json::Value::Null };
 
     rsx! {
         span {
             style: "display:inline-flex;{style}",
             input {
+                // Identity-coupled key: remount whenever the BOUND value
+                // changes so an external / mirror write is reflected in
+                // the DOM `.value` (an HTML input otherwise stays stuck on
+                // the typed text). Without this the linked-scale mirror
+                // wrote sp.end=200 but the sibling combo kept showing the
+                // stale "100" it had before the edit. Same trick
+                // render_number_input / render_length_input use (LINKHILITE).
+                key: "{id}-{current_value}",
                 id: "{id}",
                 r#type: "text",
                 list: "{list_id}",
@@ -6747,47 +6855,72 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 ds.set_value(field, serde_json::json!(new_val));
                                 dialog_signal.set(Some(ds));
                             }
+                            revision += 1;
                         }
                         BindTarget::Panel(field) => {
                             let f = field.clone();
                             let v = new_val.clone();
                             let app = app.clone();
+                            let ctx_snapshot = ctx_snapshot.clone();
+                            let el_for_commit = el_for_commit.clone();
+                            let mut revision = revision;
                             spawn(async move {
-                                let mut st = app.borrow_mut();
-                                // Parse as number when possible (for
-                                // scale percentages, stroke-arrowhead
-                                // preset selections). Named values
-                                // stay as strings (kerning Auto /
-                                // Optical / Metrics).
-                                let json_val = if let Ok(n) = v.parse::<f64>() {
-                                    serde_json::json!(n)
-                                } else {
-                                    serde_json::json!(v)
-                                };
-                                match panel_kind {
-                                    Some(PanelKind::Character) => {
-                                        set_character_field(&mut st.character_panel, &f, &json_val);
-                                        st.character_panel_post_write(&f);
-                                        st.apply_character_panel_to_selection();
+                                {
+                                    let mut st = app.borrow_mut();
+                                    // Parse as number when possible (for
+                                    // scale percentages, stroke-arrowhead
+                                    // preset selections). Named values
+                                    // stay as strings (kerning Auto /
+                                    // Optical / Metrics).
+                                    let json_val = if let Ok(n) = v.parse::<f64>() {
+                                        serde_json::json!(n)
+                                    } else {
+                                        serde_json::json!(v)
+                                    };
+                                    match panel_kind {
+                                        Some(PanelKind::Character) => {
+                                            set_character_field(&mut st.character_panel, &f, &json_val);
+                                            st.character_panel_post_write(&f);
+                                            st.apply_character_panel_to_selection();
+                                        }
+                                        Some(PanelKind::Paragraph) => {
+                                            st.sync_paragraph_panel_from_selection();
+                                            set_paragraph_field(&mut st.paragraph_panel, &f, &json_val);
+                                            st.apply_paragraph_panel_to_selection();
+                                        }
+                                        Some(PanelKind::Stroke) | None => {
+                                            set_stroke_field(&mut st.stroke_panel, &f, &json_val);
+                                            st.apply_stroke_panel_to_selection();
+                                        }
+                                        // Other panels: no-op until their
+                                        // per-panel state structs land.
+                                        _ => {}
                                     }
-                                    Some(PanelKind::Paragraph) => {
-                                        st.sync_paragraph_panel_from_selection();
-                                        set_paragraph_field(&mut st.paragraph_panel, &f, &json_val);
-                                        st.apply_paragraph_panel_to_selection();
+                                    // Generic: run the widget's declared
+                                    // `event: commit` behavior after the
+                                    // native write (e.g. linked scale mirror).
+                                    if !el_for_commit.is_null() {
+                                        run_input_commit_behavior(
+                                            &el_for_commit, &f, &json_val,
+                                            &ctx_snapshot, &mut st);
                                     }
-                                    Some(PanelKind::Stroke) | None => {
-                                        set_stroke_field(&mut st.stroke_panel, &f, &json_val);
-                                        st.apply_stroke_panel_to_selection();
-                                    }
-                                    // Other panels: no-op until their
-                                    // per-panel state structs land.
-                                    _ => {}
                                 }
+                                // Bump revision AFTER the native write and
+                                // the commit-behavior mirror have BOTH
+                                // landed, so the dock re-render reads the
+                                // fresh, consistent struct (start=200,
+                                // end=200, link untouched). The old bump sat
+                                // OUTSIDE the spawn and fired synchronously
+                                // BEFORE the async mutation — the panel
+                                // re-rendered against pre-commit state and
+                                // the committed value never repainted
+                                // (LINKHILITE). Mirrors number_input /
+                                // length_input, whose bump lives in-spawn.
+                                revision += 1;
                             });
                         }
-                        BindTarget::None => { return; }
+                        BindTarget::None => {}
                     }
-                    revision += 1;
                 },
             }
             datalist {
@@ -8019,6 +8152,8 @@ fn render_panel(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
             "boolean_panel_content"    => Some(PanelKind::Boolean),
             "magic_wand_panel_content" => Some(PanelKind::MagicWand),
             "symbols_panel_content"    => Some(PanelKind::Symbols),
+            "gradient_panel_content"   => Some(PanelKind::Gradient),
+            "concepts_panel_content"   => Some(PanelKind::Concepts),
             _ => None,
         });
         let mut child = rctx.clone();
@@ -10502,6 +10637,228 @@ mod tests {
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         assert_eq!(fill_hex, Some("#0000ff".to_string()));
         assert!(st.app_default_stroke.is_none());
+    }
+
+    // ── Stroke panel: Dashed-Line checkbox toggles both ways ──────────
+    //
+    // Regression (DASHFIX). The checkbox fires the canonical paired
+    // toggle:
+    //   set_panel_state { dashed:        "not panel.dashed" }   (panel scope)
+    //   set            { stroke_dashed:  "not state.stroke_dashed" } (global)
+    // The `set` reads `state.stroke_dashed` from the panel eval-context.
+    // The dock builds that context via build_live_state_map ->
+    // build_panel_state_subset("stroke"). Before the fix the subset
+    // omitted stroke_dashed, so the read was `not null` == true on every
+    // click and the box latched checked (uncheckable). This test builds
+    // the context exactly as the dock does so it exercises the real
+    // subset, and clicks twice: the second click must clear `dashed`.
+    #[test]
+    fn stroke_dashed_checkbox_toggles_both_ways() {
+        use crate::workspace::dock_panel::{build_live_state_map, build_panel_state_subset};
+        let checkbox_effects = [
+            serde_json::json!({"set_panel_state": {"key": "dashed", "value": "not panel.dashed"}}),
+            serde_json::json!({"set": {"stroke_dashed": "not state.stroke_dashed"}}),
+        ];
+        // Rebuild the panel state context each click, as a re-render does.
+        let build_ctx = |st: &AppState| -> serde_json::Value {
+            let state = build_panel_state_subset("stroke", &build_live_state_map(st));
+            serde_json::json!({"state": state, "panel": {"dashed": st.stroke_panel.dashed}})
+        };
+
+        let mut st = make_state_with_colors("ffffff", "000000");
+        assert!(!st.stroke_panel.dashed, "starts undashed");
+
+        // Click 1 — turns dashing on.
+        let ctx = build_ctx(&st);
+        run_yaml_effects(&checkbox_effects, &ctx, &mut st);
+        assert!(st.stroke_panel.dashed, "first click turns dashing on");
+
+        // Click 2 — must turn dashing OFF (the checkbox is un-checkable).
+        let ctx = build_ctx(&st);
+        run_yaml_effects(&checkbox_effects, &ctx, &mut st);
+        assert!(!st.stroke_panel.dashed, "second click must turn dashing off");
+    }
+
+    // ── Stroke panel: linked arrowhead-scale mirror ──────────────────
+    //
+    // LINKSCALE feature 1. The two scale combo boxes carry a generic
+    // `event: commit` behavior; when `panel.link_arrowhead_scale` is
+    // true, committing one scale mirrors it onto the other (panel +
+    // global). render_combo_box's onchange runs the native two-way write
+    // (set_stroke_field) then this behavior via run_input_commit_behavior;
+    // the tests target that pure helper (the closure needs component
+    // context). The shipped YAML carrying the behavior is pinned in the
+    // reference bundle test (TestLinkedArrowheadScaleBundle).
+    fn start_scale_combo() -> serde_json::Value {
+        serde_json::json!({
+            "id": "stk_start_arrowhead_scale",
+            "type": "combo_box",
+            "bind": {"value": "panel.start_arrowhead_scale"},
+            "behavior": [{"event": "commit", "effects": [
+                {"if": {"condition": "panel.link_arrowhead_scale", "then": [
+                    {"set_panel_state": {"key": "end_arrowhead_scale",
+                                         "value": "panel.start_arrowhead_scale"}},
+                    {"set": {"stroke_end_arrowhead_scale":
+                             "panel.start_arrowhead_scale"}},
+                ]}},
+            ]}],
+        })
+    }
+
+    #[test]
+    fn linked_arrowhead_scale_mirrors_when_linked() {
+        let el = start_scale_combo();
+        let mut st = make_state_with_colors("ffffff", "000000");
+        // Native two-way write already committed the edited scale.
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.link_arrowhead_scale = true;
+        let render_ctx = serde_json::json!({
+            "panel": {"link_arrowhead_scale": true,
+                      "start_arrowhead_scale": 100.0,
+                      "end_arrowhead_scale": 100.0},
+            "state": {},
+        });
+        run_input_commit_behavior(&el, "start_arrowhead_scale",
+                                  &serde_json::json!(200.0), &render_ctx, &mut st);
+        assert_eq!(st.stroke_panel.end_arrowhead_scale, 200.0,
+                   "linked: the other scale mirrors the edit");
+        // The chain highlight must survive a scale edit (feature 2).
+        assert!(st.stroke_panel.link_arrowhead_scale,
+                "the UI-only link flag is not clobbered by the mirror");
+    }
+
+    #[test]
+    fn linked_arrowhead_scale_independent_when_unlinked() {
+        let el = start_scale_combo();
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.end_arrowhead_scale = 100.0;
+        st.stroke_panel.link_arrowhead_scale = false;
+        let render_ctx = serde_json::json!({
+            "panel": {"link_arrowhead_scale": false,
+                      "start_arrowhead_scale": 100.0,
+                      "end_arrowhead_scale": 100.0},
+            "state": {},
+        });
+        run_input_commit_behavior(&el, "start_arrowhead_scale",
+                                  &serde_json::json!(200.0), &render_ctx, &mut st);
+        assert_eq!(st.stroke_panel.end_arrowhead_scale, 100.0,
+                   "unlinked: the other scale is untouched");
+    }
+
+    // ── Stroke panel: scale edit keeps the chain highlight (feature 2) ──
+    //
+    // The Rust panel refresh (build_live_panel_overrides) re-seeds the
+    // stroke panel's weight / cap / join from the selection, but the
+    // UI-only link_arrowhead_scale / profile_flipped / dash_align_anchors
+    // flags must come from panel state, never the selection — otherwise a
+    // scale edit (which re-runs the refresh) drops the highlight. Locks
+    // that the refresh reads the live panel flag.
+    #[test]
+    fn scale_edit_preserves_link_flag_in_panel_ctx() {
+        use crate::workspace::dock_panel::build_live_panel_overrides;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.stroke_panel.link_arrowhead_scale = true;
+        st.stroke_panel.profile_flipped = true;
+        st.stroke_panel.dash_align_anchors = true;
+        // Simulate a scale field edit + its apply.
+        set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
+                         &serde_json::json!(200.0));
+        st.apply_stroke_panel_to_selection();
+        let overrides = build_live_panel_overrides(&st);
+        assert_eq!(overrides.get("link_arrowhead_scale"),
+                   Some(&serde_json::Value::Bool(true)),
+                   "link highlight survives a scale edit");
+        assert_eq!(overrides.get("profile_flipped"),
+                   Some(&serde_json::Value::Bool(true)));
+        assert_eq!(overrides.get("dash_align_anchors"),
+                   Some(&serde_json::Value::Bool(true)));
+    }
+
+    // ── LINKHILITE: the RENDERED dock ctx must reflect struct truth ───
+    //
+    // The prior linked-scale pins all assert STRUCT state (sp.end, sp.link)
+    // or build_live_panel_overrides in isolation. None reconstruct the
+    // ctx the dock actually renders each widget's bind against — the
+    // panel_state_defaults map OVERLAID by build_live_panel_overrides,
+    // plus the build_panel_state_subset state map — exactly as
+    // build_dock_groups assembles it. This pin closes that hole: it
+    // replays the reported sequence (chain ON, then commit start scale to
+    // 200 through the real native-write + run_input_commit_behavior mirror
+    // path) and evaluates each widget's REAL bind expression against the
+    // rebuilt render ctx, proving what the two scale combos DISPLAY and
+    // whether the chain's `checked: panel.link_arrowhead_scale` stays
+    // highlighted. (Confirms the interpreter layer is consistent; the live
+    // stale-field lie was a render-timing / controlled-input defect in
+    // render_combo_box, fixed separately — see its onchange + input key.)
+    fn build_stroke_render_ctx(st: &AppState) -> serde_json::Value {
+        use crate::workspace::dock_panel::{
+            build_live_panel_overrides, build_live_state_map, build_panel_state_subset,
+        };
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        // panel_state_defaults(content_id) OVERLAID by the live overrides,
+        // gated by contains_key — byte-for-byte how build_dock_groups seeds
+        // the panel namespace.
+        let mut panel_map: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("stroke_panel_content").into_iter().collect();
+        let overrides = build_live_panel_overrides(st);
+        for (k, v) in &overrides {
+            if panel_map.contains_key(k) {
+                panel_map.insert(k.clone(), v.clone());
+            }
+        }
+        let state = build_panel_state_subset("stroke", &build_live_state_map(st));
+        serde_json::json!({ "panel": panel_map, "state": state })
+    }
+
+    #[test]
+    fn linkhilite_rendered_ctx_reflects_mirror_and_link() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+
+        // ── ctx #0: initial render — chain OFF, scales 100/100. ──
+        let ctx0 = build_stroke_render_ctx(&st);
+        assert_eq!(
+            expr::eval("panel.link_arrowhead_scale", &ctx0).to_bool(),
+            false, "chain starts unlinked");
+
+        // ── Chain click (stroke.yaml stk_link_arrowhead_scale on_click),
+        //    run against the render-time ctx exactly as build_click_handler
+        //    does with its ctx_snapshot. ──
+        let chain_effects = [
+            serde_json::json!({"set_panel_state": {"key": "link_arrowhead_scale",
+                "value": "not panel.link_arrowhead_scale"}}),
+            serde_json::json!({"set": {"stroke_link_arrowhead_scale":
+                "not state.stroke_link_arrowhead_scale"}}),
+        ];
+        run_yaml_effects(&chain_effects, &ctx0, &mut st);
+
+        // ── ctx #1: render after chain ON — chain must show highlighted. ──
+        let ctx1 = build_stroke_render_ctx(&st);
+        assert_eq!(
+            expr::eval("panel.link_arrowhead_scale", &ctx1).to_bool(),
+            true, "chain highlight ON after the click");
+
+        // ── Commit start scale = 200 through the REAL onchange path:
+        //    native two-way write + run_input_commit_behavior with the
+        //    render-time ctx snapshot (ctx1), as render_combo_box does. ──
+        set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
+            &serde_json::json!(200.0));
+        st.apply_stroke_panel_to_selection();
+        run_input_commit_behavior(&start_scale_combo(), "start_arrowhead_scale",
+            &serde_json::json!(200.0), &ctx1, &mut st);
+
+        // ── ctx #2: the NEXT render pass rebuilds the dock ctx. Assert what
+        //    each widget DISPLAYS by evaluating its real bind expression. ──
+        let ctx2 = build_stroke_render_ctx(&st);
+        let start_disp = expr::eval("panel.start_arrowhead_scale", &ctx2);
+        let end_disp = expr::eval("panel.end_arrowhead_scale", &ctx2);
+        let chain_disp = expr::eval("panel.link_arrowhead_scale", &ctx2).to_bool();
+        assert!(matches!(start_disp, Value::Number(n) if (n - 200.0).abs() < 1e-9),
+            "start combo displays 200, got {start_disp:?}");
+        assert!(matches!(end_disp, Value::Number(n) if (n - 200.0).abs() < 1e-9),
+            "end combo (mirrored sibling) displays 200 — NOT the stale 100, got {end_disp:?}");
+        assert!(chain_disp,
+            "chain highlight SURVIVES the scale edit (checked binds true)");
     }
 
     // ── radio widget: on_check partitioning ───────────────────

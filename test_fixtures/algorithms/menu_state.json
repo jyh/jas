@@ -521,6 +521,15 @@
         "action": "toggle_panel",
         "enabled": true,
         "checked": false
+      },
+      {
+        "path": [
+          4,
+          23
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
       }
     ]
   },
@@ -1046,6 +1055,15 @@
         "action": "toggle_panel",
         "enabled": true,
         "checked": false
+      },
+      {
+        "path": [
+          4,
+          23
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
       }
     ]
   },
@@ -1489,7 +1507,7 @@
         ],
         "action": "toggle_panel",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
@@ -1498,7 +1516,7 @@
         ],
         "action": "toggle_panel",
         "enabled": true,
-        "checked": false
+        "checked": true
       },
       {
         "path": [
@@ -1525,7 +1543,7 @@
         ],
         "action": "toggle_panel",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
@@ -1534,7 +1552,7 @@
         ],
         "action": "toggle_panel",
         "enabled": true,
-        "checked": false
+        "checked": true
       },
       {
         "path": [
@@ -1567,6 +1585,15 @@
         "path": [
           4,
           22
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          23
         ],
         "action": "toggle_panel",
         "enabled": true,
@@ -2086,12 +2113,21 @@
         ],
         "action": "toggle_panel",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
           4,
           22
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          23
         ],
         "action": "toggle_panel",
         "enabled": true,

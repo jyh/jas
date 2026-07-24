@@ -317,6 +317,17 @@ public func isToolButtonElement(_ element: [String: Any]) -> Bool {
     }
 }
 
+/// True when an ``icon_button`` element declares long-press ``alternates``
+/// (a non-null ``alternates`` field). Such toolbar slots render a small
+/// lower-right flyout triangle so the user knows a long-press reveals more
+/// tools. Data-driven — the marker follows the bundle, never a hardcoded
+/// slot list. Mirrors jas_dioxus ``render_icon_button``'s ``has_alternates``
+/// (``el.get("alternates").map(|v| !v.is_null())``).
+public func iconButtonHasAlternates(_ element: [String: Any]) -> Bool {
+    guard let v = element["alternates"], !(v is NSNull) else { return false }
+    return true
+}
+
 /// Map PanelKind to YAML content id.
 func panelKindToContentId(_ kind: PanelKind) -> String {
     switch kind {
@@ -334,5 +345,7 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .magicWand: return "magic_wand_panel_content"
     case .symbols: return "symbols_panel_content"
     case .brushes: return "brushes_panel_content"
+    case .gradient: return "gradient_panel_content"
+    case .concepts: return "concepts_panel_content"
     }
 }

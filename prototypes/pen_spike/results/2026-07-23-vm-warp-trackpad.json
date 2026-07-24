@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "os": "windows aarch64",
+    "backend": "Dx12",
+    "adapter_name": "Microsoft Basic Render Driver",
+    "adapter_type": "Cpu (WARP software rasterizer)",
+    "present_mode": "Immediate",
+    "surface_format": "Bgra8UnormSrgb",
+    "qpc_frequency": 24000000,
+    "mouse_in_pointer": true,
+    "requested_seconds": 30.0,
+    "ring_capacity": 65536,
+    "generated_unix": 1784833376,
+    "present_timing_note": "present-side stages (encode_to_present, *_to_present) are REAL but WARP-software-polluted; the input-side stages (hw_to_receipt, receipt_to_encode) are the honest signal on this backend",
+    "scope_note": "app-internal latency only (hw timestamp -> present submit); a LOWER BOUND on motion-to-photon, which needs real iron + a high-speed camera to measure"
+  },
+  "summary": {
+    "stages": [
+      {
+        "stage": "hw_to_receipt",
+        "count": 3225,
+        "avg_us": 44.19,
+        "p50_us": 39.46,
+        "p95_us": 79.13,
+        "p99_us": 107.29,
+        "min_us": 14.63,
+        "max_us": 749.38
+      },
+      {
+        "stage": "receipt_to_encode",
+        "count": 3225,
+        "avg_us": 5.88,
+        "p50_us": 4.92,
+        "p95_us": 9.46,
+        "p99_us": 25.88,
+        "min_us": 2.04,
+        "max_us": 209.08
+      },
+      {
+        "stage": "encode_to_present",
+        "count": 3225,
+        "avg_us": 463.6,
+        "p50_us": 418.46,
+        "p95_us": 717.67,
+        "p99_us": 1061.54,
+        "min_us": 175.5,
+        "max_us": 19014.67
+      },
+      {
+        "stage": "receipt_to_present",
+        "count": 3225,
+        "avg_us": 469.48,
+        "p50_us": 423.88,
+        "p95_us": 725.46,
+        "p99_us": 1068.42,
+        "min_us": 177.96,
+        "max_us": 19020.5
+      },
+      {
+        "stage": "hw_to_present",
+        "count": 3225,
+        "avg_us": 513.66,
+        "p50_us": 463.17,
+        "p95_us": 797.04,
+        "p99_us": 1159.46,
+        "min_us": 192.75,
+        "max_us": 19081.79
+      }
+    ],
+    "events": 3225,
+    "hw_valid_events": 3225,
+    "dropped": 0
+  }
+}

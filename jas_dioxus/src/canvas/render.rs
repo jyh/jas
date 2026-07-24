@@ -1199,6 +1199,28 @@ fn draw_element_body(
 
     match elem {
         Element::Line(e) => {
+            // PH1 Painter conversion (capability-routed). A plain
+            // center-aligned, solid, arrowless line's leaf paint routes through
+            // Canvas2dPainter — BYTE-IDENTICAL to the legacy body below (see
+            // `painter::element_render::line_painter_inputs` for the exact
+            // ctx-sequence equivalence argument). The shared per-element
+            // prologue/epilogue (save · transform · global_alpha(base_alpha) ·
+            // composite · restore) stays raw ctx; only the leaf paint is
+            // rewritten. Any line needing an arrowhead / variable width /
+            // inside-outside alignment / a stroke gradient / anchor-aligned
+            // dashing, or in outline mode, falls through to the unchanged
+            // legacy path.
+            let converted = if outline {
+                false
+            } else if let Some(lp) = crate::painter::element_render::line_painter_inputs(e) {
+                use crate::painter::Painter as _;
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                painter.stroke_path(&lp.path, &lp.brush, &lp.stroke, base_alpha * lp.stroke_op);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut stroke_op, mut stroke_align) = (1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1255,8 +1277,27 @@ fn draw_element_body(
                     );
                 }
             }
+            } // end `if !converted`: the PH1 painter route handled the leaf paint
         }
         Element::Rect(e) => {
+            // PH2 Painter conversion (capability-routed), mirroring the Line arm.
+            // A convertible Rect's fill+stroke leaf paint routes through
+            // Canvas2dPainter — display-list-equivalent to the legacy body below
+            // (the fill/stroke reorder is pixel-identical; see the PH2 design).
+            // A freeform gradient or anchor-dash expansion (which the two-paint
+            // seam can't reproduce), and outline mode, fall through unchanged.
+            let converted = if outline {
+                false
+            } else if let Some(sp) = crate::painter::element_render::rect_painter_inputs(
+                e, (e.x, e.y, e.width, e.height),
+            ) {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1330,8 +1371,24 @@ fn draw_element_body(
                     }
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Circle(e) => {
+            // PH2 Painter conversion (capability-routed). RP3: a non-center
+            // stroke stays legacy — an ellipse arc carries no inside/outside
+            // clip. Freeform gradient and outline mode also fall through.
+            let converted = if outline {
+                false
+            } else if let Some(sp) = crate::painter::element_render::circle_painter_inputs(
+                e, (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0),
+            ) {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1353,8 +1410,24 @@ fn draw_element_body(
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 stroke_aligned(ctx, stroke_align);
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Ellipse(e) => {
+            // PH2 Painter conversion (capability-routed). RP3 as Circle: a
+            // non-center stroke stays legacy. Freeform gradient / outline fall
+            // through unchanged.
+            let converted = if outline {
+                false
+            } else if let Some(sp) = crate::painter::element_render::ellipse_painter_inputs(
+                e, (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
+            ) {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1377,8 +1450,24 @@ fn draw_element_body(
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 stroke_aligned(ctx, stroke_align);
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Polyline(e) => {
+            // PH2 Painter conversion (capability-routed). Inside/outside strokes
+            // ride the path clip lowering; a freeform gradient, an empty point
+            // list, or outline mode falls through to the unchanged legacy path.
+            let converted = if outline {
+                false
+            } else if let Some(sp) =
+                crate::painter::element_render::polyline_painter_inputs(e, poly_bbox(&e.points))
+            {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1405,8 +1494,24 @@ fn draw_element_body(
                     stroke_aligned(ctx, stroke_align);
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Polygon(e) => {
+            // PH2 Painter conversion (capability-routed). Inside/outside strokes
+            // ride the path clip lowering; a freeform gradient, an empty point
+            // list, or outline mode falls through to the unchanged legacy path.
+            let converted = if outline {
+                false
+            } else if let Some(sp) =
+                crate::painter::element_render::polygon_painter_inputs(e, poly_bbox(&e.points))
+            {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1434,8 +1539,28 @@ fn draw_element_body(
                     stroke_aligned(ctx, stroke_align);
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Path(e) => {
+            // PH2 Painter conversion (capability-routed). RP2: a set stroke
+            // brush renders a filled outline (draw_brushed_path), nothing like a
+            // native stroke — it stays legacy, together with variable width,
+            // arrowheads, anchor-dash expansion, freeform gradients, and outline
+            // mode. The gradient bbox is `elem.bounds()` — exactly the box the
+            // legacy arm passes (for Path that box IS bounds()). The A3 fill
+            // winding is the element's fill_rule.
+            let converted = if outline {
+                false
+            } else if let Some(sp) =
+                crate::painter::element_render::path_painter_inputs(e, elem.bounds())
+            {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1534,6 +1659,7 @@ fn draw_element_body(
                     );
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Text(e) => {
             let fill_op = apply_fill(ctx, e.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));

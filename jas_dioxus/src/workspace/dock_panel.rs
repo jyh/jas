@@ -99,7 +99,7 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
     m
 }
 
-fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
     use serde_json::Value as J;
 
@@ -776,6 +776,17 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     m.insert("_layers_hidden_types_count".into(), serde_json::Value::Number(st.layers_hidden_types.len().into()));
     m.insert("_layers_filter_open".into(), serde_json::Value::Bool(st.layers_filter_dropdown_open));
 
+    // Stroke-panel toggles read `state.stroke_*` in their `set` effects
+    // (Dashed-Line / Link-scales / Flip-profile). Expose the live values so
+    // `not state.stroke_dashed` reads the current bool instead of a stale
+    // workspace default — otherwise the read is `not null`/`not false` on
+    // every click and the checkbox latches on (DASHFIX). Paired with the
+    // stroke keys in build_panel_state_subset.
+    let sp = &st.stroke_panel;
+    m.insert("stroke_dashed".into(), J::Bool(sp.dashed));
+    m.insert("stroke_link_arrowhead_scale".into(), J::Bool(sp.link_arrowhead_scale));
+    m.insert("stroke_profile_flipped".into(), J::Bool(sp.profile_flipped));
+
     m
 }
 
@@ -859,12 +870,21 @@ pub(crate) fn build_tool_state_map(
 /// Build a minimal state subset for a panel's eval context.
 /// Only includes the state keys the panel actually references,
 /// so unrelated state changes don't invalidate the panel memo cache.
-fn build_panel_state_subset(
+pub(crate) fn build_panel_state_subset(
     panel_name: &str,
     full_state: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {
     let keys: &[&str] = match panel_name {
-        "stroke" => &["stroke_width", "stroke_color"],
+        // stroke_dashed / stroke_link_arrowhead_scale / stroke_profile_flipped
+        // are read by the Dashed-Line / Link-scales / Flip-profile toggles'
+        // `set: { stroke_X: "not state.stroke_X" }` effects. They MUST be
+        // exposed live (see build_live_state_map) or the read is `not null`
+        // and the toggle latches on. See DASHFIX / stroke.yaml Row 5.
+        "stroke" => &[
+            "stroke_width", "stroke_color",
+            "stroke_dashed", "stroke_link_arrowhead_scale",
+            "stroke_profile_flipped",
+        ],
         "color" | "swatches" => &["fill_color", "stroke_color", "fill_on_top"],
         "layers" => &["_doc_generation", "_layers_renaming", "_layers_collapsed_count", "_layers_panel_sel_count", "_layers_panel_selection", "_layers_drag_target", "_layers_context_menu", "_layers_search_query", "_layers_isolation_depth", "_layers_hidden_types_count", "_layers_filter_open"],
         _ => &["fill_color", "stroke_color", "fill_on_top"],

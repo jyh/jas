@@ -551,6 +551,75 @@ private func testLayout() -> WorkspaceLayout {
     #expect(l.hiddenPanels.isEmpty)
 }
 
+// MARK: - toggle_panel summon (Gradient / Concepts reachability)
+//
+// Equivalence pins for the generic Window-menu toggle_panel contract
+// (actions.yaml). Mirror of the Rust show_panel_in_last_group tests. The bug:
+// Window > Gradient (and Concepts) did nothing because those panels had no
+// PanelKind and no reachable toggle path.
+
+@Test func showInLastGroupLandsInLastGroup() {
+    // testLayout() last group (index 2) = [layers]. Summoning a toggle-only
+    // panel must append it to the LAST group and make it the active tab.
+    var l = testLayout()
+    let id = rightDockId(l)
+    let last = l.dock(id)!.groups.count - 1
+    #expect(!l.isPanelVisible(.gradient))
+    l.showPanelInLastGroup(.gradient)
+    let group = l.dock(id)!.groups[last]
+    #expect(group.panels.last == .gradient, "summoned into dock_main's LAST group")
+    #expect(group.active == group.panels.count - 1, "summoned panel is the active tab")
+    #expect(l.isPanelVisible(.gradient))
+}
+
+@Test func showInLastGroupExpandsDockAndGroup() {
+    var l = testLayout()
+    let id = rightDockId(l)
+    let last = l.dock(id)!.groups.count - 1
+    l.anchored[0].1.collapsed = true
+    l.anchored[0].1.groups[last].collapsed = true
+    l.showPanelInLastGroup(.concepts)
+    #expect(!l.dock(id)!.collapsed, "dock expanded on summon")
+    #expect(!l.dock(id)!.groups[last].collapsed, "target group expanded")
+}
+
+@Test func showInLastGroupNoopWhenVisible() {
+    // .color is in group 0; summoning is a no-op (no duplicate, stays put).
+    var l = testLayout()
+    let id = rightDockId(l)
+    l.showPanelInLastGroup(.color)
+    let count = l.dock(id)!.groups.reduce(0) { $0 + $1.panels.filter { $0 == .color }.count }
+    #expect(count == 1, "already-visible summon is a no-op")
+    #expect(l.dock(id)!.groups[0].panels.contains(.color), "Color stays in its group")
+}
+
+@Test func toggleGradientAndConceptsShowThenHide() {
+    // The two halves the JasCommands toggle_panel arm calls, for the panels
+    // that were unreachable: SHOW (showPanelInLastGroup) then HIDE (closePanel
+    // at the summoned address). Empty group auto-removed on hide.
+    for kind: PanelKind in [.gradient, .concepts] {
+        var l = testLayout()
+        let id = rightDockId(l)
+        #expect(!l.isPanelVisible(kind))
+        l.showPanelInLastGroup(kind)
+        #expect(l.isPanelVisible(kind))
+        // Locate + close it (mirrors findPanel + opClosePanel in the arm).
+        let g = l.dock(id)!.groups.firstIndex { $0.panels.contains(kind) }!
+        let p = l.dock(id)!.groups[g].panels.firstIndex(of: kind)!
+        l.closePanel(pa(id.value, g, p))
+        #expect(!l.isPanelVisible(kind), "\(kind) hidden after toggle-off")
+    }
+}
+
+@Test func panelKindStrRoundTripsGradientAndConcepts() {
+    // The op round-trip must stay lossless now that the enum has 16 kinds.
+    for kind: PanelKind in [.gradient, .concepts] {
+        #expect(layoutParsePanelKind(layoutPanelKindStr(kind)) == kind)
+    }
+    #expect(layoutPanelKindStr(.gradient) == "gradient")
+    #expect(layoutPanelKindStr(.concepts) == "concepts")
+}
+
 @Test func panelMenuItemsVisibilityFollowsGroups() {
     let l = testLayout()
     let items = l.panelMenuItems()

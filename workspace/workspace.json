@@ -769,7 +769,7 @@
       ]
     },
     "toggle_panel": {
-      "description": "Show or hide a dock panel via the Window menu. When showing, the panel is added to the last group of the anchored dock (dock_main), the dock is made visible and expanded, and the panel is activated. When hiding, the panel is removed from its group via close_panel. If the group becomes empty it is removed automatically.\n",
+      "description": "Show or hide a dock panel from the Window menu. Every Window-menu panel row (Layers, Color, Swatches, Brushes, Gradient, Stroke, Object properties, Character, Paragraph, Artboards, Align, Boolean, Opacity, Magic Wand, Symbols, Concepts) dispatches this one action with its own panel id; the row's check mark reflects whether that panel is currently on screen, i.e. present in some dock group.\nWhen the panel is NOT on screen it is shown: the primary anchored dock (dock_main) is made visible (its pane is un-hidden) and expanded (un-collapsed from the icon strip), the panel is appended to dock_main's LAST group, and it becomes that group's active (front) tab. When the panel IS on screen it is hidden: it is removed from its group via the close_panel operation, and if that leaves the group empty the group is removed automatically.\nDock-group mutation cannot be expressed with the declarative effect vocabulary, so each active port implements this action natively against its own workspace_layout dock model per the contract stated in this description. Exact equivalence is the law: all ports show, hide, place, and activate identically. This is the single generic panel-toggle path \u2014 there are no per-panel variants.\n",
       "category": "window",
       "params": {
         "panel": {
@@ -777,15 +777,26 @@
           "values": [
             "layers",
             "color",
+            "swatches",
+            "brushes",
+            "gradient",
             "stroke",
             "properties",
-            "align"
+            "character",
+            "paragraph",
+            "artboards",
+            "align",
+            "boolean",
+            "opacity",
+            "magic_wand",
+            "symbols",
+            "concepts"
           ]
         }
       },
       "effects": [
         {
-          "log": "toggle_panel: {{param.panel}}"
+          "log": "toggle_panel (native): {{param.panel}}"
         }
       ]
     },
@@ -8491,6 +8502,15 @@
             "panel": "brushes"
           },
           "checked_when": "panels.brushes"
+        },
+        {
+          "id": "menu_gradient",
+          "label": "Gra&dient",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "gradient"
+          },
+          "checked_when": "panels.gradient"
         },
         {
           "id": "menu_stroke",
@@ -19407,7 +19427,7 @@
                 "id": "stk_start_arrowhead_scale",
                 "type": "combo_box",
                 "summary": "Start arrowhead scale",
-                "description": "Scale of the start arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value.\n",
+                "description": "Scale of the start arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value. When the link button (chain) is active, committing this value also copies it onto the end arrowhead scale \u2014 both the panel field and the global state \u2014 so the two scales move together; when unlinked the two scales are independent.\n",
                 "min": 1,
                 "style": {
                   "flex": 1
@@ -19444,13 +19464,38 @@
                 ],
                 "bind": {
                   "value": "panel.start_arrowhead_scale"
-                }
+                },
+                "behavior": [
+                  {
+                    "event": "commit",
+                    "effects": [
+                      {
+                        "if": {
+                          "condition": "panel.link_arrowhead_scale",
+                          "then": [
+                            {
+                              "set_panel_state": {
+                                "key": "end_arrowhead_scale",
+                                "value": "panel.start_arrowhead_scale"
+                              }
+                            },
+                            {
+                              "set": {
+                                "stroke_end_arrowhead_scale": "panel.start_arrowhead_scale"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "stk_end_arrowhead_scale",
                 "type": "combo_box",
                 "summary": "End arrowhead scale",
-                "description": "Scale of the end arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value.\n",
+                "description": "Scale of the end arrowhead as a percentage of the stroke weight. Dropdown presets plus free entry. Minimum 1%. Committed on Enter or focus loss. Invalid input reverts to the previous value. When the link button (chain) is active, committing this value also copies it onto the start arrowhead scale \u2014 both the panel field and the global state \u2014 so the two scales move together; when unlinked the two scales are independent.\n",
                 "min": 1,
                 "style": {
                   "flex": 1
@@ -19487,7 +19532,32 @@
                 ],
                 "bind": {
                   "value": "panel.end_arrowhead_scale"
-                }
+                },
+                "behavior": [
+                  {
+                    "event": "commit",
+                    "effects": [
+                      {
+                        "if": {
+                          "condition": "panel.link_arrowhead_scale",
+                          "then": [
+                            {
+                              "set_panel_state": {
+                                "key": "start_arrowhead_scale",
+                                "value": "panel.end_arrowhead_scale"
+                              }
+                            },
+                            {
+                              "set": {
+                                "stroke_start_arrowhead_scale": "panel.end_arrowhead_scale"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "stk_link_arrowhead_scale",

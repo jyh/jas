@@ -12,6 +12,22 @@ private struct PickerEntry: Identifiable {
     let displayLabel: String
 }
 
+/// Lower-right corner triangle marking a toolbar slot that carries
+/// long-press ``alternates`` (so the user knows a long-press reveals more
+/// tools). Mirrors jas_dioxus ``render_icon_button``'s 5x5 SVG
+/// `M 5 5 L 0 5 L 5 0 Z` — a right triangle filling the lower-right half of
+/// the box, filled with the theme text color (Rust's `var(--jas-text)`).
+private struct FlyoutAlternatesTriangle: Shape {
+    func path(in rect: CGRect) -> SwiftUI.Path {
+        var p = SwiftUI.Path()
+        p.move(to: CGPoint(x: rect.maxX, y: rect.maxY))   // bottom-right
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY)) // bottom-left
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY)) // top-right
+        p.closeSubpath()
+        return p
+    }
+}
+
 /// Resolve an icon_button glyph size (points) from its ``style`` map,
 /// the eval ``context``, and an optional flyout-scoped default.
 ///
@@ -355,6 +371,15 @@ struct YamlElementView: View {
                 store: model.stateStore, key: key, value: value)
         }
         model.stateStore.setPanel(pid, key, value)
+        // LINKSCALE: the Stroke arrowhead-scale combos bind `panel.<field>`
+        // only, but applyStrokePanelToSelection reads the scale from the
+        // GLOBAL `stroke_<field>`. Mirror the committed scale into the
+        // global (matching Rust's unified two-way write) BEFORE the
+        // notify/apply below so the fresh value reaches the selection.
+        if pid == "stroke_panel_content" {
+            mirrorStrokeScaleCommitToGlobal(
+                store: model.stateStore, key: key, value: value)
+        }
         // Properties panel field edit → apply to the selection (Part B.2).
         // Per-field: the key tells us which (prop_x moves, prop_w scales, …).
         // The display is pull (propertiesPanelLiveOverrides), so the mutated
@@ -839,6 +864,9 @@ struct YamlElementView: View {
                         RoundedRectangle(cornerRadius: 3)
                             .fill(isChecked ? checkedBg : .clear)
                     )
+                    .overlay(alignment: .bottomTrailing) {
+                        alternatesFlyoutMarker(tint: SwiftUI.Color(nsColor: theme.text))
+                    }
             }
             .buttonStyle(.plain)
             .help(summary)
@@ -857,6 +885,11 @@ struct YamlElementView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(isChecked ? checkedBg : .clear)
                 )
+                .overlay(alignment: .bottomTrailing) {
+                    alternatesFlyoutMarker(
+                        tint: theme.map { SwiftUI.Color(nsColor: $0.text) }
+                            ?? SwiftUI.Color(white: 0.8))
+                }
                 .disabled(isDisabled)
                 .modifier(PressDispatchModifier(
                     onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
@@ -864,6 +897,20 @@ struct YamlElementView: View {
                 ))
                 .modifier(ToolOptionsDblClickModifier(
                     enabled: wantsToolOptionsDblClick, onDoubleClick: toolOptionsAction))
+        }
+    }
+
+    /// Overlay content for an icon_button: the lower-right flyout triangle,
+    /// shown only when this element declares long-press ``alternates:`` (the
+    /// same data-driven predicate Rust's ``render_icon_button`` keys on).
+    /// `tint` is the theme text color, matching Rust's `var(--jas-text)`.
+    @ViewBuilder
+    private func alternatesFlyoutMarker(tint: SwiftUI.Color) -> some View {
+        if iconButtonHasAlternates(element) {
+            FlyoutAlternatesTriangle()
+                .fill(tint)
+                .frame(width: 5, height: 5)
+                .allowsHitTesting(false)
         }
     }
 
@@ -3021,7 +3068,34 @@ struct YamlElementView: View {
         let menu = Menu {
             ForEach(entries) { e in
                 Button(e.displayLabel) {
-                    if let t = writeTarget { commitWidgetWrite(target: t, value: e.val) }
+                    guard let t = writeTarget else { return }
+                    switch t.scope {
+                    case .panel:
+                        // Match Rust render_combo_box's onchange Panel branch:
+                        // parse the picked value to a number when possible
+                        // (scale % presets, arrowhead selections); named
+                        // values stay strings.
+                        let committed: Any =
+                            Double(e.val).map { $0 as Any } ?? (e.val as Any)
+                        commitWidgetWrite(target: t, value: committed)
+                        // Generic input-commit hook: run the widget's
+                        // `event: commit` behaviors after the native two-way
+                        // write (e.g. the linked arrowhead-scale mirror).
+                        // Scoped to commit, so gradient `change` combos are
+                        // untouched — mirrors Rust run_input_commit_behavior,
+                        // which the Panel branch calls after the native write.
+                        if let model = model, let pid = panelId {
+                            model.stateStore.setActivePanel(pid)
+                            runInputCommitBehavior(
+                                element: element, field: t.key,
+                                committed: committed, context: context,
+                                store: model.stateStore, model: model)
+                        }
+                    case .dialog:
+                        // Rust's Dialog branch commits the raw string (no
+                        // parse, no commit behavior).
+                        commitWidgetWrite(target: t, value: e.val)
+                    }
                 }
             }
         } label: {

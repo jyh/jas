@@ -1,0 +1,73 @@
+{
+  "machine": "mac",
+  "chip": "Apple M5 Pro",
+  "os": "macOS 26.5.2",
+  "backend": "metal",
+  "mode": "offscreen",
+  "present_mode": "none (no surface)",
+  "antialiasing": "Area",
+  "width": 3200,
+  "height": 2000,
+  "seed": 6971763,
+  "warmup_secs": 2.0,
+  "measure_secs": 8.0,
+  "architecture_note": "Geometry encoded once into a retained vello::Scene per point; per frame a reused outer Scene is reset()+append(inner, camera) — re-encodes the command stream under the camera affine, not the geometry.",
+  "timing_note": "frame_ms = encode + render_to_texture + poll(Wait): fully serialized CPU+GPU, no pipelining",
+  "generated_unix": 1784827643,
+  "points": [
+    {
+      "elements": 10000,
+      "frames": 1790,
+      "avg_encode_ms": 0.09,
+      "p95_encode_ms": 0.1,
+      "avg_frame_ms": 4.47,
+      "p95_frame_ms": 7.44,
+      "fps": 223.83
+    },
+    {
+      "elements": 50000,
+      "frames": 787,
+      "avg_encode_ms": 0.45,
+      "p95_encode_ms": 0.56,
+      "avg_frame_ms": 10.16,
+      "p95_frame_ms": 13.98,
+      "fps": 98.39
+    },
+    {
+      "elements": 100000,
+      "frames": 632,
+      "avg_encode_ms": 0.87,
+      "p95_encode_ms": 0.96,
+      "avg_frame_ms": 12.65,
+      "p95_frame_ms": 13.98,
+      "fps": 79.05
+    },
+    {
+      "elements": 250000,
+      "frames": 256,
+      "avg_encode_ms": 2.14,
+      "p95_encode_ms": 2.28,
+      "avg_frame_ms": 31.25,
+      "p95_frame_ms": 38.21,
+      "fps": 32.0
+    },
+    {
+      "elements": 500000,
+      "frames": 142,
+      "avg_encode_ms": 4.22,
+      "p95_encode_ms": 4.43,
+      "avg_frame_ms": 56.13,
+      "p95_frame_ms": 59.01,
+      "fps": 17.82
+    },
+    {
+      "elements": 800000,
+      "frames": 91,
+      "avg_encode_ms": 6.73,
+      "p95_encode_ms": 6.93,
+      "avg_frame_ms": 87.41,
+      "p95_frame_ms": 91.86,
+      "fps": 11.44
+    }
+  ]
+}
