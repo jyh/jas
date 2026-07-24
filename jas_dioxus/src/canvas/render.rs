@@ -1413,6 +1413,21 @@ fn draw_element_body(
             } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Ellipse(e) => {
+            // PH2 Painter conversion (capability-routed). RP3 as Circle: a
+            // non-center stroke stays legacy. Freeform gradient / outline fall
+            // through unchanged.
+            let converted = if outline {
+                false
+            } else if let Some(sp) = crate::painter::element_render::ellipse_painter_inputs(
+                e, (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
+            ) {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1435,6 +1450,7 @@ fn draw_element_body(
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 stroke_aligned(ctx, stroke_align);
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Polyline(e) => {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);

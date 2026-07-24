@@ -12,8 +12,8 @@
 //! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
 
 use super::{
-    circle_painter_inputs, element_needs_legacy, emit_element, emit_shape_paint,
-    line_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
+    circle_painter_inputs, element_needs_legacy, ellipse_painter_inputs, emit_element,
+    emit_shape_paint, line_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
 use crate::geometry::element::{
     Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
@@ -478,7 +478,22 @@ fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
     vec![
         ("ref_rect_convert", rect_case(), 0.9),
         ("ref_circle_convert", circle_case(), 0.8),
+        ("ref_ellipse_convert", ellipse_case(), 1.0),
     ]
+}
+
+fn ellipse_bbox(e: &EllipseElem) -> (f64, f64, f64, f64) {
+    (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0)
+}
+
+fn ellipse_case() -> ShapePaint {
+    let e = EllipseElem {
+        cx: 120.0, cy: 80.0, rx: 60.0, ry: 35.0,
+        fill: fill(Color::rgb(0.2, 0.4, 0.8)),
+        stroke: Some(stroke(Color::rgb(0.1, 0.1, 0.1), 1.5)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    ellipse_painter_inputs(&e, ellipse_bbox(&e)).expect("convertible ellipse")
 }
 
 fn circle_bbox(e: &CircleElem) -> (f64, f64, f64, f64) {
@@ -623,4 +638,41 @@ fn circle_anchor_dash_renders_solid_and_converts() {
     e.stroke = Some(anchor_dash(3.0));
     let sp = circle_painter_inputs(&e, circle_bbox(&e)).expect("anchor-dash circle still converts");
     assert!(sp.stroke.expect("stroke").style.dash.is_empty(), "anchor dash lowers to solid");
+}
+
+// -- Ellipse -----------------------------------------------------------------
+
+fn plain_ellipse_elem() -> EllipseElem {
+    EllipseElem {
+        cx: 120.0, cy: 80.0, rx: 60.0, ry: 35.0,
+        fill: fill(Color::rgb(0.2, 0.4, 0.8)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    }
+}
+
+#[test]
+fn ellipse_center_solid_is_convertible() {
+    let e = plain_ellipse_elem();
+    let sp = ellipse_painter_inputs(&e, ellipse_bbox(&e)).expect("center ellipse converts");
+    assert!(matches!(sp.geom, ConvGeom::Arc(_)), "ellipse lowers to an ellipse arc");
+}
+
+#[test]
+fn ellipse_non_center_stroke_not_convertible() {
+    for align in [StrokeAlign::Inside, StrokeAlign::Outside] {
+        let mut e = plain_ellipse_elem();
+        e.stroke = Some(stroke_aligned(Color::BLACK, 4.0, align));
+        assert!(
+            ellipse_painter_inputs(&e, ellipse_bbox(&e)).is_none(),
+            "RP3: a {align:?}-aligned ellipse stroke stays legacy"
+        );
+    }
+}
+
+#[test]
+fn ellipse_freeform_gradient_not_convertible() {
+    let mut e = plain_ellipse_elem();
+    e.stroke_gradient = Some(freeform_grad());
+    assert!(ellipse_painter_inputs(&e, ellipse_bbox(&e)).is_none());
 }
