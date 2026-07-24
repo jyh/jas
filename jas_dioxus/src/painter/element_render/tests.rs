@@ -13,8 +13,10 @@
 
 use super::{
     circle_painter_inputs, element_needs_legacy, ellipse_painter_inputs, emit_element,
-    emit_shape_paint, line_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
+    emit_shape_paint, line_painter_inputs, polyline_painter_inputs, rect_painter_inputs, ConvGeom,
+    ShapePaint,
 };
+use crate::painter::recording::Command;
 use crate::geometry::element::{
     Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
     GradientStop, GradientType, GroupElem, LineElem, PathCommand, PathElem, PolygonElem,
@@ -479,7 +481,18 @@ fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
         ("ref_rect_convert", rect_case(), 0.9),
         ("ref_circle_convert", circle_case(), 0.8),
         ("ref_ellipse_convert", ellipse_case(), 1.0),
+        ("ref_polyline_convert", polyline_case(), 0.75),
     ]
+}
+
+fn polyline_case() -> ShapePaint {
+    let e = PolylineElem {
+        points: vec![(20.0, 200.0), (60.0, 150.0), (110.0, 210.0), (160.0, 160.0)],
+        fill: None,
+        stroke: Some(stroke(Color::rgb(0.8, 0.4, 0.0), 2.5)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    polyline_painter_inputs(&e, super::poly_bbox(&e.points)).expect("convertible polyline")
 }
 
 fn ellipse_bbox(e: &EllipseElem) -> (f64, f64, f64, f64) {
@@ -675,4 +688,64 @@ fn ellipse_freeform_gradient_not_convertible() {
     let mut e = plain_ellipse_elem();
     e.stroke_gradient = Some(freeform_grad());
     assert!(ellipse_painter_inputs(&e, ellipse_bbox(&e)).is_none());
+}
+
+// -- Polyline ----------------------------------------------------------------
+
+fn plain_polyline_elem() -> PolylineElem {
+    PolylineElem {
+        points: vec![(20.0, 200.0), (60.0, 150.0), (110.0, 210.0)],
+        fill: None,
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    }
+}
+
+#[test]
+fn polyline_open_path_is_convertible() {
+    let e = plain_polyline_elem();
+    let sp = polyline_painter_inputs(&e, super::poly_bbox(&e.points)).expect("polyline converts");
+    if let ConvGeom::Path(p) = &sp.geom {
+        // Open: no ClosePath command.
+        assert!(!p.iter().any(|c| matches!(c, crate::geometry::element::PathCommand::ClosePath)));
+    } else {
+        panic!("polyline lowers to a path");
+    }
+}
+
+#[test]
+fn polyline_empty_points_not_convertible() {
+    let e = PolylineElem { points: vec![], ..plain_polyline_elem() };
+    assert!(polyline_painter_inputs(&e, super::poly_bbox(&e.points)).is_none());
+}
+
+#[test]
+fn polyline_freeform_gradient_not_convertible() {
+    let mut e = plain_polyline_elem();
+    e.fill_gradient = Some(freeform_grad());
+    assert!(polyline_painter_inputs(&e, super::poly_bbox(&e.points)).is_none());
+}
+
+/// An inside-aligned path stroke lowers to the build-time clip sequence
+/// (save · clip · stroke at 2× width · restore) — the shared A5 lowering.
+#[test]
+fn inside_align_stroke_uses_clip_lowering() {
+    let mut e = plain_polyline_elem();
+    e.stroke = Some(stroke_aligned(Color::BLACK, 3.0, StrokeAlign::Inside));
+    let sp = polyline_painter_inputs(&e, super::poly_bbox(&e.points)).expect("converts");
+    let mut rec = RecordingPainter::new();
+    emit_shape_paint(&mut rec, &sp, 1.0);
+    let cmds = rec.commands();
+    assert!(
+        matches!(cmds[0], Command::PushState { .. })
+            && matches!(cmds[1], Command::Clip { .. })
+            && matches!(cmds[3], Command::PopState),
+        "inside align emits push_state · clip · stroke_path · pop_state, got {cmds:?}"
+    );
+    match &cmds[2] {
+        Command::StrokePath { stroke, .. } => {
+            assert_eq!(stroke.width, 6.0, "inside stroke is drawn at 2× width")
+        }
+        other => panic!("expected a stroke_path at index 2, got {other:?}"),
+    }
 }

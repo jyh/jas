@@ -1453,6 +1453,21 @@ fn draw_element_body(
             } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Polyline(e) => {
+            // PH2 Painter conversion (capability-routed). Inside/outside strokes
+            // ride the path clip lowering; a freeform gradient, an empty point
+            // list, or outline mode falls through to the unchanged legacy path.
+            let converted = if outline {
+                false
+            } else if let Some(sp) =
+                crate::painter::element_render::polyline_painter_inputs(e, poly_bbox(&e.points))
+            {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1479,6 +1494,7 @@ fn draw_element_body(
                     stroke_aligned(ctx, stroke_align);
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Polygon(e) => {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
