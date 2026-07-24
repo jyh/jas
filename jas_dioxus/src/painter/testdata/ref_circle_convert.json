@@ -1,0 +1,58 @@
+[
+{
+    "cmd": "fill_ellipse_arc",
+    "arc": {
+      "cx": 90.0000,
+      "cy": 70.0000,
+      "rx": 45.0000,
+      "ry": 45.0000,
+      "rotation": 0.0000,
+      "start": 0.0000,
+      "end": 6.2832,
+      "ccw": false
+    },
+    "winding": "nonzero",
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.9000,
+        "g": 0.3000,
+        "b": 0.2000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 0.5600
+  },
+{
+    "cmd": "stroke_ellipse_arc",
+    "arc": {
+      "cx": 90.0000,
+      "cy": 70.0000,
+      "rx": 45.0000,
+      "ry": 45.0000,
+      "rotation": 0.0000,
+      "start": 0.0000,
+      "end": 6.2832,
+      "ccw": false
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.0000,
+        "g": 0.0000,
+        "b": 0.0000,
+        "a": 1.0000
+      }
+    },
+    "stroke": {
+      "width": 2.5000,
+      "cap": "butt",
+      "join": "miter",
+      "miter": 10.0000,
+      "dash": []
+    },
+    "alpha": 0.8000
+  }
+]

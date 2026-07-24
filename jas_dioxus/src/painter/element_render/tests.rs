@@ -12,8 +12,8 @@
 //! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
 
 use super::{
-    element_needs_legacy, emit_element, emit_shape_paint, line_painter_inputs,
-    rect_painter_inputs, ConvGeom, ShapePaint,
+    circle_painter_inputs, element_needs_legacy, emit_element, emit_shape_paint,
+    line_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
 use crate::geometry::element::{
     Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
@@ -475,7 +475,24 @@ fn record_convert(sp: &ShapePaint, base_alpha: f64) -> String {
 
 /// The convertible reference elements: `(golden name, resolved paint, base_alpha)`.
 fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
-    vec![("ref_rect_convert", rect_case(), 0.9)]
+    vec![
+        ("ref_rect_convert", rect_case(), 0.9),
+        ("ref_circle_convert", circle_case(), 0.8),
+    ]
+}
+
+fn circle_bbox(e: &CircleElem) -> (f64, f64, f64, f64) {
+    (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0)
+}
+
+fn circle_case() -> ShapePaint {
+    let e = CircleElem {
+        cx: 90.0, cy: 70.0, r: 45.0,
+        fill: fill_op(Color::rgb(0.9, 0.3, 0.2), 0.7),
+        stroke: Some(stroke(Color::BLACK, 2.5)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    circle_painter_inputs(&e, circle_bbox(&e)).expect("convertible circle")
 }
 
 fn rect_case() -> ShapePaint {
@@ -557,4 +574,53 @@ fn rect_regular_dash_is_convertible() {
     let sp = rect_painter_inputs(&e, (e.x, e.y, e.width, e.height)).expect("regular dash converts");
     let cs = sp.stroke.expect("stroke");
     assert_eq!(cs.style.dash, vec![6.0, 3.0], "the dash pattern crosses the seam");
+}
+
+// -- Circle ------------------------------------------------------------------
+
+fn plain_circle_elem() -> CircleElem {
+    CircleElem {
+        cx: 90.0, cy: 70.0, r: 45.0,
+        fill: fill(Color::rgb(0.9, 0.3, 0.2)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    }
+}
+
+#[test]
+fn circle_center_solid_is_convertible() {
+    let e = plain_circle_elem();
+    let sp = circle_painter_inputs(&e, circle_bbox(&e)).expect("center circle converts");
+    assert!(matches!(sp.geom, ConvGeom::Arc(_)), "circle lowers to an ellipse arc");
+    assert!(sp.fill.is_some() && sp.stroke.is_some());
+}
+
+#[test]
+fn circle_non_center_stroke_not_convertible() {
+    for align in [StrokeAlign::Inside, StrokeAlign::Outside] {
+        let mut e = plain_circle_elem();
+        e.stroke = Some(stroke_aligned(Color::BLACK, 4.0, align));
+        assert!(
+            circle_painter_inputs(&e, circle_bbox(&e)).is_none(),
+            "RP3: a {align:?}-aligned circle stroke stays legacy"
+        );
+    }
+}
+
+#[test]
+fn circle_freeform_gradient_not_convertible() {
+    let mut e = plain_circle_elem();
+    e.fill_gradient = Some(freeform_grad());
+    assert!(circle_painter_inputs(&e, circle_bbox(&e)).is_none());
+}
+
+#[test]
+fn circle_anchor_dash_renders_solid_and_converts() {
+    // A circle has no dasher-expansion arm: anchor dashing renders SOLID in
+    // legacy (the platform dash is cleared), and the seam clears it too — so
+    // the circle stays convertible with an empty dash (equivalent, not excluded).
+    let mut e = plain_circle_elem();
+    e.stroke = Some(anchor_dash(3.0));
+    let sp = circle_painter_inputs(&e, circle_bbox(&e)).expect("anchor-dash circle still converts");
+    assert!(sp.stroke.expect("stroke").style.dash.is_empty(), "anchor dash lowers to solid");
 }
