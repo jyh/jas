@@ -1299,3 +1299,85 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(cs.operation == .subtractFront)
     #expect(cs.operands.count == 2)
 }
+
+// MARK: - Arrowhead SVG persistence (ARROWFIX2 item 2)
+
+@Test func svgArrowheadsRoundtripOnLine() {
+    // All five arrow fields survive save->load on a line.
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 2,
+                        startArrow: .simpleArrow, endArrow: .diamond,
+                        startArrowScale: 150, endArrowScale: 200,
+                        arrowAlign: .centerAtEnd)
+    let doc = Document(layers: [Layer(children: [
+        .line(Line(x1: 0, y1: 0, x2: 100, y2: 0, stroke: stroke))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("jas:start-arrow=\"simple_arrow\""), "\(svg)")
+    #expect(svg.contains("jas:end-arrow=\"diamond\""), "\(svg)")
+    #expect(svg.contains("jas:start-arrow-scale=\"150\""), "\(svg)")
+    #expect(svg.contains("jas:end-arrow-scale=\"200\""), "\(svg)")
+    #expect(svg.contains("jas:arrow-align=\"center_at_end\""), "\(svg)")
+    let doc2 = svgToDocument(svg)
+    guard case .line(let l) = doc2.layers[0].children[0], let s = l.stroke else {
+        Issue.record("expected a stroked Line"); return
+    }
+    #expect(s.startArrow == .simpleArrow)
+    #expect(s.endArrow == .diamond)
+    #expect(s.startArrowScale == 150)
+    #expect(s.endArrowScale == 200)
+    #expect(s.arrowAlign == .centerAtEnd)
+}
+
+@Test func svgArrowheadsRoundtripOnPath() {
+    // A one-armed arrowed path: end arrow only, default scale + align.
+    let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 6.6667,
+                        endArrow: .stealthArrow)
+    let doc = Document(layers: [Layer(children: [
+        .path(Path(d: [.moveTo(0, 0), .curveTo(x1: 0, y1: 40, x2: 40, y2: 40, x: 40, y: 0)],
+                   stroke: stroke))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("jas:end-arrow=\"stealth_arrow\""), "\(svg)")
+    #expect(!svg.contains("jas:start-arrow"), "\(svg)")
+    #expect(!svg.contains("jas:start-arrow-scale"), "\(svg)")
+    #expect(!svg.contains("jas:end-arrow-scale"), "\(svg)")
+    #expect(!svg.contains("jas:arrow-align"), "\(svg)")
+    let doc2 = svgToDocument(svg)
+    guard case .path(let p) = doc2.layers[0].children[0], let s = p.stroke else {
+        Issue.record("expected a stroked Path"); return
+    }
+    #expect(s.startArrow == .none)
+    #expect(s.endArrow == .stealthArrow)
+    #expect(s.startArrowScale == 100)
+    #expect(s.endArrowScale == 100)
+    #expect(s.arrowAlign == .tipAtEnd)
+}
+
+@Test func svgPlainStrokeEmitsNoJasArrowAttrs() {
+    // Byte-cleanliness: an ordinary stroke emits none of the jas:arrow attrs.
+    let doc = Document(layers: [Layer(children: [
+        .line(Line(x1: 0, y1: 0, x2: 50, y2: 50,
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(!svg.contains("jas:start-arrow"), "\(svg)")
+    #expect(!svg.contains("jas:end-arrow"), "\(svg)")
+    #expect(!svg.contains("jas:arrow-align"), "\(svg)")
+}
+
+@Test func svgPlainImportDefaultsArrowsToNone() {
+    // Cross-tool: plain SVG (no jas attrs) parses to no arrows.
+    let svg = """
+    <?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\
+    <line x1="0" y1="0" x2="100" y2="0" stroke="black" stroke-width="2"/></svg>
+    """
+    let doc = svgToDocument(svg)
+    guard case .line(let l) = doc.layers[0].children[0], let s = l.stroke else {
+        Issue.record("expected a stroked Line"); return
+    }
+    #expect(s.startArrow == .none)
+    #expect(s.endArrow == .none)
+    #expect(s.startArrowScale == 100)
+    #expect(s.endArrowScale == 100)
+    #expect(s.arrowAlign == .tipAtEnd)
+}
