@@ -345,5 +345,7 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .magicWand: return "magic_wand_panel_content"
     case .symbols: return "symbols_panel_content"
     case .brushes: return "brushes_panel_content"
+    case .gradient: return "gradient_panel_content"
+    case .concepts: return "concepts_panel_content"
     }
 }

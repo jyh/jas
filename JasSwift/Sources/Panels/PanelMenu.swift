@@ -138,6 +138,11 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .magicWand: return MagicWandPanel.menuItems()
     case .symbols: return SymbolsPanel.menuItems()
     case .brushes: return BrushesPanel.menuItems()
+    // Gradient / Concepts are rendered generically from the YAML bundle and
+    // have no native panel-menu module, so their hamburger menu is empty (the
+    // bundle supplies any panel-menu rows). They exist as PanelKind cases
+    // purely so the dock can show/hide them via the generic toggle_panel path.
+    case .gradient, .concepts: return []
     }
 }
 
@@ -171,6 +176,8 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    // No native panel-menu module (YAML-rendered): no bespoke menu commands.
+    case .gradient, .concepts: break
     }
 }
 
@@ -196,6 +203,8 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
     case .magicWand: return MagicWandPanel.isChecked(cmd, layout: layout)
     case .symbols: return SymbolsPanel.isChecked(cmd, layout: layout)
     case .brushes: return BrushesPanel.isCheckedWithModel(cmd, model: model)
+    // No native panel-menu module (YAML-rendered): no stateful checkmarks.
+    case .gradient, .concepts: return false
     }
 }
 

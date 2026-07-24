@@ -388,20 +388,21 @@ public struct JasCommands: Commands {
             guard let ws = workspace,
                   let panelId = params["panel"] as? String else { return }
             guard let kind = panelKindForMenuId(panelId) else {
-                // `concepts` has NO PanelKind case (the Concepts panel is not
-                // wired into the dock/PanelKind layout in this app), so the
-                // toggle is a graceful no-op here — special-cased like Rust's
-                // `toggle_panel_concepts`, but Swift has no panel to show yet.
+                // Unknown panel id — graceful no-op.
                 return
             }
-            // OP_LOG 3d-2: dispatch close/show through the shared layout-op
-            // runtime. Byte-identical to the prior `panelToggle` body.
+            // The ONE generic native toggle_panel path (actions.yaml contract),
+            // keyed by the panel-id string, identical to the Rust dispatch:
+            // SHOW -> make dock_main visible + expanded, append to its LAST
+            // group, activate (showPanelInLastGroup); HIDE -> close_panel + drop
+            // the emptied group (shared layout-op runtime). This makes Gradient
+            // and Concepts reachable, same as every other panel.
             if ws.workspaceLayout.isPanelVisible(kind) {
                 if let addr = findPanel(ws.workspaceLayout, kind) {
                     layoutApply(&ws.workspaceLayout, opClosePanel(addr))
                 }
             } else {
-                layoutApply(&ws.workspaceLayout, opShowPanel(kind))
+                ws.workspaceLayout.showPanelInLastGroup(kind)
             }
             ws.workspaceLayout.saveIfNeeded()
         default:
@@ -771,14 +772,14 @@ public struct JasCommands: Commands {
 // MARK: - Menu evaluation context (chrome seam)
 
 /// The Window-menu panel ids whose visibility populates the `panels.*`
-/// namespace of the menu ctx. `concepts` has no ``PanelKind`` case in this app,
-/// so it resolves to not-visible (see ``panelKindForMenuId(_:)``); `brushes` is
-/// a toggle-only panel (not in the default layout) whose `panels.brushes`
-/// checkmark must reflect on-screen state.
+/// namespace of the menu ctx. All 16 have a ``PanelKind`` case now, so each
+/// check mark tracks live on-screen state; `brushes`, `gradient`, and
+/// `concepts` are toggle-only panels (not in the default layout) whose
+/// checkmark must reflect on-screen state once summoned.
 let menuPanelIds: [String] = [
     "artboards", "layers", "color", "swatches", "stroke", "properties",
     "character", "paragraph", "align", "boolean", "magic_wand", "opacity",
-    "symbols", "brushes", "concepts",
+    "symbols", "brushes", "gradient", "concepts",
 ]
 
 /// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``. Free function
@@ -792,10 +793,10 @@ func paneKindForId(_ id: String) -> PaneKind? {
     }
 }
 
-/// Map a bundle Window-menu panel id to ``PanelKind``. Returns nil for
-/// `concepts` (no PanelKind case — the Concepts panel is not wired into this
-/// app's dock/PanelKind layout, see the `toggle_panel` dispatch arm). Free
-/// function shared by the menu dispatch and the menu-ctx builder.
+/// Map a bundle Window-menu panel id to ``PanelKind``. Complete over all 16
+/// dock panels (gradient / concepts included); returns nil only for an
+/// unknown id. Free function shared by the menu dispatch and the menu-ctx
+/// builder.
 func panelKindForMenuId(_ id: String) -> PanelKind? {
     switch id {
     case "layers": return .layers
@@ -812,6 +813,8 @@ func panelKindForMenuId(_ id: String) -> PanelKind? {
     case "magic_wand": return .magicWand
     case "symbols": return .symbols
     case "brushes": return .brushes
+    case "gradient": return .gradient
+    case "concepts": return .concepts
     default: return nil
     }
 }
@@ -859,7 +862,8 @@ func buildMenuContext(model: Model?, tabCount: Int, hasSelection: Bool?,
         hasSavedLayout = ws.appConfig.activeLayout != workspaceLayoutName
         let layout = ws.workspaceLayout
         for pid in menuPanelIds {
-            // concepts → false (no PanelKind case), matching the Python ctx.
+            // All 16 ids map to a PanelKind now; the checkmark tracks live
+            // on-screen state (unknown id would defensively resolve to false).
             panels[pid] = panelKindForMenuId(pid).map { layout.isPanelVisible($0) } ?? false
         }
         let paneLayout = layout.panes()
