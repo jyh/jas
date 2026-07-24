@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import JasLib
 
 // Mirrors jas_dioxus/src/algorithms/arrow_trim.rs tests. Pins the arc-length
@@ -74,4 +75,51 @@ private func approx(_ a: Double, _ b: Double, _ tol: Double = 1e-4) -> Bool {
     let e = endpoint(r[1])
     #expect(approx(e.0, 52.5346))
     #expect(approx(e.1, 13.0731))
+}
+
+// ── Orientation (the trim-chord law, ARROWFIX2 item 1) ───────────
+// Mirrors jas_dioxus/src/algorithms/arrow_trim.rs orientation tests.
+
+@Test func arrowOrientJyhPenReleaseTailIsTheChordNotTheScrap() {
+    // JYH's real saved pen-release tail (last two curves of Untitled-2.svg):
+    // the final ~1.3px segment has ctrl2 coincident with the endpoint.
+    let tail: [PathCommand] = [
+        .moveTo(416.6667, 174.6667),
+        .curveTo(x1: 415.5973, y1: 165.0424, x2: 411.0564, y2: 163.4462, x: 407.3333, y: 156.0),
+        .curveTo(x1: 407.0522, y1: 155.4378, x2: 406.0, y2: 154.6667, x: 406.0, y: 154.6667),
+    ]
+    // Triangle head, stroke width 6.6667, scale 100 -> end_setback 26.6668 >
+    // tail length 23.0559 -> heads-only -> whole-tail chord = -2.0608 rad.
+    let (_, end100) = ArrowTrim.headAngles(tail, startSetback: 0, endSetback: 4.0 * 6.6667)
+    #expect(approx(end100, -2.060755))
+    let (_, end200) = ArrowTrim.headAngles(tail, startSetback: 0, endSetback: 4.0 * 6.6667 * 2.0)
+    #expect(approx(end200, -2.060755))
+    // Up-and-left on screen (y down): cos<0 (left), sin<0 (up).
+    #expect(cos(end100) < 0 && sin(end100) < 0)
+}
+
+@Test func arrowOrientCurvedEndCutChordIsScaleSensitive() {
+    let arch: [PathCommand] = [.moveTo(0, 0), .curveTo(x1: 0, y1: 100, x2: 200, y2: 100, x: 200, y: 0)]
+    let (_, s100) = ArrowTrim.headAngles(arch, startSetback: 0, endSetback: 4.0 * 6.6667)
+    let (_, s200) = ArrowTrim.headAngles(arch, startSetback: 0, endSetback: 4.0 * 6.6667 * 2.0)
+    #expect(approx(s100, -1.374535))
+    #expect(approx(s200, -1.165320))
+    #expect(s200 > s100)  // a larger head samples a shallower chord
+}
+
+@Test func arrowOrientStartHeadIsTheChordNotTheHook() {
+    let hook: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 0.3, y1: -0.3, x2: 0.6, y2: 0.2, x: 1.0, y: 0.0),
+        .lineTo(60, 0),
+    ]
+    let (start, _) = ArrowTrim.headAngles(hook, startSetback: 4.0 * 6.6667, endSetback: 0)
+    #expect(approx(start, Double.pi))  // straight back, outward
+}
+
+@Test func arrowOrientDegeneratePointFallsBackToTangentWalk() {
+    let pt: [PathCommand] = [.moveTo(5, 5), .lineTo(5, 5)]
+    let (start, end) = ArrowTrim.headAngles(pt, startSetback: 2, endSetback: 2)
+    #expect(approx(start, Double.pi))
+    #expect(approx(end, 0))
 }

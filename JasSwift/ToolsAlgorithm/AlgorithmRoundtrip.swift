@@ -116,6 +116,18 @@ func runArrowTrim(_ vectors: [[String: Any]]) -> [[String: Any]] {
         if case .path(let p) = elem { d = p.d }
         let startSb = (tc["start_setback"] as? NSNumber)?.doubleValue ?? 0.0
         let endSb = (tc["end_setback"] as? NSNumber)?.doubleValue ?? 0.0
+        // Orientation vectors pin the trim-chord head angles (ARROWFIX2 item 1);
+        // a head reports its angle only when armed (its setback > 0).
+        if (tc["orient"] as? NSNumber)?.boolValue ?? false {
+            let eps = 1e-9
+            let (startAngle, endAngle) = ArrowTrim.headAngles(
+                d, startSetback: startSb, endSetback: endSb)
+            let result: [String: Any] = [
+                "start": startSb > eps ? (startAngle as Any) : NSNull(),
+                "end": endSb > eps ? (endAngle as Any) : NSNull(),
+            ]
+            return ["name": name, "result": result]
+        }
         let trimmed = ArrowTrim.trimPath(d, startSetback: startSb, endSetback: endSb)
         let result = trimmed.map { cmdToJSON($0) }
         return ["name": name, "result": result]

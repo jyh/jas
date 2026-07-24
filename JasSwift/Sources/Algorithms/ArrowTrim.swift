@@ -262,4 +262,82 @@ public enum ArrowTrim {
         }
         return out
     }
+
+    // ── Arrowhead orientation (the trim-chord law) ───────────────────
+    //
+    // ARROWFIX2 item 1. Port of `arrow_trim.rs::head_angles`; keep in lockstep.
+    // The head POSITION is unchanged (the original endpoint; the caller keeps
+    // drawing there). Only the ANGLE changes: the head points along the CHORD
+    // spanning its own footprint — from the trim CUT-POINT to the ORIGINAL
+    // endpoint — so a degenerate micro-segment or an end-hook at the very tip (a
+    // pen released without a drag leaves ctrl2 coincident with the endpoint and a
+    // sub-pixel final segment) cannot swing it.
+    //
+    // Resolution order (per head): normal trim -> chord(cut -> endpoint); heads-
+    // only (setbacks meet/exceed the length) -> whole-path chord; whole-path
+    // chord degenerate -> the tangent walk (startTangent/endTangent). The end
+    // angle points in the travel direction, the start angle outward, matching the
+    // tangent walk this supersedes.
+
+    /// Direction of the chord from `from` to `to`, or nil if they coincide.
+    private static func chordDir(_ from: Pt, _ to: Pt) -> Double? {
+        let dx = to.0 - from.0, dy = to.1 - from.1
+        if (dx * dx + dy * dy).squareRoot() < eps { return nil }
+        return atan2(dy, dx)
+    }
+
+    /// Head-orientation angles `(startAngle, endAngle)` in radians for the same
+    /// `cmds` and setbacks fed to `trimPath`. POSITION is unchanged — the caller
+    /// still anchors each head at the original endpoint; this supplies the ANGLE.
+    public static func headAngles(_ cmds: [PathCommand],
+                                  startSetback: Double,
+                                  endSetback: Double) -> (Double, Double) {
+        // startTangent / endTangent (Arrowheads.swift) give the original
+        // endpoints (.0/.1) and the tangent-walk fallback angle (.2).
+        let (sx, sy, startFallback) = startTangent(cmds)
+        let (ex, ey, endFallback) = endTangent(cmds)
+        let origStart: Pt = (sx, sy)
+        let origEnd: Pt = (ex, ey)
+
+        let segs = buildSegments(cmds)
+        if segs.isEmpty {
+            let start = chordDir(origEnd, origStart) ?? startFallback
+            let end = chordDir(origStart, origEnd) ?? endFallback
+            return (start, end)
+        }
+
+        var cum: [Double] = [0.0]
+        var s = 0.0
+        for seg in segs { s += arcLen(seg); cum.append(s) }
+        let total = s
+        let startSb = max(startSetback, 0.0)
+        let endSb = max(endSetback, 0.0)
+        let aStart = min(startSb, total)
+        let aEnd = total - endSb
+        let headsOnly = total <= eps || aEnd <= aStart + eps
+
+        var endAngle: Double
+        do {
+            var ang: Double? = nil
+            if !headsOnly && endSb > eps {
+                let (i1, local1) = locate(cum, aEnd)
+                let t1 = paramAtArc(segs[i1], local1)
+                ang = chordDir(pointAt(segs[i1], t1), origEnd)
+            }
+            endAngle = ang ?? chordDir(origStart, origEnd) ?? endFallback
+        }
+
+        var startAngle: Double
+        do {
+            var ang: Double? = nil
+            if !headsOnly && startSb > eps {
+                let (i0, local0) = locate(cum, aStart)
+                let t0 = paramAtArc(segs[i0], local0)
+                ang = chordDir(pointAt(segs[i0], t0), origStart)
+            }
+            startAngle = ang ?? chordDir(origEnd, origStart) ?? startFallback
+        }
+
+        return (startAngle, endAngle)
+    }
 }

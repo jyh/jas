@@ -350,6 +350,175 @@ pub fn trim_path(cmds: &[PathCommand], start_setback: f64, end_setback: f64) -> 
     out
 }
 
+// ── Arrowhead orientation (the trim-chord law) ───────────────────
+//
+// ARROWFIX2 item 1. The head POSITION is unchanged (the original endpoint; the
+// caller keeps drawing there). Only the ANGLE changes: the head points along the
+// CHORD spanning its own footprint — from the trim CUT-POINT to the ORIGINAL
+// endpoint — so a degenerate micro-segment or an end-hook at the very tip (a pen
+// released without a drag leaves ctrl2 coincident with the endpoint and a
+// sub-pixel final segment) cannot swing it. This supersedes the pre-ARROWFIX2
+// contract, where the angle was the raw end/start tangent walked back to the
+// first non-coincident point — which orients a ~25px head off a ~1px scrap.
+//
+// Resolution order (per head):
+//   1. Normal trim: dir(cut_point -> original_endpoint) over the head footprint.
+//   2. Heads-only (setbacks meet/exceed the length — same test `trim_path` uses,
+//      so the cut is meaningless): dir over the WHOLE original path chord.
+//   3. Whole-path chord also degenerate (start == end, < EPS): fall back to the
+//      tangent walk (pre-ARROWFIX2 behaviour), the last resort.
+//
+// Sign convention matches the tangent walk this replaces: the end angle points
+// in the travel direction (toward the endpoint), the start angle points outward
+// (away from the interior), so `draw_one`'s `rotate(angle)` aims the +x shape the
+// same way it did before. Pure geometry, so the `algorithm_roundtrip` binary can
+// pin it cross-language alongside `trim_path`.
+
+/// Direction (radians) of the chord from `from` to `to`, or None if the two
+/// points coincide within EPS (an unusable, zero-length chord).
+fn chord_dir(from: P, to: P) -> Option<f64> {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    if (dx * dx + dy * dy).sqrt() < EPS {
+        None
+    } else {
+        Some(dy.atan2(dx))
+    }
+}
+
+/// Significant points in path order, identical to the arrowheads tangent walk
+/// (`canvas::arrowheads::{start,end}_tangent` collect the same list). Kept here
+/// so the orientation law is pure and web-independent.
+fn collect_points(cmds: &[PathCommand]) -> Vec<P> {
+    let mut points: Vec<P> = Vec::new();
+    for cmd in cmds {
+        match *cmd {
+            PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => points.push((x, y)),
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                points.push((x1, y1));
+                points.push((x2, y2));
+                points.push((x, y));
+            }
+            PathCommand::QuadTo { x1, y1, x, y } => {
+                points.push((x1, y1));
+                points.push((x, y));
+            }
+            PathCommand::SmoothCurveTo { x2, y2, x, y } => {
+                points.push((x2, y2));
+                points.push((x, y));
+            }
+            PathCommand::SmoothQuadTo { x, y } | PathCommand::ArcTo { x, y, .. } => {
+                points.push((x, y));
+            }
+            PathCommand::ClosePath => {}
+        }
+    }
+    points
+}
+
+/// Last-resort tangent walk at the END, a pure mirror of
+/// `canvas::arrowheads::end_tangent` (threshold 0.1). Returns the angle only.
+fn tangent_walk_end(points: &[P]) -> f64 {
+    if points.is_empty() {
+        return 0.0;
+    }
+    let (ex, ey) = *points.last().unwrap();
+    let threshold = 0.1;
+    for &(px, py) in points.iter().rev().skip(1) {
+        let dx = ex - px;
+        let dy = ey - py;
+        if dx * dx + dy * dy > threshold * threshold {
+            return dy.atan2(dx);
+        }
+    }
+    0.0
+}
+
+/// Last-resort tangent walk at the START, a pure mirror of
+/// `canvas::arrowheads::start_tangent` (threshold 0.1). Returns the angle only.
+fn tangent_walk_start(points: &[P]) -> f64 {
+    if points.is_empty() {
+        return 0.0;
+    }
+    let (sx, sy) = points[0];
+    let threshold = 0.1;
+    for &(nx, ny) in points.iter().skip(1) {
+        let dx = sx - nx;
+        let dy = sy - ny;
+        if dx * dx + dy * dy > threshold * threshold {
+            return dy.atan2(dx);
+        }
+    }
+    std::f64::consts::PI
+}
+
+/// Head-orientation angles under the trim-chord law: returns `(start_angle,
+/// end_angle)` in radians for the same `cmds` and setbacks fed to `trim_path`.
+/// POSITION is unchanged — the caller still anchors each head at the original
+/// endpoint; this only supplies the ANGLE. See the module note above for the
+/// resolution order and sign convention.
+pub fn head_angles(cmds: &[PathCommand], start_setback: f64, end_setback: f64) -> (f64, f64) {
+    let points = collect_points(cmds);
+    let start_fallback = tangent_walk_start(&points);
+    let end_fallback = tangent_walk_end(&points);
+    if points.is_empty() {
+        return (start_fallback, end_fallback);
+    }
+    let orig_start = points[0];
+    let orig_end = *points.last().unwrap();
+
+    let segs = build_segments(cmds);
+    if segs.is_empty() {
+        let start = chord_dir(orig_end, orig_start).unwrap_or(start_fallback);
+        let end = chord_dir(orig_start, orig_end).unwrap_or(end_fallback);
+        return (start, end);
+    }
+
+    let mut cum = Vec::with_capacity(segs.len() + 1);
+    cum.push(0.0);
+    let mut s = 0.0;
+    for seg in &segs {
+        s += seg.arc_len();
+        cum.push(s);
+    }
+    let total = s;
+    let start_setback = start_setback.max(0.0);
+    let end_setback = end_setback.max(0.0);
+    let a_start = start_setback.min(total);
+    let a_end = total - end_setback;
+    // Same heads-only test trim_path uses: the setbacks cross or consume the
+    // length, so a per-end cut point is meaningless — orient off the whole path.
+    let heads_only = total <= EPS || a_end <= a_start + EPS;
+
+    let end_angle = {
+        let cut_chord = if !heads_only && end_setback > EPS {
+            let (i1, local1) = locate(&cum, a_end);
+            let t1 = segs[i1].param_at_arc(local1);
+            chord_dir(segs[i1].point_at(t1), orig_end)
+        } else {
+            None
+        };
+        cut_chord
+            .or_else(|| chord_dir(orig_start, orig_end))
+            .unwrap_or(end_fallback)
+    };
+
+    let start_angle = {
+        let cut_chord = if !heads_only && start_setback > EPS {
+            let (i0, local0) = locate(&cum, a_start);
+            let t0 = segs[i0].param_at_arc(local0);
+            chord_dir(segs[i0].point_at(t0), orig_start)
+        } else {
+            None
+        };
+        cut_chord
+            .or_else(|| chord_dir(orig_end, orig_start))
+            .unwrap_or(start_fallback)
+    };
+
+    (start_angle, end_angle)
+}
+
 // ── Tests ────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
@@ -444,5 +613,85 @@ mod tests {
     fn determinism() {
         let d = vec![M { x: 0.0, y: 0.0 }, C { x1: 0.0, y1: 40.0, x2: 40.0, y2: 40.0, x: 40.0, y: 0.0 }];
         assert_eq!(trim_path(&d, 5.0, 7.0), trim_path(&d, 5.0, 7.0));
+    }
+
+    // ── Orientation (the trim-chord law, ARROWFIX2 item 1) ───────────
+
+    /// JYH's real saved pen-release tail (the last two curves of
+    /// Untitled-2.svg): the final ~1.3px segment has ctrl2 coincident with the
+    /// endpoint. RED/GREEN in one assertion — the OLD tangent walk reads the head
+    /// off the ~1px ctrl1->endpoint scrap (garbage), the NEW law reads the chord
+    /// over the head's own footprint (the real up-and-left travel direction).
+    #[test]
+    fn jyh_pen_release_tail_orients_off_the_chord_not_the_scrap() {
+        let tail = vec![
+            M { x: 416.6667, y: 174.6667 },
+            C { x1: 415.5973, y1: 165.0424, x2: 411.0564, y2: 163.4462, x: 407.3333, y: 156.0 },
+            C { x1: 407.0522, y1: 155.4378, x2: 406.0, y2: 154.6667, x: 406.0, y: 154.6667 },
+        ];
+        // OLD law: the raw end tangent walks back to ctrl1 (407.0522,155.4378),
+        // ~1.05px from the endpoint -> -2.5092 rad (-143.8 deg): garbage.
+        let old = tangent_walk_end(&collect_points(&tail));
+        approx(old, -2.509161);
+
+        // Triangle head, stroke width 6.6667, scale 100 -> end_setback = 26.6668,
+        // which exceeds the 23.0559 tail length: heads-only, so the head orients
+        // off the whole-tail chord (416.6667,174.6667)->(406,154.6667).
+        let (_, end100) = head_angles(&tail, 0.0, 4.0 * 6.6667);
+        approx(end100, -2.060755);
+        // Scale 200 (setback 53.3336) still exceeds the tail -> identical chord.
+        let (_, end200) = head_angles(&tail, 0.0, 4.0 * 6.6667 * 2.0);
+        approx(end200, -2.060755);
+
+        // The law CHANGED deliberately: new != old by a wide margin.
+        assert!((end100 - old).abs() > 0.4, "new chord must diverge from old tangent");
+        // The chord aims up-and-left on screen (y down): cos<0 (left), sin<0 (up).
+        assert!(end100.cos() < 0.0 && end100.sin() < 0.0, "head should aim up-and-left");
+    }
+
+    /// A curved end where the trim cut lands MID-PATH (non-degenerate): the chord
+    /// over the head footprint differs from the raw end tangent AND is scale
+    /// sensitive (a bigger head samples a longer, shallower chord).
+    #[test]
+    fn curved_end_cut_chord_is_scale_sensitive() {
+        let arch = vec![
+            M { x: 0.0, y: 0.0 },
+            C { x1: 0.0, y1: 100.0, x2: 200.0, y2: 100.0, x: 200.0, y: 0.0 },
+        ];
+        // Raw end tangent is straight down (-pi/2); the chord law is shallower.
+        approx(tangent_walk_end(&collect_points(&arch)), -std::f64::consts::FRAC_PI_2);
+        let (_, s100) = head_angles(&arch, 0.0, 4.0 * 6.6667);
+        let (_, s200) = head_angles(&arch, 0.0, 4.0 * 6.6667 * 2.0);
+        approx(s100, -1.374535);
+        approx(s200, -1.165320);
+        assert!(s200 > s100, "a larger head samples a shallower chord");
+    }
+
+    /// The start head mirrors the law: a sub-pixel start hook must not swing it.
+    /// The path leaves (0,0) through a ~1px hook, then a long +x leg; the start
+    /// head orients off the chord (straight back = PI), not the hook's first
+    /// control point (the old law's 135deg garbage).
+    #[test]
+    fn start_head_orients_off_the_chord_not_the_hook() {
+        let hook = vec![
+            M { x: 0.0, y: 0.0 },
+            C { x1: 0.3, y1: -0.3, x2: 0.6, y2: 0.2, x: 1.0, y: 0.0 },
+            L { x: 60.0, y: 0.0 },
+        ];
+        let old = tangent_walk_start(&collect_points(&hook));
+        approx(old, 2.356194); // 135 deg off the hook control point
+        let (start, _) = head_angles(&hook, 4.0 * 6.6667, 0.0);
+        approx(start, std::f64::consts::PI); // straight back, outward
+        assert!((start - old).abs() > 0.5, "new start chord must diverge from old");
+    }
+
+    /// Fully degenerate path (single point): the whole-path chord collapses, so
+    /// both heads fall back to the tangent walk's documented defaults.
+    #[test]
+    fn degenerate_point_falls_back_to_tangent_walk() {
+        let pt = vec![M { x: 5.0, y: 5.0 }, L { x: 5.0, y: 5.0 }];
+        let (start, end) = head_angles(&pt, 2.0, 2.0);
+        approx(start, std::f64::consts::PI); // start_tangent all-coincident -> PI
+        approx(end, 0.0); // end_tangent all-coincident -> 0
     }
 }

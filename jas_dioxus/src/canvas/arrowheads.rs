@@ -306,13 +306,15 @@ pub fn end_tangent(cmds: &[PathCommand]) -> (f64, f64, f64) {
 /// Draw arrowheads for a path element.
 /// `stroke_color` is used for outline shapes; filled shapes use the stroke color as fill.
 ///
-/// ORIENTATION CONTRACT (see `orientation_from_original_survives_oversized_setback`):
-/// `cmds` MUST be the ORIGINAL path commands, never the shortened / arc-length-
-/// trimmed stroke path. Head position is the original endpoint and head angle is
-/// the original endpoint tangent. A large setback (e.g. arrowhead scale 200) can
-/// displace a trimmed anchor PAST the final control point, reversing the sampled
-/// tangent and flipping the head — so the head is always oriented off the path as
-/// authored, decoupled from whatever the (trimmed) stroke draws.
+/// ORIENTATION CONTRACT (ARROWFIX2 item 1, the trim-chord law): `cmds` MUST be
+/// the ORIGINAL path commands, never the shortened / trimmed stroke path. Head
+/// POSITION is the original endpoint (`start_tangent` / `end_tangent` supply it,
+/// unchanged). Head ANGLE is the chord over the head's own footprint — from the
+/// trim CUT-POINT (derived from `start_setback` / `end_setback`, the same values
+/// fed to `arrow_trim::trim_path`) to the original endpoint — computed by
+/// `arrow_trim::head_angles`. This is immune by construction to end-hooks and
+/// degenerate micro-segments (a pen released without a drag leaves a sub-pixel
+/// final segment whose raw tangent would swing a ~25px head off a ~1px scrap).
 pub fn draw_arrowheads(
     ctx: &CanvasRenderingContext2d,
     cmds: &[PathCommand],
@@ -323,16 +325,20 @@ pub fn draw_arrowheads(
     stroke_width: f64,
     stroke_color: &str,
     center_at_end: bool,
+    start_setback: f64,
+    end_setback: f64,
 ) {
+    let (start_angle, end_angle) =
+        crate::algorithms::arrow_trim::head_angles(cmds, start_setback, end_setback);
     if let Some(shape) = get_shape(start_name) {
-        let (x, y, angle) = start_tangent(cmds);
+        let (x, y, _) = start_tangent(cmds);
         let s = stroke_width * start_scale / 100.0;
-        draw_one(ctx, &shape, x, y, angle, s, stroke_color, center_at_end);
+        draw_one(ctx, &shape, x, y, start_angle, s, stroke_color, center_at_end);
     }
     if let Some(shape) = get_shape(end_name) {
-        let (x, y, angle) = end_tangent(cmds);
+        let (x, y, _) = end_tangent(cmds);
         let s = stroke_width * end_scale / 100.0;
-        draw_one(ctx, &shape, x, y, angle, s, stroke_color, center_at_end);
+        draw_one(ctx, &shape, x, y, end_angle, s, stroke_color, center_at_end);
     }
 }
 
@@ -403,61 +409,44 @@ fn draw_one(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::{FRAC_PI_2, PI};
+    use std::f64::consts::PI;
 
-    fn angle_diff(a: f64, b: f64) -> f64 {
-        ((a - b + PI).rem_euclid(2.0 * PI) - PI).abs()
-    }
-
-    /// Orientation contract (ARROWTRIM commit 1): the arrowhead angle is
-    /// sampled from the ORIGINAL path tangent, never from the shortened /
-    /// trimmed stroke geometry. This pins the trap the true-trim work must
-    /// not reintroduce: at a scale-200-class setback the old anchor
-    /// displacement moves the endpoint PAST the final control point, and a
-    /// tangent sampled off THAT geometry flips ~180 degrees.
+    /// Orientation contract (ARROWFIX2 item 1 — the law CHANGED from the
+    /// ARROWTRIM original-tangent pin). The head angle is now the trim-chord
+    /// over the head's own footprint (`arrow_trim::head_angles`), NOT the raw
+    /// endpoint tangent. This pins the live bug the old law left standing: an
+    /// end-hook (ctrl2 coincident with the endpoint, a sub-pixel final segment)
+    /// swings the raw tangent but must NOT swing the head, which spans ~25px.
     #[test]
-    fn orientation_from_original_survives_oversized_setback() {
-        // Cubic riding the +x axis: 0,0 -> ctrl1(20,0) -> ctrl2(40,0) -> end(44,0).
+    fn end_head_angle_is_the_chord_immune_to_the_end_hook() {
+        // Long +x leg, then a ~1px hook at the tip.
         let cmds = vec![
             MoveTo { x: 0.0, y: 0.0 },
-            CurveTo { x1: 20.0, y1: 0.0, x2: 40.0, y2: 0.0, x: 44.0, y: 0.0 },
+            LineTo { x: 40.0, y: 0.0 },
+            CurveTo { x1: 40.3, y1: 0.3, x2: 41.0, y2: 0.0, x: 41.0, y: 0.0 },
         ];
-        let (ex, ey, orig) = end_tangent(&cmds);
-        assert!((ex - 44.0).abs() < 1e-9 && ey.abs() < 1e-9);
-        // True end tangent points along +x (0 rad).
-        assert!(orig.abs() < 1e-9, "true end tangent should be 0, got {orig}");
-
-        // ctrl2->endpoint distance is 4.0; a setback that exceeds it folds
-        // the endpoint back to the far side of ctrl2 under the old shorten.
-        let shortened = shorten_path(&cmds, 0.0, 12.0);
-        let (_, _, folded) = end_tangent(&shortened);
-        assert!(
-            angle_diff(folded, orig) > FRAC_PI_2,
-            "shortened-geometry tangent must flip past 90 degrees (got diff {})",
-            angle_diff(folded, orig)
-        );
-
-        // Contract: the head is oriented off the ORIGINAL path, unchanged by
-        // any setback. draw_arrowheads(&e.d, ..) at the render call sites
-        // upholds this by construction.
-        let (_, _, head_angle) = end_tangent(&cmds);
-        assert!((head_angle - orig).abs() < 1e-9);
+        // Raw tangent hooks off the ~1px scrap (swung well off +x).
+        let (_, _, raw) = end_tangent(&cmds);
+        assert!(raw.abs() > 0.2, "raw tangent should be swung by the hook, got {raw}");
+        // The chord over a real triangle-head footprint (setback 26.6668) points
+        // essentially +x (0 rad): the head follows the stroke, not the scrap.
+        let (_, head) = crate::algorithms::arrow_trim::head_angles(&cmds, 0.0, 4.0 * 6.6667);
+        assert!(head.abs() < 0.05, "head should orient +x off the chord, got {head}");
     }
 
-    /// The start head mirrors the contract: its angle is the original
-    /// first-segment tangent, invariant to the start setback.
+    /// The start head mirrors the law: a sub-pixel start hook swings the raw
+    /// start tangent but not the head, which orients off the chord (straight
+    /// back = PI, outward).
     #[test]
-    fn start_orientation_is_invariant_to_setback() {
+    fn start_head_angle_is_the_chord_immune_to_the_start_hook() {
         let cmds = vec![
             MoveTo { x: 0.0, y: 0.0 },
-            CurveTo { x1: 4.0, y1: 0.0, x2: 24.0, y2: 0.0, x: 44.0, y: 0.0 },
+            CurveTo { x1: 0.3, y1: -0.3, x2: 0.6, y2: 0.2, x: 1.0, y: 0.0 },
+            LineTo { x: 60.0, y: 0.0 },
         ];
-        let (_, _, orig) = start_tangent(&cmds);
-        let shortened = shorten_path(&cmds, 12.0, 0.0);
-        let (_, _, moved) = start_tangent(&shortened);
-        assert!(
-            angle_diff(moved, orig) > FRAC_PI_2,
-            "shortened-geometry start tangent must flip"
-        );
+        let (_, _, raw) = start_tangent(&cmds);
+        assert!((raw - PI).abs() > 0.2, "raw start tangent should be swung by the hook");
+        let (head, _) = crate::algorithms::arrow_trim::head_angles(&cmds, 4.0 * 6.6667, 0.0);
+        assert!((head - PI).abs() < 0.05, "start head should point straight back (PI), got {head}");
     }
 }

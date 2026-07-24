@@ -1382,15 +1382,19 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                     bbox: pbbox, outline: false
                 )
             }
-            // Arrowheads — oriented off the ORIGINAL v.d, never the trimmed
-            // strokeCmds (see Arrowheads orientation contract).
+            // Arrowheads — anchored at the ORIGINAL v.d endpoints, never the
+            // trimmed strokeCmds. The ANGLE is the trim-chord over each head's
+            // footprint (see Arrowheads orientation contract).
             if let s = v.stroke {
                 let center = s.arrowAlign == .centerAtEnd
+                let startSb = arrowSetback(s.startArrow.name, strokeWidth: s.width, scalePct: s.startArrowScale)
+                let endSb = arrowSetback(s.endArrow.name, strokeWidth: s.width, scalePct: s.endArrowScale)
                 drawArrowheads(ctx, cmds: v.d,
                               startName: s.startArrow.name, endName: s.endArrow.name,
                               startScale: s.startArrowScale, endScale: s.endArrowScale,
                               strokeWidth: s.width, strokeColor: cgColor(s.color),
-                              centerAtEnd: center)
+                              centerAtEnd: center,
+                              startSetback: startSb, endSetback: endSb)
             }
         }
 

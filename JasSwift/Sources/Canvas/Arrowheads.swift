@@ -241,21 +241,32 @@ private func drawOne(_ ctx: CGContext, _ shape: ArrowShape,
 }
 
 /// Draw arrowheads for a path element.
+///
+/// ORIENTATION CONTRACT (ARROWFIX2 item 1, the trim-chord law): `cmds` MUST be
+/// the ORIGINAL path commands, never the trimmed stroke path. Head POSITION is
+/// the original endpoint (startTangent / endTangent supply it). Head ANGLE is the
+/// chord over the head's own footprint — from the trim CUT-POINT (derived from
+/// `startSetback` / `endSetback`, the same values fed to `ArrowTrim.trimPath`) to
+/// the original endpoint — via `ArrowTrim.headAngles`, immune by construction to
+/// end-hooks and degenerate micro-segments.
 func drawArrowheads(_ ctx: CGContext, cmds: [PathCommand],
                     startName: String, endName: String,
                     startScale: Double, endScale: Double,
                     strokeWidth: Double, strokeColor: CGColor,
-                    centerAtEnd: Bool) {
+                    centerAtEnd: Bool,
+                    startSetback: Double, endSetback: Double) {
+    let (startAngle, endAngle) = ArrowTrim.headAngles(
+        cmds, startSetback: startSetback, endSetback: endSetback)
     if let shape = getShape(startName) {
-        let (x, y, angle) = startTangent(cmds)
+        let (x, y, _) = startTangent(cmds)
         let s = strokeWidth * startScale / 100.0
-        drawOne(ctx, shape, x: x, y: y, angle: angle, scale: s,
+        drawOne(ctx, shape, x: x, y: y, angle: startAngle, scale: s,
                 strokeColor: strokeColor, centerAtEnd: centerAtEnd)
     }
     if let shape = getShape(endName) {
-        let (x, y, angle) = endTangent(cmds)
+        let (x, y, _) = endTangent(cmds)
         let s = strokeWidth * endScale / 100.0
-        drawOne(ctx, shape, x: x, y: y, angle: angle, scale: s,
+        drawOne(ctx, shape, x: x, y: y, angle: endAngle, scale: s,
                 strokeColor: strokeColor, centerAtEnd: centerAtEnd)
     }
 }

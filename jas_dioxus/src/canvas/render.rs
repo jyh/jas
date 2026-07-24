@@ -1661,19 +1661,25 @@ fn draw_element_body(
                     stroke_aligned(ctx, stroke_align);
                 }
             }
-            // Arrowheads — oriented off the ORIGINAL `e.d`, never the
-            // shortened/trimmed `stroke_cmds`. See the orientation contract on
-            // draw_arrowheads: a large setback can fold a trimmed anchor past
-            // the final control point and flip a tangent sampled off it.
+            // Arrowheads — anchored at the ORIGINAL `e.d` endpoints, never the
+            // shortened/trimmed `stroke_cmds`. The ANGLE is the trim-chord over
+            // each head's footprint (from the trim cut-point to the original
+            // endpoint), so end-hooks and degenerate micro-segments can't swing
+            // it. See the orientation contract on draw_arrowheads.
             if !outline {
                 if let Some(s) = e.stroke.as_ref() {
                     let color = css_color(&s.color);
                     let center = s.arrow_align == ArrowAlign::CenterAtEnd;
+                    let start_sb = super::arrowheads::arrow_setback(
+                        s.start_arrow.as_str(), s.width, s.start_arrow_scale);
+                    let end_sb = super::arrowheads::arrow_setback(
+                        s.end_arrow.as_str(), s.width, s.end_arrow_scale);
                     super::arrowheads::draw_arrowheads(
                         ctx, &e.d,
                         s.start_arrow.as_str(), s.end_arrow.as_str(),
                         s.start_arrow_scale, s.end_arrow_scale,
                         s.width, &color, center,
+                        start_sb, end_sb,
                     );
                 }
             }

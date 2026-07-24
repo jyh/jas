@@ -170,7 +170,8 @@ fn cmd_to_json(cmd: &PathCommand) -> Value {
 }
 
 fn run_arrow_trim(vectors: &[Value]) -> Vec<Value> {
-    use jas_dioxus::algorithms::arrow_trim::trim_path;
+    use jas_dioxus::algorithms::arrow_trim::{head_angles, trim_path};
+    const EPS: f64 = 1e-9;
     vectors
         .iter()
         .map(|tc| {
@@ -182,6 +183,14 @@ fn run_arrow_trim(vectors: &[Value]) -> Vec<Value> {
             };
             let start_sb = tc["start_setback"].as_f64().unwrap_or(0.0);
             let end_sb = tc["end_setback"].as_f64().unwrap_or(0.0);
+            // Orientation vectors pin the trim-chord head angles (ARROWFIX2
+            // item 1); a head reports its angle only when armed (setback > 0).
+            if tc["orient"].as_bool().unwrap_or(false) {
+                let (start_angle, end_angle) = head_angles(&d, start_sb, end_sb);
+                let start = if start_sb > EPS { json!(start_angle) } else { Value::Null };
+                let end = if end_sb > EPS { json!(end_angle) } else { Value::Null };
+                return json!({"name": name, "result": {"start": start, "end": end}});
+            }
             let trimmed = trim_path(&d, start_sb, end_sb);
             let result: Vec<Value> = trimmed.iter().map(cmd_to_json).collect();
             json!({"name": name, "result": result})
