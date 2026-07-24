@@ -1009,6 +1009,14 @@ pub fn App() -> Element {
             .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
             .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
             .jas-icon-toggle:hover {{ background: var(--jas-button-hover, #606060); }}
+            /* icon_button checked highlight. Driving it from a stylesheet
+               rule keyed on the data-checked attribute (with the resolved
+               color carried in the --jas-check-bg custom property) keeps the
+               highlight reactive WITHOUT baking a background into the widget's
+               multi-segment inline style — so a toggle flips one attribute on
+               a stable node and Dioxus never has to remount to land it
+               (CHAINGLOW). Unchecked → the rule un-matches → no background. */
+            .jas-icon-button[data-checked="true"] {{ background: var(--jas-check-bg, #505050); }}
             /* Swatches / brushes tile hover — subtle accent ring;
                selection outline is set inline by render_color_swatch
                and wins via the inline style precedence. */

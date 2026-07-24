@@ -5189,21 +5189,35 @@ fn is_toolbar_tool_slot(el: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Resolve an icon_button's checked/highlight state from its
-/// `bind.checked` expression + `style.checked_bg`, evaluated against the
-/// render ctx. Returns `(checked, background_fragment)`.
+/// Resolve an icon_button's checked state and the color its highlight uses
+/// WHEN checked, from `bind.checked` + `style.checked_bg` against the render
+/// ctx. Returns `(checked, checked_bg_color)`.
 ///
-/// ALWAYS emits a concrete `background:` (the resolved `checked_bg`, or
-/// `transparent`) so a checked→unchecked transition clears the highlight
-/// rather than leaving the prior background on a reused node (the Align-To
-/// note below).
+/// The highlight is NOT baked into the root div's `style` string. The div
+/// carries a dedicated `data-checked` attribute (this bool) plus a
+/// `--jas-check-bg` custom property (this color), and the app stylesheet's
+/// `.jas-icon-button[data-checked="true"] { background: var(--jas-check-bg) }`
+/// rule paints it (app.rs). Driving on/off from that ONE dedicated attribute
+/// — rather than a `background:` fragment buried in a multi-segment formatted
+/// `style` value — means a toggle flips a single attribute on a node whose
+/// identity is STABLE (`key: "{id}"`): Dioxus flushes that value reliably (the
+/// same way the glyph's `dangerous_inner_html` child always re-rendered), and
+/// nothing remounts.
 ///
-/// Extracted (CHAINGLOW) for two reasons: (1) the identity `key` and the
-/// highlight background must be driven by the SAME freshly-evaluated
-/// `checked` — see render_icon_button's `key` — and (2) render_icon_button
-/// itself returns an Element that needs component context, so this pure
-/// helper is the headless test target for what the button DISPLAYS.
-fn icon_button_bg_style(el: &serde_json::Value, ctx: &serde_json::Value) -> (bool, String) {
+/// This replaces the prior CHAINGLOW remedy, which keyed the div on
+/// `{id}-{checked}-{disabled}`. That key DID land the fresh highlight — but
+/// only by remounting the whole node on every checked/disabled flip, which
+/// destroyed the focused element on keyboard activation (breaking Tab-nav
+/// continuity — keyboard.rs relies on the focused widget, and there is no
+/// focus restoration for `.jas-focusable` divs) and split a toolbar slot's
+/// double-click across two DOM nodes (click1 selects the tool, flipping
+/// `checked` and remounting before click2, suppressing the dblclick).
+/// `checked_bg_color` is constant across a toggle, so it never needs to
+/// re-flush mid-interaction — only `data-checked` moves.
+///
+/// Extracted so the checked decision has a headless test target
+/// (render_icon_button returns an Element that needs component context).
+fn icon_button_check_state(el: &serde_json::Value, ctx: &serde_json::Value) -> (bool, String) {
     let checked = el
         .get("bind")
         .and_then(|b| b.get("checked"))
@@ -5212,6 +5226,9 @@ fn icon_button_bg_style(el: &serde_json::Value, ctx: &serde_json::Value) -> (boo
         .unwrap_or(false);
 
     // Resolve checked_bg from the style spec, substituting {{...}} templates.
+    // Every shipped icon_button uses `{{theme.colors.button_checked}}`, and
+    // the unset default is that same #505050; a literal color in
+    // `style.checked_bg` is honored too (it rides the --jas-check-bg property).
     let checked_bg = if let Some(raw) = el.get("style").and_then(|s| s.get("checked_bg")).and_then(|v| v.as_str()) {
         let resolved = if raw.contains("{{") { expr::eval_text(raw, ctx) } else { raw.to_string() };
         if resolved.is_empty() || resolved.contains("{{") {
@@ -5222,17 +5239,7 @@ fn icon_button_bg_style(el: &serde_json::Value, ctx: &serde_json::Value) -> (boo
     } else {
         "#505050".to_string()
     };
-    // Always emit `background:` explicitly so a checked→unchecked
-    // transition actually clears the highlight in the DOM. With an
-    // empty fallback Dioxus's style diff left the previous
-    // background-color on the element (so e.g. all three Align-To
-    // toggles looked checked once any had ever been checked).
-    let bg_style = if checked {
-        format!("background:{checked_bg};")
-    } else {
-        "background:transparent;".to_string()
-    };
-    (checked, bg_style)
+    (checked, checked_bg)
 }
 
 fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
@@ -5241,9 +5248,11 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let style = build_style(el, ctx);
     let panel_kind = rctx.panel_kind;
 
-    // Evaluate bind.checked + resolve the highlight background (shared with
-    // the identity key below so both track the same fresh `checked`).
-    let (checked, bg_style) = icon_button_bg_style(el, ctx);
+    // Evaluate bind.checked + resolve the highlight color. The highlight is
+    // applied by CSS via the `data-checked` attribute + `--jas-check-bg`
+    // property set on the root div below — NOT by a background fragment in
+    // the style string — so the toggle flips one attribute on a stable node.
+    let (checked, checked_bg) = icon_button_check_state(el, ctx);
     // Evaluate bind.disabled to grey the button out. Used by
     // op_link_indicator to disable while the selection has no mask.
     let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
@@ -5525,23 +5534,29 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id_for_keydown = id.clone();
     rsx! {
         div {
-            // Identity-coupled key: remount whenever the highlight/disabled
-            // state flips so the fresh inline `background` (and greyed-out
-            // opacity) actually reach the DOM. The icon glyph rides in a
-            // child `dangerous_inner_html` node that Dioxus rewrites whole
-            // on each repaint, so the TINT always tracked state; the checked
-            // highlight lives in THIS reused root div's multi-segment `style`
-            // string and stuck at its first-enabled value across repaints
-            // (the same stale-DOM-after-repaint class LINKHILITE hit with the
-            // combo's controlled <input> — "even when it did repaint" the DOM
-            // kept its old value). build_click_handler already bumps revision
-            // in-spawn, so the missing medicine was only this key. Mirrors the
-            // `key: "{{id}}-{{value}}"` on render_number_input / render_combo_box.
-            key: "{id}-{checked}-{disabled}",
+            // STABLE identity: key on the widget id ALONE so a state change
+            // never remounts the node. The checked highlight is driven by the
+            // `data-checked` attribute + the app stylesheet rule
+            // `.jas-icon-button[data-checked="true"]`, so toggling flips one
+            // dedicated attribute on THIS same persistent node — Dioxus
+            // flushes that reliably (as it always did the glyph's
+            // `dangerous_inner_html` tint) with no remount. That preserves
+            // keyboard focus across Enter/Space activation (keyboard.rs
+            // Tab-nav continuity) and keeps a toolbar slot's double-click on
+            // ONE DOM node even though click1 flips active_tool/checked.
+            // (CHAINGLOW had keyed this on `{{id}}-{{checked}}-{{disabled}}`;
+            // that remounted on every flip, destroying the focused node and
+            // splitting the dblclick target between click1 and click2.)
+            key: "{id}",
             id: "{id}",
-            class: "jas-focusable",
+            class: "jas-focusable jas-icon-button",
+            "data-checked": "{checked}",
             tabindex: "{tabindex_val}",
-            style: "{position_style}{layout_style}cursor:pointer;{disabled_style}{bg_style}{style}",
+            // `--jas-check-bg` is the highlight color the stylesheet paints
+            // when data-checked is "true"; it is constant across a toggle
+            // (only data-checked moves), so it never needs to re-flush
+            // mid-interaction. The `background:` itself is NOT in this string.
+            style: "{position_style}{layout_style}cursor:pointer;--jas-check-bg:{checked_bg};{disabled_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
@@ -10898,20 +10913,17 @@ mod tests {
     // ── CHAINGLOW: the icon_button highlight must track on→off ────────
     //
     // The Stroke chain toggle (stroke.yaml stk_link_arrowhead_scale,
-    // icon_button, `bind.checked: panel.link_arrowhead_scale`) told the
-    // truth in the struct but the checked HIGHLIGHT stuck ON after the
-    // first enable while the icon TINT tracked. Two visual layers, two DOM
-    // paths: the glyph is `dangerous_inner_html` (rewritten whole each
-    // repaint → tint re-evaluates); the highlight is the `background` in the
-    // reused root div's `style` string (stale-DOM-after-repaint, the class
-    // LINKHILITE hit with the combo <input>). The interpreter layer is
-    // honest — this pin proves it by rebuilding the dock ctx exactly as
-    // build_dock_groups does and evaluating render_icon_button's REAL
-    // highlight decision (icon_button_bg_style: the same checked eval +
-    // checked_bg resolve the button renders, and the value the identity key
-    // keys on) across a full on→OFF cycle. The fix is the identity `key`
-    // that remounts the div on each `checked` flip; this locks the decision
-    // it feeds.
+    // icon_button, `bind.checked: panel.link_arrowhead_scale`) must light its
+    // highlight while checked and CLEAR it when unchecked. The highlight is
+    // now the `data-checked` attribute + the app stylesheet rule
+    // `.jas-icon-button[data-checked="true"]` (see icon_button_check_state),
+    // so the decision the button DISPLAYS is exactly the `checked` bool CSS
+    // keys on, plus the `--jas-check-bg` color it paints. This pin rebuilds
+    // the dock ctx exactly as build_dock_groups does and evaluates that real
+    // decision across a full on→OFF cycle: `checked` must flip true then back
+    // to false (data-checked "true"→"false" → CSS un-matches → highlight
+    // clears, does NOT stick ON), while the resolved color stays constant.
+    // The stable `key: "{id}"` means the flip never remounts the node.
     fn chain_toggle_el() -> serde_json::Value {
         // The shipped stroke.yaml element (bind.checked only; no checked_bg
         // → the #505050 default). Pinned in the reference bundle test.
@@ -10934,28 +10946,29 @@ mod tests {
         ];
         let mut st = make_state_with_colors("ffffff", "000000");
 
-        // ── ctx #0: initial render — chain OFF → transparent, no highlight. ──
+        // ── ctx #0: initial render — chain OFF → data-checked=false, the
+        //    stylesheet rule does not match, so no highlight is painted. ──
         let ctx0 = build_stroke_render_ctx(&st);
-        let (checked0, bg0) = icon_button_bg_style(&el, &ctx0);
-        assert!(!checked0, "chain starts unchecked");
-        assert_eq!(bg0, "background:transparent;", "no highlight when off");
+        let (checked0, bg0) = icon_button_check_state(&el, &ctx0);
+        assert!(!checked0, "chain starts unchecked → data-checked=false, no highlight");
+        assert_eq!(bg0, "#505050", "checked_bg resolves to the default highlight color");
 
-        // ── Click 1 (enable): the highlight must turn ON. ──
+        // ── Click 1 (enable): data-checked flips true → CSS paints it. ──
         run_yaml_effects(&chain_effects, &ctx0, &mut st);
         let ctx1 = build_stroke_render_ctx(&st);
-        let (checked1, bg1) = icon_button_bg_style(&el, &ctx1);
-        assert!(checked1, "checked true after first enable");
-        assert_eq!(bg1, "background:#505050;", "highlight ON after enable");
+        let (checked1, bg1) = icon_button_check_state(&el, &ctx1);
+        assert!(checked1, "checked true after first enable → data-checked=true, highlight ON");
+        assert_eq!(bg1, "#505050", "highlight color unchanged across the toggle");
 
-        // ── Click 2 (disable): the highlight must clear — NOT stick ON
-        //    (the reported bug). The key `{id}-{checked}` flips true→false,
-        //    remounting the div so this fresh transparent background lands. ──
+        // ── Click 2 (disable): data-checked flips back to false — the
+        //    highlight CLEARS (the rule un-matches), NOT sticks ON (the
+        //    reported bug). No remount: the stable {id} key keeps the same
+        //    node; only the attribute value moves. ──
         run_yaml_effects(&chain_effects, &ctx1, &mut st);
         let ctx2 = build_stroke_render_ctx(&st);
-        let (checked2, bg2) = icon_button_bg_style(&el, &ctx2);
-        assert!(!checked2, "checked back to false after second click");
-        assert_eq!(bg2, "background:transparent;",
-            "highlight CLEARS on disable — does not stick ON");
+        let (checked2, bg2) = icon_button_check_state(&el, &ctx2);
+        assert!(!checked2, "checked back to false → data-checked=false, highlight CLEARS");
+        assert_eq!(bg2, "#505050", "highlight color still resolvable (just not painted)");
     }
 
     // ── radio widget: on_check partitioning ───────────────────
