@@ -13,14 +13,14 @@
 
 use super::{
     circle_painter_inputs, element_needs_legacy, ellipse_painter_inputs, emit_element,
-    emit_shape_paint, line_painter_inputs, polygon_painter_inputs, polyline_painter_inputs,
-    rect_painter_inputs, ConvGeom, ShapePaint,
+    emit_shape_paint, line_painter_inputs, path_painter_inputs, polygon_painter_inputs,
+    polyline_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
 use crate::painter::recording::Command;
 use crate::geometry::element::{
     Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
     GradientStop, GradientType, GroupElem, LineElem, PathCommand, PathElem, PolygonElem,
-    PolylineElem, RectElem, Stroke, StrokeAlign, Transform,
+    PolylineElem, RectElem, Stroke, StrokeAlign, StrokeWidthPoint, Transform,
 };
 use crate::painter::recording::RecordingPainter;
 use crate::painter::Painter;
@@ -483,7 +483,35 @@ fn convert_cases() -> Vec<(&'static str, ShapePaint, f64)> {
         ("ref_ellipse_convert", ellipse_case(), 1.0),
         ("ref_polyline_convert", polyline_case(), 0.75),
         ("ref_polygon_convert", polygon_case(), 0.6),
+        ("ref_path_convert", path_case(), 0.85),
     ]
+}
+
+fn path_case() -> ShapePaint {
+    // A two-subpath EvenOdd path (boolean-op output) with a fill and a solid
+    // center stroke — locks the A3 winding riding fill_path.
+    let e = PathElem {
+        d: vec![
+            PathCommand::MoveTo { x: 20.0, y: 200.0 },
+            PathCommand::CurveTo { x1: 60.0, y1: 120.0, x2: 140.0, y2: 280.0, x: 180.0, y: 200.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 60.0, y: 200.0 },
+            PathCommand::LineTo { x: 140.0, y: 200.0 },
+            PathCommand::LineTo { x: 100.0, y: 170.0 },
+            PathCommand::ClosePath,
+        ],
+        fill: fill(Color::rgb(0.2, 0.6, 0.3)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        fill_rule: FillRule::EvenOdd,
+        common: common(),
+        ..PathElem::default()
+    };
+    path_painter_inputs(&e, elem_bounds_path(&e)).expect("convertible path")
+}
+
+/// The bbox the legacy Path arm resolves gradients on (`elem.bounds()`).
+fn elem_bounds_path(e: &PathElem) -> (f64, f64, f64, f64) {
+    Element::Path(e.clone()).bounds()
 }
 
 fn polygon_case() -> ShapePaint {
@@ -796,4 +824,80 @@ fn polygon_freeform_gradient_not_convertible() {
     let mut e = plain_polygon_elem();
     e.stroke_gradient = Some(freeform_grad());
     assert!(polygon_painter_inputs(&e, super::poly_bbox(&e.points)).is_none());
+}
+
+// -- Path --------------------------------------------------------------------
+
+fn plain_path_elem() -> PathElem {
+    PathElem {
+        d: vec![
+            PathCommand::MoveTo { x: 20.0, y: 200.0 },
+            PathCommand::CurveTo { x1: 60.0, y1: 120.0, x2: 140.0, y2: 280.0, x: 180.0, y: 200.0 },
+            PathCommand::ClosePath,
+        ],
+        fill: fill(Color::rgb(0.2, 0.6, 0.3)),
+        stroke: Some(stroke(Color::BLACK, 2.0)),
+        common: common(),
+        ..PathElem::default()
+    }
+}
+
+#[test]
+fn path_solid_center_is_convertible() {
+    let e = plain_path_elem();
+    let sp = path_painter_inputs(&e, elem_bounds_path(&e)).expect("plain path converts");
+    assert!(sp.fill.is_some() && sp.stroke.is_some());
+    assert!(matches!(sp.geom, ConvGeom::Path(_)));
+}
+
+#[test]
+fn path_evenodd_winding_crosses_the_seam() {
+    let mut e = plain_path_elem();
+    e.fill_rule = FillRule::EvenOdd;
+    let sp = path_painter_inputs(&e, elem_bounds_path(&e)).expect("converts");
+    assert_eq!(sp.fill.expect("fill").winding, FillRule::EvenOdd, "A3 winding rides fill_path");
+}
+
+#[test]
+fn path_stroke_brush_not_convertible() {
+    // RP2: a set stroke brush renders a filled outline, not a native stroke.
+    let mut e = plain_path_elem();
+    e.stroke_brush = Some("calligraphic/flat".to_string());
+    assert!(path_painter_inputs(&e, elem_bounds_path(&e)).is_none(), "RP2: stroke brush stays legacy");
+}
+
+#[test]
+fn path_variable_width_not_convertible() {
+    let mut e = plain_path_elem();
+    e.width_points = vec![
+        StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 1.0 },
+        StrokeWidthPoint { t: 1.0, width_left: 3.0, width_right: 3.0 },
+    ];
+    assert!(path_painter_inputs(&e, elem_bounds_path(&e)).is_none(), "variable width stays legacy");
+}
+
+#[test]
+fn path_arrowhead_not_convertible() {
+    let mut s = stroke(Color::BLACK, 2.0);
+    s.end_arrow = Arrowhead::SimpleArrow;
+    let mut e = plain_path_elem();
+    e.stroke = Some(s);
+    assert!(path_painter_inputs(&e, elem_bounds_path(&e)).is_none(), "arrowheads stay legacy");
+}
+
+#[test]
+fn path_anchor_dash_not_convertible() {
+    let mut e = plain_path_elem();
+    e.stroke = Some(anchor_dash(2.0));
+    assert!(
+        path_painter_inputs(&e, elem_bounds_path(&e)).is_none(),
+        "the Path arm expands anchor dashing — stays legacy"
+    );
+}
+
+#[test]
+fn path_freeform_gradient_not_convertible() {
+    let mut e = plain_path_elem();
+    e.fill_gradient = Some(freeform_grad());
+    assert!(path_painter_inputs(&e, elem_bounds_path(&e)).is_none());
 }

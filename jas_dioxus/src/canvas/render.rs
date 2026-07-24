@@ -1542,6 +1542,25 @@ fn draw_element_body(
             } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Path(e) => {
+            // PH2 Painter conversion (capability-routed). RP2: a set stroke
+            // brush renders a filled outline (draw_brushed_path), nothing like a
+            // native stroke — it stays legacy, together with variable width,
+            // arrowheads, anchor-dash expansion, freeform gradients, and outline
+            // mode. The gradient bbox is `elem.bounds()` — exactly the box the
+            // legacy arm passes (for Path that box IS bounds()). The A3 fill
+            // winding is the element's fill_rule.
+            let converted = if outline {
+                false
+            } else if let Some(sp) =
+                crate::painter::element_render::path_painter_inputs(e, elem.bounds())
+            {
+                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
+                true
+            } else {
+                false
+            };
+            if !converted {
             let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
             if outline {
                 apply_outline_style(ctx);
@@ -1640,6 +1659,7 @@ fn draw_element_body(
                     );
                 }
             }
+            } // end `if !converted`: the PH2 painter route handled the paints
         }
         Element::Text(e) => {
             let fill_op = apply_fill(ctx, e.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
