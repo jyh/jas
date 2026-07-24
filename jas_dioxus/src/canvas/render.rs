@@ -1601,20 +1601,34 @@ fn draw_element_body(
                 // Fall through to native stroke when the slug didn't
                 // resolve or the brush type isn't supported yet.
             }
-            // Stroke uses a shortened path to accommodate arrowheads
+            // Stroke uses an arc-length-trimmed path to accommodate arrowheads:
+            // walk in from each armed end by the setback along arc length, split
+            // the straddled segment (de Casteljau), drop the tail. Replaces the
+            // old anchor-displacement (which deformed curved ends and folded them
+            // past the head at large setbacks). An empty result means the setbacks
+            // meet-or-exceed the length -> heads-only, no stroke; every draw path
+            // below no-ops on empty cmds, and the arrowheads still draw off `e.d`.
             if outline || e.stroke.is_some() {
-                let shortened = if !outline {
+                let trimmed = if !outline {
                     if let Some(s) = e.stroke.as_ref() {
                         let start_sb = super::arrowheads::arrow_setback(
                             s.start_arrow.as_str(), s.width, s.start_arrow_scale);
                         let end_sb = super::arrowheads::arrow_setback(
                             s.end_arrow.as_str(), s.width, s.end_arrow_scale);
                         if start_sb > 0.0 || end_sb > 0.0 {
-                            Some(super::arrowheads::shorten_path(&e.d, start_sb, end_sb))
+                            Some(crate::algorithms::arrow_trim::trim_path(&e.d, start_sb, end_sb))
                         } else { None }
                     } else { None }
                 } else { None };
-                let stroke_cmds = shortened.as_deref().unwrap_or(&e.d);
+                // Butt the trimmed cut: the head covers the stroke's end at the
+                // head base, so a round/projecting cap there would poke half a
+                // width into/under the head. A single canvas stroke carries one
+                // cap, so this also butts a one-armed path's free end — an
+                // accepted simplification; arrowheaded ends are the target.
+                if trimmed.is_some() {
+                    ctx.set_line_cap("butt");
+                }
+                let stroke_cmds = trimmed.as_deref().unwrap_or(&e.d);
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 if !outline && !e.width_points.is_empty() {
                     // Variable-width stroke via offset paths

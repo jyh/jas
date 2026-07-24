@@ -1,0 +1,118 @@
+{
+  "_doc": "Arc-length trim of arrowheaded stroke paths (ARROWTRIM). trim_path walks in from each armed end by the setback distance along arc length, de-Casteljau-splits the straddled segment, drops the tail, and butts the cut. Arc length uses the house FLATTEN_STEPS=20 uniform-t polyline (identical to flatten_path_commands / measure.arc_lengths / the dash-anchor walk), so the arc->parameter mapping is byte-reproducible across the active ports. Goldens are the trimmed command list pinned to the 4-decimal doc-space law. An empty result means the setbacks meet-or-exceed the total length: draw arrowheads only (oriented off the original path), no stroke.",
+  "vectors": [
+    {
+      "name": "line_both_ends",
+      "_comment": "100-long horizontal line, trim 10 off start and 20 off end -> M(10,0) L(80,0). Exact, hand-verifiable.",
+      "start_setback": 10.0,
+      "end_setback": 20.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [{"cmd": "M", "x": 10.0, "y": 0.0}, {"cmd": "L", "x": 80.0, "y": 0.0}]
+    },
+    {
+      "name": "line_start_only",
+      "start_setback": 12.5,
+      "end_setback": 0.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 0.0, "y": 50.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [{"cmd": "M", "x": 0.0, "y": 12.5}, {"cmd": "L", "x": 0.0, "y": 50.0}]
+    },
+    {
+      "name": "line_end_only",
+      "start_setback": 0.0,
+      "end_setback": 8.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 10.0, "y": 10.0}, {"cmd": "L", "x": 10.0, "y": 40.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [{"cmd": "M", "x": 10.0, "y": 10.0}, {"cmd": "L", "x": 10.0, "y": 32.0}]
+    },
+    {
+      "name": "corner_span_two_segments",
+      "_comment": "Two 50-long legs; trim 10/10. Kept stroke spans the (50,0) corner joint.",
+      "start_setback": 10.0,
+      "end_setback": 10.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 50.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [{"cmd": "M", "x": 10.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 40.0}]
+    },
+    {
+      "name": "cubic_end_trim",
+      "_comment": "Symmetric arch cubic; trim ~25% of arc off the end. Kept endpoint lands ON the curve (de Casteljau split), lifted off y=0, short of x=40 -- not the folded anchor the old shorten produced.",
+      "start_setback": 0.0,
+      "end_setback": 20.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "C", "x1": 0.0, "y1": 40.0, "x2": 40.0, "y2": 40.0, "x": 40.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "C", "x1": 0.0, "y1": 31.9118, "x2": 25.4591, "y2": 38.3645, "x": 35.7550, "y": 19.3582}
+      ]
+    },
+    {
+      "name": "cubic_both_ends_trim",
+      "start_setback": 15.0,
+      "end_setback": 20.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "C", "x1": 0.0, "y1": 40.0, "x2": 40.0, "y2": 40.0, "x": 40.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [
+        {"cmd": "M", "x": 2.2498, "y": 14.7927},
+        {"cmd": "C", "x1": 8.6973, "y1": 33.4118, "x2": 27.3176, "y2": 34.9336, "x": 35.7550, "y": 19.3582}
+      ]
+    },
+    {
+      "name": "quad_end_trim",
+      "start_setback": 0.0,
+      "end_setback": 15.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "Q", "x1": 30.0, "y1": 60.0, "x": 60.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "Q", "x1": 26.2673, "y1": 52.5346, "x": 52.5346, "y": 13.0731}
+      ]
+    },
+    {
+      "name": "line_then_cubic_end_trim_stays_in_cubic",
+      "_comment": "Line leg then a cubic; a small end trim splits only the trailing cubic, the line and the joint survive whole.",
+      "start_setback": 0.0,
+      "end_setback": 12.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0},
+        {"cmd": "C", "x1": 40.0, "y1": 0.0, "x2": 60.0, "y2": 20.0, "x": 60.0, "y": 40.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 20.0, "y": 0.0},
+        {"cmd": "C", "x1": 36.0362, "y1": 0.0, "x2": 52.0724, "y2": 12.8580, "x": 57.7990, "y": 28.2643}
+      ]
+    },
+    {
+      "name": "setback_exceeds_total_heads_only",
+      "_comment": "end_setback > total length -> empty stroke (heads-only).",
+      "start_setback": 0.0,
+      "end_setback": 50.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": []
+    },
+    {
+      "name": "overlapping_setbacks_heads_only",
+      "_comment": "25 + 25 > 40 -> the two trims cross -> nothing remains (heads-only).",
+      "start_setback": 25.0,
+      "end_setback": 25.0,
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 40.0, "y": 0.0}
+      ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      "expected": []
+    }
+  ]
+}
