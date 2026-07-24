@@ -4327,6 +4327,26 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
 
 /// Build an onclick handler from an element's behavior declarations.
 /// Returns None if the element has no click behaviors.
+/// True when `el` declares any click-family pointer behavior
+/// (`click` / `double_click` / `click_and_wait`) — i.e. the events that
+/// `build_click_handler` / `build_dblclick_handler` turn into live
+/// handlers. Render arms that host arbitrary widgets (notably
+/// `render_container`) gate their interactive branch on this so a
+/// declared behavior is never silently dropped (the BRUSHDEAD brush-tile
+/// bug, where a click-bearing container rendered as an inert `<div>`).
+fn has_pointer_behavior(el: &serde_json::Value) -> bool {
+    el.get("behavior")
+        .and_then(|b| b.as_array())
+        .map_or(false, |behaviors| {
+            behaviors.iter().any(|b| {
+                matches!(
+                    b.get("event").and_then(|e| e.as_str()).unwrap_or("click"),
+                    "click" | "double_click" | "click_and_wait"
+                )
+            })
+        })
+}
+
 fn build_click_handler(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
@@ -4851,21 +4871,66 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     } else {
         format!("display:flex;flex-direction:{dir};")
     };
-    let style = if visible {
-        format!("{flex_dir}{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
+    // A container may carry its own `behavior` list — the brush tile is a
+    // `type: container` with click (select + set stroke_brush + apply) and
+    // double_click (open options). Wire those the same way icon_button /
+    // color_swatch do; without this the tile rendered as an inert <div>
+    // and clicks did nothing at all (the BRUSHDEAD bug). Only interactive
+    // containers pay for the listeners — the vast majority (plain layout
+    // wrappers) take the no-listener branch below.
+    let on_click = build_click_handler(el, ctx, rctx);
+    let on_dblclick = build_dblclick_handler(el, ctx, rctx);
+    let on_mousedown = build_mousedown_handler(el, ctx, rctx);
+    let on_mouseup = build_mouseup_handler(el, ctx, rctx);
+    // `has_pointer_behavior` is the same predicate the BRUSHDEAD pin
+    // asserts for the brush tile — gate the interactive branch on it (plus
+    // any mouse_down/up timer behaviors) so the tested contract and the
+    // live wiring decision are one and the same.
+    let interactive =
+        has_pointer_behavior(el) || on_mousedown.is_some() || on_mouseup.is_some();
+    let cursor = if interactive { "cursor:pointer;" } else { "" };
+
+    // bind.selected_in: draw the 2px accent outline when this tile's
+    // identity is a member of the bound list (shared with color_swatch via
+    // eval_selected_in). Appended last so it overrides the base border.
+    let selected_border = if eval_selected_in(el, ctx) {
+        "border:2px solid #007aff;"
     } else {
-        format!("display:none;{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
+        ""
+    };
+
+    let style = if visible {
+        format!("{flex_dir}{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}{cursor}{selected_border}")
+    } else {
+        format!("display:none;{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}{cursor}{selected_border}")
     };
     let css_class = format!("{row_class} {col_class}").trim().to_string();
     let children = render_children(el, ctx, rctx);
 
-    rsx! {
-        div {
-            id: "{id}",
-            class: "{css_class}",
-            style: "{style}",
-            for child in children {
-                {child}
+    if interactive {
+        rsx! {
+            div {
+                id: "{id}",
+                class: "{css_class}",
+                style: "{style}",
+                onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+                ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
+                onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
+                onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
+                for child in children {
+                    {child}
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div {
+                id: "{id}",
+                class: "{css_class}",
+                style: "{style}",
+                for child in children {
+                    {child}
+                }
             }
         }
     }
@@ -7524,28 +7589,8 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // from the click behavior's first `select.target` so authors don't
     // have to repeat it). If the identity is in the list, draw a 2px
     // accent outline. Falls back to the regular border otherwise.
-    let selected = el.get("bind")
-        .and_then(|b| b.get("selected_in"))
-        .and_then(|v| v.as_str())
-        .map(|list_expr| {
-            let list_val = expr::eval(list_expr, ctx);
-            let id_expr = el.get("behavior")
-                .and_then(|b| b.as_array())
-                .and_then(|behaviors| {
-                    behaviors.iter().find_map(|b| {
-                        let effects = b.get("effects").and_then(|v| v.as_array())?;
-                        effects.iter().find_map(|e| {
-                            e.get("select")
-                                .and_then(|s| s.get("target"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        })
-                    })
-                });
-            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
-            list_contains_value(&list_val, id_val.as_ref())
-        })
-        .unwrap_or(false);
+    // Shared with the brush-tile container via `eval_selected_in`.
+    let selected = eval_selected_in(el, ctx);
 
     // Selected: 2px macOS-system-blue (#007aff) outline replacing
     // the 1px border. Matches JasSwift's renderColorSwatch which
@@ -7603,6 +7648,38 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             }
         }
     }
+}
+
+/// Evaluate a tile widget's `bind.selected_in` membership: true when the
+/// element's per-item identity (read from its click behavior's first
+/// `select.target`, so authors don't repeat it) is a member of the bound
+/// list expression. Shared by tile-shaped widgets (`color_swatch` and the
+/// brush-tile `container`) so the accent-outline selection cue is drawn
+/// identically wherever a `selected_in` bind appears.
+fn eval_selected_in(el: &serde_json::Value, ctx: &serde_json::Value) -> bool {
+    el.get("bind")
+        .and_then(|b| b.get("selected_in"))
+        .and_then(|v| v.as_str())
+        .map(|list_expr| {
+            let list_val = expr::eval(list_expr, ctx);
+            let id_expr = el
+                .get("behavior")
+                .and_then(|b| b.as_array())
+                .and_then(|behaviors| {
+                    behaviors.iter().find_map(|b| {
+                        let effects = b.get("effects").and_then(|v| v.as_array())?;
+                        effects.iter().find_map(|e| {
+                            e.get("select")
+                                .and_then(|s| s.get("target"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        })
+                    })
+                });
+            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
+            list_contains_value(&list_val, id_val.as_ref())
+        })
+        .unwrap_or(false)
 }
 
 /// Test whether `id` is a member of the list `list`. Used by the
@@ -13879,6 +13956,197 @@ mod tests {
         // No behavior at all.
         let bare = serde_json::json!({ "type": "icon_button" });
         assert!(!super::is_toolbar_tool_slot(&bare));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // BRUSHDEAD — declared pointer behaviors must not be silently dropped
+    // ─────────────────────────────────────────────────────────────
+    //
+    // The live bug: clicking a Brushes-panel brush tile did NOTHING —
+    // no apply, no state change, not even the tile's own selected-outline
+    // cue. The tile is a `type: container` carrying `behavior: [click,
+    // double_click]`, but `render_container` built a plain `<div>` with no
+    // onclick/ondoubleclick, so the declared behavior never reached the
+    // dispatcher. That is finding-#26 disease: a widget-type render arm
+    // that silently drops declared behaviors.
+    //
+    // AUTHORITATIVE CONTRACT. `wires_pointer_click` lists every widget
+    // `type` whose render arm attaches a pointer (onclick / ondoubleclick)
+    // handler built from the element's declared `behavior` list. Grep
+    // contract: each type here has an `onclick:` (and, where it also takes
+    // double_click, an `ondoubleclick:`) in its `render_*` arm above,
+    // sourced from `build_click_handler` / `build_dblclick_handler` (or,
+    // for the native tree widget, its own pointer wiring). If you give a
+    // NEW widget type a click behavior in the YAML, you MUST both add its
+    // `onclick` in the render arm and register it here — otherwise
+    // `every_click_bearing_widget_type_is_pointer_wired` fails.
+    //
+    // Scope: this pin guards the demonstrated defect class —
+    // click-family pointer behaviors (`click` / `double_click` /
+    // `click_and_wait`). change/commit/input behaviors are wired through
+    // each input arm's own native onchange/oninput closures, and
+    // drag/toggle through the drag subsystem; those are out of scope here.
+    fn wires_pointer_click(widget_type: &str) -> bool {
+        matches!(
+            widget_type,
+            "container" | "row" | "col"   // render_container
+                | "icon_button"           // render_icon_button
+                | "color_swatch"          // render_color_swatch
+                | "gradient_tile"         // render_gradient_tile
+                | "gradient_slider"       // render_gradient_slider
+                | "text"                  // render_text
+                | "button"                // render_button
+                | "toggle" | "checkbox"   // render_toggle
+                | "tree_view"             // render_tree_view (native)
+        )
+    }
+
+    /// Collect `(widget_type, event)` for every node in `node` whose
+    /// `behavior[]` declares a click-family pointer event.
+    fn collect_click_bearing(node: &serde_json::Value, out: &mut Vec<(String, String)>) {
+        match node {
+            serde_json::Value::Object(map) => {
+                if let (Some(t), Some(behaviors)) = (
+                    map.get("type").and_then(|t| t.as_str()),
+                    map.get("behavior").and_then(|b| b.as_array()),
+                ) {
+                    for b in behaviors {
+                        let ev = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
+                        if matches!(ev, "click" | "double_click" | "click_and_wait") {
+                            out.push((t.to_string(), ev.to_string()));
+                        }
+                    }
+                }
+                for v in map.values() {
+                    collect_click_bearing(v, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for v in items {
+                    collect_click_bearing(v, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // COMPLETENESS PIN. Walk the COMPILED bundle (workspace.json) and
+    // assert that every widget type carrying a click-family behavior maps
+    // to a render arm that wires a pointer handler. This is the guard
+    // against the whole class: if a render arm silently drops declared
+    // pointer behaviors (as render_container did), any bundle widget of
+    // that type is dead — and this test names it.
+    #[test]
+    fn every_click_bearing_widget_type_is_pointer_wired() {
+        let ws = super::super::workspace::Workspace::load().expect("bundle loads");
+        let mut found = Vec::new();
+        collect_click_bearing(ws.data(), &mut found);
+
+        // Sanity: the bundle actually carries click behaviors (guards
+        // against a walker that silently finds nothing).
+        assert!(
+            !found.is_empty(),
+            "bundle should declare click-family behaviors on widgets"
+        );
+
+        let mut unwired: Vec<(String, String)> = found
+            .iter()
+            .filter(|(t, _)| !wires_pointer_click(t))
+            .cloned()
+            .collect();
+        unwired.sort();
+        unwired.dedup();
+        assert!(
+            unwired.is_empty(),
+            "widget types carry a click/double_click behavior in the bundle \
+             but their render arm attaches no pointer handler (silently dead \
+             clicks — the BRUSHDEAD disease): {unwired:?}"
+        );
+
+        // The container fix specifically must be represented: the bundle
+        // DOES ship a click-bearing container (the brush tile), so this
+        // must be a live case, not a hypothetical.
+        assert!(
+            found.iter().any(|(t, _)| t == "container"),
+            "expected a click-bearing container in the bundle (the brush tile)"
+        );
+    }
+
+    /// Walk the bundle for the first node with `id == want` (ids may carry
+    /// `{{...}}` templating, so match on the literal template form).
+    fn find_by_id<'a>(node: &'a serde_json::Value, want: &str) -> Option<&'a serde_json::Value> {
+        match node {
+            serde_json::Value::Object(map) => {
+                if map.get("id").and_then(|v| v.as_str()) == Some(want) {
+                    return Some(node);
+                }
+                map.values().find_map(|v| find_by_id(v, want))
+            }
+            serde_json::Value::Array(items) => items.iter().find_map(|v| find_by_id(v, want)),
+            _ => None,
+        }
+    }
+
+    // BRUSHES-SPECIFIC PIN. The brush tile must be a container that
+    // declares BOTH a click behavior (select + set stroke_brush + apply)
+    // and a double_click behavior (open options), and `render_container`
+    // must treat that shape as interactive. `has_pointer_behavior` is the
+    // exact predicate render_container gates its interactive branch on, so
+    // asserting it here locks the wiring decision for the tile.
+    #[test]
+    fn brush_tile_container_is_interactive() {
+        let ws = super::super::workspace::Workspace::load().expect("bundle loads");
+        let tile = find_by_id(ws.data(), "bp_tile_{{lib.id}}_{{brush.slug}}")
+            .expect("brush tile present in compiled bundle");
+
+        assert_eq!(
+            tile.get("type").and_then(|t| t.as_str()),
+            Some("container"),
+            "brush tile is a container"
+        );
+
+        let events: Vec<&str> = tile
+            .get("behavior")
+            .and_then(|b| b.as_array())
+            .expect("tile declares behaviors")
+            .iter()
+            .filter_map(|b| b.get("event").and_then(|e| e.as_str()))
+            .collect();
+        assert!(events.contains(&"click"), "tile declares a click behavior");
+        assert!(
+            events.contains(&"double_click"),
+            "tile declares a double_click behavior"
+        );
+
+        // The render arm's own interactivity gate must fire for this node.
+        assert!(
+            super::has_pointer_behavior(tile),
+            "render_container must classify the brush tile as interactive"
+        );
+        // And the tile's type must be pointer-wired per the contract.
+        assert!(wires_pointer_click("container"));
+    }
+
+    // The tile also carries a `selected_in` bind for its highlight; the
+    // shared `eval_selected_in` must report membership so the accent
+    // outline shows once the brush is in `panel.selected_brushes`.
+    #[test]
+    fn eval_selected_in_matches_bundle_tile_shape() {
+        // Mirror the tile: identity is read from the click behavior's
+        // first `select.target` (here a literal), tested against the bound
+        // list.
+        let el = serde_json::json!({
+            "type": "container",
+            "bind": { "selected_in": "panel.selected_brushes" },
+            "behavior": [{
+                "event": "click",
+                "effects": [{ "select": { "target": "\"acme/round\"", "list": "selected_brushes" } }]
+            }]
+        });
+        let ctx_in = serde_json::json!({ "panel": { "selected_brushes": ["acme/round"] } });
+        let ctx_out = serde_json::json!({ "panel": { "selected_brushes": ["acme/flat"] } });
+        assert!(super::eval_selected_in(&el, &ctx_in), "tile is selected when its id is in the list");
+        assert!(!super::eval_selected_in(&el, &ctx_out), "tile is not selected otherwise");
     }
 }
 
