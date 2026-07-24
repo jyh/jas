@@ -233,7 +233,24 @@ func runInputCommitBehavior(
         ctx["panel"] = panelScope
     }
     ctx["event"] = ["value": committed as Any] as [String: Any]
-    let platformEffects = alignPlatformEffects(model: model)
+    // Commit behaviors that write stroke render keys (the linked
+    // arrowhead-scale mirror's `set` / `set_panel_state`) must re-apply the
+    // panel to the selection — exactly as the panel's own commitPanelWrite
+    // path does via notifyPanelStateChanged, and as Rust's
+    // apply_set_panel_state_with_ctx unconditionally re-applies for the
+    // arrowhead-scale keys (renderer.rs ~2042-2048). alignPlatformEffects
+    // registers no such hook, so without it the mirror updated the panel /
+    // global scopes but the sibling scale never reached the element (it
+    // stayed at its stale value while only the edited field applied).
+    // Generic: any stroke render-key write through set / set_panel_state
+    // re-applies, not a scale-combo special case.
+    var platformEffects = alignPlatformEffects(model: model)
+    platformEffects["notify_panel_state_changed"] = { arg, _, store in
+        if let panelId = arg as? String {
+            notifyPanelStateChanged(panelId, store: store, model: model)
+        }
+        return nil
+    }
     for entry in commitBehaviors {
         let effects = (entry["effects"] as? [Any]) ?? []
         if !effects.isEmpty {

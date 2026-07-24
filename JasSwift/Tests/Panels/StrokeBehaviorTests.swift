@@ -538,3 +538,72 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
 
     #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 150)
 }
+
+// (e) SWIFTLINK re-apply gap (the confirmed divergence): link ON, commit
+// start=200 through the REAL runInputCommitBehavior path against a Model
+// with a SELECTED stroked element. The mirror's set / set_panel_state
+// effects must drive applyStrokePanelToSelection for the SIBLING scale —
+// exactly as Rust's apply_set_panel_state_with_ctx unconditionally
+// re-applies for the arrowhead-scale keys (renderer.rs ~2042-2048). The
+// SIBLING must reach the element through the commit-behavior effects, NOT
+// a direct applyStrokePanelToSelection call. Before the fix the
+// commit-behavior platformEffects map (alignPlatformEffects) registered no
+// notify_panel_state_changed hook, so the mirror updated the panel/global
+// scopes but the element stayed {startArrowScale:200, endArrowScale:100}
+// (start applied by the edited-field commit, end stale). Rust: {200,200}.
+@Test func linkedStartScaleCommitReAppliesSiblingToSelection() {
+    let model = strokeModelWithSelectedRect()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": true, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    // The edited field's native two-way write + its OWN apply — this is
+    // what commitPanelWrite does BEFORE runInputCommitBehavior. Element
+    // reaches {200,100}: start applied, sibling still stale.
+    commitStrokeScale(store, "start_arrowhead_scale", 200)
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 200)
+    #expect(model.document.getElement([0, 0]).stroke?.endArrowScale == 100)
+
+    // The linked mirror runs through the real commit-behavior path. Its
+    // set / set_panel_state effects must re-apply the mirrored sibling to
+    // the selection (the effect-hook path, no direct apply call here).
+    runInputCommitBehavior(element: startScaleCombo(),
+                           field: "start_arrowhead_scale", committed: 200.0,
+                           context: staleScaleCtx(linked: true),
+                           store: store, model: model)
+
+    let s = model.document.getElement([0, 0]).stroke
+    #expect(s?.endArrowScale == 200)    // SIBLING re-applied (was stale 100)
+    #expect(s?.startArrowScale == 200)  // edited field intact
+}
+
+// (f) mirror-OFF element guard: link off, commit start=200 via the real
+// path. The `if` guard is false so no mirror effects run — the sibling end
+// scale on the ELEMENT must stay 100. Confirms the fix adds NO new apply
+// where Rust has none (passes both before and after the fix).
+@Test func unlinkedStartScaleCommitLeavesSiblingElementAlone() {
+    let model = strokeModelWithSelectedRect()
+    let store = model.stateStore
+    store.initPanel("stroke_panel_content", defaults: [
+        "start_arrowhead_scale": 100.0, "end_arrowhead_scale": 100.0,
+        "link_arrowhead_scale": false, "weight": 1.0])
+    store.setActivePanel("stroke_panel_content")
+    store.set("stroke_start_arrowhead_scale", 100.0)
+    store.set("stroke_end_arrowhead_scale", 100.0)
+
+    commitStrokeScale(store, "start_arrowhead_scale", 200)
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    runInputCommitBehavior(element: startScaleCombo(),
+                           field: "start_arrowhead_scale", committed: 200.0,
+                           context: staleScaleCtx(linked: false),
+                           store: store, model: model)
+
+    let s = model.document.getElement([0, 0]).stroke
+    #expect(s?.startArrowScale == 200)
+    #expect(s?.endArrowScale == 100)    // sibling untouched (no spurious apply)
+}
