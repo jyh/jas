@@ -4338,9 +4338,13 @@ mod tests {
             // A vector's `scope` (panel / global) collapses in this port:
             // the flat global `stroke_cap` and the panel field `cap` are ONE
             // slot on `StrokePanelState` — `renderer::set_app_state_field`
-            // writes the same field a widget write-back does, weight
-            // included (`stroke_width` -> `stroke_panel.weight`, pinned by
-            // `global_stroke_width_write_lands_on_the_panel_weight`). Swift
+            // writes the same field a widget write-back does for every key
+            // this corpus uses, weight included (`stroke_width` ->
+            // `stroke_panel.weight`, pinned by
+            // `global_stroke_width_write_lands_on_the_panel_weight`).
+            // (Known exception OUTSIDE the corpus: it has no
+            // `stroke_dash_align_anchors` arm — banked in STROKE.md's
+            // follow-ups with the global-apply question.) Swift
             // and the reference keep two dicts, so there the marker selects
             // which one gets seeded.
             let panel = stroke_panel_from_attrs(

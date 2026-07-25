@@ -356,9 +356,12 @@ private func applyGlobalEdit(
 // attributes — a live port divergence on top of the clobber. Both ports now
 // recolour per element and preserve everything else.
 //
-// These pins drive `Controller.swapFillStrokeColors` — the real call path
-// both views now use. They used to re-implement the law with the mappers
-// instead, so a regression in the view code could not have turned them red.
+// These pins drive `Controller.swapFillStrokeColors`, the single home of
+// the law, which both views now delegate to. That pins the LAW once (the
+// old pins re-implemented it with the mappers, asserting nothing shipped);
+// the delegation itself in ContentView.swapColors / the CanvasSubwindow
+// keyDown "X" branch is not exercised here — a view that stopped
+// delegating would need a GUI-level check to catch.
 //
 // The defaults are deliberately PLAIN and the element RICH: that gap is the
 // bug, and seeding the default with the same rich stroke hides it.

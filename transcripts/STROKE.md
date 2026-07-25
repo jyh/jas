@@ -508,3 +508,8 @@ written down here so the decision does not live only in a commit message:
   buttons all commit keyed values), which is why nothing is broken; the
   gap is in the generic widget layer and closing it means every
   panel-state-writing effect naming the field it wrote.
+- **Rust `set_app_state_field` has no `stroke_dash_align_anchors` arm.** A
+  YAML `set: { stroke_dash_align_anchors: ... }` reaches neither the panel
+  field nor any apply in the Rust port, while Swift's `strokeRenderKeys`
+  fires it. Same decision surface as the global-`set:` apply question in
+  this list; fix the two together.
