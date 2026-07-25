@@ -25,15 +25,19 @@ of what is drawn*, and nothing about feel.
 ./scripts/gui_drive.sh --check chain_visible   # one check
 ./scripts/gui_drive.sh --shot-dir /tmp/eyes   # keep evidence PNGs
 ./scripts/gui_drive.sh --headed               # watch it happen
-./scripts/gui_drive.sh --regress dead_tile    # prove the checks can go red
+./scripts/gui_drive.sh --regress dead_sweep   # prove a check can go red
 ```
 
 `gui_drive.sh` starts a wasm dev server on **:8097** if nothing is serving there
 (a private port, so a running `./dxserve.sh` on :8080 is never disturbed), runs
 the checks, and exits nonzero if any failed. Needs Chrome, `dx`, and
-`websocket-client` (already in `.venv`). **No macOS permission is required** for
-the Rust lane — everything goes through the DevTools protocol — so it runs
-unattended, on an unprivileged host, and in CI.
+`websocket-client` (already in `.venv`; the driver preflights all three and
+picks the right Python even from a `git worktree`). **No macOS permission is
+required** for the Rust lane — everything goes through the DevTools protocol —
+so it runs unattended, on an unprivileged host. It is **CI-ready** (gates purely
+on exit code, needs no display or grant); no CI lane is wired yet.
+
+`$JAS_CHROME` overrides the Chrome binary; `$PYTHON` overrides the interpreter.
 
 ## The pieces
 
@@ -129,19 +133,36 @@ same bundle and cannot observe wiring.
 
 ## Fault injection — a green check proves nothing until it goes red
 
-`--regress MODE` reproduces a real defect at the layer it escaped from and
-**inverts the verdict**: a check that fails is reported `TEETH ok` and the run
-exits 0; a check that still passes is `TEETH MISSING` and the run exits nonzero.
+`--regress MODE` reproduces a real defect at the layer it escaped from. **Each
+mode owns exactly one check** — the one it must break — so `--regress MODE`
+with no `--check` auto-selects it. (Pairing a mode with a different `--check`
+is a usage error, exit 2, never a fake red — the old behavior ran the fault
+against *every* selected check, so the non-matching ones scored `TEETH MISSING`
+and a bare `--regress dead_tile` exited nonzero on a perfectly healthy app.)
 
-| Mode | What it breaks | Which check must catch it |
-|------|----------------|---------------------------|
-| `invisible_highlight` | a stylesheet override neutralises the checked highlight — `data-checked` still flips, nothing paints | `chain_visible` |
-| `dead_tile` | strips the tile's `data-dioxus-id`, so Dioxus's delegated dispatch can no longer resolve the handler: declared, rendered, unwired | `tile_click_responds`, `behavior_liveness` |
-| `thin_stroke` | draws the probe stroke at 1pt when the check asked for 5pt | `stroke_width_invariance` |
-| `width_reset` | commits a second Stroke-panel weight edit while an object is selected | `stroke_width_invariance` |
+| Mode | Owning check | What it breaks |
+|------|--------------|----------------|
+| `invisible_highlight` | `chain_visible` | a stylesheet override neutralises the checked highlight — `data-checked` still flips, nothing paints |
+| `dead_tile` | `tile_click_responds` | strips the clicked swatch's `data-dioxus-id`, so Dioxus's delegated dispatch can no longer resolve the handler: declared, rendered, unwired |
+| `dead_sweep` | `behavior_liveness` | strips `data-dioxus-id` from one in-scope swept widget (`stk_link_arrowhead_scale`) **in the same pristine probe that clicks it**, so the sweep reports exactly that widget `DEAD` |
+| `thin_stroke` | `stroke_width_invariance` | draws the probe stroke at 1pt when the check asked for 5pt |
+| `width_reset` | `stroke_width_invariance` | commits a second Stroke-panel weight edit while an object is selected (on this build a livelock — see §Findings) |
 
-**Add a fault whenever you add a check.** A check nobody has seen fail is a
-check nobody should trust.
+**Scoring is not a blind inversion** — a red for the wrong reason proves
+nothing. Each mode declares a *marker* (a fragment of its owning check's own
+`ctx.want` message). The run reports:
+
+* `TEETH ok`, **exit 0** — the check failed *and* the failure carried the
+  marker (the fault was genuinely caught);
+* `TEETH MISSING`, **exit 1** — the check passed with the fault injected (the
+  gate is blind to the defect it claims to catch);
+* `HARNESS ERROR`, **exit 3** — the check failed *without* the marker, or the
+  harness itself broke (no Chrome, dev server down, a CDP timeout, a launch
+  failure). "Teeth unproven": a caught fault and a broken host must not look
+  alike.
+
+**Add a fault whenever you add a check**, owning that one check, with a marker.
+A check nobody has seen fail is a check nobody should trust.
 
 ---
 
@@ -174,7 +195,14 @@ def dash_gap_renders(ctx: Ctx):
    * `ctx.shot(name, target)` — a PNG when `--shot-dir` is set.
    * `p.heartbeat()` after anything risky, so a wedged app is a named result in
      6 seconds instead of a mystery 30-second timeout inside an unrelated probe.
-4. **Add the matching `--regress` fault and watch it go red.**
+4. **Add the matching `--regress` fault, owning this one check, with a marker.**
+   Register it in `FAULTS` as `Fault(apply_fn, "your_check", "marker")`, where
+   `marker` is a stable fragment of the `ctx.want` message the fault will trip.
+   Then run `--regress your_mode` and watch it report `TEETH ok` (exit 0). If it
+   reports `HARNESS ERROR`, the fault tripped a *different* assertion than the
+   marker names — fix the marker or the fault so the red is attributable. If the
+   fault must land in a probe other than the check's primary (as the liveness
+   sweep does, per widget), pass it explicitly: `ctx.inject(mode, probe=p)`.
 5. **Mind determinism.** Fixed 1400x1300 window, `--force-device-scale-factor=1`,
    `--hide-scrollbars`, a fresh Chrome profile, and a document created through
    the app's own Ctrl+N. Never `element.click()` — always a trusted click at a
@@ -240,12 +268,14 @@ deliberately untouched here.** The alternative unblock is a `dump <what> <path>`
 fifo verb; the OCaml fifo's third verb (`open_dialog`) is the precedent that
 this vocabulary is meant to grow.
 
-### Permissions (nothing for JYH to click)
+### Permissions AND an unlocked, awake display
 
-Screen Recording and Accessibility are **already granted**, verified with
-non-prompting APIs. The grant follows the terminal that launches Claude Code —
-currently **iTerm**. From Terminal.app, VS Code, or the desktop app, that host
-needs the same two toggles. Preflight:
+Two grants, plus a runtime condition the grants do not cover.
+
+**The two grants.** Screen Recording and Accessibility are **already granted**,
+verified with non-prompting APIs. The grant follows the terminal that launches
+Claude Code — currently **iTerm**. From Terminal.app, VS Code, or the desktop
+app, that host needs the same two toggles. Preflight:
 
 ```sh
 .venv/bin/python -c "import Quartz; print(Quartz.CGPreflightScreenCaptureAccess())"
@@ -254,6 +284,24 @@ needs the same two toggles. Preflight:
 
 Both must print `True`. **Never call `CGRequestScreenCaptureAccess()`** — it
 prompts. The Rust lane needs neither permission.
+
+**The runtime condition — an UNLOCKED, AWAKE display on the console.** This is
+NOT covered by the two toggles and matters for unattended use. `screencapture`
+returns exit 0 but writes a **blank frame** when the screen is locked
+(`CGSSessionScreenIsLocked`) or the display is asleep — verified on this host:
+permissions read `True`, capture came back black. So a locked machine would
+have produced a green-looking capture of nothing. The Swift lane now preflights
+this (`require_capturable_display()`) and stops with a **named** message
+(exit 3) rather than measuring a black rectangle; check the current state with:
+
+```sh
+.venv/bin/python scripts/gui_probe_swift.py session   # locked/asleep/on_console
+```
+
+It also filters the window list to **real, layer-0 app windows**, so the
+lock-screen `Display N Shield` pseudo-windows the Window Server puts up can
+never be selected as a capture target. For unattended runs, keep the display
+unlocked and awake (disable display sleep, or use `caffeinate`).
 
 ---
 
