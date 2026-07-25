@@ -87,6 +87,113 @@ class TestBrushApplyValueForm:
         assert "fill_color" not in store.get_element((0, 0))
 
 
+def _doc_with_selected_line() -> dict:
+    """A one-layer document holding a single stroked Line, selected."""
+    return {
+        "layers": [
+            {
+                "kind": "Layer",
+                "name": "L",
+                "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
+                "children": [
+                    {
+                        "kind": "Line",
+                        "x1": 10.0, "y1": 10.0, "x2": 100.0, "y2": 60.0,
+                        "stroke": {"color": "#000000", "width": 2.0},
+                        "common": {"name": "my line", "id": "line-7"},
+                    }
+                ],
+            }
+        ],
+        "selection": [[0, 0]],
+    }
+
+
+def _doc_with_selected_polyline() -> dict:
+    """A one-layer document holding a single filled+stroked Polyline, selected."""
+    return {
+        "layers": [
+            {
+                "kind": "Layer",
+                "name": "L",
+                "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
+                "children": [
+                    {
+                        "kind": "Polyline",
+                        "points": [[0.0, 0.0], [10.0, 5.0], [20.0, 0.0]],
+                        "fill": {"color": "#ff0000"},
+                        "stroke": {"color": "#000000", "width": 2.0},
+                        "common": {"id": "poly-1"},
+                    }
+                ],
+            }
+        ],
+        "selection": [[0, 0]],
+    }
+
+
+class TestBrushApplyPromotesLine:
+    """LINEPROMOTE (JYH 2026-07-25): applying a brush to a Line promotes it to
+    a geometry-identical Path that carries the brush — the "upgrade naturally"
+    convention, mirroring the Rect→Polygon corner-drag promotion."""
+
+    def test_line_promotes_to_path_and_carries_brush(self):
+        store = StateStore(document=_doc_with_selected_line())
+        run_effects(
+            [{"doc.set_attr_on_selection": {
+                "attr": "stroke_brush",
+                "value": 'param.library + "/" + param.brush_slug',
+            }}],
+            {"param": {"library": "default_brushes", "brush_slug": "flat_10"}},
+            store,
+        )
+        elem = store.get_element((0, 0))
+        # Type upgraded Line -> Path, geometry identical (MoveTo + LineTo).
+        assert elem["kind"] == "Path"
+        assert elem["d"] == [
+            {"MoveTo": {"x": 10.0, "y": 10.0}},
+            {"LineTo": {"x": 100.0, "y": 60.0}},
+        ]
+        # The brush landed; the line-only endpoint fields are gone.
+        assert elem["stroke_brush"] == "default_brushes/flat_10"
+        assert "x1" not in elem and "y2" not in elem
+        # Stroke + identity (common) carried WHOLE.
+        assert elem["stroke"] == {"color": "#000000", "width": 2.0}
+        assert elem["common"] == {"name": "my line", "id": "line-7"}
+
+    def test_polyline_promotes_carrying_fill(self):
+        store = StateStore(document=_doc_with_selected_polyline())
+        run_effects(
+            [{"doc.set_attr_on_selection": {
+                "attr": "stroke_brush", "value": "'default_brushes/flat_10'"}}],
+            {}, store,
+        )
+        elem = store.get_element((0, 0))
+        assert elem["kind"] == "Path"
+        assert elem["d"] == [
+            {"MoveTo": {"x": 0.0, "y": 0.0}},
+            {"LineTo": {"x": 10.0, "y": 5.0}},
+            {"LineTo": {"x": 20.0, "y": 0.0}},
+        ]
+        assert elem["stroke_brush"] == "default_brushes/flat_10"
+        # A Polyline's fill carries across (unlike a Line, which has none).
+        assert elem["fill"] == {"color": "#ff0000"}
+        assert elem["common"] == {"id": "poly-1"}
+
+    def test_clearing_a_brush_never_promotes_a_line(self):
+        # A null/empty resolved value is NOT a brush application — a Line stays
+        # a Line (no surprise upgrade on a clear).
+        store = StateStore(document=_doc_with_selected_line())
+        run_effects(
+            [{"doc.set_attr_on_selection": {"attr": "stroke_brush", "value": "null"}}],
+            {}, store,
+        )
+        elem = store.get_element((0, 0))
+        assert elem["kind"] == "Line"
+        assert elem["stroke_brush"] is None
+        assert elem["x1"] == 10.0
+
+
 _BUNDLE = os.path.join(
     os.path.dirname(__file__), "..", "..", "workspace", "workspace.json"
 )

@@ -705,6 +705,14 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             else None
         )
         for path in store.selection_paths():
+            # Applying a brush (a non-empty resolved value) to a Line or open
+            # Polyline PROMOTES it to a geometry-identical Path first — the
+            # "upgrade naturally" convention (JYH 2026-07-25), mirroring the
+            # Rect→Polygon corner-drag promotion. Clearing (None) never
+            # promotes. A Path (or a non-promotable element) is untouched by
+            # the promotion and simply receives the attribute.
+            if resolved is not None:
+                store.promote_element_for_brush(path)
             store.set_element_field(path, attr, resolved)
         return None
 
