@@ -18,7 +18,8 @@ construction:
 This module drives the REAL app in a real browser over the DevTools protocol
 (the same trusted-event path a user's mouse takes) and asserts *facts read back
 out of the live DOM and the live canvas*. It needs no macOS Screen-Recording or
-Accessibility grant, so it runs unattended and in CI.
+Accessibility grant, so it runs unattended on an unprivileged host (and is
+CI-ready — it gates on exit code and needs no display; no CI lane is wired yet).
 
 WHAT IT ASSERTS
 ---------------
@@ -59,7 +60,13 @@ import zlib
 
 import websocket
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Overridable so a non-default Chrome (a Beta/Canary channel, a pinned build, a
+# CI image path) can drive the harness without editing this source. Preflighted
+# in `launch`, which fails loudly and names $JAS_CHROME if the path is wrong —
+# far better than a bare FileNotFoundError from subprocess deep in a check.
+CHROME = os.environ.get(
+    "JAS_CHROME",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 # CDP modifier bitmask.
 ALT, CTRL, META, SHIFT = 1, 2, 4, 8
@@ -225,6 +232,11 @@ class GuiProbe:
             print(f"  probe: {msg}", flush=True)
 
     def launch(self):
+        if not (os.path.isfile(CHROME) and os.access(CHROME, os.X_OK)):
+            raise ProbeFailure(
+                f"Chrome is not an executable at {CHROME!r}. Set $JAS_CHROME to "
+                f"the Chrome/Chromium binary you want to drive, e.g. "
+                f"'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'.")
         self.profile = tempfile.mkdtemp(prefix="jas-guieyes-")
         args = [
             CHROME,
