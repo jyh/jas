@@ -101,8 +101,12 @@ public enum StrokeEditGroup {
              "gap_3", "dash_align_anchors": return .dash
         case "start_arrowhead": return .startArrow
         case "end_arrowhead": return .endArrow
-        case "start_arrowhead_scale", "end_arrowhead_scale",
-             "link_arrowhead_scale": return .arrowScales
+        case "start_arrowhead_scale", "end_arrowhead_scale": return .arrowScales
+        // `link_arrowhead_scale` is a UI-only flag: the chain button
+        // mirrors one scale onto the other by committing the SIBLING scale
+        // field, which applies through .arrowScales. Toggling the chain
+        // itself must not touch the document (it would push an undo step
+        // that changes nothing).
         case "arrow_align": return .arrowAlign
         case "profile", "profile_flipped": return .profile
         default: return nil

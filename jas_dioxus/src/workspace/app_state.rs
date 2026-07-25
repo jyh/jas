@@ -353,8 +353,12 @@ impl StrokeEditGroup {
             | "gap_3" | "dash_align_anchors" => Self::Dash,
             "start_arrowhead" => Self::StartArrow,
             "end_arrowhead" => Self::EndArrow,
-            "start_arrowhead_scale" | "end_arrowhead_scale"
-            | "link_arrowhead_scale" => Self::ArrowScales,
+            "start_arrowhead_scale" | "end_arrowhead_scale" => Self::ArrowScales,
+            // `link_arrowhead_scale` is a UI-only flag: the chain button
+            // mirrors one scale onto the other by committing the SIBLING
+            // scale field, which applies through ArrowScales. Toggling the
+            // chain itself must not touch the document (it would push an
+            // undo step that changes nothing).
             "arrow_align" => Self::ArrowAlign,
             "profile" | "profile_flipped" => Self::Profile,
             _ => return None,
@@ -5393,6 +5397,17 @@ mod stroke_panel_field_scope_tests {
         st.apply_stroke_panel_to_selection("not_a_stroke_field");
         assert_eq!(stroke_at(&st, 0), rich_stroke());
         assert!(!st.tabs[st.active_tab].model.can_undo());
+    }
+
+    // The chain button is UI-only: it must not push a document edit.
+    #[test]
+    fn link_scales_toggle_is_a_no_op() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.link_arrowhead_scale = true;
+        st.apply_stroke_panel_to_selection("link_arrowhead_scale");
+        assert_eq!(stroke_at(&st, 0), rich_stroke());
+        assert!(!st.tabs[st.active_tab].model.can_undo(),
+                "toggling the chain pushes no undo step");
     }
 
     // ── the Color-panel twin: a colour pick is COLOUR-only ────────

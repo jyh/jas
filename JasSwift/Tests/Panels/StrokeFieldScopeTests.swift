@@ -233,6 +233,15 @@ private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
     #expect(strokeAt(model, 0) == richStroke())
 }
 
+// The chain button is UI-only: it must not push a document edit.
+@Test func strokeLinkScalesToggleIsANoOp() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "link_arrowhead_scale", ["link_arrowhead_scale": true,
+                                             "start_arrowhead_scale": 300.0])
+    #expect(strokeAt(model, 0) == richStroke())
+    #expect(!model.canUndo, "toggling the chain pushes no undo step")
+}
+
 // An unnamed edit changes nothing: the apply cannot guess which field
 // the user touched, and guessing is what clobbered the width.
 @Test func strokeUnnamedEditIsANoOp() {
