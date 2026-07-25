@@ -1057,7 +1057,16 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
 
 def _stroke_to_attrs(stroke) -> dict:
     """A geometry ``Stroke`` as the law's flat attribute map
-    (:mod:`workspace_interpreter.stroke_law`)."""
+    (:mod:`workspace_interpreter.stroke_law`).
+
+    The ``color`` entry is 6-char hex, which is LOSSY three ways at once:
+    the colour space is flattened to RGB, the alpha is dropped, and the
+    components are quantised to 8 bits. The law never reads or writes the
+    colour on a panel edit, so a caller whose edit does not CHANGE the
+    colour must carry the original ``Color`` object across and hand it back
+    through ``_stroke_from_attrs(..., color=...)`` — never let it make the
+    hex round trip.
+    """
     return {
         "color": stroke.color.to_hex(),
         "width": float(stroke.width),
@@ -1076,12 +1085,21 @@ def _stroke_to_attrs(stroke) -> dict:
     }
 
 
-def _stroke_from_attrs(attrs: dict):
-    """The law's flat attribute map back as a geometry ``Stroke``."""
+def _stroke_from_attrs(attrs: dict, color=None):
+    """The law's flat attribute map back as a geometry ``Stroke``.
+
+    ``color`` is the colour OBJECT to install, bypassing ``attrs["color"]``
+    entirely. Every caller whose edit leaves the colour alone passes the
+    stroke's own colour here, so the space / alpha / full precision survive
+    (see :func:`_stroke_to_attrs`). Only the colour ROUTE — where the new
+    colour genuinely arrives as the hex a ``set: { stroke_color }`` effect
+    wrote — leaves it unset.
+    """
     from geometry.element import (
         Stroke, Color, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign,
     )
-    color = Color.from_hex(attrs["color"]) or Color.BLACK
+    if color is None:
+        color = Color.from_hex(attrs["color"]) or Color.BLACK
     cap_map = {"butt": LineCap.BUTT, "round": LineCap.ROUND,
                "square": LineCap.SQUARE}
     join_map = {"miter": LineJoin.MITER, "round": LineJoin.ROUND,
@@ -1217,7 +1235,12 @@ def apply_stroke_panel_to_selection(
                           else fallback_attrs)
             new_attrs = stroke_with_group(
                 base_attrs, panel, group, committed_width)
-            new_elem = with_stroke(elem, _stroke_from_attrs(new_attrs))
+            # The edit owns ONE attribute group and the colour is never in
+            # it, so the element's own colour object goes straight back —
+            # the hex in base_attrs would demote its space, drop its alpha
+            # and quantise it to 8 bits.
+            new_elem = with_stroke(elem, _stroke_from_attrs(
+                new_attrs, color=(base or fallback).color))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         if new_doc is not doc:
@@ -1236,10 +1259,14 @@ def apply_stroke_panel_to_selection(
     # The new-element defaults take the SAME field-scoped edit, built on
     # the default stroke — never on the selected element, whose width /
     # colour must not leak into what the next element gets.
-    model.default_stroke = _stroke_from_attrs(stroke_with_group(
-        _stroke_to_attrs(default_stroke) if default_stroke is not None
-        else fallback_attrs,
-        panel, group, committed_width))
+    # Its own colour object rides across untouched, same as the elements'.
+    default_base = default_stroke if default_stroke is not None else fallback
+    model.default_stroke = _stroke_from_attrs(
+        stroke_with_group(
+            _stroke_to_attrs(default_stroke) if default_stroke is not None
+            else fallback_attrs,
+            panel, group, committed_width),
+        color=default_base.color)
 
 
 # Rendering-affecting stroke state keys. Mirrors OCaml's

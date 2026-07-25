@@ -32,6 +32,35 @@ private func strokeApplyCorpus() -> [String: Any] {
     return dict
 }
 
+/// A fixture colour: 6-char hex, or the `{space, components, a}` object
+/// form. The object form exists because a stroke colour is NOT hex — hex
+/// flattens the space, drops the alpha and quantises to 8 bits, and a panel
+/// edit must hand the colour back bit-for-bit.
+private func colorFromAttrs(_ spec: Any) -> Color {
+    if let hex = spec as? String {
+        guard let c = Color.fromHex(hex) else {
+            fatalError("fixture colour must parse: \(hex)")
+        }
+        return c
+    }
+    guard let map = spec as? [String: Any] else {
+        fatalError("unknown fixture colour \(spec)")
+    }
+    func f(_ k: String) -> Double {
+        guard let n = map[k] as? NSNumber else {
+            fatalError("fixture colour missing '\(k)'")
+        }
+        return n.doubleValue
+    }
+    let a = (map["a"] as? NSNumber)?.doubleValue ?? 1.0
+    switch map["space"] as? String {
+    case "cmyk": return .cmyk(c: f("c"), m: f("m"), y: f("y"), k: f("k"), a: a)
+    case "hsb": return .hsb(h: f("h"), s: f("s"), b: f("b"), a: a)
+    case "rgb": return .rgb(r: f("r"), g: f("g"), b: f("b"), a: a)
+    default: fatalError("unknown fixture colour space \(map)")
+    }
+}
+
 /// The Stroke a fixture attribute map describes, taking anything it omits
 /// from `base`.
 private func strokeFromAttrs(_ base: Stroke, _ attrs: [String: Any]) -> Stroke {
@@ -55,7 +84,7 @@ private func strokeFromAttrs(_ base: Stroke, _ attrs: [String: Any]) -> Stroke {
     var dash = base.dashPattern
     if let v = attrs["dash"] as? [NSNumber] { dash = v.map { $0.doubleValue } }
     var color = base.color
-    if let v = attrs["color"] as? String, let c = Color.fromHex(v) { color = c }
+    if let v = attrs["color"], !(v is NSNull) { color = colorFromAttrs(v) }
     return Stroke(
         color: color,
         width: num("width") ?? base.width,
@@ -153,6 +182,6 @@ struct StrokeApplyCorpusTests {
             #expect(got == want, "stroke_apply panel_edit '\(name)'")
             ran += 1
         }
-        #expect(ran >= 20, "stroke_apply corpus ran only \(ran) vectors")
+        #expect(ran >= 25, "stroke_apply corpus ran only \(ran) vectors")
     }
 }

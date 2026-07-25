@@ -395,6 +395,17 @@ attributed to the key it actually wrote — including writes made by
 another field's commit behaviour, like the chain mirror. A write blamed
 on the wrong field applies the wrong group.
 
+"Preserved" means **bit-for-bit**, and the colour is the attribute where
+that bites. A stroke colour carries its colour *space* (RGB / HSB / CMYK)
+and its own alpha, so a colour that makes a round trip through 6-char hex
+comes back demoted to RGB, opaque, and quantised to 8 bits. A panel edit
+owns no part of the colour, so it must hand the element's colour object
+straight back — never re-derive it. The reference bridge did exactly that
+round trip on every apply, which made the reference the one
+implementation that broke its own preserve-the-rest clause; the corpus
+now carries a CMYK vector and an alpha-bearing vector so no
+implementation can silently demote a colour again.
+
 **Colour is not part of this.** A colour pick changes the colour and
 nothing else, through the same preserve-the-rest rule (`recolor_stroke` /
 `recolorStroke`), and so does the fill/stroke swap (Shift+X, the widget

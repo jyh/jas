@@ -47,7 +47,18 @@
     "Colours are hex; arrowhead / cap / join / align / arrow_align ids are the",
     "snake_case workspace ids. 'dash' is the active dash array (empty = not",
     "dashed); the ports' fixed-array + dash_len representation must present the",
-    "same active slice."
+    "same active slice.",
+    "",
+    "COLOURS. A stroke 'color' is EITHER a 6-char hex string (an opaque RGB",
+    "colour, the common case) OR an object naming its space and components:",
+    "{space: rgb|hsb|cmyk, ...components, a: alpha}. The object form exists",
+    "because a stroke colour is NOT hex — every port carries the space and the",
+    "alpha — and hex is lossy in three ways at once (space demoted to RGB,",
+    "alpha dropped, components quantised to 8 bits). The law never reads or",
+    "writes the colour on a panel edit, so an edit must hand back the",
+    "element's own colour BIT-FOR-BIT; the non-RGB / alpha-bearing vectors pin",
+    "that. A 'color_pick' colour is always hex: that route's input really is",
+    "the hex string a `set: { stroke_color }` effect writes."
   ],
   "panel_defaults": {
     "_comment": "The Stroke panel sitting at its 1pt defaults — the state that used to be stamped over the whole selection on every edit.",
@@ -273,6 +284,40 @@
       "edited": "not_a_stroke_field",
       "committed_width": 9.0,
       "expected": null
+    },
+    {
+      "name": "cap_edit_preserves_a_cmyk_stroke_colour",
+      "_comment": "The colour SPACE is none of the law's business: a cap edit hands back the element's own colour unchanged, CMYK and all. The reference BRIDGE round-tripped every stroke colour through 6-char hex on each apply, so this stroke came back RGB with alpha 1.0 and 8-bit-quantised components — the law's own 'every other attribute is preserved' clause violated in the contract (STROKEWIDTH reverify F1). Non-RGB colours are reachable: the binary format carries the space (jas/geometry/binary.py _unpack_color).",
+      "op": "panel_edit",
+      "base": {
+        "color": {"space": "cmyk", "c": 0.1, "m": 0.2, "y": 0.3, "k": 0.4, "a": 0.6},
+        "width": 5.0, "linecap": "round", "linejoin": "bevel",
+        "miter_limit": 4.0, "align": "inside", "dash": [6.0, 3.0],
+        "dash_align_anchors": true, "start_arrow": "simple_arrow",
+        "end_arrow": "circle", "start_arrow_scale": 150.0,
+        "end_arrow_scale": 75.0, "arrow_align": "center_at_end", "opacity": 0.5
+      },
+      "panel": {"cap": "square"},
+      "edited": "cap",
+      "committed_width": 1.0,
+      "expected": {"linecap": "square"}
+    },
+    {
+      "name": "weight_edit_preserves_colour_alpha_and_precision",
+      "_comment": "The same blind spot from the other side: an RGB colour with alpha 0.5 and components that do NOT survive 8-bit quantisation (0.3 -> 77/255 -> 0.302). A weight edit writes the width and must not touch a single bit of the colour.",
+      "op": "panel_edit",
+      "base": {
+        "color": {"space": "rgb", "r": 0.3, "g": 0.6, "b": 0.9, "a": 0.5},
+        "width": 5.0, "linecap": "round", "linejoin": "bevel",
+        "miter_limit": 4.0, "align": "inside", "dash": [6.0, 3.0],
+        "dash_align_anchors": true, "start_arrow": "simple_arrow",
+        "end_arrow": "circle", "start_arrow_scale": 150.0,
+        "end_arrow_scale": 75.0, "arrow_align": "center_at_end", "opacity": 0.5
+      },
+      "panel": {"weight": 4.0},
+      "edited": "weight",
+      "committed_width": 4.0,
+      "expected": {"width": 4.0}
     },
     {
       "name": "cap_edit_on_element_with_no_stroke_uses_the_fallback",

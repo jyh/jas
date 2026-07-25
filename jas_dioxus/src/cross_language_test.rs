@@ -4143,6 +4143,29 @@ mod tests {
     // it names are what the edit changed, and every key it omits must come
     // back unchanged.
 
+    /// A fixture colour: 6-char hex, or the `{space, components, a}` object
+    /// form. The object form exists because a stroke colour is NOT hex —
+    /// hex flattens the space, drops the alpha and quantises to 8 bits, and
+    /// a panel edit must hand the colour back bit-for-bit.
+    fn color_from_attrs(spec: &serde_json::Value)
+        -> crate::geometry::element::Color
+    {
+        use crate::geometry::element::Color;
+        if let Some(hex) = spec.as_str() {
+            return Color::from_hex(hex).expect("fixture colour must parse");
+        }
+        let f = |k: &str| spec.get(k).and_then(|v| v.as_f64())
+            .unwrap_or_else(|| panic!("fixture colour missing '{}'", k));
+        let a = spec.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        match spec.get("space").and_then(|v| v.as_str()) {
+            Some("cmyk") => Color::Cmyk {
+                c: f("c"), m: f("m"), y: f("y"), k: f("k"), a },
+            Some("hsb") => Color::Hsb { h: f("h"), s: f("s"), b: f("b"), a },
+            Some("rgb") => Color::Rgb { r: f("r"), g: f("g"), b: f("b"), a },
+            other => panic!("unknown fixture colour space {:?}", other),
+        }
+    }
+
     /// The Stroke a fixture attribute map describes, taking anything it
     /// omits from `base`.
     fn stroke_from_attrs(base: &crate::geometry::element::Stroke,
@@ -4150,11 +4173,11 @@ mod tests {
         -> crate::geometry::element::Stroke
     {
         use crate::geometry::element::{
-            Arrowhead, ArrowAlign, Color, LineCap, LineJoin, StrokeAlign,
+            Arrowhead, ArrowAlign, LineCap, LineJoin, StrokeAlign,
         };
         let mut s = *base;
-        if let Some(v) = attrs.get("color").and_then(|v| v.as_str()) {
-            s.color = Color::from_hex(v).expect("fixture colour must parse");
+        if let Some(v) = attrs.get("color") {
+            if !v.is_null() { s.color = color_from_attrs(v); }
         }
         if let Some(v) = attrs.get("width").and_then(|v| v.as_f64()) { s.width = v; }
         if let Some(v) = attrs.get("linecap").and_then(|v| v.as_str()) {
@@ -4320,7 +4343,7 @@ mod tests {
             assert_eq!(got, want, "stroke_apply panel_edit '{}'", name);
             ran += 1;
         }
-        assert!(ran >= 20, "stroke_apply corpus ran only {} vectors", ran);
+        assert!(ran >= 25, "stroke_apply corpus ran only {} vectors", ran);
     }
 
     #[cfg(feature = "web")]

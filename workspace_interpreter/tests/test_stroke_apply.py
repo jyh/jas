@@ -257,11 +257,32 @@ class _FakeController:
         self.model.edit_document(doc)
 
 
-def _rich_stroke_obj():
-    """``rich_stroke`` from the corpus as a geometry Stroke."""
+def _colour_obj(spec):
+    """A corpus colour — 6-char hex, or the ``{space, components, a}``
+    object form — as a geometry Color."""
+    from geometry.element import Color
+    if isinstance(spec, str):
+        return Color.from_hex(spec) or Color.BLACK
+    space = spec["space"]
+    a = spec.get("a", 1.0)
+    if space == "cmyk":
+        return Color.cmyk(spec["c"], spec["m"], spec["y"], spec["k"], a)
+    if space == "hsb":
+        return Color.hsb(spec["h"], spec["s"], spec["b"], a)
+    return Color.rgb(spec["r"], spec["g"], spec["b"], a)
+
+
+def _stroke_obj(attrs: dict):
+    """A corpus attribute map as a geometry Stroke, colour included."""
     from workspace_interpreter.effects import _stroke_from_attrs
     from workspace_interpreter.stroke_law import normalize_stroke
-    return _stroke_from_attrs(normalize_stroke(_CORPUS["rich_stroke"]))
+    return _stroke_from_attrs(normalize_stroke(attrs),
+                              color=_colour_obj(attrs["color"]))
+
+
+def _rich_stroke_obj():
+    """``rich_stroke`` from the corpus as a geometry Stroke."""
+    return _stroke_obj(_CORPUS["rich_stroke"])
 
 
 def _doc_with_stroked_line(stroke):
@@ -366,6 +387,66 @@ class TestBridgeAppliesTheFieldScopedLaw:
         # selected element's 5pt must not leak into the next element.
         assert model.default_stroke.linecap == LineCap.ROUND
         assert model.default_stroke.width == 2.0
+
+
+class TestBridgePreservesTheColourObject:
+    """STROKEWIDTH reverify F1: the bridge must carry the element's colour
+    OBJECT through the apply, not a hex round trip.
+
+    ``_stroke_to_attrs`` / ``_stroke_from_attrs`` used to serialize the
+    colour to 6-char hex and parse it back on every apply, which is lossy
+    three ways at once: the colour SPACE was demoted to RGB, the ALPHA was
+    dropped, and the components were quantised to 8 bits. A ``stroke_cap``
+    edit on a half-transparent CMYK stroke handed back an opaque RGB one —
+    the law's own "every other attribute is preserved" clause violated in
+    the reference, which is the contract the ports mirror. Both ports were
+    already correct (they map the Stroke in place and never touch
+    ``color``), so this was a reference-only divergence.
+
+    Driven off the corpus's non-RGB / alpha-bearing vectors so the fixture
+    and the bridge cannot drift apart.
+    """
+
+    COLOUR_VECTORS = [
+        "cap_edit_preserves_a_cmyk_stroke_colour",
+        "weight_edit_preserves_colour_alpha_and_precision",
+    ]
+
+    @pytest.mark.parametrize("name", COLOUR_VECTORS)
+    def test_the_colour_object_survives_the_apply(self, name):
+        from workspace_interpreter.effects import apply_stroke_panel_to_selection
+        from workspace_interpreter.state_store import StateStore
+        vec = _vec(name)
+        stroke = _stroke_obj(_resolve_base(vec))
+        model = _FakeModel(_doc_with_stroked_line(stroke), default_stroke=stroke)
+        store = StateStore()
+        _seed_panel(store, **vec["panel"])
+        apply_stroke_panel_to_selection(store, _FakeController(model),
+                                        vec["edited"])
+        got = model.document.get_element((0, 0)).stroke
+        assert type(got.color) is type(stroke.color), (
+            f"{name}: the colour SPACE must survive the apply"
+        )
+        assert got.color == stroke.color, (
+            f"{name}: the colour must come back bit-for-bit"
+        )
+        # The new-element default takes the same edit and must not lose its
+        # own colour either.
+        assert model.default_stroke.color == stroke.color, (
+            f"{name}: the default stroke's colour must survive too"
+        )
+
+    def test_the_corpus_actually_carries_a_non_rgb_and_an_alpha_colour(self):
+        """The vectors above only close the blind spot if the fixture really
+        holds a non-RGB space and a non-opaque alpha."""
+        spaces, alphas = set(), set()
+        for name in self.COLOUR_VECTORS:
+            spec = _resolve_base(_vec(name))["color"]
+            assert isinstance(spec, dict), f"{name}: hex cannot express this"
+            spaces.add(spec["space"])
+            alphas.add(spec["a"])
+        assert spaces - {"rgb"}, "no non-RGB colour space in the corpus"
+        assert alphas - {1.0}, "no alpha-bearing colour in the corpus"
 
 
 class TestBridgeColourRouteIsColourOnly:
