@@ -2595,6 +2595,43 @@ mod tests {
         assert_eq!(model.document().layers[0].children().unwrap().len(), original_count + 1);
     }
 
+    /// LINEPROMOTE: applying a brush to a SELECTED Line promotes it to a Path
+    /// in place (same tree path), and a single undo restores the Line — the
+    /// "upgrade naturally" convention with a one-step journal (JYH 2026-07-25).
+    #[test]
+    fn brush_apply_promotes_selected_line_and_undo_restores_it() {
+        let line = make_line(0.0, 0.0, 5.0, 5.0);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(line)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        assert!(matches!(model.document().get_element(&vec![0, 0]), Some(Element::Line(_))));
+
+        Controller::set_selection_stroke_brush(&mut model, Some("charcoal".to_string()));
+        match model.document().get_element(&vec![0, 0]) {
+            Some(Element::Path(p)) => {
+                assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
+                assert_eq!(p.d, vec![
+                    crate::geometry::element::PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    crate::geometry::element::PathCommand::LineTo { x: 5.0, y: 5.0 },
+                ]);
+            }
+            other => panic!("brush apply must promote the Line to a Path, got {other:?}"),
+        }
+
+        model.undo();
+        assert!(matches!(model.document().get_element(&vec![0, 0]), Some(Element::Line(_))),
+            "a single undo restores the Line");
+    }
+
     // ── Mask editor routing (OPACITY.md §Preview interactions) ──
 
     #[test]

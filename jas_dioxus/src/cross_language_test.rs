@@ -3181,6 +3181,29 @@ mod tests {
             "an empty value clears the brush (None)");
         let replay = replay_model(&tc, &model);
         assert_eq!(brush_of(&replay), live, "replay re-applies the clear");
+
+        // (4) LINEPROMOTE — a Line receiving a brush is PROMOTED to a Path that
+        // carries the resolved slug. The canonical JSON already gates the type
+        // flip + geometry; here we pin the brush field itself (which that JSON
+        // omits) on both the live + replay paths.
+        let tc = find("set_attr_on_selection_line_promotes_to_path");
+        let model = run_operation_model(&tc);
+        match model.document().get_element(&vec![0, 0]) {
+            Some(Element::Path(p)) => {
+                assert_eq!(p.stroke_brush, Some("charcoal".to_string()),
+                    "the promoted Path carries the brush slug");
+                assert_eq!(p.d, vec![
+                    crate::geometry::element::PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    crate::geometry::element::PathCommand::LineTo { x: 36.0, y: 18.0 },
+                ], "the promoted geometry is MoveTo(x1,y1)+LineTo(x2,y2)");
+                assert_eq!(p.common.id.as_deref(), Some("line-1"),
+                    "identity (id) survives the promotion");
+            }
+            other => panic!("a brushed Line must become a Path, got {other:?}"),
+        }
+        let replay = replay_model(&tc, &model);
+        assert!(matches!(replay.document().get_element(&vec![0, 0]), Some(Element::Path(_))),
+            "journal replay reproduces the Line→Path promotion");
     }
 
     /// Build the journal-replay Model for a fixture's whole journal (re-derives
