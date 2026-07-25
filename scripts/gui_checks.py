@@ -6,10 +6,12 @@ Run through `scripts/gui_drive.sh` (which brings the dev server up first):
     ./scripts/gui_drive.sh                       # every check
     ./scripts/gui_drive.sh --check chain_visible
     ./scripts/gui_drive.sh --list
-    ./scripts/gui_drive.sh --regress dead_tile   # prove a check has teeth
+    ./scripts/gui_drive.sh --regress dead_sweep  # prove a check has teeth
+                                                 # (auto-selects its owning check)
 
 Exit status is 0 only when every selected check passed, so a conductor can
-gate on it.
+gate on it. Under `--regress` the exit code carries the teeth verdict: 0 the
+fault was caught, 1 the gate is blind to it, 3 the harness itself broke.
 
 EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
 ------------------------------------------
@@ -25,24 +27,44 @@ EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
 FAULT INJECTION (`--regress MODE`)
 ----------------------------------
 A green check proves nothing unless it can go red. Each mode reproduces a
-real defect at the layer it escaped from, and the matching check MUST fail:
+real defect at the layer it escaped from, and EACH MODE OWNS EXACTLY ONE
+CHECK — the one it must make fail. `--regress MODE` with no `--check`
+auto-selects that owning check; pairing a mode with a different `--check`
+is a usage error (exit 2), never a fake red.
 
-  invisible_highlight  neutralise the checked highlight in CSS — the state
-                       still flips, nothing paints (chain_visible)
-  dead_tile            strip the tile's `data-dioxus-id` so the delegated
-                       handler can no longer resolve it: a widget that
-                       declares a click behavior and is not wired
-                       (tile_click_responds, behavior_liveness)
-  width_reset          silently push the stroke weight back to 1 while the
-                       object is selected — the observable of the 5pt bug
-                       (stroke_width_invariance)
-  thin_stroke          draw the probe stroke at 1pt when the check asked for
-                       5pt: the wedge-free proof that the canvas measurement
-                       tells fat from thin  (stroke_width_invariance)
+  MODE                 OWNING CHECK             what it breaks
+  invisible_highlight  chain_visible            neutralise the checked
+                                                highlight in CSS — the state
+                                                still flips, nothing paints
+  dead_tile            tile_click_responds      strip the swatch's
+                                                `data-dioxus-id` so the
+                                                delegated handler cannot
+                                                resolve it (declared,
+                                                rendered, unwired)
+  dead_sweep           behavior_liveness        strip `data-dioxus-id` from
+                                                ONE in-scope swept widget, in
+                                                the SAME pristine probe that
+                                                clicks it, so the sweep must
+                                                report that widget DEAD
+  width_reset          stroke_width_invariance  a second Stroke-panel weight
+                                                commit while selected — on this
+                                                build a livelock (see
+                                                GUI_EYES.md §Findings)
+  thin_stroke          stroke_width_invariance  draw the probe stroke at 1pt
+                                                when the check asked for 5pt
 
-With `--regress`, the runner INVERTS its verdict: a check that fails under
-injection is reported `TEETH ok` and the run exits 0; a check that still
-passes is reported `TEETH MISSING` and the run exits nonzero.
+SCORING (`--regress`). The verdict is INVERTED, but not blindly — a red for
+the wrong reason proves nothing:
+
+  * the check fails AND the failure carries the mode's expected marker
+    (`FAULTS[mode].marker`, a substring of the check's own `ctx.want`
+    message) -> `TEETH ok`, exit 0;
+  * the check PASSES with the fault injected -> `TEETH MISSING`, exit 1
+    (the gate is blind to the defect it claims to catch);
+  * the check fails WITHOUT the expected marker, or the harness itself
+    errors (no Chrome, dev server down, a CDP timeout, a launch failure)
+    -> `HARNESS ERROR`, exit 3 ("teeth unproven") — never scored as a pass,
+    because a caught fault and a broken host must not look alike.
 """
 
 from __future__ import annotations
@@ -107,71 +129,118 @@ class Ctx:
 
     # --- fault injection ------------------------------------------------
 
-    def inject(self, mode: str) -> bool:
-        """Apply fault `mode` if it is the one requested. Returns True if applied."""
+    def inject(self, mode: str, probe: GuiProbe | None = None) -> bool:
+        """Apply fault `mode` if it is the one requested. Returns True if applied.
+
+        The fault lands in `probe` (default: this check's primary probe). The
+        liveness sweep passes its per-widget PRISTINE probe here, so the fault
+        is stripped in the SAME browser that performs the swept click — an
+        earlier version applied it to the primary probe while the sweep clicked
+        in a throwaway one, so it never bit anything.
+        """
         if self.regress != mode:
             return False
-        FAULTS[mode](self)
+        FAULTS[mode].apply(probe or self.p)
         self.note(f"INJECTED FAULT {mode!r}")
         return True
 
 
-def _fault_invisible_highlight(ctx: Ctx):
+def _strip_dioxus_id(p: GuiProbe, ids: list[str]):
+    """Sever the delegated handler binding on each of `ids`, in probe `p`.
+
+    Dioxus delegates DOM events from the document root and resolves the
+    handler by `data-dioxus-id`; removing that attribute cuts the binding
+    without touching layout or styling — a widget that looks perfectly
+    clickable and does nothing.
+    """
+    p.cdp.evaluate(
+        f"(()=>{{for(const id of {json.dumps(ids)}){{"
+        "const e=document.getElementById(id);"
+        "if(e){e.removeAttribute('data-dioxus-id');"
+        "e.style.pointerEvents='auto';}}return true;})()")
+
+
+def _fault_invisible_highlight(p: GuiProbe):
     """Kill the rendered side of the checked state, keep the declared side.
 
     Exactly the shape of the escape: `data-checked` flips as designed, so a
     DOM-only check stays green while the user sees nothing.
     """
-    ctx.p.cdp.evaluate(
+    p.cdp.evaluate(
         "(()=>{const s=document.createElement('style');"
         "s.textContent='.jas-icon-button[data-checked=\"true\"]"
         "{background:transparent !important;box-shadow:none !important;}';"
         "document.head.appendChild(s);return true;})()")
 
 
-def _fault_dead_tile(ctx: Ctx):
-    """Unwire a widget while leaving it declared and rendered.
+def _fault_dead_tile(p: GuiProbe):
+    """Unwire the colour-panel swatch that `tile_click_responds` clicks."""
+    _strip_dioxus_id(p, ["cp_black_swatch", "cp_white_swatch"])
 
-    Dioxus delegates DOM events from the document root and resolves the
-    handler by `data-dioxus-id`; removing that attribute severs the binding
-    without touching layout or styling — a widget that looks perfectly
-    clickable and does nothing.
+
+def _fault_dead_sweep(p: GuiProbe):
+    """Unwire ONE in-default-scope widget the liveness sweep will click.
+
+    The sweep clicks each widget in its own pristine probe; this must run in
+    THAT probe (the sweep passes it explicitly), so the widget the sweep is
+    about to click is the one that goes dead — and the sweep reports it DEAD.
     """
-    ctx.p.cdp.evaluate(
-        "(()=>{for(const id of ['cp_black_swatch','cp_white_swatch']){"
-        "const e=document.getElementById(id);"
-        "if(e){e.removeAttribute('data-dioxus-id');"
-        "e.style.pointerEvents='auto';}}return true;})()")
+    _strip_dioxus_id(p, [DEAD_SWEEP_TARGET])
 
 
-def _fault_width_reset(ctx: Ctx):
+def _fault_width_reset(p: GuiProbe):
     """Reproduce the 5pt → 1pt reset as a side effect of an unrelated edit.
 
     NOTE (finding, 2026-07-24): on this build the injected user action — a
     SECOND Stroke-panel weight commit made while an object is selected — does
     not merely change the width, it WEDGES the app (see
-    GUI_EYES.md §Findings). The check still goes red, via
-    `heartbeat`, and says so in as many words. Use `thin_stroke` for a
-    wedge-free teeth demonstration of the same measurement.
+    GUI_EYES.md §Findings). The check still goes red, via `heartbeat`, whose
+    message ("the main thread is wedged") is the mode's marker. Use
+    `thin_stroke` for a wedge-free teeth demonstration of the same measurement.
     """
-    ctx.p.set_field("stk_weight", "1")
+    p.set_field("stk_weight", "1")
 
 
-def _fault_thin_stroke(ctx: Ctx):
-    """Draw the probe stroke at 1pt while the check asks for 5pt.
-
-    The wedge-free proof that the canvas measurement really distinguishes fat
-    from thin: the thickness assertion fails with 2.0px against the 4.0px
-    floor, which is exactly the observation JYH made by eye.
-    """
-    ctx.note("fault: the probe stroke will be drawn at 1pt, not 5pt")
+def _fault_thin_stroke(p: GuiProbe):
+    """No browser-side mutation: `draw_probe_line` draws the stroke at 1pt when
+    this mode is armed, so the 5pt-thickness assertion fails at 2.0px vs the
+    4.0px floor — the wedge-free proof the canvas measurement tells fat from
+    thin, exactly the observation JYH made by eye."""
 
 
+# The single widget `dead_sweep` unwires. It must be inside SWEEP_DEFAULT_SCOPES
+# (so the default sweep actually reaches it) and reliably LIVE in the stock scene
+# (so a healthy sweep passes and only the injection turns it DEAD). This chain
+# toggle sits in the Stroke panel, starts unchecked, and flips its own
+# `data-checked` on click — a clean, self-contained meaningful mutation to sever.
+DEAD_SWEEP_TARGET = "stk_link_arrowhead_scale"
+
+
+class Fault:
+    """A fault mode: how to inject it, which check it must break, and the
+    substring the intended failure carries so a red can be attributed to it
+    (not to a broken host or an unrelated defect)."""
+
+    def __init__(self, apply, check: str, marker: str):
+        self.apply = apply
+        self.check = check
+        self.marker = marker
+
+
+# Every mode owns exactly ONE check. `marker` is a stable fragment of that
+# check's own failing `ctx.want` message; the regress scorer requires it in the
+# failure before reporting TEETH ok (see module doc + main()).
 FAULTS = {
-    "invisible_highlight": _fault_invisible_highlight,
-    "dead_tile": _fault_dead_tile,
-    "width_reset": _fault_width_reset,
-    "thin_stroke": _fault_thin_stroke,
+    "invisible_highlight": Fault(_fault_invisible_highlight, "chain_visible",
+                                 "RENDERED style moved"),
+    "dead_tile": Fault(_fault_dead_tile, "tile_click_responds",
+                       "moved the DOM meaningfully"),
+    "dead_sweep": Fault(_fault_dead_sweep, "behavior_liveness",
+                        DEAD_SWEEP_TARGET),
+    "width_reset": Fault(_fault_width_reset, "stroke_width_invariance",
+                         "the main thread is wedged"),
+    "thin_stroke": Fault(_fault_thin_stroke, "stroke_width_invariance",
+                         "5pt stroke renders thick"),
 }
 
 
@@ -205,6 +274,7 @@ def draw_probe_line(ctx: Ctx, weight: str) -> float:
     p = ctx.p
     if ctx.inject("thin_stroke"):
         weight = "1"
+        ctx.note("fault: the probe stroke will be drawn at 1pt, not 5pt")
     got = p.set_field("stk_weight", weight)
     ctx.want(got.strip().startswith(weight),
              f"stroke weight field committed {got!r} for input {weight!r}")
@@ -400,8 +470,12 @@ def behavior_liveness(ctx: Ctx):
             if hit != wid:
                 skipped.append((wid, f"occluded by {hit}"))
                 continue
-            if wid == "cp_black_swatch":
-                ctx.inject("dead_tile")
+            # `--regress dead_sweep`: unwire the ONE in-scope target IN THIS
+            # widget's own probe, right before it is clicked, so the sweep must
+            # report exactly this widget DEAD. The teeth assertion below names
+            # it, so the red is attributable — not "some widget failed".
+            if wid == DEAD_SWEEP_TARGET:
+                ctx.inject("dead_sweep", probe=p)
             pre = SWEEP_PRECONDITION.get(wid, [])
             for pre_wid in pre:
                 p.click(pre_wid)
@@ -565,7 +639,23 @@ def main() -> int:
             print(f"{name:26s} {fn.about}")
         return 0
 
-    names = args.check or sorted(CHECKS)
+    # A fault mode owns exactly ONE check. `--regress MODE` with no `--check`
+    # auto-selects that check; pairing MODE with any other `--check` is a usage
+    # error (exit 2), so a non-matching combination can never masquerade as a
+    # red. Without `--regress`, `--check` selects normally (default: all).
+    if args.regress:
+        owner = FAULTS[args.regress].check
+        if args.check is None or args.check == [owner]:
+            names = [owner]
+        else:
+            print(f"usage: --regress {args.regress} exercises only its owning "
+                  f"check {owner!r}, but --check {args.check} was given. Omit "
+                  f"--check to auto-select it, or pass exactly "
+                  f"--check {owner}.", file=sys.stderr)
+            return 2
+    else:
+        names = args.check or sorted(CHECKS)
+
     unknown = [n for n in names if n not in CHECKS]
     if unknown:
         print(f"unknown check(s): {unknown}; try --list", file=sys.stderr)
@@ -574,7 +664,9 @@ def main() -> int:
         os.makedirs(args.shot_dir, exist_ok=True)
 
     if args.regress:
-        print(f"FAULT INJECTION {args.regress!r}: a check that FAILS is correct.\n")
+        fault = FAULTS[args.regress]
+        print(f"FAULT INJECTION {args.regress!r} -> check {fault.check!r}: it "
+              f"must fail carrying the marker {fault.marker!r}.\n")
 
     results = []
     for name in names:
@@ -612,25 +704,47 @@ def main() -> int:
             probe.shutdown()
 
         if args.regress:
-            ok = failure is not None
-            verdict = "TEETH ok" if ok else "TEETH MISSING"
-            detail = f" (failed as intended: {failure})" if ok else \
-                     " — the check passed WITH the fault injected, so it is blind to it"
+            marker = FAULTS[args.regress].marker
+            if failure is None:
+                status = "teeth_missing"
+                detail = (" — the check PASSED with the fault injected, so it "
+                          "is blind to the defect it claims to catch")
+            elif marker in failure:
+                status = "teeth_ok"
+                detail = f" (failed as intended, carrying {marker!r}: {failure})"
+            else:
+                # A red for the wrong reason, or the harness itself broke (no
+                # Chrome, dev server down, a CDP timeout, a launch failure). A
+                # caught fault and a broken host MUST NOT look alike.
+                status = "harness_error"
+                detail = (f" — teeth UNPROVEN: failed WITHOUT the expected "
+                          f"marker {marker!r} (broken host, or a red for the "
+                          f"wrong reason): {failure}")
         else:
-            ok = failure is None
-            verdict = "PASS" if ok else "FAIL"
-            detail = "" if ok else f": {failure}"
-        print(f"  => {verdict}{detail}\n", flush=True)
-        results.append((name, ok))
+            status = "pass" if failure is None else "fail"
+            detail = "" if failure is None else f": {failure}"
+        print(f"  => {TAGS[status]}{detail}\n", flush=True)
+        results.append((name, status))
 
-    bad = [n for n, ok in results if not ok]
     print("=" * 68)
-    for name, ok in results:
-        tag = ("TEETH ok" if ok else "TEETH MISSING") if args.regress else \
-              ("PASS" if ok else "FAIL")
-        print(f"  {tag:14s} {name}")
-    print(f"{len(results) - len(bad)}/{len(results)} ok")
-    return 1 if bad else 0
+    for name, status in results:
+        print(f"  {TAGS[status]:14s} {name}")
+    good = sum(1 for _, s in results if s in ("pass", "teeth_ok"))
+    print(f"{good}/{len(results)} ok")
+
+    # Exit codes: 3 (harness error / teeth unproven) dominates 1 (a real
+    # failure, or a gate blind to its own fault); 0 only when every selected
+    # check is good. A caught fault (0) is never confused with a broken host (3).
+    statuses = {s for _, s in results}
+    if "harness_error" in statuses:
+        return 3
+    if "fail" in statuses or "teeth_missing" in statuses:
+        return 1
+    return 0
+
+
+TAGS = {"pass": "PASS", "fail": "FAIL", "teeth_ok": "TEETH ok",
+        "teeth_missing": "TEETH MISSING", "harness_error": "HARNESS ERROR"}
 
 
 if __name__ == "__main__":

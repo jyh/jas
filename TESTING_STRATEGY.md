@@ -210,8 +210,11 @@ edit. The generic gate for (1) is a **declared-behavior liveness sweep** derived
 
 It asserts **measurable properties** — stroke thickness along a canvas scanline, exact
 RGBA at a probe point, crop mean-colour distance, declared `data-checked` paired against
-computed style — never whole-image equality. Every check ships a `--regress` fault mode
-that must make it go red.
+computed style — never whole-image equality. Every check — the liveness sweep included —
+**owns a `--regress` fault mode that must make it go red**, and the scorer requires the
+red to carry the fault's own marker: a caught fault exits 0, a gate blind to its fault
+exits 1, and a broken host (no Chrome, dev server down, CDP timeout) exits 3 rather than
+masquerading as a caught fault.
 
 **It does not raise the floor's ceiling on FEEL.** Taste, motion, cursor glyphs, native
 chrome, retina fidelity and cross-app parity remain JYH's manual floor and are listed
