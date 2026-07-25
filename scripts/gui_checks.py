@@ -23,6 +23,8 @@ EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
                                                     (dead brush tile)
   behavior_liveness        the generic sweep: every declared-clickable
                            widget live in the DOM must move something
+  arrowhead_reflects_scale a head's rendered size must match the panel's
+                           Scale field                (JYH's half-size head)
 
 FAULT INJECTION (`--regress MODE`)
 ----------------------------------
@@ -52,6 +54,11 @@ is a usage error (exit 2), never a fake red.
                                                 GUI_EYES.md §Findings)
   thin_stroke          stroke_width_invariance  draw the probe stroke at 1pt
                                                 when the check asked for 5pt
+  arrow_scale_lie      arrowhead_reflects_scale overwrite the end-scale field's
+                                                DOM value to 200 while the head
+                                                stays at its true 100% — the
+                                                panel then claims a scale the
+                                                canvas never rendered
 
 SCORING (`--regress`). The verdict is INVERTED, but not blindly — a red for
 the wrong reason proves nothing:
@@ -208,6 +215,18 @@ def _fault_thin_stroke(p: GuiProbe):
     thin, exactly the observation JYH made by eye."""
 
 
+def _fault_arrow_scale_lie(p: GuiProbe):
+    """Make the Scale field CLAIM a scale the head does not have: overwrite the
+    end-arrowhead-scale field's DOM value to 200 while the drawn head stays at
+    its true 100%. Reproduces JYH's class — the panel reports a scale the
+    canvas never rendered (here the head is HALF what the field claims).
+    Browser-side; a re-render would revert it, but the check reads the field
+    immediately, before it deselects."""
+    p.cdp.evaluate(
+        "(()=>{const e=document.getElementById('stk_end_arrowhead_scale');"
+        "if(e){e.value='200';}return !!e;})()")
+
+
 # The single widget `dead_sweep` unwires. It must be inside SWEEP_DEFAULT_SCOPES
 # (so the default sweep actually reaches it) and reliably LIVE in the stock scene
 # (so a healthy sweep passes and only the injection turns it DEAD). This chain
@@ -241,6 +260,8 @@ FAULTS = {
                          "the main thread is wedged"),
     "thin_stroke": Fault(_fault_thin_stroke, "stroke_width_invariance",
                          "5pt stroke renders thick"),
+    "arrow_scale_lie": Fault(_fault_arrow_scale_lie, "arrowhead_reflects_scale",
+                             "matches the panel's Scale field"),
 }
 
 
@@ -330,6 +351,71 @@ def stroke_width_invariance(ctx: Ctx):
     ctx.want(t_after == t_before,
              f"stroke thickness is INVARIANT across the unrelated edit "
              f"({t_before}px -> {t_after}px)")
+
+
+def _set_end_arrow(p, shape):
+    """Pick the END arrowhead shape the way its onchange fires. The <select>'s
+    change routes production set_stroke_field + apply, so a drawn line inherits
+    the shape from the new-element default."""
+    p.cdp.evaluate(
+        "(()=>{const e=document.getElementById('stk_end_arrowhead');"
+        f"e.value='{shape}';"
+        "e.dispatchEvent(new Event('change',{bubbles:true}));return e.value;})()")
+    time.sleep(0.4)
+
+
+def _head_height(p):
+    """Vertical ink extent of the END head, scanned a few px back from the tip
+    at (LINE_X1, LINE_Y). The stroke body is trimmed by the arrow setback so
+    these scanlines see only the head; the longest contiguous run rises toward
+    the head's base, so its max over the sweep IS the head's rendered size."""
+    best = 0.0
+    for xoff in (7, 10, 13, 16, 19):
+        span = p.ink_span(LINE_X1 - xoff, LINE_Y - 22, 44)
+        if span["longest"] > best:
+            best = span["longest"]
+    return best
+
+
+@check("arrowhead_reflects_scale",
+       "an arrowhead's rendered size matches the scale the panel field shows")
+def arrowhead_reflects_scale(ctx: Ctx):
+    """JYH's bug (2026-07-25): a drawn line's arrowhead rendered a size the
+    Stroke-panel Scale field never showed, and committing the shown value then
+    JUMPED it. The Scale field did not reflect the selection (unlike
+    weight/cap/join), so it could claim a scale the canvas did not have.
+
+    Asserts a RENDERED property (head ink extent) against the panel's OWN
+    reported scale: a simple_arrow head is 4 x weight x scale% / 100 px. The
+    two agree only when the display tells the truth about the selection — so
+    this catches both a stale display and a mis-scaled draw, whichever caused
+    the divergence, exactly as JYH saw it by eye."""
+    p = ctx.p
+    weight = 5.0
+    got = p.set_field("stk_weight", "5")
+    ctx.want(got.strip().startswith("5"), f"weight committed {got!r}")
+    deselect(p)
+    _set_end_arrow(p, "simple_arrow")           # new-element default end shape
+    p.click("btn_line")
+    ctx.want(p.checked("btn_line"), "line tool active")
+    p.drag([(LINE_X0, LINE_Y), (LINE_X1, LINE_Y), (LINE_X1, LINE_Y)])
+    select_all(p)                               # the bug shows while selected
+    ctx.inject("arrow_scale_lie")
+    raw = (p.value("stk_end_arrowhead_scale") or "").strip()
+    scale = float(raw) if raw else 0.0
+    ctx.note(f"panel end-scale field reads {raw!r} -> {scale}%")
+    deselect(p)                                 # keep handles out of the pixels
+    h = _head_height(p)
+    expected = round(4.0 * weight * scale / 100.0, 1)
+    ctx.note(f"rendered head {h}px; field {scale}% expects ~{expected}px")
+    ctx.shot("arrow_reflects")
+
+    ctx.want(scale > 0, f"the end-scale field read a real number ({raw!r})")
+    ctx.want(h >= 4.0, f"an arrowhead actually rendered ({h}px)")
+    ctx.want(abs(h - expected) <= 4.0,
+             f"the rendered head (~{h}px) matches the panel's Scale field "
+             f"({scale}% -> ~{expected}px); a mismatch means the panel claims a "
+             f"scale the canvas never rendered — JYH's half-size head")
 
 
 @check("chain_visible",
