@@ -4321,11 +4321,12 @@ mod tests {
             }
             assert_eq!(op, "panel_edit", "unknown op in vector '{}'", name);
             let edited = vec["edited"].as_str().unwrap();
-            // The flat GLOBAL key form a YAML `set:` effect writes must
-            // normalize to the same group as the panel field.
-            let key = edited.strip_prefix("stroke_").unwrap_or(edited);
-            let key = if key == "width" { "weight" } else { key };
-            let group = StrokeEditGroup::from_field(key);
+            // The key goes to production UNTOUCHED: normalizing the flat
+            // GLOBAL form (`stroke_cap`, `stroke_width`) is `from_field`'s
+            // job, and the `*_global_key` vectors exist to pin exactly
+            // that. This arm used to strip the prefix itself, which made
+            // those three vectors pass vacuously here.
+            let group = StrokeEditGroup::from_field(edited);
             if vec["expected"].is_null() {
                 assert!(group.is_none(),
                         "stroke_apply '{}': '{}' must own no group", name, edited);

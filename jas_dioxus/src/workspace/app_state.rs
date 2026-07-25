@@ -359,13 +359,32 @@ pub(crate) enum StrokeEditGroup {
     Profile,
 }
 
+/// A Stroke-panel field key normalized to its panel-scope name.
+///
+/// The flat GLOBAL keys a YAML `set:` effect writes carry a `stroke_`
+/// prefix (`stroke_cap`); the panel scope does not (`cap`). The weight
+/// input is the one asymmetric pair: its global is `stroke_width` while its
+/// panel field is `weight`.
+///
+/// This normalization belongs in production, not in a test harness. The
+/// corpus's `*_global_key` vectors assert that the flat form reaches the
+/// same group, and the Rust arm used to do the stripping itself — so those
+/// vectors passed VACUOUSLY here while genuinely pinning the reference and
+/// Swift, both of which normalize in production (`stroke_field_name` /
+/// `strokeFieldName`). Mirrors them.
+pub(crate) fn stroke_field_name(key: &str) -> &str {
+    let name = key.strip_prefix("stroke_").unwrap_or(key);
+    if name == "width" { "weight" } else { name }
+}
+
 impl StrokeEditGroup {
-    /// Map a Stroke-panel field key (as written by
-    /// `renderer::set_stroke_field`) to the group it owns. `None` means
-    /// the key owns no element attribute, so editing it writes nothing to
-    /// the selection.
+    /// Map a Stroke-panel field key to the group it owns. Accepts both the
+    /// PANEL key (`"cap"` — what `renderer::set_stroke_field` writes) and
+    /// the flat GLOBAL key (`"stroke_cap"` — what a YAML `set:` effect
+    /// writes). `None` means the key owns no element attribute, so editing
+    /// it writes nothing to the selection.
     pub(crate) fn from_field(key: &str) -> Option<Self> {
-        Some(match key {
+        Some(match stroke_field_name(key) {
             "weight" => Self::Width,
             "cap" => Self::Cap,
             "join" => Self::Join,
@@ -5541,6 +5560,49 @@ mod stroke_panel_field_scope_tests {
         st.apply_stroke_panel_to_selection("not_a_stroke_field");
         assert_eq!(stroke_at(&st, 0), rich_stroke());
         assert!(!st.tabs[st.active_tab].model.can_undo());
+    }
+
+    // ── the flat GLOBAL key form reaches the same group ───────────
+    //
+    // A YAML `set:` effect writes `stroke_cap` / `stroke_width`, not the
+    // panel-scope `cap` / `weight`. The reference and Swift both normalize
+    // in production; this port did the stripping inside its corpus arm, so
+    // the corpus's three `*_global_key` vectors passed vacuously here while
+    // production `from_field` still accepted panel keys only. These pins
+    // hold the normalization where it belongs.
+    #[test]
+    fn from_field_accepts_the_flat_global_key_form() {
+        for (global, panel) in [
+            ("stroke_cap", "cap"),
+            ("stroke_join", "join"),
+            ("stroke_width", "weight"),
+            ("stroke_align", "align_stroke"),
+            ("stroke_dash_1", "dash_1"),
+            ("stroke_start_arrowhead", "start_arrowhead"),
+            ("stroke_end_arrowhead_scale", "end_arrowhead_scale"),
+            ("stroke_profile_flipped", "profile_flipped"),
+        ] {
+            assert_eq!(StrokeEditGroup::from_field(global),
+                       StrokeEditGroup::from_field(panel),
+                       "'{}' must reach the same group as '{}'", global, panel);
+            assert!(StrokeEditGroup::from_field(panel).is_some());
+        }
+        // The UI-only chain flag owns no group in either spelling.
+        assert!(StrokeEditGroup::from_field("stroke_link_arrowhead_scale").is_none());
+        assert!(StrokeEditGroup::from_field("link_arrowhead_scale").is_none());
+    }
+
+    #[test]
+    fn apply_takes_the_global_weight_key() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.weight = 8.0;
+        // `stroke_width` is what workspace/actions.yaml writes; it must
+        // reach the width group and nothing else.
+        st.apply_stroke_panel_to_selection("stroke_width");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.width, 8.0, "the global weight key must apply");
+        assert_eq!(s.linecap, rich_stroke().linecap, "and nothing else moves");
+        assert_eq!(s.dash_array(), rich_stroke().dash_array());
     }
 
     // The chain button is UI-only: it must not push a document edit.
