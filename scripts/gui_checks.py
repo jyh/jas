@@ -185,6 +185,20 @@ def _fault_dead_tile(p: GuiProbe):
     _strip_dioxus_id(p, ["cp_black_swatch", "cp_white_swatch"])
 
 
+def _fault_dead_brush_tile(p: GuiProbe):
+    """Sever the handler on every brush tile the promotion check might click.
+
+    The tile ids are TEMPLATED (`bp_tile_<lib>_<slug>`), so target them by the
+    `id^="bp_tile_"` prefix rather than a literal id. With the handler cut, the
+    click lands on a live-looking tile that applies no brush — the Line is never
+    promoted, the stroke stays thin, and `brush_promotes_line` sees no band.
+    """
+    p.cdp.evaluate(
+        "(()=>{for(const e of document.querySelectorAll('[id^=\"bp_tile_\"]')){"
+        "e.removeAttribute('data-dioxus-id');e.style.pointerEvents='auto';}"
+        "return true;})()")
+
+
 def _fault_dead_sweep(p: GuiProbe):
     """Unwire ONE in-default-scope widget the liveness sweep will click.
 
@@ -262,6 +276,8 @@ FAULTS = {
                          "5pt stroke renders thick"),
     "arrow_scale_lie": Fault(_fault_arrow_scale_lie, "arrowhead_reflects_scale",
                              "matches the panel's Scale field"),
+    "dead_brush_tile": Fault(_fault_dead_brush_tile, "brush_promotes_line",
+                             "THICKER band"),
 }
 
 
@@ -275,6 +291,31 @@ LINE_Y = 300
 LINE_X0, LINE_X1 = 300, 500
 SCAN_X = 400
 SCAN_Y0, SCAN_SPAN = LINE_Y - 25, 50
+# A calligraphic band is far taller than a plain stroke, so the brush-promotion
+# check scans a generous vertical strip centred on the line.
+BAND_SCAN_Y0, BAND_SCAN_SPAN = LINE_Y - 90, 180
+
+
+def _click_by_text(p: GuiProbe, selector: str, text: str) -> bool:
+    """Trusted-click the first element matching `selector` whose textContent
+    contains `text`, and return True; False when none matches.
+
+    The top-level menu titles and their items render as TEXT (the menu bar
+    emits no per-item DOM id — menu_bar.rs), so the Window menu and its Brushes
+    item are reached by text, not by a spec id. `selector` is a raw CSS
+    selector (a leading `css:` handle, as elsewhere in the harness, is stripped).
+    """
+    if selector.startswith("css:"):
+        selector = selector[4:]
+    center = p.cdp.evaluate(
+        f"(()=>{{const els=[...document.querySelectorAll({json.dumps(selector)})];"
+        f"const e=els.find(x=>x.textContent && x.textContent.includes({json.dumps(text)}));"
+        "if(!e)return null;const r=e.getBoundingClientRect();"
+        "return [r.x+r.width/2, r.y+r.height/2];})()")
+    if not center:
+        return False
+    p.click_xy(center[0], center[1])
+    return True
 
 
 def deselect(p: GuiProbe):
@@ -502,6 +543,82 @@ def tile_click_responds(ctx: Ctx):
              f"declares a click behavior that is not wired")
     ctx.want("rgb(0, 0, 0)" in after or "#000000" in after,
              "the tile's DECLARED effect landed: the fill swatch is now black")
+
+
+@check("brush_promotes_line",
+       "applying a brush to a Line thickens its ink (Line→Path promotion)")
+def brush_promotes_line(ctx: Ctx):
+    """LINEPROMOTE (JYH 2026-07-25): a brush applied to a selected Line PROMOTES
+    it to a Path that renders the calligraphic band — the "upgrade naturally"
+    convention. The only end-to-end visible proof: a plain thin line stroke
+    becomes a fat band. The pre-convention behavior silently no-op'd (a Line had
+    no `stroke_brush` field to write), leaving the thin stroke unchanged; this
+    check would go red on that build exactly as it does under the owned fault.
+    """
+    p = ctx.p
+    tile = 'css:[id^="bp_tile_"]'
+
+    # Open the Brushes panel via Window ▸ Brushes (a top-level menu title + item,
+    # both text-addressed — the menu bar emits no per-item DOM id). Opened BEFORE
+    # drawing so the canvas layout — and the doc→screen mapping the ink reads
+    # depend on — is stable across the before/after measurements. Skip if already
+    # open.
+    if not p.exists(tile):
+        _click_by_text(p, "css:.jas-menu-title", "Window")
+        time.sleep(0.3)
+        ctx.want(_click_by_text(p, "css:.jas-menu-item", "Brushes"),
+                 "Window ▸ Brushes toggles the Brushes panel open")
+        time.sleep(0.3)
+    ctx.want(p.exists(tile),
+             "a brush tile is rendered in the open Brushes panel")
+
+    # Draw a THIN horizontal line, then switch to the Selection tool and
+    # select-all so the line is really in doc.selection (the line tool's
+    # just-drawn highlight is NOT a document selection) —
+    # apply_brush_to_selection acts on doc.selection.
+    got = p.set_field("stk_weight", "1")
+    ctx.want(got.strip().startswith("1"),
+             f"stroke weight committed {got!r} for input '1'")
+    p.click("btn_line")
+    ctx.want(p.checked("btn_line"), "line tool is the active tool")
+    p.drag([(LINE_X0, LINE_Y), (LINE_X1, LINE_Y), (LINE_X1, LINE_Y)])
+    p.click("btn_selection")
+    select_all(p)
+    # A horizontal line's bounding box is degenerate (zero height), so its
+    # selection handles sit at the two ENDPOINTS (x=LINE_X0 / LINE_X1), never at
+    # the mid-span SCAN_X — the thickness read there is pure stroke ink whether
+    # or not the line is selected.
+    before = p.ink_span(SCAN_X, BAND_SCAN_Y0, BAND_SCAN_SPAN)["longest"]
+    ctx.note(f"before brush: plain line thickness = {before}px")
+
+    # Click a wide (10 pt round) brush tile. The tiles all share the LITERAL
+    # templated id `bp_tile_{{lib.id}}_{{brush.slug}}` (the container id template
+    # is not expanded), so a specific brush is reached by INDEX, not id. Index 5
+    # is the 10 pt round calligraphic. In regress mode the tile handler is
+    # severed here so the brush never applies.
+    def _click_nth(sel, n):
+        c = p.cdp.evaluate(
+            f"(()=>{{const els=document.querySelectorAll({json.dumps(sel)});"
+            f"const e=els[{n}];if(!e)return null;"
+            "e.scrollIntoView({block:'center',inline:'center'});"
+            "const r=e.getBoundingClientRect();"
+            "return [r.x+r.width/2, r.y+r.height/2];})()")
+        if not c:
+            return False
+        p.click_xy(c[0], c[1])
+        return True
+    ctx.inject("dead_brush_tile")
+    ctx.want(_click_nth('[id^="bp_tile_"]', 5),
+             "the 10 pt round brush tile is clickable")
+    p.heartbeat(6.0, "the app after clicking the brush tile")
+    after = p.ink_span(SCAN_X, BAND_SCAN_Y0, BAND_SCAN_SPAN)["longest"]
+    ctx.note(f"after brush:  calligraphic band thickness = {after}px")
+    ctx.shot("brush_promoted_line")
+
+    ctx.want(after > before + 5,
+             f"the brushed line renders a THICKER band ({after}px vs {before}px) "
+             f"— the Line→Path promotion fired end-to-end; an unchanged thickness "
+             f"means the brush apply was a silent no-op")
 
 
 @check("behavior_liveness",
