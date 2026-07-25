@@ -20,8 +20,9 @@ private func strokeApplyCorpus() -> [String: Any] {
     let panelsDir = (thisFile as NSString).deletingLastPathComponent
     let testsDir = (panelsDir as NSString).deletingLastPathComponent
     let jasSwiftDir = (testsDir as NSString).deletingLastPathComponent
-    let full = (jasSwiftDir as NSString)
-        .appendingPathComponent("../test_fixtures/stroke_apply/panel_edit.json")
+    let fixtures = (jasSwiftDir as NSString).appendingPathComponent("../test_fixtures")
+    let full = (fixtures as NSString)
+        .appendingPathComponent("stroke_apply/panel_edit.json")
     let path = (full as NSString).standardizingPath
     guard let data = FileManager.default.contents(atPath: path),
           let obj = try? JSONSerialization.jsonObject(with: data),
