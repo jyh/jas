@@ -331,13 +331,13 @@ def tile_click_responds(ctx: Ctx):
     ctx.note(f"fill swatch before: ...{before[-60:]}")
     p.watch_start()
     p.click(tile)
-    raw = p.watch_records()
     meaningful = p.watch_meaningful(tile)
+    incidental = p.watch_incidental()
     p.watch_stop()
     after = p.attr("cp_fill_swatch", "style")
     ctx.note(f"fill swatch after:  ...{after[-60:]}")
-    ctx.note(f"DOM mutations: {len(raw)} raw, {len(meaningful)} meaningful "
-             f"[{p.describe_records(meaningful)}]")
+    ctx.note(f"DOM mutations: {len(meaningful)} meaningful, {incidental} "
+             f"decoration-only [{p.describe_records(meaningful)}]")
     ctx.shot("tile_clicked")
 
     ctx.want(len(meaningful) > 0,
@@ -409,7 +409,7 @@ def behavior_liveness(ctx: Ctx):
             p.watch_start()
             p.click(wid)
             meaningful = p.watch_meaningful(wid)
-            raw = p.watch_count()
+            raw = p.watch_incidental()
             p.watch_stop()
             try:
                 p.heartbeat(6.0, f"the app after clicking {wid}")
@@ -439,10 +439,10 @@ def behavior_liveness(ctx: Ctx):
     for wid, why in skipped:
         ctx.note(f"  skip {wid}: {why}")
     for wid, n, raw, desc in live:
-        ctx.note(f"  live {wid}: {n} meaningful ({raw} raw) [{desc}]")
+        ctx.note(f"  live {wid}: {n} meaningful (+{raw} decoration) [{desc}]")
     for wid, n, raw, desc in dead:
-        ctx.note(f"  DEAD {wid}: 0 meaningful mutations ({raw} raw, all "
-                 f"focus decoration) — declared clickable, not wired")
+        ctx.note(f"  DEAD {wid}: 0 meaningful mutations ({raw} decoration-only) "
+                 f"— declared clickable, not wired")
     for wid, why in wedged:
         ctx.note(f"  WEDGED {wid}: {why}")
     ctx.want(len(live) > 0, f"the sweep actually exercised widgets ({len(live)} live)")

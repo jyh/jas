@@ -601,11 +601,22 @@ class GuiProbe:
         check per widget. Descriptions (not just a count) are kept so a
         failure names the change it did or did not see.
         """
+        # The filter runs IN THE PAGE, before the cap, and incidental records
+        # are counted rather than stored. An earlier version capped the raw
+        # array at 200 and filtered in Python; a `data-input-modality` storm
+        # then filled the cap with decoration and CROWDED OUT the meaningful
+        # records that arrived after it, so a perfectly live widget reported
+        # "201 raw, 0 meaningful" and the check failed intermittently. Never
+        # let noise evict signal.
+        incidental = json.dumps(list(self.INCIDENTAL_ATTRS))
         self.cdp.evaluate(
-            "(()=>{window.__jasMut=[];"
+            "(()=>{window.__jasMut=[];window.__jasIncidental=0;"
+            f"const IGN={incidental};"
             "if(window.__jasObs)window.__jasObs.disconnect();"
             "window.__jasObs=new MutationObserver(rs=>{for(const r of rs){"
-            "if(window.__jasMut.length>200)break;"
+            "if(r.type==='attributes'&&IGN.indexOf(r.attributeName)>=0){"
+            "window.__jasIncidental++;continue;}"
+            "if(window.__jasMut.length>=500)continue;"
             "const t=r.target, el=(t.nodeType===1?t:t.parentElement);"
             "window.__jasMut.push({type:r.type,"
             "attr:r.attributeName||'',"
@@ -617,16 +628,19 @@ class GuiProbe:
             "return true;})()")
 
     def watch_records(self) -> list[dict]:
+        """The MEANINGFUL records — decoration was already dropped in-page."""
         return self.cdp.evaluate("window.__jasMut||[]") or []
 
     def watch_meaningful(self, clicked_id: str | None = None) -> list[dict]:
-        """Records with click decoration filtered out (see INCIDENTAL_ATTRS)."""
-        return [r for r in self.watch_records()
-                if not (r["type"] == "attributes"
-                        and r["attr"] in self.INCIDENTAL_ATTRS)]
+        return self.watch_records()
+
+    def watch_incidental(self) -> int:
+        """How many decoration-only records were seen and discarded."""
+        return int(self.cdp.evaluate("window.__jasIncidental||0"))
 
     def watch_count(self) -> int:
-        return len(self.watch_records())
+        """Total records observed, decoration included."""
+        return len(self.watch_records()) + self.watch_incidental()
 
     def watch_stop(self):
         self.cdp.evaluate(
