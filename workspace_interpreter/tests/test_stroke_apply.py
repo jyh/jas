@@ -12,6 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+
+_JAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "jas"))
+if _JAS_DIR not in sys.path:
+    sys.path.insert(0, _JAS_DIR)
 
 import pytest
 
@@ -204,3 +209,181 @@ class TestGlobalKeyNormalization:
     def test_global_and_panel_keys_agree(self, global_key, panel_key):
         assert stroke_edit_group(global_key) == stroke_edit_group(panel_key)
         assert stroke_edit_group(panel_key) is not None
+
+
+# ---------------------------------------------------------------------------
+# The bridge: the same law, exercised through the store + document wiring
+# ---------------------------------------------------------------------------
+
+class _FakeModel:
+    """The slice of the app model the stroke bridge touches."""
+
+    def __init__(self, document, default_stroke=None):
+        self.document = document
+        self.default_stroke = default_stroke
+        self.default_fill = None
+        self.edits = 0
+
+    def edit_document(self, doc):
+        self.document = doc
+        self.edits += 1
+
+    def set_document_unbracketed(self, doc):
+        self.document = doc
+
+
+class _FakeController:
+    def __init__(self, model):
+        self.model = model
+        self.width_profiles = []
+
+    def set_selection_width_profile(self, wp):
+        self.width_profiles.append(wp)
+
+    def set_selection_stroke(self, stroke):
+        from geometry.element import with_stroke
+        doc = self.model.document
+        for es in doc.selection:
+            doc = doc.replace_element(
+                es.path, with_stroke(doc.get_element(es.path), stroke))
+        self.model.edit_document(doc)
+
+    def set_selection_fill(self, fill):
+        from geometry.element import with_fill
+        doc = self.model.document
+        for es in doc.selection:
+            doc = doc.replace_element(
+                es.path, with_fill(doc.get_element(es.path), fill))
+        self.model.edit_document(doc)
+
+
+def _rich_stroke_obj():
+    """``rich_stroke`` from the corpus as a geometry Stroke."""
+    from workspace_interpreter.effects import _stroke_from_attrs
+    from workspace_interpreter.stroke_law import normalize_stroke
+    return _stroke_from_attrs(normalize_stroke(_CORPUS["rich_stroke"]))
+
+
+def _doc_with_stroked_line(stroke):
+    """A one-layer document holding a single selected stroked Path."""
+    from document.document import Document, ElementSelection
+    from geometry.element import Layer, LineTo, MoveTo, Path
+    path = Path(d=(MoveTo(x=0.0, y=0.0), LineTo(x=100.0, y=0.0)),
+                stroke=stroke, fill=None)
+    layer = Layer(children=(path,))
+    return Document(layers=(layer,),
+                    selection=frozenset({ElementSelection.all((0, 0))}))
+
+
+def _seed_panel(store, **overrides):
+    """The Stroke panel sitting at its corpus defaults, plus overrides.
+
+    ``init_panel`` creates the scope; ``set_panel`` is a no-op on a scope
+    that does not exist yet.
+    """
+    defaults = {k: v for k, v in _CORPUS["panel_defaults"].items()
+                if not k.startswith("_")}
+    store.init_panel("stroke_panel_content", {**defaults, **overrides})
+
+
+class TestBridgeAppliesTheFieldScopedLaw:
+    """``apply_stroke_panel_to_selection`` — the wiring, not just the pure
+    law. This is the function that actually held the old law."""
+
+    def _run(self, edited, **panel):
+        from workspace_interpreter.effects import apply_stroke_panel_to_selection
+        from workspace_interpreter.state_store import StateStore
+        stroke = _rich_stroke_obj()
+        model = _FakeModel(_doc_with_stroked_line(stroke))
+        ctrl = _FakeController(model)
+        store = StateStore()
+        _seed_panel(store, **panel)
+        apply_stroke_panel_to_selection(store, ctrl, edited)
+        return model, ctrl, model.document.get_element((0, 0)).stroke
+
+    def test_jyh_repro_arrowhead_edit_keeps_the_5pt_width(self):
+        """The repro: rich 5pt stroke, panel at 1pt defaults, user picks an
+        end arrowhead. Everything but the head survives."""
+        _, _, got = self._run("stroke_end_arrowhead",
+                              end_arrowhead="closed_arrow")
+        from geometry.element import Arrowhead
+        assert got.end_arrow == Arrowhead.CLOSED_ARROW
+        assert got.width == 5.0
+        rich = _rich_stroke_obj()
+        assert got.linecap == rich.linecap
+        assert got.linejoin == rich.linejoin
+        assert got.dash_pattern == rich.dash_pattern
+        assert got.start_arrow == rich.start_arrow
+        assert got.align == rich.align
+        assert got.miter_limit == rich.miter_limit
+        assert got.opacity == rich.opacity
+        assert got.start_arrow_scale == rich.start_arrow_scale
+        assert got.end_arrow_scale == rich.end_arrow_scale
+
+    def test_weight_edit_writes_the_committed_width(self):
+        _, _, got = self._run("stroke_width", weight=8.0)
+        assert got.width == 8.0
+        assert got.dash_pattern == _rich_stroke_obj().dash_pattern
+
+    def test_cap_edit_writes_only_the_cap(self):
+        from geometry.element import LineCap
+        _, _, got = self._run("stroke_cap", cap="square")
+        assert got.linecap == LineCap.SQUARE
+        assert got.width == 5.0
+
+    def test_unlinked_start_scale_leaves_the_end_scale(self):
+        _, _, got = self._run("stroke_start_arrowhead_scale",
+                              start_arrowhead_scale=200.0)
+        assert got.start_arrow_scale == 200.0
+        assert got.end_arrow_scale == 75.0
+
+    def test_link_toggle_writes_nothing_at_all(self):
+        """A UI-only flag must not reach the document — no edit, so no undo
+        step that changes nothing."""
+        model, _, got = self._run("stroke_link_arrowhead_scale")
+        assert model.edits == 0
+        assert got == _rich_stroke_obj()
+
+    def test_profile_edit_leaves_the_stroke_and_derives_width_points(self):
+        model, ctrl, got = self._run("stroke_profile", profile="taper_both")
+        assert got == _rich_stroke_obj()
+        assert ctrl.width_profiles, "a profile edit must re-derive width points"
+
+    def test_a_non_profile_edit_does_not_touch_width_points(self):
+        _, ctrl, _ = self._run("stroke_cap", cap="round")
+        assert ctrl.width_profiles == []
+
+    def test_the_new_element_default_takes_the_same_scoped_edit(self):
+        from workspace_interpreter.effects import apply_stroke_panel_to_selection
+        from workspace_interpreter.state_store import StateStore
+        from geometry.element import Color, LineCap, Stroke
+        model = _FakeModel(_doc_with_stroked_line(_rich_stroke_obj()),
+                           default_stroke=Stroke(color=Color.BLACK, width=2.0))
+        store = StateStore()
+        _seed_panel(store, cap="round")
+        apply_stroke_panel_to_selection(store, _FakeController(model), "stroke_cap")
+        # The default takes the cap, and keeps its OWN 2pt width — the
+        # selected element's 5pt must not leak into the next element.
+        assert model.default_stroke.linecap == LineCap.ROUND
+        assert model.default_stroke.width == 2.0
+
+
+class TestBridgeColourRouteIsColourOnly:
+    def test_stroke_colour_pick_preserves_every_other_attribute(self):
+        from workspace_interpreter.effects import subscribe_active_color
+        from workspace_interpreter.state_store import StateStore
+        from geometry.element import Color
+        rich = _rich_stroke_obj()
+        model = _FakeModel(_doc_with_stroked_line(rich), default_stroke=rich)
+        ctrl = _FakeController(model)
+        store = StateStore()
+        subscribe_active_color(store, lambda: ctrl)
+        store.set("stroke_color", "#ff0000")
+        got = model.document.get_element((0, 0)).stroke
+        assert got.color == Color.from_hex("#ff0000")
+        assert got.width == 5.0
+        assert got.dash_pattern == rich.dash_pattern
+        assert got.start_arrow == rich.start_arrow
+        assert got.end_arrow == rich.end_arrow
+        assert got.linecap == rich.linecap
+        assert got.opacity == rich.opacity
