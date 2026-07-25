@@ -459,3 +459,52 @@ Open follow-ups:
 - The 15 arrowhead shapes exist as marker references; the full
   per-shape SVG marker set needs to land before every shape renders
   on every canvas.
+
+Banked by the STROKEWIDTH council (2026-07-24) — decided, deferred, and
+written down here so the decision does not live only in a commit message:
+
+- **Per-element swap-colour sourcing.** The fill/stroke swap sources both
+  colours from the new-element defaults, in every port. Sourcing them per
+  element (so a mixed selection swaps each element's own two colours) is a
+  plausible future feature, but it needs an answer for elements that hold
+  only one of the two — a Line has no fill, and swapping its stroke away
+  to nothing is not what the arrow promises. Revisit with the
+  multi-selection story, not before.
+- **`reset_fill_stroke_defaults` still replaces whole attributes.** Reset
+  is the one action that legitimately does; `workspace/actions.yaml`
+  enumerates exactly what it resets. Left as intended semantics, not an
+  oversight — if it ever grows a "reset colours only" mode, that is a new
+  action, not a change to this one.
+- **Display-vs-apply sync.** The panel shows the selection's real weight /
+  cap / join through a per-render PULL (Rust `build_live_panel_overrides`,
+  Swift `strokePanelLiveOverrides`) — but a push-style
+  `sync_stroke_panel_from_selection` also survives in the reference
+  (writing panel state) and in Swift (writing the flat globals, with no
+  production caller). Rust deleted its copy, which additionally mutated
+  the new-element default — a display path must never do that. Two shapes
+  for one job: unifying on the pull is the intended direction and wants
+  its own pass.
+- **The profile stamp on a multi-selection.** A `profile` / `weight` edit
+  re-derives width points for the whole selection from ONE profile width:
+  the committed weight for a weight edit, else the FIRST selected
+  element's width. With mixed widths selected, the later elements get the
+  first element's profile scale. Correct fix is per-element re-derivation;
+  needs a decision on what the panel's profile picker means across a
+  mixed selection.
+- **The Character-panel clobber.** `applyCharacterPanelToSelection` /
+  `apply_character_panel_to_selection` take no `edited` field at all: they
+  read the whole panel scope and write it over the selected range on any
+  edit — the shape the Stroke panel just left behind. Nothing has been
+  reported yet, but the class of bug is identical (a panel field that does
+  not track the selection re-imposing itself on an unrelated edit) and the
+  fix is the same field-scoped move. Next panel in line.
+- **Swift's `icon_button` effects: not every write notifies.** A YAML
+  button's `effects:` reach the apply only through the effects that fire
+  the `notify_panel_state_changed` hook — `set:` (per written key) and
+  `set_panel_state:` (per key). The others that touch panel state,
+  `select:` chief among them, write straight through `store.setPanel` and
+  only bump the render version, so a panel-state write made that way
+  lands without applying. No Stroke-panel control uses one today (its
+  buttons all commit keyed values), which is why nothing is broken; the
+  gap is in the generic widget layer and closing it means every
+  panel-state-writing effect naming the field it wrote.
