@@ -1434,6 +1434,14 @@ fn set_app_state_field(
         }
         "stroke_width" => {
             if let Some(w) = val.as_f64() {
+                // The weight input's panel field, same as every other
+                // `stroke_*` key below writes its own — the flat global and
+                // the panel field are ONE slot in this port, and the apply
+                // reads the width from `stroke_panel.weight`. Without this
+                // an out-of-panel `set: { stroke_width }` (actions.yaml
+                // `reset_fill_stroke`) moved the defaults but left the
+                // panel's committed weight stale.
+                st.stroke_panel.weight = w;
                 if let Some(ref mut s) = st.app_default_stroke {
                     s.width = w;
                 }
@@ -10811,6 +10819,19 @@ mod tests {
         let mut st = AppState::new();
         st.app_default_fill = None;
         assert_eq!(get_app_state_field("fill_color", &st), serde_json::Value::Null);
+    }
+
+    // The flat global `stroke_width` and the panel's `weight` field are ONE
+    // slot in this port, so a global write must land on the panel field the
+    // apply reads — like every other `stroke_*` key. It used to move only
+    // the default strokes, leaving the committed weight stale.
+    #[test]
+    fn global_stroke_width_write_lands_on_the_panel_weight() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        set_app_state_field("stroke_width", &serde_json::json!(7.5), &mut st);
+        assert_eq!(st.stroke_panel.weight, 7.5,
+                   "the global weight write must reach the panel field");
+        assert_eq!(st.app_default_stroke.unwrap().width, 7.5);
     }
 
     #[test]

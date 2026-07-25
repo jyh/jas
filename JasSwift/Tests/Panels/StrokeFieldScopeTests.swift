@@ -273,6 +273,79 @@ private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
     #expect(strokeAt(model, 0).dashPattern == richStroke().dashPattern)
 }
 
+// ── the flat GLOBAL scope resolves to the same fields ────────────
+//
+// Out-of-panel writers reach the Stroke panel through the flat globals a
+// YAML `set:` effect writes: `stroke_cap`, and for the weight input
+// `stroke_width` (workspace/actions.yaml `reset_fill_stroke`,
+// workspace/panels/stroke.yaml `init:`). `strokePanelField` resolved the
+// weight's global as `stroke_weight` — a key nothing in workspace/ writes —
+// while the reference maps weight -> `stroke_width`
+// (effects.py stroke_panel_state). So a global weight write reached the
+// width group (fromField normalizes the key) and then fell through to the
+// default stroke for its VALUE. Same shape for `align_stroke`, whose global
+// is `stroke_align`.
+
+/// Seed the flat GLOBAL scope — what an out-of-panel `set:` effect writes —
+/// with NO panel scope at all, then apply the named edit.
+private func applyGlobalEdit(
+    _ model: Model, _ edited: String, _ globals: [String: Any] = [:]
+) {
+    for (k, v) in globals { model.stateStore.set(k, v) }
+    applyStrokePanelToSelection(store: model.stateStore,
+                                controller: Controller(model: model),
+                                edited: edited)
+}
+
+@Test func strokeWeightAppliesFromTheGlobalScope() {
+    let model = strokeModel(richStroke())
+    applyGlobalEdit(model, "stroke_width", ["stroke_width": 7.0])
+    #expect(strokeAt(model, 0).width == 7.0,
+            "a global stroke_width write must supply the committed width")
+    // ...and only the width group moved.
+    #expect(strokeAt(model, 0).linecap == richStroke().linecap)
+    #expect(strokeAt(model, 0).dashPattern == richStroke().dashPattern)
+}
+
+@Test func strokeCapAppliesFromTheGlobalScope() {
+    let model = strokeModel(richStroke())
+    applyGlobalEdit(model, "stroke_cap", ["stroke_cap": "square"])
+    #expect(strokeAt(model, 0).linecap == .square)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+@Test func strokeAlignAppliesFromTheGlobalScope() {
+    let model = strokeModel(richStroke())
+    applyGlobalEdit(model, "stroke_align", ["stroke_align": "outside"])
+    #expect(strokeAt(model, 0).align == .outside)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+// The panel scope still WINS over the global: that is where every in-panel
+// widget write-back lands, and the globals are only the fallback.
+@Test func strokePanelScopeBeatsTheGlobal() {
+    let model = strokeModel(richStroke())
+    model.stateStore.set("stroke_width", 2.0)
+    applyEdit(model, "weight", ["weight": 9.0])
+    #expect(strokeAt(model, 0).width == 9.0, "the panel commit wins")
+}
+
+// Every render key the workspace writes must be one a `set:` effect can
+// actually produce, and the reference's list is the contract.
+@Test func strokeRenderKeysMatchTheReference() {
+    // workspace/actions.yaml reset_fill_stroke writes exactly these.
+    for key in ["stroke_width", "stroke_align", "stroke_cap", "stroke_join",
+                "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
+                "stroke_start_arrowhead", "stroke_end_arrowhead",
+                "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
+                "stroke_arrow_align", "stroke_profile"] {
+        #expect(isStrokeRenderKey(key), "\(key) must trigger the stroke apply")
+    }
+    // ...and not the spellings nothing writes.
+    #expect(!isStrokeRenderKey("stroke_weight"))
+    #expect(!isStrokeRenderKey("stroke_align_stroke"))
+}
+
 // ── swap_fill_stroke is colour-only ──────────────────────────────
 //
 // Shift+X / the fill-stroke widget arrow / the Color-panel button all say

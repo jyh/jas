@@ -114,6 +114,24 @@ private func seedStrokePanel(_ store: StateStore, _ panel: [String: Any]) {
     }
 }
 
+/// Seed the flat GLOBAL scope instead — a `"scope": "global"` vector, which
+/// is how an out-of-panel `set:` effect delivers a stroke field.
+///
+/// The global spellings are NOT a mechanical `stroke_` prefix: the weight
+/// field's global is `stroke_width` and `align_stroke`'s is `stroke_align`
+/// (workspace/panels/stroke.yaml `init:`, workspace/actions.yaml
+/// `reset_fill_stroke`). That table is stated here from the workspace YAML
+/// rather than borrowed from production, so the port's own resolver is what
+/// is under test.
+private func seedStrokeGlobals(_ store: StateStore, _ panel: [String: Any]) {
+    for (key, value) in panel where !key.hasPrefix("_") {
+        if value is NSNull { continue }
+        let global = key == "weight" ? "stroke_width"
+            : key == "align_stroke" ? "stroke_align" : "stroke_\(key)"
+        store.set(global, value)
+    }
+}
+
 /// Shallow merge: the override map over the base map.
 private func merged(_ base: [String: Any], _ over: [String: Any]) -> [String: Any] {
     var out = base
@@ -172,9 +190,20 @@ struct StrokeApplyCorpusTests {
             }
             let store = StateStore()
             store.initPanel("stroke_panel_content", defaults: [:])
-            seedStrokePanel(store, merged(panelDefaults,
-                                          vec["panel"] as! [String: Any]))
+            let panelMap = merged(panelDefaults, vec["panel"] as! [String: Any])
             let committed = (vec["committed_width"] as! NSNumber).doubleValue
+            if (vec["scope"] as? String) == "global" {
+                seedStrokeGlobals(store, panelMap)
+                // A global vector pins the SCOPE RESOLUTION, not just the key
+                // normalization: the port must find the value in the flat
+                // globals. `strokePanelField` looked the weight up as
+                // `stroke_weight` — a key nothing writes — so this returned
+                // nil and the width fell through to the default stroke.
+                #expect(strokePanelNumber(store, "weight") == committed,
+                        "stroke_apply '\(name)': the weight must resolve from the global scope")
+            } else {
+                seedStrokePanel(store, panelMap)
+            }
             let got = strokeWithGroup(base!, store: store, group: group,
                                       committedWidth: committed)
             let want = strokeFromAttrs(

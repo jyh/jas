@@ -4335,6 +4335,14 @@ mod tests {
             }
             let group = group.unwrap_or_else(
                 || panic!("stroke_apply '{}': '{}' must own a group", name, edited));
+            // A vector's `scope` (panel / global) collapses in this port:
+            // the flat global `stroke_cap` and the panel field `cap` are ONE
+            // slot on `StrokePanelState` — `renderer::set_app_state_field`
+            // writes the same field a widget write-back does, weight
+            // included (`stroke_width` -> `stroke_panel.weight`, pinned by
+            // `global_stroke_width_write_lands_on_the_panel_weight`). Swift
+            // and the reference keep two dicts, so there the marker selects
+            // which one gets seeded.
             let panel = stroke_panel_from_attrs(
                 &merged(&corpus["panel_defaults"], &vec["panel"]));
             let committed = vec["committed_width"].as_f64().unwrap();

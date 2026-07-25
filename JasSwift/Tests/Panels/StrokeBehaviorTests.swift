@@ -277,7 +277,10 @@ private func syncModel(_ stroke: Stroke) -> Model {
                              linecap: .round, linejoin: .bevel))
     syncStrokePanelFromSelection(store: m.stateStore,
                                  controller: Controller(model: m))
-    #expect((m.stateStore.get("stroke_weight") as? Double) == 3.5)
+    // The weight's global spelling is `stroke_width` — the key
+    // `strokePanelField` reads back and a `set:` effect writes. It was
+    // `stroke_weight`, which nothing read.
+    #expect((m.stateStore.get("stroke_width") as? Double) == 3.5)
     #expect((m.stateStore.get("stroke_cap") as? String) == "round")
     #expect((m.stateStore.get("stroke_join") as? String) == "bevel")
 }

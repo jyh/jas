@@ -819,13 +819,21 @@ private func runOne(
 
 // MARK: - Stroke panel state binding
 
-/// Rendering-affecting stroke state keys.
+/// Rendering-affecting stroke state keys — the flat GLOBAL spellings, which
+/// are what a `set:` effect writes. Mirrors the reference
+/// `STROKE_RENDER_KEYS` (effects.py) key for key.
+///
+/// Two of them used to be spellings nothing in workspace/ ever writes:
+/// `stroke_weight` (the weight global is `stroke_width`) and
+/// `stroke_align_stroke` (the align global is `stroke_align`). Both are
+/// written by `reset_fill_stroke` and by the panel's own align buttons, so
+/// the apply simply never fired for them.
 private let strokeRenderKeys: Set<String> = [
-    "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
+    "stroke_cap", "stroke_join", "stroke_width", "stroke_miter_limit",
     "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
     "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
     "stroke_dash_align_anchors",
-    "stroke_align_stroke", "stroke_start_arrowhead", "stroke_end_arrowhead",
+    "stroke_align", "stroke_start_arrowhead", "stroke_end_arrowhead",
     "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
     "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
 ]
@@ -905,6 +913,10 @@ func applyStrokePanelToSelection(
 }
 
 /// Sync stroke panel state from the first selected element's stroke.
+///
+/// Writes the flat GLOBAL spellings (`stroke_width`, `stroke_align`), the
+/// same ones `strokePanelField` reads back and `set:` effects write. It used
+/// to write `stroke_weight` / `stroke_align_stroke`, which nothing read.
 func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
     let doc = controller.model.document
     guard let first = doc.selection.first else { return }
@@ -912,11 +924,11 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
 
     store.set("stroke_cap", s.linecap == .butt ? "butt" : s.linecap == .round ? "round" : "square")
     store.set("stroke_join", s.linejoin == .miter ? "miter" : s.linejoin == .round ? "round" : "bevel")
-    store.set("stroke_weight", s.width)
+    store.set("stroke_width", s.width)
     store.set("stroke_miter_limit", s.miterLimit)
     let alignStr: String
     switch s.align { case .center: alignStr = "center"; case .inside: alignStr = "inside"; case .outside: alignStr = "outside" }
-    store.set("stroke_align_stroke", alignStr)
+    store.set("stroke_align", alignStr)
     store.set("stroke_dashed", !s.dashPattern.isEmpty)
     if s.dashPattern.count >= 2 {
         store.set("stroke_dash_1", s.dashPattern[0])

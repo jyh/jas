@@ -154,14 +154,25 @@ public func strokePanelField(_ store: StateStore, _ field: String) -> Any? {
         return v
     }
     let globals = store.getAll()
-    if let v = globals["stroke_\(field)"], !(v is NSNull) { return v }
-    // `align_stroke` is written to the global as `stroke_align` by the
-    // panel's `init:` block but as `stroke_align_stroke` by its widgets;
-    // accept both.
+    // The weight input is the asymmetric pair: its global is `stroke_width`
+    // (workspace/panels/stroke.yaml `init:`, workspace/actions.yaml
+    // `reset_fill_stroke`), NOT `stroke_weight` — which is what this used to
+    // look up, a key nothing in workspace/ writes. So an out-of-panel weight
+    // write reached the width group (`fromField` normalizes the key) and
+    // then fell through to the default stroke for its VALUE. Mirrors the
+    // reference `stroke_panel_state` (effects.py).
+    if let v = globals[strokePanelGlobalKey(field)], !(v is NSNull) { return v }
+    // `align_stroke` is spelled `stroke_align` in the global scope.
     if field == "align_stroke", let v = globals["stroke_align"], !(v is NSNull) {
         return v
     }
     return nil
+}
+
+/// The flat GLOBAL key a Stroke-panel field is written under — the inverse
+/// of ``strokeFieldName``.
+public func strokePanelGlobalKey(_ field: String) -> String {
+    field == "weight" ? "stroke_width" : "stroke_\(field)"
 }
 
 /// `strokePanelField` as a Double (numeric values arrive as Int / Double /

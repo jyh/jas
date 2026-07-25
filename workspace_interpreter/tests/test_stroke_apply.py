@@ -61,6 +61,37 @@ def _expected(vec: dict) -> dict:
     return normalize_stroke({**(_effective_base(vec) or {}), **vec["expected"]})
 
 
+#: The flat GLOBAL key each Stroke-panel field is written under. NOT a
+#: mechanical ``stroke_`` prefix: the weight field's global is
+#: ``stroke_width`` and ``align_stroke``'s is ``stroke_align``
+#: (workspace/panels/stroke.yaml ``init:``, workspace/actions.yaml
+#: ``reset_fill_stroke``). Stated here from the workspace YAML rather than
+#: borrowed from the implementation, so the resolver stays under test.
+_GLOBAL_KEYS = {"weight": "stroke_width", "align_stroke": "stroke_align"}
+
+
+def _panel_map(vec: dict) -> dict:
+    """The panel state a vector describes, delivered through the scope the
+    vector names.
+
+    A ``"scope": "global"`` vector seeds ONLY the flat globals and lets the
+    reference's own ``stroke_panel_state`` resolve them — so the vector pins
+    the panel-first-then-global fallback, not just the key normalization.
+    """
+    fields = {**_CORPUS["panel_defaults"], **vec["panel"]}
+    fields = {k: v for k, v in fields.items() if not k.startswith("_")}
+    if vec.get("scope") != "global":
+        return fields
+    from workspace_interpreter.effects import stroke_panel_state
+    from workspace_interpreter.state_store import StateStore
+    store = StateStore()
+    for field, value in fields.items():
+        if value is None:
+            continue
+        store.set(_GLOBAL_KEYS.get(field, f"stroke_{field}"), value)
+    return stroke_panel_state(store)
+
+
 def _ids(op: str) -> list[str]:
     return [v["name"] for v in _CORPUS["vectors"] if v["op"] == op]
 
@@ -76,7 +107,7 @@ class TestPanelEditCorpus:
     @pytest.mark.parametrize("name", _ids("panel_edit"))
     def test_vector(self, name):
         vec = _vec(name)
-        panel = {**_CORPUS["panel_defaults"], **vec["panel"]}
+        panel = _panel_map(vec)
         group = stroke_edit_group(vec["edited"])
         if vec["expected"] is None:
             # No group -> the edit reaches the document not at all.
@@ -193,6 +224,18 @@ class TestLinkScalesToggleIsUiOnly:
 
 
 class TestGlobalKeyNormalization:
+    def test_the_corpus_exercises_the_global_scope(self):
+        """The ``*_global_key`` vectors must actually be delivered through
+        the flat globals — otherwise they pin the key table and nothing
+        about the scope FALLBACK, which is where Swift resolved the weight
+        as ``stroke_weight``, a key nothing writes."""
+        globals_ = [v for v in _CORPUS["vectors"] if v.get("scope") == "global"]
+        assert len(globals_) >= 3, "the global scope must be exercised"
+        # And the resolution really happens: the weight arrives under
+        # `stroke_width` and comes back as the panel field `weight`.
+        vec = _vec("weight_edit_from_global_key")
+        assert _panel_map(vec)["weight"] == vec["committed_width"]
+
     @pytest.mark.parametrize(
         "global_key,panel_key",
         [
