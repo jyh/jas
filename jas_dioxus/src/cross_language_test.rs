@@ -4129,6 +4129,200 @@ mod tests {
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------
 
+
+    // ---------------------------------------------------------------
+    // STROKEWIDTH: the field-scoped Stroke-panel apply law
+    // ---------------------------------------------------------------
+    //
+    // Runs test_fixtures/stroke_apply/panel_edit.json — the shared corpus
+    // that pins this law across the three LIVE implementations (the
+    // workspace_interpreter reference, this port, and Swift). The
+    // reference states the field -> attribute-group table
+    // (workspace_interpreter/stroke_law.py); `StrokeEditGroup` mirrors it.
+    // A vector's `expected` is a DELTA over its effective base: the keys
+    // it names are what the edit changed, and every key it omits must come
+    // back unchanged.
+
+    /// The Stroke a fixture attribute map describes, taking anything it
+    /// omits from `base`.
+    fn stroke_from_attrs(base: &crate::geometry::element::Stroke,
+                         attrs: &serde_json::Value)
+        -> crate::geometry::element::Stroke
+    {
+        use crate::geometry::element::{
+            Arrowhead, ArrowAlign, Color, LineCap, LineJoin, StrokeAlign,
+        };
+        let mut s = *base;
+        if let Some(v) = attrs.get("color").and_then(|v| v.as_str()) {
+            s.color = Color::from_hex(v).expect("fixture colour must parse");
+        }
+        if let Some(v) = attrs.get("width").and_then(|v| v.as_f64()) { s.width = v; }
+        if let Some(v) = attrs.get("linecap").and_then(|v| v.as_str()) {
+            s.linecap = match v {
+                "round" => LineCap::Round,
+                "square" => LineCap::Square,
+                _ => LineCap::Butt,
+            };
+        }
+        if let Some(v) = attrs.get("linejoin").and_then(|v| v.as_str()) {
+            s.linejoin = match v {
+                "round" => LineJoin::Round,
+                "bevel" => LineJoin::Bevel,
+                _ => LineJoin::Miter,
+            };
+        }
+        if let Some(v) = attrs.get("miter_limit").and_then(|v| v.as_f64()) {
+            s.miter_limit = v;
+        }
+        if let Some(v) = attrs.get("align").and_then(|v| v.as_str()) {
+            s.align = match v {
+                "inside" => StrokeAlign::Inside,
+                "outside" => StrokeAlign::Outside,
+                _ => StrokeAlign::Center,
+            };
+        }
+        if let Some(v) = attrs.get("dash").and_then(|v| v.as_array()) {
+            s.dash_pattern = [0.0; 6];
+            s.dash_len = v.len() as u8;
+            for (i, d) in v.iter().enumerate() {
+                s.dash_pattern[i] = d.as_f64().unwrap();
+            }
+        }
+        if let Some(v) = attrs.get("dash_align_anchors").and_then(|v| v.as_bool()) {
+            s.dash_align_anchors = v;
+        }
+        if let Some(v) = attrs.get("start_arrow").and_then(|v| v.as_str()) {
+            s.start_arrow = Arrowhead::from_str(v);
+        }
+        if let Some(v) = attrs.get("end_arrow").and_then(|v| v.as_str()) {
+            s.end_arrow = Arrowhead::from_str(v);
+        }
+        if let Some(v) = attrs.get("start_arrow_scale").and_then(|v| v.as_f64()) {
+            s.start_arrow_scale = v;
+        }
+        if let Some(v) = attrs.get("end_arrow_scale").and_then(|v| v.as_f64()) {
+            s.end_arrow_scale = v;
+        }
+        if let Some(v) = attrs.get("arrow_align").and_then(|v| v.as_str()) {
+            s.arrow_align = if v == "center_at_end" {
+                ArrowAlign::CenterAtEnd
+            } else {
+                ArrowAlign::TipAtEnd
+            };
+        }
+        if let Some(v) = attrs.get("opacity").and_then(|v| v.as_f64()) {
+            s.opacity = v;
+        }
+        s
+    }
+
+    /// The StrokePanelState a fixture panel map describes (its defaults
+    /// block plus the vector's overrides).
+    fn stroke_panel_from_attrs(attrs: &serde_json::Value)
+        -> crate::workspace::app_state::StrokePanelState
+    {
+        let mut sp = crate::workspace::app_state::StrokePanelState::default();
+        let s = |k: &str| attrs.get(k).and_then(|v| v.as_str()).map(|v| v.to_string());
+        let f = |k: &str| attrs.get(k).and_then(|v| v.as_f64());
+        let b = |k: &str| attrs.get(k).and_then(|v| v.as_bool());
+        if let Some(v) = s("cap") { sp.cap = v; }
+        if let Some(v) = s("join") { sp.join = v; }
+        if let Some(v) = f("miter_limit") { sp.miter_limit = v; }
+        if let Some(v) = s("align_stroke") { sp.align = v; }
+        if let Some(v) = b("dashed") { sp.dashed = v; }
+        if let Some(v) = f("dash_1") { sp.dash_1 = v; }
+        if let Some(v) = f("gap_1") { sp.gap_1 = v; }
+        sp.dash_2 = f("dash_2");
+        sp.gap_2 = f("gap_2");
+        sp.dash_3 = f("dash_3");
+        sp.gap_3 = f("gap_3");
+        if let Some(v) = b("dash_align_anchors") { sp.dash_align_anchors = v; }
+        if let Some(v) = s("start_arrowhead") { sp.start_arrowhead = v; }
+        if let Some(v) = s("end_arrowhead") { sp.end_arrowhead = v; }
+        if let Some(v) = f("start_arrowhead_scale") { sp.start_arrowhead_scale = v; }
+        if let Some(v) = f("end_arrowhead_scale") { sp.end_arrowhead_scale = v; }
+        if let Some(v) = s("arrow_align") { sp.arrow_align = v; }
+        if let Some(v) = s("profile") { sp.profile = v; }
+        if let Some(v) = b("profile_flipped") { sp.profile_flipped = v; }
+        if let Some(v) = f("weight") { sp.weight = v; }
+        sp
+    }
+
+    /// Merge a JSON object over another, shallow (the vector's overrides
+    /// over the corpus defaults / its base).
+    fn merged(base: &serde_json::Value, over: &serde_json::Value) -> serde_json::Value {
+        let mut out = base.as_object().cloned().unwrap_or_default();
+        if let Some(o) = over.as_object() {
+            for (k, v) in o { out.insert(k.clone(), v.clone()); }
+        }
+        serde_json::Value::Object(out)
+    }
+
+    #[test]
+    fn stroke_apply_panel_edit_corpus() {
+        use crate::geometry::element::{Color, Stroke};
+        use crate::workspace::app_state::{
+            recolor_stroke, stroke_with_group, StrokeEditGroup,
+        };
+        let raw = read_fixture("stroke_apply/panel_edit.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let plain = Stroke::new(Color::from_hex("#000000").unwrap(), 1.0);
+        let mut ran = 0usize;
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            // `base`: a literal attribute map, the NAME of a shared map, or
+            // null (an element with no stroke, which takes `fallback`).
+            let base_attrs = match &vec["base"] {
+                serde_json::Value::String(n) => corpus[n.as_str()].clone(),
+                serde_json::Value::Null => vec["fallback"].clone(),
+                other => other.clone(),
+            };
+            let has_base = !vec["base"].is_null();
+            let base = if base_attrs.is_null() {
+                None
+            } else {
+                Some(stroke_from_attrs(&plain, &base_attrs))
+            };
+            let op = vec["op"].as_str().unwrap();
+            if op == "color_pick" {
+                let color = Color::from_hex(vec["color"].as_str().unwrap()).unwrap();
+                let got = recolor_stroke(if has_base { base } else { None },
+                                         color);
+                let want = stroke_from_attrs(
+                    &base.unwrap_or(plain),
+                    &merged(&base_attrs, &vec["expected"]),
+                );
+                assert_eq!(got, want, "stroke_apply color_pick '{}'", name);
+                ran += 1;
+                continue;
+            }
+            assert_eq!(op, "panel_edit", "unknown op in vector '{}'", name);
+            let edited = vec["edited"].as_str().unwrap();
+            // The flat GLOBAL key form a YAML `set:` effect writes must
+            // normalize to the same group as the panel field.
+            let key = edited.strip_prefix("stroke_").unwrap_or(edited);
+            let key = if key == "width" { "weight" } else { key };
+            let group = StrokeEditGroup::from_field(key);
+            if vec["expected"].is_null() {
+                assert!(group.is_none(),
+                        "stroke_apply '{}': '{}' must own no group", name, edited);
+                ran += 1;
+                continue;
+            }
+            let group = group.unwrap_or_else(
+                || panic!("stroke_apply '{}': '{}' must own a group", name, edited));
+            let panel = stroke_panel_from_attrs(
+                &merged(&corpus["panel_defaults"], &vec["panel"]));
+            let committed = vec["committed_width"].as_f64().unwrap();
+            let got = stroke_with_group(base.unwrap(), &panel, group, committed);
+            let want = stroke_from_attrs(
+                &base.unwrap(), &merged(&base_attrs, &vec["expected"]));
+            assert_eq!(got, want, "stroke_apply panel_edit '{}'", name);
+            ran += 1;
+        }
+        assert!(ran >= 20, "stroke_apply corpus ran only {} vectors", ran);
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {

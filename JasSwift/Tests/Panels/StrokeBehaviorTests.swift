@@ -555,14 +555,22 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
 // start=200 through the REAL runInputCommitBehavior path against a Model
 // with a SELECTED stroked element. The mirror's set / set_panel_state
 // effects must drive applyStrokePanelToSelection for the SIBLING scale —
-// exactly as Rust's apply_set_panel_state_with_ctx unconditionally
-// re-applies for the arrowhead-scale keys (renderer.rs ~2042-2048). The
-// SIBLING must reach the element through the commit-behavior effects, NOT
-// a direct applyStrokePanelToSelection call. Before the fix the
-// commit-behavior platformEffects map (alignPlatformEffects) registered no
-// notify_panel_state_changed hook, so the mirror updated the panel/global
-// scopes but the element stayed {startArrowScale:200, endArrowScale:100}
-// (start applied by the edited-field commit, end stale). Rust: {200,200}.
+// exactly as Rust's apply_set_panel_state_with_ctx re-applies with its own
+// key (renderer.rs). The SIBLING must reach the element through the
+// commit-behavior effects, NOT a direct applyStrokePanelToSelection call.
+// Before the fix the commit-behavior platformEffects map
+// (alignPlatformEffects) registered no notify_panel_state_changed hook, so
+// the mirror updated the panel/global scopes but the element stayed
+// {startArrowScale:200, endArrowScale:100} (start applied by the
+// edited-field commit, end stale). Rust: {200,200}.
+//
+// STROKEWIDTH: the MECHANISM changed, the law did not. Each arrowhead
+// scale is now its own edit group, so the sibling no longer rides along on
+// the edited field's apply — it reaches the element because the notify
+// payload NAMES the key each mirror write touched, and that key's own
+// group is what gets written. Same {200,200} outcome, now for the right
+// reason: an UNLINKED start-scale edit leaves the end scale alone (see
+// StrokeFieldScopeTests / the stroke_apply corpus).
 @Test func linkedStartScaleCommitReAppliesSiblingToSelection() {
     let model = strokeModelWithSelectedRect()
     let store = model.stateStore

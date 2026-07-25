@@ -330,9 +330,16 @@ import Testing
 @Test func setPanelStateFiresNotifyHook() {
     let store = StateStore()
     store.initPanel("character_panel_content", defaults: ["font_family": "sans-serif"])
+    // The hook payload names the panel AND the field written: the Stroke
+    // panel's apply is field-scoped, so a write must be attributed to the
+    // key it actually wrote.
     var notified: [String] = []
-    let hook: PlatformEffect = { panelIdAny, _, _ in
-        if let pid = panelIdAny as? String { notified.append(pid) }
+    var fields: [String?] = []
+    let hook: PlatformEffect = { payload, _, _ in
+        if let (pid, field) = parseNotifyPayload(payload) {
+            notified.append(pid)
+            fields.append(field)
+        }
         return nil
     }
     // set_panel_state names the panel by its short kind ("character");
@@ -346,6 +353,7 @@ import Testing
     )
     #expect(store.getPanel("character_panel_content", "font_family") as? String == "Arial")
     #expect(notified == ["character_panel_content"])
+    #expect(fields == ["font_family"])
 }
 
 @Test func setPanelXFiresNotifyHookForActivePanel() {
@@ -353,8 +361,12 @@ import Testing
     store.initPanel("stroke_panel", defaults: ["cap": "butt"])
     store.setActivePanel("stroke_panel")
     var notified: [String] = []
-    let hook: PlatformEffect = { panelIdAny, _, _ in
-        if let pid = panelIdAny as? String { notified.append(pid) }
+    var fields: [String?] = []
+    let hook: PlatformEffect = { payload, _, _ in
+        if let (pid, field) = parseNotifyPayload(payload) {
+            notified.append(pid)
+            fields.append(field)
+        }
         return nil
     }
     // Non-schema path: writes directly to the store keyed by "panel.cap".
@@ -365,6 +377,7 @@ import Testing
         platformEffects: ["notify_panel_state_changed": hook]
     )
     #expect(notified == ["stroke_panel"])
+    #expect(fields == ["cap"], "the notify names the field it wrote")
 }
 
 @Test func notifyHookSilentWhenUnregistered() {

@@ -264,6 +264,16 @@ pub(crate) struct LayerSoloState {
 /// Stroke panel state fields that sync with global state and the selection.
 #[derive(Debug, Clone)]
 pub(crate) struct StrokePanelState {
+    /// The Weight input's committed value, in points. THE source of the
+    /// width a weight edit applies (`StrokeEditGroup::Width`).
+    ///
+    /// This used to have no slot at all: the weight commit wrote straight
+    /// into `app_default_stroke.width` / the tab default and the apply read
+    /// it back from there, so with no default stroke (after picking the None
+    /// stroke swatch) the commit was DROPPED and typing a weight was a
+    /// silent no-op — while Swift, which reads its panel-scope `weight`
+    /// first, applied it. Both ports now read the panel-committed value.
+    pub weight: f64,
     pub cap: String,
     pub join: String,
     pub miter_limit: f64,
@@ -289,6 +299,7 @@ pub(crate) struct StrokePanelState {
 impl Default for StrokePanelState {
     fn default() -> Self {
         Self {
+            weight: 1.0,
             cap: "butt".into(),
             join: "miter".into(),
             miter_limit: 10.0,
@@ -318,9 +329,19 @@ impl Default for StrokePanelState {
 /// A panel edit must write only the group it touched and preserve every
 /// other attribute from the element (see
 /// `AppState::apply_stroke_panel_to_selection`). Fields that move
-/// together stay in one group: the dash inputs and the dashed toggle are
-/// one pattern, and the two arrowhead scales move together because the
-/// link-scales button mirrors one onto the other.
+/// together stay in one group, and only where that is forced: the dash
+/// inputs and the dashed toggle are one pattern because a dash array
+/// cannot be written a slot at a time.
+///
+/// The two arrowhead scales are NOT one group. They used to be, on the
+/// reasoning that the link-scales button moves them together — but the
+/// chain mirrors by COMMITTING the sibling field (`stroke.yaml` arrow-scale
+/// on_change), which applies through that field's own group. The wide group
+/// bought nothing and cost an UNLINKED scale edit stamping the panel's
+/// sibling scale over the element's own.
+///
+/// Mirrors the reference `STROKE_EDIT_GROUPS`
+/// (`workspace_interpreter/stroke_law.py`), which states the table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StrokeEditGroup {
     Width,
@@ -331,7 +352,8 @@ pub(crate) enum StrokeEditGroup {
     Dash,
     StartArrow,
     EndArrow,
-    ArrowScales,
+    StartArrowScale,
+    EndArrowScale,
     ArrowAlign,
     /// Width profile only — the Stroke struct itself is untouched.
     Profile,
@@ -353,12 +375,13 @@ impl StrokeEditGroup {
             | "gap_3" | "dash_align_anchors" => Self::Dash,
             "start_arrowhead" => Self::StartArrow,
             "end_arrowhead" => Self::EndArrow,
-            "start_arrowhead_scale" | "end_arrowhead_scale" => Self::ArrowScales,
+            "start_arrowhead_scale" => Self::StartArrowScale,
+            "end_arrowhead_scale" => Self::EndArrowScale,
             // `link_arrowhead_scale` is a UI-only flag: the chain button
             // mirrors one scale onto the other by committing the SIBLING
-            // scale field, which applies through ArrowScales. Toggling the
-            // chain itself must not touch the document (it would push an
-            // undo step that changes nothing).
+            // scale field, which applies through that field's own group.
+            // Toggling the chain itself must not touch the document (it
+            // would push an undo step that changes nothing).
             "arrow_align" => Self::ArrowAlign,
             "profile" | "profile_flipped" => Self::Profile,
             _ => return None,
@@ -439,10 +462,10 @@ pub(crate) fn stroke_with_group(
         }
         StrokeEditGroup::StartArrow => s.start_arrow = Arrowhead::from_str(&sp.start_arrowhead),
         StrokeEditGroup::EndArrow => s.end_arrow = Arrowhead::from_str(&sp.end_arrowhead),
-        StrokeEditGroup::ArrowScales => {
-            s.start_arrow_scale = sp.start_arrowhead_scale;
-            s.end_arrow_scale = sp.end_arrowhead_scale;
-        }
+        // Each scale is its own group: an unlinked edit of one must not
+        // stamp the panel's sibling scale onto the element.
+        StrokeEditGroup::StartArrowScale => s.start_arrow_scale = sp.start_arrowhead_scale,
+        StrokeEditGroup::EndArrowScale => s.end_arrow_scale = sp.end_arrowhead_scale,
         StrokeEditGroup::ArrowAlign => {
             s.arrow_align = if sp.arrow_align == "center_at_end" {
                 ArrowAlign::CenterAtEnd
@@ -1280,10 +1303,11 @@ impl AppState {
         let default_stroke = tab.model.default_stroke.or(self.app_default_stroke);
         // Nothing to build on: no selected stroke and no default.
         let Some(fallback) = sel_stroke.or(default_stroke) else { return };
-        // The weight input's committed value lives in the default stroke
-        // (renderer.rs writes it there just before calling us). It is read
-        // ONLY for a weight edit.
-        let committed_width = default_stroke.map(|s| s.width).unwrap_or(fallback.width);
+        // The weight input's committed value, read ONLY for a weight edit.
+        // It comes from the PANEL field, not from the default stroke: the
+        // default can be absent (the None stroke swatch), which used to
+        // drop the commit and make a weight edit a silent no-op.
+        let committed_width = sp.weight;
         // Width profiles are re-derived only when the edit can change
         // them: the profile shape / flip, or the weight they scale with.
         let profile_edit = matches!(group, StrokeEditGroup::Width | StrokeEditGroup::Profile);
@@ -4866,8 +4890,13 @@ mod stroke_panel_apply_tests {
         get_stroke(&st)
     }
 
-    /// Same, but also lets the caller seed the tab's `default_stroke`
-    /// (the "weight input" seam) before apply.
+    /// Same, but with `width` committed in the Weight input first.
+    ///
+    /// The committed weight lives on the PANEL state (`sp.weight`) — it used
+    /// to be read back out of the tab / app default stroke, which made the
+    /// edit a silent no-op whenever there was no default. The defaults are
+    /// still seeded here because they are the new-element defaults the apply
+    /// also updates.
     fn apply_with_width(width: f64, edited: &str,
                         modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
         let mut st = state_with_element(Element::Line(line_with_stroke()), true);
@@ -4875,6 +4904,7 @@ mod stroke_panel_apply_tests {
             tab.model.default_stroke = Some(Stroke::new(Color::BLACK, width));
         }
         st.app_default_stroke = Some(Stroke::new(Color::BLACK, width));
+        st.stroke_panel.weight = width;
         modify(&mut st.stroke_panel);
         st.apply_stroke_panel_to_selection(edited);
         get_stroke(&st)
@@ -5009,8 +5039,14 @@ mod stroke_panel_apply_tests {
     }
 
     // ── optional extras (arrow scale / align / dash-anchor) ──────
+    /// STROKEWIDTH: each arrowhead scale is its OWN group, so a start-scale
+    /// edit writes the start scale and leaves the end scale as the element
+    /// had it. This test previously asserted the opposite (both scales
+    /// written from panel state), which is exactly the bug: an UNLINKED
+    /// start-scale edit stamped the panel's end scale over the element's.
     #[test]
-    fn arrowhead_scales() {
+    fn start_arrowhead_scale_edit_writes_only_the_start_scale() {
+        let element_end_scale = line_with_stroke().stroke.unwrap().end_arrow_scale;
         let s = apply_and_get("start_arrowhead_scale", |sp| {
             sp.start_arrowhead = "simple_arrow".into();
             sp.end_arrowhead = "simple_arrow".into();
@@ -5018,7 +5054,18 @@ mod stroke_panel_apply_tests {
             sp.end_arrowhead_scale = 75.0;
         });
         assert_eq!(s.start_arrow_scale, 150.0);
+        assert_eq!(s.end_arrow_scale, element_end_scale);
+    }
+
+    #[test]
+    fn end_arrowhead_scale_edit_writes_only_the_end_scale() {
+        let element_start_scale = line_with_stroke().stroke.unwrap().start_arrow_scale;
+        let s = apply_and_get("end_arrowhead_scale", |sp| {
+            sp.start_arrowhead_scale = 150.0;
+            sp.end_arrowhead_scale = 75.0;
+        });
         assert_eq!(s.end_arrow_scale, 75.0);
+        assert_eq!(s.start_arrow_scale, element_start_scale);
     }
 
     #[test]
@@ -5054,6 +5101,7 @@ mod stroke_panel_apply_tests {
             tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 4.0));
         }
         st.app_default_stroke = Some(Stroke::new(Color::BLACK, 4.0));
+        st.stroke_panel.weight = 4.0;
         st.apply_stroke_panel_to_selection("weight");
         st.stroke_panel.cap = "round".into();
         st.apply_stroke_panel_to_selection("cap");
@@ -5272,12 +5320,11 @@ mod stroke_panel_field_scope_tests {
     #[test]
     fn weight_edit_applies_new_width() {
         let mut st = state_with(rich_stroke());
-        // The weight input commits by writing the tab / app default
-        // stroke width, then re-applying the panel (renderer.rs).
-        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            tab.model.default_stroke.as_mut().unwrap().width = 9.0;
-        }
-        st.app_default_stroke.as_mut().unwrap().width = 9.0;
+        // The weight input commits into the PANEL field, then re-applies
+        // (renderer.rs `set_stroke_field`). It used to commit by writing the
+        // tab / app default stroke width and the apply read it back from
+        // there, so with no default the edit vanished.
+        st.stroke_panel.weight = 9.0;
         st.apply_stroke_panel_to_selection("weight");
         assert_eq!(stroke_at(&st, 0).width, 9.0, "weight input must still apply");
         // ...and it must not disturb the rest of the element's stroke.
@@ -5289,13 +5336,32 @@ mod stroke_panel_field_scope_tests {
     fn weight_edit_rescales_profile() {
         let mut st = state_with(rich_stroke());
         st.stroke_panel.profile = "taper_end".into();
-        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            tab.model.default_stroke.as_mut().unwrap().width = 8.0;
-        }
-        st.app_default_stroke.as_mut().unwrap().width = 8.0;
+        st.stroke_panel.weight = 8.0;
         st.apply_stroke_panel_to_selection("weight");
         let wp = width_points_at(&st, 0);
         assert_eq!(wp[0].width_left, 4.0, "profile follows the new weight");
+    }
+
+    /// STROKEWIDTH repair 3: the committed weight must apply even with NO
+    /// default stroke (e.g. right after picking the None stroke swatch).
+    /// The commit used to be written into the default stroke and read back
+    /// from it, so `None` dropped it on the floor and typing a weight on a
+    /// selected 5pt line was a SILENT no-op here while Swift, reading its
+    /// panel-scope `weight` first, applied it — a live port divergence.
+    #[test]
+    fn weight_edit_applies_with_no_default_stroke() {
+        let mut st = state_with(rich_stroke());
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke = None;
+        }
+        st.app_default_stroke = None;
+        st.stroke_panel.weight = 6.0;
+        st.apply_stroke_panel_to_selection("weight");
+        assert_eq!(stroke_at(&st, 0).width, 6.0,
+                   "a committed weight must apply with no default stroke");
+        // ...and the rest of the element's stroke is still untouched.
+        assert_eq!(stroke_at(&st, 0).linecap, LineCap::Round);
+        assert_eq!(stroke_at(&st, 0).dash_array(), &[7.0, 3.0]);
     }
 
     // ── (d) color / opacity preservation unchanged ────────────────

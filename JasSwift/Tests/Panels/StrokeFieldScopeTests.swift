@@ -242,14 +242,35 @@ private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
     #expect(!model.canUndo, "toggling the chain pushes no undo step")
 }
 
-// An unnamed edit changes nothing: the apply cannot guess which field
-// the user touched, and guessing is what clobbered the width.
-@Test func strokeUnnamedEditIsANoOp() {
+// An edit naming a field the panel does not own changes nothing: the apply
+// cannot guess which field the user touched, and guessing is what clobbered
+// the width. (An edit naming NO field is now a compile error — `edited` is
+// required, so the old silent-no-op default cannot be reached at all.)
+@Test func strokeUnrecognizedFieldEditIsANoOp() {
     let model = strokeModel(richStroke())
-    model.stateStore.initPanel("stroke_panel_content", defaults: ["cap": "butt"])
+    model.stateStore.initPanel("stroke_panel_content", defaults: ["cap": "round"])
     applyStrokePanelToSelection(store: model.stateStore,
-                               controller: Controller(model: model))
+                                controller: Controller(model: model),
+                                edited: "not_a_stroke_field")
     #expect(strokeAt(model, 0) == richStroke())
+    #expect(!model.canUndo, "an unowned field pushes no undo step")
+}
+
+// STROKEWIDTH repair 3: the committed weight applies even with NO default
+// stroke (e.g. right after picking the None stroke swatch). This port always
+// read the panel-committed `weight` first, so it worked here; Rust read the
+// tab / app default stroke width and dropped the commit when that was nil,
+// making the same edit a silent no-op there. Both ports now read the
+// panel-committed value — pinned on both sides so they cannot drift apart.
+@Test func strokeWeightEditAppliesWithNoDefaultStroke() {
+    let model = strokeModel(richStroke())
+    model.defaultStroke = nil
+    applyEdit(model, "weight", ["weight": 6.0])
+    #expect(strokeAt(model, 0).width == 6.0,
+            "a committed weight must apply with no default stroke")
+    // ...and the rest of the element's stroke is still untouched.
+    #expect(strokeAt(model, 0).linecap == richStroke().linecap)
+    #expect(strokeAt(model, 0).dashPattern == richStroke().dashPattern)
 }
 
 @Test func strokeEditPushesOneUndoStep() {

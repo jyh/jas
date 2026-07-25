@@ -246,13 +246,14 @@ func runInputCommitBehavior(
     // re-applies, not a scale-combo special case.
     var platformEffects = alignPlatformEffects(model: model)
     platformEffects["notify_panel_state_changed"] = { arg, _, store in
-        if let panelId = arg as? String {
-            // The commit behavior's writes belong to the field being
-            // committed — the linked-scale mirror writes the SIBLING
-            // scale, which is in the same group — so scope the apply to
-            // it. Without a field the Stroke apply writes nothing.
+        if let (panelId, wroteField) = parseNotifyPayload(arg) {
+            // Scope the apply to the field the write NAMES, falling back to
+            // the field being committed. The linked-scale mirror writes the
+            // SIBLING scale, which applies through that field's OWN group
+            // (each scale is its own group); attributing it to the committed
+            // field applied the wrong group and left the sibling stale.
             notifyPanelStateChanged(panelId, store: store, model: model,
-                                    edited: field)
+                                    edited: wroteField ?? field)
         }
         return nil
     }
@@ -399,11 +400,17 @@ private func runOne(
         // The schema-driven writer resolves `panel.X` against the
         // active panel; non-schema writes don't touch panel scope.
         // Silent no-op when the host hasn't registered the effect.
-        let wrotePanel = pairs.keys.contains { $0.hasPrefix("panel.") }
-        if wrotePanel,
+        let panelKeys = pairs.keys.filter { $0.hasPrefix("panel.") }
+        if !panelKeys.isEmpty,
            let panelId = store.getActivePanelId(),
            let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook(panelId, ctx, store)
+            // One notify per written field, each naming its own key so a
+            // field-scoped apply writes the right group.
+            for k in panelKeys.sorted() {
+                _ = hook(notifyPayload(panelId,
+                                       field: String(k.dropFirst("panel.".count))),
+                         ctx, store)
+            }
         }
         // Phase 5 follow-up: gradient_* writes trigger the apply
         // pipeline. Host provides "apply_gradient_panel" in its
@@ -439,10 +446,16 @@ private func runOne(
         // applyStrokePanelToSelection (mirrors OCaml's
         // subscribe_stroke_panel which fires on every stroke_* global
         // write).
-        let wroteStroke = pairs.keys.contains { isStrokeRenderKey($0) }
-        if wroteStroke,
+        let strokeKeys = pairs.keys.filter { isStrokeRenderKey($0) }
+        if !strokeKeys.isEmpty,
            let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook("stroke_panel_content", ctx, store)
+            // One notify per written stroke key, each naming itself: the
+            // apply is field-scoped, so the key that changed is the key
+            // whose group gets written.
+            for k in strokeKeys.sorted() {
+                _ = hook(notifyPayload("stroke_panel_content", field: k),
+                         ctx, store)
+            }
         }
         return
     }
@@ -590,7 +603,7 @@ private func runOne(
         // attributes onto the selected element). Silent no-op if
         // the host hasn't registered the effect.
         if let name = writtenPanel, let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook(name, ctx, store)
+            _ = hook(notifyPayload(name, field: key), ctx, store)
         }
         return
     }
@@ -823,8 +836,9 @@ private let strokeRenderKeys: Set<String> = [
 /// `"end_arrowhead"`, `"weight"`, … — or the flat `"stroke_cap"` global
 /// form). Only that field's ``StrokeEditGroup`` is taken from panel state;
 /// every other stroke attribute is preserved from the element being
-/// edited, per element. `nil` (no caller named a field) writes nothing:
-/// guessing which field changed is exactly what clobbered the width.
+/// edited, per element. It is REQUIRED: a caller that cannot name the
+/// field it committed has nothing to apply, and defaulting it to nil made
+/// a forgotten argument a silent no-op (Rust's is required too).
 ///
 /// Why field-scoped: this used to rebuild the whole Stroke from panel
 /// state on every edit and take `width` from the panel `weight` key
@@ -839,9 +853,9 @@ private let strokeRenderKeys: Set<String> = [
 /// nothing else can clobber the element's own width. Mirrors the Rust
 /// reference `apply_stroke_panel_to_selection` (app_state.rs).
 func applyStrokePanelToSelection(
-    store: StateStore, controller: Controller, edited: String? = nil
+    store: StateStore, controller: Controller, edited: String
 ) {
-    guard let key = edited, let group = StrokeEditGroup.fromField(key) else { return }
+    guard let group = StrokeEditGroup.fromField(edited) else { return }
     let doc = controller.model.document
     let selStroke = doc.selection.first
         .flatMap { doc.tryGetElement($0.path) }
@@ -853,6 +867,10 @@ func applyStrokePanelToSelection(
     // length_input commits it there via commitPanelWrite). Read ONLY for a
     // weight edit; numeric values arrive as Int / Double / NSNumber
     // depending on the commit path, which strokePanelNumber covers.
+    // Rust reads the same panel-committed value from `StrokePanelState.weight`
+    // (STROKEWIDTH repair 3 gave it a real field; it used to read the tab /
+    // app default stroke width, which made a weight edit a silent no-op when
+    // there was no default while this port applied it).
     let committedWidth = strokePanelNumber(store, "weight")
         ?? defaultStroke?.width
         ?? fallback.width
@@ -2113,6 +2131,29 @@ private func withJustificationAttrs(
         xmlLang: t.xmlLang)
 }
 
+/// The payload the `notify_panel_state_changed` platform effect carries.
+///
+/// Either a bare panel id (the caller does not know which field changed) or
+/// `["panel": id, "field": key]` when it does. The FIELD matters: the Stroke
+/// panel's apply is field-scoped, so a write must be attributed to the key
+/// it actually wrote — the linked arrowhead-scale mirror writes the SIBLING
+/// scale, and blaming the committed field instead applied the wrong group.
+/// Mirrors Rust's `apply_set_panel_state_with_ctx`, which re-applies with
+/// its own `key`.
+public func notifyPayload(_ panelId: String, field: String?) -> Any {
+    guard let field else { return panelId }
+    return ["panel": panelId, "field": field]
+}
+
+/// Unpack a `notify_panel_state_changed` payload into (panel id, field).
+public func parseNotifyPayload(_ arg: Any?) -> (panel: String, field: String?)? {
+    if let s = arg as? String { return (s, nil) }
+    if let d = arg as? [String: Any], let p = d["panel"] as? String {
+        return (p, d["field"] as? String)
+    }
+    return nil
+}
+
 /// Dispatch a panel-state change to the matching apply-to-selection
 /// pipeline. Called after any widget write-back or `set: panel.X`
 /// batch so the downstream surface (selected element, other views)
@@ -2131,8 +2172,14 @@ public func notifyPanelStateChanged(
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     case "stroke_panel_content":
-        applyStrokePanelToSelection(store: store, controller: Controller(model: model),
-                                    edited: edited)
+        // Without a named field there is nothing to apply: the Stroke
+        // apply is field-scoped, and guessing which control changed is
+        // exactly what clobbered the element's width.
+        if let edited {
+            applyStrokePanelToSelection(store: store,
+                                        controller: Controller(model: model),
+                                        edited: edited)
+        }
     case "color_panel_content":
         // Hex / sliders / mode all write to the same panel state;
         // re-derive the color from the updated state and apply it

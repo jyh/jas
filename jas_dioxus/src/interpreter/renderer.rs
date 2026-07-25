@@ -2061,7 +2061,7 @@ fn apply_set_panel_state_with_ctx(
             "cap": sp.cap, "join": sp.join, "miter_limit": sp.miter_limit,
             "align_stroke": sp.align, "dashed": sp.dashed,
             "dash_1": sp.dash_1, "gap_1": sp.gap_1,
-            "weight": st.app_default_stroke.as_ref().map(|s| s.width).unwrap_or(1.0),
+            "weight": sp.weight,
             "start_arrowhead": sp.start_arrowhead, "end_arrowhead": sp.end_arrowhead,
             "start_arrowhead_scale": sp.start_arrowhead_scale,
             "end_arrowhead_scale": sp.end_arrowhead_scale,
@@ -2077,19 +2077,9 @@ fn apply_set_panel_state_with_ctx(
         val.clone()
     };
     set_stroke_field(&mut st.stroke_panel, key, &resolved);
-    // Also sync stroke_width when weight changes
-    if key == "weight" {
-        if let Some(w) = resolved.as_f64() {
-            if let Some(ref mut stroke) = st.app_default_stroke {
-                stroke.width = w;
-            }
-            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                if let Some(ref mut stroke) = tab.model.default_stroke {
-                    stroke.width = w;
-                }
-            }
-        }
-    }
+    // No default-stroke pre-sync: the weight now lands on the panel state
+    // like every other field, and the apply propagates it to both defaults
+    // through the width group.
     // Propagate the edited field to the selected elements. The apply is
     // field-scoped (it writes only this key's group), and keys that own
     // no element attribute are a no-op inside it.
@@ -2120,6 +2110,7 @@ fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &st
         "profile" => J::String(sp.profile.clone()),
         "profile_flipped" => J::Bool(sp.profile_flipped),
         "dash_align_anchors" => J::Bool(sp.dash_align_anchors),
+        "weight" => serde_json::json!(sp.weight),
         _ => J::Null,
     }
 }
@@ -2191,9 +2182,9 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
         "arrow_align" => { if let Some(s) = val.as_str() { sp.arrow_align = s.into(); } }
         "profile" => { if let Some(s) = val.as_str() { sp.profile = s.into(); } }
         "profile_flipped" => { if let Some(b) = val.as_bool() { sp.profile_flipped = b; } }
-        "weight" => {
-            // weight is not on StrokePanelState — handled by caller via Stroke.width
-        }
+        // The committed weight lives on the panel state like every other
+        // field; `apply_stroke_panel_to_selection` reads it from there.
+        "weight" => { if let Some(n) = val.as_f64() { sp.weight = n; } }
         _ => {}
     }
 }
@@ -6099,17 +6090,6 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                         }
                         Some(PanelKind::Stroke) | None => {
                             set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            if f == "weight" {
-                                if let Some(ref mut stroke) = st.app_default_stroke {
-                                    stroke.width = new_val;
-                                }
-                                let idx = st.active_tab;
-                                if let Some(tab) = st.tabs.get_mut(idx) {
-                                    if let Some(ref mut stroke) = tab.model.default_stroke {
-                                        stroke.width = new_val;
-                                    }
-                                }
-                            }
                             st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {
@@ -6344,24 +6324,10 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             st.apply_paragraph_panel_to_selection();
                         }
                         Some(PanelKind::Stroke) | None => {
-                            // Weight is the canonical "stroke width"
-                            // path — mirror the number_input branch's
-                            // app_default_stroke / per-tab.default_stroke
-                            // sync so newly-drawn strokes inherit the
-                            // edited weight.
-                            if f == "weight" {
-                                if let Some(ref mut stroke) = st.app_default_stroke {
-                                    stroke.width = new_val;
-                                }
-                                let idx = st.active_tab;
-                                if let Some(tab) = st.tabs.get_mut(idx) {
-                                    if let Some(ref mut stroke) = tab.model.default_stroke {
-                                        stroke.width = new_val;
-                                    }
-                                }
-                            } else {
-                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            }
+                            // Weight goes through set_stroke_field like
+                            // every other field; the apply propagates it
+                            // to both new-element defaults.
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
                             st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {

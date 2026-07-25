@@ -67,10 +67,20 @@ public func mirrorStrokeScaleCommitToGlobal(
 ///
 /// A panel edit must write only the group it touched and preserve every
 /// other attribute from the element (see `applyStrokePanelToSelection`).
-/// Fields that move together stay in one group: the dash inputs and the
-/// dashed toggle are one pattern, and the two arrowhead scales move
-/// together because the link-scales button mirrors one onto the other.
-/// Mirrors the Rust `StrokeEditGroup` (app_state.rs).
+/// Fields that move together stay in one group, and only where that is
+/// forced: the dash inputs and the dashed toggle are one pattern because a
+/// dash array cannot be written a slot at a time.
+///
+/// The two arrowhead scales are NOT one group. They used to be, on the
+/// reasoning that the link-scales button moves them together — but the
+/// chain mirrors by COMMITTING the sibling field (`stroke.yaml` arrow-scale
+/// on_change), which applies through that field's own group. The wide group
+/// bought nothing and cost an UNLINKED scale edit stamping the panel's
+/// sibling scale over the element's own.
+///
+/// Mirrors the Rust `StrokeEditGroup` (app_state.rs) and the reference
+/// `STROKE_EDIT_GROUPS` (`workspace_interpreter/stroke_law.py`), which
+/// states the table.
 public enum StrokeEditGroup {
     case width
     case cap
@@ -80,7 +90,8 @@ public enum StrokeEditGroup {
     case dash
     case startArrow
     case endArrow
-    case arrowScales
+    case startArrowScale
+    case endArrowScale
     case arrowAlign
     /// Width profile only — the Stroke itself is untouched.
     case profile
@@ -101,12 +112,13 @@ public enum StrokeEditGroup {
              "gap_3", "dash_align_anchors": return .dash
         case "start_arrowhead": return .startArrow
         case "end_arrowhead": return .endArrow
-        case "start_arrowhead_scale", "end_arrowhead_scale": return .arrowScales
+        case "start_arrowhead_scale": return .startArrowScale
+        case "end_arrowhead_scale": return .endArrowScale
         // `link_arrowhead_scale` is a UI-only flag: the chain button
         // mirrors one scale onto the other by committing the SIBLING scale
-        // field, which applies through .arrowScales. Toggling the chain
-        // itself must not touch the document (it would push an undo step
-        // that changes nothing).
+        // field, which applies through that field's own group. Toggling the
+        // chain itself must not touch the document (it would push an undo
+        // step that changes nothing).
         case "arrow_align": return .arrowAlign
         case "profile", "profile_flipped": return .profile
         default: return nil
@@ -116,8 +128,16 @@ public enum StrokeEditGroup {
 
 /// Normalize a Stroke-panel field key to its panel-scope name by dropping
 /// the `stroke_` prefix the flat global keys carry.
+///
+/// The weight input is the one asymmetric pair: its global key is
+/// `stroke_width` while its panel field is `weight`. Without that mapping a
+/// YAML `set: { stroke_width: ... }` reached the apply owning no group and
+/// was a silent no-op. Mirrors the reference `stroke_field_name`
+/// (`workspace_interpreter/stroke_law.py`); pinned by the
+/// `weight_edit_from_global_key` corpus vector.
 public func strokeFieldName(_ key: String) -> String {
-    key.hasPrefix("stroke_") ? String(key.dropFirst("stroke_".count)) : key
+    let name = key.hasPrefix("stroke_") ? String(key.dropFirst("stroke_".count)) : key
+    return name == "width" ? "weight" : name
 }
 
 /// Read one Stroke-panel field, PANEL scope first and the flat global
@@ -221,8 +241,11 @@ public func strokeWithGroup(
     case .endArrow:
         endArrow = Arrowhead(
             fromString: strokePanelField(store, "end_arrowhead") as? String ?? "none")
-    case .arrowScales:
+    // Each scale is its own group: an unlinked edit of one must not stamp
+    // the panel's sibling scale onto the element.
+    case .startArrowScale:
         startArrowScale = strokePanelNumber(store, "start_arrowhead_scale") ?? 100.0
+    case .endArrowScale:
         endArrowScale = strokePanelNumber(store, "end_arrowhead_scale") ?? 100.0
     case .arrowAlign:
         arrowAlign = (strokePanelField(store, "arrow_align") as? String)
