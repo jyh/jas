@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.stroke_law import DASH_DEFAULT
 
 
 def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
@@ -1127,10 +1128,16 @@ def _stroke_from_attrs(attrs: dict, color=None):
 
 
 #: Every Stroke-panel field the law can read, with the value it takes when
-#: neither the panel scope nor the global scope holds one.
+#: neither the panel scope nor the global scope holds one. Each fallback is
+#: the field's declared workspace default (``workspace/panels/stroke.yaml``
+#: ``state:`` block) — ``weight`` alone is a None sentinel, meaning "no
+#: committed weight", which sends the width group to the default stroke.
+#: The dash / gap pair reads 12.0 there, not 0.0, and both ports agreed with
+#: the workspace while this table did not.
 _STROKE_PANEL_FIELDS: dict = {
     "weight": None, "cap": "butt", "join": "miter", "miter_limit": 10.0,
-    "align_stroke": "center", "dashed": False, "dash_1": 0.0, "gap_1": 0.0,
+    "align_stroke": "center", "dashed": False,
+    "dash_1": DASH_DEFAULT, "gap_1": DASH_DEFAULT,
     "dash_2": None, "gap_2": None, "dash_3": None, "gap_3": None,
     "dash_align_anchors": False, "start_arrowhead": "none",
     "end_arrowhead": "none", "start_arrowhead_scale": 100.0,

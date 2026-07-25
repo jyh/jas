@@ -135,6 +135,63 @@ class TestPanelEditCorpus:
         )
 
 
+class TestTheFallbacksAreTheWorkspaceDefaults:
+    """When a field is absent from BOTH scopes, the value the law reads is
+    the panel default the workspace declares — not a hand-written constant.
+
+    Only the dash family can reach this at all (`dashed` has to be on while
+    a dash input holds nothing), and it is exactly where the three
+    implementations disagreed: both ports read 12.0, the reference read 0.0.
+    ``workspace/panels/stroke.yaml`` declares 12, so the ports were right.
+    Machine-checking the whole table against the bundle keeps the question
+    settled: the workspace is the source of truth for a panel default, and
+    the corpus's ``panel_defaults`` block has to agree with it too.
+    """
+
+    WORKSPACE_JSON = os.path.join(
+        os.path.dirname(__file__), "..", "..", "workspace", "workspace.json")
+
+    @classmethod
+    def _declared(cls) -> dict:
+        with open(cls.WORKSPACE_JSON) as f:
+            state = json.load(f)["panels"]["stroke_panel_content"]["state"]
+        return {k: (v.get("default") if isinstance(v, dict) else v)
+                for k, v in state.items()}
+
+    def test_the_fallback_table_matches_the_workspace(self):
+        from workspace_interpreter.effects import _STROKE_PANEL_FIELDS
+        declared = self._declared()
+        for field, fallback in _STROKE_PANEL_FIELDS.items():
+            if field == "weight":
+                # The one sentinel: None means "no committed weight", which
+                # sends the width group to the default stroke instead.
+                assert fallback is None
+                continue
+            assert field in declared, f"{field} is not a declared panel field"
+            assert fallback == declared[field], (
+                f"{field}: fallback {fallback!r} != workspace default "
+                f"{declared[field]!r}"
+            )
+
+    def test_the_corpus_panel_defaults_match_the_workspace(self):
+        declared = self._declared()
+        for field, value in _CORPUS["panel_defaults"].items():
+            if field.startswith("_"):
+                continue
+            assert value == declared[field], (
+                f"{field}: corpus default {value!r} != workspace default "
+                f"{declared[field]!r}"
+            )
+
+    def test_an_absent_dash_pair_reads_the_workspace_default(self):
+        from workspace_interpreter.effects import stroke_panel_state
+        from workspace_interpreter.state_store import StateStore
+        from workspace_interpreter.stroke_law import DASH_DEFAULT
+        panel = stroke_panel_state(StateStore())
+        assert panel["dash_1"] == DASH_DEFAULT == 12.0
+        assert panel["gap_1"] == DASH_DEFAULT
+
+
 class TestColorPickCorpus:
     """The colour route: a colour pick changes the colour and nothing
     else."""

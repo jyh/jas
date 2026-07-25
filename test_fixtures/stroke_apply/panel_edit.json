@@ -75,8 +75,8 @@
     "miter_limit": 10.0,
     "align_stroke": "center",
     "dashed": false,
-    "dash_1": 0.0,
-    "gap_1": 0.0,
+    "dash_1": 12.0,
+    "gap_1": 12.0,
     "dash_2": null,
     "gap_2": null,
     "dash_3": null,
@@ -215,6 +215,26 @@
       "edited": "dash_1",
       "committed_width": 1.0,
       "expected": {"dash": [10.0, 4.0], "dash_align_anchors": false}
+    },
+    {
+      "name": "dash_edit_with_absent_dash_lengths_uses_the_panel_default",
+      "_comment": "The absent-from-EVERY-scope fallback, which only the dash family can reach: `dashed` is on while the dash / gap inputs hold nothing (null here means absent, not zero). The fallback is the panel default the workspace declares — 12pt (workspace/panels/stroke.yaml dash_1 / gap_1, workspace/state.yaml stroke_dash_1 / stroke_gap_1). Both ports used 12.0 and the reference used 0.0, so this three-way divergence sat unpinned; the reference is the contract for exactly such fallbacks.",
+      "op": "panel_edit",
+      "base": "rich_stroke",
+      "panel": {"dashed": true, "dash_1": null, "gap_1": null},
+      "edited": "dash_1",
+      "committed_width": 1.0,
+      "expected": {"dash": [12.0, 12.0], "dash_align_anchors": false}
+    },
+    {
+      "name": "dash_edit_with_an_explicit_zero_keeps_the_zero",
+      "_comment": "The other half of that fallback: a dash length the user really set to 0 is NOT absent and must not become 12. The reference read the pair as `dash_1 or 0.0`, which cannot tell 0 from absent — harmless while the fallback was itself 0, a silent value change once it is 12.",
+      "op": "panel_edit",
+      "base": "rich_stroke",
+      "panel": {"dashed": true, "dash_1": 0.0, "gap_1": 4.0},
+      "edited": "dash_1",
+      "committed_width": 1.0,
+      "expected": {"dash": [0.0, 4.0], "dash_align_anchors": false}
     },
     {
       "name": "dash_edit_three_pairs",

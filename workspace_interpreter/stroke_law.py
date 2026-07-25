@@ -162,13 +162,32 @@ def stroke_edit_group(key: str) -> str | None:
 # The law
 # ---------------------------------------------------------------------------
 
+#: The dash / gap length used when the input holds nothing at all — the
+#: panel default the workspace declares (``workspace/panels/stroke.yaml``
+#: ``dash_1`` / ``gap_1``, ``workspace/state.yaml`` ``stroke_dash_1`` /
+#: ``stroke_gap_1``). Both ports already used 12.0 while this module used
+#: 0.0; the workspace settles it.
+DASH_DEFAULT: float = 12.0
+
+
 def _panel_dash(panel: dict[str, Any]) -> tuple[float, ...]:
     """The dash array the panel's dash family describes. Empty when the
     ``dashed`` toggle is off. A second / third pair joins the pattern only
-    when BOTH its dash and gap are set."""
+    when BOTH its dash and gap are set.
+
+    An ABSENT first pair takes :data:`DASH_DEFAULT`; a dash length the user
+    really set to 0 stays 0. This read used to be ``panel.get("dash_1") or
+    0.0``, which cannot tell 0 from absent — harmless while the fallback was
+    itself 0, a silent value change the moment it is not.
+    """
     if not panel.get("dashed"):
         return ()
-    out = [float(panel.get("dash_1") or 0.0), float(panel.get("gap_1") or 0.0)]
+
+    def _pair(key: str) -> float:
+        val = panel.get(key)
+        return DASH_DEFAULT if val is None else float(val)
+
+    out = [_pair("dash_1"), _pair("gap_1")]
     for d_key, g_key in (("dash_2", "gap_2"), ("dash_3", "gap_3")):
         d, g = panel.get(d_key), panel.get(g_key)
         if d is None or g is None:
