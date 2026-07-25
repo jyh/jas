@@ -1355,6 +1355,35 @@ def sync_stroke_panel_from_selection(store: StateStore, model) -> None:
         if join is not None:
             store.set_panel("stroke_panel_content", "join",
                             getattr(join, "value", "miter"))
+        # Arrowheads reflect the selection too (ARROWSCALE; JYH 2026-07-25):
+        # the shape, the scale and the alignment are rendered geometry the
+        # user reads off the canvas, exactly like weight/cap/join. Without
+        # this the Scale field showed its own default (100) while the element
+        # carried another value, so the head rendered a size the panel never
+        # displayed and committing the shown value silently jumped it. The
+        # field-scoped apply (STROKE_EDIT_GROUPS) is unchanged. Guarded per
+        # attribute so a duck-typed stroke (tests) without them is a no-op,
+        # matching the cap/join style above.
+        start_arrow = getattr(stroke, "start_arrow", None)
+        end_arrow = getattr(stroke, "end_arrow", None)
+        start_scale = getattr(stroke, "start_arrow_scale", None)
+        end_scale = getattr(stroke, "end_arrow_scale", None)
+        align = getattr(stroke, "arrow_align", None)
+        if start_arrow is not None:
+            store.set_panel("stroke_panel_content", "start_arrowhead",
+                            getattr(start_arrow, "value", "none"))
+        if end_arrow is not None:
+            store.set_panel("stroke_panel_content", "end_arrowhead",
+                            getattr(end_arrow, "value", "none"))
+        if start_scale is not None:
+            store.set_panel("stroke_panel_content", "start_arrowhead_scale",
+                            float(start_scale))
+        if end_scale is not None:
+            store.set_panel("stroke_panel_content", "end_arrowhead_scale",
+                            float(end_scale))
+        if align is not None:
+            store.set_panel("stroke_panel_content", "arrow_align",
+                            getattr(align, "value", "tip_at_end"))
 
 
 def _element_evaluated_bbox(doc, path):

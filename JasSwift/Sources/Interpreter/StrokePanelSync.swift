@@ -286,6 +286,18 @@ public func strokePanelLiveOverrides(model: Model) -> [String: Any] {
     if let s = s {
         out["cap"] = capName(s.linecap)
         out["join"] = joinName(s.linejoin)
+        // Arrowheads reflect the selection too (ARROWSCALE; JYH 2026-07-25):
+        // shape, scale and align are rendered geometry read off the canvas,
+        // exactly like weight/cap/join. Without this the Scale field showed
+        // its own default (100) while the element carried another value, so
+        // the head rendered a size the panel never displayed and committing
+        // the shown value silently jumped it. The field-scoped apply is
+        // unchanged: an edit still writes only its own group.
+        out["start_arrowhead"] = s.startArrow.name
+        out["end_arrowhead"] = s.endArrow.name
+        out["start_arrowhead_scale"] = s.startArrowScale
+        out["end_arrowhead_scale"] = s.endArrowScale
+        out["arrow_align"] = s.arrowAlign == .centerAtEnd ? "center_at_end" : "tip_at_end"
     }
     return out
 }

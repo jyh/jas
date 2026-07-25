@@ -364,6 +364,32 @@ but the panel's other fields sit at their defaults, so rebuilding on
 any edit reset a selected 5pt dashed arrowheaded line to a plain 1pt
 line. Picking an arrowhead changed the weight. (JYH, 2026-07-24.)
 
+**The display side has its own rule, and it is the mirror image of the
+apply rule: a control that shows a RENDERED geometry of the selection
+must show the SELECTION's value, not a panel default.** Weight and
+cap / join do this, and the **arrowhead group** — start / end shape,
+start / end scale, and arrow alignment — joins them. It has to: the head
+size is `4 × weight × scale%` on the canvas, so a Scale field frozen at
+its 100 % default while the selected element carries another value shows
+a number the head never had. The head then renders at (say) half, and
+committing the field's own displayed 100 % — which the field-scoped
+apply writes straight onto the element — *jumps* the head to full, a
+change the panel never showed. Draw a line whose new-element default
+scale was 50 %, move the default back to 100 %, reselect: the old
+display read 100 while the head was 50 (JYH, 2026-07-25, ARROWSCALE).
+The fix is display-only and does not touch the apply: the panel now
+mirrors the selection's arrowhead group, and because the field shows the
+element's true scale, committing it is a no-op instead of a silent jump.
+Syncing the display is safe precisely because the apply stays
+field-scoped — a truthful display of one attribute cannot leak the
+others onto the element. The link-scale chain button stays panel-state
+(it is a UI-only flag, not an element attribute). The read seams are the
+per-port live overrides: Rust `build_live_panel_overrides`
+(`workspace/dock_panel.rs`), Swift `strokePanelLiveOverrides`
+(`Sources/Interpreter/StrokePanelSync.swift`), reference
+`sync_stroke_panel_from_selection` (`workspace_interpreter/effects.py`),
+each gated by an element→panel test.
+
 The attribute **groups** — a group is the set of attributes one field
 owns, and is a single attribute except where that is impossible:
 

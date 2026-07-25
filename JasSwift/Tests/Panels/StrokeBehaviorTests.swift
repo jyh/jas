@@ -295,6 +295,25 @@ private func syncModel(_ stroke: Stroke) -> Model {
     #expect((o["join"] as? String) == "round")
 }
 
+// ARROWSCALE (JYH 2026-07-25): the arrowhead shape, scale and align the
+// panel DISPLAYS are the selected element's, exactly like weight/cap/join.
+// JYH's repro at the true layer: the head renders the element's scale, so the
+// Scale field MUST show that same scale or the head is a size the panel never
+// displayed and committing the shown value jumps it.
+@Test func strokeSyncArrowheads_overrides() {
+    let m = syncModel(Stroke(color: Color(r: 0, g: 0, b: 0), width: 5.0,
+                             startArrow: .simpleArrow, endArrow: .circle,
+                             startArrowScale: 50.0, endArrowScale: 175.0,
+                             arrowAlign: .centerAtEnd))
+    let o = strokePanelLiveOverrides(model: m)
+    #expect((o["start_arrowhead"] as? String) == "simple_arrow")
+    #expect((o["end_arrowhead"] as? String) == "circle")
+    // The heart of the repro: DISPLAYED scale IS the element's scale.
+    #expect((o["start_arrowhead_scale"] as? Double) == 50.0)
+    #expect((o["end_arrowhead_scale"] as? Double) == 175.0)
+    #expect((o["arrow_align"] as? String) == "center_at_end")
+}
+
 // MARK: - Dashed-Line checkbox toggles both ways (DASHFIX)
 
 /// The Dashed-Line checkbox fires the canonical paired toggle:
