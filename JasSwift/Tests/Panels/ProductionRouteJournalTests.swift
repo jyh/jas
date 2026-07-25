@@ -655,6 +655,52 @@ private func makeModelWithTwoArtboards() -> Model {
     assertCheckpointEquivalence(model, preDoc: preDoc)
 }
 
+@Test func productionRouteBrushPromotesSelectedLineToPath() {
+    // LINEPROMOTE (JYH 2026-07-25): applying a brush to a selected Line
+    // PROMOTES it to a geometry-identical Path that carries the brush — the
+    // "upgrade naturally" convention, mirroring the Rect→Polygon corner-drag
+    // promotion. documentToTestJson omits strokeBrush, so the brush value +
+    // the one-step undo are pinned HERE (the corpus gates the type flip +
+    // geometry via the canonical JSON).
+    let line = Element.line(Line(x1: 10, y1: 10, x2: 100, y2: 60,
+                                 stroke: Stroke(color: .black),
+                                 name: "my line", id: "line-7"))
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [line])],
+        selectedLayer: 0,
+        selection: [ElementSelection.all([0, 0])]
+    ))
+    let preDoc = model.document
+
+    let effects: [Any] = [
+        ["doc.snapshot": [:]],
+        ["doc.set_attr_on_selection":
+            ["attr": "stroke_brush", "value": "'default_brushes/flat_10'"]],
+        ["doc.set_attr_on_selection":
+            ["attr": "stroke_brush_overrides", "value": "null"]],
+    ]
+    runEffects(effects, ctx: [:], store: model.stateStore,
+               platformEffects: buildYamlToolEffects(model: model),
+               model: model, actionName: "apply_brush_to_selection")
+
+    guard case .path(let p) = model.document.layers[0].children[0] else {
+        Issue.record("a brushed Line must become a Path"); return
+    }
+    #expect(p.strokeBrush == "default_brushes/flat_10")
+    #expect(p.d == [.moveTo(10, 10), .lineTo(100, 60)],
+            "geometry identical: MoveTo(x1,y1)+LineTo(x2,y2)")
+    #expect(p.fill == nil, "a Line has no fill")
+    #expect(p.id == "line-7", "identity (id) survives the promotion")
+    #expect(p.name == "my line")
+
+    assertCheckpointEquivalence(model, preDoc: preDoc)
+    // A single undo restores the Line.
+    model.undo()
+    guard case .line = model.document.layers[0].children[0] else {
+        Issue.record("a single undo restores the Line"); return
+    }
+}
+
 // MARK: - Concept-pack ops (place_concept_instance / set_concept_param)
 
 @Test func productionRouteConceptOpsReplayIsDeterministic() {

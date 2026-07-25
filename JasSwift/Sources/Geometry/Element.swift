@@ -2200,9 +2200,49 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     }
 }
 
-/// Return a copy of the element with strokeBrush replaced.
-/// Path-only; other elements are returned unchanged. See
+/// Promote a Line (or open Polyline) to a geometry-identical Path so it can
+/// carry Path-only attributes such as `strokeBrush`. Mirrors the Rect→Polygon
+/// corner-drag promotion (the "upgrade naturally" convention ratified by JYH
+/// 2026-07-25): identity is preserved (the caller replaces the element in
+/// place at its tree path), the common props (name, id, opacity, transform,
+/// visibility, lock, mask, blend mode) carry WHOLE, and stroke + width profile
+/// carry whole too. A Line has no fill, so the Path fill is nil; a Polyline's
+/// fill and gradients carry across. Non-promotable elements (including a
+/// degenerate Polyline with fewer than two points) return unchanged. See
 /// BRUSHES.md §Stroke styling interaction.
+public func promoteToPathForBrush(_ element: Element) -> Element {
+    switch element {
+    case .line(let v):
+        return .path(Path(d: [.moveTo(v.x1, v.y1), .lineTo(v.x2, v.y2)],
+                          fill: nil, stroke: v.stroke, widthPoints: v.widthPoints,
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: nil, strokeGradient: v.strokeGradient,
+                          strokeBrush: nil, strokeBrushOverrides: nil,
+                          toolOrigin: nil, name: v.name, id: v.id))
+    case .polyline(let v) where v.points.count >= 2:
+        var d: [PathCommand] = [.moveTo(v.points[0].0, v.points[0].1)]
+        for p in v.points[1...] { d.append(.lineTo(p.0, p.1)) }
+        return .path(Path(d: d, fill: v.fill, stroke: v.stroke, widthPoints: [],
+                          opacity: v.opacity, transform: v.transform,
+                          locked: v.locked, visibility: v.visibility,
+                          blendMode: v.blendMode, mask: v.mask,
+                          fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+                          strokeBrush: nil, strokeBrushOverrides: nil,
+                          toolOrigin: nil, name: v.name, id: v.id))
+    default:
+        return element
+    }
+}
+
+/// Return a copy of the element with strokeBrush replaced.
+/// A Path carries the brush directly. Applying a brush (a non-nil slug) to a
+/// Line or open Polyline PROMOTES it to a geometry-identical Path that then
+/// carries the brush — the "upgrade naturally" convention (JYH 2026-07-25);
+/// see `promoteToPathForBrush`. Clearing (nil) is not a brush application, so
+/// it never promotes. Other elements are returned unchanged. See BRUSHES.md
+/// §Stroke styling interaction.
 public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element {
     switch element {
     case .path(let v):
@@ -2216,13 +2256,28 @@ public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element
                           strokeBrush: strokeBrush,
                           strokeBrushOverrides: v.strokeBrushOverrides,
                           toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+    case .line, .polyline:
+        guard strokeBrush != nil,
+              case .path(let p) = promoteToPathForBrush(element) else { return element }
+        return .path(Path(d: p.d, fill: p.fill, stroke: p.stroke,
+                          widthPoints: p.widthPoints,
+                          opacity: p.opacity, transform: p.transform,
+                          locked: p.locked, visibility: p.visibility,
+                          blendMode: p.blendMode, mask: p.mask,
+                          fillGradient: p.fillGradient,
+                          strokeGradient: p.strokeGradient,
+                          strokeBrush: strokeBrush,
+                          strokeBrushOverrides: p.strokeBrushOverrides,
+                          toolOrigin: p.toolOrigin, name: p.name, id: p.id))
     default:
         return element
     }
 }
 
 /// Return a copy of the element with strokeBrushOverrides replaced.
-/// Path-only.
+/// A Path carries it directly; a Line / open Polyline is promoted to a Path
+/// first when the value is non-nil (mirrors `withStrokeBrush`). Clearing (nil)
+/// never promotes.
 public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> Element {
     switch element {
     case .path(let v):
@@ -2236,6 +2291,19 @@ public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> 
                           strokeBrush: v.strokeBrush,
                           strokeBrushOverrides: overrides,
                           toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+    case .line, .polyline:
+        guard overrides != nil,
+              case .path(let p) = promoteToPathForBrush(element) else { return element }
+        return .path(Path(d: p.d, fill: p.fill, stroke: p.stroke,
+                          widthPoints: p.widthPoints,
+                          opacity: p.opacity, transform: p.transform,
+                          locked: p.locked, visibility: p.visibility,
+                          blendMode: p.blendMode, mask: p.mask,
+                          fillGradient: p.fillGradient,
+                          strokeGradient: p.strokeGradient,
+                          strokeBrush: p.strokeBrush,
+                          strokeBrushOverrides: overrides,
+                          toolOrigin: p.toolOrigin, name: p.name, id: p.id))
     default:
         return element
     }
