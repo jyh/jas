@@ -44,7 +44,7 @@ in `JasSwift/Sources/Interpreter/YamlPanelBodyView.swift` — after which the
 already-granted Accessibility API gives Swift the same id-addressed reflection
 CDP gives Rust (`osascript` System Events can already read another app's
 UI-element roles and names; that was verified). That file is owned by a
-parallel wave this wave, so it is deliberately untouched here. The alternative
+parallel wave, so it is deliberately untouched here. The alternative
 unblock is a `dump <what> <path>` fifo verb; the OCaml fifo's third verb
 (`open_dialog`) is the precedent that this vocabulary is meant to grow.
 
