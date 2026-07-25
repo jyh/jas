@@ -2077,15 +2077,10 @@ fn apply_set_panel_state_with_ctx(
             }
         }
     }
-    // Propagate rendering-affecting changes to selected elements
-    if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
-                "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
-                "dash_align_anchors" |
-                "align_stroke" | "start_arrowhead" | "end_arrowhead" |
-                "start_arrowhead_scale" | "end_arrowhead_scale" | "arrow_align" |
-                "profile" | "profile_flipped") {
-        st.apply_stroke_panel_to_selection();
-    }
+    // Propagate the edited field to the selected elements. The apply is
+    // field-scoped (it writes only this key's group), and keys that own
+    // no element attribute are a no-op inside it.
+    st.apply_stroke_panel_to_selection(key);
 }
 
 /// Get a stroke panel field as a JSON value.
@@ -6102,7 +6097,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                                     }
                                 }
                             }
-                            st.apply_stroke_panel_to_selection();
+                            st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {
                             set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
@@ -6301,7 +6296,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             }
                             Some(PanelKind::Stroke) | None => {
                                 set_stroke_field(&mut st.stroke_panel, &f, &serde_json::Value::Null);
-                                st.apply_stroke_panel_to_selection();
+                                st.apply_stroke_panel_to_selection(&f);
                             }
                             _ => {}
                         }
@@ -6354,7 +6349,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             } else {
                                 set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
                             }
-                            st.apply_stroke_panel_to_selection();
+                            st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {
                             set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
@@ -6699,7 +6694,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                 }
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                    st.apply_stroke_panel_to_selection();
+                                    st.apply_stroke_panel_to_selection(&f);
                                 }
                                 Some(PanelKind::Opacity) => {
                                     set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(v));
@@ -6867,7 +6862,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                     }
                                     Some(PanelKind::Stroke) | None => {
                                         set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                        st.apply_stroke_panel_to_selection();
+                                        st.apply_stroke_panel_to_selection(&f);
                                     }
                                     _ => {}
                                 }
@@ -7004,7 +6999,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         }
                                         Some(PanelKind::Stroke) | None => {
                                             set_stroke_field(&mut st.stroke_panel, &f, &json_val);
-                                            st.apply_stroke_panel_to_selection();
+                                            st.apply_stroke_panel_to_selection(&f);
                                         }
                                         // Other panels: no-op until their
                                         // per-panel state structs land.
@@ -10890,7 +10885,7 @@ mod tests {
         // Simulate a scale field edit + its apply.
         set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
                          &serde_json::json!(200.0));
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection("start_arrowhead_scale");
         let overrides = build_live_panel_overrides(&st);
         assert_eq!(overrides.get("link_arrowhead_scale"),
                    Some(&serde_json::Value::Bool(true)),
@@ -10969,7 +10964,7 @@ mod tests {
         //    render-time ctx snapshot (ctx1), as render_combo_box does. ──
         set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
             &serde_json::json!(200.0));
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection("start_arrowhead_scale");
         run_input_commit_behavior(&start_scale_combo(), "start_arrowhead_scale",
             &serde_json::json!(200.0), &ctx1, &mut st);
 

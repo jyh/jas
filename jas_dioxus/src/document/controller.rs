@@ -906,6 +906,28 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
+    /// Rewrite each selected element's stroke through `f`, which receives
+    /// that element's OWN current stroke (`None` when it has none).
+    ///
+    /// Unlike [`Self::set_selection_stroke`] — which stamps one identical
+    /// Stroke across the whole selection — this preserves the per-element
+    /// fields `f` leaves alone, so a Stroke-panel edit to one attribute
+    /// cannot carry the first element's width / colour onto its siblings.
+    /// Used by `apply_stroke_panel_to_selection`.
+    pub fn map_selection_stroke(
+        model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) {
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let next = f(elem.stroke().cloned());
+                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, next));
+            }
+        }
+        model.edit_document(new_doc);
+    }
+
     /// Live, NON-undoable stroke set for per-tick color drag (see
     /// `set_selection_fill_live`).
     pub fn set_selection_stroke_live(model: &mut Model, stroke: Option<Stroke>) {

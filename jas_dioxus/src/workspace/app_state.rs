@@ -313,6 +313,128 @@ impl Default for StrokePanelState {
     }
 }
 
+/// The stroke attributes ONE Stroke-panel field owns.
+///
+/// A panel edit must write only the group it touched and preserve every
+/// other attribute from the element (see
+/// `AppState::apply_stroke_panel_to_selection`). Fields that move
+/// together stay in one group: the dash inputs and the dashed toggle are
+/// one pattern, and the two arrowhead scales move together because the
+/// link-scales button mirrors one onto the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StrokeEditGroup {
+    Width,
+    Cap,
+    Join,
+    MiterLimit,
+    Align,
+    Dash,
+    StartArrow,
+    EndArrow,
+    ArrowScales,
+    ArrowAlign,
+    /// Width profile only — the Stroke struct itself is untouched.
+    Profile,
+}
+
+impl StrokeEditGroup {
+    /// Map a Stroke-panel field key (as written by
+    /// `renderer::set_stroke_field`) to the group it owns. `None` means
+    /// the key owns no element attribute, so editing it writes nothing to
+    /// the selection.
+    pub(crate) fn from_field(key: &str) -> Option<Self> {
+        Some(match key {
+            "weight" => Self::Width,
+            "cap" => Self::Cap,
+            "join" => Self::Join,
+            "miter_limit" => Self::MiterLimit,
+            "align_stroke" | "align" => Self::Align,
+            "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3"
+            | "gap_3" | "dash_align_anchors" => Self::Dash,
+            "start_arrowhead" => Self::StartArrow,
+            "end_arrowhead" => Self::EndArrow,
+            "start_arrowhead_scale" | "end_arrowhead_scale"
+            | "link_arrowhead_scale" => Self::ArrowScales,
+            "arrow_align" => Self::ArrowAlign,
+            "profile" | "profile_flipped" => Self::Profile,
+            _ => return None,
+        })
+    }
+}
+
+/// Overwrite `base`'s `group` attributes from the Stroke panel state,
+/// leaving every other attribute of `base` untouched. `committed_width`
+/// is the weight input's committed value and is read only for
+/// [`StrokeEditGroup::Width`].
+pub(crate) fn stroke_with_group(
+    base: Stroke, sp: &StrokePanelState, group: StrokeEditGroup, committed_width: f64,
+) -> Stroke {
+    let mut s = base;
+    match group {
+        StrokeEditGroup::Width => s.width = committed_width,
+        StrokeEditGroup::Cap => {
+            s.linecap = match sp.cap.as_str() {
+                "round" => LineCap::Round,
+                "square" => LineCap::Square,
+                _ => LineCap::Butt,
+            };
+        }
+        StrokeEditGroup::Join => {
+            s.linejoin = match sp.join.as_str() {
+                "round" => LineJoin::Round,
+                "bevel" => LineJoin::Bevel,
+                _ => LineJoin::Miter,
+            };
+        }
+        StrokeEditGroup::MiterLimit => s.miter_limit = sp.miter_limit,
+        StrokeEditGroup::Align => {
+            s.align = match sp.align.as_str() {
+                "inside" => StrokeAlign::Inside,
+                "outside" => StrokeAlign::Outside,
+                _ => StrokeAlign::Center,
+            };
+        }
+        StrokeEditGroup::Dash => {
+            let mut dash_pattern = [0.0f64; 6];
+            let mut dash_len: u8 = 0;
+            if sp.dashed {
+                dash_pattern[0] = sp.dash_1;
+                dash_pattern[1] = sp.gap_1;
+                dash_len = 2;
+                if let (Some(d), Some(g)) = (sp.dash_2, sp.gap_2) {
+                    dash_pattern[2] = d;
+                    dash_pattern[3] = g;
+                    dash_len = 4;
+                }
+                if let (Some(d), Some(g)) = (sp.dash_3, sp.gap_3) {
+                    dash_pattern[4] = d;
+                    dash_pattern[5] = g;
+                    dash_len = 6;
+                }
+            }
+            s.dash_pattern = dash_pattern;
+            s.dash_len = dash_len;
+            s.dash_align_anchors = sp.dash_align_anchors;
+        }
+        StrokeEditGroup::StartArrow => s.start_arrow = Arrowhead::from_str(&sp.start_arrowhead),
+        StrokeEditGroup::EndArrow => s.end_arrow = Arrowhead::from_str(&sp.end_arrowhead),
+        StrokeEditGroup::ArrowScales => {
+            s.start_arrow_scale = sp.start_arrowhead_scale;
+            s.end_arrow_scale = sp.end_arrowhead_scale;
+        }
+        StrokeEditGroup::ArrowAlign => {
+            s.arrow_align = if sp.arrow_align == "center_at_end" {
+                ArrowAlign::CenterAtEnd
+            } else {
+                ArrowAlign::TipAtEnd
+            };
+        }
+        // The profile lives in the element's width points, not the Stroke.
+        StrokeEditGroup::Profile => {}
+    }
+    s
+}
+
 /// Gradient panel state fields — mirror the panel-local state declared
 /// in `workspace/panels/gradient.yaml`. Populated by
 /// `sync_gradient_panel_from_selection` when the selection changes;
@@ -1093,94 +1215,80 @@ impl AppState {
         }
     }
 
-    /// Apply the current stroke panel state to the selected element(s).
-    /// Builds a Stroke from the panel fields and calls set_selection_stroke.
-    pub(crate) fn apply_stroke_panel_to_selection(&mut self) {
+    /// Apply ONE Stroke-panel edit to the selected element(s).
+    ///
+    /// `edited` is the panel field key the user just committed (`"cap"`,
+    /// `"end_arrowhead"`, `"weight"`, … — the same keys
+    /// `renderer::set_stroke_field` writes). Only that field's
+    /// [`StrokeEditGroup`] is taken from panel state; every other stroke
+    /// attribute is preserved from the element being edited, per element.
+    ///
+    /// Why field-scoped: this used to rebuild the whole Stroke from panel
+    /// state on every edit and read `width` from the app / tab DEFAULT
+    /// stroke ("the selected element's width may not have been updated
+    /// yet" — the weight input commits its value into `default_stroke`
+    /// and then calls this). That made the weight input work at the cost
+    /// of resetting a selected 5pt line to 1pt whenever ANY other control
+    /// was touched (JYH, 2026-07-24). Gating the width write to the
+    /// weight edit itself removes the ordering problem entirely: nothing
+    /// else reads the default width, so nothing else can clobber it.
+    /// Cap / join were the same shape (the panel DISPLAYS them from the
+    /// element via `dock_panel::build_live_panel_overrides`, so re-imposing
+    /// panel state on an unrelated edit contradicted what the user saw),
+    /// and the dash / arrowhead / profile groups were re-stamped from
+    /// stale panel state on every edit.
+    ///
+    /// Unknown keys write nothing (the panel has fields that own no
+    /// element attribute).
+    pub(crate) fn apply_stroke_panel_to_selection(&mut self, edited: &str) {
+        let Some(group) = StrokeEditGroup::from_field(edited) else { return };
         let sp = &self.stroke_panel;
-        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            // Color/opacity come from the selected element (preserve what's there).
-            // Width comes from the default stroke (updated by the weight input).
-            let sel_stroke = {
-                let doc = tab.model.document();
-                doc.selection.first()
-                    .and_then(|es| doc.get_element(&es.path))
-                    .and_then(|e| e.stroke().cloned())
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
+        let sel_stroke = {
+            let doc = tab.model.document();
+            doc.selection.first()
+                .and_then(|es| doc.get_element(&es.path))
+                .and_then(|e| e.stroke().cloned())
+        };
+        let default_stroke = tab.model.default_stroke.or(self.app_default_stroke);
+        // Nothing to build on: no selected stroke and no default.
+        let Some(fallback) = sel_stroke.or(default_stroke) else { return };
+        // The weight input's committed value lives in the default stroke
+        // (renderer.rs writes it there just before calling us). It is read
+        // ONLY for a weight edit.
+        let committed_width = default_stroke.map(|s| s.width).unwrap_or(fallback.width);
+        // Width profiles are re-derived only when the edit can change
+        // them: the profile shape / flip, or the weight they scale with.
+        let profile_edit = matches!(group, StrokeEditGroup::Width | StrokeEditGroup::Profile);
+        let profile = sp.profile.clone();
+        let profile_flipped = sp.profile_flipped;
+        let sp = sp.clone();
+        if !tab.model.document().selection.is_empty() {
+            let profile_width = if group == StrokeEditGroup::Width {
+                committed_width
+            } else {
+                sel_stroke.map(|s| s.width).unwrap_or(committed_width)
             };
-            let default_stroke = tab.model.default_stroke.or(self.app_default_stroke);
-            let current_stroke = sel_stroke.or(default_stroke);
-            if let Some(base) = current_stroke {
-                // Use the default stroke width (set by weight input), not the
-                // selected element's width which may not have been updated yet.
-                let width = default_stroke.map(|s| s.width).unwrap_or(base.width);
-                let linecap = match sp.cap.as_str() {
-                    "round" => LineCap::Round,
-                    "square" => LineCap::Square,
-                    _ => LineCap::Butt,
-                };
-                let linejoin = match sp.join.as_str() {
-                    "round" => LineJoin::Round,
-                    "bevel" => LineJoin::Bevel,
-                    _ => LineJoin::Miter,
-                };
-                // Build dash pattern from panel state
-                let mut dash_pattern = [0.0f64; 6];
-                let mut dash_len: u8 = 0;
-                if sp.dashed {
-                    dash_pattern[0] = sp.dash_1;
-                    dash_pattern[1] = sp.gap_1;
-                    dash_len = 2;
-                    if let (Some(d), Some(g)) = (sp.dash_2, sp.gap_2) {
-                        dash_pattern[2] = d;
-                        dash_pattern[3] = g;
-                        dash_len = 4;
-                    }
-                    if let (Some(d), Some(g)) = (sp.dash_3, sp.gap_3) {
-                        dash_pattern[4] = d;
-                        dash_pattern[5] = g;
-                        dash_len = 6;
-                    }
+            tab.model.with_txn(|m| {
+                Controller::map_selection_stroke(m, |el_stroke| {
+                    let base = el_stroke.unwrap_or(fallback);
+                    Some(stroke_with_group(base, &sp, group, committed_width))
+                });
+                if profile_edit {
+                    let width_pts = crate::geometry::element::profile_to_width_points(
+                        &profile, profile_width, profile_flipped,
+                    );
+                    Controller::set_selection_width_profile(m, width_pts);
                 }
-                let new_stroke = Stroke {
-                    color: base.color,
-                    width,
-                    linecap,
-                    linejoin,
-                    miter_limit: sp.miter_limit,
-                    align: match sp.align.as_str() {
-                        "inside" => StrokeAlign::Inside,
-                        "outside" => StrokeAlign::Outside,
-                        _ => StrokeAlign::Center,
-                    },
-                    dash_pattern,
-                    dash_len,
-                    dash_align_anchors: sp.dash_align_anchors,
-                    start_arrow: Arrowhead::from_str(&sp.start_arrowhead),
-                    end_arrow: Arrowhead::from_str(&sp.end_arrowhead),
-                    start_arrow_scale: sp.start_arrowhead_scale,
-                    end_arrow_scale: sp.end_arrowhead_scale,
-                    arrow_align: if sp.arrow_align == "center_at_end" {
-                        ArrowAlign::CenterAtEnd
-                    } else {
-                        ArrowAlign::TipAtEnd
-                    },
-                    opacity: base.opacity,
-                };
-                // Update default stroke
-                tab.model.default_stroke = Some(new_stroke);
-                self.app_default_stroke = Some(new_stroke);
-                // Apply to selection
-                if !tab.model.document().selection.is_empty() {
-                    tab.model.with_txn(|m| {
-                        Controller::set_selection_stroke(m, Some(new_stroke));
-                        // Apply width profile
-                        let width_pts = crate::geometry::element::profile_to_width_points(
-                            &sp.profile, width, sp.profile_flipped,
-                        );
-                        Controller::set_selection_width_profile(m, width_pts);
-                    });
-                }
-            }
+            });
         }
+        // The new-element defaults take the SAME field-scoped edit, built
+        // on the default stroke — never on the selected element, whose
+        // width / colour must not leak into what the next element gets.
+        let new_default = stroke_with_group(
+            default_stroke.unwrap_or(fallback), &sp, group, committed_width);
+        tab.model.default_stroke = Some(new_default);
+        self.app_default_stroke = Some(new_default);
     }
 
     // NOTE: the Stroke panel reflects the selection (incl. the Weight
@@ -4722,102 +4830,105 @@ mod stroke_panel_apply_tests {
     }
 
     /// Build a default-panel state over a stroked Line, run the provided
-    /// mutation on the Stroke panel, apply, and return the element stroke.
-    fn apply_and_get(modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+    /// mutation on the Stroke panel, apply the named panel field's edit,
+    /// and return the element stroke. `edited` is the panel field key the
+    /// user just committed — the apply writes only that field's group.
+    fn apply_and_get(edited: &str, modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
         let mut st = state_with_element(Element::Line(line_with_stroke()), true);
         modify(&mut st.stroke_panel);
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection(edited);
         get_stroke(&st)
     }
 
     /// Same, but also lets the caller seed the tab's `default_stroke`
     /// (the "weight input" seam) before apply.
-    fn apply_with_width(width: f64, modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
+    fn apply_with_width(width: f64, edited: &str,
+                        modify: impl FnOnce(&mut StrokePanelState)) -> Stroke {
         let mut st = state_with_element(Element::Line(line_with_stroke()), true);
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {
             tab.model.default_stroke = Some(Stroke::new(Color::BLACK, width));
         }
         st.app_default_stroke = Some(Stroke::new(Color::BLACK, width));
         modify(&mut st.stroke_panel);
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection(edited);
         get_stroke(&st)
     }
 
     // ── weight -> stroke.width ───────────────────────────────────
     #[test]
     fn weight_2_5() {
-        let s = apply_with_width(2.5, |_sp| {});
+        let s = apply_with_width(2.5, "weight", |_sp| {});
         assert_eq!(s.width, 2.5);
     }
 
     // ── cap -> linecap ───────────────────────────────────────────
     #[test]
     fn cap_round() {
-        let s = apply_and_get(|sp| sp.cap = "round".into());
+        let s = apply_and_get("cap", |sp| sp.cap = "round".into());
         assert_eq!(s.linecap, LineCap::Round);
     }
 
     #[test]
     fn cap_square() {
-        let s = apply_and_get(|sp| sp.cap = "square".into());
+        let s = apply_and_get("cap", |sp| sp.cap = "square".into());
         assert_eq!(s.linecap, LineCap::Square);
     }
 
     #[test]
     fn cap_butt_default() {
-        let s = apply_and_get(|sp| sp.cap = "butt".into());
+        let s = apply_and_get("cap", |sp| sp.cap = "butt".into());
         assert_eq!(s.linecap, LineCap::Butt);
     }
 
     // ── join -> linejoin ─────────────────────────────────────────
     #[test]
     fn join_round() {
-        let s = apply_and_get(|sp| sp.join = "round".into());
+        let s = apply_and_get("join", |sp| sp.join = "round".into());
         assert_eq!(s.linejoin, LineJoin::Round);
     }
 
     #[test]
     fn join_bevel() {
-        let s = apply_and_get(|sp| sp.join = "bevel".into());
+        let s = apply_and_get("join", |sp| sp.join = "bevel".into());
         assert_eq!(s.linejoin, LineJoin::Bevel);
     }
 
     #[test]
     fn join_miter_default() {
-        let s = apply_and_get(|sp| sp.join = "miter".into());
+        let s = apply_and_get("join", |sp| sp.join = "miter".into());
         assert_eq!(s.linejoin, LineJoin::Miter);
     }
 
     // ── miter_limit ──────────────────────────────────────────────
     #[test]
     fn miter_limit_8() {
-        let s = apply_and_get(|sp| sp.miter_limit = 8.0);
+        let s = apply_and_get("miter_limit", |sp| sp.miter_limit = 8.0);
         assert_eq!(s.miter_limit, 8.0);
     }
 
     // ── align -> StrokeAlign ─────────────────────────────────────
     #[test]
     fn align_inside() {
-        let s = apply_and_get(|sp| sp.align = "inside".into());
+        let s = apply_and_get("align_stroke", |sp| sp.align = "inside".into());
         assert_eq!(s.align, StrokeAlign::Inside);
     }
 
     #[test]
     fn align_outside() {
-        let s = apply_and_get(|sp| sp.align = "outside".into());
+        let s = apply_and_get("align_stroke", |sp| sp.align = "outside".into());
         assert_eq!(s.align, StrokeAlign::Outside);
     }
 
     #[test]
     fn align_center_default() {
-        let s = apply_and_get(|sp| sp.align = "center".into());
+        let s = apply_and_get("align_stroke", |sp| sp.align = "center".into());
         assert_eq!(s.align, StrokeAlign::Center);
     }
 
     // ── dash pattern ─────────────────────────────────────────────
     #[test]
     fn dash_two_entries() {
-        let s = apply_and_get(|sp| {
+        let s = apply_and_get("dashed", |sp| {
             sp.dashed = true;
             sp.dash_1 = 12.0;
             sp.gap_1 = 6.0;
@@ -4827,7 +4938,7 @@ mod stroke_panel_apply_tests {
 
     #[test]
     fn dash_four_entries() {
-        let s = apply_and_get(|sp| {
+        let s = apply_and_get("dashed", |sp| {
             sp.dashed = true;
             sp.dash_1 = 12.0;
             sp.gap_1 = 6.0;
@@ -4839,7 +4950,7 @@ mod stroke_panel_apply_tests {
 
     #[test]
     fn dash_none_when_not_dashed() {
-        let s = apply_and_get(|sp| {
+        let s = apply_and_get("dashed", |sp| {
             sp.dashed = false;
             // Even with residual dash values, dashed=false -> no pattern.
             sp.dash_1 = 12.0;
@@ -4852,17 +4963,21 @@ mod stroke_panel_apply_tests {
     // ── arrowheads ───────────────────────────────────────────────
     #[test]
     fn start_arrowhead_simple_arrow() {
-        let s = apply_and_get(|sp| sp.start_arrowhead = "simple_arrow".into());
+        let s = apply_and_get("start_arrowhead", |sp| sp.start_arrowhead = "simple_arrow".into());
         assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
     }
 
     #[test]
     fn end_arrowhead_none() {
-        // Start set to an arrow, end explicitly "none" -> no end arrow.
-        let s = apply_and_get(|sp| {
-            sp.start_arrowhead = "simple_arrow".into();
-            sp.end_arrowhead = "none".into();
-        });
+        // Start picked first, then end explicitly "none" -> the start
+        // arrow survives the second edit (one apply per commit, as the
+        // two selects fire it).
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        st.stroke_panel.start_arrowhead = "simple_arrow".into();
+        st.apply_stroke_panel_to_selection("start_arrowhead");
+        st.stroke_panel.end_arrowhead = "none".into();
+        st.apply_stroke_panel_to_selection("end_arrowhead");
+        let s = get_stroke(&st);
         assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
         assert_eq!(s.end_arrow, Arrowhead::None);
     }
@@ -4870,7 +4985,7 @@ mod stroke_panel_apply_tests {
     // ── optional extras (arrow scale / align / dash-anchor) ──────
     #[test]
     fn arrowhead_scales() {
-        let s = apply_and_get(|sp| {
+        let s = apply_and_get("start_arrowhead_scale", |sp| {
             sp.start_arrowhead = "simple_arrow".into();
             sp.end_arrowhead = "simple_arrow".into();
             sp.start_arrowhead_scale = 150.0;
@@ -4882,19 +4997,19 @@ mod stroke_panel_apply_tests {
 
     #[test]
     fn arrow_align_center_at_end() {
-        let s = apply_and_get(|sp| sp.arrow_align = "center_at_end".into());
+        let s = apply_and_get("arrow_align", |sp| sp.arrow_align = "center_at_end".into());
         assert_eq!(s.arrow_align, ArrowAlign::CenterAtEnd);
     }
 
     #[test]
     fn arrow_align_tip_at_end_default() {
-        let s = apply_and_get(|sp| sp.arrow_align = "tip_at_end".into());
+        let s = apply_and_get("arrow_align", |sp| sp.arrow_align = "tip_at_end".into());
         assert_eq!(s.arrow_align, ArrowAlign::TipAtEnd);
     }
 
     #[test]
     fn dash_align_anchors_flag() {
-        let s = apply_and_get(|sp| {
+        let s = apply_and_get("dash_align_anchors", |sp| {
             sp.dashed = true;
             sp.dash_1 = 12.0;
             sp.gap_1 = 6.0;
@@ -4906,12 +5021,23 @@ mod stroke_panel_apply_tests {
     // ── end-to-end: multi-field apply + no-op on empty selection ─
     #[test]
     fn combined_fields_apply_together() {
-        let s = apply_with_width(4.0, |sp| {
-            sp.cap = "round".into();
-            sp.join = "bevel".into();
-            sp.miter_limit = 8.0;
-            sp.align = "inside".into();
-        });
+        // Four separate panel commits accumulate on the element: each
+        // apply writes its own field and preserves the previous three.
+        let mut st = state_with_element(Element::Line(line_with_stroke()), true);
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke = Some(Stroke::new(Color::BLACK, 4.0));
+        }
+        st.app_default_stroke = Some(Stroke::new(Color::BLACK, 4.0));
+        st.apply_stroke_panel_to_selection("weight");
+        st.stroke_panel.cap = "round".into();
+        st.apply_stroke_panel_to_selection("cap");
+        st.stroke_panel.join = "bevel".into();
+        st.apply_stroke_panel_to_selection("join");
+        st.stroke_panel.miter_limit = 8.0;
+        st.apply_stroke_panel_to_selection("miter_limit");
+        st.stroke_panel.align = "inside".into();
+        st.apply_stroke_panel_to_selection("align_stroke");
+        let s = get_stroke(&st);
         assert_eq!(s.width, 4.0);
         assert_eq!(s.linecap, LineCap::Round);
         assert_eq!(s.linejoin, LineJoin::Bevel);
@@ -4925,10 +5051,335 @@ mod stroke_panel_apply_tests {
         // undo step (mirrors the Character-panel no-op case).
         let mut st = state_with_element(Element::Line(line_with_stroke()), false);
         st.stroke_panel.cap = "round".into();
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection("cap");
         let s = get_stroke(&st);
         assert_eq!(s.linecap, LineCap::Butt, "empty selection must not write");
         assert!(!st.tabs[st.active_tab].model.can_undo(),
                 "no-op apply pushes no undo step");
+    }
+}
+
+// ── STROKEWIDTH: a panel edit writes ONLY what the user touched ───
+//
+// The live bug (JYH, 2026-07-24): select a line with a 5pt stroke, pick
+// an arrowhead in the Stroke panel -> the line snaps back to 1pt. The
+// apply rebuilt the WHOLE stroke on every panel edit and took `width`
+// from the app / tab DEFAULT stroke instead of the element, so any
+// Stroke-panel control silently reset the selected element's weight.
+// Cap / join had the same shape (the panel DISPLAYS them from the
+// selected element via dock_panel::build_live_panel_overrides, but the
+// apply re-imposed panel state), and dash / arrowheads / width profile
+// were re-imposed from stale panel state on every unrelated edit.
+//
+// These pins hold the class rule: the edited field's group comes from
+// the panel, EVERYTHING else is preserved from the element.
+#[cfg(test)]
+mod stroke_panel_field_scope_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{
+        Arrowhead, ArrowAlign, Color, CommonProps, Element, LayerElem, LineCap,
+        LineElem, LineJoin, Stroke, StrokeAlign, StrokeWidthPoint,
+    };
+
+    const RED: Color = Color::rgb(1.0, 0.0, 0.0);
+
+    /// A stroke whose every panel-writable field is deliberately
+    /// NON-default, so any clobber shows up as a diff.
+    fn rich_stroke() -> Stroke {
+        Stroke {
+            color: RED,
+            width: 5.0,
+            linecap: LineCap::Round,
+            linejoin: LineJoin::Bevel,
+            miter_limit: 3.0,
+            align: StrokeAlign::Inside,
+            dash_pattern: [7.0, 3.0, 0.0, 0.0, 0.0, 0.0],
+            dash_len: 2,
+            dash_align_anchors: true,
+            start_arrow: Arrowhead::Circle,
+            end_arrow: Arrowhead::Diamond,
+            start_arrow_scale: 150.0,
+            end_arrow_scale: 75.0,
+            arrow_align: ArrowAlign::CenterAtEnd,
+            opacity: 0.5,
+        }
+    }
+
+    fn line(stroke: Stroke, width_points: Vec<StrokeWidthPoint>) -> Element {
+        Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(stroke),
+            width_points,
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        })
+    }
+
+    /// One selected Line carrying `stroke`, with the app / tab default
+    /// stroke left at plain 1pt black — the value the old apply stamped
+    /// over the element's own width.
+    fn state_with(stroke: Stroke) -> AppState {
+        state_with_lines(vec![(stroke, Vec::new())])
+    }
+
+    /// N selected Lines, each with its own stroke and width profile.
+    fn state_with_lines(specs: Vec<(Stroke, Vec<StrokeWidthPoint>)>) -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let n = specs.len();
+        let layer = Element::Layer(LayerElem {
+            children: specs.into_iter()
+                .map(|(s, wp)| std::rc::Rc::new(line(s, wp)))
+                .collect(),
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: (0..n).map(|i| ElementSelection::all(vec![0, i])).collect(),
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        let plain = Stroke::new(Color::BLACK, 1.0);
+        st.tabs[st.active_tab].model.default_stroke = Some(plain);
+        st.app_default_stroke = Some(plain);
+        st
+    }
+
+    fn stroke_at(st: &AppState, i: usize) -> Stroke {
+        st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, i]).unwrap()
+            .stroke().cloned().expect("element has a stroke")
+    }
+
+    fn width_points_at(st: &AppState, i: usize) -> Vec<StrokeWidthPoint> {
+        match st.tab().unwrap().model.document().get_element(&vec![0usize, i]).unwrap() {
+            Element::Line(l) => l.width_points.clone(),
+            _ => panic!("expected a Line"),
+        }
+    }
+
+    // ── (a) the exact repro: arrowhead edit keeps the 5pt weight ──
+    #[test]
+    fn arrowhead_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.end_arrowhead = "simple_arrow".into();
+        st.apply_stroke_panel_to_selection("end_arrowhead");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.end_arrow, Arrowhead::SimpleArrow, "the edit must land");
+        assert_eq!(s.width, 5.0, "5pt line must STAY 5pt (the live bug)");
+    }
+
+    // ── (b) same for cap / join / dash / align edits ──────────────
+    #[test]
+    fn cap_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.cap = "square".into();
+        st.apply_stroke_panel_to_selection("cap");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.linecap, LineCap::Square);
+        assert_eq!(s.width, 5.0);
+    }
+
+    #[test]
+    fn join_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.join = "round".into();
+        st.apply_stroke_panel_to_selection("join");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.linejoin, LineJoin::Round);
+        assert_eq!(s.width, 5.0);
+    }
+
+    #[test]
+    fn dash_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.dashed = true;
+        st.stroke_panel.dash_1 = 4.0;
+        st.stroke_panel.gap_1 = 2.0;
+        st.apply_stroke_panel_to_selection("dash_1");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.dash_array(), &[4.0, 2.0]);
+        assert_eq!(s.width, 5.0);
+    }
+
+    #[test]
+    fn align_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.align = "outside".into();
+        st.apply_stroke_panel_to_selection("align_stroke");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.align, StrokeAlign::Outside);
+        assert_eq!(s.width, 5.0);
+    }
+
+    #[test]
+    fn profile_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.profile = "taper_end".into();
+        st.apply_stroke_panel_to_selection("profile");
+        assert_eq!(stroke_at(&st, 0).width, 5.0);
+        // The profile amplitude is derived from the ELEMENT's width.
+        let wp = width_points_at(&st, 0);
+        assert_eq!(wp.len(), 2);
+        assert_eq!(wp[0].width_left, 2.5, "half of the element's 5pt");
+    }
+
+    #[test]
+    fn arrow_scale_edit_keeps_element_width() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.end_arrowhead_scale = 200.0;
+        st.apply_stroke_panel_to_selection("start_arrowhead_scale");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.start_arrow_scale, 200.0);
+        assert_eq!(s.width, 5.0);
+    }
+
+    // ── (c) the weight input still applies a new width ────────────
+    #[test]
+    fn weight_edit_applies_new_width() {
+        let mut st = state_with(rich_stroke());
+        // The weight input commits by writing the tab / app default
+        // stroke width, then re-applying the panel (renderer.rs).
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke.as_mut().unwrap().width = 9.0;
+        }
+        st.app_default_stroke.as_mut().unwrap().width = 9.0;
+        st.apply_stroke_panel_to_selection("weight");
+        assert_eq!(stroke_at(&st, 0).width, 9.0, "weight input must still apply");
+        // ...and it must not disturb the rest of the element's stroke.
+        assert_eq!(stroke_at(&st, 0).linecap, LineCap::Round);
+        assert_eq!(stroke_at(&st, 0).dash_array(), &[7.0, 3.0]);
+    }
+
+    #[test]
+    fn weight_edit_rescales_profile() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.profile = "taper_end".into();
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_stroke.as_mut().unwrap().width = 8.0;
+        }
+        st.app_default_stroke.as_mut().unwrap().width = 8.0;
+        st.apply_stroke_panel_to_selection("weight");
+        let wp = width_points_at(&st, 0);
+        assert_eq!(wp[0].width_left, 4.0, "profile follows the new weight");
+    }
+
+    // ── (d) color / opacity preservation unchanged ────────────────
+    #[test]
+    fn edit_keeps_element_color_and_opacity() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.cap = "butt".into();
+        st.apply_stroke_panel_to_selection("cap");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.color, RED);
+        assert_eq!(s.opacity, 0.5);
+    }
+
+    // ── the rest of the class: every untouched field survives ─────
+    #[test]
+    fn arrowhead_edit_keeps_cap_join_and_miter() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.start_arrowhead = "square".into();
+        st.apply_stroke_panel_to_selection("start_arrowhead");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.start_arrow, Arrowhead::Square);
+        assert_eq!(s.linecap, LineCap::Round, "cap is displayed from the element");
+        assert_eq!(s.linejoin, LineJoin::Bevel, "join is displayed from the element");
+        assert_eq!(s.miter_limit, 3.0);
+        assert_eq!(s.align, StrokeAlign::Inside);
+    }
+
+    #[test]
+    fn cap_edit_keeps_dash_and_arrowheads() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.cap = "butt".into();
+        st.apply_stroke_panel_to_selection("cap");
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.linecap, LineCap::Butt);
+        assert_eq!(s.dash_array(), &[7.0, 3.0], "dash survives a cap edit");
+        assert!(s.dash_align_anchors);
+        assert_eq!(s.start_arrow, Arrowhead::Circle);
+        assert_eq!(s.end_arrow, Arrowhead::Diamond);
+        assert_eq!(s.start_arrow_scale, 150.0);
+        assert_eq!(s.end_arrow_scale, 75.0);
+        assert_eq!(s.arrow_align, ArrowAlign::CenterAtEnd);
+    }
+
+    #[test]
+    fn cap_edit_keeps_element_width_profile() {
+        let taper = vec![
+            StrokeWidthPoint { t: 0.0, width_left: 2.5, width_right: 2.5 },
+            StrokeWidthPoint { t: 1.0, width_left: 0.0, width_right: 0.0 },
+        ];
+        let mut st = state_with_lines(vec![(rich_stroke(), taper.clone())]);
+        st.stroke_panel.cap = "butt".into();
+        st.apply_stroke_panel_to_selection("cap");
+        assert_eq!(width_points_at(&st, 0).len(), taper.len(),
+                   "a cap edit must not wipe a custom width profile");
+    }
+
+    // Multi-selection: each element keeps its OWN width / colour; only
+    // the edited group is stamped across the selection.
+    #[test]
+    fn edit_keeps_each_elements_own_width() {
+        let mut thin = rich_stroke();
+        thin.width = 2.0;
+        thin.color = Color::BLACK;
+        let mut st = state_with_lines(vec![
+            (rich_stroke(), Vec::new()),
+            (thin, Vec::new()),
+        ]);
+        st.stroke_panel.end_arrowhead = "slash".into();
+        st.apply_stroke_panel_to_selection("end_arrowhead");
+        assert_eq!(stroke_at(&st, 0).end_arrow, Arrowhead::Slash);
+        assert_eq!(stroke_at(&st, 1).end_arrow, Arrowhead::Slash);
+        assert_eq!(stroke_at(&st, 0).width, 5.0);
+        assert_eq!(stroke_at(&st, 1).width, 2.0, "sibling keeps its own width");
+        assert_eq!(stroke_at(&st, 0).color, RED);
+        assert_eq!(stroke_at(&st, 1).color, Color::BLACK);
+    }
+
+    // The new-element defaults must not inherit the selected element's
+    // width / colour just because a panel field was edited.
+    #[test]
+    fn edit_does_not_move_new_element_defaults() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.cap = "square".into();
+        st.apply_stroke_panel_to_selection("cap");
+        let d = st.app_default_stroke.expect("app default stroke");
+        assert_eq!(d.width, 1.0, "new-element default width must stay 1pt");
+        assert_eq!(d.color, Color::BLACK, "default colour must stay black");
+        assert_eq!(d.linecap, LineCap::Square, "the edited field DOES move it");
+        let td = st.tab().unwrap().model.default_stroke.expect("tab default");
+        assert_eq!(td.width, 1.0);
+        assert_eq!(td.linecap, LineCap::Square);
+    }
+
+    // A key that owns no element attribute writes nothing.
+    #[test]
+    fn unknown_field_is_a_no_op() {
+        let mut st = state_with(rich_stroke());
+        st.apply_stroke_panel_to_selection("not_a_stroke_field");
+        assert_eq!(stroke_at(&st, 0), rich_stroke());
+        assert!(!st.tabs[st.active_tab].model.can_undo());
+    }
+
+    // One panel edit = one undo step.
+    #[test]
+    fn edit_pushes_one_undo_step() {
+        let mut st = state_with(rich_stroke());
+        st.stroke_panel.cap = "butt".into();
+        st.apply_stroke_panel_to_selection("cap");
+        assert!(st.tabs[st.active_tab].model.can_undo());
+        st.tabs[st.active_tab].model.undo();
+        assert_eq!(stroke_at(&st, 0), rich_stroke(), "one undo restores it all");
     }
 }
