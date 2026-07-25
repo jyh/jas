@@ -91,22 +91,29 @@ public enum ColorPanel {
     }
 
     /// Set the active color (fill or stroke per fillOnTop), push to recent colors.
+    ///
+    /// A colour pick changes the COLOUR and nothing else: each selected
+    /// element keeps its own width / cap / join / dash / arrowheads and its
+    /// fill or stroke opacity, and so do the new-element defaults. This
+    /// used to stamp `Stroke(color:width:)` over the whole selection, which
+    /// reset a 5pt dashed arrowheaded line to a plain 1pt stroke — the
+    /// Color-panel twin of the Stroke-panel width clobber (STROKEWIDTH,
+    /// 2026-07-24). Mirrors Rust `set_active_color`.
     public static func setActiveColor(_ color: Color, model: Model) {
         let ctrl = Controller(model: model)
         if model.fillOnTop {
-            model.defaultFill = Fill(color: color)
+            model.defaultFill = recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 // editDocument self-brackets the apply into ONE undo step
                 // (OP_LOG.md Increment 1); no separate snapshot() — that would
                 // double-checkpoint. Mirrors Rust set_active_color's
-                // `with_txn { set_selection_fill }`.
-                ctrl.setSelectionFill(Fill(color: color))
+                // `with_txn { map_selection_fill }`.
+                ctrl.mapSelectionFill { recolorFill($0, color) }
             }
         } else {
-            let width = model.defaultStroke?.width ?? 1.0
-            model.defaultStroke = Stroke(color: color, width: width)
+            model.defaultStroke = recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionStroke(Stroke(color: color, width: width))
+                ctrl.mapSelectionStroke { recolorStroke($0, color) }
             }
         }
         pushRecentColor(color.toHex(), model: model)
@@ -122,23 +129,43 @@ public enum ColorPanel {
     /// `model.snapshot()` so the per-tick drag doesn't pollute the
     /// undo stack — the eventual `setActiveColor` on release does the
     /// snapshot for the whole drag.
+    /// Colour-only, exactly like ``setActiveColor(_:model:)``.
     public static func setActiveColorLive(_ color: Color, model: Model) {
         let ctrl = Controller(model: model)
         if model.fillOnTop {
-            model.defaultFill = Fill(color: color)
+            model.defaultFill = recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 // Live, NON-undoable per-tick write (OP_LOG.md §7/§8); undo is
                 // captured once on release by setActiveColor. Mirrors Rust
-                // set_active_color_live's set_selection_fill_live.
-                ctrl.setSelectionFillLive(Fill(color: color))
+                // set_active_color_live's map_selection_fill_live.
+                ctrl.mapSelectionFillLive { recolorFill($0, color) }
             }
         } else {
-            let width = model.defaultStroke?.width ?? 1.0
-            model.defaultStroke = Stroke(color: color, width: width)
+            model.defaultStroke = recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionStrokeLive(Stroke(color: color, width: width))
+                ctrl.mapSelectionStrokeLive { recolorStroke($0, color) }
             }
         }
+    }
+
+    /// A stroke with `color` replaced and every other attribute preserved.
+    /// `nil` (nothing to recolour) becomes a plain 1pt stroke in that
+    /// colour. Mirrors Rust `recolor_stroke`.
+    static func recolorStroke(_ base: Stroke?, _ color: Color) -> Stroke {
+        guard let b = base else { return Stroke(color: color, width: 1.0) }
+        return Stroke(color: color, width: b.width, linecap: b.linecap,
+                      linejoin: b.linejoin, miterLimit: b.miterLimit,
+                      align: b.align, dashPattern: b.dashPattern,
+                      dashAlignAnchors: b.dashAlignAnchors,
+                      startArrow: b.startArrow, endArrow: b.endArrow,
+                      startArrowScale: b.startArrowScale,
+                      endArrowScale: b.endArrowScale,
+                      arrowAlign: b.arrowAlign, opacity: b.opacity)
+    }
+
+    /// A fill with `color` replaced and its opacity preserved.
+    static func recolorFill(_ base: Fill?, _ color: Color) -> Fill {
+        Fill(color: color, opacity: base?.opacity ?? 1.0)
     }
 
     /// Listeners fired after [pushRecentColor] commits. The Color and

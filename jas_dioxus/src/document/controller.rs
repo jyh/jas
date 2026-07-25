@@ -892,14 +892,6 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Live, NON-undoable fill set for per-tick color-slider drag
-    /// (`set_active_color_live`). Undo is captured once on pointer-up by
-    /// `set_active_color`, so the drag must not push checkpoints.
-    pub fn set_selection_fill_live(model: &mut Model, fill: Option<Fill>) {
-        let new_doc = Self::fill_applied(model.document(), fill);
-        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
-    }
-
     /// Set the stroke of all selected elements (undoable, self-bracketing).
     pub fn set_selection_stroke(model: &mut Model, stroke: Option<Stroke>) {
         let new_doc = Self::stroke_applied(model.document(), stroke);
@@ -917,7 +909,24 @@ impl Controller {
     pub fn map_selection_stroke(
         model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
     ) {
-        let doc = model.document().clone();
+        let new_doc = Self::stroke_mapped(model.document(), f);
+        model.edit_document(new_doc);
+    }
+
+    /// Live, NON-undoable [`Self::map_selection_stroke`] for per-tick
+    /// colour-slider drag: undo is captured once on pointer-up by
+    /// `set_active_color`, so the drag must not push checkpoints.
+    pub fn map_selection_stroke_live(
+        model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) {
+        let new_doc = Self::stroke_mapped(model.document(), f);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
+    }
+
+    fn stroke_mapped(
+        doc: &Document, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) -> Document {
+        let doc = doc.clone();
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
@@ -925,14 +934,35 @@ impl Controller {
                 new_doc = new_doc.replace_element(&es.path, with_stroke(elem, next));
             }
         }
+        new_doc
+    }
+
+    /// Rewrite each selected element's fill through `f`, which receives
+    /// that element's OWN current fill (`None` when it has none). The
+    /// per-element counterpart of [`Self::set_selection_fill`]: preserves
+    /// the fields `f` leaves alone (e.g. a colour pick must not reset each
+    /// element's fill opacity).
+    pub fn map_selection_fill(model: &mut Model, f: impl Fn(Option<Fill>) -> Option<Fill>) {
+        let new_doc = Self::fill_mapped(model.document(), f);
         model.edit_document(new_doc);
     }
 
-    /// Live, NON-undoable stroke set for per-tick color drag (see
-    /// `set_selection_fill_live`).
-    pub fn set_selection_stroke_live(model: &mut Model, stroke: Option<Stroke>) {
-        let new_doc = Self::stroke_applied(model.document(), stroke);
+    /// Live, NON-undoable [`Self::map_selection_fill`] for per-tick drag.
+    pub fn map_selection_fill_live(model: &mut Model, f: impl Fn(Option<Fill>) -> Option<Fill>) {
+        let new_doc = Self::fill_mapped(model.document(), f);
         model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
+    }
+
+    fn fill_mapped(doc: &Document, f: impl Fn(Option<Fill>) -> Option<Fill>) -> Document {
+        let doc = doc.clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let next = f(elem.fill().cloned());
+                new_doc = new_doc.replace_element(&es.path, with_fill(elem, next));
+            }
+        }
+        new_doc
     }
 
     /// Set the `fill_gradient` field of every selected element to the

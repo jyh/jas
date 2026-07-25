@@ -251,6 +251,81 @@ private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
     #expect(strokeAt(model, 0) == richStroke(), "one undo restores it all")
 }
 
+// MARK: - the Color-panel twin: a colour pick is COLOUR-only
+//
+// setActiveColor used to stamp `Stroke(color:width:)` over the selection,
+// so picking a stroke colour on a 5pt dashed arrowheaded line left a plain
+// 1pt stroke. Same class as the Stroke-panel clobber, one panel over.
+
+private let blue = Color(r: 0, g: 0, b: 1)
+
+@Test func strokeColorPickKeepsEveryOtherAttribute() {
+    let model = strokeModel(richStroke())
+    model.fillOnTop = false
+    ColorPanel.setActiveColor(blue, model: model)
+    let s = strokeAt(model, 0)
+    #expect(s.color == blue, "the colour must land")
+    #expect(s.width == 5.0, "5pt line must STAY 5pt")
+    #expect(s.linecap == .round)
+    #expect(s.linejoin == .bevel)
+    #expect(s.dashPattern == [7.0, 3.0])
+    #expect(s.startArrow == .circle)
+    #expect(s.endArrow == .diamond)
+    #expect(s.align == .inside)
+    #expect(s.opacity == 0.5, "stroke opacity preserved")
+}
+
+@Test func strokeColorPickLiveKeepsEveryOtherAttribute() {
+    let model = strokeModel(richStroke())
+    model.fillOnTop = false
+    ColorPanel.setActiveColorLive(blue, model: model)
+    let s = strokeAt(model, 0)
+    #expect(s.color == blue)
+    #expect(s.width == 5.0)
+    #expect(s.dashPattern == [7.0, 3.0])
+    #expect(!model.canUndo, "live drag stays off the undo stack")
+}
+
+@Test func strokeColorPickKeepsEachElementsOwnWidth() {
+    let model = strokeModel([
+        (richStroke(), []),
+        (richStroke(width: 2.0), []),
+    ])
+    model.fillOnTop = false
+    ColorPanel.setActiveColor(blue, model: model)
+    #expect(strokeAt(model, 0).width == 5.0)
+    #expect(strokeAt(model, 1).width == 2.0)
+    #expect(strokeAt(model, 1).color == blue)
+}
+
+@Test func strokeColorPickKeepsDefaultAttributes() {
+    let model = strokeModel(richStroke())
+    model.fillOnTop = false
+    // A panel-set default (round cap at 3pt) must survive a pick.
+    model.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 3.0,
+                                 linecap: .round)
+    ColorPanel.setActiveColor(blue, model: model)
+    #expect(model.defaultStroke?.color == blue)
+    #expect(model.defaultStroke?.width == 3.0)
+    #expect(model.defaultStroke?.linecap == .round)
+}
+
+@Test func fillColorPickKeepsElementFillOpacity() {
+    let model = Model()
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 fill: Fill(color: Color(r: 1, g: 0, b: 0),
+                                            opacity: 0.25)))
+    model.setDocumentForTest(Document(
+        layers: [Layer(children: [rect])],
+        selectedLayer: 0,
+        selection: [ElementSelection(path: [0, 0])]))
+    model.fillOnTop = true
+    ColorPanel.setActiveColor(blue, model: model)
+    let f = model.document.getElement([0, 0]).fill
+    #expect(f?.color == blue)
+    #expect(f?.opacity == 0.25, "fill opacity must survive a colour pick")
+}
+
 // The panel scope is where every in-panel widget write-back lands (the
 // arrowhead selects bind `panel.start_arrowhead` only, with no global
 // mirror), so the apply must read it. The flat `stroke_*` globals remain

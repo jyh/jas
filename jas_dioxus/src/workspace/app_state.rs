@@ -362,6 +362,23 @@ impl StrokeEditGroup {
     }
 }
 
+/// A stroke with `color` replaced and every other attribute preserved.
+/// `None` (nothing to recolour) becomes a plain 1pt stroke in that colour.
+pub(crate) fn recolor_stroke(base: Option<Stroke>, color: Color) -> Stroke {
+    match base {
+        Some(mut s) => { s.color = color; s }
+        None => Stroke::new(color, 1.0),
+    }
+}
+
+/// A fill with `color` replaced and its opacity preserved.
+pub(crate) fn recolor_fill(base: Option<Fill>, color: Color) -> Fill {
+    match base {
+        Some(mut f) => { f.color = color; f }
+        None => Fill::new(color),
+    }
+}
+
 /// Overwrite `base`'s `group` attributes from the Stroke panel state,
 /// leaving every other attribute of `base` untouched. `committed_width`
 /// is the weight input's committed value and is read only for
@@ -1152,26 +1169,34 @@ impl AppState {
     }
 
     /// Set the active color (fill or stroke, per fill_on_top) and push to recent colors.
+    ///
+    /// A colour pick changes the COLOUR and nothing else: each selected
+    /// element keeps its own width / cap / join / dash / arrowheads and its
+    /// fill or stroke opacity, and so do the new-element defaults. This
+    /// used to stamp `Stroke::new(color, default_width)` over the whole
+    /// selection, which reset a 5pt dashed arrowheaded line to a plain 1pt
+    /// stroke — the Color-panel twin of the Stroke-panel width clobber
+    /// (STROKEWIDTH, 2026-07-24).
     pub(crate) fn set_active_color(&mut self, color: Color) {
         // Always update app-level defaults
         if self.fill_on_top {
-            self.app_default_fill = Some(Fill::new(color));
+            self.app_default_fill = Some(recolor_fill(self.app_default_fill, color));
         } else {
-            let width = self.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
-            self.app_default_stroke = Some(Stroke::new(color, width));
+            self.app_default_stroke = Some(recolor_stroke(self.app_default_stroke, color));
         }
         // Update per-tab state if a document is open
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if self.fill_on_top {
-                tab.model.default_fill = Some(Fill::new(color));
+                tab.model.default_fill = Some(recolor_fill(tab.model.default_fill, color));
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.with_txn(|m| Controller::set_selection_fill(m, Some(Fill::new(color))));
+                    tab.model.with_txn(|m| Controller::map_selection_fill(
+                        m, |f| Some(recolor_fill(f, color))));
                 }
             } else {
-                let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
-                tab.model.default_stroke = Some(Stroke::new(color, width));
+                tab.model.default_stroke = Some(recolor_stroke(tab.model.default_stroke, color));
                 if !tab.model.document().selection.is_empty() {
-                    tab.model.with_txn(|m| Controller::set_selection_stroke(m, Some(Stroke::new(color, width))));
+                    tab.model.with_txn(|m| Controller::map_selection_stroke(
+                        m, |s| Some(recolor_stroke(s, color))));
                 }
             }
             // Push to recent colors (move-to-front dedup, max 10)
@@ -1193,23 +1218,21 @@ impl AppState {
     /// selection-priority live overrides keep the sliders / hex stuck
     /// on the stale selection value. Skip the snapshot so the per-tick
     /// drag doesn't bloat the undo stack — `set_active_color` (called
-    /// on pointer-up) snapshots once for the whole drag.
+    /// on pointer-up) snapshots once for the whole drag. Colour-only,
+    /// exactly like `set_active_color`.
     pub(crate) fn set_active_color_live(&mut self, color: Color) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             if self.fill_on_top {
-                let new_fill = Some(Fill::new(color));
-                tab.model.default_fill = new_fill;
+                tab.model.default_fill = Some(recolor_fill(tab.model.default_fill, color));
                 if !tab.model.document().selection.is_empty() {
-                    crate::document::controller::Controller::set_selection_fill_live(
-                        &mut tab.model, new_fill);
+                    Controller::map_selection_fill_live(
+                        &mut tab.model, |f| Some(recolor_fill(f, color)));
                 }
             } else {
-                let width = tab.model.default_stroke.map(|s| s.width).unwrap_or(1.0);
-                let new_stroke = Some(Stroke::new(color, width));
-                tab.model.default_stroke = new_stroke;
+                tab.model.default_stroke = Some(recolor_stroke(tab.model.default_stroke, color));
                 if !tab.model.document().selection.is_empty() {
-                    crate::document::controller::Controller::set_selection_stroke_live(
-                        &mut tab.model, new_stroke);
+                    Controller::map_selection_stroke_live(
+                        &mut tab.model, |s| Some(recolor_stroke(s, color)));
                 }
             }
         }
@@ -5370,6 +5393,113 @@ mod stroke_panel_field_scope_tests {
         st.apply_stroke_panel_to_selection("not_a_stroke_field");
         assert_eq!(stroke_at(&st, 0), rich_stroke());
         assert!(!st.tabs[st.active_tab].model.can_undo());
+    }
+
+    // ── the Color-panel twin: a colour pick is COLOUR-only ────────
+    //
+    // set_active_color used to stamp `Stroke::new(color, default_width)`
+    // over the selection, so picking a stroke colour on a 5pt dashed
+    // arrowheaded line left a plain 1pt stroke. Same class as the
+    // Stroke-panel clobber, one panel over.
+    const BLUE: Color = Color::rgb(0.0, 0.0, 1.0);
+
+    #[test]
+    fn stroke_color_pick_keeps_every_other_attribute() {
+        let mut st = state_with(rich_stroke());
+        st.fill_on_top = false;
+        st.set_active_color(BLUE);
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.color, BLUE, "the colour must land");
+        assert_eq!(s.width, 5.0, "5pt line must STAY 5pt");
+        assert_eq!(s.linecap, LineCap::Round);
+        assert_eq!(s.linejoin, LineJoin::Bevel);
+        assert_eq!(s.dash_array(), &[7.0, 3.0]);
+        assert_eq!(s.start_arrow, Arrowhead::Circle);
+        assert_eq!(s.end_arrow, Arrowhead::Diamond);
+        assert_eq!(s.align, StrokeAlign::Inside);
+        assert_eq!(s.opacity, 0.5, "stroke opacity preserved");
+    }
+
+    #[test]
+    fn stroke_color_pick_live_keeps_every_other_attribute() {
+        let mut st = state_with(rich_stroke());
+        st.fill_on_top = false;
+        st.set_active_color_live(BLUE);
+        let s = stroke_at(&st, 0);
+        assert_eq!(s.color, BLUE);
+        assert_eq!(s.width, 5.0);
+        assert_eq!(s.dash_array(), &[7.0, 3.0]);
+        // Live drag stays off the undo stack.
+        assert!(!st.tabs[st.active_tab].model.can_undo());
+    }
+
+    #[test]
+    fn stroke_color_pick_keeps_each_elements_own_width() {
+        let mut thin = rich_stroke();
+        thin.width = 2.0;
+        let mut st = state_with_lines(vec![
+            (rich_stroke(), Vec::new()),
+            (thin, Vec::new()),
+        ]);
+        st.fill_on_top = false;
+        st.set_active_color(BLUE);
+        assert_eq!(stroke_at(&st, 0).width, 5.0);
+        assert_eq!(stroke_at(&st, 1).width, 2.0);
+        assert_eq!(stroke_at(&st, 1).color, BLUE);
+    }
+
+    #[test]
+    fn stroke_color_pick_keeps_default_attributes() {
+        let mut st = state_with(rich_stroke());
+        st.fill_on_top = false;
+        // A panel-set default (round cap at 3pt) must survive a pick.
+        let mut d = Stroke::new(Color::BLACK, 3.0);
+        d.linecap = LineCap::Round;
+        st.app_default_stroke = Some(d);
+        st.tabs[st.active_tab].model.default_stroke = Some(d);
+        st.set_active_color(BLUE);
+        let ad = st.app_default_stroke.unwrap();
+        assert_eq!(ad.color, BLUE);
+        assert_eq!(ad.width, 3.0);
+        assert_eq!(ad.linecap, LineCap::Round);
+    }
+
+    #[test]
+    fn fill_color_pick_keeps_element_fill_opacity() {
+        use crate::geometry::element::{Fill, RectElem};
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut fill = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        fill.opacity = 0.25;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(fill), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        st.fill_on_top = true;
+        st.set_active_color(BLUE);
+        let f = st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .fill().cloned().expect("fill");
+        assert_eq!(f.color, BLUE);
+        assert_eq!(f.opacity, 0.25, "fill opacity must survive a colour pick");
     }
 
     // One panel edit = one undo step.

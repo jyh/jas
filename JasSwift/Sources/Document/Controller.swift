@@ -1301,9 +1301,8 @@ public class Controller {
     }
 
     /// Build the document with `fill` applied to every selected element,
-    /// WITHOUT committing it. Shared by the undoable ``setSelectionFill(_:)``
-    /// and the non-undoable live-drag ``setSelectionFillLive(_:)``. Mirrors the
-    /// Rust `Controller::fill_applied`.
+    /// WITHOUT committing it. Used by the undoable ``setSelectionFill(_:)``.
+    /// Mirrors the Rust `Controller::fill_applied`.
     private func fillApplied(_ fill: Fill?) -> Document {
         var doc = model.document
         if doc.selection.isEmpty { return doc }
@@ -1320,15 +1319,6 @@ public class Controller {
     public func setSelectionFill(_ fill: Fill?) {
         if model.document.selection.isEmpty { return }
         model.editDocument(fillApplied(fill))
-    }
-
-    /// Live, NON-undoable fill set for per-tick color-slider drag
-    /// (`setActiveColorLive`). Undo is captured once on pointer-up by
-    /// ``setSelectionFill(_:)`` / `setActiveColor`, so the drag must not push
-    /// checkpoints. Mirrors the Rust `Controller::set_selection_fill_live`.
-    public func setSelectionFillLive(_ fill: Fill?) {
-        if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(fillApplied(fill), intent: .liveDrag)
     }
 
     /// Build the document with `stroke` applied to every selected element,
@@ -1361,22 +1351,54 @@ public class Controller {
     /// Used by `applyStrokePanelToSelection`. Mirrors the Rust
     /// `Controller::map_selection_stroke`.
     public func mapSelectionStroke(_ f: (Stroke?) -> Stroke?) {
+        guard let doc = strokeMapped(f) else { return }
+        model.editDocument(doc)
+    }
+
+    /// Live, NON-undoable ``mapSelectionStroke(_:)`` for per-tick
+    /// colour-slider drag: undo is captured once on pointer-up by
+    /// `setActiveColor`, so the drag must not push checkpoints.
+    public func mapSelectionStrokeLive(_ f: (Stroke?) -> Stroke?) {
+        guard let doc = strokeMapped(f) else { return }
+        model.setDocumentUnbracketed(doc, intent: .liveDrag)
+    }
+
+    private func strokeMapped(_ f: (Stroke?) -> Stroke?) -> Document? {
         var doc = model.document
-        if doc.selection.isEmpty { return }
+        if doc.selection.isEmpty { return nil }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
             let newElem = withStroke(elem, stroke: f(elem.stroke))
             doc = doc.replaceElement(es.path, with: newElem)
         }
+        return doc
+    }
+
+    /// Rewrite each selected element's fill through `f`, which receives
+    /// that element's OWN current fill (`nil` when it has none). The
+    /// per-element counterpart of ``setSelectionFill(_:)``: preserves the
+    /// fields `f` leaves alone (e.g. a colour pick must not reset each
+    /// element's fill opacity). Mirrors Rust `map_selection_fill`.
+    public func mapSelectionFill(_ f: (Fill?) -> Fill?) {
+        guard let doc = fillMapped(f) else { return }
         model.editDocument(doc)
     }
 
-    /// Live, NON-undoable stroke set for per-tick color drag (see
-    /// ``setSelectionFillLive(_:)``). Mirrors the Rust
-    /// `Controller::set_selection_stroke_live`.
-    public func setSelectionStrokeLive(_ stroke: Stroke?) {
-        if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(strokeApplied(stroke), intent: .liveDrag)
+    /// Live, NON-undoable ``mapSelectionFill(_:)`` for per-tick drag.
+    public func mapSelectionFillLive(_ f: (Fill?) -> Fill?) {
+        guard let doc = fillMapped(f) else { return }
+        model.setDocumentUnbracketed(doc, intent: .liveDrag)
+    }
+
+    private func fillMapped(_ f: (Fill?) -> Fill?) -> Document? {
+        var doc = model.document
+        if doc.selection.isEmpty { return nil }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withFill(elem, fill: f(elem.fill))
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        return doc
     }
 
     /// Set strokeBrush on every selected element (paths only). Used

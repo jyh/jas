@@ -77,8 +77,8 @@ func advanceNextUntitledPast(_ filenames: [String]) {
 /// - ``liveDrag`` — 4 Swift / 4 Rust sites: per-tick writes inside a drag —
 ///   artboard move/resize live-drag (`artboardTranslateFromPreview` /
 ///   `artboardResizeApply`, idempotent restore+re-apply per mousemove) and
-///   the per-tick color apply during a picker drag (`setSelectionFillLive` /
-///   `setSelectionStrokeLive`); undo is captured once at the gesture
+///   the per-tick color apply during a picker drag (`mapSelectionFillLive` /
+///   `mapSelectionStrokeLive`); undo is captured once at the gesture
 ///   boundary.
 /// - ``testOnly`` — test-fixture seeding, routed via the test-target-only
 ///   `setDocumentForTest` extension (so production code cannot reach it; the
