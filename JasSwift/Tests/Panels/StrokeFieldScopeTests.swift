@@ -326,6 +326,39 @@ private let blue = Color(r: 0, g: 0, b: 1)
     #expect(f?.opacity == 0.25, "fill opacity must survive a colour pick")
 }
 
+// The YAML colour route (a swatch / hex click writing state.stroke_color)
+// must behave exactly like the Color panel's own commit.
+@Test func yamlStrokeColorWriteKeepsEveryOtherAttribute() {
+    let model = strokeModel(richStroke())
+    let store = model.stateStore
+    store.set("fill_on_top", false)
+    store.set("stroke_color", "#0000ff")
+    applyActiveColorFromStore(store: store, model: model)
+    let s = strokeAt(model, 0)
+    #expect(s.color == blue)
+    #expect(s.width == 5.0, "5pt line must STAY 5pt")
+    #expect(s.dashPattern == [7.0, 3.0])
+    #expect(s.startArrow == .circle)
+}
+
+@Test func yamlFillColorWriteKeepsFillOpacity() {
+    let model = Model()
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 fill: Fill(color: Color(r: 1, g: 0, b: 0),
+                                            opacity: 0.25)))
+    model.setDocumentForTest(Document(
+        layers: [Layer(children: [rect])],
+        selectedLayer: 0,
+        selection: [ElementSelection(path: [0, 0])]))
+    let store = model.stateStore
+    store.set("fill_on_top", true)
+    store.set("fill_color", "#0000ff")
+    applyActiveColorFromStore(store: store, model: model)
+    let f = model.document.getElement([0, 0]).fill
+    #expect(f?.color == blue)
+    #expect(f?.opacity == 0.25)
+}
+
 // The panel scope is where every in-panel widget write-back lands (the
 // arrowhead selects bind `panel.start_arrowhead` only, with no global
 // mirror), so the apply must read it. The flat `stroke_*` globals remain

@@ -2258,9 +2258,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
     if fillOnTop {
         let raw = store.get("fill_color")
         if let hex = raw as? String, let color = Color.fromHex(hex) {
-            model.defaultFill = Fill(color: color)
+            // Colour-ONLY, exactly like ColorPanel.setActiveColor: the
+            // element's fill opacity is preserved (STROKEWIDTH).
+            model.defaultFill = ColorPanel.recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionFill(Fill(color: color))
+                ctrl.mapSelectionFill { ColorPanel.recolorFill($0, color) }
             }
         } else if raw == nil || raw is NSNull {
             model.defaultFill = nil
@@ -2271,10 +2273,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
     } else {
         let raw = store.get("stroke_color")
         if let hex = raw as? String, let color = Color.fromHex(hex) {
-            let width = model.defaultStroke?.width ?? 1.0
-            model.defaultStroke = Stroke(color: color, width: width)
+            // Colour-ONLY: width / cap / join / dash / arrowheads and the
+            // stroke opacity all stay as they are, per element.
+            model.defaultStroke = ColorPanel.recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionStroke(Stroke(color: color, width: width))
+                ctrl.mapSelectionStroke { ColorPanel.recolorStroke($0, color) }
             }
         } else if raw == nil || raw is NSNull {
             model.defaultStroke = nil

@@ -1346,7 +1346,8 @@ fn set_app_state_field(
     val: &serde_json::Value,
     st: &mut crate::workspace::app_state::AppState,
 ) {
-    use crate::geometry::element::{Color, Fill, Stroke};
+    use crate::geometry::element::Color;
+    use crate::workspace::app_state::{recolor_fill, recolor_stroke};
 
     match key {
         "fill_on_top" => {
@@ -1371,24 +1372,39 @@ fn set_app_state_field(
                 }
             }
         }
+        // The YAML colour route (swatch / hex / colour-bar click through
+        // set_active_color). Colour-ONLY, exactly like
+        // AppState::set_active_color: a null clears the paint, a hex
+        // recolours it and preserves every other attribute — the element's
+        // fill opacity, or its stroke width / cap / join / dash /
+        // arrowheads (STROKEWIDTH, 2026-07-24).
         "fill_color" => {
-            let new_fill = if val.is_null() {
-                None
-            } else {
-                val.as_str().and_then(Color::from_hex).map(Fill::new)
-            };
-            st.app_default_fill = new_fill;
-            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                tab.model.default_fill = new_fill;
-                // Propagate to canvas selection so a swatch / hex /
-                // color-bar click via the YAML set_active_color
-                // action updates the selected element's fill — same
-                // path AppState::set_active_color uses for the
-                // Color-panel slider commits.
-                if !tab.model.document().selection.is_empty() {
-                    tab.model.with_txn(|m| {
-                        crate::document::controller::Controller::set_selection_fill(m, new_fill);
-                    });
+            let color = if val.is_null() { None } else { val.as_str().and_then(Color::from_hex) };
+            match color {
+                None if val.is_null() => {
+                    st.app_default_fill = None;
+                    if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                        tab.model.default_fill = None;
+                        if !tab.model.document().selection.is_empty() {
+                            tab.model.with_txn(|m| {
+                                crate::document::controller::Controller::set_selection_fill(m, None);
+                            });
+                        }
+                    }
+                }
+                // Unparseable hex: leave everything alone.
+                None => {}
+                Some(color) => {
+                    st.app_default_fill = Some(recolor_fill(st.app_default_fill, color));
+                    if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                        tab.model.default_fill = Some(recolor_fill(tab.model.default_fill, color));
+                        if !tab.model.document().selection.is_empty() {
+                            tab.model.with_txn(|m| {
+                                crate::document::controller::Controller::map_selection_fill(
+                                    m, |f| Some(recolor_fill(f, color)));
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1404,16 +1420,13 @@ fn set_app_state_field(
                     }
                 }
             } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
-                let width = st.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
-                let new_stroke = Some(Stroke::new(color, width));
-                st.app_default_stroke = new_stroke;
+                st.app_default_stroke = Some(recolor_stroke(st.app_default_stroke, color));
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    let tab_width = tab.model.default_stroke.map(|s| s.width).unwrap_or(width);
-                    let tab_stroke = Some(Stroke::new(color, tab_width));
-                    tab.model.default_stroke = tab_stroke;
+                    tab.model.default_stroke = Some(recolor_stroke(tab.model.default_stroke, color));
                     if !tab.model.document().selection.is_empty() {
                         tab.model.with_txn(|m| {
-                            crate::document::controller::Controller::set_selection_stroke(m, tab_stroke);
+                            crate::document::controller::Controller::map_selection_stroke(
+                                m, |s| Some(recolor_stroke(s, color)));
                         });
                     }
                 }
@@ -10727,6 +10740,104 @@ mod tests {
             get_app_state_field("stroke_color", &st),
             serde_json::Value::String("#0000ff".to_string())
         );
+    }
+
+    // ── STROKEWIDTH: the YAML colour route is COLOUR-only ─────────
+    //
+    // A swatch / hex click writes state.stroke_color (or fill_color)
+    // through set_app_state_field. It used to stamp
+    // `Stroke::new(color, default_width)` over the selection, so a swatch
+    // click reset a 5pt dashed line to a plain 1pt stroke — the same
+    // clobber as the Stroke panel's, on the colour route.
+    fn state_with_selected_stroked_line(stroke: Stroke) -> AppState {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, LineElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let line = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(stroke),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(line)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+        st
+    }
+
+    #[test]
+    fn yaml_stroke_color_write_keeps_every_other_attribute() {
+        use crate::geometry::element::{Arrowhead, LineCap};
+        let mut base = Stroke::new(Color::from_hex("ff0000").unwrap(), 5.0);
+        base.linecap = LineCap::Round;
+        base.dash_pattern = [7.0, 3.0, 0.0, 0.0, 0.0, 0.0];
+        base.dash_len = 2;
+        base.end_arrow = Arrowhead::Diamond;
+        base.opacity = 0.5;
+        let mut st = state_with_selected_stroked_line(base);
+        st.app_default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+        st.tabs[st.active_tab].model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+        set_app_state_field("stroke_color", &serde_json::json!("#0000ff"), &mut st);
+        let s = st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .stroke().cloned().unwrap();
+        assert_eq!(s.color, Color::from_hex("0000ff").unwrap());
+        assert_eq!(s.width, 5.0, "5pt line must STAY 5pt");
+        assert_eq!(s.linecap, LineCap::Round);
+        assert_eq!(s.dash_array(), &[7.0, 3.0]);
+        assert_eq!(s.end_arrow, Arrowhead::Diamond);
+        assert_eq!(s.opacity, 0.5);
+    }
+
+    #[test]
+    fn yaml_fill_color_write_keeps_fill_opacity() {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let mut fill = Fill::new(Color::from_hex("ff0000").unwrap());
+        fill.opacity = 0.25;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(fill), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+        set_app_state_field("fill_color", &serde_json::json!("#0000ff"), &mut st);
+        let f = st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .fill().cloned().unwrap();
+        assert_eq!(f.color, Color::from_hex("0000ff").unwrap());
+        assert_eq!(f.opacity, 0.25, "fill opacity must survive a colour write");
     }
 
     #[test]
