@@ -1,0 +1,264 @@
+import Testing
+import Foundation
+@testable import JasLib
+
+// STROKEWIDTH: a Stroke-panel edit writes ONLY what the user touched.
+//
+// The live bug (JYH, 2026-07-24, reported on the Rust port): select a
+// line with a 5pt stroke, pick an arrowhead in the Stroke panel, and the
+// line snaps back to 1pt. Both ports rebuilt the WHOLE Stroke from panel
+// state on every edit and took the width from a source that was NOT the
+// element (Rust: the app / tab default stroke; Swift: the panel `weight`
+// key, stale until the weight input is committed), so any Stroke-panel
+// control silently reset a selected element's weight. Cap / join had the
+// same shape — the panel DISPLAYS them from the selected element
+// (strokePanelLiveOverrides) while the apply re-imposed panel state —
+// and dash / arrowheads / align / miter / width profile were re-stamped
+// from stale panel state on every unrelated edit.
+//
+// The contract (identical to the Rust reference
+// `apply_stroke_panel_to_selection`, app_state.rs): the apply names the
+// panel field the user just committed and writes only that field's
+// group; every other stroke attribute is preserved from the element,
+// per element.
+
+// MARK: - helpers
+
+/// A stroke whose every panel-writable field is deliberately NON-default,
+/// so any clobber shows up as a diff. Mirrors the Rust `rich_stroke()`.
+private func richStroke(width: Double = 5.0,
+                        color: Color = Color(r: 1, g: 0, b: 0)) -> Stroke {
+    Stroke(color: color, width: width, linecap: .round, linejoin: .bevel,
+           miterLimit: 3.0, align: .inside,
+           dashPattern: [7.0, 3.0], dashAlignAnchors: true,
+           startArrow: .circle, endArrow: .diamond,
+           startArrowScale: 150.0, endArrowScale: 75.0,
+           arrowAlign: .centerAtEnd, opacity: 0.5)
+}
+
+/// N selected Lines, each with its own stroke and width profile, with the
+/// model default stroke left at plain 1pt black — the value the old apply
+/// stamped over the element's own width.
+private func strokeModel(
+    _ specs: [(Stroke, [StrokeWidthPoint])]
+) -> Model {
+    let model = Model()
+    let lines = specs.map { spec in
+        Element.line(Line(x1: 0, y1: 0, x2: 100, y2: 0,
+                          stroke: spec.0, widthPoints: spec.1))
+    }
+    model.setDocumentForTest(Document(
+        layers: [Layer(children: lines)],
+        selectedLayer: 0,
+        selection: Set((0..<lines.count).map { ElementSelection(path: [0, $0]) })))
+    model.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
+    return model
+}
+
+private func strokeModel(_ stroke: Stroke) -> Model {
+    strokeModel([(stroke, [])])
+}
+
+/// Seed the panel scope the way the panel's own widgets do (every write
+/// -back lands in the panel state), then apply the named edit.
+private func applyEdit(
+    _ model: Model, _ edited: String, _ panel: [String: Any] = [:]
+) {
+    model.stateStore.initPanel("stroke_panel_content", defaults: panel)
+    applyStrokePanelToSelection(store: model.stateStore,
+                               controller: Controller(model: model),
+                               edited: edited)
+}
+
+private func strokeAt(_ model: Model, _ i: Int) -> Stroke {
+    guard let s = model.document.getElement([0, i]).stroke else {
+        fatalError("expected a Stroke at [0,\(i)]")
+    }
+    return s
+}
+
+private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
+    guard case let .line(l) = model.document.getElement([0, i]) else {
+        fatalError("expected a Line at [0,\(i)]")
+    }
+    return l.widthPoints
+}
+
+// MARK: - (a) the exact repro
+
+@Test func strokeArrowheadEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "end_arrowhead", ["end_arrowhead": "simple_arrow"])
+    #expect(strokeAt(model, 0).endArrow == .simpleArrow, "the edit must land")
+    #expect(strokeAt(model, 0).width == 5.0, "5pt line must STAY 5pt")
+}
+
+// MARK: - (b) same for cap / join / dash / align / profile / scale
+
+@Test func strokeCapEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "cap", ["cap": "square"])
+    #expect(strokeAt(model, 0).linecap == .square)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+@Test func strokeJoinEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "join", ["join": "round"])
+    #expect(strokeAt(model, 0).linejoin == .round)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+@Test func strokeDashEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "dash_1", ["dashed": true, "dash_1": 4.0, "gap_1": 2.0])
+    #expect(strokeAt(model, 0).dashPattern == [4.0, 2.0])
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+@Test func strokeAlignEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "align_stroke", ["align_stroke": "outside"])
+    #expect(strokeAt(model, 0).align == .outside)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+@Test func strokeProfileEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "profile", ["profile": "taper_end"])
+    #expect(strokeAt(model, 0).width == 5.0)
+    // The profile amplitude derives from the ELEMENT's width.
+    let wp = widthPointsAt(model, 0)
+    #expect(wp.count == 2)
+    #expect(wp.first?.widthLeft == 2.5, "half of the element's 5pt")
+}
+
+@Test func strokeArrowScaleEditKeepsElementWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "start_arrowhead_scale",
+              ["start_arrowhead_scale": 200.0, "end_arrowhead_scale": 200.0])
+    #expect(strokeAt(model, 0).startArrowScale == 200.0)
+    #expect(strokeAt(model, 0).width == 5.0)
+}
+
+// MARK: - (c) the weight input still applies a new width
+
+@Test func strokeWeightEditAppliesNewWidth() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "weight", ["weight": 9.0])
+    #expect(strokeAt(model, 0).width == 9.0, "weight input must still apply")
+    // ...without disturbing the rest of the element's stroke.
+    #expect(strokeAt(model, 0).linecap == .round)
+    #expect(strokeAt(model, 0).dashPattern == [7.0, 3.0])
+}
+
+@Test func strokeWeightEditRescalesProfile() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "weight", ["weight": 8.0, "profile": "taper_end"])
+    #expect(widthPointsAt(model, 0).first?.widthLeft == 4.0,
+            "profile follows the new weight")
+}
+
+// MARK: - (d) colour / opacity preservation unchanged
+
+@Test func strokeEditKeepsElementColorAndOpacity() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "cap", ["cap": "butt"])
+    #expect(strokeAt(model, 0).color == Color(r: 1, g: 0, b: 0))
+    #expect(strokeAt(model, 0).opacity == 0.5)
+}
+
+// MARK: - the rest of the class
+
+@Test func strokeArrowheadEditKeepsCapJoinAndMiter() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "start_arrowhead", ["start_arrowhead": "square"])
+    let s = strokeAt(model, 0)
+    #expect(s.startArrow == .square)
+    #expect(s.linecap == .round, "cap is displayed from the element")
+    #expect(s.linejoin == .bevel, "join is displayed from the element")
+    #expect(s.miterLimit == 3.0)
+    #expect(s.align == .inside)
+}
+
+@Test func strokeCapEditKeepsDashAndArrowheads() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "cap", ["cap": "butt"])
+    let s = strokeAt(model, 0)
+    #expect(s.linecap == .butt)
+    #expect(s.dashPattern == [7.0, 3.0], "dash survives a cap edit")
+    #expect(s.dashAlignAnchors)
+    #expect(s.startArrow == .circle)
+    #expect(s.endArrow == .diamond)
+    #expect(s.startArrowScale == 150.0)
+    #expect(s.endArrowScale == 75.0)
+    #expect(s.arrowAlign == .centerAtEnd)
+}
+
+@Test func strokeCapEditKeepsElementWidthProfile() {
+    let taper = [StrokeWidthPoint(t: 0, widthLeft: 2.5, widthRight: 2.5),
+                 StrokeWidthPoint(t: 1, widthLeft: 0, widthRight: 0)]
+    let model = strokeModel([(richStroke(), taper)])
+    applyEdit(model, "cap", ["cap": "butt"])
+    #expect(widthPointsAt(model, 0).count == taper.count,
+            "a cap edit must not wipe a custom width profile")
+}
+
+@Test func strokeEditKeepsEachElementsOwnWidth() {
+    let model = strokeModel([
+        (richStroke(), []),
+        (richStroke(width: 2.0, color: Color(r: 0, g: 0, b: 0)), []),
+    ])
+    applyEdit(model, "end_arrowhead", ["end_arrowhead": "slash"])
+    #expect(strokeAt(model, 0).endArrow == .slash)
+    #expect(strokeAt(model, 1).endArrow == .slash)
+    #expect(strokeAt(model, 0).width == 5.0)
+    #expect(strokeAt(model, 1).width == 2.0, "sibling keeps its own width")
+    #expect(strokeAt(model, 0).color == Color(r: 1, g: 0, b: 0))
+    #expect(strokeAt(model, 1).color == Color(r: 0, g: 0, b: 0))
+}
+
+@Test func strokeEditDoesNotMoveNewElementDefaults() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "cap", ["cap": "square"])
+    let d = model.defaultStroke
+    #expect(d?.width == 1.0, "new-element default width must stay 1pt")
+    #expect(d?.color == Color(r: 0, g: 0, b: 0), "default colour stays black")
+    #expect(d?.linecap == .square, "the edited field DOES move it")
+}
+
+@Test func strokeUnknownFieldIsANoOp() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "not_a_stroke_field", ["cap": "butt"])
+    #expect(strokeAt(model, 0) == richStroke())
+}
+
+// An unnamed edit changes nothing: the apply cannot guess which field
+// the user touched, and guessing is what clobbered the width.
+@Test func strokeUnnamedEditIsANoOp() {
+    let model = strokeModel(richStroke())
+    model.stateStore.initPanel("stroke_panel_content", defaults: ["cap": "butt"])
+    applyStrokePanelToSelection(store: model.stateStore,
+                               controller: Controller(model: model))
+    #expect(strokeAt(model, 0) == richStroke())
+}
+
+@Test func strokeEditPushesOneUndoStep() {
+    let model = strokeModel(richStroke())
+    applyEdit(model, "cap", ["cap": "butt"])
+    #expect(model.canUndo)
+    model.undo()
+    #expect(strokeAt(model, 0) == richStroke(), "one undo restores it all")
+}
+
+// The panel scope is where every in-panel widget write-back lands (the
+// arrowhead selects bind `panel.start_arrowhead` only, with no global
+// mirror), so the apply must read it. The flat `stroke_*` globals remain
+// the fallback for out-of-panel writers.
+@Test func strokeEditReadsGlobalWhenPanelScopeIsEmpty() {
+    let model = strokeModel(richStroke())
+    model.stateStore.set("stroke_cap", "butt")
+    applyEdit(model, "cap")
+    #expect(strokeAt(model, 0).linecap == .butt)
+    #expect(strokeAt(model, 0).width == 5.0)
+}

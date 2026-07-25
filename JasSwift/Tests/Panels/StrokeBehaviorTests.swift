@@ -53,8 +53,18 @@ private func applyStrokePanel(
     } else {
         model.stateStore.initPanel("stroke_panel_content", defaults: [:])
     }
-    applyStrokePanelToSelection(store: model.stateStore,
-                               controller: Controller(model: model))
+    // The apply is field-scoped: it writes only the group of the field the
+    // user just committed (STROKEWIDTH — a panel edit must not rewrite
+    // attributes the user did not touch). Each case here seeds exactly the
+    // keys it exercises, so replay one apply per seeded key, which is what
+    // the runtime does (one commit -> one apply).
+    var edits = Array(globals.keys)
+    if weight != nil { edits.append("weight") }
+    for key in edits {
+        applyStrokePanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model),
+                                    edited: key)
+    }
     guard let s = model.document.getElement([0, 0]).stroke else {
         fatalError("expected a Stroke at [0,0] after apply")
     }
@@ -233,7 +243,8 @@ private func applyStrokePanel(
     model.stateStore.set("stroke_cap", "round")
     model.stateStore.initPanel("stroke_panel_content", defaults: ["weight": 9.0])
     applyStrokePanelToSelection(store: model.stateStore,
-                               controller: Controller(model: model))
+                               controller: Controller(model: model),
+                               edited: "cap")
     let s = model.document.getElement([0, 0]).stroke
     #expect(s?.linecap == .butt)   // unchanged
     #expect(s?.width == 1.0)       // unchanged
@@ -534,7 +545,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
 
     // Native combo commit of start=150 (panel bind + gap-closure global).
     commitStrokeScale(store, "start_arrowhead_scale", 150)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
 
     #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 150)
 }
@@ -565,7 +577,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     // what commitPanelWrite does BEFORE runInputCommitBehavior. Element
     // reaches {200,100}: start applied, sibling still stale.
     commitStrokeScale(store, "start_arrowhead_scale", 200)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
     #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 200)
     #expect(model.document.getElement([0, 0]).stroke?.endArrowScale == 100)
 
@@ -597,7 +610,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     store.set("stroke_end_arrowhead_scale", 100.0)
 
     commitStrokeScale(store, "start_arrowhead_scale", 200)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
     runInputCommitBehavior(element: startScaleCombo(),
                            field: "start_arrowhead_scale", committed: 200.0,
                            context: staleScaleCtx(linked: false),

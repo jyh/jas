@@ -1351,6 +1351,26 @@ public class Controller {
         model.editDocument(strokeApplied(stroke))
     }
 
+    /// Rewrite each selected element's stroke through `f`, which receives
+    /// that element's OWN current stroke (`nil` when it has none).
+    ///
+    /// Unlike ``setSelectionStroke(_:)`` — which stamps one identical
+    /// Stroke across the whole selection — this preserves the per-element
+    /// fields `f` leaves alone, so a Stroke-panel edit to one attribute
+    /// cannot carry the first element's width / colour onto its siblings.
+    /// Used by `applyStrokePanelToSelection`. Mirrors the Rust
+    /// `Controller::map_selection_stroke`.
+    public func mapSelectionStroke(_ f: (Stroke?) -> Stroke?) {
+        var doc = model.document
+        if doc.selection.isEmpty { return }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStroke(elem, stroke: f(elem.stroke))
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        model.editDocument(doc)
+    }
+
     /// Live, NON-undoable stroke set for per-tick color drag (see
     /// ``setSelectionFillLive(_:)``). Mirrors the Rust
     /// `Controller::set_selection_stroke_live`.

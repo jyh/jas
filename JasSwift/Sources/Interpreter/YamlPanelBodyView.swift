@@ -390,7 +390,11 @@ struct YamlElementView: View {
                                  value: value)
         }
         model.panelStateVersion &+= 1
-        notifyPanelStateChanged(pid, store: model.stateStore, model: model)
+        // Name the committed field: the Stroke panel's apply is
+        // field-scoped (it writes only that field's group and preserves
+        // the rest from the element). See applyStrokePanelToSelection.
+        notifyPanelStateChanged(pid, store: model.stateStore, model: model,
+                                edited: key)
     }
 
     /// Dispatch a widget edit to the right state container based on the
