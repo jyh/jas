@@ -1233,16 +1233,28 @@ struct FillStrokeWidget: View {
             default: return model.defaultStroke
             }
         }()
-        let newFill: Fill? = curStroke.map { Fill(color: $0.color) }
-        let newStroke: Stroke? = curFill.map { Stroke(color: $0.color) }
+        // Colour-only: each side keeps every one of its own non-colour
+        // attributes and takes only the other's colour. This built a bare
+        // `Fill(color:)` / `Stroke(color:)` and stamped it over the
+        // selection, so the arrow reset a 5pt dashed arrowheaded line's
+        // width / cap / join / dash / arrowheads / align / miter / opacity
+        // (and any fill opacity) — while workspace/actions.yaml
+        // `swap_fill_stroke` says it swaps colours. Mirrors the Rust
+        // app_state.rs `swap_fill_stroke`.
+        let newFill: Fill? = curStroke.map { ColorPanel.recolorFill(curFill, $0.color) }
+        let newStroke: Stroke? = curFill.map { ColorPanel.recolorStroke(curStroke, $0.color) }
         model.defaultFill = newFill
         model.defaultStroke = newStroke
         if !model.document.selection.isEmpty {
             let ctrl = Controller(model: model)
-            // Fill + stroke swap as ONE undo step (withTxn; each editDocument joins).
+            // Fill + stroke swap as ONE undo step (withTxn; each
+            // editDocument joins). Each mapper hands the element its OWN
+            // fill / stroke, so recolouring preserves the rest.
             model.withTxn {
-                ctrl.setSelectionFill(newFill)
-                ctrl.setSelectionStroke(newStroke)
+                ctrl.mapSelectionFill { f in
+                    curStroke.map { ColorPanel.recolorFill(f, $0.color) } }
+                ctrl.mapSelectionStroke { s in
+                    curFill.map { ColorPanel.recolorStroke(s, $0.color) } }
             }
         }
     }

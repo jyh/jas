@@ -273,6 +273,58 @@ private func widthPointsAt(_ model: Model, _ i: Int) -> [StrokeWidthPoint] {
     #expect(strokeAt(model, 0).dashPattern == richStroke().dashPattern)
 }
 
+// ── swap_fill_stroke is colour-only ──────────────────────────────
+//
+// Shift+X / the fill-stroke widget arrow / the Color-panel button all say
+// they swap COLOURS (workspace/actions.yaml `swap_fill_stroke`), but this
+// port built a bare `Stroke(color:)` and stamped it over the selection, so
+// the swap reset a 5pt dashed arrowheaded line's width / cap / join / dash /
+// arrowheads / align / miter / opacity. Rust at least kept the DEFAULT's
+// attributes — a live port divergence on top of the clobber. Both ports now
+// recolour per element and preserve everything else.
+//
+// The defaults are deliberately PLAIN and the element RICH: that gap is the
+// bug, and seeding the default with the same rich stroke hides it.
+@Test func swapFillStrokeSwapsColoursOnly() {
+    let model = strokeModel(richStroke())
+    let green = Color(r: 0, g: 1, b: 0)
+    model.defaultFill = Fill(color: green, opacity: 0.25)
+    model.defaultStroke = Stroke(color: Color(r: 1, g: 1, b: 1), width: 1.0)
+    let ctrl = Controller(model: model)
+    let curFill = model.defaultFill
+    let curStroke = model.defaultStroke
+    // The ContentView / CanvasSubwindow law, exercised through the same
+    // mappers both call.
+    model.withTxn {
+        ctrl.mapSelectionFill { f in
+            curStroke.map { ColorPanel.recolorFill(f, $0.color) } }
+        ctrl.mapSelectionStroke { s in
+            curFill.map { ColorPanel.recolorStroke(s, $0.color) } }
+    }
+    let s = strokeAt(model, 0)
+    let rich = richStroke()
+    #expect(s.color == green, "stroke takes the fill's colour")
+    #expect(s.width == rich.width, "a swap must not reset the weight")
+    #expect(s.linecap == rich.linecap)
+    #expect(s.linejoin == rich.linejoin)
+    #expect(s.miterLimit == rich.miterLimit)
+    #expect(s.align == rich.align)
+    #expect(s.dashPattern == rich.dashPattern)
+    #expect(s.dashAlignAnchors == rich.dashAlignAnchors)
+    #expect(s.startArrow == rich.startArrow)
+    #expect(s.endArrow == rich.endArrow)
+    #expect(s.startArrowScale == rich.startArrowScale)
+    #expect(s.endArrowScale == rich.endArrowScale)
+    #expect(s.arrowAlign == rich.arrowAlign)
+    #expect(s.opacity == rich.opacity, "a swap must not reset stroke opacity")
+}
+
+@Test func swapFillStrokePreservesFillOpacity() {
+    #expect(ColorPanel.recolorFill(Fill(color: Color(r: 0, g: 1, b: 0), opacity: 0.25),
+                                   Color(r: 1, g: 1, b: 1)).opacity == 0.25,
+            "a swap must not reset fill opacity")
+}
+
 @Test func strokeEditPushesOneUndoStep() {
     let model = strokeModel(richStroke())
     applyEdit(model, "cap", ["cap": "butt"])

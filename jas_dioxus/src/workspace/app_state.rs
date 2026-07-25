@@ -1136,28 +1136,41 @@ impl AppState {
         self.fill_on_top = !self.fill_on_top;
     }
 
-    /// Swap default fill and stroke colors (including None).
+    /// Swap the fill and stroke COLOURS, including `None` (no fill / no
+    /// stroke swap as well).
+    ///
+    /// Colour-only: each selected element keeps every one of its own
+    /// non-colour attributes and takes only the other side's colour. This
+    /// used to build a whole Stroke / Fill from the tab DEFAULT and stamp it
+    /// over the selection, so Shift+X on a 5pt dashed arrowheaded line reset
+    /// its width / cap / join / dash / arrowheads / align / miter / opacity
+    /// to whatever the default happened to be — while its own doc comment
+    /// and `workspace/actions.yaml` both say it swaps colours. Swift built a
+    /// bare `Stroke(color:)`, dropping even the default's attributes; both
+    /// ports now share this law.
+    ///
+    /// The two colours still come from the DEFAULTS, which is what decides
+    /// `None` (a swap with no default fill clears the stroke). Sourcing them
+    /// per element instead is a behaviour question, not a bug fix: an
+    /// element that cannot hold a fill at all (a Line) would swap its stroke
+    /// away to nothing.
     pub(crate) fn swap_fill_stroke(&mut self) {
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let old_fill_color = tab.model.default_fill.map(|f| f.color);
             let old_stroke_color = tab.model.default_stroke.map(|s| s.color);
-            // Swap: fill gets old stroke color, stroke gets old fill color
-            tab.model.default_fill = old_stroke_color.map(Fill::new);
-            tab.model.default_stroke = match old_fill_color {
-                Some(c) => {
-                    let mut s = tab.model.default_stroke.unwrap_or(Stroke::new(c, 1.0));
-                    s.color = c;
-                    Some(s)
-                }
-                None => None,
-            };
-            // Apply to selection
-            let new_fill = tab.model.default_fill;
-            let new_stroke = tab.model.default_stroke;
+            tab.model.default_fill = old_stroke_color
+                .map(|c| recolor_fill(tab.model.default_fill, c));
+            tab.model.default_stroke = old_fill_color
+                .map(|c| recolor_stroke(tab.model.default_stroke, c));
             if !tab.model.document().selection.is_empty() {
+                // Fill + stroke swap as ONE undo step. Each mapper hands the
+                // element its OWN current fill / stroke, so recolouring
+                // preserves everything else it carries.
                 tab.model.with_txn(|m| {
-                    Controller::set_selection_fill(m, new_fill);
-                    Controller::set_selection_stroke(m, new_stroke);
+                    Controller::map_selection_fill(
+                        m, |f| old_stroke_color.map(|c| recolor_fill(f, c)));
+                    Controller::map_selection_stroke(
+                        m, |s| old_fill_color.map(|c| recolor_stroke(s, c)));
                 });
             }
         }
@@ -5340,6 +5353,72 @@ mod stroke_panel_field_scope_tests {
         st.apply_stroke_panel_to_selection("weight");
         let wp = width_points_at(&st, 0);
         assert_eq!(wp[0].width_left, 4.0, "profile follows the new weight");
+    }
+
+    // ── swap_fill_stroke is colour-only ──────────────────────────
+    //
+    // Shift+X / the widget arrow / the Color-panel button all say they swap
+    // COLOURS (workspace/actions.yaml `swap_fill_stroke`), but the swap
+    // stamped a whole Stroke built from the DEFAULT over the selection, so
+    // it reset a 5pt dashed arrowheaded line's width / cap / join / dash /
+    // arrowheads / opacity to whatever the default happened to be.
+    //
+    // The defaults here are deliberately PLAIN and the element RICH — that
+    // gap is the bug. Seeding the default with the same rich stroke hides it.
+    fn state_for_swap() -> (AppState, Fill) {
+        let mut st = state_with(rich_stroke());
+        let default_fill = Fill { color: Color::from_hex("00ff00").unwrap(), opacity: 0.25 };
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_fill = Some(default_fill);
+            tab.model.default_stroke = Some(Stroke::new(Color::WHITE, 1.0));
+        }
+        (st, default_fill)
+    }
+
+    #[test]
+    fn swap_fill_stroke_swaps_colours_only() {
+        let (mut st, default_fill) = state_for_swap();
+        st.swap_fill_stroke();
+        let s = stroke_at(&st, 0);
+        // The colour swapped...
+        assert_eq!(s.color, default_fill.color, "stroke takes the fill's colour");
+        // ...and nothing else about the element's stroke moved.
+        let rich = rich_stroke();
+        assert_eq!(s.width, rich.width, "a swap must not reset the weight");
+        assert_eq!(s.linecap, rich.linecap);
+        assert_eq!(s.linejoin, rich.linejoin);
+        assert_eq!(s.miter_limit, rich.miter_limit);
+        assert_eq!(s.align, rich.align);
+        assert_eq!(s.dash_array(), rich.dash_array());
+        assert_eq!(s.dash_align_anchors, rich.dash_align_anchors);
+        assert_eq!(s.start_arrow, rich.start_arrow);
+        assert_eq!(s.end_arrow, rich.end_arrow);
+        assert_eq!(s.start_arrow_scale, rich.start_arrow_scale);
+        assert_eq!(s.end_arrow_scale, rich.end_arrow_scale);
+        assert_eq!(s.arrow_align, rich.arrow_align);
+        assert_eq!(s.opacity, rich.opacity, "a swap must not reset stroke opacity");
+    }
+
+    #[test]
+    fn swap_fill_stroke_preserves_default_fill_opacity() {
+        let (mut st, default_fill) = state_for_swap();
+        st.swap_fill_stroke();
+        let f = st.tabs[st.active_tab].model.default_fill.unwrap();
+        assert_eq!(f.color, Color::WHITE, "fill takes the stroke's colour");
+        assert_eq!(f.opacity, default_fill.opacity,
+                   "a swap must not reset fill opacity");
+    }
+
+    #[test]
+    fn swap_fill_stroke_with_no_default_fill_clears_the_stroke() {
+        // Unchanged semantics: None swaps too, and the defaults are what
+        // decide it.
+        let (mut st, _) = state_for_swap();
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            tab.model.default_fill = None;
+        }
+        st.swap_fill_stroke();
+        assert!(st.tabs[st.active_tab].model.default_stroke.is_none());
     }
 
     /// STROKEWIDTH repair 3: the committed weight must apply even with NO

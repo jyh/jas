@@ -3286,25 +3286,34 @@ class CanvasNSView: NSView {
                 // Swap fill and stroke colors (shift+x, no Cmd)
                 if !hasCmd {
                     if let model = controller?.model {
+                        let oldFillColor = model.defaultFill?.color
+                        let oldStrokeColor = model.defaultStroke?.color
+                        // Colour-only, and from the DEFAULTS (which is what
+                        // decides `None`): each selected element keeps every
+                        // one of its own non-colour attributes and takes only
+                        // the other side's colour. This built a bare
+                        // `Stroke(color:)` and stamped it over the selection,
+                        // so Shift+X on a 5pt dashed arrowheaded line reset
+                        // its width / cap / join / dash / arrowheads / align /
+                        // miter / opacity — while workspace/actions.yaml
+                        // `swap_fill_stroke` says it swaps colours. Rust at
+                        // least kept the DEFAULT's attributes; both ports now
+                        // share this law (app_state.rs swap_fill_stroke).
                         let oldFill = model.defaultFill
                         let oldStroke = model.defaultStroke
-                        // Swap: fill color becomes stroke color and vice versa
-                        if let sf = oldStroke {
-                            model.defaultFill = Fill(color: sf.color)
-                        } else {
-                            model.defaultFill = nil
-                        }
-                        if let ff = oldFill {
-                            model.defaultStroke = Stroke(color: ff.color)
-                        } else {
-                            model.defaultStroke = nil
-                        }
-                        if !model.document.selection.isEmpty {
+                        model.defaultFill = oldStrokeColor.map {
+                            ColorPanel.recolorFill(oldFill, $0) }
+                        model.defaultStroke = oldFillColor.map {
+                            ColorPanel.recolorStroke(oldStroke, $0) }
+                        if !model.document.selection.isEmpty, let ctrl = controller {
                             // Fill + stroke swap as ONE undo step (withTxn; each
-                            // setSelection* editDocument joins it).
+                            // mapSelection* editDocument joins it). Each mapper
+                            // hands the element its OWN fill / stroke.
                             model.withTxn {
-                                controller?.setSelectionFill(model.defaultFill)
-                                controller?.setSelectionStroke(model.defaultStroke)
+                                ctrl.mapSelectionFill { f in
+                                    oldStrokeColor.map { ColorPanel.recolorFill(f, $0) } }
+                                ctrl.mapSelectionStroke { s in
+                                    oldFillColor.map { ColorPanel.recolorStroke(s, $0) } }
                             }
                         }
                     }
