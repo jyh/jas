@@ -52,6 +52,13 @@ PERMISSIONS: Screen Recording + Accessibility, both ALREADY GRANTED to iTerm
 on this machine. They follow the terminal that launches Claude Code — from
 Terminal.app / VS Code / the desktop app, that host needs the same two
 toggles. Never call `CGRequestScreenCaptureAccess()`; it prompts.
+
+BUT PERMISSION IS NOT ENOUGH: the lane also needs an UNLOCKED, AWAKE display on
+the console. `screencapture` returns exit 0 but writes a blank frame under
+`CGSSessionScreenIsLocked` or display sleep (verified on this host — permission
+True, capture blank). `require_capturable_display()` preflights this and stops
+with a NAMED message (exit 3) rather than measuring a black rectangle; run
+`gui_probe_swift.py session` to see the current state.
 """
 
 from __future__ import annotations
@@ -87,9 +94,74 @@ def list_windows() -> list[dict]:
         out.append({"id": int(w.get("kCGWindowNumber", 0)),
                     "name": name,
                     "owner": w.get("kCGWindowOwnerName") or "",
+                    "layer": int(w.get("kCGWindowLayer", 0)),
                     "x": b.get("X", 0), "y": b.get("Y", 0),
                     "w": b.get("Width", 0), "h": b.get("Height", 0)})
     return out
+
+
+def capturable_windows() -> list[dict]:
+    """Real, capturable APP windows only.
+
+    A normal application window sits on window layer 0. Everything the harness
+    must NOT target — the lock-screen `Display N Shield` pseudo-windows the
+    Window Server puts up (verified on this host while locked), the menu bar,
+    the Dock, Control Center items, the login window — is owned by the Window
+    Server or lives on a non-zero layer. Capturing a shield "succeeds" and
+    proves nothing, so selftest and any auto-pick must draw only from here.
+    """
+    return [w for w in list_windows()
+            if w["layer"] == 0 and w["owner"] != "Window Server" and w["name"]]
+
+
+class DisplayUnavailable(ProbeFailure):
+    """The login session cannot be screen-captured right now (screen locked,
+    display asleep, or fast-user-switched off the console)."""
+
+
+def display_session_state() -> dict:
+    """Whether this login session can actually be screen-captured right now."""
+    try:
+        import Quartz
+    except ImportError:
+        raise ProbeFailure(
+            "pyobjc (Quartz) is required for the Swift lane; it is present in "
+            "the repo .venv — run this with .venv/bin/python") from None
+    d = Quartz.CGSessionCopyCurrentDictionary() or {}
+    return {
+        "locked": bool(d.get("CGSSessionScreenIsLocked", 0)),
+        "on_console": bool(d.get("kCGSSessionOnConsoleKey", 0)),
+        "asleep": bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID())),
+    }
+
+
+def require_capturable_display() -> dict:
+    """Fail with a NAMED message if the display cannot be captured.
+
+    `screencapture -l<id>` returns exit 0 but writes an unusable/black frame
+    when the screen is LOCKED or the display is ASLEEP. Verified on this host:
+    Screen-Recording permission preflights True, yet the capture is blank under
+    `CGSSessionScreenIsLocked`. So the Swift lane needs more than the two
+    permission toggles — it needs an unlocked, awake display on the console.
+    Read that up front and say so, instead of measuring a black rectangle.
+    """
+    st = display_session_state()
+    problems = []
+    if st["locked"]:
+        problems.append("the screen is LOCKED (CGSSessionScreenIsLocked)")
+    if st["asleep"]:
+        problems.append("the main display is ASLEEP (CGDisplayIsAsleep)")
+    if not st["on_console"]:
+        problems.append("this session is not on the console "
+                        "(fast-user-switched away)")
+    if problems:
+        raise DisplayUnavailable(
+            "the Swift lane needs an UNLOCKED, AWAKE display on the console: "
+            + "; ".join(problems)
+            + ". `screencapture` returns success but an unusable frame "
+              "otherwise, so this is a named stop rather than a false green. "
+              "Unlock the machine and keep the display awake, then retry.")
+    return st
 
 
 def find_window(title: str, exact: bool = True) -> dict:
@@ -120,6 +192,7 @@ def capture(window: dict, path: str) -> tuple[str, float]:
     for background and occluded windows, so the app never has to be raised
     and JYH's focus is never stolen.
     """
+    require_capturable_display()   # named stop if locked/asleep, never a blank
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     r = subprocess.run([SCREENCAPTURE, "-x", "-o", f"-l{window['id']}", path],
                        capture_output=True, text=True)
@@ -207,6 +280,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("windows", help="list on-screen window names + ids")
+    sub.add_parser("session", help="report display capturability (lock/sleep)")
     g = sub.add_parser("geom", help="print one window's id and bounds")
     g.add_argument("title")
     s = sub.add_parser("shot", help="capture one window to a PNG")
@@ -232,8 +306,18 @@ def main() -> int:
         if args.cmd == "windows":
             for w in list_windows():
                 if w["name"]:
-                    print(f"{w['id']:>7}  {w['owner'][:18]:18s} "
+                    cap = "cap " if (w["layer"] == 0
+                                     and w["owner"] != "Window Server") else "    "
+                    print(f"{cap}{w['id']:>7}  L{w['layer']:<3} "
+                          f"{w['owner'][:18]:18s} "
                           f"{int(w['w'])}x{int(w['h'])}  {w['name'][:60]}")
+        elif args.cmd == "session":
+            st = display_session_state()
+            ok = not (st["locked"] or st["asleep"]) and st["on_console"]
+            print(f"locked={st['locked']} asleep={st['asleep']} "
+                  f"on_console={st['on_console']} -> "
+                  f"{'CAPTURABLE' if ok else 'NOT capturable'}")
+            return 0 if ok else 3
         elif args.cmd == "geom":
             print(find_window(args.title))
         elif args.cmd == "shot":
@@ -247,6 +331,12 @@ def main() -> int:
                            args.axis))
         elif args.cmd == "selftest":
             return selftest(args.title)
+    except DisplayUnavailable as e:
+        # Distinct from a measurement failure: the host cannot be captured at
+        # all right now, so no verdict is possible (mirrors the Rust lane's
+        # exit-3 "harness error, teeth unproven").
+        print(f"UNAVAILABLE: {e}", file=sys.stderr)
+        return 3
     except ProbeFailure as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 1
@@ -256,17 +346,20 @@ def main() -> int:
 def selftest(title: str | None) -> int:
     """Prove capture + decode + measure end to end WITHOUT launching the app.
 
-    Uses whatever window is available (the app when `--title` is given), so the
-    Swift lane's measurement chain is verifiable on a host where the Swift
-    build is not present — which is exactly the situation this wave was in.
+    Uses whatever CAPTURABLE app window is available (the app when `--title` is
+    given), so the Swift lane's measurement chain is verifiable on a host where
+    the Swift build is not present — which is exactly the situation this wave
+    was in.
     """
-    wins = [w for w in list_windows() if w["name"] and w["w"] > 200
-            and w["h"] > 200]
+    require_capturable_display()   # named stop if the display is locked/asleep
     if title:
         wins = [find_window(title)]
+    else:
+        wins = [w for w in capturable_windows() if w["w"] > 200 and w["h"] > 200]
     if not wins:
-        print("FAIL: no suitable on-screen window to self-test against",
-              file=sys.stderr)
+        print("FAIL: no capturable app window (layer 0, not the Window Server) "
+              "to self-test against — open any normal app window, or pass "
+              "--title", file=sys.stderr)
         return 1
     win = wins[0]
     print(f"target: id={win['id']} {win['owner']!r} {win['name'][:40]!r} "
