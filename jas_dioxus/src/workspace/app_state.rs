@@ -1287,8 +1287,7 @@ impl AppState {
         // Width profiles are re-derived only when the edit can change
         // them: the profile shape / flip, or the weight they scale with.
         let profile_edit = matches!(group, StrokeEditGroup::Width | StrokeEditGroup::Profile);
-        let profile = sp.profile.clone();
-        let profile_flipped = sp.profile_flipped;
+        // Owned copy: the write closures below borrow it across the txn.
         let sp = sp.clone();
         if !tab.model.document().selection.is_empty() {
             let profile_width = if group == StrokeEditGroup::Width {
@@ -1303,7 +1302,7 @@ impl AppState {
                 });
                 if profile_edit {
                     let width_pts = crate::geometry::element::profile_to_width_points(
-                        &profile, profile_width, profile_flipped,
+                        &sp.profile, profile_width, sp.profile_flipped,
                     );
                     Controller::set_selection_width_profile(m, width_pts);
                 }
