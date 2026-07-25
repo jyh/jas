@@ -1212,51 +1212,17 @@ struct FillStrokeWidget: View {
     }
 
     private func swapColors() {
-        // Pull current colors from the SELECTION first (matching what
-        // the widget displays — see fillStrokeSquare). Fall back to
-        // tab defaults when no selection / non-uniform. Swapping based
-        // on defaults alone produced "random" colors when the
-        // defaults had drifted from the selection's actual fill /
-        // stroke (e.g. the user changed colors via Color panel
-        // slider edits that wrote to the selection).
-        let curFill: Fill? = {
-            switch selectionFillSummary(model.document) {
-            case .uniform(let f?): return f
-            case .uniform(nil): return nil
-            default: return model.defaultFill
-            }
-        }()
-        let curStroke: Stroke? = {
-            switch selectionStrokeSummary(model.document) {
-            case .uniform(let s?): return s
-            case .uniform(nil): return nil
-            default: return model.defaultStroke
-            }
-        }()
-        // Colour-only: each side keeps every one of its own non-colour
-        // attributes and takes only the other's colour. This built a bare
-        // `Fill(color:)` / `Stroke(color:)` and stamped it over the
-        // selection, so the arrow reset a 5pt dashed arrowheaded line's
-        // width / cap / join / dash / arrowheads / align / miter / opacity
-        // (and any fill opacity) — while workspace/actions.yaml
-        // `swap_fill_stroke` says it swaps colours. Mirrors the Rust
-        // app_state.rs `swap_fill_stroke`.
-        let newFill: Fill? = curStroke.map { ColorPanel.recolorFill(curFill, $0.color) }
-        let newStroke: Stroke? = curFill.map { ColorPanel.recolorStroke(curStroke, $0.color) }
-        model.defaultFill = newFill
-        model.defaultStroke = newStroke
-        if !model.document.selection.isEmpty {
-            let ctrl = Controller(model: model)
-            // Fill + stroke swap as ONE undo step (withTxn; each
-            // editDocument joins). Each mapper hands the element its OWN
-            // fill / stroke, so recolouring preserves the rest.
-            model.withTxn {
-                ctrl.mapSelectionFill { f in
-                    curStroke.map { ColorPanel.recolorFill(f, $0.color) } }
-                ctrl.mapSelectionStroke { s in
-                    curFill.map { ColorPanel.recolorStroke(s, $0.color) } }
-            }
-        }
+        // The law lives in ONE place — Controller.swapFillStrokeColors, the
+        // Swift statement of the Rust `AppState::swap_fill_stroke` — and
+        // both this widget arrow and the Shift+X key route there. It used to
+        // be a second copy that additionally sourced the two colours from
+        // the SELECTION (defaults as fallback) while Shift+X and Rust
+        // sourced the DEFAULTS, so the same action swapped different colours
+        // depending on how it was invoked. Default-sourced is the right
+        // semantic: the defaults are also what decides `nil`, and per-element
+        // sourcing would swap a Line's stroke away to nothing, since a Line
+        // holds no fill.
+        Controller(model: model).swapFillStrokeColors()
     }
 
     private func resetDefaults() {

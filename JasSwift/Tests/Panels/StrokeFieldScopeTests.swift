@@ -356,6 +356,10 @@ private func applyGlobalEdit(
 // attributes — a live port divergence on top of the clobber. Both ports now
 // recolour per element and preserve everything else.
 //
+// These pins drive `Controller.swapFillStrokeColors` — the real call path
+// both views now use. They used to re-implement the law with the mappers
+// instead, so a regression in the view code could not have turned them red.
+//
 // The defaults are deliberately PLAIN and the element RICH: that gap is the
 // bug, and seeding the default with the same rich stroke hides it.
 @Test func swapFillStrokeSwapsColoursOnly() {
@@ -363,17 +367,7 @@ private func applyGlobalEdit(
     let green = Color(r: 0, g: 1, b: 0)
     model.defaultFill = Fill(color: green, opacity: 0.25)
     model.defaultStroke = Stroke(color: Color(r: 1, g: 1, b: 1), width: 1.0)
-    let ctrl = Controller(model: model)
-    let curFill = model.defaultFill
-    let curStroke = model.defaultStroke
-    // The ContentView / CanvasSubwindow law, exercised through the same
-    // mappers both call.
-    model.withTxn {
-        ctrl.mapSelectionFill { f in
-            curStroke.map { ColorPanel.recolorFill(f, $0.color) } }
-        ctrl.mapSelectionStroke { s in
-            curFill.map { ColorPanel.recolorStroke(s, $0.color) } }
-    }
+    Controller(model: model).swapFillStrokeColors()
     let s = strokeAt(model, 0)
     let rich = richStroke()
     #expect(s.color == green, "stroke takes the fill's colour")
@@ -396,6 +390,38 @@ private func applyGlobalEdit(
     #expect(ColorPanel.recolorFill(Fill(color: Color(r: 0, g: 1, b: 0), opacity: 0.25),
                                    Color(r: 1, g: 1, b: 1)).opacity == 0.25,
             "a swap must not reset fill opacity")
+}
+
+// The two colours come from the tab DEFAULTS, not from the selection.
+// ContentView sourced them from the selection first (defaults only as
+// fallback) while Shift+X and Rust sourced the defaults, so one action
+// swapped different colours depending on how it was invoked. Per-element
+// sourcing is also wrong on its own terms: a Line holds no fill, so the
+// selection's fill reads as "uniformly nil" and the swap would take the
+// line's stroke away entirely instead of recolouring it.
+@Test func swapFillStrokeSourcesTheDefaultsNotTheSelection() {
+    let model = strokeModel(richStroke())   // a Line: stroke red, NO fill
+    let green = Color(r: 0, g: 1, b: 0)
+    model.defaultFill = Fill(color: green)
+    model.defaultStroke = Stroke(color: Color(r: 1, g: 1, b: 1), width: 1.0)
+    Controller(model: model).swapFillStrokeColors()
+    #expect(model.document.getElement([0, 0]).stroke != nil,
+            "a swap must not delete the line's stroke")
+    #expect(strokeAt(model, 0).color == green,
+            "the stroke takes the DEFAULT fill's colour")
+    #expect(model.defaultStroke?.color == green)
+    #expect(model.defaultFill?.color == Color(r: 1, g: 1, b: 1),
+            "and the default fill takes the default stroke's colour")
+}
+
+@Test func swapFillStrokePushesOneUndoStep() {
+    let model = strokeModel(richStroke())
+    model.defaultFill = Fill(color: Color(r: 0, g: 1, b: 0))
+    Controller(model: model).swapFillStrokeColors()
+    #expect(model.canUndo)
+    model.undo()
+    #expect(strokeAt(model, 0) == richStroke(),
+            "one undo restores fill AND stroke")
 }
 
 @Test func strokeEditPushesOneUndoStep() {

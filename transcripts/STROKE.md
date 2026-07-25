@@ -409,7 +409,16 @@ implementation can silently demote a colour again.
 **Colour is not part of this.** A colour pick changes the colour and
 nothing else, through the same preserve-the-rest rule (`recolor_stroke` /
 `recolorStroke`), and so does the fill/stroke swap (Shift+X, the widget
-arrow, the Color-panel button) — it swaps the two **colours**. Resetting
+arrow, the Color-panel button) — it swaps the two **colours**, and it
+sources them from the **new-element defaults**, never per element. The
+defaults are what decides `nil` (no fill / no stroke swaps too), and
+per-element sourcing breaks on the commonest case: a Line holds no fill,
+so its "own" fill colour is nothing and the swap would take its stroke
+away instead of recolouring it. Each port states this once — Rust
+`AppState::swap_fill_stroke`, Swift `Controller.swapFillStrokeColors` —
+and every call site routes there, so the keyboard path and the widget
+path cannot drift apart (they had: Swift's widget arrow sourced the
+selection while Shift+X sourced the defaults). Resetting
 to defaults (`reset_fill_stroke`) is the one action that legitimately
 replaces the whole set of stroke attributes, and `workspace/actions.yaml`
 enumerates what it resets.

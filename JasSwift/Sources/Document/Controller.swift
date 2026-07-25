@@ -1401,6 +1401,41 @@ public class Controller {
         return doc
     }
 
+    /// Swap the fill and stroke COLOURS — `workspace/actions.yaml`
+    /// `swap_fill_stroke` (Shift+X, the fill/stroke widget arrow, the
+    /// Color-panel button).
+    ///
+    /// Colour-only: each side keeps every one of its own non-colour
+    /// attributes (width / cap / join / dash / arrowheads / align / miter,
+    /// and each opacity) and takes only the other's colour. It used to build
+    /// a bare `Stroke(color:)` / `Fill(color:)` and stamp it over the
+    /// selection, so the arrow reset a 5pt dashed arrowheaded line.
+    ///
+    /// The two colours are sourced from the tab DEFAULTS, which is also what
+    /// decides `nil` (no fill / no stroke swaps too). Sourcing them from the
+    /// selection instead — which one of the two Swift call sites did — is
+    /// wrong per element: a Line holds no fill, so a per-element swap would
+    /// hand its stroke a nil colour and swap the stroke away to nothing.
+    /// Mirrors the Rust `AppState::swap_fill_stroke` (app_state.rs), which
+    /// this is the single Swift statement of: both view call sites route
+    /// here rather than each holding a copy of the law.
+    public func swapFillStrokeColors() {
+        let oldFill = model.defaultFill
+        let oldStroke = model.defaultStroke
+        let fillColor = oldFill?.color
+        let strokeColor = oldStroke?.color
+        model.defaultFill = strokeColor.map { ColorPanel.recolorFill(oldFill, $0) }
+        model.defaultStroke = fillColor.map { ColorPanel.recolorStroke(oldStroke, $0) }
+        guard !model.document.selection.isEmpty else { return }
+        // Fill + stroke swap as ONE undo step: withTxn opens the bracket,
+        // each mapSelection* (editDocument) joins it. Each mapper hands the
+        // element its OWN fill / stroke, so recolouring preserves the rest.
+        model.withTxn {
+            self.mapSelectionFill { f in strokeColor.map { ColorPanel.recolorFill(f, $0) } }
+            self.mapSelectionStroke { s in fillColor.map { ColorPanel.recolorStroke(s, $0) } }
+        }
+    }
+
     /// Set strokeBrush on every selected element (paths only). Used
     /// by apply_brush_to_selection / remove_brush_from_selection.
     public func setSelectionStrokeBrush(_ slug: String?) {
