@@ -195,6 +195,13 @@ def dash_gap_renders(ctx: Ctx):
   value inside the input, then types — which is also what a user does.
 * **Use `hit_target()`** to confirm the widget is really the topmost element at
   its own centre before believing a click did nothing.
+* **Never let mutation noise evict mutation signal.** The liveness observer
+  filters decoration *in the page, ahead of its cap*, and only counts it. An
+  earlier version stored the first 200 raw records and filtered afterwards; a
+  `data-input-modality` storm then filled the cap with focus decoration and
+  crowded out the meaningful records behind it, so a demonstrably live widget
+  intermittently reported `201 raw, 0 meaningful` and the check failed. If you
+  add a capped buffer anywhere in a check, make sure noise cannot fill it.
 
 ---
 
