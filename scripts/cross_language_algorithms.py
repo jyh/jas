@@ -47,6 +47,14 @@ SKIP_LANG_ALGO = set()
 # Strategies whose fixtures pin a SUBSET of the emitted result keys, and so
 # get the key-by-key oracle pass instead of the whole-object one. See the
 # comment at that pass for why these families need an oracle at all.
+#
+# "exact_boolean" is deliberately NOT here yet. Enabling it turns the
+# boolean family red on one vector, `exclude_overlapping_squares`, whose
+# pinned ring_count of 2 is the derived-correct answer while both ports
+# emit 1 self-touching ring. That gap, its prototyped fix, and the port
+# divergence blocking the fix are written up on the vector itself in
+# test_fixtures/algorithms/boolean.json (`_known_gap`). Add the strategy
+# here in the same commit that closes it.
 ORACLE_PARTIAL_STRATEGIES = ("property_planar",)
 
 
