@@ -184,41 +184,11 @@ struct YamlElementView: View {
                     guard let m = model, let store = storeRef else { return }
                     let ws = WorkspaceData.load()
                     let actions = ws?.data["actions"] as? [String: Any]
-                    // Augment the dialog-init context with the live
-                    // selection's fill / stroke (uniform summary →
-                    // tab default → app default) so the YAML init
-                    // expression `if param.target == "fill" then
-                    // state.fill_color else state.stroke_color` reads
-                    // the actual canvas color the user is editing.
-                    // Without this, state.X resolves to the workspace
-                    // YAML default and the picker opens on white.
-                    func liveHex(_ isFill: Bool) -> String? {
-                        let resolved: Color? = {
-                            if isFill {
-                                switch selectionFillSummary(m.document) {
-                                case .uniform(let f?): return f.color
-                                case .uniform(nil): return nil
-                                default: return m.defaultFill?.color
-                                }
-                            } else {
-                                switch selectionStrokeSummary(m.document) {
-                                case .uniform(let s?): return s.color
-                                case .uniform(nil): return nil
-                                default: return m.defaultStroke?.color
-                                }
-                            }
-                        }()
-                        return resolved.map { "#" + $0.toHex() }
-                    }
-                    var ctxAug = context
-                    var stateMap = (ctxAug["state"] as? [String: Any]) ?? [:]
-                    if let h = liveHex(true) { stateMap["fill_color"] = h }
-                    if let h = liveHex(false) { stateMap["stroke_color"] = h }
-                    ctxAug["state"] = stateMap
                     dispatchYamlAction(
                         "open_color_picker",
                         params: ["target": forFill ? "fill" : "stroke"],
-                        actions: actions, ctx: ctxAug,
+                        actions: actions,
+                        ctx: colorPickerSeedContext(context, model: m),
                         store: store, model: m
                     )
                 }

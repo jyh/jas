@@ -284,6 +284,70 @@ private func fileNewModel() -> Model {
             "a dialog opens on the paint the user can see, not the tab default")
 }
 
+// The THIRD dialog-opening site: `fill_stroke_widget`'s double-click →
+// open_color_picker, the one the Color and Swatches panels carry. It hand-rolled
+// `selection ?? model.defaultFill` and overlaid THAT onto the panel ctx, which
+// already carried the right answer — so for a MIXED selection with a non-empty
+// tab default it OVERWROTE the declared default with the tab colour. Rust seeds
+// `#ffffff` there (Mixed publishes nothing, the declared default stands), which
+// is the one Mixed rule the COLORTIERS corpus case pins.
+@Test func colorPickerSeedLeavesTheDeclaredDefaultStandingForMixed() {
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            rect(fill: Fill(color: Color(r: 1, g: 0, b: 0)), stroke: blackStroke),
+            rect(fill: Fill(color: Color(r: 0, g: 0, b: 1)), stroke: blackStroke),
+        ])],
+        selectedLayer: 0,
+        selection: [ElementSelection(path: [0, 0]), ElementSelection(path: [0, 1])]))
+    model.defaultFill = Fill(color: Color(r: 0, g: 1, b: 0))
+
+    guard let ws = WorkspaceData.load() else {
+        Issue.record("workspace bundle failed to load")
+        return
+    }
+    // The ctx the widget renders against — correct before the overlay touches it.
+    let panelCtx: [String: Any] = ["state": buildLiveStateMap(ws: ws, model: model)]
+    let seeded = colorPickerSeedContext(panelCtx, model: model)
+    let state = seeded["state"] as? [String: Any]
+    #expect(state?["fill_color"] as? String == "#ffffff",
+            """
+            a Mixed selection publishes nothing, so the DECLARED default is \
+            what the picker opens on — the tab default must not overwrite it
+            """)
+}
+
+// …and the site still does the job it was added for: a uniform selection seeds
+// the picker on the paint the user can see.
+@Test func colorPickerSeedShowsTheSelectionsColour() {
+    let model = selectedRect(fill: Fill(color: Color(r: 1, g: 0, b: 0)), stroke: blackStroke)
+    let seeded = colorPickerSeedContext(["state": [String: Any]()], model: model)
+    let state = seeded["state"] as? [String: Any]
+    #expect(state?["fill_color"] as? String == "#ff0000")
+    #expect(state?["stroke_color"] as? String == "#000000")
+}
+
+// A no-fill selection must SAY none (NSNull), not leave white standing — the
+// same thing `dialogStateScope` says, because it is now the same reader.
+@Test func colorPickerSeedSaysNoneForANoFillSelection() {
+    let model = selectedRect(fill: nil, stroke: blackStroke)
+    let state = colorPickerSeedContext(["state": [String: Any]()],
+                                       model: model)["state"] as? [String: Any]
+    #expect(state?["fill_color"] is NSNull)
+}
+
+// Keys the widget's ctx carried that are NOT the two colours survive untouched:
+// the seed re-states two facts, it does not rebuild the scope.
+@Test func colorPickerSeedKeepsTheRestOfTheCtx() {
+    let model = selectedRect(fill: white, stroke: blackStroke)
+    let seeded = colorPickerSeedContext(
+        ["state": ["active_tool": "selection"] as [String: Any],
+         "panel": ["mode": "rgb"] as [String: Any]],
+        model: model)
+    let state = seeded["state"] as? [String: Any]
+    #expect(state?["active_tool"] as? String == "selection")
+    #expect((seeded["panel"] as? [String: Any])?["mode"] as? String == "rgb")
+}
+
 @Test func dialogSeedSaysNoneForANoFillSelection() {
     let model = selectedRect(fill: nil, stroke: blackStroke)
     #expect(dialogStateScope(model: model)["fill_color"] is NSNull,

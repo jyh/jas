@@ -169,3 +169,33 @@ func dialogStateScope(model: Model?) -> [String: Any] {
     guard let ws = WorkspaceData.load() else { return [:] }
     return buildLiveStateMap(ws: ws, model: model)
 }
+
+/// The ctx a colour picker opened by DOUBLE-CLICKING a `fill_stroke_widget`
+/// initialises against: the widget's own render ctx with the two colour keys
+/// re-stated from ``dialogStateScope``.
+///
+/// `color_picker.yaml`'s init reads `if param.target == "fill" then
+/// state.fill_color else state.stroke_color`, so the seed is only as good as
+/// the `state` map handed to dispatch. This site is the third of the three
+/// dialog-opening sites and the last to be routed through the one reader; it
+/// hand-rolled `selection ?? model.defaultFill` and overlaid THAT onto the
+/// (already-live) panel ctx. For a MIXED selection the hand-rolled answer was
+/// the tab default, which OVERWROTE the declared default the panel ctx
+/// correctly carried — so Rust seeded the picker `#ffffff` (Mixed publishes
+/// nothing, the declared default stands) and this port seeded the tab colour.
+/// Mixed is the one outcome the COLORTIERS corpus case pins, so the two ports
+/// disagreed on the rule the gate exists for.
+///
+/// Re-stating both keys rather than passing `context` through untouched keeps
+/// the seed correct for callers whose ctx was built without the live overlay,
+/// and costs one map build per double-click.
+func colorPickerSeedContext(_ context: [String: Any], model: Model) -> [String: Any] {
+    var ctx = context
+    var stateMap = (ctx["state"] as? [String: Any]) ?? [:]
+    let live = dialogStateScope(model: model)
+    for key in ["fill_color", "stroke_color"] {
+        if let v = live[key] { stateMap[key] = v }
+    }
+    ctx["state"] = stateMap
+    return ctx
+}
