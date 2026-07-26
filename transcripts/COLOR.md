@@ -238,16 +238,28 @@ paint", while a null from `panel.recent_colors.3` means "that slot is
 empty" and draws a hollow placeholder. An empty string carries the "no
 paint" meaning too (a dialog's hex field cleared). Swift used to render
 every non-colour as a transparent square, making an explicit none and an
-empty slot identical; closed by COLORTIERS.
+empty slot identical; closed by COLORTIERS. An explicit none takes the
+same SOLID border a painted swatch does — it is a real answer about the
+paint — while an empty slot keeps the dashed placeholder border; Rust
+derived that from "has no colour" alone and so wore the dashed border for
+a none, converged in the COLORTIERS repair. The hollow ring's width still
+differs (6px Rust, 3px Swift) and is banked in COLOR_TESTS.md.
 
 Where the DEFAULT colours live is settled too: fill and stroke defaults
 are WORKSPACE state, not document state, so File > New carries the
-colour the user is mid-flow with rather than reseeding. And an ACTION's
+colour the user is mid-flow with rather than reseeding — and every reader
+of the active paint resolves the SAME three tiers, selection → document
+default → app default. That includes the ones easy to forget: a dialog's
+seed, the toolbar squares, and the Color panel's own sliders (each of
+which was caught answering it its own way). And an ACTION's
 `state.fill_color` is read with the SELECTION in view — clicking Solid
 with a shape selected asks whether THAT shape's fill is none, not
 whether the app default is. Both are pinned cross-language by
 `test_fixtures/actions/fill_stroke_action_scope.json`; the record is in
-COLOR_TESTS.md.
+COLOR_TESTS.md. Swift's NATIVE toolbar "C" / "/" mode buttons predate the
+ruling and still write the tab tier by hand — banked in COLOR_TESTS.md,
+with why it means no user-level check can confirm the action-scope half
+in Swift yet.
 
 ## Color bar
 

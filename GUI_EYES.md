@@ -96,6 +96,7 @@ Baselines are supported (`--shot-dir`, element-clipped PNGs are ~1 KB) but are
 | `brush_promotes_line` | applying a brush to a Line must thicken its ink (the Line→Path promotion) |
 | `canvas_transform_balance` | a brushed repaint must leave the canvas transform exactly where it found it |
 | `button_enter_activates` | a focused native `<button>` must still activate on Enter — the app may claim a key's default action only where the focused element has none of its own |
+| `none_indicator_visible` | a no-paint swatch must *look* like no paint — the white face and the red diagonal, not a colour and not an empty slot (the unrendered-fact class) |
 
 ### The generic sweep is the one that scales
 
@@ -157,6 +158,7 @@ and a bare `--regress dead_tile` exited nonzero on a perfectly healthy app.)
 | `arrow_scale_lie` | `arrowhead_reflects_scale` | overwrites the end-scale field's DOM value to 200 while the head stays at its true 100%, so the panel claims a scale the canvas never rendered |
 | `leaked_ctx_save` | `canvas_transform_balance` | pushes one un-restored `save()` + transform onto the live canvas context — the class the brushed-path early `return` used to leak |
 | `enter_default_stolen` | `button_enter_activates` | prevents Enter's default from a **capturing document listener, regardless of what holds focus** — the over-broad suppression that killed native button activation (Dioxus delegates the app's keydown from the document root, so this is the same claim at the same layer) |
+| `none_indicator_flat` | `none_indicator_visible` | strips the red diagonal from the fill swatch and keeps stripping it through re-render — what reverting the `explicit_none` plumbing renders, which every unit test, every golden and 8/8 of these checks were blind to |
 
 **Scoring is not a blind inversion** — a red for the wrong reason proves
 nothing. Each mode declares a *marker* (a fragment of its owning check's own

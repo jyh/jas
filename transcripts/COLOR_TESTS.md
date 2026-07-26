@@ -118,9 +118,46 @@ empty-string encoding Rust also reads as none) rendered as BLACK.
 
 Swift now carries the same `nullColorMeansNone` — reading the same
 schema table — plus the empty-string arm, the white face and the red
-diagonal. Pinned by `nullMeansNoneOnlyForNullableStateColours`
-(JasSwift/Tests/Interpreter/LiveStateMapTests.swift), the mirror of
-Rust's `cptriage_null_means_none_only_for_nullable_state_colours`.
+diagonal.
+
+That claim was made while only the PREDICATE had a test
+(`nullMeansNoneOnlyForNullableStateColours` and Rust's
+`cptriage_null_means_none_only_for_nullable_state_colours`). The white
+face, the diagonal and the empty-string arm had no vector in either port:
+`color_panel_content` is Path-B-excluded so no widget_tree golden sees the
+widget, and gui_drive had no none-indicator check — reverting the whole
+`explicit_none` plumbing left every unit test, every golden and 8/8
+gui_drive checks GREEN. The adversarial lens proved exactly that.
+
+The render half is now pinned by vectors of its own, in both ports, over
+pure functions lifted out of the views (`swatch_color_bind` /
+`swatch_face_color` / `swatch_border` / `swatch_style` / `NONE_DIAG_SVG`;
+`swatchColorBind` / `swatchFaceColor` / `swatchBorder` /
+`swatchNoneDiagonalPath`):
+
+* Rust `colortiers_*` in `jas_dioxus/src/interpreter/renderer.rs` (10),
+  including the style STRING a tile carries and the diagonal's geometry.
+* Swift `JasSwift/Tests/Interpreter/ColorSwatchFaceTests.swift` (8),
+  ending in `swatchFaceTableMatchesRust`, which states the whole table.
+* The user-level fact: `none_indicator_visible` in `scripts/gui_checks.py`
+  — paint the fill black, click None, assert the red diagonal, its
+  corner-to-corner geometry, the white face, and a >= 10 pixel-mean move.
+  Fault mode `none_indicator_flat` owns it (`TEETH ok` verified live).
+
+Each was verified RED by reverting the plumbing, the same way the lens
+found the gap.
+
+### Banked, NOT fixed: the hollow ring's width
+
+The two ports draw the same no-paint indicator over the same white face
+with the same border now, but the HOLLOW ("stroke") swatch's ring is
+**6px in Rust and 3px in Swift**. Pre-existing, cosmetic, and not part of
+the none contract: the ring width is how each port renders a hollow
+swatch at all, painted or not, so converging it is a swatch-geometry
+question rather than a colour one. Rust insets its 6px with
+`box-sizing: border-box`; SwiftUI's `.stroke` centres on the path edge,
+so the same number is not the same drawing and a change needs an eye on
+it. Whoever converges swatch geometry owns this.
 
 ### CLOSED by COLORTIERS: the two architectural asymmetries
 
@@ -149,14 +186,54 @@ because each port was self-consistent and they disagreed. JYH ruled
    Mixed) agree across the two scopes and the two ports. Gated
    cross-language by `test_fixtures/actions/fill_stroke_action_scope.json`.
 
-Two more readers of the same fact were hand-rolling it from
-`model.defaultFill` and were routed through the one reader in the same
-wave: the two Swift dialog-seeding sites (`openToolbarColorPicker`,
-`openYamlDialogFromMenu` → `dialogStateScope`), which opened the picker
-on WHITE where Rust opened it on the selection's colour; and the native
-`FillStrokeWidget` squares, which skipped the app tier entirely and so
-drew the NO-PAINT indicator on a cold launch while the Color panel one
-reader away showed white.
+Four more readers of the same fact were hand-rolling it from
+`model.defaultFill` and were routed through the one reader:
+
+* the two Swift dialog-seeding sites (`openToolbarColorPicker`,
+  `openYamlDialogFromMenu` → `dialogStateScope`), which opened the picker
+  on WHITE where Rust opened it on the selection's colour;
+* the native `FillStrokeWidget` squares, which skipped the app tier
+  entirely and so drew the NO-PAINT indicator on a cold launch while the
+  Color panel one reader away showed white;
+* the `fill_stroke_widget` double-click → `open_color_picker` path — the
+  THIRD dialog site, missed by the first sweep. It overlaid its own
+  `selection ?? defaultFill` answer onto the widget's (already correct)
+  panel ctx, so a MIXED selection with a non-empty tab default opened the
+  picker on the tab colour where Rust opens it on the declared default —
+  the one Mixed rule the corpus case pins. Now
+  `colorPickerSeedContext`, pinned by four tests in
+  `LiveStateMapTests.swift`;
+* the Color panel's own SLIDERS (`colorPanelLiveOverrides`), which had NO
+  app tier. Unreachable until the tier moved above the canvases, and
+  reachable the moment it did: set a red with nothing selected, File >
+  New, and Rust's sliders / hex read `#ff0000` while Swift's fell back to
+  `color.yaml`'s stored 255/255/255 — beside the same panel's fill swatch
+  painting red. A divergence the COLORTIERS wave created. Pinned by six
+  tests in `JasSwift/Tests/Interpreter/ColorPanelSyncTests.swift` and
+  Rust's
+  `colortiers_panel_sliders_read_the_app_tier_after_a_new_document`.
+
+### Banked, NOT fixed: the toolbar's native mode buttons contradict the ruling
+
+`JasSwift/Sources/Canvas/ContentView.swift`'s toolbar "C" (Color) and "/"
+(None) buttons are NATIVE AppKit-era code that writes the tab tier by
+hand, and they do not follow ruling 2 above:
+
+* "C" restores **white** where the spec and Rust restore `#000000` via
+  `set_fill_type_solid`;
+* neither button consults the SELECTION, so clicking Solid on a
+  stroke-only shape paints nothing in Swift while Rust now paints it
+  black.
+
+Scope-not-defect: it is pre-existing, justified in-code, and the ACTION
+SEAM the ruling is about (`set_fill_type_solid` through dispatch) agrees
+in both ports and is gated by
+`test_fixtures/actions/fill_stroke_action_scope.json`. It is recorded here
+because it is WHY no user-level check can confirm ruling 2 in Swift: the
+widget a user would click to test it does not go through the seam. The
+fix is to route these buttons through the YAML actions — the same
+native-widget retirement `fill_stroke_widget` is waiting on — not to
+patch their hand-rolled tiers.
 
 ### The 13 proven identity operations (correct DEAD)
 
