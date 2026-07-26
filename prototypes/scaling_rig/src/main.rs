@@ -6,6 +6,7 @@
 
 mod camera;
 mod gpu;
+mod host;
 mod metrics;
 mod rng;
 mod scene;
@@ -89,32 +90,6 @@ struct Cli {
     seed: u64,
 }
 
-fn sysctl(key: &str) -> String {
-    std::process::Command::new("sysctl")
-        .args(["-n", key])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn os_string() -> String {
-    let product = std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    if product.is_empty() {
-        std::env::consts::OS.to_string()
-    } else {
-        format!("macOS {product}")
-    }
-}
-
 fn main() {
     let cli = Cli::parse();
 
@@ -148,13 +123,17 @@ fn main() {
         measure: cli.seconds,
     };
 
-    let chip = sysctl("machdep.cpu.brand_string");
-    let os = os_string();
+    let machine = host::host_name();
+    let chip = host::cpu_brand();
+    let os = host::os_string();
+    let (adapter, device_type) = gpu::probe_adapter_info();
 
     println!("scaling_rig — jas-shaped wgpu/Vello sweep");
+    println!("  machine  : {machine}");
     println!("  chip     : {chip}");
     println!("  os       : {os}");
     println!("  backend  : {}", cli.backend.as_env());
+    println!("  adapter  : {adapter} ({device_type})");
     println!("  mode     : {:?}", cli.mode);
     println!("  target   : {}x{} (offscreen exact; windowed = physical/retina)", cli.width, cli.height);
     println!("  seed     : {:#x}", cli.seed);
@@ -191,10 +170,12 @@ fn main() {
         .unwrap_or(0);
 
     let out = RunResults {
-        machine: "mac".to_string(),
+        machine,
         chip,
         os,
         backend: cli.backend.as_env().to_string(),
+        adapter,
+        device_type,
         mode: mode_str,
         present_mode,
         antialiasing: "Area".to_string(),

@@ -88,6 +88,25 @@ fn make_instance() -> wgpu::Instance {
     })
 }
 
+/// Name and device type of the adapter this run will use, for the results record.
+///
+/// Requests an adapter with the same options and the same already-forced
+/// `WGPU_BACKEND` as the sweep, so it names the adapter the sweep gets. Returns
+/// `("unknown", "unknown")` rather than failing — provenance must never abort a run.
+pub fn probe_adapter_info() -> (String, String) {
+    match pollster::block_on(make_instance().request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    })) {
+        Ok(adapter) => {
+            let info = adapter.get_info();
+            (info.name, format!("{:?}", info.device_type))
+        }
+        Err(_) => ("unknown".to_string(), "unknown".to_string()),
+    }
+}
+
 /// Adapter + device + queue with the adapter's *full* limits (not the conservative
 /// 128 MiB storage-buffer default). `compatible` is the surface for windowed mode.
 fn make_device(

@@ -72,6 +72,11 @@ pub struct RunResults {
     pub chip: String,
     pub os: String,
     pub backend: String,
+    /// The GPU wgpu actually selected, and whether it is real hardware. Without
+    /// these a record cannot prove it was not software-rasterized (WARP/lavapipe),
+    /// which would make every number meaningless.
+    pub adapter: String,
+    pub device_type: String,
     pub mode: String,
     pub present_mode: String,
     pub antialiasing: String,
