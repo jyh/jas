@@ -757,9 +757,9 @@ public func characterPanelLiveOverrides(model: Model) -> [String: Any]? {
 
 /// Whether the first selected Text / TextPath element has an empty
 /// line_height attribute (i.e. leading is in Auto mode = 120% of font
-/// size). Returns false when no text is selected. Used by the panel
-/// commit path to keep leading tracking font_size while Auto remains
-/// in effect.
+/// size). Returns false when no text is selected. Read by
+/// `characterPanelPostWrite` below, which is what keeps the panel's Leading
+/// field tracking a committed font size while Auto remains in effect.
 public func characterElementHasAutoLeading(model: Model) -> Bool {
     guard let first = model.document.selection.first else { return false }
     switch model.document.getElement(first.path) {
@@ -767,6 +767,39 @@ public func characterElementHasAutoLeading(model: Model) -> Bool {
     case .textPath(let tp): return tp.lineHeight.isEmpty
     default: return false
     }
+}
+
+/// Post-write hook for Character-panel field commits. When the user commits
+/// `font_size` and the selected element's `line-height` is empty (Auto), bump
+/// the STORED `leading` to `font_size × 1.2`.
+///
+/// It is a DISPLAY concern, not part of the apply: the field-scoped law gives
+/// `font_size` the size and nothing else, so the element's absent
+/// `line-height` survives a size edit on its own and Auto re-derives against
+/// the new size. What the hook protects is the panel's own stored state once
+/// the SELECTION CLEARS — with nothing selected there is no element to pull
+/// from, and a stored `(font_size 24, leading 14.4)` pair reads as an
+/// EXPLICIT 14.4pt leading under the LEADING group's Auto test: an override
+/// the user never chose, which the next text object would inherit.
+///
+/// The reference needs no hook because it holds the panel's leading as an
+/// OPTIONAL — absence IS Auto and tracks any size for free, which is why
+/// `CHARACTER_PANEL_FIELDS["leading"]` is `None` and `characterPanelDefaults`
+/// omits the key. Rust's plain `f64` and this port's workspace-declared
+/// `14.4` cannot be absent, so both must MATERIALISE the value. The hook is
+/// that materialisation, not an extra rule; it mirrors
+/// `AppState::character_panel_post_write` one for one, including its position
+/// in the sequence (field write → hook → apply, see
+/// `notifyPanelStateChanged`).
+public func characterPanelPostWrite(
+    store: StateStore, model: Model, key: String
+) {
+    guard key == "font_size", characterElementHasAutoLeading(model: model)
+    else { return }
+    // Read the committed size through the same accessor the law uses, so the
+    // hook and the law can never disagree about what the panel holds.
+    store.setPanel("character_panel_content", "leading",
+                   charNum(store, "font_size") * 1.2)
 }
 
 private struct TextAttrsLive {
@@ -797,7 +830,12 @@ private struct TextAttrsLive {
 /// Mirrors the reference `decoration_flags`.
 public func decorationFlags(_ td: String) -> (Bool, Bool) {
     var u = false, s = false
-    for tok in td.split(separator: " ") {
+    // Split on ANY whitespace, like Rust's `split_whitespace()` and the
+    // reference's bare `str.split()`. A tab, a newline or a doubled space
+    // between tokens is legal CSS, and this one derivation now feeds BOTH
+    // the sibling rule and the panel's display mirror — a token it failed to
+    // see would be a token the law silently dropped from the element.
+    for tok in td.split(whereSeparator: { $0.isWhitespace }) {
         if tok == "underline" { u = true }
         if tok == "line-through" { s = true }
     }

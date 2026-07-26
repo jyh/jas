@@ -121,6 +121,108 @@ import Testing
     #expect(characterElementHasAutoLeading(model: model) == true)
 }
 
+// MARK: - The element-side sibling derivations
+
+@Test func decorationFlagsToleratesAnyWhitespace() {
+    // ONE derivation feeds the DECORATION sibling rule and the panel display
+    // mirror, so its tolerance has to match its peers: Rust splits with
+    // `split_whitespace()`, the reference with a bare `str.split()`. A tab,
+    // a newline or a doubled space between tokens is legal CSS.
+    #expect(decorationFlags("underline line-through") == (true, true))
+    #expect(decorationFlags("line-through  underline") == (true, true))
+    #expect(decorationFlags("underline\tline-through") == (true, true))
+    #expect(decorationFlags("underline\nline-through") == (true, true))
+    #expect(decorationFlags("  line-through  ") == (false, true))
+    #expect(decorationFlags("none") == (false, false))
+    #expect(decorationFlags("") == (false, false))
+}
+
+// MARK: - The Auto-leading post-write hook
+//
+// The hook keeps STORED panel state saying what the reference says by
+// ABSENCE. It mirrors Rust's `AppState::character_panel_post_write` one for
+// one, including where it sits in the sequence (field write → hook → apply);
+// `characterPanelPostWriteBumpsLeadingWhenAuto` and Rust's
+// `post_write_font_size_bumps_leading_when_auto` are the same vector, and
+// `fontSizeCommitThenDeselectShowsTheBumpedAutoLeading` is the paired
+// cross-port pin of the outcome that is VISIBLE — what the Leading field
+// reads once the selection clears and there is no element to pull from.
+
+/// A model with one 12pt Auto-leading Text selected, plus an initialised
+/// Character panel scope holding the workspace-declared defaults for the two
+/// fields the hook touches.
+private func modelWithAutoLeadingTextAndPanel(
+    lineHeight: String = ""
+) -> Model {
+    let model = Model()
+    let text = Element.text(Text(x: 0, y: 0, content: "hi",
+                                 fontSize: 12, lineHeight: lineHeight))
+    model.setDocumentForTest(Document(layers: [Layer(children: [text])],
+                                      selectedLayer: 0,
+                                      selection: [ElementSelection(path: [0, 0])]))
+    model.stateStore.initPanel("character_panel_content",
+                               defaults: ["font_size": 12.0, "leading": 14.4])
+    return model
+}
+
+private func storedLeading(_ model: Model) -> Double? {
+    model.stateStore.getPanel("character_panel_content", "leading") as? Double
+}
+
+@Test func characterPanelPostWriteBumpsLeadingWhenAuto() {
+    let model = modelWithAutoLeadingTextAndPanel()
+    model.stateStore.setPanel("character_panel_content", "font_size", 24.0)
+    characterPanelPostWrite(store: model.stateStore, model: model,
+                            key: "font_size")
+    #expect(storedLeading(model) == 24.0 * 1.2)
+}
+
+@Test func characterPanelPostWriteDoesNothingForOtherKeys() {
+    let model = modelWithAutoLeadingTextAndPanel()
+    model.stateStore.setPanel("character_panel_content", "font_size", 24.0)
+    characterPanelPostWrite(store: model.stateStore, model: model,
+                            key: "tracking")
+    #expect(storedLeading(model) == 14.4)
+}
+
+@Test func characterPanelPostWriteDoesNothingWhenLeadingIsExplicit() {
+    // The element carries an explicit line-height, so leading is NOT in Auto
+    // mode and the stored number is the user's own override — untouchable.
+    let model = modelWithAutoLeadingTextAndPanel(lineHeight: "20pt")
+    model.stateStore.setPanel("character_panel_content", "leading", 20.0)
+    model.stateStore.setPanel("character_panel_content", "font_size", 24.0)
+    characterPanelPostWrite(store: model.stateStore, model: model,
+                            key: "font_size")
+    #expect(storedLeading(model) == 20.0)
+}
+
+@Test func fontSizeCommitThenDeselectShowsTheBumpedAutoLeading() {
+    // THE CROSS-PORT PIN. Commit font_size 24 on an Auto-leading element
+    // through the real funnel, then clear the selection: with nothing
+    // selected the panel has no element to pull from and the Leading field
+    // reads STORED state, so both ports must store 28.8. Paired with Rust's
+    // `font_size_commit_then_deselect_shows_the_bumped_auto_leading`.
+    let model = modelWithAutoLeadingTextAndPanel()
+    model.stateStore.setPanel("character_panel_content", "font_size", 24.0)
+    notifyPanelStateChanged("character_panel_content", store: model.stateStore,
+                            model: model, edited: "font_size")
+    // The apply is field-scoped, so Auto survives on the element itself.
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        Issue.record("expected Text"); return
+    }
+    #expect(t.fontSize == 24.0)
+    #expect(t.lineHeight == "", "Auto is an ABSENT line-height")
+    // Now the selection clears — the display falls back to stored state.
+    model.setDocumentForTest(Document(layers: model.document.layers,
+                                      selectedLayer: 0, selection: []))
+    #expect(characterPanelLiveOverrides(model: model) == nil,
+            "no selection means no pull, so the stored value is what shows")
+    // Spelled as the product, not as 28.8: both ports evaluate `24.0 * 1.2`
+    // in IEEE double and land on the same bits (28.799999999999997), and the
+    // pin is that they agree, not that the decimal reads prettily.
+    #expect(storedLeading(model) == 24.0 * 1.2)
+}
+
 @Test func applyCharacterPanelLeadingNilPreservesAutoLineHeight() {
     // End-to-end nullable-clear: when the user clears the leading
     // input the renderer drops panel.leading from the store. The

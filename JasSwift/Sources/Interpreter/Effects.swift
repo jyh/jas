@@ -2149,6 +2149,13 @@ public func notifyPanelStateChanged(
         // apply is field-scoped, and guessing which control changed is
         // exactly what clobbered the element's font, size and decoration.
         if let edited {
+            // Auto-leading is a DISPLAY concern, and it runs BEFORE the apply
+            // — the same position Rust gives it (`set_character_field` →
+            // `character_panel_post_write` → `apply_character_panel_to_
+            // selection`, renderer.rs). It only ever rewrites stored
+            // `leading`, which the FONT_SIZE group does not read, so the
+            // order is observable in panel state and nowhere else.
+            characterPanelPostWrite(store: store, model: model, key: edited)
             applyCharacterPanelToSelection(
                 store: store, controller: Controller(model: model),
                 edited: edited)
