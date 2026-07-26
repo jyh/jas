@@ -44,6 +44,11 @@ ALGORITHMS = {
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
 SKIP_LANG_ALGO = set()
 
+# Strategies whose fixtures pin a SUBSET of the emitted result keys, and so
+# get the key-by-key oracle pass instead of the whole-object one. See the
+# comment at that pass for why these families need an oracle at all.
+ORACLE_PARTIAL_STRATEGIES = ("property_planar",)
+
 
 # ---------------------------------------------------------------
 # Language runners
@@ -293,8 +298,9 @@ def main():
         # four and stays green. Where a fixture pins a golden (`expected` per
         # case, or `translations` per align vector), also assert the reference
         # app reproduces it. Restricted to the simple tolerance/exact
-        # strategies; the boolean/planar/shape strategies carry differently
-        # shaped goldens compared by their own logic.
+        # strategies; the shape strategy carries a differently shaped golden
+        # compared by its own logic, and the boolean/planar strategies get
+        # the partial-golden pass immediately below.
         has_name_wrapper = (
             len(ref_output) == 0
             or (isinstance(ref_output[0], dict) and "name" in ref_output[0])
@@ -330,6 +336,44 @@ def main():
                         print(f"    expected: {json.dumps(golden, sort_keys=True)[:200]}")
                         print(f"    {ref_lang}:   {json.dumps(body, sort_keys=True)[:200]}")
                     failed += 1
+
+        # Partial-golden oracle for the boolean/planar strategies. Their
+        # `expected` blocks pin a SUBSET of the emitted result keys (area /
+        # ring_count / face_count / face_areas_sorted / sample_points), so
+        # compare key by key rather than whole-object. This matters most for
+        # the degenerate-geometry vectors: T-junctions, collinear overlap,
+        # retrograde loops and inter-ring cancellation are SHARED
+        # limitations, so an app-vs-app comparison is blind to them —
+        # wrong-vs-wrong compares green. Only a pinned, hand-derived
+        # expectation catches that.
+        if strategy in ORACLE_PARTIAL_STRATEGIES:
+            with open(fixture_path) as fh:
+                fixture_cases = json.load(fh).get("vectors", [])
+            gold_tol = tol if tol is not None else 1e-6
+            for idx, out_vec in enumerate(ref_output):
+                if idx >= len(fixture_cases):
+                    break
+                case = fixture_cases[idx]
+                golden = case.get("expected")
+                if not isinstance(golden, dict):
+                    continue
+                body = out_vec["result"] if has_name_wrapper else out_vec
+                name = case.get("name", f"#{idx}")
+                for key, want in golden.items():
+                    if key not in body:
+                        print(f"  FAIL: {algo}/{name} [oracle: {ref_lang} "
+                              f"emits no '{key}']")
+                        failed += 1
+                        continue
+                    if values_close(want, body[key], gold_tol):
+                        passed += 1
+                    else:
+                        print(f"  FAIL: {algo}/{name}.{key} "
+                              f"[oracle: {ref_lang} vs pinned expected]")
+                        if args.verbose:
+                            print(f"    expected: {json.dumps(want)[:200]}")
+                            print(f"    {ref_lang}:   {json.dumps(body[key])[:200]}")
+                        failed += 1
 
         # Run each comparison language
         for lang in compare_langs:

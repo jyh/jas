@@ -6,7 +6,10 @@ import Foundation
 //
 // Pipeline:
 //   1. Collect all line segments from all input polylines.
-//   2. Find every segment-segment intersection (naive O(n²)).
+//   2. Split every segment at every arrangement-relevant meeting with
+//      every other segment — proper crossings, T-junctions and
+//      collinear-overlap ends alike — via arrangementSplitPoints
+//      (naive O(n²)).
 //   3. Snap nearby intersection points and shared endpoints into
 //      single vertices.
 //   4. Prune vertices of degree 1 iteratively.
@@ -16,11 +19,17 @@ import Foundation
 //      CCW-interior convention).
 //   8. Compute face containment to mark hole relationships.
 //
-// Deferred (mirrors BooleanNormalize.swift):
+// Degenerate input — handled, each pinned by a unit test in
+// Tests/Algorithms/PlanarTests.swift with a hand-derived expectation:
+//   - T-junctions: a polyline vertex landing in the interior of another
+//     polyline's edge. Step 2 splits the edge there, so the junction
+//     becomes a real degree-3 vertex.
+//   - Collinear overlap: two polylines retracing the same span. Step 2
+//     splits both at the overlap ends; step 5's undirected edge set then
+//     fuses the doubled span into one edge.
+//
+// Deferred:
 //   - Bezier curves (caller flattens to polylines first).
-//   - T-junctions where one polyline's vertex lands on another's
-//     interior.
-//   - Collinear segment overlap.
 //   - Incremental rebuild on stroke add/remove.
 //   - Spatial acceleration (R-tree / BVH) for hit testing.
 
@@ -158,15 +167,6 @@ public struct PlanarGraph {
 
 // MARK: - Build
 
-/// Vertex coincidence and zero-length tolerance, in input units.
-private let VERT_EPS: Double = 1e-9
-
-/// Parameter-band epsilon for `intersectProper`; matches BooleanNormalize.
-private let PARAM_EPS: Double = 1e-9
-
-/// Determinant tolerance for parallel-segment rejection.
-private let DENOM_EPS: Double = 1e-12
-
 extension PlanarGraph {
     /// Build a planar graph from a set of polylines.
     public static func build(_ polylines: [PlanarPolyline]) -> PlanarGraph {
@@ -177,7 +177,7 @@ extension PlanarGraph {
             for i in 0..<(poly.count - 1) {
                 let a = poly[i]
                 let b = poly[i + 1]
-                if planarDist(a, b) > VERT_EPS {
+                if arrangementDist(a, b) > ARR_VERT_EPS {
                     segments.append((a, b))
                 }
             }
@@ -190,19 +190,24 @@ extension PlanarGraph {
         var vertPts: [PlanarPoint] = []
         var segParams: [[(Double, Int)]] = Array(repeating: [], count: segments.count)
         for (si, seg) in segments.enumerated() {
-            let va = addOrFindVertex(&vertPts, seg.0)
-            let vb = addOrFindVertex(&vertPts, seg.1)
+            let va = arrangementAddOrFindVertex(&vertPts, seg.0)
+            let vb = arrangementAddOrFindVertex(&vertPts, seg.1)
             segParams[si].append((0.0, va))
             segParams[si].append((1.0, vb))
         }
 
-        // ----- 4. Naive O(n²) proper-interior intersection -----
+        // ----- 4. Naive O(n²) pairwise splitting -----
+        // arrangementSplitPoints reports every arrangement-relevant
+        // meeting of two segments: proper interior crossings,
+        // T-junctions, endpoint coincidences and collinear-overlap ends.
+        // Splitting at all of them is what makes the arrangement
+        // conforming.
         for i in 0..<segments.count {
             for j in (i + 1)..<segments.count {
                 let (a1, a2) = segments[i]
                 let (b1, b2) = segments[j]
-                if let (p, s, t) = intersectProper(a1, a2, b1, b2) {
-                    let v = addOrFindVertex(&vertPts, p)
+                for (p, s, t) in arrangementSplitPoints(a1, a2, b1, b2) {
+                    let v = arrangementAddOrFindVertex(&vertPts, p)
                     segParams[i].append((s, v))
                     segParams[j].append((t, v))
                 }
@@ -442,47 +447,6 @@ extension PlanarGraph {
 }
 
 // MARK: - Numerical helpers
-
-private func planarDist(_ a: PlanarPoint, _ b: PlanarPoint) -> Double {
-    let dx = a.0 - b.0
-    let dy = a.1 - b.1
-    return (dx * dx + dy * dy).squareRoot()
-}
-
-/// Linear-search vertex dedup.
-private func addOrFindVertex(_ verts: inout [PlanarPoint], _ pt: PlanarPoint) -> Int {
-    for (i, v) in verts.enumerated() {
-        if planarDist(v, pt) < VERT_EPS {
-            return i
-        }
-    }
-    verts.append(pt)
-    return verts.count - 1
-}
-
-/// Parametric line-line intersection requiring a strictly interior
-/// crossing on both segments. Mirrors BooleanNormalize.swift.
-private func intersectProper(_ a1: PlanarPoint, _ a2: PlanarPoint,
-                              _ b1: PlanarPoint, _ b2: PlanarPoint)
-    -> (PlanarPoint, Double, Double)?
-{
-    let dxA = a2.0 - a1.0
-    let dyA = a2.1 - a1.1
-    let dxB = b2.0 - b1.0
-    let dyB = b2.1 - b1.1
-    let denom = dxA * dyB - dyA * dxB
-    if abs(denom) < DENOM_EPS { return nil }
-    let dxAB = a1.0 - b1.0
-    let dyAB = a1.1 - b1.1
-    let s = (dxB * dyAB - dyB * dxAB) / denom
-    let t = (dxA * dyAB - dyA * dxAB) / denom
-    if s <= PARAM_EPS || s >= 1.0 - PARAM_EPS
-        || t <= PARAM_EPS || t >= 1.0 - PARAM_EPS
-    {
-        return nil
-    }
-    return ((a1.0 + s * dxA, a1.1 + s * dyA), s, t)
-}
 
 /// Winding number with half-open upward/downward classification.
 internal func planarWindingNumber(_ poly: [PlanarPoint], _ point: PlanarPoint) -> Int {

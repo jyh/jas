@@ -95,15 +95,69 @@ private func totalTopLevelArea(_ g: PlanarGraph) -> Double {
     #expect(abs(totalTopLevelArea(g) - 200.0) < AREA_EPS)
 }
 
-// MARK: - 7. T-junction (deferred)
+// MARK: - 7. T-junctions
 
-@Test(.disabled("T-junctions where one polyline's vertex lands on another's interior not yet supported"))
-func tJunctionCreatesVertex() {
+@Test func tJunctionCreatesVertex() {
+    // A horizontal segment (0,0)-(10,0) and a vertical (5,0)-(5,5) whose
+    // endpoint sits exactly on the horizontal's interior.
+    //
+    // Derivation: the T-vertex at (5,0) is degree 3, but (0,0), (10,0)
+    // and (5,5) are all degree 1, so the iterative degree-1 prune eats
+    // everything. Zero faces either way — this pins that splitting at
+    // the T does not INVENT a face. The T-split's observable
+    // consequences are pinned by the two chord tests below.
     let g = PlanarGraph.build([
         segment((0, 0), (10, 0)),
         segment((5, 0), (5, 5)),
     ])
     #expect(g.faceCount == 0)
+}
+
+@Test func tJunctionChordSplitsSquareIntoTwoHalves() {
+    // Closed 10x10 square plus an open chord (0,5)-(10,5). BOTH chord
+    // endpoints are T-junctions: (0,5) lies in the interior of the
+    // square's left edge, (10,5) in the interior of its right edge.
+    //
+    // Derivation. Splitting both side edges at y=5 leaves (0,5) and
+    // (10,5) at degree 3 and every other vertex at degree 2 — nothing
+    // prunes. The chord cuts the square into two 10-wide, 5-tall
+    // rectangles: faceCount = 2, each of area 10*5 = 50, total 100.
+    // Without the T-split the chord's endpoints are isolated degree-1
+    // vertices, the chord prunes away, and one face of area 100 remains.
+    let g = PlanarGraph.build([
+        closedSquare(0, 0, 10),
+        segment((0, 5), (10, 5)),
+    ])
+    #expect(g.faceCount == 2)
+    let top = g.topLevelFaces
+    #expect(top.count == 2)
+    for f in top {
+        #expect(abs(abs(g.faceNetArea(f)) - 50.0) < AREA_EPS)
+    }
+    #expect(abs(totalTopLevelArea(g) - 100.0) < AREA_EPS)
+}
+
+@Test func tJunctionCornerToEdgeChordSplits25And75() {
+    // Closed 10x10 square plus a chord from the corner (0,0) to (10,5).
+    // The tail coincides with an existing square vertex (plain vertex
+    // snap); the head is a T-junction on the right edge's interior.
+    //
+    // Derivation. The chord cuts off triangle (0,0)-(10,0)-(10,5):
+    // area = 1/2 * 10 * 5 = 25. The remainder is the quadrilateral
+    // (0,0)-(10,5)-(10,10)-(0,10); shoelace: 0*5-10*0 + 10*10-10*5
+    // + 10*10-0*10 + 0*0-0*10 = 0 + 50 + 100 + 0 = 150, half = 75.
+    // So faceCount = 2 with areas {25, 75}, total 100.
+    let g = PlanarGraph.build([
+        closedSquare(0, 0, 10),
+        segment((0, 0), (10, 5)),
+    ])
+    #expect(g.faceCount == 2)
+    let areas = g.topLevelFaces
+        .map { abs(g.faceNetArea($0)) }
+        .sorted()
+    #expect(areas.count == 2)
+    #expect(abs(areas[0] - 25.0) < AREA_EPS)
+    #expect(abs(areas[1] - 75.0) < AREA_EPS)
 }
 
 // MARK: - 8. Concentric squares (containment / holes)
@@ -276,11 +330,68 @@ func tJunctionCreatesVertex() {
     }
 }
 
-// MARK: - Deferred / known limitations
+// MARK: - 18. Collinear overlap
 
-@Test(.disabled("collinear self-overlap not yet supported (mirrors BooleanNormalize)"))
-func collinearOverlap() {
+@Test func collinearOverlap() {
+    // Closed 10x10 square plus a closed rectangle [2,8]x[0,5] whose
+    // bottom edge lies ALONG the square's bottom edge: the span y=0,
+    // x in [2,8] is traced twice, once by each polyline.
+    //
+    // Derivation. Splitting the square's bottom edge at x=2 and x=8
+    // makes the doubled span a single shared atomic edge. The
+    // arrangement then has two bounded faces that SHARE that span,
+    // neither containing the other:
+    //   - the inner rectangle, area 6*5 = 30;
+    //   - the square minus the rectangle, area 100 - 30 = 70. Shoelace
+    //     on (0,0),(2,0),(2,5),(8,5),(8,0),(10,0),(10,10),(0,10):
+    //     0 + 10 - 30 - 40 + 0 + 100 + 100 + 0 = 140, half = 70.
+    // So faceCount = 2, BOTH top-level (depth 1), total area 100.
+    //
+    // Without collinear splitting the two polylines stay separate
+    // components and the rectangle is mis-classified as a HOLE of the
+    // square (one top-level face of net area 70) — wrong: the two
+    // regions are adjacent, not nested.
+    let g = PlanarGraph.build([
+        closedSquare(0, 0, 10),
+        [(2, 0), (8, 0), (8, 5), (2, 5), (2, 0)],
+    ])
+    #expect(g.faceCount == 2)
+    let top = g.topLevelFaces
+    #expect(top.count == 2)
+    for f in top {
+        #expect(g.faces[f.value].holes.isEmpty)
+    }
+    let areas = top.map { abs(g.faceNetArea($0)) }.sorted()
+    #expect(abs(areas[0] - 30.0) < AREA_EPS)
+    #expect(abs(areas[1] - 70.0) < AREA_EPS)
+    #expect(abs(totalTopLevelArea(g) - 100.0) < AREA_EPS)
 }
+
+@Test func collinearPartialOverlapOfTwoSquaresKeepsTwoFaces() {
+    // Square A = [0,10]x[0,10]; square B = [10,20]x[3,13]. Their
+    // boundaries share the collinear span x=10, y in [3,10] — a PARTIAL
+    // edge overlap.
+    //
+    // Derivation: the two squares meet along a segment but their
+    // interiors are disjoint (A is x<=10, B is x>=10), so the bounded
+    // faces are exactly A and B: faceCount = 2, areas 100 and 100, both
+    // top-level. Splitting the shared span at y=3 and y=10 is what makes
+    // them one connected arrangement rather than two overlapping
+    // components; the areas are the same either way, so this pins that
+    // the split does not CHANGE the answer for touching-but-not-
+    // overlapping input.
+    let g = PlanarGraph.build([
+        closedSquare(0, 0, 10),
+        closedSquare(10, 3, 10),
+    ])
+    #expect(g.faceCount == 2)
+    #expect(g.topLevelFaces.count == 2)
+    for f in g.topLevelFaces {
+        #expect(abs(abs(g.faceNetArea(f)) - 100.0) < AREA_EPS)
+    }
+}
+
+// MARK: - Deferred / known limitations
 
 @Test(.disabled("incremental rebuild not yet supported"))
 func incrementalAddStroke() {

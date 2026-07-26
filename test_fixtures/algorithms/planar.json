@@ -14,70 +14,301 @@
     },
     {
       "name": "closed_square_one_face",
-      "polylines": [[[0,0],[10,0],[10,10],[0,10],[0,0]]],
+      "polylines": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      ],
       "expected": {
         "face_count": 1,
-        "face_areas_sorted": [100.0],
+        "face_areas_sorted": [
+          100.0
+        ],
         "sample_points": [
-          {"point": [5.0, 5.0], "inside_any_face": true},
-          {"point": [15.0, 5.0], "inside_any_face": false}
+          {
+            "point": [
+              5.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              15.0,
+              5.0
+            ],
+            "inside_any_face": false
+          }
         ]
       }
     },
     {
       "name": "square_with_diagonal_two_triangles",
       "polylines": [
-        [[0,0],[10,0],[10,10],[0,10],[0,0]],
-        [[0,0],[10,10]]
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            10
+          ]
+        ]
       ],
       "expected": {
         "face_count": 2,
-        "face_areas_sorted": [50.0, 50.0],
+        "face_areas_sorted": [
+          50.0,
+          50.0
+        ],
         "sample_points": [
-          {"point": [2.0, 5.0], "inside_any_face": true},
-          {"point": [8.0, 5.0], "inside_any_face": true}
+          {
+            "point": [
+              2.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              8.0,
+              5.0
+            ],
+            "inside_any_face": true
+          }
         ]
       }
     },
     {
       "name": "square_with_both_diagonals_four_triangles",
       "polylines": [
-        [[0,0],[10,0],[10,10],[0,10],[0,0]],
-        [[0,0],[10,10]],
-        [[10,0],[0,10]]
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            10
+          ]
+        ],
+        [
+          [
+            10,
+            0
+          ],
+          [
+            0,
+            10
+          ]
+        ]
       ],
       "expected": {
         "face_count": 4,
-        "face_areas_sorted": [25.0, 25.0, 25.0, 25.0],
+        "face_areas_sorted": [
+          25.0,
+          25.0,
+          25.0,
+          25.0
+        ],
         "sample_points": [
-          {"point": [5.0, 2.0], "inside_any_face": true},
-          {"point": [8.0, 5.0], "inside_any_face": true},
-          {"point": [5.0, 8.0], "inside_any_face": true},
-          {"point": [2.0, 5.0], "inside_any_face": true}
+          {
+            "point": [
+              5.0,
+              2.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              8.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              5.0,
+              8.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              2.0,
+              5.0
+            ],
+            "inside_any_face": true
+          }
         ]
       }
     },
     {
       "name": "two_disjoint_squares",
       "polylines": [
-        [[0,0],[10,0],[10,10],[0,10],[0,0]],
-        [[20,0],[30,0],[30,10],[20,10],[20,0]]
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            20,
+            0
+          ],
+          [
+            30,
+            0
+          ],
+          [
+            30,
+            10
+          ],
+          [
+            20,
+            10
+          ],
+          [
+            20,
+            0
+          ]
+        ]
       ],
       "expected": {
         "face_count": 2,
-        "face_areas_sorted": [100.0, 100.0],
+        "face_areas_sorted": [
+          100.0,
+          100.0
+        ],
         "sample_points": [
-          {"point": [5.0, 5.0], "inside_any_face": true},
-          {"point": [25.0, 5.0], "inside_any_face": true},
-          {"point": [15.0, 5.0], "inside_any_face": false}
+          {
+            "point": [
+              5.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              25.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              15.0,
+              5.0
+            ],
+            "inside_any_face": false
+          }
         ]
       }
     },
     {
       "name": "two_crossing_segments_no_faces",
       "polylines": [
-        [[-1,0],[1,0]],
-        [[0,-1],[0,1]]
+        [
+          [
+            -1,
+            0
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            -1
+          ],
+          [
+            0,
+            1
+          ]
+        ]
       ],
       "expected": {
         "face_count": 0,
@@ -88,30 +319,427 @@
     {
       "name": "square_with_external_tail",
       "polylines": [
-        [[0,0],[10,0],[10,10],[0,10],[0,0]],
-        [[10,10],[15,15]]
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            10,
+            10
+          ],
+          [
+            15,
+            15
+          ]
+        ]
       ],
       "expected": {
         "face_count": 1,
-        "face_areas_sorted": [100.0],
+        "face_areas_sorted": [
+          100.0
+        ],
         "sample_points": [
-          {"point": [5.0, 5.0], "inside_any_face": true}
+          {
+            "point": [
+              5.0,
+              5.0
+            ],
+            "inside_any_face": true
+          }
         ]
       }
     },
     {
       "name": "nested_squares_two_faces",
       "polylines": [
-        [[0,0],[20,0],[20,20],[0,20],[0,0]],
-        [[5,5],[15,5],[15,15],[5,15],[5,5]]
+        [
+          [
+            0,
+            0
+          ],
+          [
+            20,
+            0
+          ],
+          [
+            20,
+            20
+          ],
+          [
+            0,
+            20
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            5,
+            5
+          ],
+          [
+            15,
+            5
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            5,
+            15
+          ],
+          [
+            5,
+            5
+          ]
+        ]
       ],
       "expected": {
         "face_count": 2,
-        "face_areas_sorted": [100.0, 300.0],
+        "face_areas_sorted": [
+          100.0,
+          300.0
+        ],
         "sample_points": [
-          {"point": [10.0, 10.0], "inside_any_face": true},
-          {"point": [2.0, 2.0], "inside_any_face": true},
-          {"point": [25.0, 25.0], "inside_any_face": false}
+          {
+            "point": [
+              10.0,
+              10.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              2.0,
+              2.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              25.0,
+              25.0
+            ],
+            "inside_any_face": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "t_junction_chord_splits_square",
+      "_derivation": "Closed 10x10 square plus the open chord (0,5)-(10,5); both chord endpoints are T-junctions on the square's side edges. Splitting the sides at y=5 keeps every vertex at degree >= 2, so the chord survives the degree-1 prune and cuts the square into two 10x5 rectangles: 2 faces of area 50 each.",
+      "polylines": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            5
+          ],
+          [
+            10,
+            5
+          ]
+        ]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [
+          50.0,
+          50.0
+        ],
+        "sample_points": [
+          {
+            "point": [
+              5.0,
+              2.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              5.0,
+              8.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              15.0,
+              5.0
+            ],
+            "inside_any_face": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "t_junction_corner_chord_splits_25_75",
+      "_derivation": "Closed 10x10 square plus the chord (0,0)-(10,5). The tail lands on an existing corner; the head is a T-junction on the right edge. The chord cuts off triangle (0,0)-(10,0)-(10,5) of area 0.5*10*5 = 25, leaving the quadrilateral (0,0)-(10,5)-(10,10)-(0,10) of area 100-25 = 75.",
+      "polylines": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            5
+          ]
+        ]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [
+          25.0,
+          75.0
+        ],
+        "sample_points": [
+          {
+            "point": [
+              8.0,
+              1.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              2.0,
+              8.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              11.0,
+              5.0
+            ],
+            "inside_any_face": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "collinear_overlap_shared_bottom_edge",
+      "_derivation": "Closed 10x10 square plus the closed rectangle [2,8]x[0,5], whose bottom edge runs along the square's bottom edge (the span y=0, x in [2,8] is traced twice). Splitting at x=2 and x=8 fuses the doubled span into one shared edge, giving two ADJACENT bounded faces: the rectangle (6*5 = 30) and the notched remainder (100-30 = 70). Both are top-level; neither is a hole of the other.",
+      "polylines": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            2,
+            0
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            8,
+            5
+          ],
+          [
+            2,
+            5
+          ],
+          [
+            2,
+            0
+          ]
+        ]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [
+          30.0,
+          70.0
+        ],
+        "sample_points": [
+          {
+            "point": [
+              5.0,
+              2.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              5.0,
+              8.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              15.0,
+              5.0
+            ],
+            "inside_any_face": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "collinear_partial_overlap_two_squares",
+      "_derivation": "Squares [0,10]x[0,10] and [10,20]x[3,13] share the collinear span x=10, y in [3,10]. Their interiors are disjoint, so the bounded faces are exactly the two squares: 2 faces of area 100. Pins that collinear splitting does not change the answer for touching-but-not-overlapping input.",
+      "polylines": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            10,
+            3
+          ],
+          [
+            20,
+            3
+          ],
+          [
+            20,
+            13
+          ],
+          [
+            10,
+            13
+          ],
+          [
+            10,
+            3
+          ]
+        ]
+      ],
+      "expected": {
+        "face_count": 2,
+        "face_areas_sorted": [
+          100.0,
+          100.0
+        ],
+        "sample_points": [
+          {
+            "point": [
+              5.0,
+              5.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              15.0,
+              8.0
+            ],
+            "inside_any_face": true
+          },
+          {
+            "point": [
+              5.0,
+              12.0
+            ],
+            "inside_any_face": false
+          }
         ]
       }
     }
