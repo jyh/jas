@@ -1436,14 +1436,18 @@ fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
 /// so Rust and Swift emit the same rings in the same sequence, which is
 /// what the exact-comparison corpus requires.
 ///
-/// **Cost.** [`first_repeated_vertex`] is O(n) expected, and each cut
-/// removes one duplicate vertex, so a ring with `p` pinches costs
-/// O(p * n) expected — O(n^2) in the pathological limit where a
-/// constant fraction of vertices is a pinch, O(n) for the overwhelmingly
-/// common `p = 0` (one scan, no split) and O(n) for the EXCLUDE-corner
-/// `p = 2`. Worth stating because this runs on EVERY boolean result,
-/// including curve-flattened ones with thousands of vertices; the same
-/// bound is documented on the normalizer's O(E^2) arrangement.
+/// **Cost.** [`first_repeated_vertex`] is O(n) expected on a ring of at
+/// least [`PINCH_MAP_THRESHOLD`] vertices and O(n^2) worst case below it,
+/// and each cut removes one duplicate vertex, so a ring with `p` pinches
+/// costs O(p * n) expected for a long ring and at most
+/// O(p * THRESHOLD^2) for a short one — the latter bounded by 8128
+/// comparisons per call, measured at 2.5 us. The pathological limit is
+/// O(n^2) either way, where a constant fraction of vertices is a pinch.
+/// The overwhelmingly common `p = 0` (one pass, no split) and the
+/// EXCLUDE-corner `p = 2` are linear on long rings. Worth stating because
+/// this runs on EVERY boolean result, including curve-flattened ones with
+/// thousands of vertices; the same bound is documented on the
+/// normalizer's O(E^2) arrangement.
 fn split_pinched_rings(rings: &PolygonSet) -> PolygonSet {
     let mut out = PolygonSet::new();
     for ring in rings {
@@ -1483,7 +1487,7 @@ fn split_pinched_ring(ring: &Ring, out: &mut PolygonSet) {
 ///    matches nothing — exactly what `==` does.
 ///
 /// `first_repeated_vertex_matches_the_quadratic_scan` pins both cases
-/// against the scan this replaced.
+/// against the pairwise scan.
 fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
     if v.0.is_nan() || v.1.is_nan() {
         return None;
@@ -1491,25 +1495,87 @@ fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
     Some(((v.0 + 0.0).to_bits(), (v.1 + 0.0).to_bits()))
 }
 
+/// Ring length at which [`first_repeated_vertex`] switches from the
+/// pairwise scan to the index map.
+///
+/// MEASURED, not assumed. Standalone benchmarks of the two bodies over
+/// pinch-free rings (the case both must scan to the end), best-of-5 runs,
+/// `rustc -O` and `swiftc -O` on an Apple-silicon laptop:
+///
+/// | n    | Rust scan | Rust map | Swift scan | Swift map |
+/// |------|-----------|----------|------------|-----------|
+/// | 4    | 2.6 ns    | 73 ns    | 2.4 ns     | 186 ns    |
+/// | 64   | 0.62 us   | 1.05 us  | 0.55 us    | 2.15 us   |
+/// | 128  | 2.51 us   | 2.05 us  | 2.26 us    | 4.10 us   |
+/// | 256  | 9.07 us   | 4.12 us  | 8.85 us    | 8.25 us   |
+/// | 4096 | 1875 us   | 67 us    | 1873 us    | 133 us    |
+///
+/// So the map is 28x SLOWER at n=4 (77x in Swift) and 28x FASTER at
+/// n=4096 (14x in Swift); the crossover is near n=110 in Rust and n=240
+/// in Swift. An ordinary boolean result -- rect / ellipse / polygon
+/// operands, EXCLUDE corners -- sits far below either. The single map
+/// version this replaces was therefore a real regression on the common
+/// case, even though the absolute cost was ~150 ns.
+///
+/// 128 is chosen as the one shared constant because it is at or above
+/// Rust's crossover, and the most Swift can lose by using the map from
+/// 128 rather than its own 240 is the n=128 row: 4.10 us against 2.26 us,
+/// under 2 us. In the other direction the scan's worst case below the
+/// threshold is 127*128/2 = 8128 comparisons, measured at 2.3-2.5 us.
+/// Both bounds are small and explicit.
+///
+/// The threshold cannot change WHAT is returned: both bodies return the
+/// same pair for every ring, which
+/// `first_repeated_vertex_matches_the_quadratic_scan` checks directly on
+/// each of them, and `first_repeated_vertex_agrees_across_the_threshold`
+/// checks on rings straddling this value.
+const PINCH_MAP_THRESHOLD: usize = 128;
+
 /// The first repeated vertex of `ring` as `(i, j)` with `i < j` and
 /// `ring[i] == ring[j]`, scanning `j` ascending then `i` ascending so
 /// the choice is total and port-independent. Exact equality is the
 /// right test: the sweep's vertices come from snap-rounded input and
 /// arrangement splits, so a revisited vertex is bit-identical.
 ///
-/// **Cost.** O(n) expected, one hash lookup and at most one insert per
-/// vertex, replacing the O(n^2) pairwise scan this used to be. That
-/// matters because the post-pass runs on EVERY boolean result, and a
-/// curve-flattened one carries thousands of vertices.
+/// **Cost.** O(n^2) worst case below [`PINCH_MAP_THRESHOLD`] and O(n)
+/// expected at or above it -- see that constant for the measurements
+/// behind the switch. The post-pass runs on EVERY boolean result, so both
+/// regimes matter: ordinary results are short and the scan wins there,
+/// while a curve-flattened result carries thousands of vertices, where
+/// the scan costs milliseconds.
 ///
-/// The map holds the FIRST index at which each distinct vertex was seen
-/// (insert only when absent), and `j` still ascends, so the pair
-/// returned is the same `(smallest j that repeats, smallest i equal to
-/// it)` the pairwise scan chose. That identity is load-bearing:
+/// Both bodies return the SAME pair. The map holds the FIRST index at
+/// which each distinct vertex was seen (insert only when absent) and `j`
+/// still ascends, so it reports the same `(smallest j that repeats,
+/// smallest i equal to it)` the scan does. That identity is load-bearing:
 /// [`split_pinched_ring`] cuts at this pair, and the exact-comparison
 /// corpus pins the resulting ring order across both ports. JasSwift
-/// carries the identical reduction, key canonicalization included.
+/// carries the identical pair of bodies, threshold and key
+/// canonicalization included.
 fn first_repeated_vertex(ring: &Ring) -> Option<(usize, usize)> {
+    if ring.len() < PINCH_MAP_THRESHOLD {
+        first_repeated_vertex_scan(ring)
+    } else {
+        first_repeated_vertex_map(ring)
+    }
+}
+
+/// The pairwise scan. Separately named so the differential test can drive
+/// it on rings of any length, not only the ones the threshold routes here.
+fn first_repeated_vertex_scan(ring: &Ring) -> Option<(usize, usize)> {
+    for j in 1..ring.len() {
+        for i in 0..j {
+            if ring[i] == ring[j] {
+                return Some((i, j));
+            }
+        }
+    }
+    None
+}
+
+/// The index-map reduction. Separately named for the same reason as
+/// [`first_repeated_vertex_scan`].
+fn first_repeated_vertex_map(ring: &Ring) -> Option<(usize, usize)> {
     let mut seen: std::collections::HashMap<(u64, u64), usize> =
         std::collections::HashMap::with_capacity(ring.len());
     for (j, v) in ring.iter().enumerate() {
@@ -1541,11 +1607,14 @@ mod tests {
 
     // ----------- first_repeated_vertex: the index-map reduction -----------
 
-    /// The O(n^2) scan `first_repeated_vertex` replaced, kept as the
-    /// test oracle. The reduction is only allowed to be faster — the
-    /// (j, i) choice it returns must be the SAME pair, because
+    /// An independent copy of the pairwise scan, kept as the oracle so an
+    /// edit to the shipped `first_repeated_vertex_scan` has something to
+    /// disagree with. Neither body of `first_repeated_vertex` is allowed to
+    /// return a different (i, j) pair from this one, in either direction:
     /// `split_pinched_ring` cuts at that pair and the exact-comparison
-    /// corpus pins the resulting ring order across both ports.
+    /// corpus pins the resulting ring order across both ports. (Which body
+    /// is FASTER depends on the ring length -- see `PINCH_MAP_THRESHOLD`,
+    /// whose doc carries the measurements.)
     fn first_repeated_vertex_quadratic(ring: &Ring) -> Option<(usize, usize)> {
         for j in 1..ring.len() {
             for i in 0..j {
@@ -1597,11 +1666,21 @@ mod tests {
         ]
     }
 
+    /// Every body against the oracle, on every fixture, INDEPENDENTLY of
+    /// the length threshold. Calling the map body directly is what keeps
+    /// the signed-zero / NaN cases covered: the fixtures are short, so the
+    /// dispatcher would route all of them to the scan and never exercise
+    /// the map at all.
     #[test]
     fn first_repeated_vertex_matches_the_quadratic_scan() {
         for (n, ring) in adversarial_rings().iter().enumerate() {
-            assert_eq!(first_repeated_vertex(ring), first_repeated_vertex_quadratic(ring),
-                       "adversarial ring {n} disagrees: {ring:?}");
+            let want = first_repeated_vertex_quadratic(ring);
+            assert_eq!(first_repeated_vertex_map(ring), want,
+                       "adversarial ring {n}, map body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex_scan(ring), want,
+                       "adversarial ring {n}, scan body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex(ring), want,
+                       "adversarial ring {n}, dispatcher, disagrees: {ring:?}");
         }
         // Random rings drawn from a small coordinate alphabet so
         // repeats are common, including signed zeros.
@@ -1618,8 +1697,51 @@ mod tests {
                     (alphabet[xi], alphabet[yi])
                 })
                 .collect();
-            assert_eq!(first_repeated_vertex(&ring), first_repeated_vertex_quadratic(&ring),
-                       "random ring disagrees: {ring:?}");
+            let want = first_repeated_vertex_quadratic(&ring);
+            assert_eq!(first_repeated_vertex_map(&ring), want,
+                       "random ring, map body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex_scan(&ring), want,
+                       "random ring, scan body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex(&ring), want,
+                       "random ring, dispatcher, disagrees: {ring:?}");
+        }
+    }
+
+    /// The dispatcher must give the same answer on both sides of
+    /// `PINCH_MAP_THRESHOLD`, so the switch is invisible in the output.
+    /// Rings are built at length T-1, T and T+1, each in three flavours:
+    /// pinch-free, a pinch in the first half, and a pinch at the very end
+    /// (the case that scans furthest). The pinch coordinate is a signed
+    /// zero pair, so the map body's canonicalization is exercised at these
+    /// lengths too.
+    #[test]
+    fn first_repeated_vertex_agrees_across_the_threshold() {
+        for len in [PINCH_MAP_THRESHOLD - 1, PINCH_MAP_THRESHOLD, PINCH_MAP_THRESHOLD + 1] {
+            // Distinct coordinates: i is unique, so no accidental repeat.
+            let base: Ring = (0..len).map(|i| (i as f64, (i as f64) * 2.0 + 0.5)).collect();
+            let mut pinch_early = base.clone();
+            pinch_early[1] = (-0.0, 0.0);
+            pinch_early[len / 2] = (0.0, -0.0);
+            let mut pinch_late = base.clone();
+            pinch_late[0] = (-0.0, 0.0);
+            pinch_late[len - 1] = (0.0, -0.0);
+            for (label, ring) in [("pinch-free", &base),
+                                  ("pinch-early", &pinch_early),
+                                  ("pinch-late", &pinch_late)] {
+                let want = first_repeated_vertex_quadratic(ring);
+                assert_eq!(first_repeated_vertex(ring), want,
+                           "len {len} {label}: dispatcher disagrees with the oracle");
+                assert_eq!(first_repeated_vertex_map(ring), want,
+                           "len {len} {label}: map body disagrees with the oracle");
+                assert_eq!(first_repeated_vertex_scan(ring), want,
+                           "len {len} {label}: scan body disagrees with the oracle");
+            }
+            // The fixtures must actually contain what they claim, or the
+            // agreement above is vacuous.
+            assert_eq!(first_repeated_vertex_quadratic(&base), None,
+                       "the pinch-free fixture at len {len} has a repeat");
+            assert_eq!(first_repeated_vertex_quadratic(&pinch_late), Some((0, len - 1)),
+                       "the pinch-late fixture at len {len} does not end in the pinch");
         }
     }
 

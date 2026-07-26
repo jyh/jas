@@ -865,14 +865,17 @@ func connectEdges(_ events: [BoolSweepEvent], _ order: [Int]) -> BoolPolygonSet 
 /// Rust and Swift emit the same rings in the same sequence, which the
 /// exact-comparison corpus requires.
 ///
-/// COST. firstRepeatedVertex is O(n) expected, and each cut removes one
-/// duplicate vertex, so a ring with p pinches costs O(p * n) expected -
-/// O(n^2) in the pathological limit where a constant fraction of
-/// vertices is a pinch, O(n) for the overwhelmingly common p = 0 (one
-/// scan, no split) and O(n) for the EXCLUDE-corner p = 2. Worth stating
-/// because this runs on EVERY boolean result, including curve-flattened
-/// ones with thousands of vertices; the same bound is documented on the
-/// normalizer's O(E^2) arrangement.
+/// COST. firstRepeatedVertex is O(n) expected on a ring of at least
+/// `pinchMapThreshold` vertices and O(n^2) worst case below it, and each
+/// cut removes one duplicate vertex, so a ring with p pinches costs
+/// O(p * n) expected for a long ring and at most O(p * threshold^2) for a
+/// short one - the latter bounded by 8128 comparisons per call, measured
+/// at 2.3 us. The pathological limit is O(n^2) either way, where a
+/// constant fraction of vertices is a pinch. The overwhelmingly common
+/// p = 0 (one pass, no split) and the EXCLUDE-corner p = 2 are linear on
+/// long rings. Worth stating because this runs on EVERY boolean result,
+/// including curve-flattened ones with thousands of vertices; the same
+/// bound is documented on the normalizer's O(E^2) arrangement.
 func splitPinchedRings(_ rings: BoolPolygonSet) -> BoolPolygonSet {
     var out: BoolPolygonSet = []
     for ring in rings {
@@ -909,7 +912,7 @@ private func splitPinchedRing(_ ring: BoolRing, _ out: inout BoolPolygonSet) {
 ///    of the map entirely makes it match nothing - exactly what == does.
 ///
 /// firstRepeatedVertexMatchesTheQuadraticScan pins both cases against
-/// the scan this replaced.
+/// the pairwise scan.
 struct BoolVertexKey: Hashable {
     let x: UInt64
     let y: UInt64
@@ -921,28 +924,86 @@ struct BoolVertexKey: Hashable {
     }
 }
 
+/// Ring length at which firstRepeatedVertex switches from the pairwise
+/// scan to the index map.
+///
+/// MEASURED, not assumed. Standalone benchmarks of the two bodies over
+/// pinch-free rings (the case both must scan to the end), best-of-5 runs,
+/// `swiftc -O` and `rustc -O` on an Apple-silicon laptop:
+///
+///     n     | Swift scan | Swift map | Rust scan | Rust map
+///     ------|------------|-----------|-----------|---------
+///     4     | 2.4 ns     | 186 ns    | 2.6 ns    | 73 ns
+///     64    | 0.55 us    | 2.15 us   | 0.62 us   | 1.05 us
+///     128   | 2.26 us    | 4.10 us   | 2.51 us   | 2.05 us
+///     256   | 8.85 us    | 8.25 us   | 9.07 us   | 4.12 us
+///     4096  | 1873 us    | 133 us    | 1875 us   | 67 us
+///
+/// So the map is 77x SLOWER at n=4 (28x in Rust) and 14x FASTER at
+/// n=4096 (28x in Rust); the crossover is near n=240 in Swift and n=110
+/// in Rust. An ordinary boolean result - rect / ellipse / polygon
+/// operands, EXCLUDE corners - sits far below either. The single map
+/// version this replaces was therefore a real regression on the common
+/// case, even though the absolute cost was ~180 ns.
+///
+/// 128 is chosen as the one shared constant because it is at or above
+/// Rust's crossover, and the most Swift can lose by using the map from
+/// 128 rather than its own 240 is the n=128 row: 4.10 us against 2.26 us,
+/// under 2 us. In the other direction the scan's worst case below the
+/// threshold is 127*128/2 = 8128 comparisons, measured at 2.3-2.5 us.
+/// Both bounds are small and explicit.
+///
+/// The threshold cannot change WHAT is returned: both bodies return the
+/// same pair for every ring, which
+/// firstRepeatedVertexMatchesTheQuadraticScan checks directly on each of
+/// them, and firstRepeatedVertexAgreesAcrossTheThreshold checks on rings
+/// straddling this value.
+let pinchMapThreshold = 128
+
 /// The first repeated vertex of `ring` as (i, j) with i < j and
 /// ring[i] == ring[j], scanning j ascending then i ascending so the
 /// choice is total and port-independent. Exact equality is the right
 /// test: the sweep's vertices come from snap-rounded input and
 /// arrangement splits, so a revisited vertex is bit-identical.
 ///
-/// COST. O(n) expected, one lookup and at most one insert per vertex,
-/// replacing the O(n^2) pairwise scan this used to be. That matters
-/// because the post-pass runs on EVERY boolean result, and a
-/// curve-flattened one carries thousands of vertices.
+/// COST. O(n^2) worst case below `pinchMapThreshold` and O(n) expected at
+/// or above it - see that constant for the measurements behind the
+/// switch. The post-pass runs on EVERY boolean result, so both regimes
+/// matter: ordinary results are short and the scan wins there, while a
+/// curve-flattened result carries thousands of vertices, where the scan
+/// costs milliseconds.
 ///
-/// The map holds the FIRST index at which each distinct vertex was seen
-/// (insert only when absent), and j still ascends, so the pair returned
-/// is the same (smallest j that repeats, smallest i equal to it) the
-/// pairwise scan chose. That identity is load-bearing: splitPinchedRing
-/// cuts at this pair, and the exact-comparison corpus pins the
-/// resulting ring order across both ports. jas_dioxus carries the
-/// identical reduction, key canonicalization included.
+/// Both bodies return the SAME pair. The map holds the FIRST index at
+/// which each distinct vertex was seen (insert only when absent) and j
+/// still ascends, so it reports the same (smallest j that repeats,
+/// smallest i equal to it) the scan does. That identity is load-bearing:
+/// splitPinchedRing cuts at this pair, and the exact-comparison corpus
+/// pins the resulting ring order across both ports. jas_dioxus carries
+/// the identical pair of bodies, threshold and key canonicalization
+/// included.
 ///
-/// Internal (not private) only so the differential test can compare it
-/// against the retired scan.
+/// Internal (not private) only so the differential test can drive it.
 func firstRepeatedVertex(_ ring: BoolRing) -> (Int, Int)? {
+    ring.count < pinchMapThreshold
+        ? firstRepeatedVertexScan(ring)
+        : firstRepeatedVertexMap(ring)
+}
+
+/// The pairwise scan. Separately named so the differential test can drive
+/// it on rings of any length, not only the ones the threshold routes here.
+func firstRepeatedVertexScan(_ ring: BoolRing) -> (Int, Int)? {
+    guard ring.count > 1 else { return nil }
+    for j in 1..<ring.count {
+        for i in 0..<j {
+            if ring[i] == ring[j] { return (i, j) }
+        }
+    }
+    return nil
+}
+
+/// The index-map reduction. Separately named for the same reason as
+/// firstRepeatedVertexScan.
+func firstRepeatedVertexMap(_ ring: BoolRing) -> (Int, Int)? {
     var seen: [BoolVertexKey: Int] = [:]
     seen.reserveCapacity(ring.count)
     for (j, v) in ring.enumerated() {
