@@ -1230,12 +1230,18 @@ mod tests {
         // two squares fuse into the single rectangle [0,20]x[0,10].
         // The collinear vertices (10,0) and (10,10) are RETAINED —
         // collapsing them is the Boolean panel's separate opt-in — so
-        // the ring has six vertices. Shoelace on
-        //   (0,0) (10,0) (20,0) (20,10) (10,10) (0,10):
-        //   0 + 0 + 200 + 200 + 100 + 0 = ... taking terms
-        //   x_i*y_{i+1} - x_{i+1}*y_i pairwise:
-        //   0-0, 0-0, 200-0, 100-100 -> careful; total is 400
-        // -> area 200 = 100 + 100, as region-preservation demands.
+        // the ring has six vertices.
+        //
+        // Shoelace on (0,0) (10,0) (20,0) (20,10) (10,10) (0,10),
+        // one term x_i*y_{i+1} - x_{i+1}*y_i per edge, wrapping:
+        //   (0,0)  ->(10,0) :  0*0  - 10*0  =   0
+        //   (10,0) ->(20,0) : 10*0  - 20*0  =   0
+        //   (20,0) ->(20,10): 20*10 - 20*0  = 200
+        //   (20,10)->(10,10): 20*10 - 10*10 = 100
+        //   (10,10)->(0,10) : 10*10 -  0*10 = 100
+        //   (0,10) ->(0,0)  :  0*0  -  0*10 =   0
+        // sum 400, area = 400/2 = 200 = 100 + 100, as
+        // region-preservation demands.
         let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let b = vec![(10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)];
         let out = normalize(&vec![a, b], PolyFillRule::NonZero);
