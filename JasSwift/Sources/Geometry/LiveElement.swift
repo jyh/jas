@@ -1020,8 +1020,22 @@ public func boundsOfPolygonSet(_ ps: BoolPolygonSet) -> BBox {
 
 // MARK: - Internal ring samplers
 
-private func segmentsForArc(radius: Double, precision: Double) -> Int {
-    guard radius > 0, precision > 0 else { return 32 }
+/// Segment count for sampling a circular / elliptical ring.
+///
+/// Internal rather than private so `R9NaNLeaksThroughGuardTests` can hold it to
+/// its Rust twin (`geometry/live.rs segments_for_arc`).
+///
+/// `isFinite` is part of the guard, not decoration: the two ports' guards were
+/// NOT mirror images before. `radius > 0` is FALSE for NaN so this port fell
+/// back to 32, while Rust's `radius <= 0.0` is ALSO false for NaN so it fell
+/// through and landed on 8 — a display-list divergence with no crash on either
+/// side. An infinite radius trapped here and produced a usize::MAX-length point
+/// vector there. A non-finite radius is not a circle, so both ports now take the
+/// same fallback they take for a non-positive one. Risk R9.
+func segmentsForArc(radius: Double, precision: Double) -> Int {
+    guard radius > 0, radius.isFinite, precision > 0, precision.isFinite else {
+        return 32
+    }
     let n = Double.pi * (radius / (2.0 * precision)).squareRoot()
     return max(8, Int(n.rounded(.up)))
 }

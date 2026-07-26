@@ -1123,8 +1123,18 @@ fn ellipse_to_ring(cx: f64, cy: f64, rx: f64, ry: f64, precision: f64) -> Vec<(f
         .collect()
 }
 
+/// Segment count for sampling a circular / elliptical ring.
+///
+/// The finiteness tests are part of the guard, not decoration: `radius <= 0.0`
+/// is FALSE for NaN, so a NaN radius used to fall through to
+/// `nan.ceil().max(8.0) as usize` = 8 here while JasSwift's `radius > 0` guard
+/// is also false for NaN and returned 32 — a display-list divergence with no
+/// crash on either side. An infinite radius was worse: usize::MAX segments here
+/// and a precondition failure there. A non-finite radius is not a circle, so
+/// both ports now take the same fallback they take for a non-positive one.
+/// Risk R9, transcripts/CORPUS_CENSUS.md §7.
 fn segments_for_arc(radius: f64, precision: f64) -> usize {
-    if radius <= 0.0 || precision <= 0.0 {
+    if !(radius > 0.0) || !radius.is_finite() || !(precision > 0.0) || !precision.is_finite() {
         return 32;
     }
     let approx = std::f64::consts::PI * (radius / (2.0 * precision)).sqrt();
@@ -1199,6 +1209,24 @@ fn bounds_of_polygon_set(ps: &PolygonSet) -> Bounds {
 mod tests {
     use super::*;
     use crate::geometry::element::RectElem;
+
+    /// Risk R9 (transcripts/CORPUS_CENSUS.md §7): the two ports' guards here
+    /// were not mirror images. `radius <= 0.0` is FALSE for NaN, so a NaN radius
+    /// fell through to `nan.ceil().max(8.0) as usize` = 8 while JasSwift's
+    /// `radius > 0` guard (also false for NaN) returned 32 — a display-list
+    /// divergence with no crash on either side, which no cast fix would catch.
+    /// Twin: `R9NaNLeaksThroughGuardTests.segmentsForArcRejectsNonFiniteRadius`.
+    #[test]
+    fn segments_for_arc_rejects_non_finite_radius() {
+        assert_eq!(segments_for_arc(f64::NAN, 1.0), 32);
+        assert_eq!(segments_for_arc(f64::INFINITY, 1.0), 32);
+        assert_eq!(segments_for_arc(10.0, f64::NAN), 32);
+        assert_eq!(segments_for_arc(0.0, 1.0), 32);
+        assert_eq!(segments_for_arc(-1.0, 1.0), 32);
+        // A real radius is untouched.
+        assert_eq!(segments_for_arc(10.0, 1.0), 8);
+        assert_eq!(segments_for_arc(100.0, 0.1), 71);
+    }
 
     /// Shoelace signed area of one ring.
     fn ring_area(ring: &[(f64, f64)]) -> f64 {

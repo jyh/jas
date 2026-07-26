@@ -1446,8 +1446,19 @@ private func parseElement(_ node: XMLNode) -> Element? {
         }
         var th = 0.0
         if tw > 0 {
-            let lines = max(1, Int(Double(content.count) * fs * approxCharWidthFactor / tw) + 1)
-            th = Double(lines) * fs * 1.2
+            // Kept in Double and rounded UP, exactly as Rust's
+            // `.ceil().max(1.0)` does — it performs no integer conversion here
+            // at all. The old `Int(x) + 1` differed from `ceil(x)` at every
+            // exact integer (a whole extra line of height), and trapped
+            // outright on a non-finite `font-size`, which `attrF` accepts
+            // because `Double("nan")` succeeds — as does Rust's
+            // `parse::<f64>()`, so both ports READ such a file. Risk R9.
+            // Argument order matters: Swift's `max(x, y)` is `y >= x ? y : x`,
+            // so the constant must come FIRST for NaN to yield 1.0 the way
+            // Rust's `f64::max` does.
+            let lines = max(1.0, (Double(content.count) * fs * approxCharWidthFactor / tw)
+                                     .rounded(.up))
+            th = lines * fs * 1.2
         }
         // SVG `y` is the baseline of the first line; convert to the
         // layout-box top by subtracting the ascent (0.8 * fs).

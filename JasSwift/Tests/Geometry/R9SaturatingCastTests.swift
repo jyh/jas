@@ -271,3 +271,107 @@ struct R9GuardedCastTests {
         #expect(PanelLayout.resolveDim("12.7", 200) == 12)
     }
 }
+
+/// Risk R9, the "the guard does not reject NaN" family. `if len == 0.0`,
+/// `if total <= 0`, `if step <= 0` are each FALSE for NaN, so a NaN falls
+/// through to a conversion that saturates in Rust and traps here.
+struct R9NaNLeaksThroughGuardTests {
+
+    /// Rust: `((density / 12.5).round() as i64).clamp(2, 12)` — NaN saturates
+    /// to 0 and clamps to 2; 1e30 saturates to i64::MAX and clamps to 12. The
+    /// outer `min(max(…))` here was correct; the inner `Int` was not. `density`
+    /// comes from brush-library JSON and no widget anywhere bounds it.
+    @Test func bristleCountSaturatesLikeRust() {
+        #expect(BristleBrush(size: 1, density: .nan, thickness: 50,
+                             opacity: 100, strokeWeight: 1).count() == 2)
+        #expect(BristleBrush(size: 1, density: 1e30, thickness: 50,
+                             opacity: 100, strokeWeight: 1).count() == 12)
+        #expect(BristleBrush(size: 1, density: 50, thickness: 50,
+                             opacity: 100, strokeWeight: 1).count() == 4)
+    }
+
+    /// `patternAlongPath`'s `if total <= 0` and `if step <= 0` are both false
+    /// for NaN, so `Int((total / step).rounded(.down))` was reached. Rust's
+    /// `((total / step).floor() as i64).max(1)` lays down one tile.
+    @Test func patternAlongPathDoesNotTrapOnNaNGeometry() {
+        let brush = PatternBrush(tileWidth: 10, tileHeight: 10,
+                                 side: [[[0, 0], [1, 0], [1, 1]]],
+                                 scale: 100, spacing: 0,
+                                 flipAcross: false, flipAlong: false,
+                                 strokeWeight: 1)
+        let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(Double.nan, 0)]
+        // The assertion is that this RETURNS. Rust returns one tile for the
+        // same input; a trap here would take the process down.
+        _ = patternAlongPath(cmds, brush)
+    }
+
+    /// `segmentsForArc`'s two guards were NOT mirror images: `radius > 0` is
+    /// FALSE for NaN so this port fell back to 32, while Rust's
+    /// `radius <= 0.0` is also false for NaN so it fell THROUGH and landed on
+    /// 8 — a silent display-list divergence with no crash on either side, which
+    /// no cast fix would have caught. An infinite radius was worse: a trap here
+    /// and a usize::MAX-length point vector there. Both ports now reject a
+    /// non-finite radius the same way they reject a non-positive one.
+    @Test func segmentsForArcRejectsNonFiniteRadius() {
+        #expect(segmentsForArc(radius: .nan, precision: 1.0) == 32)
+        #expect(segmentsForArc(radius: .infinity, precision: 1.0) == 32)
+        #expect(segmentsForArc(radius: 10.0, precision: .nan) == 32)
+        #expect(segmentsForArc(radius: 0.0, precision: 1.0) == 32)
+        #expect(segmentsForArc(radius: -1.0, precision: 1.0) == 32)
+        // A real radius is untouched: pi * sqrt(10 / 2) = 7.02 → ceil 8 → 8.
+        #expect(segmentsForArc(radius: 10.0, precision: 1.0) == 8)
+        #expect(segmentsForArc(radius: 100.0, precision: 0.1) == 71)
+    }
+
+    /// The `inline-size` line count kept `lines` as an Int via `Int(x) + 1`
+    /// where Rust keeps it an f64 via `.ceil().max(1.0)` and converts nothing.
+    /// Two defects in one expression: a non-finite `font-size` (Swift's
+    /// `Double("nan")` and Rust's `parse::<f64>()` both ACCEPT the string, so
+    /// both ports read it) trapped the importer here, and `Int(x) + 1` is not
+    /// `ceil(x)` at exact integers — an off-by-one line of height.
+    @Test func svgInlineSizeLineCountMatchesRustCeil() {
+        // 10 chars * 7.5pt font * 0.6 factor / 22.5pt width = 2.0 EXACTLY,
+        // which is the only place the two formulas differ: ceil(2.0) is 2
+        // lines where Int(2.0) + 1 was 3.
+        let svg = """
+        <?xml version="1.0"?>
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <text x="0" y="20" font-size="10" style="inline-size:30px">abcdefghij</text>
+        </svg>
+        """
+        let doc = svgToDocument(svg)
+        guard case .text(let t)? = doc.layers.first?.children.first else {
+            Issue.record("expected a text element, got \(String(describing: doc.layers.first?.children.first))")
+            return
+        }
+        // fs is 10px = 7.5pt, tw is 30px = 22.5pt; 10 * 7.5 * 0.6 / 22.5 = 2.0.
+        #expect(t.height == 2.0 * 7.5 * 1.2)
+    }
+
+    @Test func svgNonFiniteFontSizeDoesNotTrapTheImporter() {
+        let svg = """
+        <?xml version="1.0"?>
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <text x="0" y="20" font-size="nan" style="inline-size:20px">abc</text>
+        </svg>
+        """
+        // The assertion is that the import RETURNS; jas_dioxus loads this file.
+        _ = svgToDocument(svg)
+    }
+
+    /// The four hyphenation fields are read from SVG attributes through
+    /// `attrF`, which is `Double(string) ?? default` and accepts "nan" /
+    /// "1e400"; Rust's `get_f` uses `parse::<f64>()` and accepts the same. So a
+    /// hand-edited document crashed this port on OPEN where Rust loaded it with
+    /// a saturated 0. `bias` additionally has a u8 ceiling in Rust.
+    @Test func hyphenationFieldsSaturateLikeRust() {
+        #expect(hyphenationFieldInt(.nan) == 0)          // Rust: `as usize` → 0
+        #expect(hyphenationFieldInt(-1.0) == 0)          // Rust: `as usize` → 0
+        #expect(hyphenationFieldInt(1e30) == Int.max)
+        #expect(hyphenationFieldInt(6.0) == 6)
+        #expect(hyphenationBiasInt(.nan) == 0)           // Rust: `as u8` → 0
+        #expect(hyphenationBiasInt(300.0) == 255)        // Rust: `as u8` → 255
+        #expect(hyphenationBiasInt(-5.0) == 0)
+        #expect(hyphenationBiasInt(3.0) == 3)
+    }
+}

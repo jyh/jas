@@ -110,7 +110,10 @@ private func sampleLine(_ out: inout [Sample],
     let len = ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0)).squareRoot()
     if len == 0.0 { return }
     let tangent = atan2(y1 - y0, x1 - x0)
-    let n = max(1, Int((len / SAMPLE_INTERVAL_PT).rounded(.up)))
+    // `if len == 0.0` above is FALSE for NaN, so a NaN coordinate reaches this
+    // conversion; saturatingInt mirrors Rust's `as u32`, which yields 0 and
+    // then clamps to a single sample. Risk R9.
+    let n = max(1, saturatingInt((len / SAMPLE_INTERVAL_PT).rounded(.up)))
     let startI = out.isEmpty ? 0 : 1
     for i in startI...n {
         let t = Double(i) / Double(n)

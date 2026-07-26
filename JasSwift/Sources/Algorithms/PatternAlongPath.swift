@@ -49,7 +49,10 @@ public func patternAlongPath(_ commands: [PathCommand], _ brush: PatternBrush) -
     let gap = tileW * (brush.spacing / 100.0)
     let step = tileW + gap
     if step <= 0 { return [] }
-    let n = max(Int((total / step).rounded(.down)), 1)
+    // `total <= 0` and `step <= 0` above are both FALSE for NaN, so a NaN
+    // reaches this conversion; saturatingInt mirrors Rust's `as i64`, which
+    // yields 0 and then clamps to a single tile. Risk R9.
+    let n = max(saturatingInt((total / step).rounded(.down)), 1)
 
     var out: [[[Double]]] = []
     for i in 0..<n {
