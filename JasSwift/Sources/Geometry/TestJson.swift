@@ -368,6 +368,14 @@ package func elementJson(_ elem: Element) -> String {
         let cmds = e.d.map { pathCommandJson($0) }
         o.raw("d", jsonArray(cmds))
         o.raw("fill", fillJson(e.fill))
+        // The carried rule is part of what a path MEANS, so a golden
+        // that omits it cannot see a port filling a hole
+        // (transcripts/BOOLEAN.md). Emitted only when it is not the
+        // `nonzero` default, per this file's identity-omission
+        // convention. Mirrors the Rust serializer key for key.
+        if e.fillRule != .nonzero {
+            o.str("fill_rule", "evenodd")
+        }
         o.raw("stroke", strokeJson(e.stroke))
     case .text(let e):
         o.str("type", "text")

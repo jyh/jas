@@ -948,9 +948,25 @@ public func elementToPolygonSetWith(
         case .generated(let gen):
             return gen.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
+    // THE CARRIED RULE CROSSES HERE (transcripts/BOOLEAN.md, "Fill
+    // rule: the polygon set carries it"). A path's subpaths are only a
+    // region once a fill rule reads them, and the element says which —
+    // so hand the declared rule to the algorithm layer and let
+    // boolCanonicalize spend it. Dropping it and letting the sweep's
+    // bare even-odd convention take over would make this boundary LIE:
+    // a document declaring fill-rule="nonzero" would come back from a
+    // boolean op with a hole cut into it that the artist never drew.
+    //
+    // Cost: canonicalization is the same O(E^2) scan the boolean
+    // pipeline already pays on every operand, so this is a
+    // constant-factor addition, and it is idempotent — its output is
+    // canonical, so the downstream pass is a pure pass-through.
     case .path(let p):
-        return flattenPathToRings(p.d)
+        return boolCanonicalize(BoolRuledPolygonSet(
+            flattenPathToRings(p.d), rule: BoolFillRule(p.fillRule)))
     case .textPath(let tp):
+        // No fill rule to carry: a TextPath's `d` is a baseline, not a
+        // filled region, so the bare even-odd reading is all it means.
         return flattenPathToRings(tp.d)
     case .line, .text:
         // Line has zero area; Text glyph flattening is deferred.

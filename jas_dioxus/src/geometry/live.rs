@@ -17,7 +17,7 @@
 use std::rc::Rc;
 
 use crate::algorithms::boolean::{
-    self, PolygonSet,
+    self, canonicalize, PolygonSet, RuledPolygonSet,
 };
 
 use super::element::{translate_element, Bounds, CommonProps, Element, Fill, Stroke};
@@ -1060,10 +1060,30 @@ pub(crate) fn element_to_polygon_set_with(
             LiveVariant::Recorded(rec) => rec.evaluate_with(precision, resolver, visiting),
             LiveVariant::Generated(ge) => ge.evaluate_with(precision, resolver, visiting),
         },
-        Element::Path(p) => super::element::flatten_path_to_rings(&p.d),
+        // THE CARRIED RULE CROSSES HERE (transcripts/BOOLEAN.md,
+        // "Fill rule: the polygon set carries it"). A path's subpaths
+        // are only a region once a fill rule reads them, and the
+        // element says which — so hand the declared rule to the
+        // algorithm layer and let `canonicalize` spend it. Dropping it
+        // and letting the sweep's bare even-odd convention take over
+        // would make this boundary LIE: a document declaring
+        // `fill-rule="nonzero"` would come back from a boolean op with
+        // a hole cut into it that the artist never drew.
+        //
+        // Cost: canonicalization is the same O(E^2) scan the boolean
+        // pipeline already pays on every operand, so this is a
+        // constant-factor addition, and it is idempotent — its output
+        // is canonical, so the downstream pass is a pure pass-through.
+        Element::Path(p) => canonicalize(&RuledPolygonSet::new(
+            super::element::flatten_path_to_rings(&p.d),
+            p.fill_rule.into(),
+        )),
         Element::TextPath(tp) => {
             // Treat text-on-path's underlying path as a ring; the
-            // glyph layout itself is not a polygon-set concept.
+            // glyph layout itself is not a polygon-set concept. There
+            // is no fill rule to carry: TextPath's `d` is a baseline,
+            // not a filled region, so the bare even-odd reading of the
+            // ring list is all this can mean.
             super::element::flatten_path_to_rings(&tp.d)
         }
         // Line has zero area; Text glyph flattening is deferred until
@@ -1179,6 +1199,21 @@ fn bounds_of_polygon_set(ps: &PolygonSet) -> Bounds {
 mod tests {
     use super::*;
     use crate::geometry::element::RectElem;
+
+    /// Shoelace signed area of one ring.
+    fn ring_area(ring: &[(f64, f64)]) -> f64 {
+        let n = ring.len();
+        if n < 3 {
+            return 0.0;
+        }
+        let mut sum = 0.0;
+        for i in 0..n {
+            let (x1, y1) = ring[i];
+            let (x2, y2) = ring[(i + 1) % n];
+            sum += x1 * y2 - x2 * y1;
+        }
+        sum / 2.0
+    }
 
     fn empty_compound(op: CompoundOperation) -> CompoundShape {
         CompoundShape {
@@ -1336,6 +1371,177 @@ mod tests {
         let ps = element_to_polygon_set(&rect, DEFAULT_PRECISION);
         assert_eq!(ps.len(), 1);
         assert_eq!(ps[0], vec![(1.0, 2.0), (4.0, 2.0), (4.0, 6.0), (1.0, 6.0)]);
+    }
+
+    // ---- The carried rule at the document boundary (BOOLEAN.md) ----
+
+    /// Two nested CCW subpaths in one path: [0,20]^2 and [5,15]^2,
+    /// carrying `rule`. This is the shape whose meaning the two fill
+    /// rules disagree about — donut under even-odd, solid under
+    /// non-zero — so it is the operand that proves the rule crossed
+    /// the boundary.
+    fn nested_subpath_path(rule: crate::geometry::element::FillRule) -> Element {
+        use crate::geometry::element::{PathCommand as C, PathElem};
+        let ring = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            vec![
+                C::MoveTo { x: x0, y: y0 },
+                C::LineTo { x: x1, y: y0 },
+                C::LineTo { x: x1, y: y1 },
+                C::LineTo { x: x0, y: y1 },
+                C::ClosePath,
+            ]
+        };
+        let mut d = ring(0.0, 0.0, 20.0, 20.0);
+        d.extend(ring(5.0, 5.0, 15.0, 15.0));
+        Element::Path(PathElem {
+            d,
+            fill: None,
+            stroke: None,
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: rule,
+        })
+    }
+
+    #[test]
+    fn path_operand_honours_its_declared_fill_rule() {
+        use crate::geometry::element::FillRule;
+
+        // Even-odd: a ray from inside the inner subpath crosses two
+        // edges, so the middle is a HOLE. Both rings survive; net
+        // filled area 400 - 100 = 300.
+        let eo = element_to_polygon_set(
+            &nested_subpath_path(FillRule::EvenOdd),
+            DEFAULT_PRECISION,
+        );
+        assert_eq!(eo.len(), 2, "even-odd keeps the hole: {:?}", eo);
+        assert!((ring_area(&eo[0]).abs() - 400.0).abs() < 1e-9);
+        assert!((ring_area(&eo[1]).abs() - 100.0).abs() < 1e-9);
+
+        // Non-zero (the SVG default, so what most imported artwork
+        // carries): inside the inner subpath the winding is 1 + 1 = 2,
+        // so the middle is FILLED and the operand is a solid square of
+        // 400. Before the carried-rule ruling this document was
+        // silently reinterpreted as the donut above.
+        let nz = element_to_polygon_set(
+            &nested_subpath_path(FillRule::NonZero),
+            DEFAULT_PRECISION,
+        );
+        assert_eq!(nz.len(), 1, "non-zero fills the middle: {:?}", nz);
+        assert!((ring_area(&nz[0]).abs() - 400.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn svg_round_trip_keeps_a_declared_rule_through_a_boolean() {
+        // THE CORRECTNESS ARGUMENT THAT DECIDED THE RULING, gated end
+        // to end: a path that declares its fill rule in SVG must come
+        // back out of a boolean operation with that rule respected.
+        use crate::algorithms::boolean::boolean_subtract;
+        use crate::geometry::element::FillRule;
+        use crate::geometry::svg::{document_to_svg, svg_to_document};
+
+        // Same two nested subpaths, written the way an SVG file does.
+        // SVG user units are px and the document works in points, so
+        // the importer scales everything by PX_TO_PT = 72/96 = 0.75:
+        // the outer subpath lands as [0,15]^2 and the inner as
+        // [3.75,11.25]^2. Every number below is in POINTS for that
+        // reason, and is written as (px value) * 0.75 so the
+        // derivation stays readable.
+        const S: f64 = 0.75;
+        let doc_svg = |rule: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+<path d="M0 0 L20 0 L20 20 L0 20 Z M5 5 L15 5 L15 15 L5 15 Z" fill-rule="{}"/>
+</svg>"#,
+                rule
+            )
+        };
+
+        // Areas, derived in px then converted (area scales by S^2):
+        //   nonzero: solid 20x20 = 400 px^2, minus the 20x3 strip = 60,
+        //            leaves 340 px^2 -> 340 * 0.5625 = 191.25 pt^2,
+        //            one ring.
+        //   evenodd: donut 400 - 100 = 300 px^2, minus the same strip
+        //            (which sits below the hole, so it cuts only the
+        //            outer ring) leaves 340 - 100 = 240 px^2 net
+        //            -> 135 pt^2, two rings.
+        for (attr, want_rule, want_rings, want_area) in [
+            ("nonzero", FillRule::NonZero, 1usize, 340.0 * S * S),
+            ("evenodd", FillRule::EvenOdd, 2usize, 240.0 * S * S),
+        ] {
+            let doc = svg_to_document(&doc_svg(attr));
+            let elem = doc.layers[0]
+                .children()
+                .expect("layer has children")[0]
+                .clone();
+            match elem.as_ref() {
+                Element::Path(p) => assert_eq!(
+                    p.fill_rule, want_rule,
+                    "import lost fill-rule=\"{}\"",
+                    attr
+                ),
+                other => panic!("expected a Path, got {:?}", other),
+            }
+
+            // The operand the boolean layer sees must mean what the
+            // document said. Subtract the strip [0,20]x[0,3] px, which
+            // sits below the hole (which starts at y=5 px) and inside
+            // the outer subpath.
+            let operand =
+                element_to_polygon_set(elem.as_ref(), DEFAULT_PRECISION);
+            let strip = vec![vec![
+                (0.0, 0.0),
+                (20.0 * S, 0.0),
+                (20.0 * S, 3.0 * S),
+                (0.0, 3.0 * S),
+            ]];
+            let cut = boolean_subtract(&operand, &strip);
+            assert_eq!(
+                cut.len(),
+                want_rings,
+                "fill-rule=\"{}\" produced {:?}",
+                attr,
+                cut
+            );
+            let net: f64 = if want_rings == 1 {
+                ring_area(&cut[0]).abs()
+            } else {
+                let mut areas: Vec<f64> =
+                    cut.iter().map(|r| ring_area(r).abs()).collect();
+                areas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                areas[1] - areas[0]
+            };
+            assert!(
+                (net - want_area).abs() < 1e-9,
+                "fill-rule=\"{}\" net area {} != {}",
+                attr,
+                net,
+                want_area
+            );
+
+            // And the rule survives export, so the round trip is
+            // closed. `nonzero` is the SVG default and is written by
+            // omission; `evenodd` must appear explicitly.
+            let out = document_to_svg(&doc);
+            if want_rule == FillRule::EvenOdd {
+                assert!(
+                    out.contains("fill-rule=\"evenodd\""),
+                    "export dropped evenodd: {}",
+                    out
+                );
+            } else {
+                assert!(
+                    !out.contains("fill-rule="),
+                    "export wrote a redundant default: {}",
+                    out
+                );
+            }
+            assert_eq!(svg_to_document(&out).layers, doc.layers);
+        }
     }
 
     #[test]

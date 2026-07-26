@@ -490,6 +490,18 @@ fn element_json(elem: &Element) -> String {
             let cmds: Vec<String> = e.d.iter().map(path_command_json).collect();
             o.raw("d", json_array(&cmds));
             o.raw("fill", fill_json(&e.fill));
+            // The carried rule is part of what a path MEANS, so a
+            // golden that omits it cannot see a port filling a hole
+            // (transcripts/BOOLEAN.md). Emitted only when it is not the
+            // `nonzero` default, per this file's identity-omission
+            // convention — so existing goldens are unchanged and only
+            // multi-ring boolean results grow the key.
+            if !matches!(
+                e.fill_rule,
+                crate::geometry::element::FillRule::NonZero
+            ) {
+                o.str_val("fill_rule", "evenodd");
+            }
             o.raw("stroke", stroke_json(&e.stroke));
         }
         Element::Text(e) => {

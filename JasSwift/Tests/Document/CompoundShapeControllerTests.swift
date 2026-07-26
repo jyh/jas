@@ -92,10 +92,28 @@ private func twoOverlapping() -> Model {
     #expect(topChildrenCount(m) == 1)
 }
 
-@Test func destructiveExcludeProducesTwoPolygons() {
+@Test func destructiveExcludeProducesSingleEvenOddPath() {
+    // Twin of Rust's `destructive_exclude_produces_single_evenodd_path`.
+    //
+    // THE MULTI-RING HOLE BUG, pinned. A symmetric difference is one
+    // outer ring plus an inner ring cutting out the overlap. Swift used
+    // to emit each ring as its own Polygon, and a Polygon fills its own
+    // area on its own — so the hole was PAINTED OVER and the app drew a
+    // disc where Rust drew a donut. It is now one Path carrying every
+    // ring as a subpath, declaring even-odd (boolResultFillRule), which
+    // is what makes the hole survive both in the model and on canvas.
     let m = twoOverlapping()
     Controller(model: m).applyDestructiveBoolean("exclude")
-    #expect(topChildrenCount(m) == 2)
+    #expect(topChildrenCount(m) == 1)
+    #expect(m.document.selection.count == 1)
+    guard case .path(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a Path, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.fillRule == .evenodd)
+    var moveCount = 0
+    for c in p.d { if case .moveTo = c { moveCount += 1 } }
+    #expect(moveCount >= 2)
 }
 
 @Test func destructiveSubtractFrontConsumesFront() {

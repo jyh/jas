@@ -683,17 +683,30 @@ private func buildCGPath(_ path: CGMutablePath, _ cmds: [PathCommand]) {
     }
 }
 
-private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
+private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?,
+                           fillRule: FillRule = .nonzero) {
     let hasFill = fill != nil
     let hasStroke = stroke != nil
+    // The path's DECLARED fill rule decides which points are inside it
+    // (transcripts/BOOLEAN.md). Filling a multi-subpath path with the
+    // winding rule when it declares even-odd FILLS ITS HOLES - which is
+    // exactly the bug every multi-ring boolean result used to hit here.
+    let cgRule: CGPathFillRule = fillRule == .evenodd ? .evenOdd : .winding
     if hasFill && hasStroke {
         setFill(ctx, fill)
         let (_, align) = setStroke(ctx, stroke)
-        if align == .center {
+        if align == .center && fillRule == .nonzero {
             ctx.drawPath(using: .fillStroke)
+        } else if align == .center {
+            // drawPath has no even-odd fill+stroke mode, so fill with
+            // the rule and re-add the path for the stroke.
+            let saved = ctx.path
+            ctx.fillPath(using: cgRule)
+            if let pth = saved { ctx.addPath(pth) }
+            strokeAligned(ctx, align)
         } else {
             // Fill first, then stroke with alignment clipping
-            ctx.fillPath()
+            ctx.fillPath(using: cgRule)
             // Re-add the path since fillPath consumed it
             // For non-center alignment, caller must handle path re-addition
             // Fallback: just use fillStroke (alignment requires path re-tracing)
@@ -701,7 +714,7 @@ private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?) {
         }
     } else if hasFill {
         setFill(ctx, fill)
-        ctx.fillPath()
+        ctx.fillPath(using: cgRule)
     } else if hasStroke {
         let (_, align) = setStroke(ctx, stroke)
         strokeAligned(ctx, align)
@@ -749,7 +762,8 @@ private func fillStrokeOrOutline(
     fillGradient: Gradient?,
     strokeGradient: Gradient?,
     bbox: CGRect,
-    outline: Bool
+    outline: Bool,
+    fillRule: FillRule = .nonzero
 ) {
     if outline {
         applyOutlineStyle(ctx)
@@ -779,7 +793,7 @@ private func fillStrokeOrOutline(
         }
         fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox)
     } else {
-        fillAndStroke(ctx, fill, stroke)
+        fillAndStroke(ctx, fill, stroke, fillRule: fillRule)
     }
 }
 
@@ -1379,7 +1393,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 fillStrokeOrOutline(
                     ctx, v.fill, strokeForDraw,
                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    bbox: pbbox, outline: false
+                    bbox: pbbox, outline: false, fillRule: v.fillRule
                 )
             }
             // Arrowheads — anchored at the ORIGINAL v.d endpoints, never the

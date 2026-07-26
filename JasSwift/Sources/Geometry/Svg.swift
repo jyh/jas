@@ -324,8 +324,13 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         let toolOriginAttr = v.toolOrigin.map {
             " jas:tool-origin=\"\(escapeXml($0))\""
         } ?? ""
+        // The carried rule leaves the document here. `nonzero` is the
+        // SVG default and is written by omission; `evenodd` must be
+        // stated or a re-import would silently change what the artwork
+        // means. Mirrors Rust `geometry::svg::element_svg`.
+        let fillRuleAttr = v.fillRule == .evenodd ? " fill-rule=\"evenodd\"" : ""
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
-            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
+            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))\(fillRuleAttr)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
             "\(toolOriginAttr)\(idAttr(v.id))\(nameAttr(v.name))/>"
 
@@ -1342,10 +1347,17 @@ private func parseElement(_ node: XMLNode) -> Element? {
     case "path":
         let d = parsePathD(elem.attribute(forName: "d")?.stringValue ?? "")
         let toolOrigin = elem.attribute(forName: "jas:tool-origin")?.stringValue
+        // The carried rule enters the document here. Anything other
+        // than "evenodd" — including the attribute being absent — is
+        // SVG's nonzero default. Mirrors the Rust importer.
+        let fillRule: FillRule =
+            (elem.attribute(forName: "fill-rule")?.stringValue == "evenodd")
+                ? .evenodd : .nonzero
         return .path(Path(d: d, fill: fill, stroke: stroke,
                               opacity: opacity, transform: transform,
                               toolOrigin: toolOrigin,
-                              name: name, id: id))
+                              name: name, id: id,
+                              fillRule: fillRule))
 
     case "title":
         // <title> children of an element are name-bearers (handled

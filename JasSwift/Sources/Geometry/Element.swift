@@ -1015,7 +1015,7 @@ public enum Element: Equatable {
             return .path(Path(d: cmds, fill: v.fill, stroke: v.stroke,
                                  widthPoints: v.widthPoints,
                                  opacity: v.opacity, transform: v.transform,
-                                 locked: v.locked))
+                                 locked: v.locked, fillRule: v.fillRule))
         case .textPath(let v):
             var cmds = v.d
             var anchorIdx = 0
@@ -1237,7 +1237,7 @@ public enum Element: Equatable {
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
                               widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: v.transform, locked: locked,
-                              visibility: v.visibility))
+                              visibility: v.visibility, fillRule: v.fillRule))
         case .text(let v):
             return .text(Text(x: v.x, y: v.y, content: v.content,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -1508,7 +1508,7 @@ public enum Element: Equatable {
             return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
                               widthPoints: v.widthPoints,
                               opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: visibility))
+                              visibility: visibility, fillRule: v.fillRule))
         case .text(let v):
             return .text(Text(x: v.x, y: v.y, content: v.content,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -1655,7 +1655,7 @@ public enum Element: Equatable {
                 locked: v.locked, visibility: v.visibility,
                 blendMode: v.blendMode, mask: v.mask,
                 fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
+                name: v.name, id: v.id, fillRule: v.fillRule))
         case .text(let v):
             return .text(Text(
                 x: v.x + dx, y: v.y + dy, tspans: v.tspans,
@@ -1796,7 +1796,7 @@ public enum Element: Equatable {
                               visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
                               fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                               strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                              toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+                              toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
         case .text(let v):
             return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -1903,7 +1903,7 @@ public enum Element: Equatable {
                               blendMode: blendMode ?? v.blendMode, mask: v.mask,
                               fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                               strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                              toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+                              toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
         case .text(let v):
             return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
                               fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -1998,7 +1998,7 @@ public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Ele
                           widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
                           visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: fillGradient, strokeGradient: v.strokeGradient))
+                          fillGradient: fillGradient, strokeGradient: v.strokeGradient, fillRule: v.fillRule))
     default:
         return element
     }
@@ -2047,7 +2047,7 @@ public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) ->
                           widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
                           visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: strokeGradient))
+                          fillGradient: v.fillGradient, strokeGradient: strokeGradient, fillRule: v.fillRule))
     default:
         return element
     }
@@ -2084,7 +2084,7 @@ public func withFill(_ element: Element, fill: Fill?) -> Element {
         return .path(Path(d: v.d, fill: fill, stroke: v.stroke,
                           widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
+                          visibility: v.visibility, fillRule: v.fillRule))
     case .text(let v):
         return .text(Text(x: v.x, y: v.y, content: v.content,
                           fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -2161,7 +2161,7 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
                           visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
                           fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                           strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
     case .text(let v):
         return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
                           fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -2255,7 +2255,7 @@ public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element
                           strokeGradient: v.strokeGradient,
                           strokeBrush: strokeBrush,
                           strokeBrushOverrides: v.strokeBrushOverrides,
-                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
     case .line, .polyline:
         guard strokeBrush != nil,
               case .path(let p) = promoteToPathForBrush(element) else { return element }
@@ -2268,7 +2268,7 @@ public func withStrokeBrush(_ element: Element, strokeBrush: String?) -> Element
                           strokeGradient: p.strokeGradient,
                           strokeBrush: strokeBrush,
                           strokeBrushOverrides: p.strokeBrushOverrides,
-                          toolOrigin: p.toolOrigin, name: p.name, id: p.id))
+                          toolOrigin: p.toolOrigin, name: p.name, id: p.id, fillRule: p.fillRule))
     default:
         return element
     }
@@ -2290,7 +2290,7 @@ public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> 
                           strokeGradient: v.strokeGradient,
                           strokeBrush: v.strokeBrush,
                           strokeBrushOverrides: overrides,
-                          toolOrigin: v.toolOrigin, name: v.name, id: v.id))
+                          toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
     case .line, .polyline:
         guard overrides != nil,
               case .path(let p) = promoteToPathForBrush(element) else { return element }
@@ -2303,7 +2303,7 @@ public func withStrokeBrushOverrides(_ element: Element, overrides: String?) -> 
                           strokeGradient: p.strokeGradient,
                           strokeBrush: p.strokeBrush,
                           strokeBrushOverrides: overrides,
-                          toolOrigin: p.toolOrigin, name: p.name, id: p.id))
+                          toolOrigin: p.toolOrigin, name: p.name, id: p.id, fillRule: p.fillRule))
     default:
         return element
     }
@@ -2367,7 +2367,7 @@ public func withMask(_ element: Element, mask: Mask?) -> Element {
         return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
                           widthPoints: v.widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
+                          visibility: v.visibility, blendMode: v.blendMode, mask: mask, fillRule: v.fillRule))
     case .text(let v):
         return .text(Text(x: v.x, y: v.y, content: v.content,
                           fontFamily: v.fontFamily, fontSize: v.fontSize,
@@ -2420,7 +2420,7 @@ public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint])
         return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
                           widthPoints: widthPoints,
                           opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
+                          visibility: v.visibility, fillRule: v.fillRule))
     default:
         return element
     }
@@ -3138,6 +3138,47 @@ func pathBounds(_ d: [PathCommand]) -> BBox {
     return (minX, minY, xs.max()! - minX, ys.max()! - minY)
 }
 
+/// SVG-style fill rule. Determines how a multi-subpath shape is filled.
+/// Defaults to `.nonzero` (the SVG default).
+///
+/// This is the DOCUMENT-SIDE half of the carried-rule law
+/// (transcripts/BOOLEAN.md, "Fill rule: the polygon set carries it"):
+/// what the artist or the imported file declared. The algorithm-side
+/// half is `BoolFillRule`, and the initializers below are the only
+/// bridge between them — a boolean operand must carry this value
+/// across, never assume one. Boolean RESULTS are stamped with
+/// `boolResultFillRule`, which is even-odd, so that a generated
+/// multi-ring compound shape shows its holes instead of filling them.
+///
+/// Additive: absent from a document means `.nonzero`, so every
+/// existing file stays valid. Twin of Rust's
+/// `geometry::element::FillRule`.
+public enum FillRule: String, Equatable {
+    case nonzero
+    case evenodd
+}
+
+extension FillRule {
+    /// The document rule an algorithm-layer rule denotes.
+    public init(_ r: BoolFillRule) {
+        switch r {
+        case .nonzero: self = .nonzero
+        case .evenodd: self = .evenodd
+        }
+    }
+}
+
+extension BoolFillRule {
+    /// The algorithm-layer rule a document rule denotes. Call this at
+    /// the boundary where an element becomes a boolean operand.
+    public init(_ r: FillRule) {
+        switch r {
+        case .nonzero: self = .nonzero
+        case .evenodd: self = .evenodd
+        }
+    }
+}
+
 public struct Path: Equatable {
     public let d: [PathCommand]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
@@ -3171,6 +3212,12 @@ public struct Path: Equatable {
     /// element. Preserved by mutations; optional on export.
     /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
     public let toolOrigin: String?
+    /// Which fill rule reads this path's subpaths. See `FillRule` and
+    /// transcripts/BOOLEAN.md. Declared LAST in the initializer so that
+    /// every existing `Path(...)` call stays valid and a copy site only
+    /// has to append `fillRule: v.fillRule` — which it MUST, or the
+    /// copy silently reinterprets the artwork.
+    public let fillRule: FillRule
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -3186,7 +3233,8 @@ public struct Path: Equatable {
                 strokeBrushOverrides: String? = nil,
                 toolOrigin: String? = nil,
                 name: String? = nil,
-                id: String? = nil) {
+                id: String? = nil,
+                fillRule: FillRule = .nonzero) {
         self.name = name
         self.id = id
         self.d = d
@@ -3201,6 +3249,7 @@ public struct Path: Equatable {
         self.strokeBrush = strokeBrush
         self.strokeBrushOverrides = strokeBrushOverrides
         self.toolOrigin = toolOrigin
+        self.fillRule = fillRule
     }
 
     public var bounds: BBox {

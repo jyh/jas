@@ -1596,7 +1596,8 @@ private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand]) -> Path {
                 blendMode: pe.blendMode,
                 mask: pe.mask,
                 fillGradient: pe.fillGradient,
-                strokeGradient: pe.strokeGradient)
+                strokeGradient: pe.strokeGradient,
+                fillRule: pe.fillRule)
 }
 
 /// Implementation of doc.path.delete_anchor_near.
