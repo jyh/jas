@@ -115,7 +115,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
         .lineTo(10, 10),
         .lineTo(0, 10),
         .closePath,
-    ]))
+    ], fillRule: .nonzero))
     let ps = elementToPolygonSet(path, precision: DEFAULT_PRECISION)
     #expect(ps.count == 1)
 }

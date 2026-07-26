@@ -2220,7 +2220,9 @@ public func promoteToPathForBrush(_ element: Element) -> Element {
                           blendMode: v.blendMode, mask: v.mask,
                           fillGradient: nil, strokeGradient: v.strokeGradient,
                           strokeBrush: nil, strokeBrushOverrides: nil,
-                          toolOrigin: nil, name: v.name, id: v.id))
+                          toolOrigin: nil, name: v.name, id: v.id,
+                          // A Line is one open subpath and carries no rule.
+                          fillRule: .nonzero))
     case .polyline(let v) where v.points.count >= 2:
         var d: [PathCommand] = [.moveTo(v.points[0].0, v.points[0].1)]
         for p in v.points[1...] { d.append(.lineTo(p.0, p.1)) }
@@ -2230,7 +2232,9 @@ public func promoteToPathForBrush(_ element: Element) -> Element {
                           blendMode: v.blendMode, mask: v.mask,
                           fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                           strokeBrush: nil, strokeBrushOverrides: nil,
-                          toolOrigin: nil, name: v.name, id: v.id))
+                          toolOrigin: nil, name: v.name, id: v.id,
+                          // A Polyline is one subpath and carries no rule.
+                          fillRule: .nonzero))
     default:
         return element
     }
@@ -3213,10 +3217,16 @@ public struct Path: Equatable {
     /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
     public let toolOrigin: String?
     /// Which fill rule reads this path's subpaths. See `FillRule` and
-    /// transcripts/BOOLEAN.md. Declared LAST in the initializer so that
-    /// every existing `Path(...)` call stays valid and a copy site only
-    /// has to append `fillRule: v.fillRule` — which it MUST, or the
-    /// copy silently reinterprets the artwork.
+    /// transcripts/BOOLEAN.md.
+    ///
+    /// The initializer parameter has NO DEFAULT, deliberately. Swift has
+    /// no equivalent of Rust's `PathElem { d, ..p.clone() }`, so every
+    /// Swift edit of a Path is an open-coded rebuild that restates each
+    /// field by hand; a defaulted `fillRule` let such a rebuild compile
+    /// while silently reinterpreting the artwork (refilling the holes of
+    /// an even-odd boolean result). Requiring the argument makes the
+    /// compiler, not a reviewer, enumerate the sites. Fresh-construction
+    /// sites pass `.nonzero`; rebuild sites pass the source's rule.
     public let fillRule: FillRule
 
     public init(d: [PathCommand],
@@ -3234,7 +3244,7 @@ public struct Path: Equatable {
                 toolOrigin: String? = nil,
                 name: String? = nil,
                 id: String? = nil,
-                fillRule: FillRule = .nonzero) {
+                fillRule: FillRule) {
         self.name = name
         self.id = id
         self.d = d

@@ -2975,6 +2975,65 @@ mod tests {
         }
     }
 
+    /// The Path arm of `simplify_selection` is the one place in this
+    /// function that spells `fill_rule` out by hand rather than
+    /// inheriting it from a `..clone()`, so it is the one place a future
+    /// edit could drop it. JasSwift carries the same pin
+    /// (Tests/Geometry/FillRulePreservationTests.swift
+    /// §fillRuleSurvivesSimplifySelection).
+    #[test]
+    fn simplify_selection_preserves_even_odd_fill_rule() {
+        use crate::geometry::element::{
+            Color as ColorE, CommonProps, Fill, FillRule, PathCommand, PathElem,
+        };
+        // Two concentric squares: a donut under EvenOdd.
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 25.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 75.0 },
+            PathCommand::LineTo { x: 25.0, y: 75.0 },
+            PathCommand::ClosePath,
+        ];
+        let path = Element::Path(PathElem {
+            d,
+            fill: Some(Fill::new(ColorE::BLACK)),
+            stroke: None,
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: FillRule::EvenOdd,
+        });
+        let layer = Element::Layer(crate::geometry::element::LayerElem {
+            children: vec![Rc::new(path)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut doc = Document {
+            layers: vec![layer], selected_layer: 0, selection: vec![],
+            ..Document::default()
+        };
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        let mut model = Model::new(doc, None);
+        Controller::simplify_selection(&mut model, 1.0);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        match &**child {
+            Element::Path(p) => assert_eq!(
+                p.fill_rule, FillRule::EvenOdd,
+                "simplify refilled the donut's hole"
+            ),
+            other => panic!("expected Path after simplify, got {other:?}"),
+        }
+    }
+
     #[test]
     fn boolean_then_simplify_emits_path_with_curveto() {
         use crate::geometry::element::PathCommand;

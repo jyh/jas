@@ -173,31 +173,31 @@ import Testing
 }
 
 @Test func pathBounds() {
-    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 20), .lineTo(5, 15), .closePath])
+    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 20), .lineTo(5, 15), .closePath], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 10 && b.height == 20)
 }
 
 @Test func pathCubicBezier() {
-    let p = Path(d: [.moveTo(0, 0), .curveTo(x1: 5, y1: 10, x2: 15, y2: 10, x: 20, y: 0)])
+    let p = Path(d: [.moveTo(0, 0), .curveTo(x1: 5, y1: 10, x2: 15, y2: 10, x: 20, y: 0)], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.width == 20)
 }
 
 @Test func pathSmoothCurveTo() {
-    let p = Path(d: [.moveTo(0, 0), .curveTo(x1: 1, y1: 2, x2: 3, y2: 4, x: 5, y: 6), .smoothCurveTo(x2: 8, y2: 9, x: 10, y: 12)])
+    let p = Path(d: [.moveTo(0, 0), .curveTo(x1: 1, y1: 2, x2: 3, y2: 4, x: 5, y: 6), .smoothCurveTo(x2: 8, y2: 9, x: 10, y: 12)], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.width == 10 && b.height == 12)
 }
 
 @Test func pathQuadTo() {
-    let p = Path(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0)])
+    let p = Path(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0)], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.width == 10)
 }
 
 @Test func pathSmoothQuadTo() {
-    let p = Path(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0), .smoothQuadTo(20, 5)])
+    let p = Path(d: [.moveTo(0, 0), .quadTo(x1: 5, y1: 10, x: 10, y: 0), .smoothQuadTo(20, 5)], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.width == 20)
 }
@@ -205,14 +205,14 @@ import Testing
 @Test func pathArcTo() {
     // Semicircle from (0,0) to (50,0), r=25: bulges 25 units off the chord
     // (extrema-aware bounds; endpoint-only would give height 0).
-    let p = Path(d: [.moveTo(0, 0), .arcTo(rx: 25, ry: 25, rotation: 0, largeArc: true, sweep: false, x: 50, y: 0)])
+    let p = Path(d: [.moveTo(0, 0), .arcTo(rx: 25, ry: 25, rotation: 0, largeArc: true, sweep: false, x: 50, y: 0)], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.width == 50)
     #expect(abs(b.y - 0) < 1e-9 && abs(b.height - 25) < 1e-9)
 }
 
 @Test func pathEmpty() {
-    let p = Path(d: [])
+    let p = Path(d: [], fillRule: .nonzero)
     let b = p.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 0 && b.height == 0)
 }
@@ -220,7 +220,7 @@ import Testing
 @Test func pathWithFillAndStroke() {
     let fill = Fill(color: Color(r: 1, g: 0, b: 0))
     let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.0, linecap: .round)
-    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 10), .closePath], fill: fill, stroke: stroke)
+    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 10), .closePath], fill: fill, stroke: stroke, fillRule: .nonzero)
     #expect(p.fill?.color.toRgba().0 == 1.0)
     #expect(p.stroke?.width == 2.0)
     #expect(p.stroke?.linecap == .round)
@@ -275,7 +275,7 @@ import Testing
 }
 
 @Test func elementBoundsDispatch() {
-    let pathEl = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)]))
+    let pathEl = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)], fillRule: .nonzero))
     let rectEl = Element.rect(Rect(x: 5, y: 5, width: 20, height: 20))
     #expect(pathEl.bounds.x == 0 && pathEl.bounds.width == 10)
     #expect(rectEl.bounds.x == 5 && rectEl.bounds.width == 20)
@@ -289,7 +289,7 @@ import Testing
         .ellipse(Ellipse(cx: 50, cy: 50, rx: 10, ry: 5)),
         .polyline(Polyline(points: [(0, 0), (10, 10)])),
         .polygon(Polygon(points: [(0, 0), (10, 0), (5, 10)])),
-        .path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)])),
+        .path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)], fillRule: .nonzero)),
         .text(Text(x: 0, y: 20, content: "test")),
     ]
     let g = Group(children: children)
@@ -568,7 +568,7 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
 }
 
 @Test func withStrokeSetsPathStroke() {
-    let elem = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)]))
+    let elem = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)], fillRule: .nonzero))
     let stroke = Stroke(color: Color(r: 0, g: 1, b: 0), width: 3.0)
     let result = withStroke(elem, stroke: stroke)
     if case .path(let p) = result {

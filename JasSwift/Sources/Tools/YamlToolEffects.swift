@@ -1439,7 +1439,10 @@ private func makePathFromCommands(
 
     return Path(d: cmds, fill: fill, stroke: stroke,
                 strokeBrush: strokeBrush,
-                strokeBrushOverrides: strokeBrushOverrides)
+                strokeBrushOverrides: strokeBrushOverrides,
+                // A tool-drawn path is fresh geometry, not a boolean
+                // result. Matches Rust's commit sites in effects.rs.
+                fillRule: .nonzero)
 }
 
 /// Paintbrush-tool stroke-width commit rule per PAINTBRUSH_TOOL.md
@@ -2506,7 +2509,10 @@ private func blobBrushCommitPainting(
         d: newD,
         fill: newFill, stroke: nil,
         widthPoints: [],
-        toolOrigin: "blob_brush"
+        toolOrigin: "blob_brush",
+        // Rust's blob_brush_commit_painting stamps NonZero on the
+        // unified region; parity, not preference.
+        fillRule: .nonzero
     )
 
     // Build new document: remove matches in reverse (so earlier
@@ -2572,7 +2578,9 @@ private func blobBrushCommitErasing(
                     strokeGradient: pe.strokeGradient,
                     strokeBrush: pe.strokeBrush,
                     strokeBrushOverrides: pe.strokeBrushOverrides,
-                    toolOrigin: pe.toolOrigin)
+                    toolOrigin: pe.toolOrigin,
+                    name: pe.name, id: pe.id,
+                    fillRule: pe.fillRule)
                 newDoc = newDoc.replaceElement(path, with: .path(newPe))
             }
         }

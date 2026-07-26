@@ -340,7 +340,9 @@ public func recognizedToElement(_ shape: RecognizedShape, _ template: Element) -
         d.append(.closePath)
         return .path(Path(d: d,
                          fill: a.fill, stroke: a.stroke, opacity: a.opacity,
-                         transform: a.transform, locked: a.locked, visibility: a.visibility))
+                         transform: a.transform, locked: a.locked, visibility: a.visibility,
+                         // A freshly recognized shape is a single ring.
+                         fillRule: .nonzero))
     }
 }
 

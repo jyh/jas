@@ -47,7 +47,7 @@ private func makeCtx(model: Model) -> ToolContext {
 }
 
 private func pathModel(_ d: [PathCommand]) -> Model {
-    let path = Path(d: d, fill: nil, stroke: nil)
+    let path = Path(d: d, fill: nil, stroke: nil, fillRule: .nonzero)
     let layer = Layer(name: "L", children: [.path(path)])
     return Model(document: Document(
         layers: [layer], selectedLayer: 0, selection: []

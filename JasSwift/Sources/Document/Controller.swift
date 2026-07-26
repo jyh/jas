@@ -654,7 +654,10 @@ public class Controller {
                     fillGradient: p.fillGradient,
                     strokeGradient: p.strokeGradient,
                     name: p.name,
-                    id: p.id
+                    id: p.id,
+                    // A Polygon carries no fill rule, so the refit Path is
+                    // a fresh nonzero one. Matches Rust's Polygon arm.
+                    fillRule: .nonzero
                 ))
                 newDoc = newDoc.replaceElement(es.path, with: newPath)
             case .path(let p):
@@ -710,7 +713,8 @@ public class Controller {
                     strokeBrushOverrides: p.strokeBrushOverrides,
                     toolOrigin: p.toolOrigin,
                     name: p.name,
-                    id: p.id
+                    id: p.id,
+                    fillRule: p.fillRule
                 ))
                 newDoc = newDoc.replaceElement(es.path, with: newPath)
             default:

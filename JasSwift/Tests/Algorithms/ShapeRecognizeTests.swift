@@ -473,7 +473,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 @Test func recognizedToElementPreservesStrokeAndCommon() {
     let template = Element.path(Path(d: [],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.5),
-        opacity: 0.7))
+        opacity: 0.7, fillRule: .nonzero))
     let shape = RecognizedShape.rectangle(x: 10, y: 20, w: 30, h: 40)
     if case .rect(let r) = recognizedToElement(shape, template) {
         #expect(r.x == 10); #expect(r.width == 30); #expect(r.height == 40)
@@ -486,7 +486,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 }
 
 @Test func recognizedToElementRoundRectSetsRxRy() {
-    let template = Element.path(Path(d: []))
+    let template = Element.path(Path(d: [], fillRule: .nonzero))
     let shape = RecognizedShape.roundRect(x: 0, y: 0, w: 100, h: 60, r: 12)
     if case .rect(let r) = recognizedToElement(shape, template) {
         #expect(r.rx == 12); #expect(r.ry == 12)
@@ -496,7 +496,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 }
 
 @Test func recognizedToElementArrowEmitsPolygon() {
-    let template = Element.path(Path(d: []))
+    let template = Element.path(Path(d: [], fillRule: .nonzero))
     let shape = RecognizedShape.arrow(tail: (0, 0), tip: (100, 0),
         headLen: 25, headHalfWidth: 20, shaftHalfWidth: 8)
     if case .polygon(let p) = recognizedToElement(shape, template) {
@@ -546,7 +546,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 }
 
 @Test func recognizedToElementScribbleEmitsPolyline() {
-    let template = Element.path(Path(d: []))
+    let template = Element.path(Path(d: [], fillRule: .nonzero))
     let shape = RecognizedShape.scribble(points: [(0, 0), (10, 20), (20, 0), (30, 20), (40, 0)])
     if case .polyline(let p) = recognizedToElement(shape, template) {
         #expect(p.points.count == 5)
@@ -582,7 +582,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
     let d: [PathCommand] = pts.enumerated().map { i, p in
         i == 0 ? .moveTo(p.0, p.1) : .lineTo(p.0, p.1)
     }
-    let elem = Element.path(Path(d: d))
+    let elem = Element.path(Path(d: d, fillRule: .nonzero))
     if let (kind, result) = recognizeElement(elem, RecognizeConfig()) {
         #expect(kind == .circle)
         guard case .circle = result else {
@@ -598,7 +598,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
     let d: [PathCommand] = pts.enumerated().map { i, p in
         i == 0 ? .moveTo(p.0, p.1) : .lineTo(p.0, p.1)
     }
-    let elem = Element.path(Path(d: d))
+    let elem = Element.path(Path(d: d, fillRule: .nonzero))
     if let (kind, result) = recognizeElement(elem, RecognizeConfig()) {
         #expect(kind == .square)
         guard case .rect = result else {
