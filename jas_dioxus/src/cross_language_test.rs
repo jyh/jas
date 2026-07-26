@@ -4489,7 +4489,7 @@ mod tests {
             assert_eq!(got, want, "character_apply panel_edit '{}'", name);
             ran += 1;
         }
-        assert!(ran >= 30, "character_apply corpus ran only {} vectors", ran);
+        assert!(ran >= 40, "character_apply corpus ran only {} vectors", ran);
     }
 
     #[cfg(feature = "web")]
