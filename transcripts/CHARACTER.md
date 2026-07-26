@@ -552,10 +552,38 @@ consult a font-size field the user did not touch: a 30pt element with
 a leading of 36 is at its Auto ratio and goes back to an empty
 `line-height`, whatever the panel's own size field happens to say.
 The same ruling retires the Auto-leading **post-write hook** from the
-apply path — it stays as a display concern (keeping the Leading field
-tracking a committed size) but the apply no longer needs it, because
-`font_size` owning only the size means an absent `line-height`
-survives on its own.
+apply path — the apply no longer needs it, because `font_size` owning
+only the size means an absent `line-height` survives on its own. The
+hook stays, in BOTH active ports, as a display concern: Rust's
+`character_panel_post_write` and Swift's `characterPanelPostWrite`, each
+called on every Character-panel field commit in the same position (field
+write → hook → apply).
+
+What it protects is not the element but the panel's **stored** state,
+and only after the SELECTION CLEARS. While text is selected all three
+implementations show the element's own leading, so they agree whatever
+is stored. With nothing selected there is no element to pull from and
+the Leading field reads stored state — and a stored `(font_size 24,
+leading 14.4)` pair reads as an EXPLICIT 14.4pt leading under the
+LEADING group's own Auto test: an override the user never chose, which
+the next text object would inherit.
+
+The reference needs **no** hook, and the asymmetry is exactly located.
+The reference holds the panel's leading as an OPTIONAL and stores
+nothing else, so absence *is* Auto and tracks any size for free
+(`CHARACTER_PANEL_FIELDS["leading"] is None`). Both active ports keep a
+CONCRETE number in panel state instead — Rust because its `leading` is a
+plain `f64` with no absence to offer, Swift because its panel scope is
+initialised from the workspace-declared `14.4` and a commit leaves a
+number sitting there. (Swift's *law* does read leading as an optional,
+per the cleared-leading path below; it is the *store* that is never
+empty, and the store is what the no-selection display reads.) A concrete
+number that no longer matches the size is a lie about Auto, so both ports
+must MATERIALISE `font_size × 1.2`. The hook is that materialisation —
+the same representation-gap compensation as the cleared-leading path —
+not a third rule about what an edit means. Pinned as a pair:
+`font_size_commit_then_deselect_shows_the_bumped_auto_leading` /
+`fontSizeCommitThenDeselectShowsTheBumpedAutoLeading`.
 
 **Clearing the Leading field is Auto**, and the three implementations
 reach that one outcome from two different shapes. Swift and the
@@ -607,6 +635,20 @@ reference arm additionally asserts the corpus REJECTS both retired laws
 — the whole-rebuild one and the stale-sibling one — so the gate cannot
 pass vacuously.
 
+**The panel defaults are the workspace's, and all three arms check it by
+machine.** The value a field falls back to when panel state does not
+carry it is not a hand-written constant in any arm: the reference
+compares `CHARACTER_PANEL_FIELDS` against the generated bundle, Swift
+compares `characterPanelDefaults`, and Rust compares
+`CharacterPanelState::default()` — key sets in both directions, then
+values. The Rust arm was added last and caught its own arm's first
+drift on the spot (a kerning default of `""` against the workspace's
+`"Auto"`, indistinguishable in the apply because both spell the empty
+element attribute, visible in the display as a blank combo). `leading`
+is the one field where the arms differ by design: the two nullable arms
+omit it, because absence is the sentinel for Auto; Rust must carry the
+declared 14.4, because its `f64` has no absence to offer.
+
 ### Follow-ups banked here
 
 1. **The sibling apply that is still whole-rebuild.**
@@ -644,6 +686,49 @@ pass vacuously.
    right: the honest fix is a keyword-capable tspan baseline shift,
    after which both ports write the keyword and the canvas applies the
    shrink at render time as it does for element-level super / sub.
+5. **The same defect class, one level down: a RANGE's siblings still
+   come from the ELEMENT.** This wave fixed "the sibling comes from the
+   element, not from panel state" — but on the two tspan routes the
+   base handed to the normaliser is `character_attrs_of(elem)` /
+   `CharacterAttrs(element: elem)`, i.e. the ELEMENT's attributes, not
+   the range's own effective tspan values (`app_state.rs:2393` and
+   `Effects.swift:1621` for the range route; the caret route at
+   `app_state.rs:2344` / `Effects.swift:1586` reads the same base).
+   So the destructive case the wave was about survives one level down.
+   Reproduced live, in two clicks a user can actually make: select a
+   range and click Strikethrough (the range's tspan gets
+   `["line-through"]`, the element stays `"none"`), then click Underline
+   on the same range. The sibling strikethrough is read as `false` from
+   the ELEMENT, the group writes a bare `underline`, and the range's own
+   decoration is gone — `["line-through"]` → `["underline"]`, the
+   identical failure the element-level rule was written to stop.
+   Symmetric in both ports (same base, same outcome), so it is not an
+   equivalence break, which is the only reason it is banked rather than
+   fixed here.
+
+   It is also UNTESTED. Swift's
+   `charRangeDecorationEditKeepsTheElementsStrikethrough` reads as
+   coverage but is not: its fixture puts the decoration on the ELEMENT
+   (`modelWithTextRange(decoration: "line-through")`), which is the case
+   that already works. No arm has a vector where the range's tspan
+   carries a decoration the element lacks.
+
+   The fix shape is the one follow-up 2 needs as well: build the base
+   from the range's EFFECTIVE values (the tspan's own attribute where it
+   has one, the element's where it does not), and MERGE the group's
+   result into the range rather than replacing the token list. Naming it
+   here rather than leaving it implicit, per the corner-case doctrine —
+   a corner case that destroys user data is not allowed to be silent.
+6. **`buildPanelFullOverrides` builds a whole tspan to throw most of it
+   away.** Swift's per-range route constructs the full sixteen-attribute
+   override tspan (`Effects.swift:1172`) and then clears everything
+   outside the edited group with `restrictTspanOverrides`. Correct, and
+   Rust does the same, but it means every per-range edit pays for
+   deriving fifteen values it will discard — including the super / sub
+   font-size shrink whose clearing is load-bearing (follow-up 4). A
+   group-directed builder would make the restriction structural instead
+   of subtractive, and would remove the class of bug where a newly added
+   attribute is derived but forgotten by the restrict table.
 
 ## Panel-to-selection wiring status
 
